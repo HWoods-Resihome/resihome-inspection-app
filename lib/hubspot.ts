@@ -565,3 +565,337 @@ export async function attachPdfUrlToInspection(inspectionRecordId: string, pdfUr
     }
   }
 }
+
+// ============================================================================
+// Round B lifecycle helpers
+// ============================================================================
+
+/**
+ * Fetch a single Inspection record by HubSpot record ID.
+ */
+export async function fetchInspectionById(recordId: string): Promise<InspectionSummary | null> {
+  const { inspection: typeId } = typeIds();
+  const properties = [
+    'inspection_id_external', 'inspection_name', 'template_type', 'status',
+    'property_address_snapshot', 'property_id_ref',
+    'inspector_name', 'inspector_email',
+    'bedrooms_at_inspection', 'bathrooms_at_inspection',
+    'started_at', 'completed_at', 'scheduled_date',
+    'total_questions_answered', 'hs_createdate',
+  ];
+  try {
+    const qs = properties.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/${recordId}?${qs}`);
+    const p = resp.properties || {};
+    return {
+      recordId: resp.id,
+      inspectionIdExternal: p.inspection_id_external || '',
+      inspectionName: p.inspection_name || `(Inspection ${resp.id})`,
+      templateType: p.template_type || '',
+      status: p.status || '',
+      propertyAddressSnapshot: p.property_address_snapshot || '',
+      inspectorName: p.inspector_name || '',
+      inspectorEmail: p.inspector_email || '',
+      bedroomsAtInspection: p.bedrooms_at_inspection != null && p.bedrooms_at_inspection !== ''
+        ? Number(p.bedrooms_at_inspection) : null,
+      bathroomsAtInspection: p.bathrooms_at_inspection != null && p.bathrooms_at_inspection !== ''
+        ? Number(p.bathrooms_at_inspection) : null,
+      startedAt: p.started_at || null,
+      completedAt: p.completed_at || null,
+      scheduledDate: p.scheduled_date || null,
+      createdAt: p.hs_createdate || null,
+      totalQuestionsAnswered: p.total_questions_answered != null && p.total_questions_answered !== ''
+        ? Number(p.total_questions_answered) : null,
+    };
+  } catch (e: any) {
+    if (String(e).includes('404')) return null;
+    throw e;
+  }
+}
+
+/**
+ * Also returns the property_id_ref so we can resolve the property record link.
+ */
+export async function fetchInspectionWithPropertyRef(recordId: string): Promise<{
+  inspection: InspectionSummary;
+  propertyIdRef: string;
+} | null> {
+  const { inspection: typeId } = typeIds();
+  const properties = [
+    'inspection_id_external', 'inspection_name', 'template_type', 'status',
+    'property_address_snapshot', 'property_id_ref',
+    'inspector_name', 'inspector_email',
+    'bedrooms_at_inspection', 'bathrooms_at_inspection',
+    'started_at', 'completed_at', 'scheduled_date',
+    'total_questions_answered', 'hs_createdate',
+  ];
+  try {
+    const qs = properties.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/${recordId}?${qs}`);
+    const p = resp.properties || {};
+    return {
+      inspection: {
+        recordId: resp.id,
+        inspectionIdExternal: p.inspection_id_external || '',
+        inspectionName: p.inspection_name || `(Inspection ${resp.id})`,
+        templateType: p.template_type || '',
+        status: p.status || '',
+        propertyAddressSnapshot: p.property_address_snapshot || '',
+        inspectorName: p.inspector_name || '',
+        inspectorEmail: p.inspector_email || '',
+        bedroomsAtInspection: p.bedrooms_at_inspection != null && p.bedrooms_at_inspection !== ''
+          ? Number(p.bedrooms_at_inspection) : null,
+        bathroomsAtInspection: p.bathrooms_at_inspection != null && p.bathrooms_at_inspection !== ''
+          ? Number(p.bathrooms_at_inspection) : null,
+        startedAt: p.started_at || null,
+        completedAt: p.completed_at || null,
+        scheduledDate: p.scheduled_date || null,
+        createdAt: p.hs_createdate || null,
+        totalQuestionsAnswered: p.total_questions_answered != null && p.total_questions_answered !== ''
+          ? Number(p.total_questions_answered) : null,
+      },
+      propertyIdRef: p.property_id_ref || '',
+    };
+  } catch (e: any) {
+    if (String(e).includes('404')) return null;
+    throw e;
+  }
+}
+
+/**
+ * Fetch all Answer records associated with an Inspection.
+ * Uses the date-based associations API to find linked answers, then batch-reads
+ * the answer properties.
+ */
+export interface SavedAnswer {
+  recordId: string;
+  answerIdExternal: string;
+  questionIdExternal: string;
+  questionHubspotRecordId: string | null;
+  answerType: string;
+  section: string;
+  location: string;
+  answerValue: string;
+  note: string;
+  quantity: number | null;
+  assignedTo: string;
+  photoUrls: string[];
+}
+
+export async function fetchAnswersForInspection(inspectionRecordId: string): Promise<SavedAnswer[]> {
+  const tids = typeIds();
+  // Step 1: read the associations to find linked Answer record IDs
+  const assocResp = await hubspotFetch(
+    `/crm/associations/${HUBSPOT_API_VERSION}/${tids.inspection}/${tids.answer}/batch/read`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ inputs: [{ id: inspectionRecordId }] }),
+    }
+  );
+  const answerIds: string[] = [];
+  for (const r of assocResp.results || []) {
+    for (const t of r.to || []) {
+      if (t.toObjectId) answerIds.push(String(t.toObjectId));
+      else if (t.id) answerIds.push(String(t.id));
+    }
+  }
+  if (answerIds.length === 0) return [];
+
+  // Step 2: batch-read answer properties. HubSpot batch read limit is 100.
+  const properties = [
+    'answer_id_external', 'question_id_external', 'answer_type',
+    'section', 'location', 'answer_summary', 'answer_value',
+    'note', 'quantity', 'assigned_to', 'photo_urls', 'photo_count',
+  ];
+  const out: SavedAnswer[] = [];
+  for (let i = 0; i < answerIds.length; i += 100) {
+    const chunk = answerIds.slice(i, i + 100);
+    const resp = await hubspotFetch(`/crm/v3/objects/${tids.answer}/batch/read`, {
+      method: 'POST',
+      body: JSON.stringify({
+        properties,
+        inputs: chunk.map((id) => ({ id })),
+      }),
+    });
+    for (const r of resp.results || []) {
+      const p = r.properties || {};
+      out.push({
+        recordId: r.id,
+        answerIdExternal: p.answer_id_external || '',
+        questionIdExternal: p.question_id_external || '',
+        questionHubspotRecordId: null, // will be looked up later if needed
+        answerType: p.answer_type || 'qa',
+        section: p.section || '',
+        location: p.location || '',
+        answerValue: p.answer_value || '',
+        note: p.note || '',
+        quantity: p.quantity != null && p.quantity !== '' ? Number(p.quantity) : null,
+        assignedTo: p.assigned_to || '',
+        photoUrls: (p.photo_urls || '').split(';').map((s: string) => s.trim()).filter(Boolean),
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Update an Inspection record's properties (status, etc.).
+ */
+export async function updateInspection(recordId: string, props: Record<string, any>): Promise<void> {
+  const { inspection: typeId } = typeIds();
+  await hubspotFetch(`/crm/v3/objects/${typeId}/${recordId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ properties: props }),
+  });
+}
+
+/**
+ * Create a Scheduled Inspection record. Returns the new HubSpot record ID.
+ * Sets up the Inspection->Property association too.
+ */
+export async function createScheduledInspection(args: {
+  inspectionProps: Record<string, any>;
+  propertyRecordId: string;
+}): Promise<{ inspectionId: string }> {
+  const tids = typeIds();
+  const inspToProperty = await getAssociationTypeId(tids.inspection, tids.property, 'Property');
+
+  const inspectionId = await createInspection(args.inspectionProps);
+
+  if (inspToProperty != null) {
+    await batchCreateAssociations(
+      tids.inspection, tids.property, inspToProperty,
+      [{ fromId: inspectionId, toId: args.propertyRecordId }],
+    );
+  }
+
+  return { inspectionId };
+}
+
+/**
+ * Upsert answer records for an inspection. This is the autosave workhorse.
+ *
+ * For each answer in `answersToUpsert`:
+ *   - If answer has a `recordId`, PATCH (update) that record
+ *   - Else, create a new record AND associate it to the inspection
+ *
+ * Returns the updated list of {answerIdExternal, recordId} so the caller knows
+ * the new record IDs for future updates.
+ */
+export interface AnswerUpsert {
+  // If updating an existing record, this is its HubSpot ID. If creating, undefined.
+  recordId?: string;
+  // The full Answer property set to write (same shape as createAnswers).
+  answerProps: Record<string, any>;
+  // For new records only: the Inspection Question's HubSpot ID, so we can associate.
+  questionHubspotRecordId?: string | null;
+}
+
+export async function upsertAnswers(
+  inspectionRecordId: string,
+  upserts: AnswerUpsert[]
+): Promise<Array<{ recordId: string; answerIdExternal: string }>> {
+  if (upserts.length === 0) return [];
+  const tids = typeIds();
+
+  // Split into creates vs updates
+  const toCreate = upserts.filter((u) => !u.recordId);
+  const toUpdate = upserts.filter((u) => u.recordId);
+
+  const results: Array<{ recordId: string; answerIdExternal: string }> = [];
+
+  // ----- Updates (PATCH each) -----
+  // HubSpot supports batch/update for properties. Use it.
+  if (toUpdate.length > 0) {
+    for (let i = 0; i < toUpdate.length; i += HUBSPOT_BATCH_LIMIT) {
+      const chunk = toUpdate.slice(i, i + HUBSPOT_BATCH_LIMIT);
+      const resp = await hubspotFetch(`/crm/v3/objects/${tids.answer}/batch/update`, {
+        method: 'POST',
+        body: JSON.stringify({
+          inputs: chunk.map((u) => ({
+            id: u.recordId,
+            properties: u.answerProps,
+          })),
+        }),
+      });
+      for (const r of resp.results || []) {
+        results.push({
+          recordId: r.id,
+          answerIdExternal: r.properties?.answer_id_external || '',
+        });
+      }
+    }
+  }
+
+  // ----- Creates (batch/create) -----
+  if (toCreate.length > 0) {
+    const newAnswers: Array<{ externalId: string; recordId: string }> = [];
+    for (let i = 0; i < toCreate.length; i += HUBSPOT_BATCH_LIMIT) {
+      const chunk = toCreate.slice(i, i + HUBSPOT_BATCH_LIMIT);
+      const resp = await hubspotFetch(`/crm/v3/objects/${tids.answer}/batch/create`, {
+        method: 'POST',
+        body: JSON.stringify({
+          inputs: chunk.map((u) => ({ properties: u.answerProps })),
+        }),
+      });
+      for (let j = 0; j < (resp.results || []).length; j++) {
+        const r = resp.results[j];
+        newAnswers.push({
+          externalId: r.properties?.answer_id_external || '',
+          recordId: r.id,
+        });
+        results.push({
+          recordId: r.id,
+          answerIdExternal: r.properties?.answer_id_external || '',
+        });
+      }
+    }
+
+    // Associate each new Answer to the Inspection (batch)
+    const inspToAnswer = await getAssociationTypeId(tids.inspection, tids.answer, 'Answer of');
+    if (inspToAnswer != null && newAnswers.length > 0) {
+      await batchCreateAssociations(
+        tids.inspection, tids.answer, inspToAnswer,
+        newAnswers.map((a) => ({ fromId: inspectionRecordId, toId: a.recordId })),
+      );
+    }
+
+    // Associate each new Answer to its source Question (batch)
+    const qToAnswer = await getAssociationTypeId(tids.question, tids.answer, 'Answer to');
+    if (qToAnswer != null) {
+      const qaPairs: Array<{ fromId: string; toId: string }> = [];
+      for (let j = 0; j < toCreate.length; j++) {
+        const qid = toCreate[j].questionHubspotRecordId;
+        if (!qid) continue;
+        const matchingNewAnswer = newAnswers[j];
+        if (!matchingNewAnswer) continue;
+        qaPairs.push({ fromId: qid, toId: matchingNewAnswer.recordId });
+      }
+      if (qaPairs.length > 0) {
+        await batchCreateAssociations(tids.question, tids.answer, qToAnswer, qaPairs);
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Archive (delete) Answer records by ID. Used when an inspector clears a field
+ * that previously had an answer.
+ *
+ * HubSpot batch/archive uses { inputs: [{ id }] }.
+ */
+export async function archiveAnswers(answerRecordIds: string[]): Promise<void> {
+  if (answerRecordIds.length === 0) return;
+  const { answer: typeId } = typeIds();
+  for (let i = 0; i < answerRecordIds.length; i += HUBSPOT_BATCH_LIMIT) {
+    const chunk = answerRecordIds.slice(i, i + HUBSPOT_BATCH_LIMIT);
+    await hubspotFetch(`/crm/v3/objects/${typeId}/batch/archive`, {
+      method: 'POST',
+      body: JSON.stringify({
+        inputs: chunk.map((id) => ({ id })),
+      }),
+    });
+  }
+}

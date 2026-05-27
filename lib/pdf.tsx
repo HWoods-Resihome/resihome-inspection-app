@@ -3,7 +3,7 @@
 
 import React from 'react';
 import {
-  Document, Page, Text, View, StyleSheet, Image, Font,
+  Document, Page, Text, View, StyleSheet, Image, Font, Link,
 } from '@react-pdf/renderer';
 
 // Brand colors from ResiHome brand guidelines
@@ -69,7 +69,57 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     opacity: 0.9,
   },
-  // Summary
+  // Metadata block (the opening summary).
+  // Designed to read as professional, not flashy: white card with a hot-pink
+  // accent bar on the left, generous whitespace, small uppercase labels above
+  // each value, two-column grid for compactness.
+  metaCard: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.white,
+    border: `1px solid ${COLORS.grayLight}`,
+    borderRadius: 4,
+    marginBottom: 22,
+    overflow: 'hidden',
+  },
+  metaAccent: {
+    width: 4,
+    backgroundColor: COLORS.brand,
+  },
+  metaBody: {
+    flex: 1,
+    padding: 16,
+  },
+  metaRowDouble: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  metaCol: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  metaLabel: {
+    fontSize: 7,
+    color: COLORS.gray,
+    fontFamily: 'Helvetica-Bold',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 3,
+  },
+  metaValue: {
+    fontSize: 11,
+    color: COLORS.ink,
+    fontFamily: 'Helvetica-Bold',
+  },
+  metaValueSmall: {
+    fontSize: 9,
+    color: COLORS.ink,
+  },
+  metaValueLink: {
+    fontSize: 9,
+    color: COLORS.brand,
+    textDecoration: 'underline',
+  },
+  // (Legacy summary styles kept for backwards-compat in case anything still references them)
   summaryBox: {
     backgroundColor: COLORS.grayBg,
     border: `1px solid ${COLORS.grayLight}`,
@@ -225,6 +275,8 @@ export interface PdfData {
   totalAnswered: number;
   totalPhotos: number;
   triggeredCount: number;
+  // The HubSpot record ID (used to build the clickable record URL in the metadata block)
+  hubspotRecordId?: string;
   // Grouped by section, preserving order
   sectionsInOrder: string[];
   answersBySection: Record<string, PdfAnswer[]>;
@@ -235,7 +287,8 @@ export interface PdfData {
 
 function formatDate(iso: string): string {
   try {
-    const d = new Date(iso);
+    // HubSpot Date fields are epoch-ms strings; coerce to Number first.
+    const d = /^\d+$/.test(iso) ? new Date(Number(iso)) : new Date(iso);
     return d.toLocaleDateString('en-US', {
       year: 'numeric', month: 'short', day: 'numeric',
       hour: 'numeric', minute: '2-digit',
@@ -259,39 +312,46 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           <Text style={styles.headerSubtitle}>{data.templateLabel}</Text>
         </View>
 
-        {/* Summary */}
-        <View style={styles.summaryBox}>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Property:</Text>
-            <Text style={styles.summaryValue}>{data.propertyAddress}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Inspector:</Text>
-            <Text style={styles.summaryValue}>{data.inspectorName}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Completed:</Text>
-            <Text style={styles.summaryValue}>{formatDate(data.completedAt)}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Bedrooms / Bathrooms:</Text>
-            <Text style={styles.summaryValue}>{data.bedrooms} BR / {data.bathrooms} BA</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Questions Answered:</Text>
-            <Text style={styles.summaryValue}>{data.totalAnswered}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Action Items:</Text>
-            <Text style={styles.summaryValue}>{data.triggeredCount}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Photos Attached:</Text>
-            <Text style={styles.summaryValue}>{data.totalPhotos}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>External ID:</Text>
-            <Text style={styles.summaryValue}>{data.externalId}</Text>
+        {/* Metadata card */}
+        <View style={styles.metaCard}>
+          <View style={styles.metaAccent} />
+          <View style={styles.metaBody}>
+            {/* Row 1: Property (full width) */}
+            <View style={{ marginBottom: 12 }}>
+              <Text style={styles.metaLabel}>Property</Text>
+              <Text style={styles.metaValue}>{data.propertyAddress}</Text>
+            </View>
+
+            {/* Row 2: Inspector + Date */}
+            <View style={styles.metaRowDouble}>
+              <View style={styles.metaCol}>
+                <Text style={styles.metaLabel}>Inspector</Text>
+                <Text style={styles.metaValueSmall}>{data.inspectorName}</Text>
+              </View>
+              <View style={styles.metaCol}>
+                <Text style={styles.metaLabel}>Date</Text>
+                <Text style={styles.metaValueSmall}>{formatDate(data.completedAt)}</Text>
+              </View>
+            </View>
+
+            {/* Row 3: ID + HubSpot URL */}
+            <View style={{ ...styles.metaRowDouble, marginBottom: 0 }}>
+              <View style={styles.metaCol}>
+                <Text style={styles.metaLabel}>Inspection ID</Text>
+                <Text style={styles.metaValueSmall}>{data.externalId}</Text>
+              </View>
+              {data.hubspotRecordId && (
+                <View style={styles.metaCol}>
+                  <Text style={styles.metaLabel}>HubSpot Record</Text>
+                  <Link
+                    src={`https://app.hubspot.com/contacts/51415639/record/${process.env.HUBSPOT_INSPECTION_TYPE_ID || '2-63142762'}/${data.hubspotRecordId}`}
+                    style={styles.metaValueLink}
+                  >
+                    Open in HubSpot
+                  </Link>
+                </View>
+              )}
+            </View>
           </View>
         </View>
 
