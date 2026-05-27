@@ -14,7 +14,7 @@ export function StatusBadge({ status }: Props) {
   if (s === 'scheduled') {
     colorClass = 'bg-gray-100 text-gray-700 border-gray-300';
     label = 'Scheduled';
-  } else if (s === 'in progress' || s === 'in-progress' || s === 'inprogress') {
+  } else if (s === 'in progress' || s === 'in-progress' || s === 'inprogress' || s === 'in_progress') {
     colorClass = 'bg-amber-100 text-amber-800 border-amber-300';
     label = 'In Progress';
   } else if (s === 'completed' || s === 'complete' || s === 'submitted') {

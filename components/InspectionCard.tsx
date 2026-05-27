@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { InspectionSummary } from '@/lib/types';
 import { StatusBadge } from './StatusBadge';
 
@@ -7,11 +8,20 @@ interface Props {
 
 // Derive the most meaningful date to show on the card.
 // Priority: scheduledDate (planned date) > completedAt > createdAt.
+//
+// HubSpot returns Date fields as Unix epoch milliseconds (as a string), while
+// DateTime fields and built-in fields like hs_createdate come back as ISO 8601.
+// Handle both formats.
 function effectiveDate(i: InspectionSummary): string {
-  const iso = i.scheduledDate || i.completedAt || i.createdAt;
-  if (!iso) return '';
-  // ISO 2026-03-19T... -> show just the date portion
-  return iso.slice(0, 10);
+  const raw = i.scheduledDate || i.completedAt || i.createdAt;
+  if (!raw) return '';
+  // Pure-digit string = epoch milliseconds (HubSpot Date field)
+  if (/^\d+$/.test(raw)) {
+    const d = new Date(Number(raw));
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  }
+  // Otherwise assume ISO 8601 ("2026-03-19T..." -> "2026-03-19")
+  return raw.slice(0, 10);
 }
 
 // Pretty template type: "pm_scope_inspection" -> "PM Scope"
@@ -37,7 +47,10 @@ export function InspectionCard({ inspection: i }: Props) {
   const hasProgress = i.totalQuestionsAnswered != null && i.totalQuestionsAnswered > 0;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
+    <Link
+      href={`/inspection/${i.recordId}`}
+      className="block bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm hover:border-brand/40 hover:shadow-md transition active:scale-[0.995]"
+    >
       <div className="flex items-start justify-between gap-3 mb-1.5">
         <h3 className="font-heading font-bold text-base text-ink truncate flex-1">
           {i.propertyAddressSnapshot || i.inspectionName}
@@ -64,6 +77,6 @@ export function InspectionCard({ inspection: i }: Props) {
           </div>
         </div>
       )}
-    </div>
+    </Link>
   );
 }

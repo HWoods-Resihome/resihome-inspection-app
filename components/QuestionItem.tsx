@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { Question, AnswerInput, TemplateType } from '@/lib/types';
+import { CameraCapture } from './CameraCapture';
+
+// Check once whether the browser supports the camera API. Hidden behind a
+// constant so the "Take Photos" button can be disabled on unsupported browsers
+// without throwing on the server during SSR.
+const hasMediaDevices = typeof navigator !== 'undefined'
+  && !!navigator.mediaDevices?.getUserMedia;
 
 type Props = {
   question: Question;
@@ -44,6 +51,7 @@ export function QuestionItem({ question, answer, templateType, onUpdate, uploadP
 
   // Upload progress: { current, total } while uploading; null when idle
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   async function handlePhotoUpload(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -124,7 +132,7 @@ export function QuestionItem({ question, answer, templateType, onUpdate, uploadP
           title={panelOpen ? 'Close notes/photos' : 'Add notes/photos (optional)'}
           className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-heading font-semibold transition ${
             panelOpen
-              ? 'bg-brand text-white'
+              ? 'bg-gray-700 text-white hover:bg-gray-800'
               : 'bg-gray-100 text-gray-600 hover:bg-brand/10 hover:text-brand'
           } ${hasContent && !panelOpen ? 'ring-2 ring-brand/40' : ''}`}
         >
@@ -150,7 +158,7 @@ export function QuestionItem({ question, answer, templateType, onUpdate, uploadP
       {/* Combined notes/photos panel */}
       {panelOpen && (
         <div className={`mt-3 p-3 rounded-lg space-y-3 border ${
-          triggered ? 'bg-amber-50 border-amber-300' : 'bg-gray-50 border-gray-300'
+          triggered ? 'bg-amber-50 border-amber-300' : 'bg-gray-50 border-gray-200'
         }`}>
           <div className="flex items-center justify-between">
             <span className={`text-xs font-heading font-bold uppercase tracking-wider ${
@@ -261,19 +269,57 @@ export function QuestionItem({ question, answer, templateType, onUpdate, uploadP
             }`}>
               Photos <span className="text-gray-400 font-normal">(optional)</span>
             </label>
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={(e) => handlePhotoUpload(e.target.files)}
-              disabled={!!uploadProgress}
-              className="text-sm block w-full file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:font-heading file:font-semibold file:bg-brand/10 file:text-brand hover:file:bg-brand/20 cursor-pointer"
-            />
+            <div className="flex flex-wrap gap-2 items-center">
+              {/* Take Photos: in-app camera */}
+              <button
+                type="button"
+                onClick={() => setCameraOpen(true)}
+                disabled={!!uploadProgress || !hasMediaDevices}
+                className="inline-flex items-center gap-1.5 text-sm bg-brand text-white font-heading font-semibold py-1.5 px-3 rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
+                title={hasMediaDevices ? 'Take photos with the in-app camera' : 'Camera not supported in this browser'}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                  <circle cx="12" cy="13" r="4" />
+                </svg>
+                Take Photos
+              </button>
+              {/* Choose Files: existing native file input */}
+              <label className="inline-flex items-center gap-1.5 text-sm bg-brand/10 text-brand font-heading font-semibold py-1.5 px-3 rounded cursor-pointer hover:bg-brand/20">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                Choose Files
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => handlePhotoUpload(e.target.files)}
+                  disabled={!!uploadProgress}
+                  className="hidden"
+                />
+              </label>
+            </div>
             {uploadProgress && (
               <div className="text-xs text-brand mt-1 font-heading font-semibold">
                 Uploading {uploadProgress.current} of {uploadProgress.total}...
               </div>
             )}
+            <CameraCapture
+              isOpen={cameraOpen}
+              onClose={() => setCameraOpen(false)}
+              uploadPhoto={uploadPhoto}
+              onComplete={(urls) => {
+                setCameraOpen(false);
+                if (urls.length > 0) {
+                  onUpdate({ photoUrls: [...answer.photoUrls, ...urls] });
+                }
+              }}
+            />
             {answer.photoUrls.length > 0 && (
               <div className="grid grid-cols-4 gap-2 mt-2">
                 {answer.photoUrls.map((url, idx) => (

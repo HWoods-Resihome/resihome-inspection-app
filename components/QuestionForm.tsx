@@ -1,7 +1,14 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import imageCompression from 'browser-image-compression';
 import type { Question, AnswerInput, TemplateType } from '@/lib/types';
+import type { SavedAnswer } from '@/lib/hubspot';
 import { QuestionItem } from './QuestionItem';
+import { CameraCapture } from './CameraCapture';
+
+// Whether this browser supports the camera API. SSR-safe.
+const hasMediaDevices = typeof navigator !== 'undefined'
+  && !!navigator.mediaDevices?.getUserMedia;
+import { useAutosave, type SaveState } from '@/lib/useAutosave';
 
 type Props = {
   questions: Question[];
@@ -13,6 +20,20 @@ type Props = {
   bathrooms: number;
   onSubmit: (answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>) => void;
   onCancel: () => void;
+
+  // Round B additions:
+  // -- The HubSpot Inspection record ID (used for autosave POSTs)
+  inspectionRecordId: string;
+  // -- The Inspection's external ID (used as a prefix for answer external IDs)
+  inspectionExternalId: string;
+  // -- Existing saved answers from HubSpot (when re-opening an in-progress inspection)
+  existingAnswers?: SavedAnswer[];
+  // -- Read-only mode (for Completed inspections, until user clicks Reopen)
+  readOnly?: boolean;
+  // -- Called when first user edit happens (for the Scheduled -> In Progress transition)
+  onFirstEdit?: () => void;
+  // -- Called when user clicks Cancel Inspection (different from form Cancel/Exit)
+  onCancelInspection?: () => void;
 };
 
 // Sections that do NOT require a section photo.
@@ -61,6 +82,8 @@ function slugify(s: string): string {
 export function QuestionForm({
   questions, templateType, templateLabel, inspectorName, propertyName,
   bedrooms, bathrooms, onSubmit, onCancel,
+  inspectionRecordId, inspectionExternalId,
+  existingAnswers, readOnly, onFirstEdit, onCancelInspection,
 }: Props) {
   // Build the list of section instances. Repeating sections expand into multiple.
   const sectionInstances: SectionInstance[] = useMemo(() => {
@@ -153,10 +176,27 @@ export function QuestionForm({
     return out;
   }, [questions, bedrooms, bathrooms]);
 
+  // Helper: derive instanceKey from a saved answer's `location` field.
+  // Inverse of how the form builds location during submit.
+  // "Bedroom 1" -> "bedroom-1", "Bathroom 2" -> "bathroom-2", "Half Bath" -> "bathroom-half",
+  // "" -> slugified base section name (for non-repeating sections).
+  function locationToInstanceKey(location: string, baseSection: string): string {
+    if (!location) {
+      return slugify(baseSection);
+    }
+    const lower = location.toLowerCase().trim();
+    if (lower === 'half bath') return 'bathroom-half';
+    const m = lower.match(/^(bedroom|bathroom)\s+(\d+)$/);
+    if (m) return `${m[1]}-${m[2]}`;
+    return slugify(location);
+  }
+
   // Initialize answer state. Keyed by `${questionIdExternal}::${instanceKey}` so each
-  // repeating instance has independent state.
+  // repeating instance has independent state. If existingAnswers are provided, hydrate
+  // from them.
   const [answers, setAnswers] = useState<Record<string, AnswerInput>>(() => {
     const init: Record<string, AnswerInput> = {};
+    // Step 1: blank defaults for every section instance question
     for (const inst of sectionInstances) {
       for (const q of inst.questions) {
         const key = answerKey(q.questionIdExternal, inst.instanceKey);
@@ -174,11 +214,130 @@ export function QuestionForm({
         };
       }
     }
+    // Step 2: overlay any existing saved Q&A answers from HubSpot
+    if (existingAnswers && existingAnswers.length > 0) {
+      for (const sa of existingAnswers) {
+        if (sa.answerType !== 'qa') continue;
+        const matchingInst = sectionInstances.find(
+          (inst) =>
+            inst.questions.some((q) => q.questionIdExternal === sa.questionIdExternal) &&
+            ((sa.location && inst.location === sa.location) ||
+             (!sa.location && !inst.location))
+        );
+        if (!matchingInst) continue;
+        const key = answerKey(sa.questionIdExternal, matchingInst.instanceKey);
+        const existing = init[key];
+        if (!existing) continue;
+        init[key] = {
+          ...existing,
+          answerValue: sa.answerValue || existing.answerValue,
+          note: sa.note || '',
+          quantity: sa.quantity,
+          assignedTo: sa.assignedTo || undefined,
+          photoUrls: sa.photoUrls || [],
+          optionalPanelOpen: !!(sa.note || sa.quantity != null || (sa.photoUrls && sa.photoUrls.length > 0)),
+        };
+      }
+    }
     return init;
   });
 
+  // Map of answer key -> HubSpot Answer recordId (populated as autosave succeeds
+  // OR pre-populated from existingAnswers on load).
+  const answerRecordIdsRef = useRef<Map<string, string>>(new Map());
+
   // Section photos keyed by instanceKey (so Bedroom 1 and Bedroom 2 have separate photos)
-  const [sectionPhotos, setSectionPhotos] = useState<Record<string, string[]>>({});
+  const [sectionPhotos, setSectionPhotos] = useState<Record<string, string[]>>(() => {
+    const out: Record<string, string[]> = {};
+    if (existingAnswers) {
+      for (const sa of existingAnswers) {
+        if (sa.answerType !== 'section_photo') continue;
+        // Use location to map to the correct instance
+        const matchingInst = sectionInstances.find((inst) => {
+          if (sa.location && inst.location === sa.location) return true;
+          if (!sa.location && (inst.baseSectionName === sa.section || slugify(inst.baseSectionName) === slugify(sa.section))) return true;
+          return false;
+        });
+        const key = matchingInst?.instanceKey ?? locationToInstanceKey(sa.location, sa.section);
+        if (sa.photoUrls && sa.photoUrls.length > 0) {
+          if (!out[key]) out[key] = [];
+          out[key].push(...sa.photoUrls);
+        }
+      }
+    }
+    return out;
+  });
+
+  // Which section instance has the in-app camera open right now (null = closed).
+  // Only one camera can be open at a time; this also tells us where to append
+  // captured photos when the user taps Done.
+  const [sectionCameraInstance, setSectionCameraInstance] = useState<string | null>(null);
+
+  // Map of instanceKey -> HubSpot Answer recordId for section_photo records
+  const sectionPhotoRecordIdsRef = useRef<Map<string, string>>(new Map());
+  // Populate from existing answers
+  useEffect(() => {
+    if (!existingAnswers) return;
+    const m = new Map<string, string>();
+    const aMap = new Map<string, string>();
+    for (const sa of existingAnswers) {
+      if (sa.answerType === 'section_photo') {
+        // best-effort instanceKey
+        const matchingInst = sectionInstances.find((inst) => {
+          if (sa.location && inst.location === sa.location) return true;
+          if (!sa.location && (inst.baseSectionName === sa.section || slugify(inst.baseSectionName) === slugify(sa.section))) return true;
+          return false;
+        });
+        const key = matchingInst?.instanceKey ?? locationToInstanceKey(sa.location, sa.section);
+        m.set(key, sa.recordId);
+      } else if (sa.answerType === 'qa') {
+        const matchingInst = sectionInstances.find(
+          (inst) =>
+            inst.questions.some((q) => q.questionIdExternal === sa.questionIdExternal) &&
+            ((sa.location && inst.location === sa.location) ||
+             (!sa.location && !inst.location))
+        );
+        if (matchingInst) {
+          aMap.set(answerKey(sa.questionIdExternal, matchingInst.instanceKey), sa.recordId);
+        }
+      }
+    }
+    sectionPhotoRecordIdsRef.current = m;
+    answerRecordIdsRef.current = aMap;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Initialize autosave
+  const autosave = useAutosave({
+    inspectionRecordId,
+    inspectionExternalId,
+    disabled: !!readOnly,
+    onFirstSave: onFirstEdit,
+  });
+
+  // After mount, hydrate the autosave hook with existing data so it knows
+  // each answer's recordId (for PATCH updates instead of duplicate creates).
+  useEffect(() => {
+    if (!existingAnswers || existingAnswers.length === 0) return;
+    const initial: Array<{ key: string; answer: AnswerInput; recordId: string; questionHubspotRecordId: string; instanceKey: string }> = [];
+    for (const [key, recordId] of answerRecordIdsRef.current.entries()) {
+      const a = answers[key];
+      if (!a) continue;
+      // Find the question to get the HubSpot record ID
+      const q = questions.find((x) => x.questionIdExternal === a.questionIdExternal);
+      if (!q) continue;
+      const [, instanceKey] = key.split('::');
+      initial.push({
+        key,
+        answer: a,
+        recordId,
+        questionHubspotRecordId: q.hubspotRecordId,
+        instanceKey,
+      });
+    }
+    autosave.hydrate(initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Collapsed state.
   // Scope: every section EXCEPT the first instance starts collapsed (Hayden's request for Scope).
@@ -222,10 +381,23 @@ export function QuestionForm({
   }
 
   function updateAnswer(key: string, patch: Partial<AnswerInput>) {
-    setAnswers((prev) => ({
-      ...prev,
-      [key]: { ...prev[key], ...patch },
-    }));
+    if (readOnly) return; // No edits in read-only mode
+
+    // Skip noop-only updates (like toggling optionalPanelOpen) -- they shouldn't trigger autosave
+    const onlyPanelToggle = Object.keys(patch).length === 1 && 'optionalPanelOpen' in patch;
+
+    // Compute the new value outside the setter so we can capture it for autosave
+    let updated: AnswerInput | undefined;
+    setAnswers((prev) => {
+      const merged = { ...prev[key], ...patch };
+      updated = merged;
+      return { ...prev, [key]: merged };
+    });
+
+    if (!onlyPanelToggle && updated) {
+      const [, instanceKey] = key.split('::');
+      autosave.noteEdit(key, updated, updated.questionHubspotRecordId, instanceKey);
+    }
   }
 
   const uploadPhoto = useCallback(async (file: File): Promise<string> => {
@@ -330,11 +502,114 @@ export function QuestionForm({
   }
 
   function removeSectionPhoto(instanceKey: string, idx: number) {
+    if (readOnly) return;
     setSectionPhotos((prev) => ({
       ...prev,
       [instanceKey]: (prev[instanceKey] || []).filter((_, i) => i !== idx),
     }));
   }
+
+  // Sync section photos to HubSpot whenever they change (debounced).
+  // Each instance has a single section_photo Answer record; we upsert it when photos change.
+  const sectionPhotoDirtyRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (readOnly) return;
+    // Diff against the last-saved state by tracking which instances changed.
+    // Simple approach: when sectionPhotos changes, mark all instances as potentially dirty.
+    // Real diff happens at flush time.
+    for (const instanceKey of Object.keys(sectionPhotos)) {
+      sectionPhotoDirtyRef.current.add(instanceKey);
+    }
+  }, [sectionPhotos, readOnly]);
+
+  useEffect(() => {
+    if (readOnly) return;
+    const id = setInterval(async () => {
+      if (sectionPhotoDirtyRef.current.size === 0) return;
+      const dirtyKeys = Array.from(sectionPhotoDirtyRef.current);
+      sectionPhotoDirtyRef.current.clear();
+
+      // Build a deterministic mapping from external ID -> instanceKey so we can
+      // map responses back without fragile parsing.
+      const externalIdToInstance = new Map<string, string>();
+      const upserts: any[] = [];
+      const archives: string[] = [];
+
+      for (const instanceKey of dirtyKeys) {
+        const urls = sectionPhotos[instanceKey] || [];
+        const inst = sectionInstances.find((x) => x.instanceKey === instanceKey);
+        if (!inst) continue;
+        const existingRecordId = sectionPhotoRecordIdsRef.current.get(instanceKey);
+
+        if (urls.length === 0) {
+          // No photos -- archive the section_photo record if it exists
+          if (existingRecordId) {
+            archives.push(existingRecordId);
+            sectionPhotoRecordIdsRef.current.delete(instanceKey);
+          }
+          continue;
+        }
+
+        const externalId = `${inspectionExternalId}_sp_${instanceKey.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+        externalIdToInstance.set(externalId, instanceKey);
+
+        const baseSection = inst.baseSectionName;
+        const props: Record<string, any> = {
+          answer_id_external: externalId,
+          answer_summary: `${inst.displayName} / Section Photo (${urls.length})`,
+          answer_type: 'section_photo',
+          section: baseSection,
+          photo_urls: urls.join(';'),
+          photo_count: urls.length,
+          submitted_at: new Date().toISOString(),
+          inspection_id_external: inspectionExternalId,
+        };
+        if (inst.location) props.location = inst.location;
+
+        upserts.push({
+          recordId: existingRecordId,
+          answerProps: props,
+          questionHubspotRecordId: null,
+        });
+      }
+
+      if (upserts.length === 0 && archives.length === 0) return;
+
+      try {
+        const r = await fetch(`/api/inspections/${inspectionRecordId}/answers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ upserts, archives, bumpStatusToInProgress: true }),
+        });
+        if (!r.ok) {
+          console.error('Section photo save failed', await r.text());
+          // re-mark dirty so we retry next tick
+          for (const k of dirtyKeys) sectionPhotoDirtyRef.current.add(k);
+          return;
+        }
+        const data = await r.json();
+        // Map each response back to its instanceKey using the deterministic table
+        for (const result of (data.results || [])) {
+          const eid = result.answerIdExternal;
+          const ikey = externalIdToInstance.get(eid);
+          if (ikey) {
+            sectionPhotoRecordIdsRef.current.set(ikey, result.recordId);
+          }
+        }
+        if (!hasEverHadSectionSave.current) {
+          hasEverHadSectionSave.current = true;
+          onFirstEdit?.();
+        }
+      } catch (e) {
+        console.error('Section photo save error:', e);
+        for (const k of dirtyKeys) sectionPhotoDirtyRef.current.add(k);
+      }
+    }, 2500);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, inspectionRecordId, inspectionExternalId, sectionPhotos, sectionInstances]);
+
+  const hasEverHadSectionSave = useRef(false);
 
   function scrollToAndFlash(domId: string, instanceKey?: string) {
     if (typeof document === 'undefined') return;
@@ -407,7 +682,7 @@ export function QuestionForm({
     return null;
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     const err = validate();
     if (err) {
       alert(err.message);
@@ -422,6 +697,11 @@ export function QuestionForm({
       `${totalSectionPhotos} section photos to HubSpot?`
     );
     if (!ok) return;
+
+    // Force a final flush of any pending autosave changes before finalizing
+    if (!readOnly) {
+      await autosave.flush(true);
+    }
 
     // For non-Scope: ensure triggered answers get quantity=1 if not set
     const finalAnswers = Object.values(answers).map((a) => {
@@ -482,6 +762,24 @@ export function QuestionForm({
             <div className="text-xs text-gray-500 uppercase tracking-wider">answered</div>
           </div>
         </div>
+        {/* Save indicator strip */}
+        {!readOnly && (
+          <div className="max-w-3xl mx-auto px-4 pb-2">
+            <SaveIndicator saveState={autosave.saveState} />
+          </div>
+        )}
+        {readOnly && (
+          <div className="max-w-3xl mx-auto px-4 pb-2">
+            <div className="inline-flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 border border-gray-200 px-2 py-1 rounded-full">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              <span>Read-only (Completed)</span>
+            </div>
+          </div>
+        )}
       </header>
 
       <div className="max-w-3xl mx-auto px-4 py-6 pb-32">
@@ -539,14 +837,43 @@ export function QuestionForm({
                         </span>
                       )}
                     </div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      onChange={(e) => handleSectionPhotoChange(inst.instanceKey, e.target.files)}
-                      className="text-sm block w-full file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:font-heading file:font-semibold file:bg-brand/10 file:text-brand hover:file:bg-brand/20 cursor-pointer"
-                      disabled={uploadingSection?.instanceKey === inst.instanceKey}
-                    />
+                    <div className="flex flex-wrap gap-2 items-center">
+                      {/* Take Photos: in-app camera */}
+                      <button
+                        type="button"
+                        onClick={() => setSectionCameraInstance(inst.instanceKey)}
+                        disabled={!!uploadingSection || readOnly || !hasMediaDevices}
+                        className="inline-flex items-center gap-1.5 text-sm bg-brand text-white font-heading font-semibold py-1.5 px-3 rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
+                        title={hasMediaDevices ? 'Take photos with the in-app camera' : 'Camera not supported in this browser'}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                          <circle cx="12" cy="13" r="4" />
+                        </svg>
+                        Take Photos
+                      </button>
+                      {/* Choose Files: existing native file input */}
+                      <label className={`inline-flex items-center gap-1.5 text-sm bg-brand/10 text-brand font-heading font-semibold py-1.5 px-3 rounded hover:bg-brand/20 ${
+                        uploadingSection?.instanceKey === inst.instanceKey || readOnly ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                      }`}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="17 8 12 3 7 8" />
+                          <line x1="12" y1="3" x2="12" y2="15" />
+                        </svg>
+                        Choose Files
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={(e) => handleSectionPhotoChange(inst.instanceKey, e.target.files)}
+                          disabled={uploadingSection?.instanceKey === inst.instanceKey || readOnly}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
                     {uploadingSection?.instanceKey === inst.instanceKey && (
                       <div className="text-xs text-brand mt-2 font-heading font-semibold">
                         Uploading {uploadingSection.current} of {uploadingSection.total}...
@@ -598,25 +925,150 @@ export function QuestionForm({
 
       {/* Sticky submit bar */}
       <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand p-4 shadow-lg">
-        <div className="max-w-3xl mx-auto flex gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 font-heading font-semibold text-ink"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            className="flex-1 bg-brand hover:bg-brand-dark text-white font-heading font-bold py-3 rounded-lg active:scale-[0.99] transition"
-          >
-            Submit Inspection
-          </button>
+        <div className="max-w-3xl mx-auto flex gap-2">
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={async () => {
+                // Force a final flush so the last 2 seconds of debounced edits get saved.
+                // Inspection remains in current status (Scheduled or In Progress).
+                try {
+                  await autosave.flush(true);
+                } catch (e) {
+                  // Even if save fails, we should still leave -- alert and continue
+                  console.error('Save & Close: flush failed', e);
+                }
+                onCancel();
+              }}
+              className="px-3 py-3 border border-brand rounded-lg hover:bg-pink-100 font-heading font-semibold text-brand text-sm"
+              title="Save any pending changes and return to the inspection list. Inspection stays In Progress."
+            >
+              Save &amp; Close
+            </button>
+          )}
+          {readOnly && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-3 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 font-heading font-semibold text-ink text-sm"
+              title="Return to inspection list"
+            >
+              Close
+            </button>
+          )}
+          {!readOnly && onCancelInspection && (
+            <button
+              type="button"
+              onClick={onCancelInspection}
+              className="px-3 py-3 border border-red-300 rounded-lg hover:bg-red-50 font-heading font-semibold text-red-700 text-sm"
+              title="Mark this Inspection as Cancelled in HubSpot"
+            >
+              Cancel Inspection
+            </button>
+          )}
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={handleSubmit}
+              className="flex-1 bg-brand hover:bg-brand-dark text-white font-heading font-bold py-3 rounded-lg active:scale-[0.99] transition"
+            >
+              Submit Inspection
+            </button>
+          )}
+          {readOnly && (
+            <div className="flex-1 text-center text-sm text-gray-500 font-heading py-3">
+              This Inspection is Completed (read-only)
+            </div>
+          )}
         </div>
       </div>
+
+      {/* In-app camera overlay for section photos. Only mounted when an instance
+          has the camera open; on Done, photos are appended to that instance's
+          sectionPhotos list (autosave picks them up automatically). */}
+      <CameraCapture
+        isOpen={sectionCameraInstance !== null}
+        onClose={() => setSectionCameraInstance(null)}
+        uploadPhoto={uploadPhoto}
+        onComplete={(urls) => {
+          const ikey = sectionCameraInstance;
+          setSectionCameraInstance(null);
+          if (ikey && urls.length > 0) {
+            setSectionPhotos((prev) => ({
+              ...prev,
+              [ikey]: [...(prev[ikey] || []), ...urls],
+            }));
+          }
+        }}
+      />
     </main>
   );
+}
+
+// Save indicator: small badge showing autosave status at the top of the form.
+function SaveIndicator({ saveState }: { saveState: SaveState }) {
+  if (saveState.kind === 'idle') {
+    return (
+      <div className="inline-flex items-center gap-1.5 text-xs text-gray-500 font-heading">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-600">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+          <polyline points="22 4 12 14.01 9 11.01" />
+        </svg>
+        <span>All changes saved</span>
+      </div>
+    );
+  }
+  if (saveState.kind === 'dirty') {
+    return (
+      <div className="inline-flex items-center gap-1.5 text-xs text-amber-700 font-heading font-semibold">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+        <span>Saving in a moment&hellip;</span>
+      </div>
+    );
+  }
+  if (saveState.kind === 'saving') {
+    return (
+      <div className="inline-flex items-center gap-1.5 text-xs text-brand font-heading font-semibold">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+             className="animate-spin">
+          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+        </svg>
+        <span>Saving&hellip;</span>
+      </div>
+    );
+  }
+  if (saveState.kind === 'saved') {
+    return (
+      <div className="inline-flex items-center gap-1.5 text-xs text-green-700 font-heading font-semibold">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+          <polyline points="22 4 12 14.01 9 11.01" />
+        </svg>
+        <span>Saved</span>
+      </div>
+    );
+  }
+  if (saveState.kind === 'error') {
+    return (
+      <div className="inline-flex items-center gap-1.5 text-xs text-red-700 font-heading font-semibold">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+        <span>Save failed &mdash; will retry</span>
+      </div>
+    );
+  }
+  return null;
 }
 
 function fileToBase64(file: Blob): Promise<string> {
