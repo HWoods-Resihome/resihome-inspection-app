@@ -1,6 +1,6 @@
 // HubSpot API client. SERVER-SIDE ONLY -- never import in client code.
 
-import type { Question, Property, HubSpotUser } from './types';
+import type { Question, Property, HubSpotUser, InspectionSummary } from './types';
 
 const API_BASE = 'https://api.hubapi.com';
 
@@ -21,9 +21,30 @@ const assocLabelsUrl = (fromType: string, toType: string) =>
   `/crm/associations/${HUBSPOT_API_VERSION}/${fromType}/${toType}/labels`;
 
 function token(): string {
-  const t = process.env.HUBSPOT_SANDBOX_TOKEN;
-  if (!t) throw new Error('HUBSPOT_SANDBOX_TOKEN env var is not set');
-  return t;
+  const raw = process.env.HUBSPOT_SANDBOX_TOKEN;
+  if (!raw) {
+    throw new Error(
+      'HUBSPOT_SANDBOX_TOKEN is not set. Check .env.local exists in the project root ' +
+      'and contains the line HUBSPOT_SANDBOX_TOKEN=pat-na1-... then restart `npm run dev`.'
+    );
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    throw new Error('HUBSPOT_SANDBOX_TOKEN is empty or all whitespace. Re-paste the token in .env.local.');
+  }
+  if (trimmed.includes('<') || trimmed.includes('>') || trimmed.toUpperCase().includes('PASTE')) {
+    throw new Error(
+      'HUBSPOT_SANDBOX_TOKEN still contains placeholder text like <PASTE_YOUR_PAT_TOKEN_HERE>. ' +
+      'Open .env.local and replace the placeholder with your real pat-na1-... token.'
+    );
+  }
+  if (!trimmed.startsWith('pat-')) {
+    throw new Error(
+      `HUBSPOT_SANDBOX_TOKEN doesn't start with "pat-" (it starts with "${trimmed.slice(0, 8)}..."). ` +
+      'Re-paste your Private App token from HubSpot. It should look like pat-na1-XXXXXXXX.'
+    );
+  }
+  return trimmed;
 }
 
 function typeIds() {
@@ -232,6 +253,73 @@ export async function fetchProperties(): Promise<Property[]> {
   } while (after);
 
   out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+/**
+ * Fetch all Inspection records for the list view (Round A).
+ * Returns lightweight summary records sorted by most-recent-first.
+ *
+ * Sort priority: scheduled_date if set, else completed_at, else createdate (HubSpot built-in).
+ */
+export async function fetchInspections(): Promise<InspectionSummary[]> {
+  const { inspection: typeId } = typeIds();
+  const properties = [
+    'inspection_id_external', 'inspection_name', 'template_type', 'status',
+    'property_address_snapshot', 'inspector_name', 'inspector_email',
+    'bedrooms_at_inspection', 'bathrooms_at_inspection',
+    'started_at', 'completed_at', 'scheduled_date',
+    'total_questions_answered',
+    'hs_createdate',
+  ];
+
+  const out: InspectionSummary[] = [];
+  let after: string | undefined = undefined;
+  let pages = 0;
+  do {
+    const body: any = {
+      filterGroups: [],
+      properties,
+      limit: 100,
+      sorts: [{ propertyName: 'hs_createdate', direction: 'DESCENDING' }],
+    };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    for (const r of resp.results || []) {
+      const p = r.properties || {};
+      out.push({
+        recordId: r.id,
+        inspectionIdExternal: p.inspection_id_external || '',
+        inspectionName: p.inspection_name || `(Inspection ${r.id})`,
+        templateType: p.template_type || '',
+        status: p.status || '',
+        propertyAddressSnapshot: p.property_address_snapshot || '',
+        inspectorName: p.inspector_name || '',
+        inspectorEmail: p.inspector_email || '',
+        bedroomsAtInspection: p.bedrooms_at_inspection != null && p.bedrooms_at_inspection !== ''
+          ? Number(p.bedrooms_at_inspection)
+          : null,
+        bathroomsAtInspection: p.bathrooms_at_inspection != null && p.bathrooms_at_inspection !== ''
+          ? Number(p.bathrooms_at_inspection)
+          : null,
+        startedAt: p.started_at || null,
+        completedAt: p.completed_at || null,
+        scheduledDate: p.scheduled_date || null,
+        createdAt: p.hs_createdate || null,
+        totalQuestionsAnswered: p.total_questions_answered != null && p.total_questions_answered !== ''
+          ? Number(p.total_questions_answered)
+          : null,
+      });
+    }
+    after = resp.paging?.next?.after;
+    pages++;
+    // Cap at 5 pages = 500 inspections for now. Above this we'd need pagination/infinite scroll.
+    if (pages >= 5) break;
+  } while (after);
+
   return out;
 }
 

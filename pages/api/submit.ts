@@ -35,7 +35,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       inspection_id_external: inspectionExternalId,
       inspection_name: inspectionName,
       template_type: payload.templateType,
-      status: 'completed',
+      status: 'Completed',
       property_address_snapshot: payload.propertyAddressSnapshot,
       bedrooms_at_inspection: payload.bedrooms,
       bathrooms_at_inspection: payload.bathrooms,

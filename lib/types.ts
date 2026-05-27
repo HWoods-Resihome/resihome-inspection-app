@@ -48,6 +48,27 @@ export interface Property {
   bathrooms?: number | null;
 }
 
+// Summary of an Inspection record for the list view (Round A).
+// Distinct from the SubmitPayload because we're reading rather than writing,
+// and we only need a subset of fields for the card display.
+export interface InspectionSummary {
+  recordId: string;
+  inspectionIdExternal: string;
+  inspectionName: string;
+  templateType: string;
+  status: string;              // 'Scheduled' | 'In Progress' | 'Completed' | 'Cancelled' (HubSpot label)
+  propertyAddressSnapshot: string;
+  inspectorName: string;
+  inspectorEmail: string;
+  bedroomsAtInspection: number | null;
+  bathroomsAtInspection: number | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  scheduledDate: string | null;
+  createdAt: string | null;
+  totalQuestionsAnswered: number | null;
+}
+
 export interface HubSpotUser {
   id: string;
   email: string;
