@@ -3,7 +3,7 @@
 
 import React from 'react';
 import {
-  Document, Page, Text, View, StyleSheet, Image, Font, Link,
+  Document, Page, Text, View, StyleSheet, Image, Link,
 } from '@react-pdf/renderer';
 
 // Brand colors from ResiHome brand guidelines
@@ -21,21 +21,10 @@ const COLORS = {
   white: '#ffffff',
 };
 
-// Register Raleway from Google Fonts for the PDF
-// Wrapped in try/catch in case the network is offline during PDF generation
-try {
-  Font.register({
-    family: 'Raleway',
-    fonts: [
-      { src: 'https://fonts.gstatic.com/s/raleway/v28/1Ptug8zYS_SKggPNyC0ITw.ttf', fontWeight: 400 },
-      { src: 'https://fonts.gstatic.com/s/raleway/v28/1Ptrg8zYS_SKggPNyCg4TYFq.ttf', fontWeight: 600 },
-      { src: 'https://fonts.gstatic.com/s/raleway/v28/1Ptrg8zYS_SKggPNyCMIT4ttDfA.ttf', fontWeight: 700 },
-    ],
-  });
-} catch (e) {
-  // Fallback to Helvetica if font registration fails
-  console.warn('Raleway font registration failed; using built-in font.');
-}
+// We previously tried to register Raleway from Google Fonts here, but the
+// runtime fetch failed in Vercel's serverless lambda with "Unknown font
+// format". Using bundled Helvetica/Helvetica-Bold avoids any network call.
+// (No-op kept as documentation of the prior attempt.)
 
 const styles = StyleSheet.create({
   page: {

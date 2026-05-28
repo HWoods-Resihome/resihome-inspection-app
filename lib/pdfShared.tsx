@@ -4,10 +4,15 @@
 // Style guide reference: ResiHome brand
 //   - Primary: hot pink #ff0060
 //   - Accent: teal #73e3df
-//   - Typography: Raleway for display, Helvetica fallback for body
+//   - Typography: Helvetica (bundled with PDF spec). We previously tried to
+//     register Raleway from Google Fonts at runtime, but that failed in
+//     Vercel's serverless lambda with "Unknown font format" — the lambda
+//     can't reliably fetch external font binaries. Using bundled PDF fonts
+//     (Helvetica, Helvetica-Bold) avoids the network round-trip and always
+//     renders. The brand colors do most of the brand work anyway.
 
 import React from 'react';
-import { StyleSheet, Font, Text, View } from '@react-pdf/renderer';
+import { StyleSheet, Text, View } from '@react-pdf/renderer';
 
 export const PDF_COLORS = {
   brand: '#ff0060',
@@ -22,25 +27,12 @@ export const PDF_COLORS = {
   emerald: '#059669',
 };
 
-// Register Raleway from Google Fonts. Wrapped in try/catch because the build
-// environment may not have network access at the moment of generation — in
-// that case we silently fall back to Helvetica (which is built-in to PDF).
-let fontRegistered = false;
+// No-op kept for backwards-compat with existing callers. We do NOT register
+// any external fonts because Vercel lambda fetches were failing. If you
+// later want to add a brand font, bundle the .ttf file into the deploy
+// (under public/fonts/) and use a file:// path so there's no network call.
 export function ensureFontRegistered() {
-  if (fontRegistered) return;
-  try {
-    Font.register({
-      family: 'Raleway',
-      fonts: [
-        { src: 'https://fonts.gstatic.com/s/raleway/v28/1Ptug8zYS_SKggPNyC0ITw.ttf', fontWeight: 400 },
-        { src: 'https://fonts.gstatic.com/s/raleway/v28/1Ptrg8zYS_SKggPNyCg4TYFq.ttf', fontWeight: 600 },
-        { src: 'https://fonts.gstatic.com/s/raleway/v28/1Ptrg8zYS_SKggPNyCMIT4ttDfA.ttf', fontWeight: 700 },
-      ],
-    });
-    fontRegistered = true;
-  } catch (e) {
-    console.warn('[pdfShared] Raleway font registration failed; using Helvetica fallback.');
-  }
+  // intentional no-op
 }
 
 // ---- Shared styles --------------------------------------------------------
@@ -71,39 +63,36 @@ export const pdfStyles = StyleSheet.create({
     gap: 4,
   },
   coverBadge: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 9,
     letterSpacing: 2,
     color: PDF_COLORS.accent,
-    fontWeight: 600,
     marginBottom: 16,
   },
   coverDocTitle: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 36,
-    fontWeight: 700,
     color: PDF_COLORS.white,
     marginBottom: 8,
     lineHeight: 1.1,
   },
   coverSubtitle: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 14,
     color: PDF_COLORS.white,
     opacity: 0.92,
     marginBottom: 36,
   },
   coverMetaLabel: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 8,
     letterSpacing: 1.4,
     color: PDF_COLORS.accent,
-    fontWeight: 600,
     textTransform: 'uppercase',
     marginTop: 14,
   },
   coverMetaValue: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 13,
     color: PDF_COLORS.white,
     marginTop: 2,
@@ -117,25 +106,22 @@ export const pdfStyles = StyleSheet.create({
     paddingTop: 12,
   },
   coverFooterLabel: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 8,
     letterSpacing: 1.4,
     color: PDF_COLORS.accent,
-    fontWeight: 600,
     textTransform: 'uppercase',
   },
   coverFooterValue: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 14,
     color: PDF_COLORS.white,
-    fontWeight: 600,
     marginTop: 2,
   },
   coverTenantTotal: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 22,
     color: PDF_COLORS.white,
-    fontWeight: 700,
     marginTop: 2,
   },
 
@@ -150,9 +136,8 @@ export const pdfStyles = StyleSheet.create({
     marginBottom: 14,
   },
   pageHeaderTitle: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 11,
-    fontWeight: 700,
     color: PDF_COLORS.brand,
   },
   pageHeaderRight: {
@@ -163,9 +148,8 @@ export const pdfStyles = StyleSheet.create({
 
   // ---- Section block ----
   sectionTitle: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 12,
-    fontWeight: 700,
     color: PDF_COLORS.ink,
     marginTop: 14,
     marginBottom: 4,
@@ -188,9 +172,8 @@ export const pdfStyles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   sectionSubtotalCellPrimary: {
-    fontFamily: 'Helvetica',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 8,
-    fontWeight: 700,
     color: PDF_COLORS.brand,
     textAlign: 'right',
     paddingHorizontal: 4,
@@ -206,9 +189,8 @@ export const pdfStyles = StyleSheet.create({
     paddingVertical: 4,
   },
   tableHeaderCell: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 7,
-    fontWeight: 700,
     color: PDF_COLORS.gray,
     paddingHorizontal: 4,
     textTransform: 'uppercase',
@@ -234,10 +216,9 @@ export const pdfStyles = StyleSheet.create({
     textAlign: 'right',
   },
   tableCellTenant: {
-    fontFamily: 'Helvetica',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 8,
     color: PDF_COLORS.brand,
-    fontWeight: 700,
     paddingHorizontal: 4,
     textAlign: 'right',
   },
@@ -259,7 +240,7 @@ export const pdfStyles = StyleSheet.create({
     marginTop: 14,
   },
   grandTotalsLabel: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 9,
     color: PDF_COLORS.white,
     opacity: 0.85,
@@ -267,25 +248,22 @@ export const pdfStyles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   grandTotalsValue: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 14,
-    fontWeight: 700,
     color: PDF_COLORS.white,
     marginTop: 2,
   },
   grandTotalsValueLarge: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 18,
-    fontWeight: 700,
     color: PDF_COLORS.white,
     marginTop: 2,
   },
 
   // ---- Appendix / photos ----
   appendixTitle: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 16,
-    fontWeight: 700,
     color: PDF_COLORS.brand,
     marginTop: 24,
     marginBottom: 12,
@@ -294,9 +272,8 @@ export const pdfStyles = StyleSheet.create({
     paddingBottom: 4,
   },
   appendixSectionTitle: {
-    fontFamily: 'Raleway',
+    fontFamily: 'Helvetica-Bold',
     fontSize: 11,
-    fontWeight: 700,
     color: PDF_COLORS.ink,
     marginTop: 12,
     marginBottom: 6,
