@@ -11,7 +11,7 @@
 //   - Section photos are rendered INLINE with their section (no appendix).
 
 import React from 'react';
-import { StyleSheet, Text, View, Image } from '@react-pdf/renderer';
+import { StyleSheet, Text, View, Image, Link } from '@react-pdf/renderer';
 
 export const PDF_COLORS = {
   brand: '#ff0060',
@@ -325,19 +325,20 @@ export function PdfHeaderStrip(props: {
 
 /**
  * Inline section photos. Render right after the section title and before the
- * table. No appendix — photos sit with their section. Image is wrapped in a
- * Link so clicking it in a PDF viewer opens the full-resolution version in
- * the user's browser.
+ * table. No appendix — photos sit with their section. Each photo is wrapped
+ * in a <Link> pointing to the original HubSpot Files URL, so clicking the
+ * thumbnail in a PDF viewer opens the full-resolution image in the user's
+ * browser. Compatible with all major PDF viewers (Acrobat, Preview, Chrome).
  */
 export function PdfSectionPhotos(props: { photoUrls: string[] }) {
   if (props.photoUrls.length === 0) return null;
   return (
     <View style={pdfStyles.photoGrid}>
       {props.photoUrls.map((url, i) => (
-        <View key={`${url}-${i}`} style={pdfStyles.photoCell}>
+        <Link key={`${url}-${i}`} src={url} style={pdfStyles.photoCell}>
           {/* eslint-disable-next-line jsx-a11y/alt-text */}
           <Image src={url} style={pdfStyles.photoCellImage} />
-        </View>
+        </Link>
       ))}
     </View>
   );
