@@ -30,6 +30,7 @@ export default function ExistingInspection() {
 
   const [inspection, setInspection] = useState<InspectionSummary | null>(null);
   const [propertyRecordId, setPropertyRecordId] = useState<string>('');
+  const [propertySquareFootage, setPropertySquareFootage] = useState<number | null>(null);
   const [existingAnswers, setExistingAnswers] = useState<SavedAnswer[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [submitResultUrl, setSubmitResultUrl] = useState<string>('');
@@ -47,6 +48,9 @@ export default function ExistingInspection() {
         if (cancelled) return;
         setInspection(data.inspection);
         setPropertyRecordId(data.propertyRecordId || '');
+        setPropertySquareFootage(
+          typeof data.propertySquareFootage === 'number' ? data.propertySquareFootage : null
+        );
         setExistingAnswers(data.answers || []);
 
         // Now load the template questions
@@ -266,6 +270,7 @@ export default function ExistingInspection() {
           propertyName={inspection.propertyAddressSnapshot || `Property ${propertyRecordId}`}
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
+          squareFootage={propertySquareFootage}
           inspectionRegion={inspection.regionSnapshot || ''}
           sectionListJson={inspection.sectionListJson}
           onSubmit={() => handleSubmit([], {})}
@@ -285,6 +290,8 @@ export default function ExistingInspection() {
           propertyName={inspection.propertyAddressSnapshot || `Property ${propertyRecordId}`}
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
+          squareFootage={propertySquareFootage}
+          inspectionRegion={inspection.regionSnapshot || ''}
           onSubmit={handleSubmit}
           onCancel={() => router.push('/')}
           inspectionRecordId={inspectionId}

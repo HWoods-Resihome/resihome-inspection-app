@@ -29,6 +29,9 @@ interface RateCardFormProps {
   propertyName: string;
   bedrooms: number;
   bathrooms: number;
+  /** Property's square footage (from `square_footage` on the property object).
+   *  Optional — shown in the header next to bed/bath if present. */
+  squareFootage?: number | null;
   inspectionRecordId: string;
   inspectionExternalId: string;
   inspectionRegion: string;
@@ -732,8 +735,11 @@ export function RateCardForm(props: RateCardFormProps) {
         </div>
         <div className="text-xs text-gray-500 mt-1">
           Inspector: {props.inspectorName} · {props.bedrooms} bed / {props.bathrooms} bath
-          {inspectionRegion && <span className="ml-2">· Region: <span className="font-semibold">{inspectionRegion}</span></span>}
-          {!inspectionRegion && <span className="ml-2 text-yellow-700">· Region: <span className="font-semibold">fallback (GA: Atlanta)</span></span>}
+          {props.squareFootage != null && props.squareFootage > 0 && (
+            <span> · {props.squareFootage.toLocaleString()} sqft</span>
+          )}
+          {inspectionRegion && <span> · <span className="font-semibold">{inspectionRegion}</span></span>}
+          {!inspectionRegion && <span className="text-yellow-700"> · <span className="font-semibold">fallback (GA: Atlanta)</span></span>}
         </div>
         {props.pdfUrl && (
           <a href={props.pdfUrl} target="_blank" rel="noopener noreferrer"
@@ -741,26 +747,41 @@ export function RateCardForm(props: RateCardFormProps) {
         )}
       </header>
 
-      {/* Sticky grand-total bar */}
+      {/* Sticky grand-total bar. The 3 money totals on the right use the
+          same fixed column widths as the section row totals below, so all
+          Vendor / Client / Tenant figures stack into visual columns from
+          the top of the page down through each section header. */}
       <div className="sticky top-0 z-10 -mx-4 px-4 py-2 mb-3 bg-white border-b border-gray-200 shadow-sm">
-        <div className="flex items-baseline justify-between flex-wrap gap-2">
-          <div className="text-sm font-semibold text-gray-700">
-            {grandTotals.count} {grandTotals.count === 1 ? 'line' : 'lines'} ·
-            Tenant Total: <span className="text-brand">${formatMoney(roundMoney(grandTotals.tenant))}</span>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="text-sm font-semibold text-gray-700">
+              {grandTotals.count} {grandTotals.count === 1 ? 'line' : 'lines'}
+            </div>
+            {/* Save status: visible while the inspector is making edits so they
+                get immediate feedback that work is being persisted. */}
+            <div className="text-xs flex items-center min-h-[1rem]">
+              {saveStatus.kind === 'saving' && <span className="text-brand font-semibold">Saving...</span>}
+              {saveStatus.kind === 'saved' && <span className="text-emerald-700 font-semibold">✓ Saved</span>}
+              {saveStatus.kind === 'error' && (
+                <span className="text-red-700 font-semibold" title={saveStatus.message}>
+                  ⚠ Save failed
+                </span>
+              )}
+            </div>
           </div>
-          {/* Save status: visible while the inspector is making edits so they
-              get immediate feedback that work is being persisted. */}
-          <div className="text-xs italic flex items-center gap-2 min-h-[1rem]">
-            {saveStatus.kind === 'saving' && <span className="text-brand font-semibold not-italic">Saving...</span>}
-            {saveStatus.kind === 'saved' && <span className="text-emerald-700 font-semibold not-italic">✓ Saved</span>}
-            {saveStatus.kind === 'error' && (
-              <span className="text-red-700 font-semibold not-italic" title={saveStatus.message}>
-                ⚠ Save failed
-              </span>
-            )}
-          </div>
-          <div className="text-xs text-gray-500">
-            Vendor ${formatMoney(roundMoney(grandTotals.vendor))} · Client ${formatMoney(roundMoney(grandTotals.client))}
+          <div className="flex items-baseline text-xs">
+            <span className="text-gray-500 text-right" style={{ width: 110 }}>
+              <span className="text-gray-400">Vendor </span>
+              <span className="font-semibold text-gray-700">${formatMoney(roundMoney(grandTotals.vendor))}</span>
+            </span>
+            <span className="text-gray-500 text-right" style={{ width: 110 }}>
+              <span className="text-gray-400">Client </span>
+              <span className="font-semibold text-gray-700">${formatMoney(roundMoney(grandTotals.client))}</span>
+            </span>
+            <span className="text-brand text-right" style={{ width: 110 }}>
+              <span className="text-brand/70">Tenant </span>
+              <span className="font-semibold">${formatMoney(roundMoney(grandTotals.tenant))}</span>
+            </span>
           </div>
         </div>
       </div>
@@ -824,6 +845,7 @@ export function RateCardForm(props: RateCardFormProps) {
                 isOpen={isOpen}
                 forceExpanded={hasLines}
                 lineCount={t.count}
+                vendorTotal={t.vendor}
                 clientTotal={t.client}
                 tenantTotal={t.tenant}
                 photosCount={photos.length}
@@ -1127,6 +1149,7 @@ interface SectionHeaderProps {
   /** When true, the section can't be collapsed (e.g., it has line items). */
   forceExpanded: boolean;
   lineCount: number;
+  vendorTotal: number;
   clientTotal: number;
   tenantTotal: number;
   photosCount: number;
@@ -1209,27 +1232,43 @@ function SectionHeader(p: SectionHeaderProps) {
           <span className="text-gray-400 flex-shrink-0">{p.isOpen ? '▾' : '▸'}</span>
         )}
       </div>
-      {/* Row 2: photo badges + line count + totals. Wraps onto its own line on
-          mobile so the section title is never truncated. */}
-      <div className="flex items-baseline gap-x-3 gap-y-1 flex-wrap text-xs mt-1">
-        {p.photosMissing && (
-          <span title="Section photo required" className="text-amber-600 font-semibold">📷 Photos Needed</span>
-        )}
-        {p.photosCount > 0 && (
-          <span className="text-gray-500">📷 {p.photosCount}</span>
-        )}
-        <span className={p.lineCount > 0 ? 'font-semibold text-gray-700' : 'text-gray-500'}>
-          {p.lineCount} {p.lineCount === 1 ? 'line' : 'lines'}
-        </span>
+      {/* Row 2: photo badges + line count on the LEFT, money totals on the
+          RIGHT, with each total in a fixed-width column so that Vendor /
+          Client / Tenant totals visually line up with the corresponding
+          columns in the table below. */}
+      <div className="flex items-center justify-between gap-2 mt-1 flex-wrap">
+        <div className="flex items-baseline gap-x-3 gap-y-1 flex-wrap text-xs">
+          {p.photosMissing && (
+            <span title="Section photo required" className="text-amber-600 font-semibold">📷 Photos Needed</span>
+          )}
+          {p.photosCount > 0 && (
+            <span className="text-gray-500">📷 {p.photosCount}</span>
+          )}
+          <span className={p.lineCount > 0 ? 'font-semibold text-gray-700' : 'text-gray-500'}>
+            {p.lineCount} {p.lineCount === 1 ? 'line' : 'lines'}
+          </span>
+        </div>
         {p.lineCount > 0 && (
-          <>
-            <span className="text-gray-700">
-              Client <span className="font-semibold">${formatMoney(roundMoney(p.clientTotal))}</span>
+          <div className="flex items-baseline text-xs">
+            {/* These widths roughly match the table's Vendor $ / Client $ /
+                Tenant $ columns, so the row totals appear directly above
+                their corresponding column. Tenant $ is the rightmost column
+                with min-w-[80px] + padding; the others are similar. The
+                right padding here (none) lets the Tenant total kiss the
+                same edge the table cells do. */}
+            <span className="text-gray-500 text-right" style={{ width: 110 }}>
+              <span className="text-gray-400">Vendor </span>
+              <span className="font-semibold text-gray-700">${formatMoney(roundMoney(p.vendorTotal))}</span>
             </span>
-            <span className="text-brand font-semibold">
-              Tenant ${formatMoney(roundMoney(p.tenantTotal))}
+            <span className="text-gray-500 text-right" style={{ width: 110 }}>
+              <span className="text-gray-400">Client </span>
+              <span className="font-semibold text-gray-700">${formatMoney(roundMoney(p.clientTotal))}</span>
             </span>
-          </>
+            <span className="text-brand text-right" style={{ width: 110 }}>
+              <span className="text-brand/70">Tenant </span>
+              <span className="font-semibold">${formatMoney(roundMoney(p.tenantTotal))}</span>
+            </span>
+          </div>
         )}
       </div>
     </div>

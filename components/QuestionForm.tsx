@@ -18,6 +18,11 @@ type Props = {
   propertyName: string;
   bedrooms: number;
   bathrooms: number;
+  /** Property's square footage (from `square_footage` on the property object).
+   *  Optional — shown in the header next to bed/bath if present. */
+  squareFootage?: number | null;
+  /** Inspection's region snapshot (used in the header subtitle). */
+  inspectionRegion?: string;
   onSubmit: (answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>) => void;
   onCancel: () => void;
 
@@ -84,7 +89,7 @@ function slugify(s: string): string {
 
 export function QuestionForm({
   questions, templateType, templateLabel, inspectorName, propertyName,
-  bedrooms, bathrooms, onSubmit, onCancel,
+  bedrooms, bathrooms, squareFootage, inspectionRegion, onSubmit, onCancel,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
 }: Props) {
@@ -705,6 +710,10 @@ export function QuestionForm({
             <div className="text-sm font-heading font-semibold text-ink truncate">{propertyName}</div>
             <div className="text-xs text-gray-500 truncate">
               {templateLabel} &middot; {inspectorName} &middot; {bedrooms}BR / {bathrooms}BA
+              {squareFootage != null && squareFootage > 0 && (
+                <span> &middot; {squareFootage.toLocaleString()} sqft</span>
+              )}
+              {inspectionRegion && <span> &middot; <span className="font-semibold">{inspectionRegion}</span></span>}
             </div>
             {pdfUrl && (
               <a

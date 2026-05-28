@@ -23,6 +23,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({
         inspection: data.inspection,
         propertyRecordId: data.propertyIdRef,
+        propertySquareFootage: data.propertySquareFootage,
         answers,
       });
     } catch (e: any) {

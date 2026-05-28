@@ -689,8 +689,9 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
 export async function fetchInspectionWithPropertyRef(recordId: string): Promise<{
   inspection: InspectionSummary;
   propertyIdRef: string;
+  propertySquareFootage: number | null;
 } | null> {
-  const { inspection: typeId } = typeIds();
+  const { inspection: typeId, property: propertyTypeId } = typeIds();
   const properties = [
     'inspection_id_external', 'inspection_name', 'template_type', 'status',
     'property_address_snapshot', 'property_id_ref',
@@ -704,6 +705,29 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     const qs = properties.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
     const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/${recordId}?${qs}`);
     const p = resp.properties || {};
+    const propertyIdRef = p.property_id_ref || '';
+
+    // Best-effort fetch the property's square_footage. Don't fail the whole
+    // request if the property record is missing or the property API errors —
+    // square footage is informational and we already have everything else.
+    let propertySquareFootage: number | null = null;
+    if (propertyIdRef) {
+      try {
+        const propResp = await hubspotFetch(
+          `/crm/v3/objects/${propertyTypeId}/${propertyIdRef}?properties=square_footage`
+        );
+        const pp = propResp.properties || {};
+        if (pp.square_footage != null && pp.square_footage !== '') {
+          const n = Number(pp.square_footage);
+          if (Number.isFinite(n)) propertySquareFootage = n;
+        }
+      } catch (e: any) {
+        // 404 / property-not-found / property type without square_footage -> just null.
+        // Log but don't propagate.
+        console.warn(`[fetchInspectionWithPropertyRef] could not fetch property ${propertyIdRef} square_footage:`, String(e).slice(0, 200));
+      }
+    }
+
     return {
       inspection: {
         recordId: resp.id,
@@ -728,7 +752,8 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         regionSnapshot: p.region_snapshot || null,
         sectionListJson: p.section_list_json || null,
       },
-      propertyIdRef: p.property_id_ref || '',
+      propertyIdRef,
+      propertySquareFootage,
     };
   } catch (e: any) {
     if (String(e).includes('404')) return null;
