@@ -32,6 +32,14 @@ interface RateCardFormProps {
   /** Property's square footage (from `square_footage` on the property object).
    *  Optional — shown in the header next to bed/bath if present. */
   squareFootage?: number | null;
+  /** Current HubSpot status value, e.g. 'scheduled' | 'in_progress' |
+   *  'pending_approval' | 'completed' | 'cancelled'. Controls which terminal
+   *  button is shown at the bottom of the form:
+   *    - scheduled/in_progress → "Submit for Approval" (flip to pending_approval)
+   *    - pending_approval     → "Finalize & Generate PDFs"
+   *    - completed            → form is read-only (controlled by `readOnly`)
+   *  If omitted, defaults to behaving like in_progress. */
+  inspectionStatus?: string;
   inspectionRecordId: string;
   inspectionExternalId: string;
   inspectionRegion: string;
@@ -117,6 +125,24 @@ export function RateCardForm(props: RateCardFormProps) {
     current: number;
     total: number;
   } | null>(null);
+
+  // ----- Finalize (generate PDFs) state ---------------------------------
+  // While finalize is running we lock the form so the inspector can't change
+  // anything mid-render. The result modal stays open until they hit Done; on
+  // Done we navigate away and the parent re-fetches.
+  type FinalizeResult = {
+    generatedAt: string;
+    pdfs: {
+      master: { name: string; url: string };
+      chargeback: { name: string; url: string } | null;
+      vendors: Array<{ vendor: string; name: string; url: string }>;
+      zip: { name: string; url: string };
+    };
+    totals: { vendor: number; client: number; tenant: number; lineCount: number };
+  };
+  const [finalizing, setFinalizing] = useState(false);
+  const [finalizeResult, setFinalizeResult] = useState<FinalizeResult | null>(null);
+
   // Browser supports in-app camera?
   const hasMediaDevices = typeof window !== 'undefined' &&
     !!window.navigator?.mediaDevices?.getUserMedia;
@@ -1090,7 +1116,47 @@ export function RateCardForm(props: RateCardFormProps) {
               alert(`Could not finish saving before submit: ${e.message || e}\n\nPlease try again.`);
               return;
             }
-            // Submit endpoint flips status to pending_approval for rate card inspections.
+
+            // Branch on status: if we're still in scheduled/in_progress, this
+            // button flips status to pending_approval (first submit). If we're
+            // already in pending_approval, this button triggers the Finalize
+            // & Generate PDFs flow.
+            const isFinalizing = props.inspectionStatus === 'pending_approval';
+            if (isFinalizing) {
+              // ---- Finalize & Generate PDFs ----
+              const confirmed = window.confirm(
+                'Finalize this inspection?\n\n' +
+                'This will:\n' +
+                '  • Generate the Master, Tenant Chargeback, and Per-Vendor PDFs\n' +
+                '  • Bundle them into a single ZIP\n' +
+                '  • Attach all files to this inspection in HubSpot\n' +
+                '  • Mark the inspection as Completed\n\n' +
+                'You\'ll be able to download the PDFs immediately after finalize completes. ' +
+                'You can also Reopen the inspection later if you need to make changes.'
+              );
+              if (!confirmed) return;
+              setFinalizing(true);
+              try {
+                const r = await fetch(`/api/inspections/${props.inspectionRecordId}/finalize`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({}),
+                });
+                if (!r.ok) {
+                  const text = await r.text();
+                  throw new Error(`HTTP ${r.status}: ${text.slice(0, 300)}`);
+                }
+                const data = await r.json();
+                setFinalizeResult(data as FinalizeResult);
+              } catch (e: any) {
+                alert(`Finalize failed: ${e?.message || e}\n\nThe inspection status was NOT changed. You can try again.`);
+              } finally {
+                setFinalizing(false);
+              }
+              return;
+            }
+
+            // ---- First submit: flip status to pending_approval ----
             try {
               const r = await fetch(`/api/inspections/${props.inspectionRecordId}/submit`, {
                 method: 'POST',
@@ -1106,10 +1172,14 @@ export function RateCardForm(props: RateCardFormProps) {
               alert(`Submit failed: ${e.message || e}`);
             }
           }}
-          disabled={props.readOnly || saveStatus.kind === "saving"}
+          disabled={props.readOnly || saveStatus.kind === "saving" || finalizing}
           className="px-5 py-2 text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
         >
-          Submit for Approval
+          {finalizing
+            ? 'Generating PDFs...'
+            : props.inspectionStatus === 'pending_approval'
+              ? 'Finalize & Generate PDFs'
+              : 'Submit for Approval'}
         </button>
         </div>
       </div>
@@ -1135,7 +1205,96 @@ export function RateCardForm(props: RateCardFormProps) {
           onReorder={handleReorderSections}
         />
       )}
+
+      {/* Generating overlay: blocks the form while finalize is running.
+          The render itself can take 15-40 seconds for inspections with lots
+          of photos so we want a clear "don't do anything" indicator. */}
+      {finalizing && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md mx-4 text-center">
+            <div className="text-brand text-base font-semibold mb-2">Generating PDFs...</div>
+            <div className="text-sm text-gray-700">
+              This may take 15-30 seconds depending on how many photos are attached.
+              Please don&apos;t close this tab.
+            </div>
+            <div className="mt-4 h-1 bg-gray-200 rounded overflow-hidden">
+              <div className="h-full bg-brand animate-pulse" style={{ width: '60%' }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Result modal: shown after finalize succeeds. Lists all generated
+          PDFs with download buttons. The inspector can also dismiss it,
+          which navigates back to the list (the inspection is now Completed). */}
+      {finalizeResult && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            <div className="px-5 py-4 border-b border-gray-200">
+              <div className="text-lg font-bold text-emerald-700 flex items-center gap-2">
+                <span>✓ Inspection Finalized</span>
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5">
+                {finalizeResult.totals.lineCount} {finalizeResult.totals.lineCount === 1 ? 'line item' : 'line items'} ·
+                Tenant Total: <span className="text-brand font-semibold">${finalizeResult.totals.tenant.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+            <div className="px-5 py-3 space-y-2">
+              <div className="text-xs uppercase tracking-wider font-semibold text-gray-500 mb-1">Downloads</div>
+              <DownloadLink label="Master Report" filename={finalizeResult.pdfs.master.name} url={finalizeResult.pdfs.master.url} primary />
+              {finalizeResult.pdfs.chargeback && (
+                <DownloadLink label="Tenant Chargeback" filename={finalizeResult.pdfs.chargeback.name} url={finalizeResult.pdfs.chargeback.url} />
+              )}
+              {finalizeResult.pdfs.vendors.map((v) => (
+                <DownloadLink
+                  key={v.vendor}
+                  label={`Work Order — ${v.vendor}`}
+                  filename={v.name}
+                  url={v.url}
+                />
+              ))}
+              <div className="pt-2 border-t border-gray-100" />
+              <DownloadLink label="ZIP — All PDFs" filename={finalizeResult.pdfs.zip.name} url={finalizeResult.pdfs.zip.url} accent />
+            </div>
+            <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setFinalizeResult(null);
+                  props.onSubmit();
+                }}
+                className="px-4 py-2 text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Single download row in the Finalize result modal. */
+function DownloadLink(props: { label: string; filename: string; url: string; primary?: boolean; accent?: boolean }) {
+  return (
+    <a
+      href={props.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      download={props.filename}
+      className={
+        'flex items-center justify-between px-3 py-2 rounded border text-sm hover:bg-gray-50 ' +
+        (props.primary
+          ? 'border-brand bg-brand/5 text-brand font-semibold'
+          : props.accent
+            ? 'border-emerald-300 bg-emerald-50 text-emerald-800 font-semibold'
+            : 'border-gray-200 text-gray-700')
+      }
+    >
+      <span className="truncate">{props.label}</span>
+      <span className="ml-2 text-xs opacity-70 whitespace-nowrap">↓ Download</span>
+    </a>
   );
 }
 

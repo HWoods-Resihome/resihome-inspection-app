@@ -8,6 +8,9 @@
     },
     "pages/api/upload.ts": {
       "maxDuration": 10
+    },
+    "pages/api/inspections/[id]/finalize.ts": {
+      "maxDuration": 60
     }
   }
 }

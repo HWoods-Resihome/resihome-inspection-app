@@ -271,9 +271,10 @@ export default function ExistingInspection() {
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
+          inspectionStatus={inspection.status}
           inspectionRegion={inspection.regionSnapshot || ''}
           sectionListJson={inspection.sectionListJson}
-          onSubmit={() => handleSubmit([], {})}
+          onSubmit={() => router.push('/')}
           onCancel={() => router.push('/')}
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}
