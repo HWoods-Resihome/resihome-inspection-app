@@ -31,6 +31,7 @@ export default function ExistingInspection() {
   const [inspection, setInspection] = useState<InspectionSummary | null>(null);
   const [propertyRecordId, setPropertyRecordId] = useState<string>('');
   const [propertySquareFootage, setPropertySquareFootage] = useState<number | null>(null);
+  const [propertyZip, setPropertyZip] = useState<string | null>(null);
   const [existingAnswers, setExistingAnswers] = useState<SavedAnswer[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [submitResultUrl, setSubmitResultUrl] = useState<string>('');
@@ -51,6 +52,7 @@ export default function ExistingInspection() {
         setPropertySquareFootage(
           typeof data.propertySquareFootage === 'number' ? data.propertySquareFootage : null
         );
+        setPropertyZip(typeof data.propertyZip === 'string' ? data.propertyZip : null);
         setExistingAnswers(data.answers || []);
 
         // Now load the template questions
@@ -244,6 +246,16 @@ export default function ExistingInspection() {
   const readOnly = isCompleted || isCancelled;
   const templateLabel = TEMPLATE_LABELS[inspection.templateType] || inspection.templateType;
 
+  // Compose the display address: append the property's zip code if we have
+  // one and the address doesn't already include it. This handles both cases
+  // where the snapshot was built with or without the zip.
+  const baseAddress = inspection.propertyAddressSnapshot || `Property ${propertyRecordId}`;
+  const propertyName = (() => {
+    if (!propertyZip) return baseAddress;
+    if (baseAddress.includes(propertyZip)) return baseAddress;
+    return `${baseAddress} ${propertyZip}`;
+  })();
+
   return (
     <>
       <Head>
@@ -267,7 +279,7 @@ export default function ExistingInspection() {
           templateType={inspection.templateType as TemplateType}
           templateLabel={templateLabel}
           inspectorName={inspection.inspectorName}
-          propertyName={inspection.propertyAddressSnapshot || `Property ${propertyRecordId}`}
+          propertyName={propertyName}
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
@@ -288,7 +300,7 @@ export default function ExistingInspection() {
           templateType={inspection.templateType as TemplateType}
           templateLabel={templateLabel}
           inspectorName={inspection.inspectorName}
-          propertyName={inspection.propertyAddressSnapshot || `Property ${propertyRecordId}`}
+          propertyName={propertyName}
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}

@@ -202,7 +202,7 @@ export function useRateCardAutosave(args: Args): AutosaveHandle {
         const urls = photos[sectionId] || [];
         const section = resolveSection(sectionId);
         const existingRecordId = sectionPhotoIdsRef.current[sectionId];
-        const externalId = `SECTIONPHOTO-${sectionId}`;
+        const externalId = `SECTIONPHOTO-${inspectionRecordId}-${sectionId}`;
 
         // If no photos and no existing record, skip.
         // If no photos and a record exists, archive it.

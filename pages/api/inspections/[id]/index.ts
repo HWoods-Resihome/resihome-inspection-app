@@ -24,6 +24,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         inspection: data.inspection,
         propertyRecordId: data.propertyIdRef,
         propertySquareFootage: data.propertySquareFootage,
+        propertyZip: data.propertyZip,
         answers,
       });
     } catch (e: any) {

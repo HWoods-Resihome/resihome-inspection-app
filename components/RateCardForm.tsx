@@ -611,7 +611,11 @@ export function RateCardForm(props: RateCardFormProps) {
     const section = sections.find((s) => s.id === sectionId);
     if (!section) return;
     const existingRecordId = sectionPhotoRecordIds[sectionId];
-    const externalId = `SECTIONPHOTO-${sectionId}`;
+    // External ID must be globally unique across ALL inspection_answer records
+    // in HubSpot (it's a unique-constraint property). Scoping by inspection
+    // recordId prevents collisions when two different inspections both have a
+    // section photo for the same section name (e.g., yard_exterior).
+    const externalId = `SECTIONPHOTO-${props.inspectionRecordId}-${sectionId}`;
 
     saveInFlightRef.current++;
     setSaveStatus({ kind: 'saving' });
@@ -907,7 +911,7 @@ export function RateCardForm(props: RateCardFormProps) {
       <header className="mb-3">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h1 className="text-xl font-bold text-gray-900">{props.templateLabel}</h1>
-          <span className="text-sm text-gray-500">— {props.propertyName}</span>
+          <span className="text-sm text-gray-700 font-semibold">— {props.propertyName}</span>
         </div>
         <div className="text-xs text-gray-500 mt-1">
           Inspector: {props.inspectorName} · {props.bedrooms} bed / {props.bathrooms} bath

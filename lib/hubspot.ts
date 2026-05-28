@@ -690,6 +690,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   inspection: InspectionSummary;
   propertyIdRef: string;
   propertySquareFootage: number | null;
+  propertyZip: string | null;
 } | null> {
   const { inspection: typeId, property: propertyTypeId } = typeIds();
   const properties = [
@@ -707,24 +708,28 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     const p = resp.properties || {};
     const propertyIdRef = p.property_id_ref || '';
 
-    // Best-effort fetch the property's square_footage. Don't fail the whole
+    // Best-effort fetch the property's square_footage AND zip. Don't fail the whole
     // request if the property record is missing or the property API errors —
-    // square footage is informational and we already have everything else.
+    // these are informational and we already have everything else from the inspection.
     let propertySquareFootage: number | null = null;
+    let propertyZip: string | null = null;
     if (propertyIdRef) {
       try {
         const propResp = await hubspotFetch(
-          `/crm/v3/objects/${propertyTypeId}/${propertyIdRef}?properties=square_footage`
+          `/crm/v3/objects/${propertyTypeId}/${propertyIdRef}?properties=square_footage&properties=zip&properties=zip_code`
         );
         const pp = propResp.properties || {};
         if (pp.square_footage != null && pp.square_footage !== '') {
           const n = Number(pp.square_footage);
           if (Number.isFinite(n)) propertySquareFootage = n;
         }
+        // Some HubSpot portals use 'zip', others use 'zip_code'. Try both.
+        const rawZip = (pp.zip_code || pp.zip || '').toString().trim();
+        if (rawZip) propertyZip = rawZip;
       } catch (e: any) {
-        // 404 / property-not-found / property type without square_footage -> just null.
+        // 404 / property-not-found / property type without these fields -> just null.
         // Log but don't propagate.
-        console.warn(`[fetchInspectionWithPropertyRef] could not fetch property ${propertyIdRef} square_footage:`, String(e).slice(0, 200));
+        console.warn(`[fetchInspectionWithPropertyRef] could not fetch property ${propertyIdRef} extras:`, String(e).slice(0, 200));
       }
     }
 
@@ -754,6 +759,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       },
       propertyIdRef,
       propertySquareFootage,
+      propertyZip,
     };
   } catch (e: any) {
     if (String(e).includes('404')) return null;
