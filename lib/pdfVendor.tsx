@@ -66,7 +66,7 @@ function VendorDoc(props: {
 
         <View style={pdfStyles.grandTotalsStrip}>
           <View style={pdfStyles.grandTotalsItem}>
-            <Text style={pdfStyles.grandTotalsLabel}>Lines</Text>
+            <Text style={pdfStyles.grandTotalsLabel}>Scope Items</Text>
             <Text style={pdfStyles.grandTotalsValue}>{lineCount}</Text>
           </View>
           <View style={pdfStyles.grandTotalsItem}>

@@ -31,6 +31,14 @@ import type {
   RateCardLineInput,
 } from '@/lib/types';
 
+/**
+ * Feature flag for the math debug panel. Set to true to reveal the yellow
+ * formula-trace row beneath each line item while editing (handy when the
+ * vendor cost looks wrong and you need to see the labor/material breakdown).
+ * Off by default since the math is validated.
+ */
+const SHOW_MATH_DEBUG = false;
+
 interface Props {
   // Line data and metadata
   line: RateCardLineInput | null;       // null means "brand new, unsaved"
@@ -504,10 +512,11 @@ export function EditableLineRow(props: Props) {
         </div>
       </td>
     </tr>
-    {/* TEMPORARY math debug panel — shown only in edit mode for sanity-checking
-        the vendor $ formula. Remove this <MathDebugRow> block (and the import)
-        once math is validated. */}
-    {selectedItem && calc && (
+    {/* Math debug panel — shown only in edit mode for sanity-checking the
+        vendor $ formula. Hidden by default; flip SHOW_MATH_DEBUG to true to
+        bring it back without re-importing. The <MathDebugRow> component is
+        intentionally left in this file so re-enabling is a one-line change. */}
+    {SHOW_MATH_DEBUG && selectedItem && calc && (
       <MathDebugRow
         item={selectedItem}
         calc={calc}

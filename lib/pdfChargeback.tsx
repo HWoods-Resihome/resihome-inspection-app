@@ -77,7 +77,7 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
 
         <View style={pdfStyles.grandTotalsStrip}>
           <View style={pdfStyles.grandTotalsItem}>
-            <Text style={pdfStyles.grandTotalsLabel}>Lines</Text>
+            <Text style={pdfStyles.grandTotalsLabel}>Scope Items</Text>
             <Text style={pdfStyles.grandTotalsValue}>{grandLineCount}</Text>
           </View>
           <View style={pdfStyles.grandTotalsItem}>

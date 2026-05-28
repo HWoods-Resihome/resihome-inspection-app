@@ -57,8 +57,8 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
           generatedAtLabel={generatedAtLabel}
           summary={
             <>
-              <Text style={pdfStyles.headerRightLabel}>Tenant Total</Text>
-              <Text style={pdfStyles.headerRightValue}>${formatMoneyPdf(ctx.grandTotals.tenant)}</Text>
+              <Text style={pdfStyles.headerRightLabel}>Client Total</Text>
+              <Text style={pdfStyles.headerRightValue}>${formatMoneyPdf(ctx.grandTotals.client)}</Text>
             </>
           }
         />
@@ -66,7 +66,7 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
         {/* Grand totals strip — three figures side by side */}
         <View style={pdfStyles.grandTotalsStrip}>
           <View style={pdfStyles.grandTotalsItem}>
-            <Text style={pdfStyles.grandTotalsLabel}>Lines</Text>
+            <Text style={pdfStyles.grandTotalsLabel}>Scope Items</Text>
             <Text style={pdfStyles.grandTotalsValue}>{ctx.grandTotals.lineCount}</Text>
           </View>
           <View style={pdfStyles.grandTotalsItem}>
