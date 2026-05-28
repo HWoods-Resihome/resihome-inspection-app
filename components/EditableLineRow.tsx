@@ -383,8 +383,11 @@ export function EditableLineRow(props: Props) {
           {subcategories.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </td>
-      {/* Line Item (combobox, compact variant) — with optional description textarea below */}
-      <td className="px-2 py-1.5 align-middle min-w-[200px]">
+      {/* Line Item (combobox, compact variant) — with optional description textarea below.
+          max-w caps how wide the description textarea can grow; without it, a
+          long auto-filled description can stretch the cell beyond min-w and
+          push downstream columns (including the ✓ save button) off-screen. */}
+      <td className="px-2 py-1.5 align-middle min-w-[200px] max-w-[280px]">
         <Combobox
           compact
           options={lineItemOptions}
@@ -420,7 +423,7 @@ export function EditableLineRow(props: Props) {
         />
       </td>
       {/* Vendor */}
-      <td className="px-2 py-1.5 align-middle min-w-[110px]">
+      <td className="px-2 py-1.5 align-middle min-w-[100px] max-w-[130px]">
         <select
           value={vendor}
           onChange={(e) => setVendor(e.target.value)}

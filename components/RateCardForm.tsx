@@ -145,6 +145,42 @@ export function RateCardForm(props: RateCardFormProps) {
     }
   }
 
+  /**
+   * Force-refresh the rate card catalog and region rates from HubSpot,
+   * bypassing the server-side 60-minute cache. Used when an admin has
+   * edited line item pricing or regional rates in HubSpot and wants the
+   * change to reflect in the app immediately rather than waiting for the
+   * cache TTL to expire.
+   *
+   * Note: this DOES NOT recalculate existing saved lines — their stored
+   * vendor/client/tenant totals were computed from the rates that were
+   * current at save time. To refresh those, the inspector would need to
+   * open and re-save each affected line.
+   */
+  async function refreshCatalogFromHubSpot(): Promise<void> {
+    setDataLoading(true);
+    setDataError(null);
+    try {
+      const [catRes, regRes] = await Promise.all([
+        fetch('/api/rate-card/catalog?refresh=1'),
+        fetch('/api/rate-card/regions?refresh=1'),
+      ]);
+      const catData = await catRes.json();
+      const regData = await regRes.json();
+      if (!catRes.ok) throw new Error(catData.error || `Catalog HTTP ${catRes.status}`);
+      if (!regRes.ok) throw new Error(regData.error || `Regions HTTP ${regRes.status}`);
+      setCatalog(catData.items || []);
+      setRegions(regData.regions || []);
+      setDataLoaded(true);
+      alert(`Rate card refreshed: ${catData.items?.length || 0} line items, ${regData.regions?.length || 0} regions loaded from HubSpot.`);
+    } catch (e: any) {
+      setDataError(String(e?.message || e));
+      alert(`Refresh failed: ${e?.message || e}`);
+    } finally {
+      setDataLoading(false);
+    }
+  }
+
   // ----- Load saved lines + photos on mount ---------------------------
   // Triggered once per inspection. Fetches existing inspection_answer records,
   // partitions by answer_type, and hydrates linesBySection + photosBySection.
@@ -737,6 +773,23 @@ export function RateCardForm(props: RateCardFormProps) {
 
       {!props.readOnly && (
         <div className="mb-3 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              const ok = window.confirm(
+                'Refresh rate card pricing from HubSpot?\n\n' +
+                'This will pull the latest line item costs and regional labor rates. ' +
+                'Already-saved lines keep their original pricing — only new lines will use the refreshed rates.'
+              );
+              if (!ok) return;
+              await refreshCatalogFromHubSpot();
+            }}
+            disabled={dataLoading}
+            className="text-xs px-3 py-1.5 border border-gray-300 rounded bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Force-refresh line item catalog and regional rates from HubSpot. Use after editing pricing in the HubSpot sandbox."
+          >
+            {dataLoading ? '⟳ Refreshing...' : '⟳ Refresh Pricing'}
+          </button>
           <button
             type="button"
             onClick={() => setShowSectionsManager(true)}
