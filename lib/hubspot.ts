@@ -570,12 +570,21 @@ export async function submitInspection(input: SubmitInput): Promise<{ inspection
 
 /**
  * Upload a file (image or PDF) to HubSpot Files API, return public URL.
+ *
+ * `overwrite=true` replaces an existing file with the same name+folder in
+ * place (same URL kept). Use this for deterministic-named files like
+ * generated PDFs so re-finalizing an inspection updates the existing file
+ * rather than leaving an orphan and creating "-1.pdf".
+ *
+ * Defaults to `false` (matches HubSpot's API default) because inspection
+ * photos use random UUID filenames where overwrite isn't needed.
  */
 export async function uploadFile(
   buffer: Buffer,
   filename: string,
   contentType: string,
-  folderPath: string = '/inspection_photos'
+  folderPath: string = '/inspection_photos',
+  overwrite: boolean = false
 ): Promise<string> {
   const url = `${API_BASE}/files/v3/files`;
   const form = new FormData();
@@ -583,7 +592,7 @@ export async function uploadFile(
   form.append('file', blob, filename);
   form.append('options', JSON.stringify({
     access: 'PUBLIC_INDEXABLE',
-    overwrite: false,
+    overwrite,
   }));
   form.append('folderPath', folderPath);
 

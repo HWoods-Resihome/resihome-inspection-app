@@ -1350,7 +1350,30 @@ export function RateCardForm(props: RateCardFormProps) {
               </div>
             </div>
             <div className="px-5 py-3 space-y-2">
-              <div className="text-xs uppercase tracking-wider font-semibold text-gray-500 mb-1">Downloads</div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-xs uppercase tracking-wider font-semibold text-gray-500">Downloads</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Download every PDF in sequence. Browsers will trigger
+                    // each as a separate download since the user gesture
+                    // (clicking Download All) lasts through the entire async
+                    // chain. A small stagger avoids overwhelming Safari which
+                    // sometimes drops back-to-back downloads.
+                    const items: Array<{ name: string; url: string }> = [];
+                    items.push(finalizeResult.pdfs.master);
+                    if (finalizeResult.pdfs.chargeback) items.push(finalizeResult.pdfs.chargeback);
+                    for (const v of finalizeResult.pdfs.vendors) items.push({ name: v.name, url: v.url });
+                    items.forEach((item, idx) => {
+                      setTimeout(() => triggerDownload(item.url, item.name), idx * 200);
+                    });
+                  }}
+                  className="text-xs px-3 py-1 bg-emerald-600 text-white font-semibold rounded hover:bg-emerald-700"
+                  title="Download every PDF at once"
+                >
+                  ↓ Download All
+                </button>
+              </div>
               <DownloadLink label="Master Report" filename={finalizeResult.pdfs.master.name} url={finalizeResult.pdfs.master.url} primary />
               {finalizeResult.pdfs.chargeback && (
                 <DownloadLink label="Tenant Chargeback" filename={finalizeResult.pdfs.chargeback.name} url={finalizeResult.pdfs.chargeback.url} />
@@ -1432,6 +1455,30 @@ function TerminalActions(props: {
       </div>
     </div>
   );
+}
+
+/**
+ * Trigger a single download by creating a temporary `<a download>` element,
+ * clicking it, and cleaning up. Works for cross-origin URLs because the
+ * `download` attribute is a hint; browsers honor it when the response has
+ * Content-Disposition or when the host serves the file as application/pdf
+ * (HubSpot Files does both). Falls back to opening in a new tab if the
+ * browser blocks the synthetic click.
+ */
+function triggerDownload(url: string, filename: string) {
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch {
+    // Last-ditch fallback if DOM manipulation fails for some reason
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
 }
 
 function DownloadLink(props: { label: string; filename: string; url: string; primary?: boolean; accent?: boolean }) {

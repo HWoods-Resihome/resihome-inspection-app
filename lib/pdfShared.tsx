@@ -11,7 +11,15 @@
 //   - Section photos are rendered INLINE with their section (no appendix).
 
 import React from 'react';
-import { StyleSheet, Text, View, Image, Link } from '@react-pdf/renderer';
+import { StyleSheet, Text, View, Image, Link, Font } from '@react-pdf/renderer';
+
+// Disable word hyphenation globally. @react-pdf's default hyphenation breaks
+// long words mid-word (e.g. "Internal Resolution" becomes "Internal Resolu-"
+// + "tion", and "Subcategory" becomes "Sub-" + "category"). Returning the
+// word as a single chunk forces the layout to wrap at whitespace instead.
+// Applies to ALL Text in PDFs since Font.registerHyphenationCallback is
+// module-level state.
+Font.registerHyphenationCallback((word) => [word]);
 
 export const PDF_COLORS = {
   brand: '#ff0060',
@@ -38,7 +46,10 @@ export const pdfStyles = StyleSheet.create({
     fontFamily: 'Helvetica',
     fontSize: 8,
     paddingTop: 28,
-    paddingBottom: 32,
+    // Reserve enough room for the fixed footer (bottom: 14, height ~12 + 4
+    // padding ~= 30). Anything less and section headers / photos at the
+    // bottom of a page get rendered behind the footer strip.
+    paddingBottom: 48,
     paddingLeft: 24,
     paddingRight: 24,
     color: PDF_COLORS.ink,
@@ -340,6 +351,28 @@ export function PdfSectionPhotos(props: { photoUrls: string[] }) {
           <Image src={url} style={pdfStyles.photoCellImage} />
         </Link>
       ))}
+    </View>
+  );
+}
+
+/**
+ * Section title + section photos as ONE non-splittable block.
+ *
+ * Why: react-pdf's auto page-break can land the title at the bottom of a
+ * page and put the photos (or the first table row) at the top of the next.
+ * Worse, the title can land where the fixed footer renders, so the title
+ * disappears entirely under the footer strip.
+ *
+ * Wrapping them together with wrap={false} means the layout engine treats
+ * this as one atomic block — if it doesn't fit at the bottom of a page, the
+ * whole block bumps to the next page. The table that follows can still wrap
+ * normally (rows are individually wrap={false} but the table itself isn't).
+ */
+export function PdfSectionHeader(props: { title: string; photoUrls: string[] }) {
+  return (
+    <View wrap={false} style={{ marginTop: 8 }}>
+      <Text style={pdfStyles.sectionTitle}>{props.title}</Text>
+      <PdfSectionPhotos photoUrls={props.photoUrls} />
     </View>
   );
 }

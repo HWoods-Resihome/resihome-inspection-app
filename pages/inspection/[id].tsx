@@ -383,6 +383,36 @@ function CompletedPdfMenu({ inspection }: { inspection: InspectionSummary }) {
           {/* Click-away mask — closing the menu when the user clicks anywhere else */}
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div className="absolute right-0 mt-1 z-40 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[260px] py-1">
+            <button
+              type="button"
+              onClick={() => {
+                links.forEach((l, idx) => {
+                  setTimeout(() => {
+                    try {
+                      const a = document.createElement('a');
+                      a.href = l.url;
+                      a.target = '_blank';
+                      a.rel = 'noopener noreferrer';
+                      // Pull a filename from the URL's last path segment so
+                      // the download saves with a sensible name.
+                      try {
+                        const u = new URL(l.url);
+                        a.download = decodeURIComponent(u.pathname.split('/').pop() || '');
+                      } catch {}
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                    } catch {
+                      window.open(l.url, '_blank', 'noopener,noreferrer');
+                    }
+                  }, idx * 200);
+                });
+                setOpen(false);
+              }}
+              className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 border-b border-gray-200"
+            >
+              <span>↓ Download All ({links.length})</span>
+            </button>
             {links.map((l) => (
               <a
                 key={l.url}

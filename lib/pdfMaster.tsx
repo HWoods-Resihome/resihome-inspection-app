@@ -8,7 +8,7 @@ import {
   ensureFontRegistered,
   PdfHeaderStrip,
   PdfFooter,
-  PdfSectionPhotos,
+  PdfSectionHeader,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
@@ -96,25 +96,23 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
 function MasterSection(props: { section: PdfSectionGroup }) {
   const s = props.section;
   return (
-    <View style={{ marginTop: 8 }}>
-      <Text style={pdfStyles.sectionTitle}>{s.displayName}</Text>
-
-      {/* Inline section photos (no appendix) */}
-      <PdfSectionPhotos photoUrls={s.photoUrls} />
+    <View>
+      {/* Title + photos as one atomic block (won't split across pages) */}
+      <PdfSectionHeader title={s.displayName} photoUrls={s.photoUrls} />
 
       {s.lines.length > 0 && (
         <>
           {/* Header row */}
           <View style={pdfStyles.tableHeaderRow}>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.category, textAlign: 'center' }]}>Category</Text>
-            <Text style={[pdfStyles.tableHeaderCell, { width: COL.subcategory, textAlign: 'center' }]}>Subcategory</Text>
+            <Text style={[pdfStyles.tableHeaderCell, { width: COL.subcategory, textAlign: 'center' }]}>{'Sub-\ncategory'}</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.description }]}>Description</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.qty, textAlign: 'center' }]}>Qty</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.unit, textAlign: 'center' }]}>Unit</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.vendor, textAlign: 'center' }]}>Vendor</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.vendorCost, textAlign: 'right' }]}>Vendor $</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.clientCost, textAlign: 'right' }]}>Client $</Text>
-            <Text style={[pdfStyles.tableHeaderCell, { width: COL.tenantPct, textAlign: 'right' }]}>Tenant %</Text>
+            <Text style={[pdfStyles.tableHeaderCell, { width: COL.tenantPct, textAlign: 'right' }]}>Ten %</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.tenantCost, textAlign: 'right' }]}>Tenant $</Text>
           </View>
 
@@ -139,10 +137,15 @@ function MasterSection(props: { section: PdfSectionGroup }) {
             </View>
           ))}
 
-          {/* Subtotal row (always shown, even for 1 line — keeps visual rhythm) */}
+          {/* Subtotal row. Label width must equal the sum of all columns
+              that come BEFORE the first $ column (Vendor $) so the dollar
+              amounts land directly under their headers:
+                Cat 9 + Sub 9 + Desc 28 + Qty 6 + Unit 5 + Vendor 12 = 69%
+              Then Vendor $, Client $, Tenant %, Tenant $ each use their own
+              width with the same right-alignment as the data rows above. */}
           {s.lines.length >= 1 && (
             <View style={pdfStyles.subtotalRow} wrap={false}>
-              <Text style={[pdfStyles.subtotalCell, { width: '60%' }]}>Section Subtotal</Text>
+              <Text style={[pdfStyles.subtotalCell, { width: '69%', textAlign: 'right' }]}>Section Subtotal</Text>
               <Text style={[pdfStyles.subtotalCell, { width: COL.vendorCost }]}>${formatMoneyPdf(s.vendorTotal)}</Text>
               <Text style={[pdfStyles.subtotalCell, { width: COL.clientCost }]}>${formatMoneyPdf(s.clientTotal)}</Text>
               <Text style={[pdfStyles.subtotalCell, { width: COL.tenantPct }]}> </Text>

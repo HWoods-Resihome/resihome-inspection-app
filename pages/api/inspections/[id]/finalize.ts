@@ -234,16 +234,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // ---- 5. Upload PDFs to HubSpot Files ----
     // Sequential to stay polite with HubSpot's rate limit.
-    const masterUrl = await uploadFile(masterBuf, masterFilename, 'application/pdf', '/inspection_pdfs');
+    // overwrite=true so re-running Finalize on a reopened inspection REPLACES
+    // the old PDFs in place (same URL, same record) instead of leaving them
+    // as orphans + creating "-1.pdf" duplicates.
+    const masterUrl = await uploadFile(masterBuf, masterFilename, 'application/pdf', '/inspection_pdfs', true);
 
     let chargebackUrl: string | null = null;
     if (chargebackBuf) {
-      chargebackUrl = await uploadFile(chargebackBuf, chargebackFilename, 'application/pdf', '/inspection_pdfs');
+      chargebackUrl = await uploadFile(chargebackBuf, chargebackFilename, 'application/pdf', '/inspection_pdfs', true);
     }
 
     const vendorUrls: Record<string, string> = {};
     for (const [vendor, buf] of vendorBufs.entries()) {
-      const url = await uploadFile(buf, vendorFilename(vendor), 'application/pdf', '/inspection_pdfs');
+      const url = await uploadFile(buf, vendorFilename(vendor), 'application/pdf', '/inspection_pdfs', true);
       vendorUrls[vendor] = url;
     }
 

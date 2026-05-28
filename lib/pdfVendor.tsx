@@ -9,7 +9,7 @@ import {
   ensureFontRegistered,
   PdfHeaderStrip,
   PdfFooter,
-  PdfSectionPhotos,
+  PdfSectionHeader,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
@@ -88,14 +88,12 @@ function VendorDoc(props: {
 function VendorSection(props: { section: PdfSectionGroup }) {
   const s = props.section;
   return (
-    <View style={{ marginTop: 8 }}>
-      <Text style={pdfStyles.sectionTitle}>{s.displayName}</Text>
-
-      <PdfSectionPhotos photoUrls={s.photoUrls} />
+    <View>
+      <PdfSectionHeader title={s.displayName} photoUrls={s.photoUrls} />
 
       <View style={pdfStyles.tableHeaderRow}>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.category, textAlign: 'center' }]}>Category</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.subcategory, textAlign: 'center' }]}>Subcategory</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.subcategory, textAlign: 'center' }]}>{'Sub-\ncategory'}</Text>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.description }]}>Description</Text>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.qty, textAlign: 'center' }]}>Qty</Text>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.unit, textAlign: 'center' }]}>Unit</Text>
@@ -119,7 +117,7 @@ function VendorSection(props: { section: PdfSectionGroup }) {
       ))}
 
       <View style={pdfStyles.subtotalRow} wrap={false}>
-        <Text style={[pdfStyles.subtotalCell, { width: '90%' }]}>Section Subtotal</Text>
+        <Text style={[pdfStyles.subtotalCell, { width: '90%', textAlign: 'right' }]}>Section Subtotal</Text>
         <Text style={[pdfStyles.subtotalCellTenant, { width: COL.vendorCost }]}>${formatMoneyPdf(s.vendorTotal)}</Text>
       </View>
     </View>
