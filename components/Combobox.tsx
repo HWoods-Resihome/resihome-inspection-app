@@ -142,8 +142,10 @@ export function Combobox({
   // Size classes. In compact mode (used in the rate card edit row), style the
   // closed state to look like a native <select>: 36px height, single-line label,
   // dark chevron on the right. When opened, the input behaves as a search field.
+  // Compact uses asymmetric padding (pl-2 pr-1) and a tight chevron margin
+  // (ml-0.5) so a 4-character value like "100%" fits inside ~72px.
   const inputBoxClasses = compact
-    ? 'flex items-center w-full border rounded h-9 px-2 text-sm bg-white cursor-pointer transition'
+    ? 'flex items-center w-full border rounded h-9 pl-2 pr-1 text-sm bg-white cursor-pointer transition'
     : 'flex items-center w-full border rounded-lg px-3 py-2.5 text-base bg-white cursor-text transition';
   const inputClasses = compact
     ? 'flex-1 bg-transparent outline-none text-sm text-ink placeholder-gray-400 min-w-0 cursor-pointer'
@@ -187,7 +189,7 @@ export function Combobox({
           onMouseDown={(e) => e.preventDefault()}
           onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); inputRef.current?.focus(); }}
           disabled={disabled}
-          className={`ml-2 flex-shrink-0 ${compact ? 'text-gray-600 hover:text-gray-900' : 'text-gray-400 hover:text-gray-700'}`}
+          className={`flex-shrink-0 ${compact ? 'ml-0.5 text-gray-600 hover:text-gray-900' : 'ml-2 text-gray-400 hover:text-gray-700'}`}
         >
           <svg width={compact ? 16 : 14} height={compact ? 16 : 14} viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
