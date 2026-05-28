@@ -713,7 +713,7 @@ export function QuestionForm({
               {squareFootage != null && squareFootage > 0 && (
                 <span> &middot; {squareFootage.toLocaleString()} sqft</span>
               )}
-              {inspectionRegion && <span> &middot; <span className="font-semibold">{inspectionRegion}</span></span>}
+              {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
             </div>
             {pdfUrl && (
               <a

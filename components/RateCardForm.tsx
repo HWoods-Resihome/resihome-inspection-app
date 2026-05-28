@@ -435,7 +435,10 @@ export function RateCardForm(props: RateCardFormProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ upserts: [], archives: [recordId] }),
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(`HTTP ${r.status}: ${text.slice(0, 400)}`);
+      }
       setRecordIdsByExternalId((cur) => {
         const next = { ...cur };
         delete next[externalId];
@@ -620,11 +623,15 @@ export function RateCardForm(props: RateCardFormProps) {
           return;
         }
         // Archive the photo record
-        await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
+        const ar = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ upserts: [], archives: [existingRecordId] }),
         });
+        if (!ar.ok) {
+          const text = await ar.text();
+          throw new Error(`HTTP ${ar.status}: ${text.slice(0, 400)}`);
+        }
         setSectionPhotoRecordIds((cur) => {
           const next = { ...cur };
           delete next[sectionId];
@@ -651,7 +658,10 @@ export function RateCardForm(props: RateCardFormProps) {
             archives: [],
           }),
         });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error(`HTTP ${r.status}: ${text.slice(0, 400)}`);
+        }
         const data = await r.json();
         const newRecordId = data.results?.[0]?.recordId;
         if (newRecordId) {
@@ -904,8 +914,8 @@ export function RateCardForm(props: RateCardFormProps) {
           {props.squareFootage != null && props.squareFootage > 0 && (
             <span> · {props.squareFootage.toLocaleString()} sqft</span>
           )}
-          {inspectionRegion && <span> · <span className="font-semibold">{inspectionRegion}</span></span>}
-          {!inspectionRegion && <span className="text-yellow-700"> · <span className="font-semibold">fallback (GA: Atlanta)</span></span>}
+          {inspectionRegion && <span> · {inspectionRegion}</span>}
+          {!inspectionRegion && <span className="text-yellow-700"> · fallback (GA: Atlanta)</span>}
           {statusLabel && (
             <>
               {' · '}
