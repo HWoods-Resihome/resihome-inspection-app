@@ -1,18 +1,17 @@
 // Server-side shared PDF helpers for Rate Card report generation.
 // Never imported into browser code.
 //
-// Style guide reference: ResiHome brand
-//   - Primary: hot pink #ff0060
-//   - Accent: teal #73e3df
+// Style notes:
+//   - Brand pink #ff0060 + teal accent #73e3df.
 //   - Typography: Helvetica (bundled with PDF spec). We previously tried to
-//     register Raleway from Google Fonts at runtime, but that failed in
-//     Vercel's serverless lambda with "Unknown font format" — the lambda
-//     can't reliably fetch external font binaries. Using bundled PDF fonts
-//     (Helvetica, Helvetica-Bold) avoids the network round-trip and always
-//     renders. The brand colors do most of the brand work anyway.
+//     register Raleway from Google Fonts at runtime, but the lambda fetch
+//     failed with "Unknown font format". Using bundled fonts is reliable.
+//   - All 3 PDFs (Master, Chargeback, per-Vendor) use a compact header at
+//     the top of page 1 instead of a separate cover sheet.
+//   - Section photos are rendered INLINE with their section (no appendix).
 
 import React from 'react';
-import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import { StyleSheet, Text, View, Image } from '@react-pdf/renderer';
 
 export const PDF_COLORS = {
   brand: '#ff0060',
@@ -27,265 +26,221 @@ export const PDF_COLORS = {
   emerald: '#059669',
 };
 
-// No-op kept for backwards-compat with existing callers. We do NOT register
-// any external fonts because Vercel lambda fetches were failing. If you
-// later want to add a brand font, bundle the .ttf file into the deploy
-// (under public/fonts/) and use a file:// path so there's no network call.
+// No-op for backwards-compat. No external font registration.
 export function ensureFontRegistered() {
   // intentional no-op
 }
 
-// ---- Shared styles --------------------------------------------------------
+// ---- Styles --------------------------------------------------------
 
 export const pdfStyles = StyleSheet.create({
   page: {
     fontFamily: 'Helvetica',
-    fontSize: 9,
-    paddingTop: 40,
-    paddingBottom: 50,
-    paddingLeft: 36,
-    paddingRight: 36,
+    fontSize: 8,
+    paddingTop: 28,
+    paddingBottom: 32,
+    paddingLeft: 24,
+    paddingRight: 24,
     color: PDF_COLORS.ink,
   },
 
-  // ---- Cover page ----
-  cover: {
+  // ---- Compact header strip (replaces full cover page) ----
+  // Bleeds to the edges of the page for visual punch.
+  headerStrip: {
+    marginTop: -28,
+    marginLeft: -24,
+    marginRight: -24,
+    marginBottom: 12,
+    padding: 14,
+    paddingBottom: 12,
     backgroundColor: PDF_COLORS.brand,
     color: PDF_COLORS.white,
-    margin: -40,
-    padding: 48,
-    height: '100%',
-    flexDirection: 'column',
+    flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
   },
-  coverTopBlock: {
+  headerLeft: {
     flexDirection: 'column',
-    gap: 4,
+    flex: 1,
   },
-  coverBadge: {
-    fontFamily: 'Helvetica-Bold',
-    fontSize: 9,
-    letterSpacing: 2,
-    color: PDF_COLORS.accent,
-    marginBottom: 16,
-  },
-  coverDocTitle: {
-    fontFamily: 'Helvetica-Bold',
-    fontSize: 36,
-    color: PDF_COLORS.white,
-    marginBottom: 8,
-    lineHeight: 1.1,
-  },
-  coverSubtitle: {
+  headerTitle: {
     fontFamily: 'Helvetica-Bold',
     fontSize: 14,
     color: PDF_COLORS.white,
-    opacity: 0.92,
-    marginBottom: 36,
+    marginBottom: 3,
   },
-  coverMetaLabel: {
+  headerProperty: {
     fontFamily: 'Helvetica-Bold',
-    fontSize: 8,
-    letterSpacing: 1.4,
-    color: PDF_COLORS.accent,
-    textTransform: 'uppercase',
-    marginTop: 14,
-  },
-  coverMetaValue: {
-    fontFamily: 'Helvetica-Bold',
-    fontSize: 13,
+    fontSize: 10,
     color: PDF_COLORS.white,
-    marginTop: 2,
   },
-  coverFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    borderTopWidth: 1,
-    borderTopColor: PDF_COLORS.accent,
-    paddingTop: 12,
-  },
-  coverFooterLabel: {
-    fontFamily: 'Helvetica-Bold',
-    fontSize: 8,
-    letterSpacing: 1.4,
-    color: PDF_COLORS.accent,
-    textTransform: 'uppercase',
-  },
-  coverFooterValue: {
-    fontFamily: 'Helvetica-Bold',
-    fontSize: 14,
-    color: PDF_COLORS.white,
-    marginTop: 2,
-  },
-  coverTenantTotal: {
-    fontFamily: 'Helvetica-Bold',
-    fontSize: 22,
-    color: PDF_COLORS.white,
-    marginTop: 2,
-  },
-
-  // ---- Page header (non-cover pages) ----
-  pageHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1.5,
-    borderBottomColor: PDF_COLORS.brand,
-    paddingBottom: 6,
-    marginBottom: 14,
-  },
-  pageHeaderTitle: {
-    fontFamily: 'Helvetica-Bold',
-    fontSize: 11,
-    color: PDF_COLORS.brand,
-  },
-  pageHeaderRight: {
+  headerMeta: {
     fontFamily: 'Helvetica',
     fontSize: 8,
-    color: PDF_COLORS.gray,
+    color: PDF_COLORS.white,
+    opacity: 0.9,
+    marginTop: 2,
   },
-
-  // ---- Section block ----
-  sectionTitle: {
+  headerRight: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+  },
+  headerRightLabel: {
+    fontFamily: 'Helvetica',
+    fontSize: 7,
+    color: PDF_COLORS.white,
+    opacity: 0.85,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  headerRightValue: {
     fontFamily: 'Helvetica-Bold',
     fontSize: 12,
-    color: PDF_COLORS.ink,
-    marginTop: 14,
-    marginBottom: 4,
+    color: PDF_COLORS.white,
+    marginTop: 2,
   },
-  sectionSubtotalRow: {
+
+  // ---- Grand totals strip (just below header on page 1) ----
+  grandTotalsStrip: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingTop: 4,
-    paddingBottom: 4,
-    paddingHorizontal: 6,
+    justifyContent: 'space-between',
     backgroundColor: PDF_COLORS.grayBg,
-    marginTop: -1, // touch the table border above
-    fontSize: 8,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: PDF_COLORS.grayLight,
+    padding: 7,
+    marginBottom: 8,
   },
-  sectionSubtotalCell: {
+  grandTotalsItem: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+  },
+  grandTotalsLabel: {
     fontFamily: 'Helvetica',
-    fontSize: 8,
+    fontSize: 7,
     color: PDF_COLORS.gray,
-    textAlign: 'right',
-    paddingHorizontal: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  sectionSubtotalCellPrimary: {
+  grandTotalsValue: {
     fontFamily: 'Helvetica-Bold',
-    fontSize: 8,
+    fontSize: 11,
+    color: PDF_COLORS.ink,
+    marginTop: 1,
+  },
+  grandTotalsValueBrand: {
+    fontFamily: 'Helvetica-Bold',
+    fontSize: 12,
     color: PDF_COLORS.brand,
-    textAlign: 'right',
-    paddingHorizontal: 4,
+    marginTop: 1,
+  },
+
+  // ---- Section ----
+  sectionTitle: {
+    fontFamily: 'Helvetica-Bold',
+    fontSize: 10,
+    color: PDF_COLORS.ink,
+    marginTop: 10,
+    marginBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: PDF_COLORS.brand,
+    paddingBottom: 2,
   },
 
   // ---- Table ----
   tableHeaderRow: {
     flexDirection: 'row',
     backgroundColor: PDF_COLORS.grayBg,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
+    borderTopWidth: 0.5,
+    borderBottomWidth: 0.5,
     borderColor: PDF_COLORS.grayLight,
-    paddingVertical: 4,
+    paddingVertical: 3,
   },
   tableHeaderCell: {
     fontFamily: 'Helvetica-Bold',
-    fontSize: 7,
+    fontSize: 6.5,
     color: PDF_COLORS.gray,
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   tableRow: {
     flexDirection: 'row',
     borderBottomWidth: 0.5,
     borderBottomColor: PDF_COLORS.grayLight,
-    paddingVertical: 5,
+    paddingVertical: 4,
+    minHeight: 0,
   },
   tableCell: {
     fontFamily: 'Helvetica',
-    fontSize: 8,
+    fontSize: 7.5,
     color: PDF_COLORS.ink,
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
+  },
+  tableCellCentered: {
+    fontFamily: 'Helvetica',
+    fontSize: 7.5,
+    color: PDF_COLORS.ink,
+    paddingHorizontal: 3,
+    textAlign: 'center',
   },
   tableCellNumeric: {
     fontFamily: 'Helvetica',
-    fontSize: 8,
+    fontSize: 7.5,
     color: PDF_COLORS.ink,
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
     textAlign: 'right',
   },
   tableCellTenant: {
     fontFamily: 'Helvetica-Bold',
-    fontSize: 8,
+    fontSize: 7.5,
     color: PDF_COLORS.brand,
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
     textAlign: 'right',
   },
   tableCellDescription: {
     fontFamily: 'Helvetica',
-    fontSize: 7.5,
+    fontSize: 6.5,
     color: PDF_COLORS.gray,
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
     marginTop: 1,
   },
 
-  // ---- Grand totals strip ----
-  grandTotalsStrip: {
+  // ---- Subtotal row (bold, slightly different background) ----
+  subtotalRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: PDF_COLORS.brand,
-    color: PDF_COLORS.white,
-    padding: 10,
-    marginTop: 14,
+    backgroundColor: PDF_COLORS.grayBg,
+    borderTopWidth: 1,
+    borderTopColor: PDF_COLORS.gray,
+    paddingVertical: 4,
   },
-  grandTotalsLabel: {
+  subtotalCell: {
     fontFamily: 'Helvetica-Bold',
-    fontSize: 9,
-    color: PDF_COLORS.white,
-    opacity: 0.85,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
+    fontSize: 7.5,
+    color: PDF_COLORS.ink,
+    paddingHorizontal: 3,
+    textAlign: 'right',
   },
-  grandTotalsValue: {
+  subtotalCellTenant: {
     fontFamily: 'Helvetica-Bold',
-    fontSize: 14,
-    color: PDF_COLORS.white,
-    marginTop: 2,
-  },
-  grandTotalsValueLarge: {
-    fontFamily: 'Helvetica-Bold',
-    fontSize: 18,
-    color: PDF_COLORS.white,
-    marginTop: 2,
+    fontSize: 8,
+    color: PDF_COLORS.brand,
+    paddingHorizontal: 3,
+    textAlign: 'right',
   },
 
-  // ---- Appendix / photos ----
-  appendixTitle: {
-    fontFamily: 'Helvetica-Bold',
-    fontSize: 16,
-    color: PDF_COLORS.brand,
-    marginTop: 24,
-    marginBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: PDF_COLORS.brand,
-    paddingBottom: 4,
-  },
-  appendixSectionTitle: {
-    fontFamily: 'Helvetica-Bold',
-    fontSize: 11,
-    color: PDF_COLORS.ink,
-    marginTop: 12,
-    marginBottom: 6,
-  },
+  // ---- Section photos (inline, smaller) ----
+  // Each photo about half the previous size (~65 wide instead of 130 high).
   photoGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: 4,
+    marginTop: 6,
+    marginBottom: 6,
   },
   photoCell: {
-    width: '32%',
-    height: 130,
+    width: 90,
+    height: 65,
     backgroundColor: PDF_COLORS.grayBg,
     borderWidth: 0.5,
     borderColor: PDF_COLORS.grayLight,
@@ -299,9 +254,9 @@ export const pdfStyles = StyleSheet.create({
   // ---- Footer ----
   footer: {
     position: 'absolute',
-    bottom: 20,
-    left: 36,
-    right: 36,
+    bottom: 14,
+    left: 24,
+    right: 24,
     flexDirection: 'row',
     justifyContent: 'space-between',
     fontSize: 7,
@@ -315,8 +270,7 @@ export const pdfStyles = StyleSheet.create({
 // ---- Reusable subcomponents ----
 
 /**
- * Page footer with copyright and page number. Place INSIDE each <Page>.
- * The page-number "x of y" rendering is done by react-pdf via the render prop.
+ * Page footer with attribution and page number. Place INSIDE each <Page>.
  */
 export function PdfFooter(props: { docName: string; propertyName: string }) {
   return (
@@ -328,13 +282,14 @@ export function PdfFooter(props: { docName: string; propertyName: string }) {
 }
 
 /**
- * Cover page used by all 4 doc types. Takes meta + the bottom-summary block
- * (which differs per doc type — e.g. Master shows Tenant Total; Vendor shows
- * the vendor name).
+ * Compact header strip rendered at the top of page 1 of every PDF (replaces
+ * the full cover page).
+ *   - LEFT: doc title (e.g. "Internal Resolution Scope Rate Card"), property
+ *     address, then meta (inspector + bed/bath/sqft + region + generated date)
+ *   - RIGHT: caller-supplied summary block (typically the main money total)
  */
-export function PdfCover(props: {
+export function PdfHeaderStrip(props: {
   docTitle: string;
-  docSubtitle: string;
   propertyName: string;
   inspectorName: string;
   region: string | null;
@@ -342,50 +297,48 @@ export function PdfCover(props: {
   bedrooms: number;
   bathrooms: number;
   generatedAtLabel: string;
-  /** Bottom-right summary content — different per doc type. */
+  /** Right-aligned summary content — typically a Tenant Total or Vendor Total. */
   summary?: React.ReactNode;
 }) {
+  const metaParts: string[] = [];
+  metaParts.push(props.inspectorName);
+  if (props.bedrooms > 0 || props.bathrooms > 0) {
+    metaParts.push(`${props.bedrooms} bed / ${props.bathrooms} bath`);
+  }
+  if (props.squareFootage && props.squareFootage > 0) {
+    metaParts.push(`${props.squareFootage.toLocaleString()} sqft`);
+  }
+  if (props.region) metaParts.push(props.region);
+  metaParts.push(props.generatedAtLabel);
+
   return (
-    <View style={pdfStyles.cover}>
-      <View style={pdfStyles.coverTopBlock}>
-        <Text style={pdfStyles.coverBadge}>RESIHOME · INSPECTION</Text>
-        <Text style={pdfStyles.coverDocTitle}>{props.docTitle}</Text>
-        <Text style={pdfStyles.coverSubtitle}>{props.docSubtitle}</Text>
-
-        <Text style={pdfStyles.coverMetaLabel}>Property</Text>
-        <Text style={pdfStyles.coverMetaValue}>{props.propertyName}</Text>
-
-        <Text style={pdfStyles.coverMetaLabel}>Inspector</Text>
-        <Text style={pdfStyles.coverMetaValue}>{props.inspectorName}</Text>
-
-        {(props.bedrooms > 0 || props.bathrooms > 0 || (props.squareFootage && props.squareFootage > 0)) && (
-          <>
-            <Text style={pdfStyles.coverMetaLabel}>Property Detail</Text>
-            <Text style={pdfStyles.coverMetaValue}>
-              {props.bedrooms} bed / {props.bathrooms} bath
-              {props.squareFootage && props.squareFootage > 0
-                ? ` · ${props.squareFootage.toLocaleString()} sqft` : ''}
-            </Text>
-          </>
-        )}
-
-        {props.region && (
-          <>
-            <Text style={pdfStyles.coverMetaLabel}>Region</Text>
-            <Text style={pdfStyles.coverMetaValue}>{props.region}</Text>
-          </>
-        )}
+    <View style={pdfStyles.headerStrip}>
+      <View style={pdfStyles.headerLeft}>
+        <Text style={pdfStyles.headerTitle}>{props.docTitle}</Text>
+        <Text style={pdfStyles.headerProperty}>{props.propertyName}</Text>
+        <Text style={pdfStyles.headerMeta}>{metaParts.join(' · ')}</Text>
       </View>
+      {props.summary ? <View style={pdfStyles.headerRight}>{props.summary}</View> : null}
+    </View>
+  );
+}
 
-      <View style={pdfStyles.coverFooter}>
-        <View>
-          <Text style={pdfStyles.coverFooterLabel}>Generated</Text>
-          <Text style={pdfStyles.coverFooterValue}>{props.generatedAtLabel}</Text>
+/**
+ * Inline section photos. Render right after the section title and before the
+ * table. No appendix — photos sit with their section. Image is wrapped in a
+ * Link so clicking it in a PDF viewer opens the full-resolution version in
+ * the user's browser.
+ */
+export function PdfSectionPhotos(props: { photoUrls: string[] }) {
+  if (props.photoUrls.length === 0) return null;
+  return (
+    <View style={pdfStyles.photoGrid}>
+      {props.photoUrls.map((url, i) => (
+        <View key={`${url}-${i}`} style={pdfStyles.photoCell}>
+          {/* eslint-disable-next-line jsx-a11y/alt-text */}
+          <Image src={url} style={pdfStyles.photoCellImage} />
         </View>
-        {props.summary ? (
-          <View>{props.summary}</View>
-        ) : null}
-      </View>
+      ))}
     </View>
   );
 }
@@ -397,7 +350,6 @@ export function formatMoneyPdf(n: number): string {
 }
 
 export function formatQtyPdf(n: number): string {
-  // Show integer if it's whole, else up to 2 decimals
   if (Number.isInteger(n)) return n.toString();
   return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
@@ -406,15 +358,13 @@ export function isoToHumanDate(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleString('en-US', {
-    year: 'numeric', month: 'long', day: 'numeric',
-    hour: 'numeric', minute: '2-digit', hour12: true,
+    year: 'numeric', month: 'short', day: 'numeric',
   });
 }
 
-// ---- Shared data types for PDF input ----
+// ---- Shared data types ----
 
 export interface PdfLineRow {
-  /** External answer id — used to keep React keys stable. */
   externalId: string;
   section: string;
   category: string;
@@ -422,9 +372,8 @@ export interface PdfLineRow {
   lineItemCode: string;
   laborShortDescription: string;
   laborFullDescription: string;
-  /** True when the inspector overrode the catalog description for this line. */
   hasCustomDescription: boolean;
-  laborMeas: string; // unit, e.g. "EA", "SF"
+  laborMeas: string;
   quantity: number;
   vendor: string;
   vendorCost: number;
@@ -434,9 +383,7 @@ export interface PdfLineRow {
 }
 
 export interface PdfSectionGroup {
-  /** Section label, e.g. "Yard / Exterior" */
   label: string;
-  /** Concatenated with location for repeating rooms, e.g. "Bedroom 1" */
   displayName: string;
   lines: PdfLineRow[];
   photoUrls: string[];
@@ -447,6 +394,8 @@ export interface PdfSectionGroup {
 
 export interface PdfBuildContext {
   inspectionRecordId: string;
+  /** Clean template name with prefixes stripped, e.g. "Scope Rate Card". */
+  templateLabel: string;
   propertyName: string;
   inspectorName: string;
   bedrooms: number;

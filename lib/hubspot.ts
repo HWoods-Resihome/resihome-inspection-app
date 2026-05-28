@@ -378,6 +378,10 @@ export async function fetchInspections(): Promise<InspectionSummary[]> {
         pdfUrl: p.pdf_attachment_url || null,
         regionSnapshot: p.region_snapshot || null,
         sectionListJson: p.section_list_json || null,
+        pdfMasterUrl: null,
+        pdfChargebackUrl: null,
+        pdfVendorUrlsJson: null,
+        pdfGeneratedAt: null,
       });
     }
     after = resp.paging?.next?.after;
@@ -676,6 +680,10 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
       pdfUrl: p.pdf_attachment_url || null,
       regionSnapshot: p.region_snapshot || null,
       sectionListJson: p.section_list_json || null,
+      pdfMasterUrl: null,
+      pdfChargebackUrl: null,
+      pdfVendorUrlsJson: null,
+      pdfGeneratedAt: null,
     };
   } catch (e: any) {
     if (String(e).includes('404')) return null;
@@ -701,6 +709,8 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     'started_at', 'completed_at', 'scheduled_date',
     'total_questions_answered', 'pdf_attachment_url', 'hs_createdate',
     'region_snapshot', 'section_list_json',
+    // Phase 4 PDF outputs (Rate Card finalize)
+    'pdf_master_url', 'pdf_chargeback_url', 'pdf_vendor_urls_json', 'pdf_generated_at',
   ];
   try {
     const qs = properties.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
@@ -756,6 +766,10 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         pdfUrl: p.pdf_attachment_url || null,
         regionSnapshot: p.region_snapshot || null,
         sectionListJson: p.section_list_json || null,
+        pdfMasterUrl: p.pdf_master_url || null,
+        pdfChargebackUrl: p.pdf_chargeback_url || null,
+        pdfVendorUrlsJson: p.pdf_vendor_urls_json || null,
+        pdfGeneratedAt: p.pdf_generated_at || null,
       },
       propertyIdRef,
       propertySquareFootage,

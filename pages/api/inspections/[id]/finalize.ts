@@ -13,7 +13,6 @@
 // step right before the response is sent.
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import JSZip from 'jszip';
 import { getSessionFromRequest } from '@/lib/auth';
 import {
   fetchInspectionWithPropertyRef,
@@ -180,8 +179,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
+    // Strip "(PM) "/"(QC) " prefixes from the template label to get a clean
+    // template name for cover headers and filenames. Map from internal
+    // template type to a display name (same map as TEMPLATE_LABELS in the UI).
+    const TEMPLATE_DISPLAY: Record<string, string> = {
+      pm_scope_inspection: 'Scope',
+      pm_scope_rate_card: 'Scope Rate Card',
+      pm_turn_inspection: 'Turn',
+      pm_community_inspection: 'Community',
+      pm_property_visit_inspection: 'Property Visit',
+      qc_completed_unit_inspection: 'QC Completed Unit',
+      preleasing_property_inspection: 'Pre-leasing Property',
+      leasing_agent_1099_property_inspection: '1099 Leasing Agent Property',
+    };
+    const templateLabel = TEMPLATE_DISPLAY[inspection.templateType] || 'Rate Card';
+
     const ctx: PdfBuildContext = {
       inspectionRecordId: id,
+      templateLabel,
       propertyName: inspection.propertyAddressSnapshot || `Property ${inspectionData.propertyIdRef}`,
       inspectorName: inspection.inspectorName || '(Unknown inspector)',
       bedrooms: inspection.bedroomsAtInspection || 0,
@@ -201,68 +216,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const chargebackBuf = await renderChargebackPdf(ctx);
     const vendorBufs = await renderVendorPdfs(ctx);
 
-    // Pretty file naming
+    // Pretty file naming. Uses the outer templateLabel computed before ctx.
     const safeAddress = (ctx.propertyName || 'property')
       .replace(/[^a-zA-Z0-9_\-\s]/g, '')
-      .replace(/\s+/g, '_')
-      .slice(0, 60);
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80);
     const datePart = new Date(ctx.generatedAtIso).toISOString().slice(0, 10);
-    const masterFilename = `${safeAddress}_Master_${datePart}.pdf`;
-    const chargebackFilename = `${safeAddress}_TenantChargeback_${datePart}.pdf`;
-    const zipFilename = `${safeAddress}_Inspection_${datePart}.zip`;
+    // Master + Chargeback follow the same naming convention as vendor PDFs:
+    //   "{Template Label} - {Address} - {Variant} - {Date}.pdf"
+    const masterFilename = `${templateLabel} - ${safeAddress} - Master - ${datePart}.pdf`;
+    const chargebackFilename = `${templateLabel} - ${safeAddress} - Tenant Chargeback - ${datePart}.pdf`;
     function vendorFilename(vendor: string) {
-      const v = vendor.replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, '_').slice(0, 40);
-      return `${safeAddress}_Vendor_${v}_${datePart}.pdf`;
+      const v = vendor.replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60);
+      return `${templateLabel} - ${safeAddress} - ${v} - ${datePart}.pdf`;
     }
 
-    // ---- 5. Build ZIP bundle ----
-    const zip = new JSZip();
-    zip.file(masterFilename, masterBuf);
-    if (chargebackBuf) zip.file(chargebackFilename, chargebackBuf);
-    for (const [vendor, buf] of vendorBufs.entries()) {
-      zip.file(vendorFilename(vendor), buf);
-    }
-    const manifestLines = [
-      `ResiHome Inspection — ${ctx.propertyName}`,
-      `Inspector: ${ctx.inspectorName}`,
-      `Generated: ${ctx.generatedAtIso}`,
-      `Lines: ${ctx.grandTotals.lineCount}`,
-      `Vendor Total: $${ctx.grandTotals.vendor.toFixed(2)}`,
-      `Client Total: $${ctx.grandTotals.client.toFixed(2)}`,
-      `Tenant Total: $${ctx.grandTotals.tenant.toFixed(2)}`,
-      '',
-      'Files included:',
-      `  ${masterFilename} (Master report)`,
-      ...(chargebackBuf ? [`  ${chargebackFilename} (Tenant Chargeback)`] : []),
-      ...Array.from(vendorBufs.keys()).map((v) => `  ${vendorFilename(v)} (Work order for ${v})`),
-    ];
-    zip.file('manifest.txt', manifestLines.join('\n'));
-    const zipBuf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
-
-    // ---- 6. Upload all files to HubSpot Files ----
+    // ---- 5. Upload PDFs to HubSpot Files ----
     // Sequential to stay polite with HubSpot's rate limit.
-    const uploads: { name: string; url: string }[] = [];
-
     const masterUrl = await uploadFile(masterBuf, masterFilename, 'application/pdf', '/inspection_pdfs');
-    uploads.push({ name: masterFilename, url: masterUrl });
 
     let chargebackUrl: string | null = null;
     if (chargebackBuf) {
       chargebackUrl = await uploadFile(chargebackBuf, chargebackFilename, 'application/pdf', '/inspection_pdfs');
-      uploads.push({ name: chargebackFilename, url: chargebackUrl });
     }
 
     const vendorUrls: Record<string, string> = {};
     for (const [vendor, buf] of vendorBufs.entries()) {
       const url = await uploadFile(buf, vendorFilename(vendor), 'application/pdf', '/inspection_pdfs');
       vendorUrls[vendor] = url;
-      uploads.push({ name: vendorFilename(vendor), url });
     }
 
-    const zipUrl = await uploadFile(zipBuf, zipFilename, 'application/zip', '/inspection_pdfs');
-    uploads.push({ name: zipFilename, url: zipUrl });
-
-    // ---- 7. Write URLs + completed status back to HubSpot ----
+    // ---- 6. Write URLs + completed status back to HubSpot ----
     // Be defensive: if pdf_* properties don't exist yet (migration not run),
     // we'd 500 here. Catch + try with just status update so the user isn't
     // completely blocked.
@@ -273,7 +258,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       pdf_master_url: masterUrl,
       pdf_chargeback_url: chargebackUrl || '',
       pdf_vendor_urls_json: JSON.stringify(vendorUrls),
-      pdf_zip_url: zipUrl,
       pdf_generated_at: nowIso,
     };
     try {
@@ -303,7 +287,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           name: vendorFilename(vendor),
           url,
         })),
-        zip: { name: zipFilename, url: zipUrl },
       },
       totals: {
         vendor: ctx.grandTotals.vendor,

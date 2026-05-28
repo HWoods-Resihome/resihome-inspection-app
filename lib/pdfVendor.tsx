@@ -1,14 +1,15 @@
-// Per-Vendor PDFs — one PDF per vendor that has assigned line items.
-// Vendor-focused columns: Cat | Sub | Description | Qty | Unit | Vendor $
-// Plus a section subtotal of Vendor $ only.
+// Per-Vendor PDFs — one document per vendor with assigned line items.
+// Cover header reads "{Vendor} {Template Label}" (e.g. "Internal Resolution
+// Scope Rate Card"). Filename mirrors that, set by the finalize endpoint.
 
 import React from 'react';
 import { Document, Page, Text, View, renderToBuffer } from '@react-pdf/renderer';
 import {
   pdfStyles,
   ensureFontRegistered,
-  PdfCover,
+  PdfHeaderStrip,
   PdfFooter,
+  PdfSectionPhotos,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
@@ -16,31 +17,38 @@ import {
   type PdfSectionGroup,
 } from './pdfShared';
 
-// Vendor table: Cat 13 | Sub 13 | Description 49 | Qty 6 | Unit 6 | Ven$ 13
+// Vendor column layout (Vendor-focused, no Client/Tenant):
+//   Cat 12 | Sub 12 | Description 55 | Qty 6 | Unit 5 | Ven$ 10
 const COL = {
-  category: '13%',
-  subcategory: '13%',
-  description: '49%',
+  category: '12%',
+  subcategory: '12%',
+  description: '55%',
   qty: '6%',
-  unit: '6%',
-  vendorCost: '13%',
+  unit: '5%',
+  vendorCost: '10%',
 };
 
-function VendorDoc(props: { ctx: PdfBuildContext; vendor: string; vendorSections: PdfSectionGroup[]; vendorTotal: number; lineCount: number }) {
+function VendorDoc(props: {
+  ctx: PdfBuildContext;
+  vendor: string;
+  vendorSections: PdfSectionGroup[];
+  vendorTotal: number;
+  lineCount: number;
+}) {
   ensureFontRegistered();
   const { ctx, vendor, vendorSections, vendorTotal, lineCount } = props;
   const generatedAtLabel = isoToHumanDate(ctx.generatedAtIso);
+  const docTitle = `${vendor} ${ctx.templateLabel}`;
 
   return (
     <Document
-      title={`Vendor Work Order — ${vendor} — ${ctx.propertyName}`}
+      title={`${docTitle} — ${ctx.propertyName}`}
       author="ResiHome"
-      subject={`Work Order for ${vendor}`}
+      subject={docTitle}
     >
-      <Page size="LETTER" style={pdfStyles.page}>
-        <PdfCover
-          docTitle="Vendor Work Order"
-          docSubtitle={`For ${vendor}`}
+      <Page size="LETTER" style={pdfStyles.page} wrap>
+        <PdfHeaderStrip
+          docTitle={docTitle}
           propertyName={ctx.propertyName}
           inspectorName={ctx.inspectorName}
           region={ctx.region}
@@ -49,98 +57,82 @@ function VendorDoc(props: { ctx: PdfBuildContext; vendor: string; vendorSections
           bathrooms={ctx.bathrooms}
           generatedAtLabel={generatedAtLabel}
           summary={
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={pdfStyles.coverFooterLabel}>Vendor Total</Text>
-              <Text style={pdfStyles.coverTenantTotal}>${formatMoneyPdf(vendorTotal)}</Text>
-              <Text style={[pdfStyles.coverFooterLabel, { marginTop: 6 }]}>
-                {lineCount} {lineCount === 1 ? 'line item' : 'line items'}
-              </Text>
-            </View>
+            <>
+              <Text style={pdfStyles.headerRightLabel}>Vendor Total</Text>
+              <Text style={pdfStyles.headerRightValue}>${formatMoneyPdf(vendorTotal)}</Text>
+            </>
           }
         />
-      </Page>
 
-      <Page size="LETTER" style={pdfStyles.page}>
-        <View style={pdfStyles.pageHeader} fixed>
-          <Text style={pdfStyles.pageHeaderTitle}>{vendor} — Work Order</Text>
-          <Text style={pdfStyles.pageHeaderRight}>{ctx.propertyName}</Text>
-        </View>
-
-        {/* Vendor total strip */}
         <View style={pdfStyles.grandTotalsStrip}>
-          <View>
-            <Text style={pdfStyles.grandTotalsLabel}>Items</Text>
+          <View style={pdfStyles.grandTotalsItem}>
+            <Text style={pdfStyles.grandTotalsLabel}>Lines</Text>
             <Text style={pdfStyles.grandTotalsValue}>{lineCount}</Text>
           </View>
-          <View>
+          <View style={pdfStyles.grandTotalsItem}>
             <Text style={pdfStyles.grandTotalsLabel}>Vendor Total</Text>
-            <Text style={pdfStyles.grandTotalsValueLarge}>${formatMoneyPdf(vendorTotal)}</Text>
+            <Text style={pdfStyles.grandTotalsValueBrand}>${formatMoneyPdf(vendorTotal)}</Text>
           </View>
         </View>
 
         {vendorSections.map((section) => (
-          <VendorSectionTable key={section.label} section={section} />
+          <VendorSection key={section.label} section={section} />
         ))}
 
-        <PdfFooter docName={`Work Order — ${vendor}`} propertyName={ctx.propertyName} />
+        <PdfFooter docName={vendor} propertyName={ctx.propertyName} />
       </Page>
     </Document>
   );
 }
 
-function VendorSectionTable(props: { section: PdfSectionGroup }) {
+function VendorSection(props: { section: PdfSectionGroup }) {
   const s = props.section;
   return (
-    <View wrap={false} style={{ marginTop: 12 }}>
+    <View style={{ marginTop: 8 }}>
       <Text style={pdfStyles.sectionTitle}>{s.displayName}</Text>
 
+      <PdfSectionPhotos photoUrls={s.photoUrls} />
+
       <View style={pdfStyles.tableHeaderRow}>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.category }]}>Category</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.subcategory }]}>Sub</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.category, textAlign: 'center' }]}>Category</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.subcategory, textAlign: 'center' }]}>Subcategory</Text>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.description }]}>Description</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.qty, textAlign: 'right' }]}>Qty</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.unit }]}>Unit</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.vendorCost, textAlign: 'right' }]}>Ven $</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.qty, textAlign: 'center' }]}>Qty</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.unit, textAlign: 'center' }]}>Unit</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.vendorCost, textAlign: 'right' }]}>Vendor $</Text>
       </View>
 
       {s.lines.map((line) => (
         <View key={line.externalId} style={pdfStyles.tableRow} wrap={false}>
-          <Text style={[pdfStyles.tableCell, { width: COL.category }]}>{line.category}</Text>
-          <Text style={[pdfStyles.tableCell, { width: COL.subcategory }]}>{line.subcategory}</Text>
+          <Text style={[pdfStyles.tableCellCentered, { width: COL.category }]}>{line.category}</Text>
+          <Text style={[pdfStyles.tableCellCentered, { width: COL.subcategory }]}>{line.subcategory}</Text>
           <View style={{ width: COL.description }}>
             <Text style={pdfStyles.tableCell}>{line.laborShortDescription}</Text>
             {line.laborFullDescription && line.laborFullDescription !== line.laborShortDescription && (
               <Text style={pdfStyles.tableCellDescription}>{line.laborFullDescription}</Text>
             )}
           </View>
-          <Text style={[pdfStyles.tableCellNumeric, { width: COL.qty }]}>{formatQtyPdf(line.quantity)}</Text>
-          <Text style={[pdfStyles.tableCell, { width: COL.unit }]}>{line.laborMeas}</Text>
+          <Text style={[pdfStyles.tableCellCentered, { width: COL.qty }]}>{formatQtyPdf(line.quantity)}</Text>
+          <Text style={[pdfStyles.tableCellCentered, { width: COL.unit }]}>{line.laborMeas}</Text>
           <Text style={[pdfStyles.tableCellNumeric, { width: COL.vendorCost }]}>${formatMoneyPdf(line.vendorCost)}</Text>
         </View>
       ))}
 
-      {s.lines.length > 1 && (
-        <View style={pdfStyles.sectionSubtotalRow} wrap={false}>
-          <Text style={[pdfStyles.sectionSubtotalCell, { width: '87%', textAlign: 'right' }]}>Section Subtotal</Text>
-          <Text style={[pdfStyles.sectionSubtotalCellPrimary, { width: COL.vendorCost }]}>${formatMoneyPdf(s.vendorTotal)}</Text>
-        </View>
-      )}
+      <View style={pdfStyles.subtotalRow} wrap={false}>
+        <Text style={[pdfStyles.subtotalCell, { width: '90%' }]}>Section Subtotal</Text>
+        <Text style={[pdfStyles.subtotalCellTenant, { width: COL.vendorCost }]}>${formatMoneyPdf(s.vendorTotal)}</Text>
+      </View>
     </View>
   );
 }
 
-/**
- * Render one PDF per vendor that has assigned line items. Returns a map of
- * vendor name -> rendered Buffer.
- */
 export async function renderVendorPdfs(ctx: PdfBuildContext): Promise<Map<string, Buffer>> {
-  // Group lines by vendor
+  // Group lines by vendor across sections
   const byVendor = new Map<string, PdfSectionGroup[]>();
   const lineCountByVendor = new Map<string, number>();
   const vendorTotals = new Map<string, number>();
 
   for (const section of ctx.sections) {
-    // Group THIS section's lines by vendor
     const sectionLinesByVendor = new Map<string, typeof section.lines>();
     for (const line of section.lines) {
       const v = line.vendor || 'Unassigned';
@@ -158,7 +150,9 @@ export async function renderVendorPdfs(ctx: PdfBuildContext): Promise<Map<string
         label: section.label,
         displayName: section.displayName,
         lines,
-        photoUrls: [],          // not included in vendor PDFs
+        // Vendor PDFs include section photos too (per latest feedback —
+        // photos inline by section makes the report self-contained).
+        photoUrls: section.photoUrls,
         vendorTotal,
         clientTotal,
         tenantTotal,
@@ -171,7 +165,6 @@ export async function renderVendorPdfs(ctx: PdfBuildContext): Promise<Map<string
     }
   }
 
-  // Render one PDF per vendor
   const result = new Map<string, Buffer>();
   for (const [vendor, sections] of byVendor.entries()) {
     if (sections.length === 0) continue;

@@ -79,6 +79,13 @@ export interface InspectionSummary {
   // use auto-derived defaults from bedroomsAtInspection + bathroomsAtInspection.
   // See lib/sections.ts for the descriptor shape and merge logic.
   sectionListJson: string | null;
+  // Rate Card finalize outputs. Populated by /api/inspections/[id]/finalize
+  // when the inspection is completed; null/empty before that. The vendor URLs
+  // are a JSON object {vendorName: url}.
+  pdfMasterUrl: string | null;
+  pdfChargebackUrl: string | null;
+  pdfVendorUrlsJson: string | null;
+  pdfGeneratedAt: string | null;
 }
 
 export interface HubSpotUser {

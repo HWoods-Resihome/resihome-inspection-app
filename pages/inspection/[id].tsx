@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import type {
@@ -263,15 +263,20 @@ export default function ExistingInspection() {
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
       </Head>
       {readOnly && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center">
-          <span className="text-sm text-amber-900 font-heading font-semibold">
-            {isCompleted ? 'This Inspection is Completed.' : 'This Inspection is Cancelled.'}
-          </span>
-          {isCompleted && (
-            <button onClick={handleReopen} className="ml-3 text-sm text-brand underline font-semibold">
-              Reopen for editing
-            </button>
-          )}
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2">
+          <div className="flex items-center justify-center gap-3 flex-wrap">
+            <span className="text-sm text-amber-900 font-heading font-semibold">
+              {isCompleted ? 'This Inspection is Completed.' : 'This Inspection is Cancelled.'}
+            </span>
+            {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
+              <CompletedPdfMenu inspection={inspection} />
+            )}
+            {isCompleted && (
+              <button onClick={handleReopen} className="text-sm text-brand underline font-semibold">
+                Reopen for editing
+              </button>
+            )}
+          </div>
         </div>
       )}
       {inspection.templateType === 'pm_scope_rate_card' ? (
@@ -326,5 +331,77 @@ function Layout({ children }: { children: React.ReactNode }) {
         {children}
       </div>
     </main>
+  );
+}
+
+/**
+ * Drop-down menu listing all PDFs generated for a completed Rate Card
+ * inspection. Renders nothing if no PDFs are stored on the inspection record
+ * (e.g., inspection was completed before Phase 4 shipped or finalize failed
+ * to write the URLs back). Vendor PDFs come out of pdf_vendor_urls_json
+ * which is `{ vendorName: url, ... }`.
+ */
+function CompletedPdfMenu({ inspection }: { inspection: InspectionSummary }) {
+  const [open, setOpen] = useState(false);
+  // Parse vendor URLs JSON (forgiving — if it's blank or malformed, treat as none)
+  const vendorUrls = useMemo<Record<string, string>>(() => {
+    if (!inspection.pdfVendorUrlsJson) return {};
+    try {
+      const parsed = JSON.parse(inspection.pdfVendorUrlsJson);
+      return parsed && typeof parsed === 'object' ? parsed as Record<string, string> : {};
+    } catch {
+      return {};
+    }
+  }, [inspection.pdfVendorUrlsJson]);
+
+  const links: Array<{ label: string; url: string; primary?: boolean }> = [];
+  if (inspection.pdfMasterUrl) {
+    links.push({ label: 'Master Report', url: inspection.pdfMasterUrl, primary: true });
+  }
+  if (inspection.pdfChargebackUrl) {
+    links.push({ label: 'Tenant Chargeback', url: inspection.pdfChargebackUrl });
+  }
+  for (const [vendor, url] of Object.entries(vendorUrls)) {
+    if (url) links.push({ label: `Vendor — ${vendor}`, url });
+  }
+
+  // No PDFs at all? Don't render the menu (avoids confusion). The Reopen
+  // button still shows so the user can regenerate by re-running finalize.
+  if (links.length === 0) return null;
+
+  return (
+    <div className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-sm bg-brand text-white px-3 py-1.5 rounded font-semibold hover:bg-brand-dark"
+      >
+        Download PDFs ▾
+      </button>
+      {open && (
+        <>
+          {/* Click-away mask — closing the menu when the user clicks anywhere else */}
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-1 z-40 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[260px] py-1">
+            {links.map((l) => (
+              <a
+                key={l.url}
+                href={l.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setOpen(false)}
+                className={
+                  'flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50 ' +
+                  (l.primary ? 'text-brand font-semibold' : 'text-gray-700')
+                }
+              >
+                <span className="truncate pr-2">{l.label}</span>
+                <span className="text-xs opacity-70 whitespace-nowrap">↓</span>
+              </a>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }

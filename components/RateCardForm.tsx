@@ -139,7 +139,6 @@ export function RateCardForm(props: RateCardFormProps) {
       master: { name: string; url: string };
       chargeback: { name: string; url: string } | null;
       vendors: Array<{ vendor: string; name: string; url: string }>;
-      zip: { name: string; url: string };
     };
     totals: { vendor: number; client: number; tenant: number; lineCount: number };
   };
@@ -840,7 +839,6 @@ export function RateCardForm(props: RateCardFormProps) {
         'Finalize this inspection?\n\n' +
         'This will:\n' +
         '  • Generate the Master, Tenant Chargeback, and Per-Vendor PDFs\n' +
-        '  • Bundle them into a single ZIP\n' +
         '  • Attach all files to this inspection in HubSpot\n' +
         '  • Mark the inspection as Completed\n\n' +
         'You\'ll be able to download the PDFs immediately after finalize completes. ' +
@@ -1360,13 +1358,11 @@ export function RateCardForm(props: RateCardFormProps) {
               {finalizeResult.pdfs.vendors.map((v) => (
                 <DownloadLink
                   key={v.vendor}
-                  label={`Work Order — ${v.vendor}`}
+                  label={`Vendor — ${v.vendor}`}
                   filename={v.name}
                   url={v.url}
                 />
               ))}
-              <div className="pt-2 border-t border-gray-100" />
-              <DownloadLink label="ZIP — All PDFs" filename={finalizeResult.pdfs.zip.name} url={finalizeResult.pdfs.zip.url} accent />
             </div>
             <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-2">
               <button

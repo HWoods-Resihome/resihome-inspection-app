@@ -1,13 +1,14 @@
-// Tenant Chargeback PDF — only contains line items where tenant_bill_back_percent > 0.
-// Sent to the tenant explaining what charges will be billed back to them.
+// Tenant Chargeback PDF — only contains line items where
+// tenant_bill_back_percent > 0. Sent to (or shown to) the tenant.
 
 import React from 'react';
 import { Document, Page, Text, View, renderToBuffer } from '@react-pdf/renderer';
 import {
   pdfStyles,
   ensureFontRegistered,
-  PdfCover,
+  PdfHeaderStrip,
   PdfFooter,
+  PdfSectionPhotos,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
@@ -15,16 +16,16 @@ import {
   type PdfSectionGroup,
 } from './pdfShared';
 
-// Chargeback table is more focused than Master — no Vendor or Vendor $ columns.
-// Cat 12 | Sub 12 | Description 35 | Qty 6 | Unit 6 | Cli$ 10 | Ten% 7 | Ten$ 12
+// Chargeback column layout (no Vendor/Vendor$):
+//   Cat 11 | Sub 11 | Description 39 | Qty 6 | Unit 6 | Cli$ 9 | Ten% 6 | Ten$ 12
 const COL = {
-  category: '12%',
-  subcategory: '12%',
-  description: '35%',
+  category: '11%',
+  subcategory: '11%',
+  description: '39%',
   qty: '6%',
   unit: '6%',
-  clientCost: '10%',
-  tenantPct: '7%',
+  clientCost: '9%',
+  tenantPct: '6%',
   tenantCost: '12%',
 };
 
@@ -33,11 +34,10 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
   const { ctx } = props;
   const generatedAtLabel = isoToHumanDate(ctx.generatedAtIso);
 
-  // Filter sections + lines for tenant_bill_back > 0
+  // Filter to chargeback lines and recompute totals on the filtered set
   const filteredSections: PdfSectionGroup[] = ctx.sections
     .map((s) => {
       const lines = s.lines.filter((l) => l.tenantBillBackPercent > 0 && l.tenantCost > 0);
-      // Recompute totals on the filtered set
       const tenantTotal = lines.reduce((sum, l) => sum + l.tenantCost, 0);
       const clientTotal = lines.reduce((sum, l) => sum + l.clientCost, 0);
       const vendorTotal = lines.reduce((sum, l) => sum + l.vendorCost, 0);
@@ -46,6 +46,7 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
     .filter((s) => s.lines.length > 0);
 
   const grandTenantTotal = filteredSections.reduce((sum, s) => sum + s.tenantTotal, 0);
+  const grandClientTotal = filteredSections.reduce((sum, s) => sum + s.clientTotal, 0);
   const grandLineCount = filteredSections.reduce((sum, s) => sum + s.lines.length, 0);
 
   return (
@@ -54,11 +55,9 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
       author="ResiHome"
       subject="Tenant Chargeback"
     >
-      {/* Cover */}
-      <Page size="LETTER" style={pdfStyles.page}>
-        <PdfCover
-          docTitle="Tenant Chargeback"
-          docSubtitle="Items billed back to the tenant"
+      <Page size="LETTER" style={pdfStyles.page} wrap>
+        <PdfHeaderStrip
+          docTitle={`Tenant Chargeback — ${ctx.templateLabel}`}
           propertyName={ctx.propertyName}
           inspectorName={ctx.inspectorName}
           region={ctx.region}
@@ -67,38 +66,30 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
           bathrooms={ctx.bathrooms}
           generatedAtLabel={generatedAtLabel}
           summary={
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={pdfStyles.coverFooterLabel}>Total to Tenant</Text>
-              <Text style={pdfStyles.coverTenantTotal}>${formatMoneyPdf(grandTenantTotal)}</Text>
-              <Text style={[pdfStyles.coverFooterLabel, { marginTop: 6 }]}>
-                {grandLineCount} {grandLineCount === 1 ? 'line item' : 'line items'}
-              </Text>
-            </View>
+            <>
+              <Text style={pdfStyles.headerRightLabel}>Total to Tenant</Text>
+              <Text style={pdfStyles.headerRightValue}>${formatMoneyPdf(grandTenantTotal)}</Text>
+            </>
           }
         />
-      </Page>
 
-      {/* Line items */}
-      <Page size="LETTER" style={pdfStyles.page}>
-        <View style={pdfStyles.pageHeader} fixed>
-          <Text style={pdfStyles.pageHeaderTitle}>Tenant Chargeback — Line Items</Text>
-          <Text style={pdfStyles.pageHeaderRight}>{ctx.propertyName}</Text>
-        </View>
-
-        {/* Tenant Total strip — single value, prominent */}
         <View style={pdfStyles.grandTotalsStrip}>
-          <View>
-            <Text style={pdfStyles.grandTotalsLabel}>Items</Text>
+          <View style={pdfStyles.grandTotalsItem}>
+            <Text style={pdfStyles.grandTotalsLabel}>Lines</Text>
             <Text style={pdfStyles.grandTotalsValue}>{grandLineCount}</Text>
           </View>
-          <View>
+          <View style={pdfStyles.grandTotalsItem}>
+            <Text style={pdfStyles.grandTotalsLabel}>Client Total</Text>
+            <Text style={pdfStyles.grandTotalsValue}>${formatMoneyPdf(grandClientTotal)}</Text>
+          </View>
+          <View style={pdfStyles.grandTotalsItem}>
             <Text style={pdfStyles.grandTotalsLabel}>Tenant Total</Text>
-            <Text style={pdfStyles.grandTotalsValueLarge}>${formatMoneyPdf(grandTenantTotal)}</Text>
+            <Text style={pdfStyles.grandTotalsValueBrand}>${formatMoneyPdf(grandTenantTotal)}</Text>
           </View>
         </View>
 
         {filteredSections.map((section) => (
-          <ChargebackSectionTable key={section.label} section={section} />
+          <ChargebackSection key={section.label} section={section} />
         ))}
 
         <PdfFooter docName="Tenant Chargeback" propertyName={ctx.propertyName} />
@@ -107,57 +98,53 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
   );
 }
 
-function ChargebackSectionTable(props: { section: PdfSectionGroup }) {
+function ChargebackSection(props: { section: PdfSectionGroup }) {
   const s = props.section;
   return (
-    <View wrap={false} style={{ marginTop: 12 }}>
+    <View style={{ marginTop: 8 }}>
       <Text style={pdfStyles.sectionTitle}>{s.displayName}</Text>
 
+      <PdfSectionPhotos photoUrls={s.photoUrls} />
+
       <View style={pdfStyles.tableHeaderRow}>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.category }]}>Category</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.subcategory }]}>Sub</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.category, textAlign: 'center' }]}>Category</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.subcategory, textAlign: 'center' }]}>Subcategory</Text>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.description }]}>Description</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.qty, textAlign: 'right' }]}>Qty</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.unit }]}>Unit</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.clientCost, textAlign: 'right' }]}>Cli $</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.tenantPct, textAlign: 'right' }]}>Ten %</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.tenantCost, textAlign: 'right' }]}>Ten $</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.qty, textAlign: 'center' }]}>Qty</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.unit, textAlign: 'center' }]}>Unit</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.clientCost, textAlign: 'right' }]}>Client $</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.tenantPct, textAlign: 'right' }]}>Tenant %</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.tenantCost, textAlign: 'right' }]}>Tenant $</Text>
       </View>
 
       {s.lines.map((line) => (
         <View key={line.externalId} style={pdfStyles.tableRow} wrap={false}>
-          <Text style={[pdfStyles.tableCell, { width: COL.category }]}>{line.category}</Text>
-          <Text style={[pdfStyles.tableCell, { width: COL.subcategory }]}>{line.subcategory}</Text>
+          <Text style={[pdfStyles.tableCellCentered, { width: COL.category }]}>{line.category}</Text>
+          <Text style={[pdfStyles.tableCellCentered, { width: COL.subcategory }]}>{line.subcategory}</Text>
           <View style={{ width: COL.description }}>
             <Text style={pdfStyles.tableCell}>{line.laborShortDescription}</Text>
             {line.laborFullDescription && line.laborFullDescription !== line.laborShortDescription && (
               <Text style={pdfStyles.tableCellDescription}>{line.laborFullDescription}</Text>
             )}
           </View>
-          <Text style={[pdfStyles.tableCellNumeric, { width: COL.qty }]}>{formatQtyPdf(line.quantity)}</Text>
-          <Text style={[pdfStyles.tableCell, { width: COL.unit }]}>{line.laborMeas}</Text>
+          <Text style={[pdfStyles.tableCellCentered, { width: COL.qty }]}>{formatQtyPdf(line.quantity)}</Text>
+          <Text style={[pdfStyles.tableCellCentered, { width: COL.unit }]}>{line.laborMeas}</Text>
           <Text style={[pdfStyles.tableCellNumeric, { width: COL.clientCost }]}>${formatMoneyPdf(line.clientCost)}</Text>
           <Text style={[pdfStyles.tableCellNumeric, { width: COL.tenantPct }]}>{Math.round(line.tenantBillBackPercent)}%</Text>
           <Text style={[pdfStyles.tableCellTenant, { width: COL.tenantCost }]}>${formatMoneyPdf(line.tenantCost)}</Text>
         </View>
       ))}
 
-      {s.lines.length > 1 && (
-        <View style={pdfStyles.sectionSubtotalRow} wrap={false}>
-          <Text style={[pdfStyles.sectionSubtotalCell, { width: '71%', textAlign: 'right' }]}>Section Subtotal</Text>
-          <Text style={[pdfStyles.sectionSubtotalCell, { width: COL.clientCost }]}>${formatMoneyPdf(s.clientTotal)}</Text>
-          <Text style={[pdfStyles.sectionSubtotalCell, { width: COL.tenantPct }]}> </Text>
-          <Text style={[pdfStyles.sectionSubtotalCellPrimary, { width: COL.tenantCost }]}>${formatMoneyPdf(s.tenantTotal)}</Text>
-        </View>
-      )}
+      <View style={pdfStyles.subtotalRow} wrap={false}>
+        <Text style={[pdfStyles.subtotalCell, { width: '73%' }]}>Section Subtotal</Text>
+        <Text style={[pdfStyles.subtotalCell, { width: COL.clientCost }]}>${formatMoneyPdf(s.clientTotal)}</Text>
+        <Text style={[pdfStyles.subtotalCell, { width: COL.tenantPct }]}> </Text>
+        <Text style={[pdfStyles.subtotalCellTenant, { width: COL.tenantCost }]}>${formatMoneyPdf(s.tenantTotal)}</Text>
+      </View>
     </View>
   );
 }
 
-/**
- * Render the Chargeback PDF. Returns null when there are no chargeback lines
- * (skip the PDF in that case rather than producing an empty document).
- */
 export async function renderChargebackPdf(ctx: PdfBuildContext): Promise<Buffer | null> {
   const hasChargebackLines = ctx.sections.some(
     (s) => s.lines.some((l) => l.tenantBillBackPercent > 0 && l.tenantCost > 0)
