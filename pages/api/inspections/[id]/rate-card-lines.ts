@@ -140,7 +140,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // otherwise store the catalog's labor short description. Note: question_text
         // was previously also set here but the sandbox schema doesn't have that
         // property — sending it triggers PROPERTY_DOESNT_EXIST and fails the save.
-        answer_value: line.customLaborFullDescription || catalog.laborShortDescription,
+        // Slice to 65k to fit HubSpot's text field max (textarea limit). Long
+        // pasted descriptions used to bomb the save with VALIDATION_ERROR.
+        answer_value: (line.customLaborFullDescription || catalog.laborShortDescription || '').slice(0, 65000),
         // answer_summary is REQUIRED on the inspection_answer schema. For rate
         // card lines we synthesize one from "<section> / <line item label>"
         // (e.g. "Yard / Exterior / Replace gutter section"). Without this the

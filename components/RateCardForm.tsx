@@ -111,6 +111,9 @@ export function RateCardForm(props: RateCardFormProps) {
     | { kind: 'saved'; at: number }
     | { kind: 'error'; message: string };
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: 'idle' });
+  /** When true, show the error-detail modal with the last save failure text.
+   *  Click "⚠ Save failed — click for details" in the sticky header to open. */
+  const [showSaveErrorDetail, setShowSaveErrorDetail] = useState(false);
 
   // When set, the section has a "pending new" row at the bottom that's currently
   // in edit mode (waiting to be filled out + saved). Only one pending new row
@@ -484,15 +487,21 @@ export function RateCardForm(props: RateCardFormProps) {
     });
   }
 
-  async function handleDeleteSection(sectionId: string) {
+  async function handleDeleteSection(sectionId: string, skipConfirm = false) {
     const section = sections.find((s) => s.id === sectionId);
     if (!section) return;
     const lineCount = (linesBySection[sectionId] || []).length;
     const photoCount = (photosBySection[sectionId] || []).length;
-    const msg = lineCount + photoCount > 0
-      ? `Delete "${section.displayName}"? This will also remove ${lineCount} saved line${lineCount === 1 ? '' : 's'}${lineCount && photoCount ? ' and ' : ''}${photoCount ? `${photoCount} section photo${photoCount === 1 ? '' : 's'}` : ''}.`
-      : `Delete "${section.displayName}"?`;
-    if (!window.confirm(msg)) return;
+    // The Manage Sections modal passes skipConfirm=true since clicking the X
+    // there is already an explicit per-row action; double-confirming is annoying.
+    // The section card on the main form keeps the confirm because the X is small
+    // and could be mis-tapped.
+    if (!skipConfirm) {
+      const msg = lineCount + photoCount > 0
+        ? `Delete "${section.displayName}"? This will also remove ${lineCount} saved line${lineCount === 1 ? '' : 's'}${lineCount && photoCount ? ' and ' : ''}${photoCount ? `${photoCount} section photo${photoCount === 1 ? '' : 's'}` : ''}.`
+        : `Delete "${section.displayName}"?`;
+      if (!window.confirm(msg)) return;
+    }
 
     // Cascade: archive every saved line + section photo for this section.
     const lines = linesBySection[sectionId] || [];
@@ -749,10 +758,141 @@ export function RateCardForm(props: RateCardFormProps) {
 
   const toggle = (id: string) => setExpanded((m) => ({ ...m, [id]: !m[id] }));
 
+  // ----- Terminal action handlers (shared between inline + floating footers) ----
+  // Extracted so the desktop floating footer and the mobile inline footer can
+  // both call the same logic without duplicating ~80 lines of JSX.
+
+  async function handleCancelInspectionClick() {
+    if (!props.onCancelInspection) return;
+    const confirmed = window.confirm(
+      'Cancel this inspection? It will be marked as Cancelled in HubSpot. ' +
+      'Already-saved lines and photos will remain on the record but the ' +
+      'inspection won\'t progress further. This cannot be undone.'
+    );
+    if (!confirmed) return;
+    try { await commitAndWait(); } catch {}
+    props.onCancelInspection();
+  }
+
+  async function handleSaveAndClose() {
+    // Commit any open inline edits AND flush any pending autosaves before
+    // navigating. If the save fails, surface it so the user can retry —
+    // silently dropping their work is worse than blocking.
+    try {
+      await commitAndWait();
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      const proceed = window.confirm(
+        `Save failed: ${msg}\n\nLeave anyway? Your unsaved changes will be lost.`
+      );
+      if (!proceed) return;
+    }
+    props.onCancel();
+  }
+
+  async function handleSubmitOrFinalize() {
+    // Pre-flight: required section photos present?
+    const missingSections: string[] = [];
+    for (const s of sections) {
+      const photos = photosBySection[s.id] || [];
+      const required = !s.photoOptional;
+      if (required && photos.length === 0) missingSections.push(s.displayName);
+    }
+    if (missingSections.length > 0) {
+      alert(
+        'Section photos are still required for:\n\n' +
+        missingSections.slice(0, 10).map((n) => `  • ${n}`).join('\n') +
+        (missingSections.length > 10 ? `\n  ...and ${missingSections.length - 10} more` : '')
+      );
+      return;
+    }
+    // No lines at all? Probably a mistake.
+    const totalLines = Object.values(linesBySection).reduce((s, arr) => s + arr.length, 0);
+    if (totalLines === 0) {
+      const ok = window.confirm('No line items have been added. Submit anyway?');
+      if (!ok) return;
+    }
+    // Flush pending edits to make sure HubSpot has everything before the submit.
+    try {
+      await commitAndWait();
+    } catch (e: any) {
+      alert(`Could not finish saving before submit: ${e.message || e}\n\nPlease try again.`);
+      return;
+    }
+    // Branch on status: pending_approval -> finalize flow, else submit flow.
+    const isFinalizing = props.inspectionStatus === 'pending_approval';
+    if (isFinalizing) {
+      const confirmed = window.confirm(
+        'Finalize this inspection?\n\n' +
+        'This will:\n' +
+        '  • Generate the Master, Tenant Chargeback, and Per-Vendor PDFs\n' +
+        '  • Bundle them into a single ZIP\n' +
+        '  • Attach all files to this inspection in HubSpot\n' +
+        '  • Mark the inspection as Completed\n\n' +
+        'You\'ll be able to download the PDFs immediately after finalize completes. ' +
+        'You can also Reopen the inspection later if you need to make changes.'
+      );
+      if (!confirmed) return;
+      setFinalizing(true);
+      try {
+        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/finalize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error(`HTTP ${r.status}: ${text.slice(0, 300)}`);
+        }
+        const data = await r.json();
+        setFinalizeResult(data as FinalizeResult);
+      } catch (e: any) {
+        alert(`Finalize failed: ${e?.message || e}\n\nThe inspection status was NOT changed. You can try again.`);
+      } finally {
+        setFinalizing(false);
+      }
+      return;
+    }
+    // First submit: flip status to pending_approval
+    try {
+      const r = await fetch(`/api/inspections/${props.inspectionRecordId}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(`HTTP ${r.status}: ${text.slice(0, 200)}`);
+      }
+      props.onSubmit();
+    } catch (e: any) {
+      alert(`Submit failed: ${e.message || e}`);
+    }
+  }
+
+  // Human-friendly status label shown in the header. We map the HubSpot
+  // internal value (snake_case) to title case + apply a color pill.
+  const statusLabel = (() => {
+    switch (props.inspectionStatus) {
+      case 'scheduled': return { label: 'Scheduled', color: 'bg-blue-100 text-blue-800 border-blue-200' };
+      case 'in_progress': return { label: 'In Progress', color: 'bg-amber-100 text-amber-800 border-amber-200' };
+      case 'pending_approval': return { label: 'Pending Approval', color: 'bg-purple-100 text-purple-800 border-purple-200' };
+      case 'completed': return { label: 'Completed', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+      case 'cancelled': return { label: 'Cancelled', color: 'bg-gray-100 text-gray-700 border-gray-200' };
+      default: return null;
+    }
+  })();
+
+  const submitLabel = finalizing
+    ? 'Generating PDFs...'
+    : props.inspectionStatus === 'pending_approval'
+      ? 'Finalize & Generate PDFs'
+      : 'Submit for Approval';
+
   // ----- Render --------------------------------------------------------
 
   return (
-    <div className="max-w-7xl mx-auto p-4">
+    <div className="max-w-7xl mx-auto p-4 md:pb-24">
       {/* Header */}
       <header className="mb-3">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -766,6 +906,14 @@ export function RateCardForm(props: RateCardFormProps) {
           )}
           {inspectionRegion && <span> · <span className="font-semibold">{inspectionRegion}</span></span>}
           {!inspectionRegion && <span className="text-yellow-700"> · <span className="font-semibold">fallback (GA: Atlanta)</span></span>}
+          {statusLabel && (
+            <>
+              {' · '}
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
+                {statusLabel.label}
+              </span>
+            </>
+          )}
         </div>
         {props.pdfUrl && (
           <a href={props.pdfUrl} target="_blank" rel="noopener noreferrer"
@@ -784,14 +932,21 @@ export function RateCardForm(props: RateCardFormProps) {
               {grandTotals.count} {grandTotals.count === 1 ? 'line' : 'lines'}
             </div>
             {/* Save status: visible while the inspector is making edits so they
-                get immediate feedback that work is being persisted. */}
+                get immediate feedback that work is being persisted. The
+                'error' state is a button: clicking it opens a modal with the
+                actual HubSpot error text so issues can be reported. */}
             <div className="text-xs flex items-center min-h-[1rem]">
               {saveStatus.kind === 'saving' && <span className="text-brand font-semibold">Saving...</span>}
               {saveStatus.kind === 'saved' && <span className="text-emerald-700 font-semibold">✓ Saved</span>}
               {saveStatus.kind === 'error' && (
-                <span className="text-red-700 font-semibold" title={saveStatus.message}>
-                  ⚠ Save failed
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowSaveErrorDetail(true)}
+                  className="text-red-700 font-semibold underline hover:text-red-900"
+                  title="Click for details"
+                >
+                  ⚠ Save failed — click for details
+                </button>
               )}
             </div>
           </div>
@@ -853,11 +1008,15 @@ export function RateCardForm(props: RateCardFormProps) {
         {sections.map((s) => {
           const lines = linesBySection[s.id] || [];
           const photos = photosBySection[s.id] || [];
-          // Sections with line items stay expanded regardless of the toggle
-          // state — they hold work the user needs to see at a glance. Empty
-          // sections collapse normally via the toggle.
-          const hasLines = lines.length > 0;
-          const isOpen = hasLines || expanded[s.id] === true;
+          // Sections default to open when they have line items or photos
+          // (so the inspector sees their work) but the user can collapse
+          // them at any time via the chevron. The `expanded` state is now a
+          // tri-state via undefined/true/false: undefined = use default,
+          // true = forced open, false = forced closed. This lets us preserve
+          // the default behaviour without "stickying" old user choices.
+          const hasContent = lines.length > 0 || photos.length > 0;
+          const userChoice = expanded[s.id];
+          const isOpen = userChoice === undefined ? hasContent : userChoice;
           const heading = s.displayName;
           const t = sectionTotals[s.id] || { count: 0, vendor: 0, client: 0, tenant: 0 };
           const photosRequired = !s.photoOptional;
@@ -869,14 +1028,14 @@ export function RateCardForm(props: RateCardFormProps) {
                 section={s}
                 heading={heading}
                 isOpen={isOpen}
-                forceExpanded={hasLines}
+                forceExpanded={false}
                 lineCount={t.count}
                 vendorTotal={t.vendor}
                 clientTotal={t.client}
                 tenantTotal={t.tenant}
                 photosCount={photos.length}
                 photosMissing={photosMissing}
-                onToggle={() => { if (!hasLines) toggle(s.id); }}
+                onToggle={() => setExpanded((m) => ({ ...m, [s.id]: !isOpen }))}
                 onRename={(label) => handleRenameSection(s.id, label)}
                 onDelete={() => handleDeleteSection(s.id)}
                 readOnly={!!props.readOnly}
@@ -1035,152 +1194,36 @@ export function RateCardForm(props: RateCardFormProps) {
         })}
       </div>
 
-      {/* Submit row.
-          Layout: Cancel Inspection (destructive, danger zone) anchored on the
-          LEFT so it's never accidentally tapped near the primary actions on
-          the right. Save & Close + Submit for Approval are grouped on the
-          right, Submit (primary) outermost since it's the most common
-          terminal action. Save & Close turns green on hover/active so it's
-          visually obvious it's saving work, not discarding it. */}
-      <div className="mt-6 flex items-center justify-between border-t border-gray-200 pt-4 flex-wrap gap-3">
-        <div>
-          {!props.readOnly && props.onCancelInspection && (
-            <button
-              type="button"
-              onClick={async () => {
-                const confirmed = window.confirm(
-                  'Cancel this inspection? It will be marked as Cancelled in HubSpot. ' +
-                  'Already-saved lines and photos will remain on the record but the ' +
-                  'inspection won\'t progress further. This cannot be undone.'
-                );
-                if (!confirmed) return;
-                try { await commitAndWait(); } catch {}
-                props.onCancelInspection!();
-              }}
-              className="px-4 py-2 text-sm border border-red-300 text-red-700 rounded hover:bg-red-50"
-            >
-              Cancel Inspection
-            </button>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={async () => {
-              // Commit any open inline edits AND flush any pending autosaves
-              // before navigating. If the save fails, surface it so the user
-              // can retry — silently dropping their work is worse than blocking.
-              try {
-                await commitAndWait();
-              } catch (e: any) {
-                const msg = e?.message || String(e);
-                const proceed = window.confirm(
-                  `Save failed: ${msg}\n\nLeave anyway? Your unsaved changes will be lost.`
-                );
-                if (!proceed) return;
-              }
-              props.onCancel();
-            }}
-            className="px-4 py-2 text-sm border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 transition-colors"
-          >
-            Save & Close
-          </button>
-        <button
-          type="button"
-          onClick={async () => {
-            // Check requirements first
-            const missingSections: string[] = [];
-            for (const s of sections) {
-              const photos = photosBySection[s.id] || [];
-              const required = !s.photoOptional;
-              if (required && photos.length === 0) missingSections.push(s.displayName);
-            }
-            if (missingSections.length > 0) {
-              alert(
-                'Section photos are still required for:\n\n' +
-                missingSections.slice(0, 10).map((n) => `  • ${n}`).join('\n') +
-                (missingSections.length > 10 ? `\n  ...and ${missingSections.length - 10} more` : '')
-              );
-              return;
-            }
-            // No lines at all? Probably a mistake.
-            const totalLines = Object.values(linesBySection).reduce((s, arr) => s + arr.length, 0);
-            if (totalLines === 0) {
-              const ok = window.confirm('No line items have been added. Submit anyway?');
-              if (!ok) return;
-            }
-            // Flush pending edits to make sure HubSpot has everything before the submit.
-            try {
-              await commitAndWait();
-            } catch (e: any) {
-              alert(`Could not finish saving before submit: ${e.message || e}\n\nPlease try again.`);
-              return;
-            }
+      {/* Inline footer — mobile only (md:hidden).
+          On desktop, the floating footer at the bottom of the viewport is used
+          instead. Both render the same TerminalActions content. */}
+      <div className="md:hidden">
+        <TerminalActions
+          readOnly={!!props.readOnly}
+          showCancelInspection={!!props.onCancelInspection}
+          submitLabel={submitLabel}
+          submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing}
+          onCancelInspection={handleCancelInspectionClick}
+          onSaveAndClose={handleSaveAndClose}
+          onSubmit={handleSubmitOrFinalize}
+        />
+      </div>
 
-            // Branch on status: if we're still in scheduled/in_progress, this
-            // button flips status to pending_approval (first submit). If we're
-            // already in pending_approval, this button triggers the Finalize
-            // & Generate PDFs flow.
-            const isFinalizing = props.inspectionStatus === 'pending_approval';
-            if (isFinalizing) {
-              // ---- Finalize & Generate PDFs ----
-              const confirmed = window.confirm(
-                'Finalize this inspection?\n\n' +
-                'This will:\n' +
-                '  • Generate the Master, Tenant Chargeback, and Per-Vendor PDFs\n' +
-                '  • Bundle them into a single ZIP\n' +
-                '  • Attach all files to this inspection in HubSpot\n' +
-                '  • Mark the inspection as Completed\n\n' +
-                'You\'ll be able to download the PDFs immediately after finalize completes. ' +
-                'You can also Reopen the inspection later if you need to make changes.'
-              );
-              if (!confirmed) return;
-              setFinalizing(true);
-              try {
-                const r = await fetch(`/api/inspections/${props.inspectionRecordId}/finalize`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({}),
-                });
-                if (!r.ok) {
-                  const text = await r.text();
-                  throw new Error(`HTTP ${r.status}: ${text.slice(0, 300)}`);
-                }
-                const data = await r.json();
-                setFinalizeResult(data as FinalizeResult);
-              } catch (e: any) {
-                alert(`Finalize failed: ${e?.message || e}\n\nThe inspection status was NOT changed. You can try again.`);
-              } finally {
-                setFinalizing(false);
-              }
-              return;
-            }
-
-            // ---- First submit: flip status to pending_approval ----
-            try {
-              const r = await fetch(`/api/inspections/${props.inspectionRecordId}/submit`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({}),
-              });
-              if (!r.ok) {
-                const text = await r.text();
-                throw new Error(`HTTP ${r.status}: ${text.slice(0, 200)}`);
-              }
-              props.onSubmit();
-            } catch (e: any) {
-              alert(`Submit failed: ${e.message || e}`);
-            }
-          }}
-          disabled={props.readOnly || saveStatus.kind === "saving" || finalizing}
-          className="px-5 py-2 text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
-        >
-          {finalizing
-            ? 'Generating PDFs...'
-            : props.inspectionStatus === 'pending_approval'
-              ? 'Finalize & Generate PDFs'
-              : 'Submit for Approval'}
-        </button>
+      {/* Floating footer — desktop only (hidden on mobile to avoid covering
+          the keyboard / inline scroll). Always visible at the bottom of the
+          viewport so the inspector can save/submit/cancel from anywhere on
+          the page without scrolling to the end. */}
+      <div className="hidden md:block fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
+        <div className="max-w-7xl mx-auto px-4 py-3">
+          <TerminalActions
+            readOnly={!!props.readOnly}
+            showCancelInspection={!!props.onCancelInspection}
+            submitLabel={submitLabel}
+            submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing}
+            onCancelInspection={handleCancelInspectionClick}
+            onSaveAndClose={handleSaveAndClose}
+            onSubmit={handleSubmitOrFinalize}
+          />
         </div>
       </div>
 
@@ -1200,10 +1243,65 @@ export function RateCardForm(props: RateCardFormProps) {
           photoCounts={Object.fromEntries(sections.map((s) => [s.id, (photosBySection[s.id] || []).length]))}
           onClose={() => setShowSectionsManager(false)}
           onRename={handleRenameSection}
-          onDelete={handleDeleteSection}
+          onDelete={(id) => handleDeleteSection(id, true)}
           onAdd={handleAddSection}
           onReorder={handleReorderSections}
         />
+      )}
+
+      {/* Save-error detail modal. Triggered by clicking the "Save failed"
+          badge in the sticky header. Shows the raw error message returned
+          by the API so the inspector can report it (or fix it) instead of
+          just seeing "Save failed". */}
+      {showSaveErrorDetail && saveStatus.kind === 'error' && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full">
+            <div className="px-5 py-4 border-b border-gray-200">
+              <div className="text-base font-bold text-red-700">Save failed</div>
+              <div className="text-xs text-gray-500 mt-0.5">
+                The last save attempt to HubSpot didn&apos;t complete.
+              </div>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div>
+                <div className="text-xs uppercase tracking-wider font-semibold text-gray-500 mb-1">
+                  Error message
+                </div>
+                <div className="text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded p-2 font-mono whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
+                  {saveStatus.message || '(no message captured)'}
+                </div>
+              </div>
+              <div className="text-xs text-gray-600">
+                What to try:
+                <ul className="list-disc pl-5 mt-1 space-y-0.5">
+                  <li>Try the same edit again — transient errors often resolve themselves.</li>
+                  <li>If a specific line keeps failing, delete and re-add it.</li>
+                  <li>If it&apos;s persistent, copy the message above and send it to Hayden.</li>
+                </ul>
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (saveStatus.kind === 'error' && saveStatus.message) {
+                    navigator.clipboard?.writeText(saveStatus.message).catch(() => {});
+                  }
+                }}
+                className="px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
+              >
+                Copy error
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSaveErrorDetail(false)}
+                className="px-4 py-2 text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Generating overlay: blocks the form while finalize is running.
@@ -1276,6 +1374,56 @@ export function RateCardForm(props: RateCardFormProps) {
 }
 
 /** Single download row in the Finalize result modal. */
+/**
+ * The three terminal action buttons (Cancel Inspection / Save & Close /
+ * Submit-or-Finalize). Used in both the mobile inline footer and the desktop
+ * floating footer so behavior stays identical across the two.
+ *
+ * The parent owns all the click logic — this is purely presentational.
+ */
+function TerminalActions(props: {
+  readOnly: boolean;
+  showCancelInspection: boolean;
+  submitLabel: string;
+  submitDisabled: boolean;
+  onCancelInspection: () => void;
+  onSaveAndClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between flex-wrap gap-3">
+      <div>
+        {!props.readOnly && props.showCancelInspection && (
+          <button
+            type="button"
+            onClick={props.onCancelInspection}
+            className="px-4 py-2 text-sm border border-red-300 text-red-700 rounded hover:bg-red-50"
+          >
+            Cancel Inspection
+          </button>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={props.onSaveAndClose}
+          className="px-4 py-2 text-sm border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 transition-colors"
+        >
+          Save & Close
+        </button>
+        <button
+          type="button"
+          onClick={props.onSubmit}
+          disabled={props.submitDisabled}
+          className="px-5 py-2 text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
+        >
+          {props.submitLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DownloadLink(props: { label: string; filename: string; url: string; primary?: boolean; accent?: boolean }) {
   return (
     <a
