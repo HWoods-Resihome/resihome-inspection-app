@@ -27,6 +27,7 @@ import { calculateLine } from '@/lib/rateCardMath';
 import { renderMasterPdf } from '@/lib/pdfMaster';
 import { renderChargebackPdf } from '@/lib/pdfChargeback';
 import { renderVendorPdfs } from '@/lib/pdfVendor';
+import { renderChargebackXlsx } from '@/lib/xlsxChargeback';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
 
 export const config = {
@@ -245,6 +246,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const v = vendor.replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60);
       return `${templateLabel} - ${safeAddress} - ${v} - ${datePart}.pdf`;
     }
+    const chargebackXlsxFilename = `${templateLabel} - ${safeAddress} - Tenant Chargeback Import - ${datePart}.xlsx`;
+
+    // ---- 4b. Generate Tenant Chargeback xlsx (importer file) ----
+    // Only generated if there are chargeback lines. Pulled property fields
+    // (entity_id, last_primary_tenant, address, city, state_code, zip_code)
+    // come from inspectionData. Missing fields render as blank cells.
+    const chargebackXlsxBuf = await renderChargebackXlsx(ctx, {
+      entityId: inspectionData.propertyEntityId || '',
+      primaryTenantName: inspectionData.propertyLastPrimaryTenant || '',
+      addressStreet: inspectionData.propertyAddressStreet || '',
+      city: inspectionData.propertyCity || '',
+      stateCode: inspectionData.propertyStateCode || '',
+      zipCode: inspectionData.propertyZip || '',
+      dueDate: new Date(),
+    });
 
     // ---- 5. Upload PDFs to HubSpot Files ----
     // Sequential to stay polite with HubSpot's rate limit.
@@ -256,6 +272,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let chargebackUrl: string | null = null;
     if (chargebackBuf) {
       chargebackUrl = await uploadFile(chargebackBuf, chargebackFilename, 'application/pdf', '/inspection_pdfs', true);
+    }
+
+    // Tenant Chargeback Import xlsx — only uploaded if there were chargeback lines
+    let chargebackXlsxUrl: string | null = null;
+    if (chargebackXlsxBuf) {
+      chargebackXlsxUrl = await uploadFile(
+        chargebackXlsxBuf,
+        chargebackXlsxFilename,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '/inspection_pdfs',
+        true,
+      );
     }
 
     const vendorUrls: Record<string, string> = {};
@@ -274,6 +302,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       completed_at: nowIso,
       pdf_master_url: masterUrl,
       pdf_chargeback_url: chargebackUrl || '',
+      pdf_chargeback_xlsx_url: chargebackXlsxUrl || '',
       pdf_vendor_urls_json: JSON.stringify(vendorUrls),
       pdf_generated_at: nowIso,
     };
@@ -299,6 +328,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       pdfs: {
         master: { name: masterFilename, url: masterUrl },
         chargeback: chargebackBuf ? { name: chargebackFilename, url: chargebackUrl } : null,
+        chargebackXlsx: chargebackXlsxBuf ? { name: chargebackXlsxFilename, url: chargebackXlsxUrl } : null,
         vendors: Object.entries(vendorUrls).map(([vendor, url]) => ({
           vendor,
           name: vendorFilename(vendor),

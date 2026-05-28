@@ -138,6 +138,7 @@ export function RateCardForm(props: RateCardFormProps) {
     pdfs: {
       master: { name: string; url: string };
       chargeback: { name: string; url: string } | null;
+      chargebackXlsx: { name: string; url: string } | null;
       vendors: Array<{ vendor: string; name: string; url: string }>;
     };
     totals: { vendor: number; client: number; tenant: number; lineCount: number };
@@ -1359,6 +1360,7 @@ export function RateCardForm(props: RateCardFormProps) {
                     const items: Array<{ name: string; url: string }> = [];
                     items.push(finalizeResult.pdfs.master);
                     if (finalizeResult.pdfs.chargeback) items.push(finalizeResult.pdfs.chargeback);
+                    if (finalizeResult.pdfs.chargebackXlsx) items.push(finalizeResult.pdfs.chargebackXlsx);
                     for (const v of finalizeResult.pdfs.vendors) items.push({ name: v.name, url: v.url });
                     // Sequential awaits — each download finishes before the
                     // next starts. Avoids browser rate limiting / "too many
@@ -1379,7 +1381,10 @@ export function RateCardForm(props: RateCardFormProps) {
               </div>
               <DownloadLink label="Master Report" filename={finalizeResult.pdfs.master.name} url={finalizeResult.pdfs.master.url} primary />
               {finalizeResult.pdfs.chargeback && (
-                <DownloadLink label="Tenant Chargeback" filename={finalizeResult.pdfs.chargeback.name} url={finalizeResult.pdfs.chargeback.url} />
+                <DownloadLink label="Tenant Chargeback (PDF)" filename={finalizeResult.pdfs.chargeback.name} url={finalizeResult.pdfs.chargeback.url} />
+              )}
+              {finalizeResult.pdfs.chargebackXlsx && (
+                <DownloadLink label="Tenant Chargeback Import (xlsx)" filename={finalizeResult.pdfs.chargebackXlsx.name} url={finalizeResult.pdfs.chargebackXlsx.url} />
               )}
               {finalizeResult.pdfs.vendors.map((v) => (
                 <DownloadLink

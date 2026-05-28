@@ -359,7 +359,10 @@ function CompletedPdfMenu({ inspection }: { inspection: InspectionSummary }) {
     links.push({ label: 'Master Report', url: inspection.pdfMasterUrl, primary: true });
   }
   if (inspection.pdfChargebackUrl) {
-    links.push({ label: 'Tenant Chargeback', url: inspection.pdfChargebackUrl });
+    links.push({ label: 'Tenant Chargeback (PDF)', url: inspection.pdfChargebackUrl });
+  }
+  if (inspection.pdfChargebackXlsxUrl) {
+    links.push({ label: 'Tenant Chargeback Import (xlsx)', url: inspection.pdfChargebackXlsxUrl });
   }
   for (const [vendor, url] of Object.entries(vendorUrls)) {
     if (url) links.push({ label: `Vendor — ${vendor}`, url });

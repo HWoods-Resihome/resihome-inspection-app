@@ -380,6 +380,7 @@ export async function fetchInspections(): Promise<InspectionSummary[]> {
         sectionListJson: p.section_list_json || null,
         pdfMasterUrl: null,
         pdfChargebackUrl: null,
+        pdfChargebackXlsxUrl: null,
         pdfVendorUrlsJson: null,
         pdfGeneratedAt: null,
       });
@@ -691,6 +692,7 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
       sectionListJson: p.section_list_json || null,
       pdfMasterUrl: null,
       pdfChargebackUrl: null,
+      pdfChargebackXlsxUrl: null,
       pdfVendorUrlsJson: null,
       pdfGeneratedAt: null,
     };
@@ -708,6 +710,17 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   propertyIdRef: string;
   propertySquareFootage: number | null;
   propertyZip: string | null;
+  /** Property's street-only address (e.g. "5503 Thomas Dr"). Used in
+   *  chargeback xlsx Property Address column. */
+  propertyAddressStreet: string | null;
+  propertyCity: string | null;
+  /** 2-letter state code (e.g. "TN"). Used in chargeback xlsx. */
+  propertyStateCode: string | null;
+  /** Property's `entity_id` (e.g. "RP3TN00010"). Used as the Entity ID
+   *  column in chargeback xlsx. */
+  propertyEntityId: string | null;
+  /** Tenant full name. Used as Primary Tenant First and Last Name in xlsx. */
+  propertyLastPrimaryTenant: string | null;
 } | null> {
   const { inspection: typeId, property: propertyTypeId } = typeIds();
   const properties = [
@@ -719,7 +732,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     'total_questions_answered', 'pdf_attachment_url', 'hs_createdate',
     'region_snapshot', 'section_list_json',
     // Phase 4 PDF outputs (Rate Card finalize)
-    'pdf_master_url', 'pdf_chargeback_url', 'pdf_vendor_urls_json', 'pdf_generated_at',
+    'pdf_master_url', 'pdf_chargeback_url', 'pdf_chargeback_xlsx_url', 'pdf_vendor_urls_json', 'pdf_generated_at',
   ];
   try {
     const qs = properties.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
@@ -727,27 +740,48 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     const p = resp.properties || {};
     const propertyIdRef = p.property_id_ref || '';
 
-    // Best-effort fetch the property's square_footage AND zip. Don't fail the whole
-    // request if the property record is missing or the property API errors —
-    // these are informational and we already have everything else from the inspection.
+    // Best-effort fetch property fields used downstream:
+    //   square_footage  -> shown in header subtitle
+    //   zip / zip_code  -> appended to address in header
+    //   address         -> street-only address used in chargeback xlsx
+    //   city            -> used in chargeback xlsx
+    //   state_code      -> used in chargeback xlsx (2-letter, e.g. "TN")
+    //   entity_id       -> used as Entity ID column in chargeback xlsx
+    //   last_primary_tenant -> Primary Tenant First and Last Name in xlsx
+    // Don't fail the whole request if the property is missing or some fields
+    // are absent — these are informational. Each missing field just leaves
+    // the corresponding column blank.
     let propertySquareFootage: number | null = null;
     let propertyZip: string | null = null;
+    let propertyAddressStreet: string | null = null;
+    let propertyCity: string | null = null;
+    let propertyStateCode: string | null = null;
+    let propertyEntityId: string | null = null;
+    let propertyLastPrimaryTenant: string | null = null;
     if (propertyIdRef) {
       try {
+        const propProps = [
+          'square_footage', 'zip', 'zip_code',
+          'address', 'city', 'state_code',
+          'entity_id', 'last_primary_tenant',
+        ];
+        const propQs = propProps.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
         const propResp = await hubspotFetch(
-          `/crm/v3/objects/${propertyTypeId}/${propertyIdRef}?properties=square_footage&properties=zip&properties=zip_code`
+          `/crm/v3/objects/${propertyTypeId}/${propertyIdRef}?${propQs}`
         );
         const pp = propResp.properties || {};
         if (pp.square_footage != null && pp.square_footage !== '') {
           const n = Number(pp.square_footage);
           if (Number.isFinite(n)) propertySquareFootage = n;
         }
-        // Some HubSpot portals use 'zip', others use 'zip_code'. Try both.
         const rawZip = (pp.zip_code || pp.zip || '').toString().trim();
         if (rawZip) propertyZip = rawZip;
+        propertyAddressStreet = (pp.address || '').toString().trim() || null;
+        propertyCity = (pp.city || '').toString().trim() || null;
+        propertyStateCode = (pp.state_code || '').toString().trim() || null;
+        propertyEntityId = (pp.entity_id || '').toString().trim() || null;
+        propertyLastPrimaryTenant = (pp.last_primary_tenant || '').toString().trim() || null;
       } catch (e: any) {
-        // 404 / property-not-found / property type without these fields -> just null.
-        // Log but don't propagate.
         console.warn(`[fetchInspectionWithPropertyRef] could not fetch property ${propertyIdRef} extras:`, String(e).slice(0, 200));
       }
     }
@@ -777,12 +811,18 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         sectionListJson: p.section_list_json || null,
         pdfMasterUrl: p.pdf_master_url || null,
         pdfChargebackUrl: p.pdf_chargeback_url || null,
+        pdfChargebackXlsxUrl: p.pdf_chargeback_xlsx_url || null,
         pdfVendorUrlsJson: p.pdf_vendor_urls_json || null,
         pdfGeneratedAt: p.pdf_generated_at || null,
       },
       propertyIdRef,
       propertySquareFootage,
       propertyZip,
+      propertyAddressStreet,
+      propertyCity,
+      propertyStateCode,
+      propertyEntityId,
+      propertyLastPrimaryTenant,
     };
   } catch (e: any) {
     if (String(e).includes('404')) return null;

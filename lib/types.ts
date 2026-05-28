@@ -84,6 +84,7 @@ export interface InspectionSummary {
   // are a JSON object {vendorName: url}.
   pdfMasterUrl: string | null;
   pdfChargebackUrl: string | null;
+  pdfChargebackXlsxUrl: string | null;
   pdfVendorUrlsJson: string | null;
   pdfGeneratedAt: string | null;
 }
