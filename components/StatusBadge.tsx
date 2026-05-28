@@ -3,7 +3,7 @@ interface Props {
 }
 
 // Map the HubSpot dropdown label to badge styling.
-// Hayden's confirmed values: Scheduled, In Progress, Completed, Cancelled.
+// Hayden's confirmed values: Scheduled, In Progress, Pending Approval, Completed, Cancelled.
 // We normalize to lowercase for matching to be defensive against case drift.
 export function StatusBadge({ status }: Props) {
   const s = (status || '').trim().toLowerCase();
@@ -17,6 +17,11 @@ export function StatusBadge({ status }: Props) {
   } else if (s === 'in progress' || s === 'in-progress' || s === 'inprogress' || s === 'in_progress') {
     colorClass = 'bg-amber-100 text-amber-800 border-amber-300';
     label = 'In Progress';
+  } else if (s === 'pending approval' || s === 'pending-approval' || s === 'pending_approval' || s === 'pendingapproval') {
+    // Distinct purple so the "ready to finalize" state stands out from
+    // In Progress (which can drag on for days) and from Completed.
+    colorClass = 'bg-purple-100 text-purple-800 border-purple-300';
+    label = 'Pending Approval';
   } else if (s === 'completed' || s === 'complete' || s === 'submitted') {
     colorClass = 'bg-green-100 text-green-800 border-green-300';
     label = 'Completed';

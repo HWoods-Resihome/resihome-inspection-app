@@ -7,7 +7,7 @@ import { InspectionCard } from '@/components/InspectionCard';
 
 interface MeUser { userId: string; email: string; name: string; }
 
-type StatusFilter = 'all' | 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+type StatusFilter = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed' | 'cancelled';
 
 export default function Home() {
   const router = useRouter();
@@ -105,6 +105,7 @@ export default function Home() {
         const s = (i.status || '').trim().toLowerCase();
         if (wantStatus === 'scheduled' && s !== 'scheduled') return false;
         if (wantStatus === 'in_progress' && !(s === 'in progress' || s === 'in-progress' || s === 'in_progress')) return false;
+        if (wantStatus === 'pending_approval' && !(s === 'pending approval' || s === 'pending-approval' || s === 'pending_approval' || s === 'pendingapproval')) return false;
         if (wantStatus === 'completed' && !(s === 'completed' || s === 'complete' || s === 'submitted')) return false;
         if (wantStatus === 'cancelled' && !(s === 'cancelled' || s === 'canceled')) return false;
       }
@@ -150,11 +151,12 @@ export default function Home() {
 
   // Count by status for filter chips
   const counts = useMemo(() => {
-    const c = { all: inspections.length, scheduled: 0, in_progress: 0, completed: 0, cancelled: 0 };
+    const c = { all: inspections.length, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0, cancelled: 0 };
     for (const i of inspections) {
       const s = (i.status || '').trim().toLowerCase();
       if (s === 'scheduled') c.scheduled++;
       else if (s === 'in progress' || s === 'in-progress' || s === 'in_progress') c.in_progress++;
+      else if (s === 'pending approval' || s === 'pending-approval' || s === 'pending_approval' || s === 'pendingapproval') c.pending_approval++;
       else if (s === 'completed' || s === 'complete' || s === 'submitted') c.completed++;
       else if (s === 'cancelled' || s === 'canceled') c.cancelled++;
     }
@@ -274,14 +276,17 @@ export default function Home() {
             <FilterChip label={`All (${counts.all})`} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
             <FilterChip label={`Scheduled (${counts.scheduled})`} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter('scheduled')} />
             <FilterChip label={`In Progress (${counts.in_progress})`} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter('in_progress')} />
+            <FilterChip label={`Pending Approval (${counts.pending_approval})`} active={statusFilter === 'pending_approval'} onClick={() => setStatusFilter('pending_approval')} />
             <FilterChip label={`Completed (${counts.completed})`} active={statusFilter === 'completed'} onClick={() => setStatusFilter('completed')} />
             {counts.cancelled > 0 && (
               <FilterChip label={`Cancelled (${counts.cancelled})`} active={statusFilter === 'cancelled'} onClick={() => setStatusFilter('cancelled')} />
             )}
           </div>
 
-          {/* Filter controls row: inspector dropdown | template dropdown | date sort */}
-          <div className="flex items-center gap-2 mb-2 overflow-x-auto pb-1 -mx-1 px-1">
+          {/* Filter controls row: inspector dropdown | template dropdown | date sort.
+              Wraps to a second line on narrow screens so Date stays visible
+              without horizontal scrolling on mobile. */}
+          <div className="flex flex-wrap items-center gap-2 mb-2 pb-1">
             {/* Inspector filter */}
             <div className="relative shrink-0">
               <select
