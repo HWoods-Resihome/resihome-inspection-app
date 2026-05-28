@@ -385,29 +385,41 @@ function CompletedPdfMenu({ inspection }: { inspection: InspectionSummary }) {
           <div className="absolute right-0 mt-1 z-40 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[260px] py-1">
             <button
               type="button"
-              onClick={() => {
-                links.forEach((l, idx) => {
-                  setTimeout(() => {
-                    try {
-                      const a = document.createElement('a');
-                      a.href = l.url;
-                      a.target = '_blank';
-                      a.rel = 'noopener noreferrer';
-                      // Pull a filename from the URL's last path segment so
-                      // the download saves with a sensible name.
-                      try {
-                        const u = new URL(l.url);
-                        a.download = decodeURIComponent(u.pathname.split('/').pop() || '');
-                      } catch {}
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                    } catch {
-                      window.open(l.url, '_blank', 'noopener,noreferrer');
-                    }
-                  }, idx * 200);
-                });
+              onClick={async () => {
                 setOpen(false);
+                // Sequential blob-fetch downloads. Cross-origin URLs (HubSpot
+                // Files) ignore <a download> when used directly, so we fetch
+                // each PDF as a blob first then save the blob. This forces a
+                // download rather than a navigation regardless of the
+                // server's Content-Disposition headers.
+                for (const l of links) {
+                  try {
+                    const res = await fetch(l.url);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const blob = await res.blob();
+                    const objectUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = objectUrl;
+                    // Best-effort filename: last URL path segment (HubSpot
+                    // Files URLs include the original filename here).
+                    try {
+                      const u = new URL(l.url);
+                      a.download = decodeURIComponent(u.pathname.split('/').pop() || `${l.label}.pdf`);
+                    } catch {
+                      a.download = `${l.label}.pdf`;
+                    }
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+                  } catch (e) {
+                    console.error('[CompletedPdfMenu] download failed, opening in tab:', e);
+                    window.open(l.url, '_blank', 'noopener,noreferrer');
+                  }
+                  // small gap between downloads so the browser registers each
+                  // as a separate event (helps Chrome's UI counter)
+                  await new Promise((r) => setTimeout(r, 250));
+                }
               }}
               className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 border-b border-gray-200"
             >

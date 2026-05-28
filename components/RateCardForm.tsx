@@ -1354,19 +1354,22 @@ export function RateCardForm(props: RateCardFormProps) {
                 <div className="text-xs uppercase tracking-wider font-semibold text-gray-500">Downloads</div>
                 <button
                   type="button"
-                  onClick={() => {
-                    // Download every PDF in sequence. Browsers will trigger
-                    // each as a separate download since the user gesture
-                    // (clicking Download All) lasts through the entire async
-                    // chain. A small stagger avoids overwhelming Safari which
-                    // sometimes drops back-to-back downloads.
+                  onClick={async () => {
+                    // Build the list once
                     const items: Array<{ name: string; url: string }> = [];
                     items.push(finalizeResult.pdfs.master);
                     if (finalizeResult.pdfs.chargeback) items.push(finalizeResult.pdfs.chargeback);
                     for (const v of finalizeResult.pdfs.vendors) items.push({ name: v.name, url: v.url });
-                    items.forEach((item, idx) => {
-                      setTimeout(() => triggerDownload(item.url, item.name), idx * 200);
-                    });
+                    // Sequential awaits — each download finishes before the
+                    // next starts. Avoids browser rate limiting / "too many
+                    // downloads" blocks that fire when we trigger them all
+                    // in parallel via setTimeout.
+                    for (const item of items) {
+                      await triggerDownload(item.url, item.name);
+                      // Tiny delay so the browser registers each as a
+                      // separate download event (helps Chrome counter UI)
+                      await new Promise((r) => setTimeout(r, 250));
+                    }
                   }}
                   className="text-xs px-3 py-1 bg-emerald-600 text-white font-semibold rounded hover:bg-emerald-700"
                   title="Download every PDF at once"
@@ -1458,25 +1461,33 @@ function TerminalActions(props: {
 }
 
 /**
- * Trigger a single download by creating a temporary `<a download>` element,
- * clicking it, and cleaning up. Works for cross-origin URLs because the
- * `download` attribute is a hint; browsers honor it when the response has
- * Content-Disposition or when the host serves the file as application/pdf
- * (HubSpot Files does both). Falls back to opening in a new tab if the
- * browser blocks the synthetic click.
+ * Trigger a single file download.
+ *
+ * For cross-origin URLs (HubSpot Files), the `<a download>` attribute is
+ * routinely ignored by browsers — they navigate to the URL instead. To
+ * reliably DOWNLOAD instead of NAVIGATE we fetch the file as a blob first,
+ * then create a blob: URL (which IS same-origin from the browser's
+ * perspective) and trigger an `<a download>` against that.
+ *
+ * Returns a promise so callers awaiting it can stagger correctly.
  */
-function triggerDownload(url: string, filename: string) {
+async function triggerDownload(url: string, filename: string): Promise<void> {
   try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
+    a.href = objectUrl;
     a.download = filename;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-  } catch {
-    // Last-ditch fallback if DOM manipulation fails for some reason
+    // Revoke after a tick so the click() has time to consume it
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  } catch (e) {
+    console.error('[triggerDownload] blob path failed, falling back to navigation:', e);
+    // Last-ditch fallback: open in a new tab and let the user save from there
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 }

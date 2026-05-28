@@ -72,9 +72,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       inspection.bathroomsAtInspection || 0,
     );
 
-    // Group answers by section/location for fast lookup
+    // Group answers by section/location for fast lookup.
+    // We join on `location` (immutable per section instance — e.g.
+    // "bedroom-1", "yard_exterior") rather than `label` because the label
+    // can be renamed via Manage Sections after lines were saved, which
+    // would silently drop those lines from the finalized PDFs.
     const sectionLookup = new Map<string, SectionInstance>();
     for (const s of sectionInstances) {
+      // Primary key: location only.
+      sectionLookup.set(s.location, s);
+      // Secondary key for legacy answers saved before this fix: also accept
+      // label||location combos. Harmless duplicate when both are set.
       sectionLookup.set(`${s.label}||${s.location}`, s);
     }
 
@@ -97,8 +105,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     for (const ans of answers) {
       if (ans.answerType === 'rate_card_line' && ans.rateCardLine) {
-        const s = sectionLookup.get(`${ans.section}||${ans.location}`);
-        if (!s) continue;   // orphaned answer (section was deleted) — skip
+        // Prefer location-only match (works even if section was renamed);
+        // fall back to label||location for very old answers that didn't
+        // populate location.
+        const s = sectionLookup.get(ans.location) || sectionLookup.get(`${ans.section}||${ans.location}`);
+        if (!s) {
+          console.warn(`[finalize] no section for answer ${ans.answerIdExternal} (section="${ans.section}" location="${ans.location}")`);
+          continue;
+        }
         const group = sectionGroups.get(s.id);
         if (!group) continue;
 
@@ -153,7 +167,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         group.clientTotal += calc.clientCost;
         group.tenantTotal += calc.tenantCost;
       } else if (ans.answerType === 'section_photo') {
-        const s = sectionLookup.get(`${ans.section}||${ans.location}`);
+        const s = sectionLookup.get(ans.location) || sectionLookup.get(`${ans.section}||${ans.location}`);
         if (!s) continue;
         const group = sectionGroups.get(s.id);
         if (!group) continue;
