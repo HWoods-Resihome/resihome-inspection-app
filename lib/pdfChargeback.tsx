@@ -1,5 +1,6 @@
 // Tenant Chargeback PDF — only contains line items where
-// tenant_bill_back_percent > 0. Sent to (or shown to) the tenant.
+// tenant_bill_back_percent > 0. Tenant-facing, so we omit Vendor / Client
+// figures entirely; the only money columns are Tenant % and Tenant $.
 
 import React from 'react';
 import { Document, Page, Text, View, renderToBuffer } from '@react-pdf/renderer';
@@ -16,15 +17,15 @@ import {
   type PdfSectionGroup,
 } from './pdfShared';
 
-// Chargeback column layout (no Vendor/Vendor$):
-//   Cat 11 | Sub 11 | Description 39 | Qty 6 | Unit 6 | Cli$ 9 | Ten% 6 | Ten$ 12
+// Chargeback column layout (Client column removed — Tenant Total is the
+// only figure the tenant should see):
+//   Cat 11 | Sub 11 | Description 48 | Qty 6 | Unit 6 | Ten% 6 | Ten$ 12
 const COL = {
   category: '11%',
   subcategory: '11%',
-  description: '39%',
+  description: '48%',
   qty: '6%',
   unit: '6%',
-  clientCost: '9%',
   tenantPct: '6%',
   tenantCost: '12%',
 };
@@ -39,6 +40,8 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
     .map((s) => {
       const lines = s.lines.filter((l) => l.tenantBillBackPercent > 0 && l.tenantCost > 0);
       const tenantTotal = lines.reduce((sum, l) => sum + l.tenantCost, 0);
+      // clientTotal / vendorTotal recomputed only for backward-compat with
+      // the PdfSectionGroup type; not displayed anywhere on the chargeback.
       const clientTotal = lines.reduce((sum, l) => sum + l.clientCost, 0);
       const vendorTotal = lines.reduce((sum, l) => sum + l.vendorCost, 0);
       return { ...s, lines, tenantTotal, clientTotal, vendorTotal };
@@ -46,7 +49,6 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
     .filter((s) => s.lines.length > 0);
 
   const grandTenantTotal = filteredSections.reduce((sum, s) => sum + s.tenantTotal, 0);
-  const grandClientTotal = filteredSections.reduce((sum, s) => sum + s.clientTotal, 0);
   const grandLineCount = filteredSections.reduce((sum, s) => sum + s.lines.length, 0);
 
   return (
@@ -79,10 +81,6 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
             <Text style={pdfStyles.grandTotalsValue}>{grandLineCount}</Text>
           </View>
           <View style={pdfStyles.grandTotalsItem}>
-            <Text style={pdfStyles.grandTotalsLabel}>Client Total</Text>
-            <Text style={pdfStyles.grandTotalsValue}>${formatMoneyPdf(grandClientTotal)}</Text>
-          </View>
-          <View style={pdfStyles.grandTotalsItem}>
             <Text style={pdfStyles.grandTotalsLabel}>Tenant Total</Text>
             <Text style={pdfStyles.grandTotalsValueBrand}>${formatMoneyPdf(grandTenantTotal)}</Text>
           </View>
@@ -110,7 +108,6 @@ function ChargebackSection(props: { section: PdfSectionGroup }) {
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.description }]}>Description</Text>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.qty, textAlign: 'center' }]}>Qty</Text>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.unit, textAlign: 'center' }]}>Unit</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.clientCost, textAlign: 'right' }]}>Client $</Text>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.tenantPct, textAlign: 'right' }]}>Ten %</Text>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.tenantCost, textAlign: 'right' }]}>Tenant $</Text>
       </View>
@@ -127,16 +124,15 @@ function ChargebackSection(props: { section: PdfSectionGroup }) {
           </View>
           <Text style={[pdfStyles.tableCellCentered, { width: COL.qty }]}>{formatQtyPdf(line.quantity)}</Text>
           <Text style={[pdfStyles.tableCellCentered, { width: COL.unit }]}>{line.laborMeas}</Text>
-          <Text style={[pdfStyles.tableCellNumeric, { width: COL.clientCost }]}>${formatMoneyPdf(line.clientCost)}</Text>
           <Text style={[pdfStyles.tableCellNumeric, { width: COL.tenantPct }]}>{Math.round(line.tenantBillBackPercent)}%</Text>
           <Text style={[pdfStyles.tableCellTenant, { width: COL.tenantCost }]}>${formatMoneyPdf(line.tenantCost)}</Text>
         </View>
       ))}
 
+      {/* Subtotal row. Label spans through the Ten % column (82%) so the
+          tenant $ subtotal lands directly under its column header. */}
       <View style={pdfStyles.subtotalRow} wrap={false}>
-        <Text style={[pdfStyles.subtotalCell, { width: '73%', textAlign: 'right' }]}>Section Subtotal</Text>
-        <Text style={[pdfStyles.subtotalCell, { width: COL.clientCost }]}>${formatMoneyPdf(s.clientTotal)}</Text>
-        <Text style={[pdfStyles.subtotalCell, { width: COL.tenantPct }]}> </Text>
+        <Text style={[pdfStyles.subtotalCell, { width: '88%', textAlign: 'right' }]}>Section Subtotal</Text>
         <Text style={[pdfStyles.subtotalCellTenant, { width: COL.tenantCost }]}>${formatMoneyPdf(s.tenantTotal)}</Text>
       </View>
     </View>

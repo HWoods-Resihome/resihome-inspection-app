@@ -1,6 +1,6 @@
 {
   "name": "resihome-inspection-app",
-  "version": "0.19.37",
+  "version": "0.19.38",
   "private": true,
   "scripts": {
     "dev": "next dev",
