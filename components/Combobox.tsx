@@ -184,6 +184,7 @@ export function Combobox({
           onKeyDown={handleKeyDown}
           placeholder={loading ? 'Loading...' : placeholder}
           disabled={disabled || loading}
+          title={!open && selectedLabel ? selectedLabel : undefined}
           className={inputClasses}
         />
         <button
@@ -232,6 +233,7 @@ export function Combobox({
                     aria-selected={isSelected}
                     onMouseDown={(e) => { e.preventDefault(); handleSelect(opt); }}
                     onMouseEnter={() => setActiveIndex(idx)}
+                    title={opt.sublabel ? `${opt.label}\n\n${opt.sublabel}` : opt.label}
                     className={`px-3 py-2 cursor-pointer text-sm ${
                       isActive ? 'bg-brand/10' : ''
                     } ${isSelected ? 'font-semibold' : ''}`}
@@ -239,6 +241,7 @@ export function Combobox({
                     <div className="text-ink">{opt.label}</div>
                     {opt.sublabel && (
                       <div
+                        title={opt.sublabel}
                         className="text-xs text-gray-500 overflow-hidden"
                         style={{
                           display: '-webkit-box',
