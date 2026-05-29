@@ -960,30 +960,46 @@ export function RateCardForm(props: RateCardFormProps) {
     <div className="max-w-7xl mx-auto p-4 md:pb-24">
       {/* Header */}
       <header className="mb-3">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h1 className="text-xl font-bold text-gray-900">{props.templateLabel}</h1>
-          <span className="text-sm text-gray-700 font-semibold">— {props.propertyName}</span>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h1 className="text-xl font-bold text-gray-900">{props.templateLabel}</h1>
+              <span className="text-sm text-gray-700 font-semibold">— {props.propertyName}</span>
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              Inspector: {props.inspectorName} · {props.bedrooms} bed / {props.bathrooms} bath
+              {props.squareFootage != null && props.squareFootage > 0 && (
+                <span> · {props.squareFootage.toLocaleString()} sqft</span>
+              )}
+              {inspectionRegion && <span> · {inspectionRegion}</span>}
+              {!inspectionRegion && <span className="text-yellow-700"> · fallback (GA: Atlanta)</span>}
+              {statusLabel && (
+                <>
+                  {' · '}
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
+                    {statusLabel.label}
+                  </span>
+                </>
+              )}
+            </div>
+            {props.pdfUrl && (
+              <a href={props.pdfUrl} target="_blank" rel="noopener noreferrer"
+                 className="inline-block mt-2 text-sm text-brand underline">View PDF</a>
+            )}
+          </div>
+
+          {/* Back button — saves any open/pending edits then exits, exactly
+              like Save & Close. Shown for every status (read-only inspections
+              just have nothing to commit, so it exits cleanly). */}
+          <button
+            type="button"
+            onClick={handleSaveAndClose}
+            className="flex-shrink-0 inline-flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-3 py-1.5 bg-white"
+            title="Save and go back"
+          >
+            <span aria-hidden>←</span> Back
+          </button>
         </div>
-        <div className="text-xs text-gray-500 mt-1">
-          Inspector: {props.inspectorName} · {props.bedrooms} bed / {props.bathrooms} bath
-          {props.squareFootage != null && props.squareFootage > 0 && (
-            <span> · {props.squareFootage.toLocaleString()} sqft</span>
-          )}
-          {inspectionRegion && <span> · {inspectionRegion}</span>}
-          {!inspectionRegion && <span className="text-yellow-700"> · fallback (GA: Atlanta)</span>}
-          {statusLabel && (
-            <>
-              {' · '}
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
-                {statusLabel.label}
-              </span>
-            </>
-          )}
-        </div>
-        {props.pdfUrl && (
-          <a href={props.pdfUrl} target="_blank" rel="noopener noreferrer"
-             className="inline-block mt-2 text-sm text-brand underline">View PDF</a>
-        )}
       </header>
 
       {/* Sticky grand-total bar. The 3 money totals on the right use the

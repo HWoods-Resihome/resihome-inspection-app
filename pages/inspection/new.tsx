@@ -102,6 +102,21 @@ export default function NewInspection() {
     [properties, selectedPropertyId]
   );
 
+  // Build the address snapshot stored on the inspection. We compose it from
+  // the property's structured fields (street, city, state, zip) so the zip is
+  // ALWAYS included — relying on the property's freeform `name` was
+  // inconsistent (some names omit the zip). Falls back to name, then a
+  // placeholder, if structured fields are missing.
+  const addressSnapshot = useMemo(() => {
+    const p = selectedProperty;
+    if (!p) return selectedPropertyId ? `(Property ${selectedPropertyId})` : '';
+    const composed = [p.address, p.city, p.state, p.zip]
+      .map((s) => (s || '').trim())
+      .filter(Boolean)
+      .join(', ');
+    return composed || p.name || `(Property ${selectedPropertyId})`;
+  }, [selectedProperty, selectedPropertyId]);
+
   const propertyOptions = useMemo(
     () => properties.map((p) => ({
       value: p.recordId,
@@ -131,7 +146,7 @@ export default function NewInspection() {
       const body = {
         templateType: selectedTemplate,
         propertyRecordId: selectedPropertyId,
-        propertyAddressSnapshot: selectedProperty?.name || `(Property ${selectedPropertyId})`,
+        propertyAddressSnapshot: addressSnapshot,
         inspectorName: sessionUser?.name || '',
         inspectorEmail: sessionUser?.email,
         bedrooms,
@@ -198,7 +213,7 @@ export default function NewInspection() {
       const body = {
         templateType: selectedTemplate,
         propertyRecordId: selectedPropertyId,
-        propertyAddressSnapshot: selectedProperty?.name || `(Property ${selectedPropertyId})`,
+        propertyAddressSnapshot: addressSnapshot,
         inspectorName,
         inspectorEmail,
         bedrooms,
@@ -227,7 +242,7 @@ export default function NewInspection() {
     const payload: SubmitPayload = {
       templateType: selectedTemplate as TemplateType,
       propertyRecordId: selectedPropertyId,
-      propertyAddressSnapshot: selectedProperty?.name || `(Property ${selectedPropertyId})`,
+      propertyAddressSnapshot: addressSnapshot,
       inspectorName: sessionUser?.name || '',
       inspectorEmail: sessionUser?.email || undefined,
       bedrooms: bedrooms || 0,

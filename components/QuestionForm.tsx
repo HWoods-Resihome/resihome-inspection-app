@@ -732,9 +732,30 @@ export function QuestionForm({
               </a>
             )}
           </div>
-          <div className="text-right ml-3 shrink-0">
-            <div className="text-base font-heading font-bold text-brand">{totalCompleted}/{totalQuestions}</div>
-            <div className="text-xs text-gray-500 uppercase tracking-wider">answered</div>
+          <div className="flex items-start gap-3 ml-3 shrink-0">
+            <div className="text-right">
+              <div className="text-base font-heading font-bold text-brand">{totalCompleted}/{totalQuestions}</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider">answered</div>
+            </div>
+            {/* Back button — flushes pending edits (when editable) then exits,
+                same as Save & Close. Shown for every status. */}
+            <button
+              type="button"
+              onClick={async () => {
+                if (!readOnly) {
+                  try {
+                    await autosave.flush(true);
+                  } catch (e) {
+                    console.error('Back: flush failed', e);
+                  }
+                }
+                onCancel();
+              }}
+              className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
+              title="Save and go back"
+            >
+              <span aria-hidden>←</span> Back
+            </button>
           </div>
         </div>
         {/* Save indicator strip */}

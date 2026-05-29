@@ -7,7 +7,7 @@ import { InspectionCard } from '@/components/InspectionCard';
 
 interface MeUser { userId: string; email: string; name: string; }
 
-type StatusFilter = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed' | 'cancelled';
+type StatusFilter = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
 
 export default function Home() {
   const router = useRouter();
@@ -98,16 +98,20 @@ export default function Home() {
     const wantInspector = inspectorFilter; // 'all' or lowercase inspector name
     const wantTemplate = templateFilter; // 'all' or template internal name
     return inspections.filter((i) => {
+      // Cancelled inspections are hidden from the app entirely. They still
+      // exist in HubSpot, but the field team doesn't need to see them here.
+      const statusLower = (i.status || '').trim().toLowerCase();
+      if (statusLower === 'cancelled' || statusLower === 'canceled') return false;
+
       // Search filter (matches against property address)
       if (q && !i.propertyAddressSnapshot.toLowerCase().includes(q)) return false;
       // Status filter
       if (wantStatus !== 'all') {
-        const s = (i.status || '').trim().toLowerCase();
+        const s = statusLower;
         if (wantStatus === 'scheduled' && s !== 'scheduled') return false;
         if (wantStatus === 'in_progress' && !(s === 'in progress' || s === 'in-progress' || s === 'in_progress')) return false;
         if (wantStatus === 'pending_approval' && !(s === 'pending approval' || s === 'pending-approval' || s === 'pending_approval' || s === 'pendingapproval')) return false;
         if (wantStatus === 'completed' && !(s === 'completed' || s === 'complete' || s === 'submitted')) return false;
-        if (wantStatus === 'cancelled' && !(s === 'cancelled' || s === 'canceled')) return false;
       }
       // Inspector filter (case-insensitive name match)
       if (wantInspector !== 'all') {
@@ -149,16 +153,18 @@ export default function Home() {
     return copy;
   }, [filtered, sortDir]);
 
-  // Count by status for filter chips
+  // Count by status for filter chips. Cancelled inspections are excluded
+  // from the app, so they don't count toward any chip (including "All").
   const counts = useMemo(() => {
-    const c = { all: inspections.length, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0, cancelled: 0 };
+    const c = { all: 0, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0 };
     for (const i of inspections) {
       const s = (i.status || '').trim().toLowerCase();
+      if (s === 'cancelled' || s === 'canceled') continue; // hidden everywhere
+      c.all++;
       if (s === 'scheduled') c.scheduled++;
       else if (s === 'in progress' || s === 'in-progress' || s === 'in_progress') c.in_progress++;
       else if (s === 'pending approval' || s === 'pending-approval' || s === 'pending_approval' || s === 'pendingapproval') c.pending_approval++;
       else if (s === 'completed' || s === 'complete' || s === 'submitted') c.completed++;
-      else if (s === 'cancelled' || s === 'canceled') c.cancelled++;
     }
     return c;
   }, [inspections]);
@@ -281,9 +287,6 @@ export default function Home() {
             <FilterChip label={`In Progress (${counts.in_progress})`} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter('in_progress')} />
             <FilterChip label={`Pending Approval (${counts.pending_approval})`} active={statusFilter === 'pending_approval'} onClick={() => setStatusFilter('pending_approval')} />
             <FilterChip label={`Completed (${counts.completed})`} active={statusFilter === 'completed'} onClick={() => setStatusFilter('completed')} />
-            {counts.cancelled > 0 && (
-              <FilterChip label={`Cancelled (${counts.cancelled})`} active={statusFilter === 'cancelled'} onClick={() => setStatusFilter('cancelled')} />
-            )}
           </div>
 
           {/* Filter controls row: inspector dropdown | template dropdown | date sort.
