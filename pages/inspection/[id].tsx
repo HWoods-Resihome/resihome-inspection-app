@@ -9,13 +9,15 @@ import { QuestionForm } from '@/components/QuestionForm';
 import { RateCardForm } from '@/components/RateCardForm';
 
 const TEMPLATE_LABELS: Record<string, string> = {
-  pm_scope_inspection: '(PM) Scope Inspection',
   pm_scope_rate_card: '(PM) Scope Rate Card',
-  pm_turn_inspection: '(PM) Turn Inspection',
   pm_community_inspection: '(PM) Community / Visit Inspection',
   pm_vacancy_occupancy_check: '(PM) Vacancy / Occupancy Check',
   qc_new_construction_rrqc: '(QC) New Construction RRQC',
   leasing_agent_1099_property_inspection: '1099 Leasing Agent Property Inspection',
+  // Legacy templates — retired from new inspections (replaced by Rate Card),
+  // but kept here so historical completed records still show a friendly label.
+  pm_scope_inspection: '(PM) Scope Inspection',
+  pm_turn_inspection: '(PM) Turn Inspection',
 };
 
 type Stage = 'loading' | 'loading_questions' | 'form' | 'submitting' | 'generating_pdf' | 'done' | 'error';

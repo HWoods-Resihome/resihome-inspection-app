@@ -11,8 +11,6 @@ export type ResponseType =
   | 'signature';
 
 export type TemplateType =
-  | 'pm_scope_inspection'
-  | 'pm_turn_inspection'
   | 'pm_community_inspection'
   | 'pm_vacancy_occupancy_check'
   | 'qc_new_construction_rrqc'

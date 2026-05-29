@@ -19,9 +19,7 @@ function defaultScheduledDate(): string {
 }
 
 const TEMPLATE_OPTIONS: { value: TemplateType; label: string; sublabel: string }[] = [
-  { value: 'pm_scope_inspection',                       label: '(PM) Scope Inspection',                sublabel: 'Move-out scope; full property review' },
   { value: 'pm_scope_rate_card',                        label: '(PM) Scope Rate Card',                 sublabel: 'Priced line items; tenant chargebacks + vendor bids' },
-  { value: 'pm_turn_inspection',                        label: '(PM) Turn Inspection',                 sublabel: 'Move-in readiness check after turn work' },
   { value: 'pm_community_inspection',                   label: '(PM) Community / Visit Inspection',    sublabel: 'Community grounds, amenities, signage' },
   { value: 'pm_vacancy_occupancy_check',                label: '(PM) Vacancy / Occupancy Check',       sublabel: 'Quick visit to confirm vacancy/security' },
   { value: 'qc_new_construction_rrqc',                  label: '(QC) New Construction RRQC',           sublabel: 'Rent-ready QC for new construction' },

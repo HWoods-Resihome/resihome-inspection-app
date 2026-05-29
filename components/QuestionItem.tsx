@@ -18,7 +18,7 @@ type Props = {
 
 export function QuestionItem({ question, answer, templateType, onUpdate, uploadPhoto }: Props) {
   const triggered = !!answer.answerValue && question.noteRequiredOnValues.includes(answer.answerValue);
-  const isScope = templateType === 'pm_scope_inspection';
+  const isScope = (templateType as string) === 'pm_scope_inspection';
 
   // Underline required questions that don't have a default answer
   const needsUnderline = question.isRequired && !question.defaultValue;

@@ -357,7 +357,7 @@ export function QuestionForm({
   // Non-Scope: keep prior behavior -- everything open except repeating bedroom/bathroom instances 2..N + Half Bath.
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     const c = new Set<string>();
-    if (templateType === 'pm_scope_inspection') {
+    if ((templateType as string) === 'pm_scope_inspection') {
       // Collapse everything except the first instance in render order
       for (let i = 0; i < sectionInstances.length; i++) {
         if (i === 0) continue;
@@ -602,7 +602,7 @@ export function QuestionForm({
               instanceKey: inst.instanceKey,
             };
           }
-          if (templateType === 'pm_scope_inspection') {
+          if ((templateType as string) === 'pm_scope_inspection') {
             if (a.quantity == null || Number.isNaN(a.quantity)) {
               return {
                 message: `Quantity required: ${locTag}${q.questionText} (Scope)`,
