@@ -462,20 +462,21 @@ export function EditableLineRow(props: Props) {
       <td className="px-2 py-1.5 text-right text-sm text-gray-700 align-middle whitespace-nowrap">
         {calc ? `$${formatMoney(roundMoney(calc.clientCost))}` : '—'}
       </td>
-      {/* Tenant % — uses Combobox (not native <select>) so the panel always
-          opens downward. Native <select> auto-flips upward when near the
-          bottom of the viewport, which felt inconsistent with the other
-          dropdowns on desktop. Wrapped in a fixed-width container so the
-          column doesn't bloat — values are at most 4 chars ("100%"). */}
+      {/* Tenant % — native <select> dropdown (matches Category/Sub). A plain
+          picker is cleaner on mobile than a typeable combobox: tapping opens
+          the OS picker with the fixed 0–100% list, no keyboard. Fixed-width so
+          the column doesn't bloat (values are at most 4 chars, "100%"). */}
       <td className="px-2 py-1.5 text-center align-middle">
         <div className="w-[72px] mx-auto">
-          <Combobox
-            compact
-            options={TENANT_PCT_OPTIONS.map((p) => ({ value: String(p), label: `${p}%` }))}
+          <select
             value={String(tenantPct)}
-            onChange={(v) => setTenantPct(Number(v))}
-            placeholder="%"
-          />
+            onChange={(e) => setTenantPct(Number(e.target.value))}
+            className="h-9 w-full border border-gray-300 rounded px-1 text-sm bg-white text-center"
+          >
+            {TENANT_PCT_OPTIONS.map((p) => (
+              <option key={p} value={String(p)}>{p}%</option>
+            ))}
+          </select>
         </div>
       </td>
       {/* Tenant $ — computed display */}

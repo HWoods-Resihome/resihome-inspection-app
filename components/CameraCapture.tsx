@@ -53,6 +53,11 @@ export function CameraCapture({
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
   const [busy, setBusy] = useState(false);
+  // Flash / torch. Only supported on some devices (typically Android Chrome,
+  // back camera). torchSupported gates the button so we don't show a control
+  // that does nothing (e.g. iOS Safari, front camera).
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
 
   // ----- Camera lifecycle -----
 
@@ -90,6 +95,17 @@ export function CameraCapture({
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => { /* play() may reject silently if autoplay is blocked; not fatal */ });
+      }
+      // Detect torch/flash support on the active video track. Not all devices
+      // or browsers expose this (iOS Safari doesn't; front cameras usually
+      // don't). Start with torch OFF on every fresh stream.
+      setTorchOn(false);
+      try {
+        const track = stream.getVideoTracks()[0];
+        const caps = (track?.getCapabilities?.() as any) || {};
+        setTorchSupported(!!caps.torch);
+      } catch {
+        setTorchSupported(false);
       }
       setPermissionState('granted');
       setPermissionError('');
@@ -293,6 +309,22 @@ export function CameraCapture({
     // useEffect on [facing] will restart the stream
   }, []);
 
+  const toggleTorch = useCallback(async () => {
+    const track = streamRef.current?.getVideoTracks?.()[0];
+    if (!track) return;
+    const next = !torchOn;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: next } as any] });
+      setTorchOn(next);
+    } catch (e) {
+      // Some devices report torch capability but reject applying it. Disable
+      // the control so the user isn't left with a button that does nothing.
+      console.warn('[CameraCapture] torch toggle failed:', e);
+      setTorchSupported(false);
+      setTorchOn(false);
+    }
+  }, [torchOn]);
+
   // ----- Render -----
 
   if (!isOpen) return null;
@@ -377,6 +409,25 @@ export function CameraCapture({
                 <polyline points="3 21 3 16 8 16" />
               </svg>
             </button>
+            {/* Flash / torch toggle — only shown when the device supports it */}
+            {torchSupported && (
+              <button
+                type="button"
+                onClick={toggleTorch}
+                className={
+                  'absolute top-3 right-16 w-10 h-10 rounded-full flex items-center justify-center transition ' +
+                  (torchOn ? 'bg-amber-400 text-black' : 'bg-black/50 text-white')
+                }
+                aria-label={torchOn ? 'Turn flash off' : 'Turn flash on'}
+                aria-pressed={torchOn}
+                title={torchOn ? 'Flash on (tap to turn off)' : 'Flash off (tap to turn on)'}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill={torchOn ? 'currentColor' : 'none'}
+                     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                </svg>
+              </button>
+            )}
           </>
         )}
       </div>
