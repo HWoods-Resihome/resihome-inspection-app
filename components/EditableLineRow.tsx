@@ -279,6 +279,12 @@ export function EditableLineRow(props: Props) {
   // -------------------------------------------------------------------
   useEffect(() => {
     if (!isEditing) return;
+    // The mobile modal is a fixed overlay rendered OUTSIDE rowRef's DOM subtree
+    // and has its own explicit Cancel / Save buttons. The outside-click-to-save
+    // and Enter/Escape handling below are desktop-inline-row affordances; on
+    // mobile they would misfire (every tap on the modal looks like an "outside"
+    // click and would dismiss the editor). So skip them entirely on mobile.
+    if (mobile) return;
     function handleMouseDown(e: MouseEvent) {
       const target = e.target as HTMLElement | null;
       if (!target) return;
@@ -323,7 +329,7 @@ export function EditableLineRow(props: Props) {
       window.removeEventListener('ratecard:commit-all', handleCommitAll as EventListener);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing, isComplete, selectedItem, quantityNum, tenantPct, vendor, customVendorCost, lineItemCode, category, subcategory]);
+  }, [isEditing, mobile, isComplete, selectedItem, quantityNum, tenantPct, vendor, customVendorCost, lineItemCode, category, subcategory]);
 
   // -------------------------------------------------------------------
   // Render — VIEW mode
