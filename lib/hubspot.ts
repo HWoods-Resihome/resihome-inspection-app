@@ -734,28 +734,8 @@ export async function attachFilesToInspectionRecord(
   if (ids.length === 0) return null;
   const tids = typeIds();
   try {
-    // 1) Resolve the default note -> inspection association type id.
-    let assocTypeId: number | null = null;
-    try {
-      const labels = await hubspotFetch(
-        `/crm/associations/${HUBSPOT_API_VERSION}/notes/${tids.inspection}/labels`
-      );
-      const first = (labels.results || [])[0];
-      if (first && (first.typeId ?? first.associationTypeId) != null) {
-        assocTypeId = Number(first.typeId ?? first.associationTypeId);
-      }
-    } catch (e) {
-      console.warn('[attachFiles] could not resolve note->inspection association type:', e);
-    }
-
-    // 2) Create the Note with the files attached, associating to the inspection.
-    const associations = assocTypeId != null
-      ? [{
-          to: { id: inspectionRecordId },
-          types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: assocTypeId }],
-        }]
-      : [];
-
+    // 1) Create the Note carrying the file attachments (no association yet).
+    //    hs_attachment_ids is a semicolon-delimited list of File IDs.
     const created = await hubspotFetch(`/crm/v3/objects/notes`, {
       method: 'POST',
       body: JSON.stringify({
@@ -764,25 +744,54 @@ export async function attachFilesToInspectionRecord(
           hs_note_body: noteBody,
           hs_attachment_ids: ids.join(';'),
         },
-        associations,
       }),
     });
-
     const noteId = String(created?.id || '');
+    if (!noteId) {
+      console.warn('[attachFiles] note creation returned no id');
+      return null;
+    }
 
-    // 3) If we couldn't resolve the association type up front, associate the
-    //    note to the inspection in a follow-up call using the default endpoint.
-    if (noteId && associations.length === 0) {
+    // 2) Resolve the note -> inspection association type id, then create the
+    //    association using the SAME proven machinery the rest of the app uses
+    //    (assocLabelsUrl + batchCreateAssociations). This is what makes the
+    //    files show on the record's Attachments card.
+    let associated = false;
+    try {
+      const labels = await hubspotFetch(assocLabelsUrl('notes', tids.inspection));
+      const first = (labels.results || [])[0];
+      const assocTypeId = first ? Number(first.typeId ?? first.associationTypeId) : NaN;
+      if (Number.isFinite(assocTypeId)) {
+        const r = await batchCreateAssociations('notes', tids.inspection, assocTypeId, [
+          { fromId: noteId, toId: inspectionRecordId },
+        ]);
+        associated = r.ok > 0;
+        if (!associated) console.warn('[attachFiles] association batch reported 0 ok', JSON.stringify(r));
+      } else {
+        console.warn('[attachFiles] no note->inspection association label found');
+      }
+    } catch (e) {
+      console.warn('[attachFiles] association via labels failed:', e);
+    }
+
+    // 3) Fallback: the v4 "default" association endpoint, which creates the
+    //    primary/unlabeled association without needing a resolved type id.
+    if (!associated) {
       try {
         await hubspotFetch(
           `/crm/v4/objects/notes/${noteId}/associations/default/${tids.inspection}/${inspectionRecordId}`,
           { method: 'PUT' }
         );
+        associated = true;
       } catch (e) {
-        console.warn('[attachFiles] default association fallback failed:', e);
+        console.warn('[attachFiles] v4 default association fallback failed:', e);
       }
     }
-    return noteId || null;
+
+    if (!associated) {
+      console.warn(`[attachFiles] note ${noteId} created but could NOT be associated to inspection ${inspectionRecordId}; it will not show on the record.`);
+    }
+    return noteId;
   } catch (e) {
     console.warn('[attachFiles] failed (non-fatal):', e);
     return null;

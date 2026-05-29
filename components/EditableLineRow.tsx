@@ -493,32 +493,35 @@ export function EditableLineRow(props: Props) {
 
                 {/* Totals row: Vendor $ (editable, with pencil) · Client $ · Tenant $.
                     Vendor $ is blank to use the formula; type to override. */}
-                <div className="grid grid-cols-3 gap-3 bg-gray-50 rounded-lg p-3">
-                  <div>
-                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                <div className="grid grid-cols-3 gap-3 bg-gray-50 rounded-lg p-3 text-center">
+                  <div className="flex flex-col items-center">
+                    <div className="text-xs font-bold text-gray-700 flex items-center justify-center gap-1 border-b-2 border-brand pb-0.5 mb-1">
                       Vendor $
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400" aria-hidden>
                         <path d="M12 20h9" />
                         <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
                       </svg>
                     </div>
-                    <input
-                      type="number" step="0.01" min="0" inputMode="decimal"
-                      value={customVendorCost}
-                      onChange={(e) => setCustomVendorCost(e.target.value)}
-                      placeholder={calc && !calc.isCustomPriced ? formatMoney(roundMoney(calc.vendorCost)) : '0.00'}
-                      className="no-spinner w-full bg-transparent border-0 border-b border-dashed border-gray-300 focus:border-brand focus:ring-0 px-0 py-0.5 text-base font-semibold text-gray-800"
-                      title="Leave blank to use the formula; type a number to override"
-                      aria-label="Vendor dollar amount (editable)"
-                    />
+                    <div className="inline-flex items-baseline justify-center">
+                      <span className="text-base font-semibold text-gray-800">$</span>
+                      <input
+                        type="number" step="0.01" min="0" inputMode="decimal"
+                        value={customVendorCost}
+                        onChange={(e) => setCustomVendorCost(e.target.value)}
+                        placeholder={calc && !calc.isCustomPriced ? formatMoney(roundMoney(calc.vendorCost)) : '0.00'}
+                        className="no-spinner bg-transparent border-0 focus:ring-0 p-0 text-base font-semibold text-gray-800 text-center w-16"
+                        title="Leave blank to use the formula; type a number to override"
+                        aria-label="Vendor dollar amount (editable)"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs text-gray-500">Client $</div>
-                    <div className="font-semibold text-gray-800 py-0.5">{calc ? `$${formatMoney(roundMoney(calc.clientCost))}` : '—'}</div>
+                  <div className="flex flex-col items-center">
+                    <div className="text-xs font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1">Client $</div>
+                    <div className="text-base font-semibold text-gray-800">{calc ? `$${formatMoney(roundMoney(calc.clientCost))}` : '—'}</div>
                   </div>
-                  <div>
-                    <div className="text-xs text-gray-500">Tenant $</div>
-                    <div className="font-semibold text-brand py-0.5">{calc ? `$${formatMoney(roundMoney(calc.tenantCost))}` : '—'}</div>
+                  <div className="flex flex-col items-center">
+                    <div className="text-xs font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1">Tenant $</div>
+                    <div className="text-base font-semibold text-brand">{calc ? `$${formatMoney(roundMoney(calc.tenantCost))}` : '—'}</div>
                   </div>
                 </div>
               </div>
