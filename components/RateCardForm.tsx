@@ -544,20 +544,9 @@ export function RateCardForm(props: RateCardFormProps) {
   }
 
   async function handleDeleteSection(sectionId: string, skipConfirm = false) {
+    void skipConfirm; // kept for call-site compatibility; deletion is now immediate (no confirm)
     const section = sections.find((s) => s.id === sectionId);
     if (!section) return;
-    const lineCount = (linesBySection[sectionId] || []).length;
-    const photoCount = (photosBySection[sectionId] || []).length;
-    // The Manage Sections modal passes skipConfirm=true since clicking the X
-    // there is already an explicit per-row action; double-confirming is annoying.
-    // The section card on the main form keeps the confirm because the X is small
-    // and could be mis-tapped.
-    if (!skipConfirm) {
-      const msg = lineCount + photoCount > 0
-        ? `Delete "${section.displayName}"? This will also remove ${lineCount} saved line${lineCount === 1 ? '' : 's'}${lineCount && photoCount ? ' and ' : ''}${photoCount ? `${photoCount} section photo${photoCount === 1 ? '' : 's'}` : ''}.`
-        : `Delete "${section.displayName}"?`;
-      if (!window.confirm(msg)) return;
-    }
 
     // Cascade: archive every saved line + section photo for this section.
     const lines = linesBySection[sectionId] || [];

@@ -111,6 +111,9 @@ export function Combobox({
     onChange(opt.value);
     setOpen(false);
     setQuery('');
+    // Dismiss the on-screen keyboard on mobile after a selection — otherwise
+    // the search input stays focused and the keyboard covers the form.
+    inputRef.current?.blur();
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

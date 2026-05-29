@@ -224,7 +224,7 @@ export function SectionsManager(props: Props) {
           <button
             type="button"
             onClick={props.onClose}
-            className="px-4 py-2 text-sm bg-gray-100 rounded hover:bg-gray-200 text-gray-700"
+            className="px-5 py-2 text-sm bg-brand text-white font-heading font-semibold rounded hover:bg-brand-dark"
           >
             Done
           </button>
