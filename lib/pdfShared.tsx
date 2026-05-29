@@ -32,6 +32,7 @@ export const PDF_COLORS = {
   grayBg: '#f9fafb',
   white: '#ffffff',
   emerald: '#059669',
+  teal: '#0d9488',
 };
 
 // No-op for backwards-compat. No external font registration.

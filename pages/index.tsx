@@ -28,6 +28,11 @@ export default function Home() {
   // Filter by template internal name. 'all' = no filter.
   const [templateFilter, setTemplateFilter] = useState<string>('all');
 
+  // Bulk-select mode + selection set + busy flag for the cancel action.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [cancelBusy, setCancelBusy] = useState(false);
+
   useEffect(() => {
     const img = new window.Image();
     img.onload = () => setHasLogo(true);
@@ -168,6 +173,76 @@ export default function Home() {
     }
     return c;
   }, [inspections]);
+
+  // ---- Bulk-select helpers ----
+  // A card is selectable for cancellation unless it's completed.
+  function isSelectable(i: InspectionSummary): boolean {
+    const s = (i.status || '').trim().toLowerCase();
+    return !(s === 'completed' || s === 'complete' || s === 'submitted');
+  }
+
+  function toggleSelect(recordId: string) {
+    setSelectedIds((cur) => {
+      const next = new Set(cur);
+      if (next.has(recordId)) next.delete(recordId); else next.add(recordId);
+      return next;
+    });
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+
+  // Select / clear all currently-visible selectable inspections.
+  const selectableVisible = useMemo(
+    () => sorted.filter(isSelectable),
+    [sorted]
+  );
+  const allVisibleSelected = selectableVisible.length > 0
+    && selectableVisible.every((i) => selectedIds.has(i.recordId));
+
+  function toggleSelectAll() {
+    setSelectedIds((cur) => {
+      if (allVisibleSelected) {
+        // Deselect the visible ones
+        const next = new Set(cur);
+        for (const i of selectableVisible) next.delete(i.recordId);
+        return next;
+      }
+      const next = new Set(cur);
+      for (const i of selectableVisible) next.add(i.recordId);
+      return next;
+    });
+  }
+
+  async function handleBulkCancel() {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    if (!confirm(`Move ${ids.length} inspection${ids.length === 1 ? '' : 's'} to Cancelled? This can't be undone from here.`)) return;
+    setCancelBusy(true);
+    try {
+      const r = await fetch('/api/inspections/bulk-cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      const data = await r.json();
+      if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
+      exitSelectMode();
+      // Refresh; HubSpot's index can lag so give it a beat.
+      await fetchInspections();
+      setTimeout(() => { fetchInspections(); }, 1200);
+      const skippedCompleted = (data.skipped || []).filter((s: any) => s.reason === 'completed').length;
+      if (skippedCompleted > 0) {
+        alert(`${data.cancelled.length} cancelled. ${skippedCompleted} completed inspection${skippedCompleted === 1 ? ' was' : 's were'} skipped (completed inspections can't be cancelled).`);
+      }
+    } catch (e: any) {
+      alert(`Could not cancel: ${e.message || e}`);
+    } finally {
+      setCancelBusy(false);
+    }
+  }
 
   // Derive inspector dropdown options from the loaded inspections.
   // Each option: { value: lowercase name (filter key), label: original-case display name, count }
@@ -385,10 +460,59 @@ export default function Home() {
             )}
           </div>
 
-          <div className="text-xs text-gray-500 font-heading mb-3">
-            {loading ? 'Loading...' : `${sorted.length} of ${inspections.length} inspection${inspections.length === 1 ? '' : 's'}`}
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="text-xs text-gray-500 font-heading">
+              {loading ? 'Loading...' : `${sorted.length} of ${inspections.length} inspection${inspections.length === 1 ? '' : 's'}`}
+            </div>
+            {!loading && !error && inspections.length > 0 && (
+              selectMode ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={toggleSelectAll}
+                    className="text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 underline"
+                  >
+                    {allVisibleSelected ? 'Clear all' : 'Select all'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exitSelectMode}
+                    className="text-xs font-heading font-semibold text-gray-500 hover:text-gray-700"
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setSelectMode(true)}
+                  className="text-xs font-heading font-semibold text-brand hover:underline"
+                >
+                  Select
+                </button>
+              )
+            )}
           </div>
         </div>
+
+        {/* Bulk action bar (sticky) — only in select mode */}
+        {selectMode && (
+          <div className="sticky top-0 z-20 bg-white border-y border-gray-200 shadow-sm">
+            <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
+              <span className="text-sm font-heading font-semibold text-gray-700">
+                {selectedIds.size} selected
+              </span>
+              <button
+                type="button"
+                onClick={handleBulkCancel}
+                disabled={selectedIds.size === 0 || cancelBusy}
+                className="text-sm font-heading font-semibold text-white bg-brand hover:bg-brand-dark rounded-lg px-4 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {cancelBusy ? 'Cancelling...' : 'Move to Cancelled'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Inspection list */}
         <div className="max-w-3xl mx-auto px-4 pb-12">
@@ -413,7 +537,14 @@ export default function Home() {
             </div>
           )}
           {sorted.map((i) => (
-            <InspectionCard key={i.recordId} inspection={i} />
+            <InspectionCard
+              key={i.recordId}
+              inspection={i}
+              selectMode={selectMode}
+              selected={selectedIds.has(i.recordId)}
+              selectable={isSelectable(i)}
+              onToggleSelect={toggleSelect}
+            />
           ))}
         </div>
       </main>

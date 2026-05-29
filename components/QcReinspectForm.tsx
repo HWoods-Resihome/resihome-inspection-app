@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
 import { CameraCapture } from '@/components/CameraCapture';
+import { vendorPillStyle } from '@/lib/vendors';
 
 interface QcLine {
   recordId: string;
@@ -407,9 +408,14 @@ export function QcReinspectForm(props: Props) {
                           <td className="px-3 py-2.5 text-center text-gray-600">{ln.unit}</td>
                           <td className="px-3 py-2.5 text-center text-gray-600">{ln.quantity != null ? ln.quantity : ''}</td>
                           <td className="px-3 py-2.5 text-center">
-                            {ln.vendor && (
-                              <span className="inline-block bg-sky-100 text-sky-800 rounded-full px-2 py-0.5 text-xs font-semibold whitespace-nowrap">{ln.vendor}</span>
-                            )}
+                            {ln.vendor && (() => {
+                              const ps = vendorPillStyle(ln.vendor);
+                              return (
+                                <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold whitespace-nowrap ${ps.bg} ${ps.text} ${ps.border || ''}`}>
+                                  {ln.vendor}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td className="px-3 py-2.5 text-right text-gray-900 whitespace-nowrap">{ln.vendorCost != null ? `$${formatMoney(ln.vendorCost)}` : ''}</td>
                           <td className="px-3 py-2.5">

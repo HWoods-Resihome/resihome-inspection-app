@@ -4,6 +4,12 @@ import { StatusBadge } from './StatusBadge';
 
 interface Props {
   inspection: InspectionSummary;
+  // Bulk-select mode (home page). When selectMode is true the card shows a
+  // checkbox and tapping toggles selection instead of navigating.
+  selectMode?: boolean;
+  selected?: boolean;
+  selectable?: boolean;   // false for completed inspections (can't be cancelled)
+  onToggleSelect?: (recordId: string) => void;
 }
 
 // Derive the most meaningful date to show on the card.
@@ -25,19 +31,37 @@ function effectiveDate(i: InspectionSummary): string {
 }
 
 // Pretty template type: "pm_scope_inspection" -> "PM Scope"
+// Known templates use a canonical short label; unknown ones fall back to the
+// generated form. Keeps acronyms (QC) and hyphenation (Re-Inspect) correct.
+const SHORT_LABELS: Record<string, string> = {
+  pm_scope_rate_card: 'Scope Rate Card',
+  pm_turn_reinspect_qc: 'Turn Re-Inspect QC',
+  pm_community_inspection: 'Community',
+  pm_vacancy_occupancy_check: 'Vacancy / Occupancy Check',
+  qc_new_construction_rrqc: 'QC New Construction',
+  leasing_agent_1099_property_inspection: 'Leasing Agent 1099 Property',
+  pm_scope_inspection: 'Scope',
+  pm_turn_inspection: 'Turn',
+};
+const ACRONYMS = new Set(['QC', 'PM', 'RRQC', '1099']);
 function prettyTemplate(t: string): string {
   if (!t) return '';
+  if (SHORT_LABELS[t]) return SHORT_LABELS[t];
   return t
     .replace(/^pm_/, '')
     .replace(/^qc_/, 'QC ')
     .replace(/_inspection$/, '')
     .replace(/_/g, ' ')
     .split(' ')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .map((w) => {
+      const up = w.toUpperCase();
+      if (ACRONYMS.has(up)) return up;
+      return w.split('-').map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join('-');
+    })
     .join(' ');
 }
 
-export function InspectionCard({ inspection: i }: Props) {
+export function InspectionCard({ inspection: i, selectMode, selected, selectable, onToggleSelect }: Props) {
   const date = effectiveDate(i);
   const tmpl = prettyTemplate(i.templateType);
 
@@ -46,11 +70,8 @@ export function InspectionCard({ inspection: i }: Props) {
   // total_questions_answered is set at submit, so it's only meaningful for Completed/In Progress.
   const hasProgress = i.totalQuestionsAnswered != null && i.totalQuestionsAnswered > 0;
 
-  return (
-    <Link
-      href={`/inspection/${i.recordId}`}
-      className="block bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm hover:border-brand/40 hover:shadow-md transition active:scale-[0.995]"
-    >
+  const inner = (
+    <>
       <div className="flex items-start justify-between gap-3 mb-1.5">
         <h3 className="font-heading font-bold text-base text-ink truncate flex-1">
           {i.propertyAddressSnapshot || i.inspectionName}
@@ -77,6 +98,44 @@ export function InspectionCard({ inspection: i }: Props) {
           </div>
         </div>
       )}
+    </>
+  );
+
+  // ---- Select mode: render as a togglable row (not a link) ----
+  if (selectMode) {
+    const canSelect = selectable !== false;
+    return (
+      <div
+        onClick={() => canSelect && onToggleSelect?.(i.recordId)}
+        className={
+          'flex items-start gap-3 bg-white border rounded-xl p-4 mb-3 shadow-sm transition ' +
+          (canSelect ? 'cursor-pointer ' : 'opacity-60 cursor-not-allowed ') +
+          (selected ? 'border-brand ring-1 ring-brand/40' : 'border-gray-200')
+        }
+        title={canSelect ? undefined : 'Completed inspections cannot be cancelled'}
+      >
+        <div className="pt-0.5 shrink-0">
+          <input
+            type="checkbox"
+            checked={!!selected}
+            disabled={!canSelect}
+            onChange={() => canSelect && onToggleSelect?.(i.recordId)}
+            onClick={(e) => e.stopPropagation()}
+            className="w-5 h-5 accent-brand cursor-pointer disabled:cursor-not-allowed"
+          />
+        </div>
+        <div className="min-w-0 flex-1">{inner}</div>
+      </div>
+    );
+  }
+
+  // ---- Normal mode: navigate to the inspection ----
+  return (
+    <Link
+      href={`/inspection/${i.recordId}`}
+      className="block bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm hover:border-brand/40 hover:shadow-md transition active:scale-[0.995]"
+    >
+      {inner}
     </Link>
   );
 }

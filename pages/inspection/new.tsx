@@ -510,7 +510,7 @@ export default function NewInspection() {
               {isQcTemplate && (
                 <div>
                   <label className="block text-sm font-heading font-semibold text-ink mb-1.5">
-                    Scope Rate Card to validate
+                    Scope Rate Card to Validate
                   </label>
                   {!selectedPropertyId ? (
                     <div className="text-sm text-gray-400 border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5">

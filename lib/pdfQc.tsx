@@ -149,7 +149,7 @@ function QcSection({ section: s }: { section: QcPdfSection }) {
     <View>
       {/* Section header (title + counts) kept with the first content as an
           atomic block so it doesn't strand at a page bottom. */}
-      <View wrap={false} style={{ marginTop: 8 }}>
+      <View wrap={false} style={{ marginTop: 10 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
                        borderBottomWidth: 1, borderBottomColor: PDF_COLORS.brand, paddingBottom: 2, marginBottom: 4 }}>
           <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 10, color: PDF_COLORS.ink }}>{s.displayName}</Text>
@@ -160,21 +160,19 @@ function QcSection({ section: s }: { section: QcPdfSection }) {
           </Text>
         </View>
 
-        {/* Before / After photo groups */}
-        {(s.beforePhotos.length > 0 || s.afterPhotos.length > 0) && (
-          <View style={{ flexDirection: 'row', gap: 16, marginBottom: 4 }}>
-            {s.beforePhotos.length > 0 && (
-              <View>
-                <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 7, color: PDF_COLORS.gray, textTransform: 'uppercase', marginBottom: 2 }}>Before</Text>
-                <PdfSectionPhotos photoUrls={s.beforePhotos} />
-              </View>
-            )}
-            {s.afterPhotos.length > 0 && (
-              <View>
-                <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 7, color: PDF_COLORS.gray, textTransform: 'uppercase', marginBottom: 2 }}>After</Text>
-                <PdfSectionPhotos photoUrls={s.afterPhotos} />
-              </View>
-            )}
+        {/* Before photos — full-width labeled block (same grid as Rate Card) */}
+        {s.beforePhotos.length > 0 && (
+          <View style={{ marginBottom: 2 }}>
+            <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 8, color: PDF_COLORS.gray, textTransform: 'uppercase', letterSpacing: 0.5 }}>Before</Text>
+            <PdfSectionPhotos photoUrls={s.beforePhotos} />
+          </View>
+        )}
+
+        {/* After photos — full-width labeled block, teal label to distinguish */}
+        {s.afterPhotos.length > 0 && (
+          <View style={{ marginBottom: 2 }}>
+            <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 8, color: PDF_COLORS.teal, textTransform: 'uppercase', letterSpacing: 0.5 }}>After</Text>
+            <PdfSectionPhotos photoUrls={s.afterPhotos} />
           </View>
         )}
       </View>
