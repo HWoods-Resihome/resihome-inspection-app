@@ -355,6 +355,9 @@ export function QuestionForm({
   // Collapsed state.
   // Scope: every section EXCEPT the first instance starts collapsed (Hayden's request for Scope).
   // Non-Scope: keep prior behavior -- everything open except repeating bedroom/bathroom instances 2..N + Half Bath.
+  // Per-section collapse of the photo strip.
+  const [photosCollapsed, setPhotosCollapsed] = useState<Record<string, boolean>>({});
+
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     const c = new Set<string>();
     if ((templateType as string) === 'pm_scope_inspection') {
@@ -827,12 +830,19 @@ export function QuestionForm({
                   <div className={`px-3 py-2 ${photosMissing ? 'bg-amber-50' : 'bg-gray-50'}`}>
                     <div className="flex items-center justify-between gap-3 flex-wrap">
                       <div className="flex items-baseline gap-2 min-w-0">
-                        <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap">
-                          Section Photos
-                          {photosRequired
-                            ? <span className="text-brand ml-1">*</span>
-                            : <span className="text-gray-400 normal-case font-normal ml-1">(optional)</span>}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPhotosCollapsed((c) => ({ ...c, [inst.instanceKey]: !c[inst.instanceKey] }))}
+                          className="flex items-baseline gap-1.5 min-w-0"
+                        >
+                          <span className={`text-gray-400 text-[10px] self-center transition-transform ${photosCollapsed[inst.instanceKey] ? '' : 'rotate-90'}`}>&#9654;</span>
+                          <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap">
+                            Section Photos
+                            {photosRequired
+                              ? <span className="text-brand ml-1">*</span>
+                              : <span className="text-gray-400 normal-case font-normal ml-1">(optional)</span>}
+                          </span>
+                        </button>
                         {photosMissing && uploadingSection?.instanceKey !== inst.instanceKey && (
                           <span className="text-xs text-amber-800 font-semibold">at least 1 required</span>
                         )}
@@ -881,12 +891,14 @@ export function QuestionForm({
                         </div>
                       )}
                     </div>
-                    {sectionPhotoUrls.length > 0 && (
-                      <div className="grid grid-cols-6 sm:grid-cols-8 gap-1 mt-2">
+                    {sectionPhotoUrls.length > 0 && !photosCollapsed[inst.instanceKey] && (
+                      <div className="flex gap-1.5 overflow-x-auto pb-1 mt-2 -mx-0.5 px-0.5">
                         {sectionPhotoUrls.map((url, idx) => (
-                          <div key={idx} className="relative">
+                          <div key={idx} className="relative shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={url} alt="" className="w-full h-12 object-cover rounded" />
+                            <a href={url} target="_blank" rel="noopener noreferrer">
+                              <img src={url} alt="" className="w-16 h-16 object-cover rounded border border-gray-200" />
+                            </a>
                             {!readOnly && (
                               <button
                                 type="button"

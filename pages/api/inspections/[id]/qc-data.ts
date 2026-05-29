@@ -42,7 +42,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Catalog lookup (code -> category/subcategory/unit) to enrich the copied
     // lines so the QC view can show the same columns as the Scope Rate Card.
     const lineAnswers = answers.filter((a) => a.answerType === 'rate_card_line');
-    let catByCode: Record<string, { category: string; subcategory: string; unit: string }> = {};
+    let catByCode: Record<string, { category: string; subcategory: string; unit: string; shortDescription: string; subtext: string }> = {};
     if (lineAnswers.length > 0) {
       try {
         const catalog = await fetchRateCardCatalog();
@@ -51,6 +51,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             category: c.category || '',
             subcategory: c.subcategory || '',
             unit: c.laborMeas || '',
+            shortDescription: c.laborShortDescription || '',
+            subtext: (c.laborSubtext && c.laborSubtext.trim()) || c.laborFullDescription || '',
           };
         }
       } catch (e) {
@@ -61,7 +63,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // QC's copied line items, enriched with catalog category/sub/unit.
     const lines = lineAnswers.map((a) => {
       const code = a.rateCardLine?.lineItemCode || '';
-      const cat = catByCode[code] || { category: '', subcategory: '', unit: '' };
+      const cat = catByCode[code] || { category: '', subcategory: '', unit: '', shortDescription: '', subtext: '' };
+      // The stored answer_value is the user's override (if any) or the catalog
+      // subtext/short. Prefer the catalog short description for the title line;
+      // fall back to the stored value when the catalog isn't available.
+      const shortDesc = cat.shortDescription || a.answerValue || '';
+      // Subtext line: the catalog subtext, but only if it differs from the
+      // short title (avoid showing the same text twice). If the stored value
+      // was a manual override, prefer that as the subtext.
+      const stored = a.answerValue || '';
+      const overrode = stored && stored !== cat.shortDescription && stored !== cat.subtext;
+      const subtext = overrode ? stored : (cat.subtext && cat.subtext !== shortDesc ? cat.subtext : '');
       return {
         recordId: a.recordId,
         section: a.section,
@@ -70,8 +82,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         category: cat.category,
         subcategory: cat.subcategory,
         unit: cat.unit,
-        // answer_value holds the display description (custom or catalog short desc)
-        description: a.answerValue,
+        // Title line (short) + optional subtext line below it.
+        description: shortDesc,
+        subtext,
         quantity: a.quantity,
         vendor: a.assignedTo,
         vendorCost: a.rateCardLine?.vendorCost ?? null,

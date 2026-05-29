@@ -123,6 +123,8 @@ export function RateCardForm(props: RateCardFormProps) {
   // Mobile detection — drives the full-screen stacked line editor instead of
   // the inline table row, which is unusable on a phone.
   const [isMobile, setIsMobile] = useState(false);
+  // Per-section collapse of the photo strip.
+  const [photosCollapsed, setPhotosCollapsed] = useState<Record<string, boolean>>({});
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 640px)');
     const update = () => setIsMobile(mq.matches);
@@ -1143,12 +1145,19 @@ export function RateCardForm(props: RateCardFormProps) {
                   <div className={`px-3 py-2 ${photosMissing ? 'bg-amber-50' : 'bg-gray-50'} border-b border-gray-100`}>
                     <div className="flex items-center justify-between gap-3 flex-wrap">
                       <div className="flex items-baseline gap-2 min-w-0">
-                        <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap">
-                          Section Photos
-                          {photosRequired
-                            ? <span className="text-brand ml-1">*</span>
-                            : <span className="text-gray-400 normal-case font-normal ml-1">(optional)</span>}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPhotosCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))}
+                          className="flex items-baseline gap-1.5 min-w-0"
+                        >
+                          <span className={`text-gray-400 text-[10px] self-center transition-transform ${photosCollapsed[s.id] ? '' : 'rotate-90'}`}>&#9654;</span>
+                          <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap">
+                            Section Photos
+                            {photosRequired
+                              ? <span className="text-brand ml-1">*</span>
+                              : <span className="text-gray-400 normal-case font-normal ml-1">(optional)</span>}
+                          </span>
+                        </button>
                         {photosMissing && !isUploadingHere && (
                           <span className="text-xs text-amber-800 font-semibold">at least 1 required</span>
                         )}
@@ -1197,12 +1206,14 @@ export function RateCardForm(props: RateCardFormProps) {
                         </div>
                       )}
                     </div>
-                    {photos.length > 0 && (
-                      <div className="grid grid-cols-6 sm:grid-cols-8 gap-1 mt-2">
+                    {photos.length > 0 && !photosCollapsed[s.id] && (
+                      <div className="flex gap-1.5 overflow-x-auto pb-1 mt-2 -mx-0.5 px-0.5">
                         {photos.map((url, idx) => (
-                          <div key={idx} className="relative">
+                          <div key={idx} className="relative shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={url} alt="" className="w-full h-12 object-cover rounded" />
+                            <a href={url} target="_blank" rel="noopener noreferrer">
+                              <img src={url} alt="" className="w-16 h-16 object-cover rounded border border-gray-200" />
+                            </a>
                             {!props.readOnly && (
                               <button
                                 type="button"

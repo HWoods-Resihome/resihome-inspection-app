@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
 import { CameraCapture } from '@/components/CameraCapture';
 import { vendorPillStyle } from '@/lib/vendors';
+import { PhotoStrip } from '@/components/PhotoStrip';
 
 interface QcLine {
   recordId: string;
@@ -30,6 +31,7 @@ interface QcLine {
   subcategory: string;
   unit: string;
   description: string;
+  subtext?: string;
   quantity: number | null;
   vendor: string;
   vendorCost: number | null;
@@ -337,65 +339,42 @@ export function QcReinspectForm(props: Props) {
 
             {!isCollapsed && (
               <>
-                <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-4 border-b border-gray-100">
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5">
-                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Before</div>
-                    {s.beforePhotos.length === 0 ? (
-                      <div className="text-xs text-gray-400">No before photos on source</div>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {s.beforePhotos.map((u, i) => (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <a key={i} href={u} target="_blank" rel="noopener noreferrer">
-                            <img src={u} alt="before" className="w-16 h-16 object-cover rounded border border-gray-200" />
-                          </a>
-                        ))}
-                      </div>
-                    )}
+                <div className="px-4 py-3 grid grid-cols-2 gap-3 border-b border-gray-100">
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5 min-w-0">
+                    <PhotoStrip
+                      label="Before"
+                      photoUrls={s.beforePhotos}
+                      size={64}
+                      accent="gray"
+                      emptyLabel="No before photos on source"
+                    />
                   </div>
 
-                  <div className="rounded-lg border-2 border-teal-300 bg-teal-50/60 p-2.5">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="text-xs font-semibold text-teal-700 uppercase tracking-wider">
-                        After Photos {after.length === 0 && <span className="text-brand normal-case">&bull; required</span>}
-                      </div>
-                    </div>
-                    {after.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mb-2">
-                        {after.map((u, i) => (
-                          <div key={i} className="relative">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <a href={u} target="_blank" rel="noopener noreferrer">
-                              <img src={u} alt="after" className="w-16 h-16 object-cover rounded border border-teal-200" />
-                            </a>
-                            {!props.readOnly && (
-                              <button
-                                type="button"
-                                onClick={() => removeAfterPhoto(s.key, s.section, s.location, u)}
-                                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-white border border-gray-300 rounded-full text-gray-600 text-xs leading-none shadow"
-                                title="Remove photo"
-                              >&times;</button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {!props.readOnly && (
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setCameraKey(s.key)}
-                          className="text-xs font-semibold bg-teal-600 text-white rounded px-2.5 py-1.5 hover:bg-teal-700"
-                        >Take After Photo</button>
-                        <label className="text-xs font-semibold text-teal-700 border border-teal-300 rounded px-2.5 py-1.5 cursor-pointer hover:border-teal-400 bg-white">
-                          Upload
-                          <input
-                            type="file" accept="image/*" multiple className="hidden"
-                            onChange={(e) => { handleFilePick(s.key, s.section, s.location, e.target.files); e.currentTarget.value = ''; }}
-                          />
-                        </label>
-                      </div>
-                    )}
+                  <div className="rounded-lg border-2 border-teal-300 bg-teal-50/60 p-2.5 min-w-0">
+                    <PhotoStrip
+                      label={after.length === 0 ? 'After • required' : 'After'}
+                      photoUrls={after}
+                      size={64}
+                      accent="teal"
+                      onRemove={props.readOnly ? undefined : (u) => removeAfterPhoto(s.key, s.section, s.location, u)}
+                    >
+                      {!props.readOnly && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => setCameraKey(s.key)}
+                            className="text-xs font-semibold bg-teal-600 text-white rounded px-2.5 py-1.5 hover:bg-teal-700"
+                          >Take After Photo</button>
+                          <label className="text-xs font-semibold text-teal-700 border border-teal-300 rounded px-2.5 py-1.5 cursor-pointer hover:border-teal-400 bg-white">
+                            Upload
+                            <input
+                              type="file" accept="image/*" multiple className="hidden"
+                              onChange={(e) => { handleFilePick(s.key, s.section, s.location, e.target.files); e.currentTarget.value = ''; }}
+                            />
+                          </label>
+                        </div>
+                      )}
+                    </PhotoStrip>
                   </div>
                 </div>
 
@@ -467,52 +446,63 @@ export function QcReinspectForm(props: Props) {
                   </table>
                 </div>
 
-                {/* Mobile: stacked cards — all detail visible, tidy pass/fail
-                    buttons, no horizontal scroll. */}
+                {/* Mobile: stacked cards.
+                    Cat · Sub · Short Desc  /  Subtext  /  Vendor · Qty Unit · Price
+                    with pass/fail on the right. */}
                 <div className="sm:hidden divide-y divide-gray-100 px-1">
                   {s.lines.map((ln) => {
                     const ps = ln.vendor ? vendorPillStyle(ln.vendor) : null;
                     return (
-                      <div key={ln.recordId} className="py-3.5 px-2">
-                        <div className="text-sm font-semibold text-gray-900 mb-1 leading-snug">{ln.description}</div>
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 mb-2.5">
-                          <span>{ln.category}</span>
-                          {ln.subcategory && (<><span>&middot;</span><span>{ln.subcategory}</span></>)}
-                          {ln.unit && (<><span>&middot;</span><span>{ln.quantity != null ? `${ln.quantity} ` : ''}{ln.unit}</span></>)}
-                          {ln.vendorCost != null && (<><span>&middot;</span><span className="text-gray-700 font-semibold">${formatMoney(ln.vendorCost)}</span></>)}
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                          {ps ? (
-                            <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${ps.bg} ${ps.text} ${ps.border || ''}`}>
-                              {ln.vendor}
+                      <div key={ln.recordId} className="py-3 px-2 flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          {/* Line 1: Category · Sub · Short description */}
+                          <div className="text-sm font-semibold text-gray-900 leading-snug">
+                            <span className="text-gray-500 font-normal">
+                              {ln.category}{ln.subcategory ? ` · ${ln.subcategory}` : ''} ·{' '}
                             </span>
-                          ) : <span />}
-                          <div className="flex items-center gap-2 shrink-0">
-                            <button
-                              type="button"
-                              disabled={props.readOnly}
-                              onClick={() => setLinePassFail(ln, 'pass')}
-                              className={
-                                'w-10 h-9 rounded-lg flex items-center justify-center text-sm font-bold border transition ' +
-                                (ln.passFail === 'pass'
-                                  ? 'bg-emerald-600 text-white border-emerald-600'
-                                  : 'bg-white text-emerald-600 border-emerald-300')
-                              }
-                              aria-label="Pass"
-                            >&#10003;</button>
-                            <button
-                              type="button"
-                              disabled={props.readOnly}
-                              onClick={() => setLinePassFail(ln, 'fail')}
-                              className={
-                                'w-10 h-9 rounded-lg flex items-center justify-center text-sm font-bold border transition ' +
-                                (ln.passFail === 'fail'
-                                  ? 'bg-brand text-white border-brand'
-                                  : 'bg-white text-brand border-brand/40')
-                              }
-                              aria-label="Fail"
-                            >&#10007;</button>
+                            {ln.description}
                           </div>
+                          {/* Line 2: Subtext (only if present + different) */}
+                          {ln.subtext && (
+                            <div className="text-xs text-gray-500 leading-snug">{ln.subtext}</div>
+                          )}
+                          {/* Line 3: Vendor · Qty Unit · Price */}
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 pt-0.5">
+                            {ps && (
+                              <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${ps.bg} ${ps.text} ${ps.border || ''}`}>
+                                {ln.vendor}
+                              </span>
+                            )}
+                            {ln.unit && <span>{ln.quantity != null ? `${ln.quantity} ` : ''}{ln.unit}</span>}
+                            {ln.vendorCost != null && (<><span>·</span><span className="text-gray-800 font-semibold">${formatMoney(ln.vendorCost)}</span></>)}
+                          </div>
+                        </div>
+                        {/* Pass / fail */}
+                        <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                          <button
+                            type="button"
+                            disabled={props.readOnly}
+                            onClick={() => setLinePassFail(ln, 'pass')}
+                            className={
+                              'w-10 h-9 rounded-lg flex items-center justify-center text-sm font-bold border transition ' +
+                              (ln.passFail === 'pass'
+                                ? 'bg-emerald-600 text-white border-emerald-600'
+                                : 'bg-white text-emerald-600 border-emerald-300')
+                            }
+                            aria-label="Pass"
+                          >&#10003;</button>
+                          <button
+                            type="button"
+                            disabled={props.readOnly}
+                            onClick={() => setLinePassFail(ln, 'fail')}
+                            className={
+                              'w-10 h-9 rounded-lg flex items-center justify-center text-sm font-bold border transition ' +
+                              (ln.passFail === 'fail'
+                                ? 'bg-brand text-white border-brand'
+                                : 'bg-white text-brand border-brand/40')
+                            }
+                            aria-label="Fail"
+                          >&#10007;</button>
                         </div>
                       </div>
                     );
