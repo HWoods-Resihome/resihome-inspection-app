@@ -467,15 +467,15 @@ export function QcReinspectForm(props: Props) {
                   </table>
                 </div>
 
-                {/* Mobile: stacked cards — all detail visible, big pass/fail
+                {/* Mobile: stacked cards — all detail visible, tidy pass/fail
                     buttons, no horizontal scroll. */}
-                <div className="sm:hidden divide-y divide-gray-100">
+                <div className="sm:hidden divide-y divide-gray-100 px-1">
                   {s.lines.map((ln) => {
                     const ps = ln.vendor ? vendorPillStyle(ln.vendor) : null;
                     return (
-                      <div key={ln.recordId} className="py-3">
-                        <div className="text-sm font-semibold text-gray-900 mb-1">{ln.description}</div>
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 mb-2">
+                      <div key={ln.recordId} className="py-3.5 px-2">
+                        <div className="text-sm font-semibold text-gray-900 mb-1 leading-snug">{ln.description}</div>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 mb-2.5">
                           <span>{ln.category}</span>
                           {ln.subcategory && (<><span>&middot;</span><span>{ln.subcategory}</span></>)}
                           {ln.unit && (<><span>&middot;</span><span>{ln.quantity != null ? `${ln.quantity} ` : ''}{ln.unit}</span></>)}
@@ -493,7 +493,7 @@ export function QcReinspectForm(props: Props) {
                               disabled={props.readOnly}
                               onClick={() => setLinePassFail(ln, 'pass')}
                               className={
-                                'h-11 px-5 rounded-lg flex items-center justify-center text-base font-bold border-2 transition ' +
+                                'w-10 h-9 rounded-lg flex items-center justify-center text-sm font-bold border transition ' +
                                 (ln.passFail === 'pass'
                                   ? 'bg-emerald-600 text-white border-emerald-600'
                                   : 'bg-white text-emerald-600 border-emerald-300')
@@ -505,7 +505,7 @@ export function QcReinspectForm(props: Props) {
                               disabled={props.readOnly}
                               onClick={() => setLinePassFail(ln, 'fail')}
                               className={
-                                'h-11 px-5 rounded-lg flex items-center justify-center text-base font-bold border-2 transition ' +
+                                'w-10 h-9 rounded-lg flex items-center justify-center text-sm font-bold border transition ' +
                                 (ln.passFail === 'fail'
                                   ? 'bg-brand text-white border-brand'
                                   : 'bg-white text-brand border-brand/40')
