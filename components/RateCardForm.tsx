@@ -981,7 +981,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // ----- Render --------------------------------------------------------
 
   return (
-    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-4 md:pb-24">
+    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-4">
       {/* Header */}
       <header className="mb-3">
         <div className="flex items-center justify-between gap-3">
@@ -1310,28 +1310,14 @@ export function RateCardForm(props: RateCardFormProps) {
         })}
       </div>
 
-      {/* Inline footer — mobile only (md:hidden).
-          On desktop, the floating footer at the bottom of the viewport is used
-          instead. Both render the same TerminalActions content. */}
-      <div className="md:hidden">
-        <TerminalActions
-          readOnly={!!props.readOnly}
-          showCancelInspection={!!props.onCancelInspection}
-          submitLabel={submitLabel}
-          submitLabelShort={submitLabelShort}
-          submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing}
-          onCancelInspection={handleCancelInspectionClick}
-          onSaveAndClose={handleSaveAndClose}
-          onSubmit={handleSubmitOrFinalize}
-        />
-      </div>
+      {/* Spacer so the floating footer doesn't cover the last section. */}
+      <div className="h-24 md:h-20" />
 
-      {/* Floating footer — desktop only (hidden on mobile to avoid covering
-          the keyboard / inline scroll). Always visible at the bottom of the
-          viewport so the inspector can save/submit/cancel from anywhere on
-          the page without scrolling to the end. */}
-      <div className="hidden md:block fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
-        <div className="max-w-7xl mx-auto px-4 py-3">
+      {/* Floating footer — visible on all screen sizes, pinned to the bottom of
+          the viewport so the inspector can save/submit/cancel from anywhere.
+          TerminalActions handles the responsive (one-line) mobile layout. */}
+      <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3">
           <TerminalActions
             readOnly={!!props.readOnly}
             showCancelInspection={!!props.onCancelInspection}
