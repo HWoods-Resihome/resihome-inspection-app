@@ -940,21 +940,21 @@ export function QuestionForm({
           on the right. Save & Close gets a green hover/active style for
           visual reassurance that it's saving work. Matches the same layout
           used in RateCardForm so behavior is consistent across templates. */}
-      <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand p-4 shadow-lg">
+      <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand px-3 sm:p-4 py-2.5 shadow-lg">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-2">
-          <div>
+          <div className="shrink-0">
             {!readOnly && onCancelInspection && (
               <button
                 type="button"
                 onClick={onCancelInspection}
-                className="px-3 py-3 border border-red-300 rounded-lg hover:bg-red-50 font-heading font-semibold text-red-700 text-sm"
+                className="px-2.5 sm:px-3 py-2.5 sm:py-3 border border-red-300 rounded-lg hover:bg-red-50 font-heading font-semibold text-red-700 text-xs sm:text-sm whitespace-nowrap"
                 title="Mark this Inspection as Cancelled in HubSpot"
               >
-                Cancel Inspection
+                Cancel
               </button>
             )}
           </div>
-          <div className="flex items-center gap-2 flex-1 justify-end">
+          <div className="flex items-center gap-2 justify-end shrink-0">
             {!readOnly && (
               <button
                 type="button"
@@ -969,7 +969,7 @@ export function QuestionForm({
                   }
                   onCancel();
                 }}
-                className="px-3 py-3 border border-emerald-300 rounded-lg hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 font-heading font-semibold text-emerald-700 text-sm transition-colors"
+                className="px-2.5 sm:px-3 py-2.5 sm:py-3 border border-emerald-300 rounded-lg hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 font-heading font-semibold text-emerald-700 text-xs sm:text-sm transition-colors whitespace-nowrap"
                 title="Save any pending changes and return to the inspection list. Inspection stays In Progress."
               >
                 Save &amp; Close
@@ -979,7 +979,7 @@ export function QuestionForm({
               <button
                 type="button"
                 onClick={onCancel}
-                className="px-3 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 font-heading font-semibold text-ink text-sm"
+                className="px-3 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 font-heading font-semibold text-ink text-sm whitespace-nowrap"
                 title="Return to inspection list"
               >
                 Close
@@ -989,9 +989,10 @@ export function QuestionForm({
               <button
                 type="button"
                 onClick={handleSubmit}
-                className="bg-brand hover:bg-brand-dark text-white font-heading font-bold px-5 py-3 rounded-lg active:scale-[0.99] transition"
+                className="bg-brand hover:bg-brand-dark text-white font-heading font-bold px-3 sm:px-5 py-2.5 sm:py-3 rounded-lg active:scale-[0.99] transition text-xs sm:text-sm whitespace-nowrap"
               >
-                Submit Inspection
+                <span className="sm:hidden">Submit</span>
+                <span className="hidden sm:inline">Submit Inspection</span>
               </button>
             )}
             {readOnly && (

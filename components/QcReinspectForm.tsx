@@ -567,24 +567,24 @@ export function QcReinspectForm(props: Props) {
           status chip. Shown for editable inspections. */}
       {!props.readOnly && (
         <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
-          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3">
+          <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               {props.onCancelInspection && (
                 <button
                   type="button"
                   onClick={props.onCancelInspection}
-                  className="px-4 py-2 text-sm border border-red-300 text-red-700 rounded hover:bg-red-50"
+                  className="px-2.5 sm:px-4 py-2 text-xs sm:text-sm border border-red-300 text-red-700 rounded hover:bg-red-50 whitespace-nowrap"
                 >
-                  Cancel Inspection
+                  Cancel
                 </button>
               )}
-              <SaveStatusChip status={saveStatus} />
+              <span className="hidden sm:inline-flex"><SaveStatusChip status={saveStatus} /></span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={props.onCancel}
-                className="px-4 py-2 text-sm border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 transition-colors"
+                className="px-2.5 sm:px-4 py-2 text-xs sm:text-sm border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 transition-colors whitespace-nowrap"
               >
                 Save &amp; Close
               </button>
@@ -592,9 +592,9 @@ export function QcReinspectForm(props: Props) {
                 type="button"
                 onClick={handleSubmit}
                 disabled={submitting || !allMarked || !allSectionsHaveAfter || !verdict}
-                className="px-5 py-2 text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
+                className="px-3 sm:px-5 py-2 text-xs sm:text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed whitespace-nowrap"
               >
-                {submitting ? 'Submitting...' : 'Submit Inspection'}
+                {submitting ? 'Submitting...' : 'Submit'}
               </button>
             </div>
           </div>

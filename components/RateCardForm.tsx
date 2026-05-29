@@ -971,6 +971,12 @@ export function RateCardForm(props: RateCardFormProps) {
     : props.inspectionStatus === 'pending_approval'
       ? 'Finalize & Generate PDFs'
       : 'Submit for Approval';
+  // Compact label for the narrow mobile footer (keeps everything on one line).
+  const submitLabelShort = finalizing
+    ? 'Generating...'
+    : props.inspectionStatus === 'pending_approval'
+      ? 'Finalize'
+      : 'Submit';
 
   // ----- Render --------------------------------------------------------
 
@@ -1312,6 +1318,7 @@ export function RateCardForm(props: RateCardFormProps) {
           readOnly={!!props.readOnly}
           showCancelInspection={!!props.onCancelInspection}
           submitLabel={submitLabel}
+          submitLabelShort={submitLabelShort}
           submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing}
           onCancelInspection={handleCancelInspectionClick}
           onSaveAndClose={handleSaveAndClose}
@@ -1329,6 +1336,7 @@ export function RateCardForm(props: RateCardFormProps) {
             readOnly={!!props.readOnly}
             showCancelInspection={!!props.onCancelInspection}
             submitLabel={submitLabel}
+            submitLabelShort={submitLabelShort}
             submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing}
             onCancelInspection={handleCancelInspectionClick}
             onSaveAndClose={handleSaveAndClose}
@@ -1568,39 +1576,41 @@ function TerminalActions(props: {
   readOnly: boolean;
   showCancelInspection: boolean;
   submitLabel: string;
+  submitLabelShort?: string;
   submitDisabled: boolean;
   onCancelInspection: () => void;
   onSaveAndClose: () => void;
   onSubmit: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between flex-wrap gap-3">
-      <div>
+    <div className="flex items-center justify-between gap-2">
+      <div className="shrink-0">
         {!props.readOnly && props.showCancelInspection && (
           <button
             type="button"
             onClick={props.onCancelInspection}
-            className="px-4 py-2 text-sm border border-red-300 text-red-700 rounded hover:bg-red-50"
+            className="px-2.5 sm:px-4 py-2 text-xs sm:text-sm border border-red-300 text-red-700 rounded hover:bg-red-50 whitespace-nowrap"
           >
-            Cancel Inspection
+            Cancel
           </button>
         )}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <button
           type="button"
           onClick={props.onSaveAndClose}
-          className="px-4 py-2 text-sm border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 transition-colors"
+          className="px-2.5 sm:px-4 py-2 text-xs sm:text-sm border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 transition-colors whitespace-nowrap"
         >
-          Save & Close
+          Save &amp; Close
         </button>
         <button
           type="button"
           onClick={props.onSubmit}
           disabled={props.submitDisabled}
-          className="px-5 py-2 text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
+          className="px-3 sm:px-5 py-2 text-xs sm:text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed whitespace-nowrap"
         >
-          {props.submitLabel}
+          <span className="sm:hidden">{props.submitLabelShort || props.submitLabel}</span>
+          <span className="hidden sm:inline">{props.submitLabel}</span>
         </button>
       </div>
     </div>
