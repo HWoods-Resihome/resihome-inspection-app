@@ -1142,7 +1142,12 @@ export async function copyRateCardLinesToQc(args: {
 
 /**
  * Read a source inspection's section photos so the QC can show them as
- * "Before" photos. Returns a map of location -> photo URLs.
+ * "Before" photos. Returns a map keyed by SEVERAL forms of the section
+ * identity so the caller can match regardless of how the QC's lines are keyed:
+ *   - `${section}||${location}`
+ *   - bare `location`
+ *   - bare `section`
+ * The same URL list is stored under each applicable key.
  */
 export async function fetchSourceSectionPhotos(
   sourceInspectionId: string
@@ -1150,11 +1155,13 @@ export async function fetchSourceSectionPhotos(
   const answers = await fetchAnswersForInspection(sourceInspectionId);
   const out: Record<string, string[]> = {};
   for (const a of answers) {
-    if (a.answerType === 'section_photo') {
-      const key = a.location || a.section || '';
-      if (!key) continue;
-      out[key] = a.photoUrls || [];
-    }
+    if (a.answerType !== 'section_photo') continue;
+    const urls = a.photoUrls || [];
+    if (urls.length === 0) continue;
+    const composite = `${a.section || ''}||${a.location || ''}`;
+    out[composite] = urls;
+    if (a.location) out[a.location] = urls;
+    if (a.section && !(a.section in out)) out[a.section] = urls;
   }
   return out;
 }

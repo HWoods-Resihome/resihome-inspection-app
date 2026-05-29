@@ -15,6 +15,7 @@ import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
   fetchSourceSectionPhotos,
+  fetchRateCardCatalog,
 } from '@/lib/hubspot';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -38,33 +39,56 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const inspection = data.inspection;
     const answers = await fetchAnswersForInspection(id);
 
-    // QC's copied line items
-    const lines = answers
-      .filter((a) => a.answerType === 'rate_card_line')
-      .map((a) => ({
+    // Catalog lookup (code -> category/subcategory/unit) to enrich the copied
+    // lines so the QC view can show the same columns as the Scope Rate Card.
+    const lineAnswers = answers.filter((a) => a.answerType === 'rate_card_line');
+    let catByCode: Record<string, { category: string; subcategory: string; unit: string }> = {};
+    if (lineAnswers.length > 0) {
+      try {
+        const catalog = await fetchRateCardCatalog();
+        for (const c of catalog) {
+          catByCode[c.lineItemCode] = {
+            category: c.category || '',
+            subcategory: c.subcategory || '',
+            unit: c.laborMeas || '',
+          };
+        }
+      } catch (e) {
+        console.warn('[qc-data] catalog load failed; columns will be sparse:', e);
+      }
+    }
+
+    // QC's copied line items, enriched with catalog category/sub/unit.
+    const lines = lineAnswers.map((a) => {
+      const code = a.rateCardLine?.lineItemCode || '';
+      const cat = catByCode[code] || { category: '', subcategory: '', unit: '' };
+      return {
         recordId: a.recordId,
         section: a.section,
         location: a.location,
+        lineItemCode: code,
+        category: cat.category,
+        subcategory: cat.subcategory,
+        unit: cat.unit,
         // answer_value holds the display description (custom or catalog short desc)
         description: a.answerValue,
         quantity: a.quantity,
         vendor: a.assignedTo,
         vendorCost: a.rateCardLine?.vendorCost ?? null,
-        // pass/fail current value ('pass' | 'fail' | '')
         passFail: a.passFail || '',
-      }));
+      };
+    });
 
-    // QC's own "after" section photos, keyed by location
+    // QC's own "after" section photos, keyed by composite + location.
     const afterPhotos: Record<string, { recordId: string; urls: string[] }> = {};
     for (const a of answers) {
       if (a.answerType === 'section_photo') {
-        const key = a.location || a.section || '';
-        if (!key) continue;
+        const key = `${a.section || ''}||${a.location || ''}`;
         afterPhotos[key] = { recordId: a.recordId, urls: a.photoUrls || [] };
       }
     }
 
-    // Source inspection's section photos -> "before"
+    // Source inspection's section photos -> "before" (multi-keyed).
     let beforePhotos: Record<string, string[]> = {};
     if (inspection.sourceRateCardId) {
       try {

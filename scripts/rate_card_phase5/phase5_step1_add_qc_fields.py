@@ -34,7 +34,7 @@ sys.path.insert(
     0,
     os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rate_card_phase1'),
 )
-from _hubspot_helpers import ensure_property, ensure_property_group  # type: ignore
+from _hubspot_helpers import ensure_property, ensure_property_group, ensure_picklist_value  # type: ignore
 
 INSPECTION = 'inspection'
 ANSWER = 'inspection_answer'
@@ -44,6 +44,15 @@ def main():
     print('=' * 72)
     print('Phase 5, Step 1: Add (PM) Turn Re-Inspect QC fields')
     print('=' * 72)
+
+    # The template_type field on the inspection is an enumeration. The new QC
+    # inspection type needs to be an allowed option or creation 400s.
+    try:
+        ensure_picklist_value(
+            INSPECTION, 'template_type', 'pm_turn_reinspect_qc', '(PM) Turn Re-Inspect QC'
+        )
+    except Exception as e:
+        print(f'  (warning) could not add template_type option: {str(e)[:120]}')
 
     # Property group for the QC fields on the inspection (best-effort).
     try:

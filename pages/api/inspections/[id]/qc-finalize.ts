@@ -16,6 +16,7 @@ import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
   fetchSourceSectionPhotos,
+  fetchRateCardCatalog,
   uploadFile,
   updateInspection,
 } from '@/lib/hubspot';
@@ -58,6 +59,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Group lines + after-photos by section instance (location), preserving
     // the order they appear in the answer list.
     const lineAnswers = answers.filter((a) => a.answerType === 'rate_card_line');
+
+    // Catalog lookup to enrich each line with category/subcategory/unit.
+    let catByCode: Record<string, { category: string; subcategory: string; unit: string }> = {};
+    if (lineAnswers.length > 0) {
+      try {
+        const catalog = await fetchRateCardCatalog();
+        for (const c of catalog) {
+          catByCode[c.lineItemCode] = { category: c.category || '', subcategory: c.subcategory || '', unit: c.laborMeas || '' };
+        }
+      } catch (e) {
+        console.warn('[qc-finalize] catalog load failed; PDF columns sparse:', e);
+      }
+    }
+
     const afterByLoc: Record<string, string[]> = {};
     for (const a of answers) {
       if (a.answerType === 'section_photo') {
@@ -97,9 +112,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const pf = (a.passFail === 'pass' || a.passFail === 'fail') ? a.passFail : '';
       if (pf === 'pass') { sec.passCount++; passCount++; }
       else if (pf === 'fail') { sec.failCount++; failCount++; }
+      const code = a.rateCardLine?.lineItemCode || '';
+      const cat = catByCode[code] || { category: '', subcategory: '', unit: '' };
       const line: QcPdfLine = {
-        category: '', // category/subcategory aren't stored on the copied line;
-        subcategory: '', // description carries the meaningful text.
+        category: cat.category,
+        subcategory: cat.subcategory,
+        unit: cat.unit,
         description: a.answerValue || '',
         quantity: a.quantity,
         vendor: a.assignedTo || '',

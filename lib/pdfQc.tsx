@@ -25,6 +25,7 @@ import {
 export interface QcPdfLine {
   category: string;
   subcategory: string;
+  unit: string;
   description: string;
   quantity: number | null;
   vendor: string;
@@ -57,14 +58,17 @@ export interface QcPdfContext {
   sections: QcPdfSection[];
 }
 
-// QC column layout (no client/tenant):
-//   Description 50 | Qty 7 | Vendor 18 | Ven$ 12 | Result 13
+// QC column layout mirrors Scope (no client/tenant) + Result:
+//   Cat 13 | Sub 12 | Description 30 | Unit 6 | Qty 6 | Vendor 12 | Ven$ 10 | Result 11
 const COL = {
-  description: '50%',
-  qty: '7%',
-  vendor: '18%',
-  vendorCost: '12%',
-  result: '13%',
+  category: '13%',
+  subcategory: '12%',
+  description: '30%',
+  unit: '6%',
+  qty: '6%',
+  vendor: '12%',
+  vendorCost: '10%',
+  result: '11%',
 };
 
 function ResultChip({ pf }: { pf: 'pass' | 'fail' | '' }) {
@@ -178,7 +182,10 @@ function QcSection({ section: s }: { section: QcPdfSection }) {
       {s.lines.length > 0 && (
         <>
           <View style={pdfStyles.tableHeaderRow}>
-            <Text style={[pdfStyles.tableHeaderCell, { width: COL.description }]}>Description</Text>
+            <Text style={[pdfStyles.tableHeaderCell, { width: COL.category }]}>Category</Text>
+            <Text style={[pdfStyles.tableHeaderCell, { width: COL.subcategory }]}>Sub</Text>
+            <Text style={[pdfStyles.tableHeaderCell, { width: COL.description }]}>Line Item</Text>
+            <Text style={[pdfStyles.tableHeaderCell, { width: COL.unit, textAlign: 'center' }]}>Unit</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.qty, textAlign: 'center' }]}>Qty</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.vendor, textAlign: 'center' }]}>Vendor</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.vendorCost, textAlign: 'right' }]}>Vendor $</Text>
@@ -187,9 +194,12 @@ function QcSection({ section: s }: { section: QcPdfSection }) {
 
           {s.lines.map((line, idx) => (
             <View key={idx} style={pdfStyles.tableRow} wrap={false}>
+              <Text style={[pdfStyles.tableCell, { width: COL.category }]}>{line.category}</Text>
+              <Text style={[pdfStyles.tableCell, { width: COL.subcategory }]}>{line.subcategory}</Text>
               <View style={{ width: COL.description }}>
                 <Text style={pdfStyles.tableCell}>{line.description}</Text>
               </View>
+              <Text style={[pdfStyles.tableCellCentered, { width: COL.unit }]}>{line.unit}</Text>
               <Text style={[pdfStyles.tableCellCentered, { width: COL.qty }]}>{line.quantity != null ? formatQtyPdf(line.quantity) : ''}</Text>
               <Text style={[pdfStyles.tableCellCentered, { width: COL.vendor }]}>{line.vendor}</Text>
               <Text style={[pdfStyles.tableCellNumeric, { width: COL.vendorCost }]}>{line.vendorCost != null ? `$${formatMoneyPdf(line.vendorCost)}` : ''}</Text>
