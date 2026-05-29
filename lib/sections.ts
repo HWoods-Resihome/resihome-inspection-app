@@ -210,3 +210,37 @@ export function resolveSections(
   if (parsed && parsed.length > 0) return parsed;
   return deriveDefaultSections(bedrooms, bathrooms);
 }
+
+/**
+ * Resolve a 2-letter US state code, preferring an explicit code but falling
+ * back to the first two letters of the region.
+ *
+ * Region is formatted like "GA: Atlanta" or "AL: Birmingham", so the state is
+ * the two characters before the colon. Used everywhere we need a state: the
+ * Tenant Chargeback xlsx, the email subject, and the team{ST}@resihome.com
+ * CC recipient.
+ *
+ * Returns '' (blank) if neither source yields a valid 2-letter code — callers
+ * should treat blank as "leave the state empty" rather than erroring.
+ */
+export function resolveStateCode(
+  explicitStateCode: string | null | undefined,
+  region: string | null | undefined,
+): string {
+  // 1. Explicit state_code from the property record
+  const explicit = (explicitStateCode || '').trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(explicit)) return explicit;
+
+  // 2. First two letters of the region ("AL: Birmingham" -> "AL").
+  //    Only trust this when the region is in the expected "ST: City" format
+  //    (i.e. contains a colon). A bare string like "Atlanta" must NOT yield
+  //    "AT" — that's not a real state code.
+  const regionStr = (region || '').trim();
+  if (regionStr.includes(':')) {
+    const beforeColon = regionStr.split(':')[0].trim().toUpperCase();
+    if (/^[A-Z]{2}$/.test(beforeColon)) return beforeColon;
+  }
+
+  // 3. Nothing usable
+  return '';
+}

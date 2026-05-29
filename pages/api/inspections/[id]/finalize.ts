@@ -22,7 +22,7 @@ import {
   uploadFile,
   updateInspection,
 } from '@/lib/hubspot';
-import { resolveSections, type SectionInstance } from '@/lib/sections';
+import { resolveSections, resolveStateCode, type SectionInstance } from '@/lib/sections';
 import { calculateLine } from '@/lib/rateCardMath';
 import { renderMasterPdf } from '@/lib/pdfMaster';
 import { renderChargebackPdf } from '@/lib/pdfChargeback';
@@ -226,6 +226,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       grandTotals: { vendor: grandVendor, client: grandClient, tenant: grandTenant, lineCount: grandLineCount },
     };
 
+    // Resolve the state code once: prefer property.state_code, else first two
+    // letters of the region ("AL: Birmingham" -> "AL"). Used by the xlsx, the
+    // email subject, and the team{ST}@resihome.com CC. Blank if neither works.
+    const resolvedStateCode = resolveStateCode(
+      inspectionData.propertyStateCode,
+      inspection.regionSnapshot,
+    );
+
     // ---- 4. Render PDFs ----
     // Sequential to avoid running out of memory on Vercel's lambda. (Each PDF
     // render in @react-pdf can transiently allocate 100+ MB.)
@@ -233,22 +241,40 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const chargebackBuf = await renderChargebackPdf(ctx);
     const vendorBufs = await renderVendorPdfs(ctx);
 
-    // Pretty file naming. Uses the outer templateLabel computed before ctx.
-    const safeAddress = (ctx.propertyName || 'property')
+    // Pretty file naming. New format puts the file TYPE first so files sort
+    // and read clearly:
+    //   "{Type} Rate Card - {street} {city} {ST} {zip} - {M/D/YY}.pdf"
+    // e.g. "Master Rate Card - 3020 Walker St Fultondale AL 35068 - 5/29/26.pdf"
+    //
+    // Build a full address from the property fields (street/city/state/zip),
+    // falling back to the snapshot if the structured fields are missing.
+    const fullAddressParts = [
+      inspectionData.propertyAddressStreet || '',
+      inspectionData.propertyCity || '',
+      resolvedStateCode,
+      inspectionData.propertyZip || '',
+    ].map((s) => (s || '').trim()).filter(Boolean);
+    const rawAddress = fullAddressParts.length > 0
+      ? fullAddressParts.join(' ')
+      : (ctx.propertyName || 'property');
+    const safeAddress = rawAddress
       .replace(/[^a-zA-Z0-9_\-\s]/g, '')
       .replace(/\s+/g, ' ')
       .trim()
-      .slice(0, 80);
-    const datePart = new Date(ctx.generatedAtIso).toISOString().slice(0, 10);
-    // Master + Chargeback follow the same naming convention as vendor PDFs:
-    //   "{Template Label} - {Address} - {Variant} - {Date}.pdf"
-    const masterFilename = `${templateLabel} - ${safeAddress} - Master - ${datePart}.pdf`;
-    const chargebackFilename = `${templateLabel} - ${safeAddress} - Tenant Chargeback - ${datePart}.pdf`;
+      .slice(0, 90);
+    // Date as M/D/YY (e.g. "5/29/26"). Slashes are illegal in filenames on
+    // most filesystems, so render with hyphens: "5-29-26".
+    const d = new Date(ctx.generatedAtIso);
+    const datePart = `${d.getMonth() + 1}-${d.getDate()}-${String(d.getFullYear()).slice(2)}`;
+
+    // "Rate Card" suffix is constant; the leading word is the file type.
+    const masterFilename = `Master Rate Card - ${safeAddress} - ${datePart}.pdf`;
+    const chargebackFilename = `Tenant Chargeback Rate Card - ${safeAddress} - ${datePart}.pdf`;
     function vendorFilename(vendor: string) {
       const v = vendor.replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60);
-      return `${templateLabel} - ${safeAddress} - ${v} - ${datePart}.pdf`;
+      return `${v} Rate Card - ${safeAddress} - ${datePart}.pdf`;
     }
-    const chargebackXlsxFilename = `${templateLabel} - ${safeAddress} - Tenant Chargeback Import - ${datePart}.xlsx`;
+    const chargebackXlsxFilename = `Tenant Chargeback Import - ${safeAddress} - ${datePart}.xlsx`;
 
     // ---- 4b. Generate Tenant Chargeback xlsx (importer file) ----
     // Only generated if there are chargeback lines. Pulled property fields
@@ -259,7 +285,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       primaryTenantName: inspectionData.propertyLastPrimaryTenant || '',
       addressStreet: inspectionData.propertyAddressStreet || '',
       city: inspectionData.propertyCity || '',
-      stateCode: inspectionData.propertyStateCode || '',
+      stateCode: resolvedStateCode,
       zipCode: inspectionData.propertyZip || '',
       dueDate: new Date(),
     });
@@ -345,7 +371,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         prop: {
           addressStreet: inspectionData.propertyAddressStreet || '',
           city: inspectionData.propertyCity || '',
-          stateCode: inspectionData.propertyStateCode || '',
+          stateCode: resolvedStateCode,
           zipCode: inspectionData.propertyZip || '',
         },
         links: { appUrl, hubspotUrl },

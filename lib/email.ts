@@ -130,9 +130,8 @@ function buildHtmlBody(args: {
   ctx: PdfBuildContext;
   vendorBreakdown: VendorTotal[];
   links: InspectionLinks;
-  attachmentNames: string[];
 }): string {
-  const { prop, ctx, vendorBreakdown, links, attachmentNames } = args;
+  const { prop, ctx, vendorBreakdown, links } = args;
   const addressLine = [
     prop.addressStreet,
     [prop.city, prop.stateCode].filter(Boolean).join(', ') + (prop.zipCode ? ` ${prop.zipCode}` : ''),
@@ -146,12 +145,6 @@ function buildHtmlBody(args: {
       <td style="padding:6px 12px;border-bottom:1px solid #e5e7eb;${i === 0 ? 'border-top:1px solid #e5e7eb;' : ''}text-align:right;font-weight:bold;">${fmtMoney(v.vendorCost)}</td>
     </tr>`).join('');
 
-  const attachmentList = attachmentNames.length === 0
-    ? '<em style="color:#6b7280;">(none)</em>'
-    : `<ul style="margin:4px 0 0 0;padding-left:20px;color:#1a1a1a;">${
-        attachmentNames.map((n) => `<li style="margin-bottom:2px;">${escapeHtml(n)}</li>`).join('')
-      }</ul>`;
-
   return `<!DOCTYPE html>
 <html>
 <body style="margin:0;padding:0;background:#f9fafb;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;">
@@ -162,7 +155,7 @@ function buildHtmlBody(args: {
         <!-- Pink header bar -->
         <tr>
           <td style="background:#ff0060;padding:18px 24px;color:#ffffff;">
-            <div style="font-size:18px;font-weight:bold;">Inspection Finalized</div>
+            <div style="font-size:18px;font-weight:bold;">Move Out Scope Completed</div>
             <div style="font-size:13px;opacity:0.9;margin-top:2px;">${escapeHtml(ctx.templateLabel)} &mdash; ${escapeHtml(addressLine)}</div>
           </td>
         </tr>
@@ -208,6 +201,10 @@ function buildHtmlBody(args: {
                   <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Tenant Total</div>
                   <div style="font-size:18px;font-weight:bold;margin-top:4px;">${fmtMoney(ctx.grandTotals.tenant)}</div>
                 </td>
+                <td style="padding:14px 16px;text-align:center;border-left:1px solid #e5e7eb;">
+                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Net Turn Cost</div>
+                  <div style="font-size:18px;font-weight:bold;margin-top:4px;">${fmtMoney(ctx.grandTotals.client - ctx.grandTotals.tenant)}</div>
+                </td>
               </tr>
             </table>
           </td>
@@ -241,17 +238,9 @@ function buildHtmlBody(args: {
           </td>
         </tr>
 
-        <!-- Attachments listing -->
-        <tr>
-          <td style="padding:16px 24px;border-top:1px solid #e5e7eb;">
-            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;font-weight:bold;">Attached</div>
-            <div style="font-size:13px;color:#1a1a1a;">${attachmentList}</div>
-          </td>
-        </tr>
-
         <!-- Footer -->
         <tr>
-          <td style="padding:14px 24px;background:#f9fafb;text-align:center;font-size:11px;color:#6b7280;">
+          <td style="padding:14px 24px;background:#f9fafb;text-align:center;font-size:11px;color:#6b7280;border-top:1px solid #e5e7eb;">
             Sent from the ResiHome Inspection App
           </td>
         </tr>
@@ -277,7 +266,7 @@ function buildTextBody(args: {
     [prop.city, prop.stateCode].filter(Boolean).join(', ') + (prop.zipCode ? ` ${prop.zipCode}` : ''),
   ].filter((s) => s.trim()).join(', ');
   const lines: string[] = [];
-  lines.push('Inspection Finalized');
+  lines.push('Move Out Scope Completed');
   lines.push(`${ctx.templateLabel} - ${addressLine}`);
   lines.push('');
   lines.push('Property: ' + addressLine);
@@ -289,6 +278,7 @@ function buildTextBody(args: {
   lines.push('  Vendor Total: ' + fmtMoney(ctx.grandTotals.vendor));
   lines.push('  Client Total: ' + fmtMoney(ctx.grandTotals.client));
   lines.push('  Tenant Total: ' + fmtMoney(ctx.grandTotals.tenant));
+  lines.push('  Net Turn Cost: ' + fmtMoney(ctx.grandTotals.client - ctx.grandTotals.tenant));
   lines.push('  Scope Items: ' + ctx.grandTotals.lineCount);
   lines.push('');
   lines.push('VENDOR BREAKDOWN');
@@ -366,11 +356,11 @@ export function composeInspectionEmail(args: {
       mimeType: 'application/pdf',
     });
   }
-  if (attachments.chargebackXlsx) {
+  if (attachments.chargebackPdf) {
     attachmentList.push({
-      filename: attachments.chargebackXlsx.name,
-      url: attachments.chargebackXlsx.url,
-      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      filename: attachments.chargebackPdf.name,
+      url: attachments.chargebackPdf.url,
+      mimeType: 'application/pdf',
     });
   }
   // Vendor PDFs in the order produced by vendorBreakdown so the listing in
@@ -382,11 +372,19 @@ export function composeInspectionEmail(args: {
       attachmentList.push({ filename: vp.name, url: vp.url, mimeType: 'application/pdf' });
     }
   }
+  // The Tenant Chargeback xlsx import file ALWAYS goes last, after every PDF.
+  if (attachments.chargebackXlsx) {
+    attachmentList.push({
+      filename: attachments.chargebackXlsx.name,
+      url: attachments.chargebackXlsx.url,
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+  }
 
   // Subject + body
   const subject = buildSubject(ctx.grandTotals.client, prop);
   const attachmentNames = attachmentList.map((a) => a.filename);
-  const htmlBody = buildHtmlBody({ prop, ctx, vendorBreakdown, links, attachmentNames });
+  const htmlBody = buildHtmlBody({ prop, ctx, vendorBreakdown, links });
   const textBody = buildTextBody({ prop, ctx, vendorBreakdown, links, attachmentNames });
 
   return { to, cc, subject, htmlBody, textBody, attachments: attachmentList };

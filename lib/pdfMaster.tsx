@@ -47,7 +47,7 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
     >
       <Page size="LETTER" style={pdfStyles.page} wrap>
         <PdfHeaderStrip
-          docTitle={ctx.templateLabel}
+          docTitle={`${ctx.templateLabel} - Master`}
           propertyName={ctx.propertyName}
           inspectorName={ctx.inspectorName}
           region={ctx.region}
@@ -63,7 +63,7 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
           }
         />
 
-        {/* Grand totals strip — three figures side by side */}
+        {/* Grand totals strip — Scope Items + Vendor / Client / Tenant / Net Turn */}
         <View style={pdfStyles.grandTotalsStrip}>
           <View style={pdfStyles.grandTotalsItem}>
             <Text style={pdfStyles.grandTotalsLabel}>Scope Items</Text>
@@ -80,6 +80,10 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
           <View style={pdfStyles.grandTotalsItem}>
             <Text style={pdfStyles.grandTotalsLabel}>Tenant Total</Text>
             <Text style={pdfStyles.grandTotalsValueBrand}>${formatMoneyPdf(ctx.grandTotals.tenant)}</Text>
+          </View>
+          <View style={pdfStyles.grandTotalsItem}>
+            <Text style={pdfStyles.grandTotalsLabel}>Net Turn Cost</Text>
+            <Text style={pdfStyles.grandTotalsValue}>${formatMoneyPdf(ctx.grandTotals.client - ctx.grandTotals.tenant)}</Text>
           </View>
         </View>
 
