@@ -317,7 +317,7 @@ export function QcReinspectForm(props: Props) {
         const after = afterPhotos[s.key] || [];
         const isCollapsed = collapsed.has(s.key);
         return (
-          <section key={s.key} className="mb-4 border border-gray-200 rounded-xl overflow-hidden">
+          <section key={s.key} className="mb-4 border border-gray-200 rounded-xl overflow-hidden shadow-md">
             <button
               type="button"
               onClick={() => toggleCollapse(s.key)}

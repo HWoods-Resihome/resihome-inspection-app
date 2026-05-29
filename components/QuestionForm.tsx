@@ -788,13 +788,13 @@ export function QuestionForm({
           const sectionDomId = `section-${inst.instanceKey}`;
 
           return (
-            <section key={inst.instanceKey} id={sectionDomId} className="mb-8 scroll-mt-24">
+            <section key={inst.instanceKey} id={sectionDomId} className="mb-8 scroll-mt-24 rounded-xl shadow-md overflow-hidden">
               {/* Section header (tappable to collapse) */}
               <button
                 type="button"
                 onClick={() => toggleCollapsed(inst.instanceKey)}
                 aria-expanded={!isCollapsed}
-                className={`w-full bg-ink text-white ${isCollapsed ? 'rounded-xl' : 'rounded-t-xl'} px-4 py-3 flex items-center justify-between text-left hover:bg-gray-900 transition`}
+                className="w-full bg-gray-50 text-gray-900 border-b border-gray-200 px-4 py-3 flex items-center justify-between text-left hover:bg-gray-100 transition"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <svg
@@ -822,7 +822,7 @@ export function QuestionForm({
               </button>
 
               {!isCollapsed && (
-                <div className="bg-white border border-t-0 border-gray-200 rounded-b-xl divide-y divide-gray-100">
+                <div className="bg-white border-x border-b border-gray-200 divide-y divide-gray-100">
                   {/* Section photos — compact single-row layout (matches RateCardForm) */}
                   <div className={`px-3 py-2 ${photosMissing ? 'bg-amber-50' : 'bg-gray-50'}`}>
                     <div className="flex items-center justify-between gap-3 flex-wrap">

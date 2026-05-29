@@ -1115,7 +1115,7 @@ export function RateCardForm(props: RateCardFormProps) {
           const photosMissing = photosRequired && photos.length === 0;
           const isUploadingHere = uploadingSection?.sectionId === s.id;
           return (
-            <section key={s.id} className="bg-white rounded shadow-sm border border-gray-200 overflow-hidden">
+            <section key={s.id} className="bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden">
               <SectionHeader
                 section={s}
                 heading={heading}
@@ -1687,8 +1687,8 @@ function SectionHeader(p: SectionHeaderProps) {
   return (
     <div
       onClick={editingTitle || p.forceExpanded ? undefined : p.onToggle}
-      className={`w-full px-4 py-3 ${
-        editingTitle || p.forceExpanded ? '' : 'hover:bg-gray-50 cursor-pointer'
+      className={`w-full px-4 py-3 bg-gray-50 border-b border-gray-200 ${
+        editingTitle || p.forceExpanded ? '' : 'hover:bg-gray-100 cursor-pointer'
       }`}
     >
       {/* Row 1: Title + inline edit/delete controls. The title gets the full
