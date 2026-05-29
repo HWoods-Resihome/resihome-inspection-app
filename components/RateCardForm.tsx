@@ -141,10 +141,41 @@ export function RateCardForm(props: RateCardFormProps) {
       chargebackXlsx: { name: string; url: string } | null;
       vendors: Array<{ vendor: string; name: string; url: string }>;
     };
+    email: {
+      sent: boolean;
+      reason?: string;
+      message?: string;
+      recipients?: { to: string[]; cc: string[] };
+    } | null;
     totals: { vendor: number; client: number; tenant: number; lineCount: number };
   };
   const [finalizing, setFinalizing] = useState(false);
   const [finalizeResult, setFinalizeResult] = useState<FinalizeResult | null>(null);
+
+  // Ref to the finalize handler so the auto-resume effect (below) can call the
+  // latest version without re-running when the handler identity changes.
+  const finalizeHandlerRef = useRef<null | (() => Promise<void>)>(null);
+  // Guard so we only auto-resume once even if the effect re-runs.
+  const autoFinalizeTriggered = useRef(false);
+
+  // Auto-resume finalize after returning from the Gmail OAuth flow. The
+  // callback redirects to /inspection/{id}?finalizeNow=1 once the user has
+  // connected their account. We strip the param from the URL so a refresh
+  // doesn't re-trigger, then kick the same finalize handler the button uses.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (autoFinalizeTriggered.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('finalizeNow') === '1' && props.inspectionStatus === 'pending_approval') {
+      autoFinalizeTriggered.current = true;
+      // Clean the URL (remove the query param) without a navigation.
+      params.delete('finalizeNow');
+      const clean = window.location.pathname + (params.toString() ? `?${params}` : '');
+      window.history.replaceState({}, '', clean);
+      // Defer a tick so the component is fully mounted + handler ref is set.
+      setTimeout(() => { finalizeHandlerRef.current?.(); }, 50);
+    }
+  }, [props.inspectionStatus]);
 
   // Browser supports in-app camera?
   const hasMediaDevices = typeof window !== 'undefined' &&
@@ -836,16 +867,33 @@ export function RateCardForm(props: RateCardFormProps) {
     // Branch on status: pending_approval -> finalize flow, else submit flow.
     const isFinalizing = props.inspectionStatus === 'pending_approval';
     if (isFinalizing) {
-      const confirmed = window.confirm(
-        'Finalize this inspection?\n\n' +
-        'This will:\n' +
-        '  • Generate the Master, Tenant Chargeback, and Per-Vendor PDFs\n' +
-        '  • Attach all files to this inspection in HubSpot\n' +
-        '  • Mark the inspection as Completed\n\n' +
-        'You\'ll be able to download the PDFs immediately after finalize completes. ' +
-        'You can also Reopen the inspection later if you need to make changes.'
-      );
-      if (!confirmed) return;
+      // Before finalizing, make sure Gmail is connected so the completion
+      // email can actually send. If the server is configured for Gmail but
+      // this user hasn't connected yet, bounce them through the OAuth flow —
+      // the callback returns to this inspection with ?finalizeNow=1 which
+      // auto-resumes finalize once connected. If Gmail isn't configured on
+      // the server at all, we just proceed (email will be skipped server-side).
+      try {
+        const statusRes = await fetch('/api/auth/gmail/status');
+        if (statusRes.ok) {
+          const status = await statusRes.json();
+          if (status.configured && !status.connected) {
+            // Redirect to connect, carrying this inspection id so we can
+            // auto-resume finalize after authorization.
+            window.location.href =
+              `/api/auth/gmail/connect?finalizeAfter=${encodeURIComponent(props.inspectionRecordId)}`;
+            return;
+          }
+        }
+      } catch {
+        // Status check failed — don't block finalize on it; proceed and let
+        // the server decide whether email sends.
+      }
+
+      // No confirmation prompt — clicking the button is itself the user's
+      // intent to finalize. Spinner shows in the button label while the PDFs
+      // generate (10-30s on Vercel lambda). The result modal still appears
+      // afterward to surface the downloads.
       setFinalizing(true);
       try {
         const r = await fetch(`/api/inspections/${props.inspectionRecordId}/finalize`, {
@@ -882,6 +930,10 @@ export function RateCardForm(props: RateCardFormProps) {
       alert(`Submit failed: ${e.message || e}`);
     }
   }
+
+  // Keep the ref pointing at the latest handler so the OAuth auto-resume
+  // effect always calls the current closure.
+  finalizeHandlerRef.current = handleSubmitOrFinalize;
 
   // Human-friendly status label shown in the header. We map the HubSpot
   // internal value (snake_case) to title case + apply a color pill.
@@ -1350,6 +1402,51 @@ export function RateCardForm(props: RateCardFormProps) {
                 Tenant Total: <span className="text-brand font-semibold">${finalizeResult.totals.tenant.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
             </div>
+
+            {/* Email status banner — shown right under the header. Three states:
+                  sent (emerald)     — the notification email went out
+                  not_connected (amber) — Gmail not connected yet, click to connect
+                  send_failed (red)  — Gmail accepted us but the message bounced */}
+            {finalizeResult.email && (
+              <div className={`px-5 py-3 border-b ${
+                finalizeResult.email.sent
+                  ? 'bg-emerald-50 border-emerald-200'
+                  : finalizeResult.email.reason === 'gmail_not_configured' || finalizeResult.email.reason === 'gmail_not_connected'
+                    ? 'bg-amber-50 border-amber-200'
+                    : 'bg-red-50 border-red-200'
+              }`}>
+                {finalizeResult.email.sent ? (
+                  <>
+                    <div className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Email Sent</div>
+                    {finalizeResult.email.recipients && (
+                      <div className="text-xs text-emerald-900 mt-1">
+                        To: <span className="font-mono">{finalizeResult.email.recipients.to.join(', ')}</span>
+                        {finalizeResult.email.recipients.cc.length > 0 && (
+                          <> · CC: <span className="font-mono">{finalizeResult.email.recipients.cc.join(', ')}</span></>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="text-xs font-bold text-amber-800 uppercase tracking-wider">
+                      Email Not Sent
+                    </div>
+                    <div className="text-xs text-amber-900 mt-1">
+                      {finalizeResult.email.message || 'Reason unknown.'}
+                    </div>
+                    {finalizeResult.email.recipients && (
+                      <div className="text-xs text-amber-900 mt-1 opacity-80">
+                        Would have gone to: <span className="font-mono">{finalizeResult.email.recipients.to.join(', ')}</span>
+                        {finalizeResult.email.recipients.cc.length > 0 && (
+                          <>, <span className="font-mono">{finalizeResult.email.recipients.cc.join(', ')}</span></>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
             <div className="px-5 py-3 space-y-2">
               <div className="flex items-center justify-between mb-1">
                 <div className="text-xs uppercase tracking-wider font-semibold text-gray-500">Downloads</div>

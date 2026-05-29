@@ -228,12 +228,15 @@ export default function Home() {
                   )}
                 </div>
               </div>
-              <button
-                onClick={handleLogout}
-                className="text-xs font-heading font-semibold text-white/90 hover:text-white whitespace-nowrap"
-              >
-                Sign Out
-              </button>
+              <div className="flex items-center gap-3 whitespace-nowrap">
+                <GmailConnectChip />
+                <button
+                  onClick={handleLogout}
+                  className="text-xs font-heading font-semibold text-white/90 hover:text-white"
+                >
+                  Sign Out
+                </button>
+              </div>
             </div>
 
             {/* + New Inspection button */}
@@ -451,4 +454,65 @@ function prettyTemplateLabel(t: string): string {
     .filter(Boolean)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
+}
+
+/**
+ * Small chip in the header showing Gmail connection status. Lets users
+ * connect proactively (rather than only being prompted at finalize time) and
+ * disconnect. Hidden entirely when the server isn't configured for Gmail
+ * (no OAuth client), since there's nothing to connect to.
+ */
+function GmailConnectChip() {
+  const [state, setState] = useState<{ configured: boolean; connected: boolean } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/gmail/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d) setState(d); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // Surface OAuth round-trip results from the query string (set by the
+  // callback) as a one-time toast-ish refresh of state.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('gmail_connected') === '1') {
+      setState((s) => (s ? { ...s, connected: true } : s));
+      params.delete('gmail_connected');
+      const clean = window.location.pathname + (params.toString() ? `?${params}` : '');
+      window.history.replaceState({}, '', clean);
+    }
+  }, []);
+
+  if (!state || !state.configured) return null; // nothing to show if unconfigured
+
+  if (state.connected) {
+    return (
+      <button
+        onClick={async () => {
+          await fetch('/api/auth/gmail/status', { method: 'DELETE' });
+          setState((s) => (s ? { ...s, connected: false } : s));
+        }}
+        title="Gmail connected — click to disconnect"
+        className="text-xs font-semibold text-white/90 hover:text-white flex items-center gap-1"
+      >
+        <span className="inline-block w-2 h-2 rounded-full bg-emerald-300" />
+        Gmail
+      </button>
+    );
+  }
+
+  return (
+    <a
+      href="/api/auth/gmail/connect"
+      title="Connect your Gmail to send inspection emails"
+      className="text-xs font-semibold bg-white/15 hover:bg-white/25 rounded px-2 py-1 flex items-center gap-1"
+    >
+      <span className="inline-block w-2 h-2 rounded-full bg-white/50" />
+      Connect Gmail
+    </a>
+  );
 }

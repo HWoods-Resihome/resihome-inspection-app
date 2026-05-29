@@ -28,6 +28,8 @@ import { renderMasterPdf } from '@/lib/pdfMaster';
 import { renderChargebackPdf } from '@/lib/pdfChargeback';
 import { renderVendorPdfs } from '@/lib/pdfVendor';
 import { renderChargebackXlsx } from '@/lib/xlsxChargeback';
+import { composeInspectionEmail } from '@/lib/email';
+import { sendInspectionEmail } from '@/lib/gmail';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
 
 export const config = {
@@ -320,6 +322,53 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // ---- 7. Email notification (Gmail send) ----
+    // Composed regardless of whether Gmail is connected, so the result
+    // modal can still preview where it WOULD have gone. Actual send may
+    // no-op until OAuth is wired up. Wrapped in try/catch so an email
+    // failure never blocks finalize completion.
+    let emailResult: Awaited<ReturnType<typeof sendInspectionEmail>> | null = null;
+    try {
+      // Inspection URLs for the body. The app URL uses the request's host;
+      // the HubSpot URL uses sandbox portal 51415639 (placeholder per Hayden).
+      const appHost = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
+      const appProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+      const appUrl = `${appProto}://${appHost}/inspection/${id}`;
+      const inspectionTypeId = process.env.HUBSPOT_INSPECTION_TYPE_ID || '';
+      const HUBSPOT_PORTAL_ID = '51415639';
+      const hubspotUrl = inspectionTypeId
+        ? `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/${inspectionTypeId}/${id}`
+        : `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-1/${id}`;
+
+      const payload = composeInspectionEmail({
+        ctx,
+        prop: {
+          addressStreet: inspectionData.propertyAddressStreet || '',
+          city: inspectionData.propertyCity || '',
+          stateCode: inspectionData.propertyStateCode || '',
+          zipCode: inspectionData.propertyZip || '',
+        },
+        links: { appUrl, hubspotUrl },
+        attachments: {
+          masterPdf: { name: masterFilename, url: masterUrl },
+          chargebackPdf: chargebackBuf && chargebackUrl ? { name: chargebackFilename, url: chargebackUrl } : null,
+          chargebackXlsx: chargebackXlsxBuf && chargebackXlsxUrl ? { name: chargebackXlsxFilename, url: chargebackXlsxUrl } : null,
+          vendorPdfs: Object.entries(vendorUrls).map(([vendor, url]) => ({
+            vendor, url, name: vendorFilename(vendor),
+          })),
+        },
+      });
+
+      emailResult = await sendInspectionEmail(payload, session.email, req);
+    } catch (e: any) {
+      console.error('[finalize] email send threw (caught, finalize continues):', e);
+      emailResult = {
+        sent: false,
+        reason: 'send_failed',
+        message: String(e?.message || e).slice(0, 300),
+      };
+    }
+
     const elapsed = Date.now() - t0;
     return res.status(200).json({
       success: true,
@@ -335,6 +384,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           url,
         })),
       },
+      email: emailResult,
       totals: {
         vendor: ctx.grandTotals.vendor,
         client: ctx.grandTotals.client,
