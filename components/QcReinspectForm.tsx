@@ -116,15 +116,9 @@ export function QcReinspectForm(props: Props) {
         setSourceName(d.sourceRateCardName || null);
         if (d.qcVerdict === 'pass' || d.qcVerdict === 'fail') setVerdict(d.qcVerdict);
 
-        const order: string[] = [];
-        const seen = new Set<string>();
-        for (const ln of loadedLines) {
-          const k = sectionKey(ln.section, ln.location);
-          if (!seen.has(k)) { seen.add(k); order.push(k); }
-        }
-        const initialCollapsed = new Set<string>();
-        for (let i = 1; i < order.length; i++) initialCollapsed.add(order[i]);
-        setCollapsed(initialCollapsed);
+        // Default: all sections expanded so the reviewer can see every line
+        // item at a glance. (They can still collapse individually.)
+        setCollapsed(new Set());
       } catch (e: any) {
         if (!cancelled) setLoadError(String(e?.message || e));
       } finally {

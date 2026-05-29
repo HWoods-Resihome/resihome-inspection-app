@@ -48,7 +48,7 @@ export default function LoginPage() {
             <img
               src="/resiwalk-logo.png"
               alt="ResiWALK"
-              className="w-full max-w-xs object-contain mb-3"
+              className="w-full max-w-[280px] object-contain mb-2"
             />
             <p className="text-sm text-gray-500 font-heading uppercase tracking-widest">
               Field Inspections
