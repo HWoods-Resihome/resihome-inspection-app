@@ -399,7 +399,8 @@ export function QcReinspectForm(props: Props) {
                   </div>
                 </div>
 
-                <div className="overflow-x-auto">
+                {/* Desktop: full table (horizontal scroll if needed) */}
+                <div className="overflow-x-auto hidden sm:block">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
@@ -464,6 +465,58 @@ export function QcReinspectForm(props: Props) {
                       ))}
                     </tbody>
                   </table>
+                </div>
+
+                {/* Mobile: stacked cards — all detail visible, big pass/fail
+                    buttons, no horizontal scroll. */}
+                <div className="sm:hidden divide-y divide-gray-100">
+                  {s.lines.map((ln) => {
+                    const ps = ln.vendor ? vendorPillStyle(ln.vendor) : null;
+                    return (
+                      <div key={ln.recordId} className="py-3">
+                        <div className="text-sm font-semibold text-gray-900 mb-1">{ln.description}</div>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 mb-2">
+                          <span>{ln.category}</span>
+                          {ln.subcategory && (<><span>&middot;</span><span>{ln.subcategory}</span></>)}
+                          {ln.unit && (<><span>&middot;</span><span>{ln.quantity != null ? `${ln.quantity} ` : ''}{ln.unit}</span></>)}
+                          {ln.vendorCost != null && (<><span>&middot;</span><span className="text-gray-700 font-semibold">${formatMoney(ln.vendorCost)}</span></>)}
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          {ps ? (
+                            <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${ps.bg} ${ps.text} ${ps.border || ''}`}>
+                              {ln.vendor}
+                            </span>
+                          ) : <span />}
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              disabled={props.readOnly}
+                              onClick={() => setLinePassFail(ln, 'pass')}
+                              className={
+                                'h-11 px-5 rounded-lg flex items-center justify-center text-base font-bold border-2 transition ' +
+                                (ln.passFail === 'pass'
+                                  ? 'bg-emerald-600 text-white border-emerald-600'
+                                  : 'bg-white text-emerald-600 border-emerald-300')
+                              }
+                              aria-label="Pass"
+                            >&#10003;</button>
+                            <button
+                              type="button"
+                              disabled={props.readOnly}
+                              onClick={() => setLinePassFail(ln, 'fail')}
+                              className={
+                                'h-11 px-5 rounded-lg flex items-center justify-center text-base font-bold border-2 transition ' +
+                                (ln.passFail === 'fail'
+                                  ? 'bg-brand text-white border-brand'
+                                  : 'bg-white text-brand border-brand/40')
+                              }
+                              aria-label="Fail"
+                            >&#10007;</button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </>
             )}
