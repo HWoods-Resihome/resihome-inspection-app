@@ -304,12 +304,17 @@ export function RateCardForm(props: RateCardFormProps) {
             const rc = ans.rateCardLine;
             const sectionId = sectionLookup[`${ans.section}||${ans.location}`] || ans.section;
             // rc.customLaborFullDescription is whatever was stored in answer_value
-            // — it's either the catalog short description (default) or an
-            // inspector override. We compare against the catalog to decide.
+            // — the catalog subtext/short description (default) or an inspector
+            // override. Treat it as an override only if it differs from BOTH the
+            // short description and the preferred catalog description (subtext).
             const catalogItem = catalog.find((c) => c.lineItemCode === rc.lineItemCode);
             const storedDesc = rc.customLaborFullDescription || '';
             const catalogShort = catalogItem?.laborShortDescription || '';
-            const customDesc = storedDesc && storedDesc !== catalogShort ? storedDesc : undefined;
+            const catalogPreferred = (catalogItem?.laborSubtext && catalogItem.laborSubtext.trim())
+              || catalogItem?.laborFullDescription || '';
+            const customDesc = storedDesc && storedDesc !== catalogShort && storedDesc !== catalogPreferred
+              ? storedDesc
+              : undefined;
             const line: RateCardLineInput = {
               externalId: ans.answerIdExternal,
               section: ans.section,

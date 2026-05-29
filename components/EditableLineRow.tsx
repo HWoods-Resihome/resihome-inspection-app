@@ -78,6 +78,16 @@ function genExternalId(): string {
   return `RCLINE-${uuid}`;
 }
 
+/**
+ * The default description to show for a catalog item. Prefers the newer
+ * per-item labor_subtext; falls back to the legacy full description for any
+ * item that doesn't have a subtext yet. (A user's own per-line override always
+ * takes precedence over this where applicable.)
+ */
+function catalogDescription(item: { laborSubtext?: string; laborFullDescription: string }): string {
+  return (item.laborSubtext && item.laborSubtext.trim()) || item.laborFullDescription || '';
+}
+
 export function EditableLineRow(props: Props) {
   const {
     line, catalog, regions, inspectionRegion,
@@ -375,7 +385,7 @@ export function EditableLineRow(props: Props) {
   const lineItemOptions = filteredLineItems.map((item) => ({
     value: item.lineItemCode,
     label: item.laborShortDescription,
-    sublabel: item.laborFullDescription,
+    sublabel: catalogDescription(item),
   }));
 
   // -------------------------------------------------------------------
@@ -436,7 +446,7 @@ export function EditableLineRow(props: Props) {
                   />
                   {selectedItem && (
                     <textarea
-                      value={customDescription || selectedItem.laborFullDescription}
+                      value={customDescription || catalogDescription(selectedItem)}
                       onChange={(e) => setCustomDescription(e.target.value)}
                       rows={2}
                       className="w-full mt-2 text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-700 bg-white"
@@ -594,7 +604,7 @@ export function EditableLineRow(props: Props) {
         />
         {selectedItem && (
           <textarea
-            value={customDescription || selectedItem.laborFullDescription}
+            value={customDescription || catalogDescription(selectedItem)}
             onChange={(e) => setCustomDescription(e.target.value)}
             rows={2}
             className="w-full mt-1.5 text-xs border border-gray-300 rounded px-2 py-1 text-gray-700 bg-white"
@@ -740,7 +750,7 @@ function ViewRow({ line, item, calc, readOnly, onEnterEdit, onDelete, onSaveDesc
   const [descDraft, setDescDraft] = useState('');
   const descTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const fullDescription = line.customLaborFullDescription || item.laborFullDescription;
+  const fullDescription = line.customLaborFullDescription || catalogDescription(item);
   const shortDescription = item.laborShortDescription;
   const truncated = fullDescription.length > 120
     ? fullDescription.slice(0, 120).trim() + '…'
@@ -762,7 +772,7 @@ function ViewRow({ line, item, calc, readOnly, onEnterEdit, onDelete, onSaveDesc
   function commitDesc() {
     const next = descDraft.trim();
     // Only persist if it actually changed from what's saved
-    if (next !== (line.customLaborFullDescription || item.laborFullDescription)) {
+    if (next !== (line.customLaborFullDescription || catalogDescription(item))) {
       onSaveDescription(next);
     }
     setEditingDesc(false);

@@ -163,6 +163,7 @@ export interface RateCardLineItem {
   lineItemCode: string;              // natural key (e.g., "APLSL1009")
   laborShortDescription: string;
   laborFullDescription: string;
+  laborSubtext: string;              // newer per-item subtext; preferred over full description for display
   category: string;
   subcategory: string;
   laborCode: string;

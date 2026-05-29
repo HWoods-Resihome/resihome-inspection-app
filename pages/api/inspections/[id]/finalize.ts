@@ -161,8 +161,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
         );
 
+        // Preferred catalog description is the newer subtext, falling back to
+        // the full description for items without one.
+        const catalogDesc = (catalogItem.laborSubtext && catalogItem.laborSubtext.trim()) || catalogItem.laborFullDescription || '';
         const storedDescription = ans.answerValue || '';
-        const hasCustomDescription = !!storedDescription && storedDescription !== catalogItem.laborShortDescription;
+        // Treat the stored value as a custom/override description if it differs
+        // from both the short description and the preferred catalog description.
+        const hasCustomDescription = !!storedDescription
+          && storedDescription !== catalogItem.laborShortDescription
+          && storedDescription !== catalogDesc;
 
         const line: PdfLineRow = {
           externalId: ans.answerIdExternal,
@@ -171,7 +178,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           subcategory: catalogItem.subcategory,
           lineItemCode: rc.lineItemCode,
           laborShortDescription: catalogItem.laborShortDescription,
-          laborFullDescription: hasCustomDescription ? storedDescription : catalogItem.laborFullDescription,
+          laborFullDescription: hasCustomDescription ? storedDescription : catalogDesc,
           hasCustomDescription,
           laborMeas: catalogItem.laborMeas || '',
           quantity: rc.quantityDecimal,

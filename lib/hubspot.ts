@@ -1425,7 +1425,7 @@ import type { RateCardLineItem, RegionRate } from './types';
 export async function fetchRateCardCatalog(): Promise<RateCardLineItem[]> {
   const ids = await rateCardTypeIds();
   const properties = [
-    'line_item_code', 'labor_short_description', 'labor_full_description',
+    'line_item_code', 'labor_short_description', 'labor_full_description', 'labor_subtext',
     'category', 'subcategory',
     'labor_code', 'labor_meas', 'labor_hours', 'labor_hourly_rate_list',
     'material_code', 'material_description', 'material_meas',
@@ -1459,6 +1459,7 @@ export async function fetchRateCardCatalog(): Promise<RateCardLineItem[]> {
         lineItemCode: p.line_item_code || '',
         laborShortDescription: p.labor_short_description || '',
         laborFullDescription: p.labor_full_description || '',
+        laborSubtext: p.labor_subtext || '',
         category: p.category || '',
         subcategory: p.subcategory || '',
         laborCode: p.labor_code || '',
@@ -1498,7 +1499,7 @@ export async function fetchRateCardCatalog(): Promise<RateCardLineItem[]> {
 export async function fetchRateCardLineItemByCode(code: string): Promise<RateCardLineItem | null> {
   const ids = await rateCardTypeIds();
   const properties = [
-    'line_item_code', 'labor_short_description', 'labor_full_description',
+    'line_item_code', 'labor_short_description', 'labor_full_description', 'labor_subtext',
     'category', 'subcategory',
     'labor_code', 'labor_meas', 'labor_hours', 'labor_hourly_rate_list',
     'material_code', 'material_description', 'material_meas',
@@ -1526,6 +1527,7 @@ export async function fetchRateCardLineItemByCode(code: string): Promise<RateCar
     lineItemCode: p.line_item_code || '',
     laborShortDescription: p.labor_short_description || '',
     laborFullDescription: p.labor_full_description || '',
+    laborSubtext: p.labor_subtext || '',
     category: p.category || '',
     subcategory: p.subcategory || '',
     laborCode: p.labor_code || '',
