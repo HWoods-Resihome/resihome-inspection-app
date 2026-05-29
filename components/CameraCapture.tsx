@@ -58,6 +58,7 @@ export function CameraCapture({
   // that does nothing (e.g. iOS Safari, front camera).
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [torchError, setTorchError] = useState('');
 
   // ----- Camera lifecycle -----
 
@@ -96,17 +97,35 @@ export function CameraCapture({
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => { /* play() may reject silently if autoplay is blocked; not fatal */ });
       }
-      // Detect torch/flash support on the active video track. Not all devices
-      // or browsers expose this (iOS Safari doesn't; front cameras usually
-      // don't). Start with torch OFF on every fresh stream.
+      // Detect torch/flash support on the active video track. getCapabilities()
+      // is unreliable immediately after getUserMedia — on many Android devices
+      // .torch is undefined until the video has loaded metadata, and sometimes
+      // a moment after. So we re-check on a short delay. We also optimistically
+      // show the control on mobile back-cameras even if the capability flag is
+      // missing, then confirm/disable on the first apply attempt (some devices
+      // support torch via applyConstraints without reporting the capability).
       setTorchOn(false);
-      try {
-        const track = stream.getVideoTracks()[0];
-        const caps = (track?.getCapabilities?.() as any) || {};
-        setTorchSupported(!!caps.torch);
-      } catch {
-        setTorchSupported(false);
+      setTorchError('');
+      const checkTorch = () => {
+        try {
+          const track = streamRef.current?.getVideoTracks?.()[0];
+          const caps = (track?.getCapabilities?.() as any) || {};
+          if (caps.torch) { setTorchSupported(true); return; }
+        } catch { /* ignore */ }
+        // Optimistic fallback: on a mobile device using the back camera, allow
+        // an attempt even when the capability isn't reported.
+        const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+        setTorchSupported(isMobile && facing === 'environment');
+      };
+      // Check now, after metadata, and once more on a delay to catch late caps.
+      checkTorch();
+      if (videoRef.current) {
+        videoRef.current.addEventListener('loadedmetadata', () => {
+          checkTorch();
+          setTimeout(checkTorch, 600);
+        }, { once: true });
       }
+      setTimeout(checkTorch, 800);
       setPermissionState('granted');
       setPermissionError('');
     } catch (e: any) {
@@ -139,6 +158,41 @@ export function CameraCapture({
   }, [isOpen, facing]);
 
   // ----- Capture -----
+
+  // Upload one File through the background pipeline + optimistic thumbnail.
+  // Shared by the in-app shutter and the native-camera fallback.
+  const enqueueFile = useCallback((file: File) => {
+    const id = `${Date.now()}_${(typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 8)}`;
+    const blobUrl = URL.createObjectURL(file);
+    const abortController = new AbortController();
+    const item: CaptureItem = { id, blobUrl, file, status: 'uploading', abortController };
+    setItems((prev) => [...prev, item]);
+    uploadPhoto(file).then((hubspotUrl) => {
+      if (abortController.signal.aborted) return;
+      setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'uploaded', hubspotUrl } : it)));
+    }).catch((err) => {
+      if (abortController.signal.aborted) return;
+      setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'failed', error: err?.message || String(err) } : it)));
+    });
+  }, [uploadPhoto]);
+
+  // Native OS camera fallback. On iOS (no web torch) and as a universal
+  // backup, this opens the phone's built-in camera — which has its own flash
+  // control — via a file input with capture. Picked photos flow through the
+  // same upload pipeline and thumbnails as in-app shots.
+  const nativeInputRef = useRef<HTMLInputElement | null>(null);
+  const openNativeCamera = useCallback(() => {
+    nativeInputRef.current?.click();
+  }, []);
+  const handleNativeFiles = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const room = Math.max(0, maxPhotos - itemsRef.current.length);
+    const picked = Array.from(files).slice(0, room);
+    if (picked.length < files.length) {
+      alert(`Only the first ${room} photo(s) were added (max ${maxPhotos} per session).`);
+    }
+    for (const f of picked) enqueueFile(f);
+  }, [enqueueFile, maxPhotos]);
 
   const capturePhoto = useCallback(async () => {
     if (busy) return;
@@ -178,38 +232,13 @@ export function CameraCapture({
       }
       const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const file = new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' });
-      const blobUrl = URL.createObjectURL(blob);
-      const abortController = new AbortController();
-
-      const item: CaptureItem = {
-        id, blobUrl, file, status: 'uploading', abortController,
-      };
-      // Add to state immediately (optimistic) - thumbnail appears at once
-      setItems((prev) => [...prev, item]);
-
-      // Kick off the upload in the background. We don't await it here so the
-      // shutter unblocks immediately for the next shot.
-      uploadPhoto(file).then((hubspotUrl) => {
-        if (abortController.signal.aborted) return; // user deleted this photo
-        setItems((prev) =>
-          prev.map((it) =>
-            it.id === id ? { ...it, status: 'uploaded', hubspotUrl } : it
-          )
-        );
-      }).catch((err) => {
-        if (abortController.signal.aborted) return;
-        setItems((prev) =>
-          prev.map((it) =>
-            it.id === id ? { ...it, status: 'failed', error: err?.message || String(err) } : it
-          )
-        );
-      });
+      enqueueFile(file);
     } catch (e: any) {
       console.error('Capture error:', e);
     } finally {
       setBusy(false);
     }
-  }, [busy, items.length, maxPhotos, uploadPhoto]);
+  }, [busy, items.length, maxPhotos, enqueueFile]);
 
   // ----- Per-photo retake/delete -----
 
@@ -316,12 +345,14 @@ export function CameraCapture({
     try {
       await track.applyConstraints({ advanced: [{ torch: next } as any] });
       setTorchOn(next);
+      setTorchError('');
     } catch (e) {
-      // Some devices report torch capability but reject applying it. Disable
-      // the control so the user isn't left with a button that does nothing.
+      // We optimistically showed the button; this device can't actually do
+      // torch via the web API. Hide it and point the user to the OS camera.
       console.warn('[CameraCapture] torch toggle failed:', e);
       setTorchSupported(false);
       setTorchOn(false);
+      setTorchError('Flash isn\u2019t available in-app on this device. Use "Photo Library / Camera" below for your phone\u2019s camera with flash.');
     }
   }, [torchOn]);
 
@@ -370,13 +401,22 @@ export function CameraCapture({
               </svg>
               <p className="text-sm font-heading font-semibold mb-2">Camera unavailable</p>
               <p className="text-xs text-white/80 mb-4">{permissionError}</p>
-              <button
-                type="button"
-                onClick={handleCancel}
-                className="bg-white text-black font-heading font-semibold px-4 py-2 rounded-lg text-sm"
-              >
-                Close
-              </button>
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={openNativeCamera}
+                  className="bg-brand text-white font-heading font-semibold px-4 py-2 rounded-lg text-sm"
+                >
+                  Use Phone Camera
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="bg-white text-black font-heading font-semibold px-4 py-2 rounded-lg text-sm"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -487,8 +527,34 @@ export function CameraCapture({
         </div>
       )}
 
+      {/* Torch error / iOS guidance (if a torch attempt failed) */}
+      {torchError && (
+        <div className="bg-amber-500/90 text-black text-xs font-heading text-center px-4 py-1.5">
+          {torchError}
+        </div>
+      )}
+
       {/* Shutter row */}
-      <div className="bg-black px-4 py-4 flex items-center justify-center">
+      <div className="bg-black px-4 py-4 flex items-center justify-center gap-8">
+        {/* Phone camera fallback (left of shutter). Always available: gives iOS
+            users a flash-capable camera, and is a universal backup if the live
+            camera struggles. */}
+        <button
+          type="button"
+          onClick={openNativeCamera}
+          className="flex flex-col items-center gap-1 text-white/90"
+          aria-label="Use phone camera (with flash)"
+          title="Open your phone's camera (has its own flash)"
+        >
+          <span className="w-11 h-11 rounded-full bg-white/15 flex items-center justify-center">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+          </span>
+          <span className="text-[10px] font-heading">Phone cam</span>
+        </button>
+
         <button
           type="button"
           onClick={capturePhoto}
@@ -498,7 +564,21 @@ export function CameraCapture({
         >
           <span className="block w-full h-full rounded-full bg-white" />
         </button>
+
+        {/* Spacer to keep the shutter visually centered opposite Phone cam */}
+        <span className="w-11" aria-hidden="true" />
       </div>
+
+      {/* Hidden native camera input (capture opens the OS camera on mobile) */}
+      <input
+        ref={nativeInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        multiple
+        className="hidden"
+        onChange={(e) => { handleNativeFiles(e.target.files); e.currentTarget.value = ''; }}
+      />
     </div>
   );
 }
