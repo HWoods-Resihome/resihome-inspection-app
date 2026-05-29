@@ -19,7 +19,8 @@ import {
   fetchAnswersForInspection,
   fetchRateCardCatalog,
   fetchRegionRates,
-  uploadFile,
+  uploadFileWithId,
+  attachFilesToInspectionRecord,
   updateInspection,
 } from '@/lib/hubspot';
 import { resolveSections, resolveStateCode, type SectionInstance } from '@/lib/sections';
@@ -311,29 +312,43 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // overwrite=true so re-running Finalize on a reopened inspection REPLACES
     // the old PDFs in place (same URL, same record) instead of leaving them
     // as orphans + creating "-1.pdf" duplicates.
-    const masterUrl = await uploadFile(masterBuf, masterFilename, 'application/pdf', '/inspection_pdfs', true);
+    const attachmentFileIds: string[] = [];
+    const masterUp = await uploadFileWithId(masterBuf, masterFilename, 'application/pdf', '/inspection_pdfs', true);
+    const masterUrl = masterUp.url;
+    if (masterUp.id) attachmentFileIds.push(masterUp.id);
 
     let chargebackUrl: string | null = null;
     if (chargebackBuf) {
-      chargebackUrl = await uploadFile(chargebackBuf, chargebackFilename, 'application/pdf', '/inspection_pdfs', true);
+      const up = await uploadFileWithId(chargebackBuf, chargebackFilename, 'application/pdf', '/inspection_pdfs', true);
+      chargebackUrl = up.url;
+      if (up.id) attachmentFileIds.push(up.id);
     }
 
     // Tenant Chargeback Import xlsx — only uploaded if there were chargeback lines
     let chargebackXlsxUrl: string | null = null;
     if (chargebackXlsxBuf) {
-      chargebackXlsxUrl = await uploadFile(
+      const up = await uploadFileWithId(
         chargebackXlsxBuf,
         chargebackXlsxFilename,
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         '/inspection_pdfs',
         true,
       );
+      chargebackXlsxUrl = up.url;
+      if (up.id) attachmentFileIds.push(up.id);
     }
 
     const vendorUrls: Record<string, string> = {};
     for (const [vendor, buf] of vendorBufs.entries()) {
-      const url = await uploadFile(buf, vendorFilename(vendor), 'application/pdf', '/inspection_pdfs', true);
-      vendorUrls[vendor] = url;
+      const up = await uploadFileWithId(buf, vendorFilename(vendor), 'application/pdf', '/inspection_pdfs', true);
+      vendorUrls[vendor] = up.url;
+      if (up.id) attachmentFileIds.push(up.id);
+    }
+
+    // Attach every generated file to the inspection's Attachments card
+    // (best-effort; never blocks finalize).
+    if (attachmentFileIds.length > 0) {
+      await attachFilesToInspectionRecord(id, attachmentFileIds, 'Move Out Scope report files');
     }
 
     // ---- 6. Write URLs + completed status back to HubSpot ----

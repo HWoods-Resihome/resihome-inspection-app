@@ -17,7 +17,8 @@ import {
   fetchAnswersForInspection,
   fetchSourceSectionPhotos,
   fetchRateCardCatalog,
-  uploadFile,
+  uploadFileWithId,
+  attachFilesToInspectionRecord,
   updateInspection,
 } from '@/lib/hubspot';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
@@ -190,7 +191,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const idSuffix = String(id).slice(-6);
     const filename = `Turn Re-Inspect QC - ${safeAddress} - ${datePart} - ${idSuffix}.pdf`;
 
-    const pdfUrl = await uploadFile(pdfBuf, filename, 'application/pdf', '/inspection_pdfs', true);
+    const { url: pdfUrl, id: pdfFileId } = await uploadFileWithId(pdfBuf, filename, 'application/pdf', '/inspection_pdfs', true);
+
+    // Attach the PDF to the inspection record's Attachments card (best-effort).
+    if (pdfFileId) {
+      await attachFilesToInspectionRecord(id, [pdfFileId], `Turn Re-Inspect QC report (${verdict.toUpperCase()})`);
+    }
 
     // Persist verdict + counts + status + PDF url. Defensive fallback if the
     // QC schema fields aren't present yet.
@@ -201,6 +207,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       qc_verdict: verdict,
       qc_pass_count: passCount,
       qc_fail_count: failCount,
+      inspection_result: verdict,   // standardized Pass/Fail field (phase5_step2)
       pdf_attachment_url: pdfUrl,
       pdf_master_url: pdfUrl,
       pdf_generated_at: nowIso,
@@ -210,8 +217,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     } catch (e: any) {
       const msg = String(e?.message || e);
       if (msg.includes('PROPERTY_DOESNT_EXIST') || (msg.includes('Property') && msg.includes('does not exist'))) {
-        console.warn('[qc-finalize] QC props not on schema — run phase5_step1. Falling back to status-only.');
-        await updateInspection(id, { status: 'completed', completed_at: nowIso, pdf_attachment_url: pdfUrl });
+        console.warn('[qc-finalize] a result prop is missing on schema. Retrying without inspection_result, then status-only.');
+        // Step down: drop only the newest field (inspection_result) first so the
+        // verdict + counts still persist if that's the one missing.
+        try {
+          const { inspection_result, ...withoutResult } = fullUpdate;
+          await updateInspection(id, withoutResult);
+        } catch (e2: any) {
+          console.warn('[qc-finalize] QC props still missing — run phase5_step1/step2. Falling back to status-only.');
+          await updateInspection(id, { status: 'completed', completed_at: nowIso, pdf_attachment_url: pdfUrl });
+        }
       } else {
         throw e;
       }

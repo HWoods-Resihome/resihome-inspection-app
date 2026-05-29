@@ -15,7 +15,7 @@ const TEMPLATE_LABELS: Record<string, string> = {
   pm_community_inspection: '(PM) Community / Visit Inspection',
   pm_vacancy_occupancy_check: '(PM) Vacancy / Occupancy Check',
   qc_new_construction_rrqc: '(QC) New Construction RRQC',
-  leasing_agent_1099_property_inspection: '1099 Leasing Agent Property Inspection',
+  leasing_agent_1099_property_inspection: '(1099) Leasing Agent Property Inspection',
   // Legacy templates — retired from new inspections (replaced by Rate Card),
   // but kept here so historical completed records still show a friendly label.
   pm_scope_inspection: '(PM) Scope Inspection',

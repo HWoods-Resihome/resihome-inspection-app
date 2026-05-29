@@ -684,6 +684,112 @@ export async function uploadFile(
 }
 
 /**
+ * Same as uploadFile, but also returns the HubSpot File ID so the file can be
+ * associated to a record (e.g. attached to the inspection's Attachments card
+ * via a Note engagement). Kept separate so existing callers of uploadFile are
+ * unaffected.
+ */
+export async function uploadFileWithId(
+  buffer: Buffer,
+  filename: string,
+  contentType: string,
+  folderPath: string = '/inspection_pdfs',
+  overwrite: boolean = true
+): Promise<{ url: string; id: string }> {
+  const url = `${API_BASE}/files/v3/files`;
+  const form = new FormData();
+  const blob = new Blob([buffer], { type: contentType });
+  form.append('file', blob, filename);
+  form.append('options', JSON.stringify({ access: 'PUBLIC_INDEXABLE', overwrite }));
+  form.append('folderPath', folderPath);
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token()}` },
+    body: form,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HubSpot file upload failed ${res.status}: ${text.slice(0, 500)}`);
+  }
+  const json = await res.json();
+  return { url: json.url || json.cdnUrl || '', id: String(json.id || '') };
+}
+
+/**
+ * Attach one or more uploaded HubSpot Files to an Inspection record so they
+ * appear under the record's "Attachments" card. HubSpot surfaces attachments
+ * via Note engagements that carry `hs_attachment_ids`, associated to the
+ * record. We create a single Note holding all the file IDs.
+ *
+ * Best-effort: never throws — a failure here should not fail finalize. Returns
+ * the created note id (or null).
+ */
+export async function attachFilesToInspectionRecord(
+  inspectionRecordId: string,
+  fileIds: string[],
+  noteBody: string = 'Inspection report PDFs'
+): Promise<string | null> {
+  const ids = fileIds.filter(Boolean);
+  if (ids.length === 0) return null;
+  const tids = typeIds();
+  try {
+    // 1) Resolve the default note -> inspection association type id.
+    let assocTypeId: number | null = null;
+    try {
+      const labels = await hubspotFetch(
+        `/crm/associations/${HUBSPOT_API_VERSION}/notes/${tids.inspection}/labels`
+      );
+      const first = (labels.results || [])[0];
+      if (first && (first.typeId ?? first.associationTypeId) != null) {
+        assocTypeId = Number(first.typeId ?? first.associationTypeId);
+      }
+    } catch (e) {
+      console.warn('[attachFiles] could not resolve note->inspection association type:', e);
+    }
+
+    // 2) Create the Note with the files attached, associating to the inspection.
+    const associations = assocTypeId != null
+      ? [{
+          to: { id: inspectionRecordId },
+          types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: assocTypeId }],
+        }]
+      : [];
+
+    const created = await hubspotFetch(`/crm/v3/objects/notes`, {
+      method: 'POST',
+      body: JSON.stringify({
+        properties: {
+          hs_timestamp: new Date().toISOString(),
+          hs_note_body: noteBody,
+          hs_attachment_ids: ids.join(';'),
+        },
+        associations,
+      }),
+    });
+
+    const noteId = String(created?.id || '');
+
+    // 3) If we couldn't resolve the association type up front, associate the
+    //    note to the inspection in a follow-up call using the default endpoint.
+    if (noteId && associations.length === 0) {
+      try {
+        await hubspotFetch(
+          `/crm/v4/objects/notes/${noteId}/associations/default/${tids.inspection}/${inspectionRecordId}`,
+          { method: 'PUT' }
+        );
+      } catch (e) {
+        console.warn('[attachFiles] default association fallback failed:', e);
+      }
+    }
+    return noteId || null;
+  } catch (e) {
+    console.warn('[attachFiles] failed (non-fatal):', e);
+    return null;
+  }
+}
+
+/**
  * After uploading a PDF to HubSpot Files, write its URL to the Inspection record's
  * pdf_attachment_url property so it's visible/clickable on the record page.
  *

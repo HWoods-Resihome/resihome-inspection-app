@@ -3,7 +3,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
 import { InspectionPdf, PdfData, PdfAnswer } from '@/lib/pdf';
-import { uploadFile, attachPdfUrlToInspection } from '@/lib/hubspot';
+import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord } from '@/lib/hubspot';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
 import type { AnswerInput } from '@/lib/types';
 
@@ -140,13 +140,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const t3 = Date.now();
     const safeName = body.inspectionName.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 60);
     const filename = `${safeName}_${body.externalId}.pdf`;
-    const pdfUrl = await uploadFile(pdfBuffer, filename, 'application/pdf', '/inspection_pdfs');
+    const { url: pdfUrl, id: pdfFileId } = await uploadFileWithId(pdfBuffer, filename, 'application/pdf', '/inspection_pdfs', true);
     const tUpload = Date.now() - t3;
     console.log(`[pdf] uploaded in ${tUpload}ms`);
 
-    // Step 6: patch Inspection record with PDF URL (fire-and-forget pattern would be
-    // faster but lower reliability; keeping awaited for now)
+    // Step 6: patch Inspection record with PDF URL + attach to Attachments card.
     await attachPdfUrlToInspection(body.inspectionRecordId, pdfUrl);
+    if (pdfFileId) {
+      await attachFilesToInspectionRecord(body.inspectionRecordId, [pdfFileId], 'Inspection report');
+    }
 
     const total = Date.now() - t0;
     console.log(`[pdf] total ${total}ms (images ${tImg}ms / render ${tRender}ms / upload ${tUpload}ms)`);

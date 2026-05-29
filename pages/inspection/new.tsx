@@ -24,7 +24,7 @@ const TEMPLATE_OPTIONS: { value: TemplateType; label: string; sublabel: string }
   { value: 'pm_community_inspection',                   label: '(PM) Community / Visit Inspection',    sublabel: 'Community grounds, amenities, signage' },
   { value: 'pm_vacancy_occupancy_check',                label: '(PM) Vacancy / Occupancy Check',       sublabel: 'Quick visit to confirm vacancy/security' },
   { value: 'qc_new_construction_rrqc',                  label: '(QC) New Construction RRQC',           sublabel: 'Rent-ready QC for new construction' },
-  { value: 'leasing_agent_1099_property_inspection',    label: '1099 Leasing Agent Property Inspection', sublabel: 'Pre-tour assessment by leasing agent' },
+  { value: 'leasing_agent_1099_property_inspection',    label: '(1099) Leasing Agent Property Inspection', sublabel: 'Pre-tour assessment by leasing agent' },
 ];
 
 function templateLabel(v: TemplateType): string {
