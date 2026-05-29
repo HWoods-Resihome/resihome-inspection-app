@@ -79,6 +79,9 @@ export function QcReinspectForm(props: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<null | { verdict: string; passCount: number; failCount: number; pdf: { name: string; url: string } }>(null);
   const [cameraKey, setCameraKey] = useState<string | null>(null);
+  // Per-section photo collapse — Before + After share one state so collapsing
+  // either folds both.
+  const [photosCollapsed, setPhotosCollapsed] = useState<Record<string, boolean>>({});
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Real-time save status indicator (mirrors the Scope Rate Card).
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -347,6 +350,8 @@ export function QcReinspectForm(props: Props) {
                       size={64}
                       accent="gray"
                       emptyLabel="No before photos on source"
+                      collapsed={!!photosCollapsed[s.key]}
+                      onToggle={() => setPhotosCollapsed((c) => ({ ...c, [s.key]: !c[s.key] }))}
                     />
                   </div>
 
@@ -356,16 +361,18 @@ export function QcReinspectForm(props: Props) {
                       photoUrls={after}
                       size={64}
                       accent="teal"
+                      collapsed={!!photosCollapsed[s.key]}
+                      onToggle={() => setPhotosCollapsed((c) => ({ ...c, [s.key]: !c[s.key] }))}
                       onRemove={props.readOnly ? undefined : (u) => removeAfterPhoto(s.key, s.section, s.location, u)}
                     >
                       {!props.readOnly && (
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-nowrap">
                           <button
                             type="button"
                             onClick={() => setCameraKey(s.key)}
-                            className="text-xs font-semibold bg-teal-600 text-white rounded px-2.5 py-1.5 hover:bg-teal-700"
-                          >Take After Photo</button>
-                          <label className="text-xs font-semibold text-teal-700 border border-teal-300 rounded px-2.5 py-1.5 cursor-pointer hover:border-teal-400 bg-white">
+                            className="text-xs font-semibold bg-teal-600 text-white rounded px-2 py-1.5 hover:bg-teal-700 whitespace-nowrap"
+                          >Take Photo</button>
+                          <label className="text-xs font-semibold text-teal-700 border border-teal-300 rounded px-2 py-1.5 cursor-pointer hover:border-teal-400 bg-white whitespace-nowrap">
                             Upload
                             <input
                               type="file" accept="image/*" multiple className="hidden"

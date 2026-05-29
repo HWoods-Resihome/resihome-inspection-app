@@ -218,7 +218,7 @@ function buildHtmlBody(args: {
               ${vendorRows}
               <tr>
                 <td style="padding:8px 12px;font-weight:bold;background:#f9fafb;">Total Scope Items</td>
-                <td style="padding:8px 12px;text-align:center;background:#f9fafb;color:#6b7280;">${ctx.grandTotals.lineCount}</td>
+                <td style="padding:8px 12px;text-align:center;background:#f9fafb;font-weight:bold;">${ctx.grandTotals.lineCount} item${ctx.grandTotals.lineCount === 1 ? '' : 's'}</td>
                 <td style="padding:8px 12px;text-align:right;font-weight:bold;background:#f9fafb;">${fmtMoney(ctx.grandTotals.vendor)}</td>
               </tr>
             </table>

@@ -14,8 +14,12 @@ interface PhotoStripProps {
   children?: React.ReactNode;
   /** Message when there are no photos. */
   emptyLabel?: string;
-  /** Start collapsed? Defaults to expanded. */
+  /** Start collapsed? Defaults to expanded. (uncontrolled mode) */
   defaultCollapsed?: boolean;
+  /** Controlled collapse: when provided, the parent owns the state (used to
+   *  link Before/After so they collapse together). */
+  collapsed?: boolean;
+  onToggle?: () => void;
 }
 
 const ACCENTS = {
@@ -31,9 +35,13 @@ const ACCENTS = {
  * and desktop.
  */
 export function PhotoStrip({
-  label, photoUrls, size = 80, onRemove, accent = 'gray', children, emptyLabel, defaultCollapsed,
+  label, photoUrls, size = 80, onRemove, accent = 'gray', children, emptyLabel,
+  defaultCollapsed, collapsed: collapsedProp, onToggle,
 }: PhotoStripProps) {
-  const [collapsed, setCollapsed] = useState(!!defaultCollapsed);
+  const [collapsedState, setCollapsedState] = useState(!!defaultCollapsed);
+  const isControlled = collapsedProp !== undefined;
+  const collapsed = isControlled ? collapsedProp : collapsedState;
+  const toggle = () => { if (isControlled) { onToggle?.(); } else { setCollapsedState((c) => !c); } };
   const a = ACCENTS[accent];
   const count = photoUrls.length;
 
@@ -41,7 +49,7 @@ export function PhotoStrip({
     <div>
       <button
         type="button"
-        onClick={() => setCollapsed((c) => !c)}
+        onClick={toggle}
         className="w-full flex items-center justify-between mb-1.5 text-left"
       >
         <span className={`text-xs font-semibold uppercase tracking-wider ${a.text}`}>
