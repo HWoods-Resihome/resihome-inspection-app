@@ -7,9 +7,11 @@ import type {
 import type { SavedAnswer } from '@/lib/hubspot';
 import { QuestionForm } from '@/components/QuestionForm';
 import { RateCardForm } from '@/components/RateCardForm';
+import { QcReinspectForm } from '@/components/QcReinspectForm';
 
 const TEMPLATE_LABELS: Record<string, string> = {
   pm_scope_rate_card: '(PM) Scope Rate Card',
+  pm_turn_reinspect_qc: '(PM) Turn Re-Inspect QC',
   pm_community_inspection: '(PM) Community / Visit Inspection',
   pm_vacancy_occupancy_check: '(PM) Vacancy / Occupancy Check',
   qc_new_construction_rrqc: '(QC) New Construction RRQC',
@@ -67,6 +69,13 @@ export default function ExistingInspection() {
         // Rate Card doesn't use questions — its content comes from the catalog
         // via RateCardForm. Skip the questions fetch and go straight to the form.
         if (tmpl === 'pm_scope_rate_card') {
+          setQuestions([]);
+          setStage('form');
+          return;
+        }
+        // QC Turn Re-Inspect loads its own data (copied lines + before/after
+        // photos) via /api/inspections/[id]/qc-data, so it skips questions too.
+        if (tmpl === 'pm_turn_reinspect_qc') {
           setQuestions([]);
           setStage('form');
           return;
@@ -273,6 +282,12 @@ export default function ExistingInspection() {
             {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
               <CompletedPdfMenu inspection={inspection} />
             )}
+            {isCompleted && inspection.templateType === 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
+              <a href={inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
+                 className="text-sm text-brand underline font-semibold">
+                Download QC Report (PDF)
+              </a>
+            )}
             {isCompleted && (
               <button onClick={handleReopen} className="text-sm text-brand underline font-semibold">
                 Reopen for editing
@@ -281,7 +296,21 @@ export default function ExistingInspection() {
           </div>
         </div>
       )}
-      {inspection.templateType === 'pm_scope_rate_card' ? (
+      {inspection.templateType === 'pm_turn_reinspect_qc' ? (
+        <QcReinspectForm
+          inspectionRecordId={inspectionId}
+          templateLabel={templateLabel}
+          inspectorName={inspection.inspectorName}
+          propertyName={propertyName}
+          bedrooms={inspection.bedroomsAtInspection || 0}
+          bathrooms={inspection.bathroomsAtInspection || 0}
+          squareFootage={propertySquareFootage}
+          inspectionStatus={inspection.status}
+          readOnly={readOnly}
+          onSubmit={() => router.push('/')}
+          onCancel={() => router.push('/')}
+        />
+      ) : inspection.templateType === 'pm_scope_rate_card' ? (
         <RateCardForm
           templateType={inspection.templateType as TemplateType}
           templateLabel={templateLabel}

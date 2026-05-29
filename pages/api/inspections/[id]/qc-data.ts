@@ -1,0 +1,94 @@
+// GET /api/inspections/[id]/qc-data
+//
+// Bundles everything the QC Turn Re-Inspect form needs:
+//   - the QC's copied rate_card_line answers (with current pass_fail)
+//   - the QC's own section "after" photos
+//   - the SOURCE inspection's section photos (shown as "before")
+//   - the overall verdict + counts (if already set)
+//
+// The QC's lines were snapshotted at create time, so this reads the QC's own
+// answer records (not the source's live lines).
+
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { getSessionFromRequest } from '@/lib/auth';
+import {
+  fetchInspectionWithPropertyRef,
+  fetchAnswersForInspection,
+  fetchSourceSectionPhotos,
+} from '@/lib/hubspot';
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const session = await getSessionFromRequest(req);
+  if (!session) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  const id = req.query.id;
+  if (typeof id !== 'string' || !id) {
+    res.status(400).json({ error: 'Missing inspection id' });
+    return;
+  }
+
+  try {
+    const data = await fetchInspectionWithPropertyRef(id);
+    if (!data) {
+      res.status(404).json({ error: 'Inspection not found' });
+      return;
+    }
+    const inspection = data.inspection;
+    const answers = await fetchAnswersForInspection(id);
+
+    // QC's copied line items
+    const lines = answers
+      .filter((a) => a.answerType === 'rate_card_line')
+      .map((a) => ({
+        recordId: a.recordId,
+        section: a.section,
+        location: a.location,
+        // answer_value holds the display description (custom or catalog short desc)
+        description: a.answerValue,
+        quantity: a.quantity,
+        vendor: a.assignedTo,
+        vendorCost: a.rateCardLine?.vendorCost ?? null,
+        // pass/fail current value ('pass' | 'fail' | '')
+        passFail: a.passFail || '',
+      }));
+
+    // QC's own "after" section photos, keyed by location
+    const afterPhotos: Record<string, { recordId: string; urls: string[] }> = {};
+    for (const a of answers) {
+      if (a.answerType === 'section_photo') {
+        const key = a.location || a.section || '';
+        if (!key) continue;
+        afterPhotos[key] = { recordId: a.recordId, urls: a.photoUrls || [] };
+      }
+    }
+
+    // Source inspection's section photos -> "before"
+    let beforePhotos: Record<string, string[]> = {};
+    if (inspection.sourceRateCardId) {
+      try {
+        beforePhotos = await fetchSourceSectionPhotos(inspection.sourceRateCardId);
+      } catch (e) {
+        console.warn(`[qc-data] could not load source before-photos for ${id}:`, e);
+      }
+    }
+
+    res.status(200).json({
+      inspection,
+      propertyRecordId: data.propertyIdRef,
+      propertySquareFootage: data.propertySquareFootage,
+      sourceRateCardId: inspection.sourceRateCardId,
+      sourceRateCardName: inspection.sourceRateCardName,
+      qcVerdict: inspection.qcVerdict,
+      qcPassCount: inspection.qcPassCount,
+      qcFailCount: inspection.qcFailCount,
+      lines,
+      afterPhotos,
+      beforePhotos,
+    });
+  } catch (e: any) {
+    console.error(`[qc-data] GET ${id} failed:`, e);
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+}

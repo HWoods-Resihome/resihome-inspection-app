@@ -383,6 +383,11 @@ export async function fetchInspections(): Promise<InspectionSummary[]> {
         pdfChargebackXlsxUrl: null,
         pdfVendorUrlsJson: null,
         pdfGeneratedAt: null,
+        sourceRateCardId: null,
+        sourceRateCardName: null,
+        qcVerdict: null,
+        qcPassCount: null,
+        qcFailCount: null,
       });
     }
     after = resp.paging?.next?.after;
@@ -391,6 +396,74 @@ export async function fetchInspections(): Promise<InspectionSummary[]> {
     if (pages >= 5) break;
   } while (after);
 
+  return out;
+}
+
+/**
+ * For the QC Turn Re-Inspect flow: list a property's Scope Rate Card
+ * inspections that are submitted/completed (the only ones worth validating).
+ * Sorted most-recently-submitted first so the picker can default to the top.
+ *
+ * "Submitted" here means status is completed (PDFs generated) OR pending
+ * approval (submitted but not yet finalized). We surface both because a QC may
+ * be kicked off as soon as the scope is submitted, before final approval.
+ */
+export interface SourceRateCardOption {
+  recordId: string;
+  inspectionName: string;
+  status: string;
+  submittedAt: string | null;   // completed_at, else started_at, else created
+}
+
+export async function fetchSourceRateCardInspections(
+  propertyRecordId: string
+): Promise<SourceRateCardOption[]> {
+  const { inspection: typeId } = typeIds();
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+    method: 'POST',
+    body: JSON.stringify({
+      filterGroups: [
+        {
+          filters: [
+            { propertyName: 'property_id_ref', operator: 'EQ', value: propertyRecordId },
+            { propertyName: 'template_type', operator: 'EQ', value: 'pm_scope_rate_card' },
+          ],
+        },
+      ],
+      properties: [
+        'inspection_name', 'status', 'completed_at', 'started_at', 'hs_createdate',
+        'property_address_snapshot',
+      ],
+      limit: 100,
+    }),
+  });
+
+  const out: SourceRateCardOption[] = [];
+  for (const r of resp.results || []) {
+    const p = r.properties || {};
+    const status = (p.status || '').trim().toLowerCase();
+    // Only submitted/completed sources are selectable.
+    const isSubmitted =
+      status === 'completed' || status === 'complete' || status === 'submitted' ||
+      status === 'pending approval' || status === 'pending_approval' ||
+      status === 'pending-approval' || status === 'pendingapproval';
+    if (!isSubmitted) continue;
+    out.push({
+      recordId: r.id,
+      inspectionName: p.inspection_name || `(Inspection ${r.id})`,
+      status: p.status || '',
+      submittedAt: p.completed_at || p.started_at || p.hs_createdate || null,
+    });
+  }
+
+  // Most recently submitted first. Parse epoch-ms or ISO.
+  const ts = (s: string | null): number => {
+    if (!s) return 0;
+    if (/^\d+$/.test(s)) return Number(s);
+    const t = Date.parse(s);
+    return isNaN(t) ? 0 : t;
+  };
+  out.sort((a, b) => ts(b.submittedAt) - ts(a.submittedAt));
   return out;
 }
 
@@ -695,6 +768,11 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
       pdfChargebackXlsxUrl: null,
       pdfVendorUrlsJson: null,
       pdfGeneratedAt: null,
+      sourceRateCardId: null,
+      sourceRateCardName: null,
+      qcVerdict: null,
+      qcPassCount: null,
+      qcFailCount: null,
     };
   } catch (e: any) {
     if (String(e).includes('404')) return null;
@@ -733,6 +811,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     'region_snapshot', 'section_list_json',
     // Phase 4 PDF outputs (Rate Card finalize)
     'pdf_master_url', 'pdf_chargeback_url', 'pdf_chargeback_xlsx_url', 'pdf_vendor_urls_json', 'pdf_generated_at',
+    'source_rate_card_id', 'source_rate_card_name', 'qc_verdict', 'qc_pass_count', 'qc_fail_count',
   ];
   try {
     const qs = properties.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
@@ -814,6 +893,11 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         pdfChargebackXlsxUrl: p.pdf_chargeback_xlsx_url || null,
         pdfVendorUrlsJson: p.pdf_vendor_urls_json || null,
         pdfGeneratedAt: p.pdf_generated_at || null,
+        sourceRateCardId: p.source_rate_card_id || null,
+        sourceRateCardName: p.source_rate_card_name || null,
+        qcVerdict: (p.qc_verdict === 'pass' || p.qc_verdict === 'fail') ? p.qc_verdict : null,
+        qcPassCount: p.qc_pass_count != null && p.qc_pass_count !== '' ? Number(p.qc_pass_count) : null,
+        qcFailCount: p.qc_fail_count != null && p.qc_fail_count !== '' ? Number(p.qc_fail_count) : null,
       },
       propertyIdRef,
       propertySquareFootage,
@@ -848,6 +932,10 @@ export interface SavedAnswer {
   quantity: number | null;
   assignedTo: string;
   photoUrls: string[];
+  // QC Turn Re-Inspect: per-line result ('pass'|'fail'|'') and photo phase
+  // ('after' for QC after-photos). Empty/absent on non-QC answers.
+  passFail?: 'pass' | 'fail' | '';
+  photoPhase?: string;
   // Present only when answerType === 'rate_card_line'. Holds the raw inputs
   // + last stored totals so the form can hydrate without re-running the math
   // client-side.
@@ -898,6 +986,8 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
     'custom_labor_rate', 'custom_adjusted_material_cost', 'custom_vendor_cost',
     // Stored totals (so the client can show numbers without re-running math)
     'vendor_cost', 'client_cost', 'tenant_cost',
+    // QC Turn Re-Inspect
+    'pass_fail', 'photo_phase',
   ];
   const out: SavedAnswer[] = [];
   for (let i = 0; i < answerIds.length; i += 100) {
@@ -926,6 +1016,8 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
         // photo_urls is stored comma-separated by rate-card-lines.ts and
         // semicolon-separated by some Scope code paths. Handle both.
         photoUrls: (p.photo_urls || '').split(/[,;]/).map((s: string) => s.trim()).filter(Boolean),
+        passFail: (p.pass_fail === 'pass' || p.pass_fail === 'fail') ? p.pass_fail : '',
+        photoPhase: p.photo_phase || '',
       };
       // Attach rate card fields when present (won't be on Scope/QA answers)
       if (ans.answerType === 'rate_card_line') {
@@ -994,6 +1086,77 @@ export async function createScheduledInspection(args: {
   }
 
   return { inspectionId };
+}
+
+/**
+ * QC Turn Re-Inspect: snapshot the source Scope Rate Card's line items onto a
+ * newly-created QC inspection as its own answer records. This makes the QC
+ * self-contained — later edits to the source don't change the QC.
+ *
+ * Each copied line keeps cat/sub/desc/qty/unit/vendor + the snapshotted
+ * vendor/client/tenant costs (we only display through Vendor $, but we copy
+ * everything for fidelity). pass_fail starts blank; the inspector sets it.
+ *
+ * Returns the number of lines copied.
+ */
+export async function copyRateCardLinesToQc(args: {
+  sourceInspectionId: string;
+  qcInspectionId: string;
+}): Promise<number> {
+  const sourceAnswers = await fetchAnswersForInspection(args.sourceInspectionId);
+  const lineAnswers = sourceAnswers.filter((a) => a.answerType === 'rate_card_line' && a.rateCardLine);
+  if (lineAnswers.length === 0) return 0;
+
+  const upserts: AnswerUpsert[] = lineAnswers.map((a) => {
+    const rc = a.rateCardLine!;
+    const externalId = `QCLINE-${args.qcInspectionId}-${Math.random().toString(36).slice(2, 10)}`;
+    const props: Record<string, any> = {
+      answer_id_external: externalId,
+      answer_type: 'rate_card_line',
+      answer_summary: a.answerValue || rc.lineItemCode || 'line',
+      section: a.section || '',
+      location: a.location || '',
+      answer_value: a.answerValue || '',
+      note: a.note || '',
+      assigned_to: a.assignedTo || '',
+      quantity: a.quantity != null ? a.quantity : '',
+      rate_card_line_item_code: rc.lineItemCode || '',
+      quantity_decimal: rc.quantityDecimal != null ? rc.quantityDecimal : '',
+      tenant_bill_back_percent: rc.tenantBillBackPercent != null ? rc.tenantBillBackPercent : '',
+      is_custom_priced: rc.isCustomPriced ? 'true' : 'false',
+      custom_labor_rate: rc.customLaborRate != null ? rc.customLaborRate : '',
+      custom_adjusted_material_cost: rc.customAdjustedMaterialCost != null ? rc.customAdjustedMaterialCost : '',
+      custom_vendor_cost: rc.customVendorCost != null ? rc.customVendorCost : '',
+      vendor_cost: rc.vendorCost != null ? rc.vendorCost : '',
+      client_cost: rc.clientCost != null ? rc.clientCost : '',
+      tenant_cost: rc.tenantCost != null ? rc.tenantCost : '',
+      // QC-specific: starts unmarked
+      pass_fail: '',
+    };
+    return { answerProps: props, questionHubspotRecordId: null };
+  });
+
+  await upsertAnswers(args.qcInspectionId, upserts);
+  return upserts.length;
+}
+
+/**
+ * Read a source inspection's section photos so the QC can show them as
+ * "Before" photos. Returns a map of location -> photo URLs.
+ */
+export async function fetchSourceSectionPhotos(
+  sourceInspectionId: string
+): Promise<Record<string, string[]>> {
+  const answers = await fetchAnswersForInspection(sourceInspectionId);
+  const out: Record<string, string[]> = {};
+  for (const a of answers) {
+    if (a.answerType === 'section_photo') {
+      const key = a.location || a.section || '';
+      if (!key) continue;
+      out[key] = a.photoUrls || [];
+    }
+  }
+  return out;
 }
 
 /**

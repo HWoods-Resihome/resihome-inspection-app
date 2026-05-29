@@ -20,6 +20,7 @@ function defaultScheduledDate(): string {
 
 const TEMPLATE_OPTIONS: { value: TemplateType; label: string; sublabel: string }[] = [
   { value: 'pm_scope_rate_card',                        label: '(PM) Scope Rate Card',                 sublabel: 'Priced line items; tenant chargebacks + vendor bids' },
+  { value: 'pm_turn_reinspect_qc',                      label: '(PM) Turn Re-Inspect QC',              sublabel: 'Validate vendor work against a Scope Rate Card' },
   { value: 'pm_community_inspection',                   label: '(PM) Community / Visit Inspection',    sublabel: 'Community grounds, amenities, signage' },
   { value: 'pm_vacancy_occupancy_check',                label: '(PM) Vacancy / Occupancy Check',       sublabel: 'Quick visit to confirm vacancy/security' },
   { value: 'qc_new_construction_rrqc',                  label: '(QC) New Construction RRQC',           sublabel: 'Rent-ready QC for new construction' },
@@ -46,6 +47,16 @@ export default function NewInspection() {
   const [selectedPropertyId, setSelectedPropertyId] = useState('');
   const [bedrooms, setBedrooms] = useState<number | null>(null);
   const [bathrooms, setBathrooms] = useState<number | null>(null);
+
+  // QC Turn Re-Inspect: the source Scope Rate Card inspection being validated.
+  // Only relevant when selectedTemplate === 'pm_turn_reinspect_qc'.
+  const [sourceOptions, setSourceOptions] = useState<
+    Array<{ recordId: string; inspectionName: string; status: string; submittedAt: string | null }>
+  >([]);
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [selectedSourceId, setSelectedSourceId] = useState('');
+  const isQcTemplate = selectedTemplate === 'pm_turn_reinspect_qc';
 
   // Schedule-mode state. When `scheduling` is true, the schedule panel is shown
   // below the buttons. The user picks a date + inspector, then confirms.
@@ -125,6 +136,41 @@ export default function NewInspection() {
     })),
     [properties]
   );
+
+  // When QC template + a property are selected, load that property's
+  // submitted/completed Scope Rate Card inspections for the dependent
+  // dropdown. Default to the most recently submitted (first in the list).
+  useEffect(() => {
+    if (!isQcTemplate || !selectedPropertyId) {
+      setSourceOptions([]);
+      setSelectedSourceId('');
+      setSourceError(null);
+      return;
+    }
+    let cancelled = false;
+    setSourceLoading(true);
+    setSourceError(null);
+    fetch(`/api/properties/${selectedPropertyId}/rate-card-inspections`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d) => {
+        if (cancelled) return;
+        const opts = d.options || [];
+        setSourceOptions(opts);
+        // Default to most recent (list is already sorted desc by submittedAt)
+        setSelectedSourceId(opts.length > 0 ? opts[0].recordId : '');
+        if (opts.length === 0) {
+          setSourceError('No submitted Scope Rate Card inspections found for this property.');
+        }
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setSourceError(`Could not load source inspections: ${e.message || e}`);
+        setSourceOptions([]);
+        setSelectedSourceId('');
+      })
+      .finally(() => { if (!cancelled) setSourceLoading(false); });
+    return () => { cancelled = true; };
+  }, [isQcTemplate, selectedPropertyId]);
   const templateOptions = useMemo(
     () => TEMPLATE_OPTIONS.map((t) => ({ value: t.value, label: t.label, sublabel: t.sublabel })),
     []
@@ -134,7 +180,9 @@ export default function NewInspection() {
     && !!selectedPropertyId
     && !!sessionUser
     && bedrooms != null
-    && bathrooms != null;
+    && bathrooms != null
+    // QC requires a source Scope Rate Card inspection to validate.
+    && (!isQcTemplate || !!selectedSourceId);
 
   async function handleBegin() {
     if (!setupReady) {
@@ -151,6 +199,7 @@ export default function NewInspection() {
         inspectorEmail: sessionUser?.email,
         bedrooms,
         bathrooms,
+        ...(isQcTemplate ? { sourceRateCardId: selectedSourceId } : {}),
       };
       const r = await fetch('/api/inspections/create', {
         method: 'POST',
@@ -219,6 +268,7 @@ export default function NewInspection() {
         bedrooms,
         bathrooms,
         scheduledDate,
+        ...(isQcTemplate ? { sourceRateCardId: selectedSourceId } : {}),
       };
       const r = await fetch('/api/inspections/create', {
         method: 'POST',
@@ -452,6 +502,52 @@ export default function NewInspection() {
                   emptyLabel="No properties match your search"
                 />
               </div>
+
+              {/* QC Turn Re-Inspect: dependent source-inspection picker.
+                  Only shows when the QC template is selected. Lists the
+                  property's submitted/completed Scope Rate Card inspections,
+                  defaulting to the most recent. */}
+              {isQcTemplate && (
+                <div>
+                  <label className="block text-sm font-heading font-semibold text-ink mb-1.5">
+                    Scope Rate Card to validate
+                  </label>
+                  {!selectedPropertyId ? (
+                    <div className="text-sm text-gray-400 border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5">
+                      Select a property first
+                    </div>
+                  ) : sourceLoading ? (
+                    <div className="text-sm text-gray-400 border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5">
+                      Loading inspections…
+                    </div>
+                  ) : sourceOptions.length === 0 ? (
+                    <div className="text-sm text-amber-700 border border-amber-200 bg-amber-50 rounded-lg px-3 py-2.5">
+                      {sourceError || 'No submitted Scope Rate Card inspections for this property.'}
+                    </div>
+                  ) : (
+                    <>
+                      <Combobox
+                        id="source-rc-cb"
+                        options={sourceOptions.map((o) => ({
+                          value: o.recordId,
+                          label: o.inspectionName,
+                          sublabel: [
+                            o.status,
+                            o.submittedAt ? new Date(/^\d+$/.test(o.submittedAt) ? Number(o.submittedAt) : o.submittedAt).toLocaleDateString() : null,
+                          ].filter(Boolean).join(' · ') || undefined,
+                        }))}
+                        value={selectedSourceId}
+                        onChange={setSelectedSourceId}
+                        placeholder="Select the inspection to validate"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Defaults to the most recently submitted. The QC will copy this
+                        inspection's line items for pass/fail validation.
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* Inspector - locked to logged-in user */}
               <div>

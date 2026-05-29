@@ -15,7 +15,8 @@ export type TemplateType =
   | 'pm_vacancy_occupancy_check'
   | 'qc_new_construction_rrqc'
   | 'leasing_agent_1099_property_inspection'
-  | 'pm_scope_rate_card';
+  | 'pm_scope_rate_card'
+  | 'pm_turn_reinspect_qc';
 
 export interface Question {
   hubspotRecordId: string;
@@ -85,6 +86,12 @@ export interface InspectionSummary {
   pdfChargebackXlsxUrl: string | null;
   pdfVendorUrlsJson: string | null;
   pdfGeneratedAt: string | null;
+  // (PM) Turn Re-Inspect QC fields. Populated only for pm_turn_reinspect_qc.
+  sourceRateCardId: string | null;
+  sourceRateCardName: string | null;
+  qcVerdict: 'pass' | 'fail' | null;
+  qcPassCount: number | null;
+  qcFailCount: number | null;
 }
 
 export interface HubSpotUser {

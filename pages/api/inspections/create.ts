@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createScheduledInspection, fetchPropertyRegion } from '@/lib/hubspot';
+import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 
 function nowIso(): string {
@@ -21,6 +21,8 @@ interface CreateBody {
   // Optional: when the user uses "Schedule Inspection", they pick a specific date.
   // ISO date string (YYYY-MM-DD) or full ISO datetime. If absent, defaults to now.
   scheduledDate?: string;
+  // QC Turn Re-Inspect: the source Scope Rate Card inspection to validate.
+  sourceRateCardId?: string;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -41,9 +43,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Inspection name format: Rate Card inspections use "Rate Card – <address> – <date>"
     // per the Phase 1 Q-M decision; others use the existing pattern.
     const isRateCard = body.templateType === 'pm_scope_rate_card';
+    const isQc = body.templateType === 'pm_turn_reinspect_qc';
     const inspectionName = isRateCard
       ? `Rate Card – ${body.propertyAddressSnapshot} – ${nowIso().slice(0, 10)}`
-      : `${body.templateType.replace(/_/g, ' ')} -- ${body.propertyAddressSnapshot} -- ${nowIso().slice(0, 10)}`;
+      : isQc
+        ? `Turn Re-Inspect QC – ${body.propertyAddressSnapshot} – ${nowIso().slice(0, 10)}`
+        : `${body.templateType.replace(/_/g, ' ')} -- ${body.propertyAddressSnapshot} -- ${nowIso().slice(0, 10)}`;
 
     // HubSpot's scheduled_date is a Date field (not DateTime), so the value MUST be
     // exactly midnight UTC. We send the YYYY-MM-DD string form, which HubSpot interprets
@@ -93,12 +98,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // QC Turn Re-Inspect: stamp the source inspection ref + carry its region
+    // snapshot so the copied lines price/display consistently.
+    if (isQc) {
+      if (!body.sourceRateCardId) {
+        return res.status(400).json({ error: 'QC inspection requires a source Rate Card inspection.' });
+      }
+      inspectionProps.source_rate_card_id = body.sourceRateCardId;
+      try {
+        const src = await fetchInspectionById(body.sourceRateCardId);
+        if (src) {
+          inspectionProps.source_rate_card_name = src.inspectionName || '';
+          if (src.regionSnapshot) inspectionProps.region_snapshot = src.regionSnapshot;
+        }
+      } catch (e) {
+        console.warn(`Could not load source inspection ${body.sourceRateCardId}:`, e);
+      }
+    }
+
     const { inspectionId } = await createScheduledInspection({
       inspectionProps,
       propertyRecordId: body.propertyRecordId,
     });
 
-    return res.status(200).json({ success: true, inspectionId, externalId, inspectionName });
+    // QC: copy the source Rate Card's line items onto the new QC inspection so
+    // it's a self-contained snapshot. Done after creation so we have the new id.
+    let copiedLines = 0;
+    if (isQc && body.sourceRateCardId) {
+      try {
+        copiedLines = await copyRateCardLinesToQc({
+          sourceInspectionId: body.sourceRateCardId,
+          qcInspectionId: inspectionId,
+        });
+      } catch (e) {
+        console.error(`QC line copy failed for inspection ${inspectionId}:`, e);
+        // Don't fail the create — the QC exists; the form will just show no
+        // lines and the user can retry/reopen. Surface a soft warning.
+      }
+    }
+
+    return res.status(200).json({ success: true, inspectionId, externalId, inspectionName, copiedLines });
   } catch (e: any) {
     console.error('POST /api/inspections/create failed:', e);
     return res.status(500).json({ error: String(e.message || e) });
