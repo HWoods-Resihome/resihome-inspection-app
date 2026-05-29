@@ -1,12 +1,37 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+
+// Friendly messages for ?error= codes bounced back from the Google flow.
+const ERROR_MESSAGES: Record<string, string> = {
+  not_recognized: 'Email not recognized.',
+  invalid_email: 'Please enter a valid email.',
+  verify_failed: 'Could not verify users right now. Please try again.',
+  google_not_configured: 'Google sign-in is not configured yet. Contact your administrator.',
+  google_missing_code: 'Google sign-in did not complete. Please try again.',
+  google_state_mismatch: 'Your sign-in session expired. Please try again.',
+  google_exchange_failed: 'Google sign-in failed. Please try again.',
+  google_no_identity: 'Could not read your Google account. Please try again.',
+  google_email_mismatch: 'The Google account you signed in with does not match that email. Sign in with the matching Google account.',
+  access_denied: 'Google sign-in was cancelled.',
+};
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Surface errors bounced back from the Google sign-in flow.
+  useEffect(() => {
+    const code = typeof router.query.error === 'string' ? router.query.error : '';
+    if (code) {
+      setError(ERROR_MESSAGES[code] || 'Sign-in failed. Please try again.');
+      // Clean the URL so a refresh doesn't keep showing the error.
+      router.replace('/login', undefined, { shallow: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.query.error]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -28,8 +53,10 @@ export default function LoginPage() {
         setSubmitting(false);
         return;
       }
-      // Success -- redirect to home
-      router.replace('/');
+      // Email is a valid HubSpot user. Hand off to Google sign-in to prove
+      // ownership of the email. This is a full-page navigation (OAuth redirect);
+      // keep `submitting` true so the button shows the in-progress state.
+      window.location.href = `/api/auth/google-login?email=${encodeURIComponent(email.trim())}`;
     } catch (err: any) {
       setError(String(err.message || err));
       setSubmitting(false);
@@ -58,7 +85,7 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
             <h2 className="text-lg font-heading font-bold mb-2">Sign in</h2>
             <p className="text-sm text-gray-600 mb-6">
-              Enter your HubSpot account email to access the app.
+              Enter your HubSpot account email. You&apos;ll confirm it with Google to continue.
             </p>
 
             <label htmlFor="email" className="block text-sm font-heading font-semibold text-ink mb-1.5">
@@ -87,11 +114,11 @@ export default function LoginPage() {
               disabled={submitting || !email.trim()}
               className="w-full bg-brand hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-heading font-semibold py-3.5 px-4 rounded-lg transition mt-5 active:scale-[0.98]"
             >
-              {submitting ? 'Signing in...' : 'Sign in'}
+              {submitting ? 'Redirecting to Google…' : 'Continue with Google'}
             </button>
 
             <p className="text-xs text-gray-400 text-center mt-5">
-              Access is restricted to active HubSpot users.
+              Access is restricted to active HubSpot users. You&apos;ll verify ownership of your email through Google.
             </p>
           </form>
 

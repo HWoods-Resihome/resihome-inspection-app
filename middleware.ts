@@ -5,6 +5,11 @@ const PUBLIC_PATHS = new Set<string>([
   '/login',
   '/api/auth/login',
   '/api/auth/logout',
+  // Pre-auth Google sign-in: these run before a session exists. The callback
+  // does its own verification (login flow needs no session; the legacy connect
+  // flow checks the session itself).
+  '/api/auth/google-login',
+  '/api/auth/gmail/callback',
 ]);
 
 function isStaticAsset(pathname: string): boolean {

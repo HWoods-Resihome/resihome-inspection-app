@@ -1,6 +1,10 @@
+// Step 1 of login: validate that the typed email is an active HubSpot user.
+// This NO LONGER mints a session — authentication is completed by Google
+// sign-in (see /api/auth/google-login -> /api/auth/gmail/callback). On success
+// the client redirects the browser to /api/auth/google-login?email=...
+
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { fetchUsers } from '@/lib/hubspot';
-import { createSessionCookie } from '@/lib/auth';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -16,7 +20,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    // Look up the email in HubSpot users (this is our source of truth)
     let users;
     try {
       users = await fetchUsers();
@@ -27,20 +30,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const match = users.find((u) => u.email.toLowerCase() === normalized);
     if (!match) {
-      // Generic error to avoid leaking whether an email exists in our portal
+      // Generic error to avoid leaking whether an email exists in our portal.
       return res.status(401).json({ error: 'Email not recognized' });
     }
 
-    const cookie = await createSessionCookie({
-      userId: match.id,
-      email: match.email,
-      name: match.fullName,
-    });
-    res.setHeader('Set-Cookie', cookie);
-    return res.status(200).json({
-      ok: true,
-      user: { userId: match.id, email: match.email, name: match.fullName },
-    });
+    // Valid HubSpot user. Don't create a session yet — tell the client to
+    // continue to Google sign-in to prove ownership of this email.
+    return res.status(200).json({ ok: true, next: 'google', email: match.email });
   } catch (e: any) {
     console.error('POST /api/auth/login failed:', e);
     return res.status(500).json({ error: String(e.message || e) });

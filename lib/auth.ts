@@ -8,7 +8,9 @@ import { serialize, parse } from 'cookie';
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 export const SESSION_COOKIE_NAME = 'resihome_session';
-const SESSION_DURATION_HOURS = 8;
+// 30 days. Auth is gated by Google sign-in at login (proves the user controls
+// the email); after that the session is good for 30 days without re-doing Google.
+const SESSION_DURATION_HOURS = 24 * 30;
 
 export interface SessionUser {
   userId: string;  // HubSpot user ID

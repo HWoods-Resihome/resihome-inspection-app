@@ -101,39 +101,65 @@ export function getGmailOAuthConfig(): GmailOAuthConfig | null {
 }
 
 export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+// Identity scopes — let us read which Google account actually authenticated so
+// we can verify it matches the email the user typed on the login page.
+export const IDENTITY_SCOPES = 'openid email';
+// Full scope set requested at login: prove identity (everyone) + Gmail send
+// (granted by internal users; external users simply won't use it).
+export const LOGIN_SCOPES = `${IDENTITY_SCOPES} ${GMAIL_SEND_SCOPE}`;
 
 /**
  * Build the Google OAuth consent URL.
  *   - access_type=offline   -> we get a refresh token
  *   - prompt=consent        -> forces refresh token issuance even on re-auth
- *   - hd=resihome.com       -> hint Google to the Workspace domain
  *   - login_hint            -> pre-fill the user's email on the consent screen
  *   - state                 -> opaque value we round-trip (carries CSRF token +
  *                              optional "finalize after" inspection id)
+ *   - scope                 -> defaults to Gmail-send only (post-login connect);
+ *                              login flow passes LOGIN_SCOPES to also verify id.
  */
 export function buildGmailConsentUrl(cfg: GmailOAuthConfig, opts: {
   state: string;
   loginHint?: string;
+  scope?: string;
+  includeHd?: boolean;
 }): string {
   const params = new URLSearchParams({
     client_id: cfg.clientId,
     redirect_uri: cfg.redirectUri,
     response_type: 'code',
-    scope: GMAIL_SEND_SCOPE,
+    scope: opts.scope || GMAIL_SEND_SCOPE,
     access_type: 'offline',
     prompt: 'consent',
-    hd: 'resihome.com',
     state: opts.state,
   });
+  // Workspace-domain hint is helpful for internal users but would block valid
+  // external Google accounts, so only set it when explicitly requested.
+  if (opts.includeHd) params.set('hd', 'resihome.com');
   if (opts.loginHint) params.set('login_hint', opts.loginHint);
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+}
+
+/** Decode the email claim from a Google id_token (JWT). No signature check is
+ *  needed here because the token came directly from Google's token endpoint
+ *  over TLS in response to our own client_secret-authenticated request. */
+export function emailFromIdToken(idToken: string): string | null {
+  try {
+    const payload = idToken.split('.')[1];
+    if (!payload) return null;
+    const json = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (json.email_verified === false) return null;
+    return typeof json.email === 'string' ? json.email.toLowerCase() : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Exchange an authorization code for tokens. Returns the refresh token. */
 export async function exchangeCodeForRefreshToken(
   cfg: GmailOAuthConfig,
   code: string
-): Promise<{ refreshToken: string | null; accessToken: string; expiresIn: number }> {
+): Promise<{ refreshToken: string | null; accessToken: string; expiresIn: number; idToken: string | null }> {
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -154,6 +180,7 @@ export async function exchangeCodeForRefreshToken(
     refreshToken: json.refresh_token || null,
     accessToken: json.access_token,
     expiresIn: json.expires_in,
+    idToken: json.id_token || null,
   };
 }
 
