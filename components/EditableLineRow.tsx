@@ -402,7 +402,7 @@ export function EditableLineRow(props: Props) {
 
               <div className="px-4 py-4 space-y-4">
                 <div>
-                  <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">Category</label>
+                  <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Category</label>
                   <select
                     value={category}
                     onChange={(e) => handleCategoryChange(e.target.value)}
@@ -414,7 +414,7 @@ export function EditableLineRow(props: Props) {
                 </div>
 
                 <div>
-                  <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">Sub-category</label>
+                  <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Sub-category</label>
                   <select
                     value={subcategory}
                     onChange={(e) => handleSubcategoryChange(e.target.value)}
@@ -426,7 +426,7 @@ export function EditableLineRow(props: Props) {
                 </div>
 
                 <div>
-                  <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">Line Item</label>
+                  <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Line Item</label>
                   <Combobox
                     options={lineItemOptions}
                     value={lineItemCode}
@@ -447,13 +447,13 @@ export function EditableLineRow(props: Props) {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">Unit</label>
+                    <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Unit</label>
                     <div className="h-11 flex items-center px-3 border border-gray-200 rounded-lg bg-gray-50 text-base text-gray-700">
                       {selectedItem?.laborMeas || '—'}
                     </div>
                   </div>
                   <div>
-                    <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">
+                    <label className="block text-xs font-heading font-bold text-gray-700 mb-1">
                       Quantity <span className="text-brand">*</span>
                     </label>
                     <input
@@ -466,7 +466,7 @@ export function EditableLineRow(props: Props) {
                 </div>
 
                 <div>
-                  <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">
+                  <label className="block text-xs font-heading font-bold text-gray-700 mb-1">
                     Vendor <span className="text-brand">*</span>
                   </label>
                   <select
@@ -479,7 +479,7 @@ export function EditableLineRow(props: Props) {
                 </div>
 
                 <div>
-                  <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">
+                  <label className="block text-xs font-heading font-bold text-gray-700 mb-1">
                     Tenant % <span className="text-brand">*</span>
                   </label>
                   <select
@@ -495,7 +495,7 @@ export function EditableLineRow(props: Props) {
                     Vendor $ is blank to use the formula; type to override. */}
                 <div className="grid grid-cols-3 gap-3 bg-gray-50 rounded-lg p-3 text-center">
                   <div className="flex flex-col items-center">
-                    <div className="text-xs font-bold text-gray-700 flex items-center justify-center gap-1 border-b-2 border-brand pb-0.5 mb-1">
+                    <div className="text-xs font-bold text-gray-700 flex items-center justify-center gap-1 mb-1">
                       Vendor $
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400" aria-hidden>
                         <path d="M12 20h9" />
@@ -516,11 +516,11 @@ export function EditableLineRow(props: Props) {
                     </div>
                   </div>
                   <div className="flex flex-col items-center">
-                    <div className="text-xs font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1">Client $</div>
+                    <div className="text-xs font-bold text-gray-700 mb-1">Client $</div>
                     <div className="text-base font-semibold text-gray-800">{calc ? `$${formatMoney(roundMoney(calc.clientCost))}` : '—'}</div>
                   </div>
                   <div className="flex flex-col items-center">
-                    <div className="text-xs font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1">Tenant $</div>
+                    <div className="text-xs font-bold text-gray-700 mb-1">Tenant $</div>
                     <div className="text-base font-semibold text-brand">{calc ? `$${formatMoney(roundMoney(calc.tenantCost))}` : '—'}</div>
                   </div>
                 </div>
