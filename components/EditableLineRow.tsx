@@ -51,6 +51,9 @@ interface Props {
   // Behavior
   readOnly?: boolean;
   startInEditMode?: boolean;            // true for new rows
+  // When true, edit mode renders a full-screen mobile-friendly card (stacked
+  // fields) instead of the inline <tr>. View mode is unchanged.
+  mobile?: boolean;
   // Callbacks
   onSave: (line: RateCardLineInput) => void;
   onDelete: () => void;                 // hide × in view mode? no — always shown
@@ -78,7 +81,7 @@ function genExternalId(): string {
 export function EditableLineRow(props: Props) {
   const {
     line, catalog, regions, inspectionRegion,
-    section, location, readOnly, startInEditMode,
+    section, location, readOnly, startInEditMode, mobile,
     onSave, onDelete, onDiscardNew,
   } = props;
 
@@ -368,6 +371,166 @@ export function EditableLineRow(props: Props) {
     label: item.laborShortDescription,
     sublabel: item.laborFullDescription,
   }));
+
+  // -------------------------------------------------------------------
+  // Render — EDIT mode, MOBILE (full-screen stacked card)
+  // -------------------------------------------------------------------
+  if (mobile) {
+    return (
+      <tr>
+        <td colSpan={12} className="p-0">
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center sm:justify-center">
+            <div className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl max-h-[92vh] overflow-y-auto shadow-xl">
+              {/* Sticky header with title + close */}
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between z-10">
+                <span className="font-heading font-bold text-base text-ink">
+                  {line ? 'Edit Line Item' : 'Add Line Item'}
+                </span>
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  className="text-gray-400 hover:text-gray-700 text-2xl leading-none w-8 h-8 flex items-center justify-center"
+                  aria-label="Cancel"
+                >×</button>
+              </div>
+
+              <div className="px-4 py-4 space-y-4">
+                <div>
+                  <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">Category</label>
+                  <select
+                    value={category}
+                    onChange={(e) => handleCategoryChange(e.target.value)}
+                    className="h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white"
+                  >
+                    <option value="">Select category…</option>
+                    {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">Sub-category</label>
+                  <select
+                    value={subcategory}
+                    onChange={(e) => handleSubcategoryChange(e.target.value)}
+                    className="h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white"
+                  >
+                    <option value="">Select sub-category…</option>
+                    {subcategories.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">Line Item</label>
+                  <Combobox
+                    options={lineItemOptions}
+                    value={lineItemCode}
+                    onChange={handleLineItemChange}
+                    placeholder="Type to search items…"
+                    emptyLabel={category ? 'No items in this category' : 'No matching items'}
+                  />
+                  {selectedItem && (
+                    <textarea
+                      value={customDescription || selectedItem.laborFullDescription}
+                      onChange={(e) => setCustomDescription(e.target.value)}
+                      rows={2}
+                      className="w-full mt-2 text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-700 bg-white"
+                      placeholder="Edit description (optional)…"
+                    />
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">Unit</label>
+                    <div className="h-11 flex items-center px-3 border border-gray-200 rounded-lg bg-gray-50 text-base text-gray-700">
+                      {selectedItem?.laborMeas || '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">Quantity</label>
+                    <input
+                      type="number" step="0.01" min="0" inputMode="decimal"
+                      value={quantity}
+                      onChange={(e) => setQuantity(e.target.value)}
+                      className="no-spinner h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">Vendor</label>
+                  <select
+                    value={vendor}
+                    onChange={(e) => setVendor(e.target.value)}
+                    className="h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white"
+                  >
+                    {VENDORS.map((v) => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">
+                    Vendor $ <span className="font-normal text-gray-400">(blank = use formula)</span>
+                  </label>
+                  <input
+                    type="number" step="0.01" min="0" inputMode="decimal"
+                    value={customVendorCost}
+                    onChange={(e) => setCustomVendorCost(e.target.value)}
+                    placeholder={calc && !calc.isCustomPriced ? formatMoney(roundMoney(calc.vendorCost)) : '0.00'}
+                    className="no-spinner h-11 w-full border border-gray-300 rounded-lg px-3 text-base text-right bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">Tenant %</label>
+                  <select
+                    value={String(tenantPct)}
+                    onChange={(e) => setTenantPct(Number(e.target.value))}
+                    className="h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white"
+                  >
+                    {TENANT_PCT_OPTIONS.map((p) => <option key={p} value={String(p)}>{p}%</option>)}
+                  </select>
+                </div>
+
+                {/* Live computed totals */}
+                <div className="grid grid-cols-2 gap-3 bg-gray-50 rounded-lg p-3 text-sm">
+                  <div>
+                    <div className="text-xs text-gray-500">Client $</div>
+                    <div className="font-semibold text-gray-800">{calc ? `$${formatMoney(roundMoney(calc.clientCost))}` : '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500">Tenant $</div>
+                    <div className="font-semibold text-brand">{calc ? `$${formatMoney(roundMoney(calc.tenantCost))}` : '—'}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sticky footer action */}
+              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  className="flex-1 h-11 rounded-lg border border-gray-300 text-gray-700 font-heading font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => trySave()}
+                  disabled={!isComplete}
+                  className={`flex-1 h-11 rounded-lg font-heading font-bold text-white flex items-center justify-center gap-2 ${
+                    isComplete ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'
+                  }`}
+                >
+                  <span aria-hidden>✓</span> Save Line
+                </button>
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>
+    );
+  }
 
   return (
     <>

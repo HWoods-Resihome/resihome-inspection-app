@@ -278,19 +278,26 @@ export default function ExistingInspection() {
             <span className="text-sm text-amber-900 font-heading font-semibold">
               {isCompleted ? 'This Inspection is Completed.' : 'This Inspection is Cancelled.'}
             </span>
+            {isCompleted && (
+              <button onClick={handleReopen} className="text-sm text-brand underline font-semibold">
+                Reopen for editing
+              </button>
+            )}
             {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
               <CompletedPdfMenu inspection={inspection} />
             )}
             {isCompleted && inspection.templateType === 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
               <a href={inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
-                 className="text-sm text-brand underline font-semibold">
+                 className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
                 Download QC Report (PDF)
               </a>
             )}
-            {isCompleted && (
-              <button onClick={handleReopen} className="text-sm text-brand underline font-semibold">
-                Reopen for editing
-              </button>
+            {isCompleted && inspection.templateType !== 'pm_scope_rate_card'
+              && inspection.templateType !== 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
+              <a href={inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
+                 className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
+                Download Report (PDF)
+              </a>
             )}
           </div>
         </div>
@@ -408,7 +415,7 @@ function CompletedPdfMenu({ inspection }: { inspection: InspectionSummary }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="text-sm bg-brand text-white px-3 py-1.5 rounded font-semibold hover:bg-brand-dark"
+        className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded font-semibold hover:bg-blue-700"
       >
         Download PDFs ▾
       </button>

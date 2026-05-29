@@ -120,6 +120,17 @@ export function RateCardForm(props: RateCardFormProps) {
   // per section at a time; clicking + Add again while one is pending is a no-op.
   const [pendingNewBySection, setPendingNewBySection] = useState<Record<string, true>>({});
 
+  // Mobile detection — drives the full-screen stacked line editor instead of
+  // the inline table row, which is unusable on a phone.
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)');
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
   // Camera modal (for in-app capture). When non-null, captures append to this section.
   const [cameraSectionId, setCameraSectionId] = useState<string | null>(null);
   // Upload progress (per section)
@@ -968,10 +979,10 @@ export function RateCardForm(props: RateCardFormProps) {
   // ----- Render --------------------------------------------------------
 
   return (
-    <div className="max-w-7xl mx-auto p-4 md:pb-24">
+    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-4 md:pb-24">
       {/* Header */}
       <header className="mb-3">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h1 className="text-xl font-bold text-gray-900">{props.templateLabel}</h1>
@@ -1241,6 +1252,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               section={s.label}
                               location={s.location}
                               readOnly={props.readOnly}
+                              mobile={isMobile}
                               onSave={(updated) => handleSaveLineForSection(s.id, updated)}
                               onDelete={() => handleDeleteLine(s.id, line.externalId)}
                             />
@@ -1255,6 +1267,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               section={s.label}
                               location={s.location}
                               readOnly={props.readOnly}
+                              mobile={isMobile}
                               startInEditMode
                               onSave={(created) => handleSaveLineForSection(s.id, created)}
                               onDelete={() => handleDiscardNew(s.id)}  /* unused for new rows (no view-mode), kept for typing */

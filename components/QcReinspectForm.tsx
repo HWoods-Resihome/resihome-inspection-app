@@ -273,9 +273,9 @@ export function QcReinspectForm(props: Props) {
   if (loadError) return <div className="text-sm text-red-600 py-8 text-center">Could not load: {loadError}</div>;
 
   return (
-    <>
+    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-4 md:pb-24">
       <header className="mb-3">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h1 className="text-xl font-bold text-gray-900">{props.templateLabel}</h1>
@@ -300,7 +300,7 @@ export function QcReinspectForm(props: Props) {
         </div>
       </header>
 
-      <div className="sticky top-0 z-10 -mx-4 px-4 py-2 mb-3 bg-white border-b border-gray-200 shadow-sm">
+      <div className="sticky top-0 z-10 -mx-5 sm:-mx-6 px-5 sm:px-6 py-2 mb-3 bg-white border-b border-gray-200 shadow-sm">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="text-sm font-semibold text-gray-700">{lines.length} items</div>
           <div className="flex items-center gap-4 text-sm font-bold">
@@ -591,7 +591,7 @@ export function QcReinspectForm(props: Props) {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 

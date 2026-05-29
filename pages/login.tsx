@@ -1,20 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [hasLogo, setHasLogo] = useState(false);
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const img = new window.Image();
-    img.onload = () => setHasLogo(true);
-    img.onerror = () => setHasLogo(false);
-    img.src = '/logo.png';
-  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -52,22 +44,13 @@ export default function LoginPage() {
       <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-white">
         <div className="w-full max-w-md">
           <div className="flex flex-col items-center mb-8">
-            {hasLogo ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src="/logo.png"
-                alt="ResiHome"
-                className="h-24 w-24 object-contain rounded-2xl mb-4 shadow-lg"
-              />
-            ) : (
-              <div className="h-24 w-24 mb-4 flex items-center justify-center bg-brand text-white rounded-2xl text-3xl font-heading font-extrabold">
-                RH
-              </div>
-            )}
-            <h1 className="text-3xl font-heading font-extrabold text-ink tracking-tight">
-              RESI<span className="text-brand">HOME</span>
-            </h1>
-            <p className="text-sm text-gray-500 mt-1 font-heading uppercase tracking-widest">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/resiwalk-logo.png"
+              alt="ResiWALK"
+              className="w-full max-w-xs object-contain mb-3"
+            />
+            <p className="text-sm text-gray-500 font-heading uppercase tracking-widest">
               Field Inspections
             </p>
           </div>
