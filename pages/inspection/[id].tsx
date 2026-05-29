@@ -271,7 +271,6 @@ export default function ExistingInspection() {
     <>
       <Head>
         <title>{inspection.propertyAddressSnapshot || 'Inspection'} - ResiHome</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
       </Head>
       {readOnly && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-2">
@@ -309,6 +308,7 @@ export default function ExistingInspection() {
           readOnly={readOnly}
           onSubmit={() => router.push('/')}
           onCancel={() => router.push('/')}
+          onCancelInspection={readOnly ? undefined : handleCancelInspection}
         />
       ) : inspection.templateType === 'pm_scope_rate_card' ? (
         <RateCardForm

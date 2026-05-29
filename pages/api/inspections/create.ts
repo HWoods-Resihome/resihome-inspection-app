@@ -7,6 +7,10 @@ function nowIso(): string {
 }
 
 function shortId(): string {
+  // crypto.randomUUID (Node 18+) for collision-proof ids; strip dashes.
+  if (typeof crypto !== 'undefined' && (crypto as any).randomUUID) {
+    return (crypto as any).randomUUID().replace(/-/g, '');
+  }
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 

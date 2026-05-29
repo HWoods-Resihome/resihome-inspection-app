@@ -280,7 +280,6 @@ export default function Home() {
     <>
       <Head>
         <title>ResiHome Inspection</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
       </Head>
       <main className="min-h-screen bg-gray-50">
         {/* Pink branded header */}

@@ -68,7 +68,11 @@ const DEFAULT_VENDOR = 'Vendor 1';
 const DEFAULT_TENANT_PCT = 100;
 
 function genExternalId(): string {
-  return `RCLINE-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  // crypto.randomUUID is available in all modern browsers + Node 18+.
+  const uuid = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `RCLINE-${uuid}`;
 }
 
 export function EditableLineRow(props: Props) {

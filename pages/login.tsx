@@ -48,7 +48,6 @@ export default function LoginPage() {
     <>
       <Head>
         <title>Sign in - ResiHome Inspection</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
       </Head>
       <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-white">
         <div className="w-full max-w-md">

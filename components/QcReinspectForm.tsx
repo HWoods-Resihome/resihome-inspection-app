@@ -16,7 +16,7 @@
  * the PDF, stores verdict + counts, flips to completed (like the 1099 flow).
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
 import { CameraCapture } from '@/components/CameraCapture';
 import { vendorPillStyle } from '@/lib/vendors';
@@ -48,6 +48,8 @@ interface Props {
   readOnly: boolean;
   onSubmit: () => void;
   onCancel: () => void;
+  // Cancel the whole inspection (sets status to cancelled). Absent when readOnly.
+  onCancelInspection?: () => void;
 }
 
 interface SectionGroup {
@@ -76,6 +78,18 @@ export function QcReinspectForm(props: Props) {
   const [result, setResult] = useState<null | { verdict: string; passCount: number; failCount: number; pdf: { name: string; url: string } }>(null);
   const [cameraKey, setCameraKey] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Real-time save status indicator (mirrors the Scope Rate Card).
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function markSaving() { setSaveStatus('saving'); }
+  function markSaved() {
+    setSaveStatus('saved');
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => setSaveStatus('idle'), 2000);
+  }
+  function markSaveError() { setSaveStatus('error'); }
+  useEffect(() => () => { if (savedTimerRef.current) clearTimeout(savedTimerRef.current); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,7 +173,9 @@ export function QcReinspectForm(props: Props) {
 
   async function persistAfterPhotos(key: string, section: string, location: string, urls: string[]) {
     const existingId = afterPhotoRecordIds[key];
-    const externalId = existingId || `QCAFTER-${props.inspectionRecordId}-${key}-${Math.random().toString(36).slice(2, 8)}`;
+    const uuid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const externalId = existingId || `QCAFTER-${props.inspectionRecordId}-${key}-${uuid}`;
+    markSaving();
     const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -180,12 +196,13 @@ export function QcReinspectForm(props: Props) {
         bumpStatusToInProgress: true,
       }),
     });
-    if (!r.ok) throw new Error(`Save after-photos failed: HTTP ${r.status}`);
+    if (!r.ok) { markSaveError(); throw new Error(`Save after-photos failed: HTTP ${r.status}`); }
     const data = await r.json();
     const newId = data?.results?.[0]?.recordId;
     if (newId && !existingId) {
       setAfterPhotoRecordIds((cur) => ({ ...cur, [key]: newId }));
     }
+    markSaved();
   }
 
   async function addAfterPhotos(key: string, section: string, location: string, newUrls: string[]) {
@@ -213,6 +230,7 @@ export function QcReinspectForm(props: Props) {
   async function setLinePassFail(line: QcLine, pf: 'pass' | 'fail') {
     const next = line.passFail === pf ? '' : pf;
     setLines((cur) => cur.map((l) => (l.recordId === line.recordId ? { ...l, passFail: next } : l)));
+    markSaving();
     try {
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
         method: 'POST',
@@ -223,7 +241,9 @@ export function QcReinspectForm(props: Props) {
         }),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      markSaved();
     } catch (e: any) {
+      markSaveError();
       setLines((cur) => cur.map((l) => (l.recordId === line.recordId ? { ...l, passFail: line.passFail } : l)));
       alert(`Could not save pass/fail: ${e?.message || e}`);
     }
@@ -464,9 +484,9 @@ export function QcReinspectForm(props: Props) {
       )}
 
       {!props.readOnly && (
-        <div className="border-2 border-gray-200 rounded-xl p-4 mb-8 mt-4">
+        <div className="border-2 border-gray-200 rounded-xl p-4 mb-4 mt-4">
           <div className="text-sm font-bold text-gray-900 mb-2">Overall Inspection Result</div>
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-3 mb-2">
             <button
               type="button"
               onClick={() => setVerdict('pass')}
@@ -486,21 +506,54 @@ export function QcReinspectForm(props: Props) {
           </div>
 
           {(!allMarked || !allSectionsHaveAfter || !verdict) && (
-            <ul className="text-xs text-amber-700 mb-3 list-disc pl-5 space-y-0.5">
+            <ul className="text-xs text-amber-700 list-disc pl-5 space-y-0.5">
               {!allMarked && <li>Mark every line item Pass or Fail.</li>}
               {!allSectionsHaveAfter && <li>Add at least one After Photo to every section.</li>}
               {!verdict && <li>Choose an overall Pass/Fail verdict.</li>}
             </ul>
           )}
+        </div>
+      )}
 
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={submitting || !allMarked || !allSectionsHaveAfter || !verdict}
-            className="w-full py-3 rounded-lg font-bold text-white bg-brand hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {submitting ? 'Submitting...' : 'Submit Inspection'}
-          </button>
+      {/* Spacer so the fixed footer doesn't cover the last content */}
+      {!props.readOnly && <div className="h-20" />}
+
+      {/* Floating footer — same pattern as the Scope Rate Card. Cancel
+          Inspection / Save & Close / Submit Inspection, with a live save
+          status chip. Shown for editable inspections. */}
+      {!props.readOnly && (
+        <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              {props.onCancelInspection && (
+                <button
+                  type="button"
+                  onClick={props.onCancelInspection}
+                  className="px-4 py-2 text-sm border border-red-300 text-red-700 rounded hover:bg-red-50"
+                >
+                  Cancel Inspection
+                </button>
+              )}
+              <SaveStatusChip status={saveStatus} />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={props.onCancel}
+                className="px-4 py-2 text-sm border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 transition-colors"
+              >
+                Save &amp; Close
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={submitting || !allMarked || !allSectionsHaveAfter || !verdict}
+                className="px-5 py-2 text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                {submitting ? 'Submitting...' : 'Submit Inspection'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -540,4 +593,16 @@ export function QcReinspectForm(props: Props) {
       )}
     </>
   );
+}
+
+/** Small live save-status indicator, mirrors the Scope Rate Card footer. */
+function SaveStatusChip({ status }: { status: 'idle' | 'saving' | 'saved' | 'error' }) {
+  if (status === 'idle') return null;
+  const map = {
+    saving: { text: 'Saving…', cls: 'text-gray-500' },
+    saved: { text: 'All changes saved', cls: 'text-emerald-600' },
+    error: { text: 'Save failed — retry', cls: 'text-red-600' },
+  } as const;
+  const m = map[status];
+  return <span className={`text-xs font-heading font-semibold ${m.cls}`}>{m.text}</span>;
 }

@@ -41,6 +41,11 @@ export const config = {
   },
 };
 
+// In-flight finalize lock. Prevents a double-tap / slow-network retry from
+// kicking off two concurrent PDF-generation passes for the same inspection
+// (per server instance). Cleared in the finally block.
+const inFlightFinalize = new Set<string>();
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -49,6 +54,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const id = String(req.query.id || '');
   if (!id) return res.status(400).json({ error: 'Missing inspection id' });
+
+  if (inFlightFinalize.has(id)) {
+    return res.status(409).json({ error: 'This inspection is already being finalized. Please wait.' });
+  }
+  inFlightFinalize.add(id);
 
   const t0 = Date.now();
   try {
@@ -61,6 +71,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (inspection.templateType !== 'pm_scope_rate_card') {
       return res.status(400).json({ error: 'Finalize is only supported for Rate Card inspections.' });
     }
+
+    // Whether this is a RE-finalize (inspection was already completed and is
+    // being regenerated after a reopen). We still regenerate PDFs, but we do
+    // NOT re-send the damages email — that would duplicate it to soda@ + team.
+    const priorStatus = (inspection.status || '').trim().toLowerCase();
+    const isRefinalize = priorStatus === 'completed' || priorStatus === 'complete' || priorStatus === 'submitted';
 
     const [answers, regions, catalog] = await Promise.all([
       fetchAnswersForInspection(id),
@@ -354,6 +370,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // no-op until OAuth is wired up. Wrapped in try/catch so an email
     // failure never blocks finalize completion.
     let emailResult: Awaited<ReturnType<typeof sendInspectionEmail>> | null = null;
+    if (isRefinalize) {
+      // Re-finalize after a reopen: PDFs are regenerated above, but don't
+      // re-send the damages email (avoids duplicate emails to soda@ + team).
+      emailResult = {
+        sent: false,
+        reason: 'refinalize_skipped',
+        message: 'Email not re-sent because this inspection was already completed.',
+      } as any;
+    } else {
     try {
       // Inspection URLs for the body. The app URL uses the request's host;
       // the HubSpot URL uses sandbox portal 51415639 (placeholder per Hayden).
@@ -361,7 +386,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const appProto = (req.headers['x-forwarded-proto'] as string) || 'https';
       const appUrl = `${appProto}://${appHost}/inspection/${id}`;
       const inspectionTypeId = process.env.HUBSPOT_INSPECTION_TYPE_ID || '';
-      const HUBSPOT_PORTAL_ID = '51415639';
+      // Portal ID for building the HubSpot record link in the email. Reads from
+      // env so prod points at the prod portal; falls back to the sandbox id.
+      const HUBSPOT_PORTAL_ID = process.env.HUBSPOT_PORTAL_ID || '51415639';
       const hubspotUrl = inspectionTypeId
         ? `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/${inspectionTypeId}/${id}`
         : `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-1/${id}`;
@@ -394,6 +421,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         message: String(e?.message || e).slice(0, 300),
       };
     }
+    }
 
     const elapsed = Date.now() - t0;
     return res.status(200).json({
@@ -422,5 +450,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const elapsed = Date.now() - t0;
     console.error(`[finalize] failed after ${elapsed}ms:`, e);
     return res.status(500).json({ error: String(e?.message || e), elapsedMs: elapsed });
+  } finally {
+    inFlightFinalize.delete(id);
   }
 }

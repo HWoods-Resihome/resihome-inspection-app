@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { getSessionFromRequest } from '@/lib/auth';
 import { submitInspection } from '@/lib/hubspot';
 import type { SubmitPayload } from '@/lib/types';
 
@@ -15,10 +16,20 @@ function nowIso(): string {
 }
 
 function shortId(): string {
+  // crypto.randomUUID (Node 18+) for collision-proof ids; strip dashes.
+  if (typeof crypto !== 'undefined' && (crypto as any).randomUUID) {
+    return (crypto as any).randomUUID().replace(/-/g, '');
+  }
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // Defense-in-depth: middleware already gates this, but verify the
+  // session here too so the route is never reachable unauthenticated
+  // even if the middleware matcher changes.
+  const session = await getSessionFromRequest(req);
+  if (!session) return res.status(401).json({ error: 'Not authenticated' });
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

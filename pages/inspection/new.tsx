@@ -457,7 +457,6 @@ export default function NewInspection() {
     <>
       <Head>
         <title>New Inspection</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
       </Head>
       <main className="min-h-screen p-4 sm:p-6 bg-white">
         <div className="max-w-xl mx-auto">

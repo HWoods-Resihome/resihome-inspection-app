@@ -1109,7 +1109,7 @@ export async function copyRateCardLinesToQc(args: {
 
   const upserts: AnswerUpsert[] = lineAnswers.map((a) => {
     const rc = a.rateCardLine!;
-    const externalId = `QCLINE-${args.qcInspectionId}-${Math.random().toString(36).slice(2, 10)}`;
+    const externalId = `QCLINE-${args.qcInspectionId}-${(typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2, 12)}`;
     const props: Record<string, any> = {
       answer_id_external: externalId,
       answer_type: 'rate_card_line',

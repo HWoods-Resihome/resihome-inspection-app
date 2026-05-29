@@ -183,6 +183,17 @@ export function RateCardForm(props: RateCardFormProps) {
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
+  // Eagerly warm the catalog + region rates in the background as soon as the
+  // form mounts, so the FIRST "add line item" click is instant instead of
+  // waiting on the (large) catalog fetch. Fire-and-forget; ensureDataLoaded
+  // guards against double-loading, and the hydration effect below will reuse
+  // whatever this has loaded. Skipped in read-only (completed) inspections.
+  useEffect(() => {
+    if (props.readOnly) return;
+    void ensureDataLoaded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function ensureDataLoaded(): Promise<boolean> {
     if (dataLoaded || dataLoading) return dataLoaded;
     setDataLoading(true);

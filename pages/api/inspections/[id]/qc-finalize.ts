@@ -21,8 +21,12 @@ import {
   updateInspection,
 } from '@/lib/hubspot';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
+import { resolveImagesInParallel } from '@/lib/pdf-images';
 
 export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };
+
+// In-flight lock — prevents double-tap from running two QC finalizations.
+const inFlightQcFinalize = new Set<string>();
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -45,6 +49,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(400).json({ error: 'verdict must be "pass" or "fail"' });
     return;
   }
+
+  if (inFlightQcFinalize.has(id)) {
+    res.status(409).json({ error: 'This inspection is already being submitted. Please wait.' });
+    return;
+  }
+  inFlightQcFinalize.add(id);
 
   const t0 = Date.now();
   try {
@@ -99,10 +109,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const key = `${sectionLabel}||${loc}`;
       if (!sectionMap.has(key)) {
         sectionOrder.push(key);
+        // Before photos: match on composite, then bare location, then section
+        // (same fallback the QC form uses).
+        const before = beforeByLoc[key] || beforeByLoc[loc] || beforeByLoc[sectionLabel] || [];
         sectionMap.set(key, {
           displayName: loc || sectionLabel || 'Section',
           lines: [],
-          beforePhotos: beforeByLoc[loc] || [],
+          beforePhotos: before,
           afterPhotos: afterByLoc[loc] || [],
           passCount: 0,
           failCount: 0,
@@ -128,6 +141,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const sections: QcPdfSection[] = sectionOrder.map((k) => sectionMap.get(k)!);
+
+    // Pre-resolve every before/after photo URL to a JPEG data URI in parallel,
+    // then swap them into the section data. This is the same approach the
+    // /api/pdf route uses and is far more reliable than letting @react-pdf
+    // fetch each HubSpot URL itself at render time (which can silently fail).
+    const allPhotoUrls: string[] = [];
+    for (const s of sections) {
+      allPhotoUrls.push(...s.beforePhotos, ...s.afterPhotos);
+    }
+    const resolved = await resolveImagesInParallel(allPhotoUrls);
+    const swap = (urls: string[]) => urls.map((u) => resolved.get(u) || u);
+    for (const s of sections) {
+      s.beforePhotos = swap(s.beforePhotos);
+      s.afterPhotos = swap(s.afterPhotos);
+    }
 
     const ctx: QcPdfContext = {
       templateLabel: '(PM) Turn Re-Inspect QC',
@@ -192,5 +220,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch (e: any) {
     console.error(`[qc-finalize] failed:`, e);
     res.status(500).json({ error: String(e?.message || e), elapsedMs: Date.now() - t0 });
+  } finally {
+    inFlightQcFinalize.delete(id);
   }
 }

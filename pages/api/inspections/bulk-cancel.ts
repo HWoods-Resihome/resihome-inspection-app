@@ -28,26 +28,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const cancelled: string[] = [];
   const skipped: Array<{ id: string; reason: string }> = [];
 
-  for (const id of ids) {
-    try {
-      // Guard: never cancel a completed inspection.
-      const insp = await fetchInspectionById(id);
-      const status = (insp?.status || '').trim().toLowerCase();
-      if (status === 'completed' || status === 'complete' || status === 'submitted') {
-        skipped.push({ id, reason: 'completed' });
-        continue;
-      }
-      if (status === 'cancelled' || status === 'canceled') {
-        // Already cancelled — treat as success (idempotent).
+  // Process with a small concurrency cap so a large multi-select doesn't take
+  // N sequential round-trips, while staying polite with HubSpot's rate limit.
+  const CONCURRENCY = 5;
+  let idx = 0;
+  async function worker() {
+    while (idx < ids.length) {
+      const id = ids[idx++];
+      try {
+        // Guard: never cancel a completed inspection.
+        const insp = await fetchInspectionById(id);
+        const status = (insp?.status || '').trim().toLowerCase();
+        if (status === 'completed' || status === 'complete' || status === 'submitted') {
+          skipped.push({ id, reason: 'completed' });
+          continue;
+        }
+        if (status === 'cancelled' || status === 'canceled') {
+          cancelled.push(id); // already cancelled — idempotent success
+          continue;
+        }
+        await updateInspection(id, { status: 'cancelled' });
         cancelled.push(id);
-        continue;
+      } catch (e: any) {
+        skipped.push({ id, reason: String(e?.message || e).slice(0, 120) });
       }
-      await updateInspection(id, { status: 'cancelled' });
-      cancelled.push(id);
-    } catch (e: any) {
-      skipped.push({ id, reason: String(e?.message || e).slice(0, 120) });
     }
   }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ids.length) }, () => worker()));
 
   res.status(200).json({ success: true, cancelled, skipped });
 }

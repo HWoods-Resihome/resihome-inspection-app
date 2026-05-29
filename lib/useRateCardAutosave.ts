@@ -107,16 +107,7 @@ export function useRateCardAutosave(args: Args): AutosaveHandle {
 
   // ----- The actual save -----
   const doSave = useCallback(async (): Promise<void> => {
-    // TEMPORARY DIAGNOSTIC LOGGING
-    console.log('[SaveDebug] doSave called', {
-      enabled,
-      dirtyLines: Array.from(dirtyLinesRef.current),
-      dirtyPhotos: Array.from(dirtyPhotoSectionsRef.current),
-      pendingArchives: pendingArchivesRef.current.length,
-      linesInRef: Object.values(linesRef.current).flat().length,
-    });
     if (!enabled) {
-      console.warn('[SaveDebug] doSave bailed: enabled=false');
       return;
     }
     const lines = linesRef.current;
@@ -126,7 +117,6 @@ export function useRateCardAutosave(args: Args): AutosaveHandle {
     const archives = pendingArchivesRef.current.slice();
 
     if (dirtyLines.length === 0 && dirtyPhotos.length === 0 && archives.length === 0) {
-      console.log('[SaveDebug] doSave: nothing dirty, returning');
       return;
     }
 
@@ -155,17 +145,6 @@ export function useRateCardAutosave(args: Args): AutosaveHandle {
     try {
       // Save lines (if any)
       if (upserts.length > 0 || archives.length > 0) {
-        console.log('[SaveDebug] POSTing rate-card-lines', {
-          upsertsCount: upserts.length,
-          archivesCount: archives.length,
-          firstUpsert: upserts[0] ? {
-            externalId: upserts[0].line.externalId,
-            lineItemCode: upserts[0].line.lineItemCode,
-            recordId: upserts[0].recordId,
-            section: upserts[0].line.section,
-            location: upserts[0].line.location,
-          } : null,
-        });
         const r = await fetch(`/api/inspections/${inspectionRecordId}/rate-card-lines`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -175,14 +154,11 @@ export function useRateCardAutosave(args: Args): AutosaveHandle {
             bumpStatusToInProgress: true,
           }),
         });
-        console.log('[SaveDebug] rate-card-lines response status:', r.status);
         if (!r.ok) {
           const text = await r.text();
-          console.error('[SaveDebug] rate-card-lines failed body:', text);
           throw new Error(`Save failed (${r.status}): ${text.slice(0, 200)}`);
         }
         const data = await r.json();
-        console.log('[SaveDebug] rate-card-lines success, results:', data.results?.length);
         // Stitch back new record IDs for newly created lines
         const updates = { ...recordIdsRef.current };
         for (const result of data.results || []) {
@@ -327,6 +303,33 @@ export function useRateCardAutosave(args: Args): AutosaveHandle {
       if (savedClearTimerRef.current) clearTimeout(savedClearTimerRef.current);
     };
   }, []);
+
+  // Warn before leaving (tab close / browser back / refresh) if there are
+  // un-saved edits still sitting in the debounce window. Async saves can't be
+  // awaited in beforeunload, so the most reliable protection is the native
+  // "Leave site?" prompt — it gives the 2s debounce time to flush, or lets the
+  // user cancel. The in-app Back / Save & Close buttons flush explicitly, so
+  // this only fires on hard navigation.
+  useEffect(() => {
+    function hasPendingEdits() {
+      return (
+        dirtyLinesRef.current.size > 0 ||
+        dirtyPhotoSectionsRef.current.size > 0 ||
+        pendingArchivesRef.current.length > 0
+      );
+    }
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (!enabled) return;
+      // Best-effort: kick off a save (may not finish, but often does on slow nav)
+      if (hasPendingEdits()) {
+        void doSave();
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    }
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [enabled, doSave]);
 
   return { status, errorMessage, markLineDirty, markLineDeleted, markPhotosDirty, flush };
 }
