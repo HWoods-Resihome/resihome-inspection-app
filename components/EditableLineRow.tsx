@@ -402,7 +402,7 @@ export function EditableLineRow(props: Props) {
 
               <div className="px-4 py-4 space-y-4">
                 <div>
-                  <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">Category</label>
+                  <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">Category</label>
                   <select
                     value={category}
                     onChange={(e) => handleCategoryChange(e.target.value)}
@@ -414,7 +414,7 @@ export function EditableLineRow(props: Props) {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">Sub-category</label>
+                  <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">Sub-category</label>
                   <select
                     value={subcategory}
                     onChange={(e) => handleSubcategoryChange(e.target.value)}
@@ -426,7 +426,7 @@ export function EditableLineRow(props: Props) {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">Line Item</label>
+                  <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">Line Item</label>
                   <Combobox
                     options={lineItemOptions}
                     value={lineItemCode}
@@ -447,13 +447,13 @@ export function EditableLineRow(props: Props) {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">Unit</label>
+                    <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">Unit</label>
                     <div className="h-11 flex items-center px-3 border border-gray-200 rounded-lg bg-gray-50 text-base text-gray-700">
                       {selectedItem?.laborMeas || '—'}
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">
+                    <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">
                       Quantity <span className="text-brand">*</span>
                     </label>
                     <input
@@ -466,7 +466,7 @@ export function EditableLineRow(props: Props) {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">
+                  <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">
                     Vendor <span className="text-brand">*</span>
                   </label>
                   <select
@@ -479,7 +479,7 @@ export function EditableLineRow(props: Props) {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-heading font-semibold text-gray-600 mb-1">
+                  <label className="inline-block text-xs font-heading font-bold text-gray-700 border-b-2 border-brand pb-0.5 mb-1.5">
                     Tenant % <span className="text-brand">*</span>
                   </label>
                   <select
