@@ -461,7 +461,7 @@ export default function Home() {
 
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="text-xs text-gray-500 font-heading">
-              {loading ? 'Loading...' : `${sorted.length} of ${inspections.length} inspection${inspections.length === 1 ? '' : 's'}`}
+              {loading ? 'Loading...' : `${sorted.length} of ${counts.all} inspection${counts.all === 1 ? '' : 's'}`}
             </div>
             {!loading && !error && inspections.length > 0 && (
               selectMode ? (

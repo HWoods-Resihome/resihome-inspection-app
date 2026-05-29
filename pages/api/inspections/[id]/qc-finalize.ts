@@ -86,8 +86,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const afterByLoc: Record<string, string[]> = {};
     for (const a of answers) {
       if (a.answerType === 'section_photo') {
-        const key = a.location || a.section || '';
-        if (key) afterByLoc[key] = a.photoUrls || [];
+        const urls = a.photoUrls || [];
+        // Key by composite, bare location, and bare section so the line-side
+        // lookup below matches regardless of how the section was keyed.
+        afterByLoc[`${a.section || ''}||${a.location || ''}`] = urls;
+        if (a.location) afterByLoc[a.location] = urls;
+        if (a.section && !(a.section in afterByLoc)) afterByLoc[a.section] = urls;
       }
     }
     let beforeByLoc: Record<string, string[]> = {};
@@ -109,14 +113,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const key = `${sectionLabel}||${loc}`;
       if (!sectionMap.has(key)) {
         sectionOrder.push(key);
-        // Before photos: match on composite, then bare location, then section
-        // (same fallback the QC form uses).
+        // Photos: match composite, then bare location, then section.
         const before = beforeByLoc[key] || beforeByLoc[loc] || beforeByLoc[sectionLabel] || [];
+        const after = afterByLoc[key] || afterByLoc[loc] || afterByLoc[sectionLabel] || [];
         sectionMap.set(key, {
           displayName: loc || sectionLabel || 'Section',
           lines: [],
           beforePhotos: before,
-          afterPhotos: afterByLoc[loc] || [],
+          afterPhotos: after,
           passCount: 0,
           failCount: 0,
         });
@@ -175,12 +179,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const pdfBuf = await renderQcPdf(ctx);
 
-    // Filename: "Turn Re-Inspect QC - {address} - {date}.pdf"
+    // Filename: "Turn Re-Inspect QC - {address} - {date} - {shortId}.pdf"
+    // The short inspection-id suffix guarantees uniqueness so two QC
+    // inspections on the same property/day don't collide in HubSpot Files
+    // (which can dedupe identical paths and hand back the OLD file's URL).
     const safeAddress = (ctx.propertyName || 'property')
       .replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, ' ').trim().slice(0, 90);
     const d = new Date(ctx.generatedAtIso);
     const datePart = `${d.getMonth() + 1}-${d.getDate()}-${String(d.getFullYear()).slice(2)}`;
-    const filename = `Turn Re-Inspect QC - ${safeAddress} - ${datePart}.pdf`;
+    const idSuffix = String(id).slice(-6);
+    const filename = `Turn Re-Inspect QC - ${safeAddress} - ${datePart} - ${idSuffix}.pdf`;
 
     const pdfUrl = await uploadFile(pdfBuf, filename, 'application/pdf', '/inspection_pdfs', true);
 
