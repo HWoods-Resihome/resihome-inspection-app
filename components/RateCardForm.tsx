@@ -24,6 +24,7 @@ import {
   makeCustomSectionId,
 } from '@/lib/sections';
 import { SectionsManager } from '@/components/SectionsManager';
+import { PhotoLightbox } from '@/components/PhotoLightbox';
 
 interface RateCardFormProps {
   templateType: TemplateType;
@@ -85,6 +86,8 @@ export function RateCardForm(props: RateCardFormProps) {
   );
   // Manage Sections modal open state
   const [showSectionsManager, setShowSectionsManager] = useState(false);
+  // Photo lightbox (tap a section photo to view/swipe/mark-up/delete).
+  const [lightbox, setLightbox] = useState<{ sectionId: string; index: number } | null>(null);
 
   // ----- Catalog + regions ---------------------------------------------
   const [catalog, setCatalog] = useState<RateCardLineItem[]>([]);
@@ -959,6 +962,22 @@ export function RateCardForm(props: RateCardFormProps) {
     savePhotosForSection(sectionId, next);
   }
 
+  // Replace a section photo with an annotated version (from the lightbox):
+  // upload the marked-up file, swap the URL in place, and persist.
+  async function replaceSectionPhoto(sectionId: string, idx: number, file: File) {
+    if (props.readOnly) return;
+    try {
+      const url = await uploadPhoto(file);
+      const current = [...(photosBySection[sectionId] || [])];
+      if (idx < 0 || idx >= current.length) return;
+      current[idx] = url;
+      setPhotosBySection((m) => ({ ...m, [sectionId]: current }));
+      await savePhotosForSection(sectionId, current);
+    } catch (e) {
+      console.error('[RateCardForm] annotate replace failed:', e);
+    }
+  }
+
   function handleCameraComplete(hubspotUrls: string[]) {
     if (!cameraSectionId) return;
     if (hubspotUrls.length) {
@@ -1437,9 +1456,13 @@ export function RateCardForm(props: RateCardFormProps) {
                         {photos.map((url, idx) => (
                           <div key={idx} className="relative shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <a href={url} target="_blank" rel="noopener noreferrer">
-                              <img src={url} alt="" className="w-16 h-16 object-cover rounded border border-gray-200" />
-                            </a>
+                            <img
+                              src={url}
+                              alt=""
+                              onClick={() => setLightbox({ sectionId: s.id, index: idx })}
+                              className="w-16 h-16 object-cover rounded border border-gray-200 cursor-pointer"
+                              title="Tap to view, mark up, or delete"
+                            />
                             {!props.readOnly && (
                               <button
                                 type="button"
@@ -1625,6 +1648,19 @@ export function RateCardForm(props: RateCardFormProps) {
           onAdd={handleAddSection}
           onReorder={handleReorderSections}
           onClearSections={handleClearSections}
+        />
+      )}
+
+      {lightbox && (
+        <PhotoLightbox
+          rooms={sections.map((s) => ({ id: s.id, name: s.displayName || s.label }))}
+          photosBySection={photosBySection}
+          initialSectionId={lightbox.sectionId}
+          initialIndex={lightbox.index}
+          readOnly={!!props.readOnly}
+          onClose={() => setLightbox(null)}
+          onDelete={(sectionId, index) => removePhoto(sectionId, index)}
+          onReplace={(sectionId, index, file) => replaceSectionPhoto(sectionId, index, file)}
         />
       )}
 
