@@ -1293,20 +1293,20 @@ export function RateCardForm(props: RateCardFormProps) {
   // ----- Render --------------------------------------------------------
 
   return (
-    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-4">
+    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-2.5">
       {/* Header */}
-      <header className="mb-3">
+      <header className="mb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 min-w-0 flex-wrap">
-              <h1 className="text-lg sm:text-xl font-bold text-gray-900">{props.templateLabel}</h1>
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{props.templateLabel}</h1>
               {statusLabel && (
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
                   {statusLabel.label}
                 </span>
               )}
             </div>
-            <div className="text-xs text-gray-500 mt-1">Inspector: {props.inspectorName}</div>
+            <div className="text-xs text-gray-500 mt-2">Inspector: {props.inspectorName}</div>
             {props.pdfUrl && (
               <a href={props.pdfUrl} target="_blank" rel="noopener noreferrer"
                  className="inline-block mt-2 text-sm text-brand underline">View PDF</a>
@@ -2045,7 +2045,7 @@ function TerminalActions(props: {
           type="button"
           onClick={props.onSubmit}
           disabled={props.submitDisabled}
-          className="px-3 sm:px-5 py-2 text-xs sm:text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed whitespace-nowrap"
+          className="px-3 sm:px-5 py-2 text-xs sm:text-sm bg-white border border-brand text-brand font-semibold rounded hover:bg-brand hover:text-white active:bg-brand-dark active:border-brand-dark active:text-white transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed whitespace-nowrap"
         >
           <span className="sm:hidden">{props.submitLabelShort || props.submitLabel}</span>
           <span className="hidden sm:inline">{props.submitLabel}</span>

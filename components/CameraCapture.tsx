@@ -159,7 +159,8 @@ const CLIP_BITRATE = 2_500_000;
 // (Done in-canvas so it works on iOS Safari, which doesn't support the hardware
 // `zoom` track constraint.)
 const MAX_ZOOM = 4;
-const ZOOM_DRAG_PX = 200; // thumb travel (px) for the full 1x→MAX_ZOOM range
+const ZOOM_DRAG_PX = 520; // thumb travel (px) for the full 1x→MAX_ZOOM range (higher = gentler)
+const ZOOM_DEADZONE_PX = 18; // ignore tiny thumb wobble before zoom kicks in
 
 // Pick the best MediaRecorder mime type this browser supports (Safari → mp4,
 // Chrome/Android → webm). Returns '' if recording is unsupported entirely.
@@ -590,7 +591,10 @@ export function CameraCapture({
   }
   function onShutterMove(e: React.PointerEvent) {
     if (!recordingRef.current || shutterStartYRef.current == null) return;
-    const dy = shutterStartYRef.current - e.clientY; // up = positive = zoom in
+    const raw = shutterStartYRef.current - e.clientY; // up = positive = zoom in
+    // Deadzone so a small wobble doesn't zoom; gentle ramp via ZOOM_DRAG_PX.
+    const dy = raw > ZOOM_DEADZONE_PX ? raw - ZOOM_DEADZONE_PX
+      : raw < -ZOOM_DEADZONE_PX ? raw + ZOOM_DEADZONE_PX : 0;
     const z = Math.min(MAX_ZOOM, Math.max(1, 1 + (dy / ZOOM_DRAG_PX) * (MAX_ZOOM - 1)));
     zoomRef.current = z;
     setZoom(z);
@@ -1286,15 +1290,9 @@ export function CameraCapture({
         </div>
       )}
 
-      {/* Voice line-item dictation. `relative` so the assistant's pop-up panel
-          (positioned bottom-full) anchors to THIS bar and stays on-screen,
-          rather than to the full-screen camera root (which pushed it off-screen). */}
-      {voiceSlot && (
-        <div className="relative bg-black px-4 pb-1 flex justify-center">{voiceSlot}</div>
-      )}
-
-      {/* Shutter row */}
-      <div className="bg-black px-4 py-4 flex items-center justify-center gap-8">
+      {/* Shutter row. `relative` so the voice assistant's pop-up panel (anchored
+          bottom-full to the mic) floats above this bar and stays on-screen. */}
+      <div className="relative bg-black px-4 py-4 flex items-center justify-center gap-8">
         {/* Phone camera fallback (left of shutter). Always available: gives iOS
             users a flash-capable camera, and is a universal backup if the live
             camera struggles. */}
@@ -1357,6 +1355,11 @@ export function CameraCapture({
           </span>
           <span className="text-[10px] font-heading">Mark</span>
         </button>
+
+        {/* Voice line-item dictation — pinned to the bottom-right of the shutter row. */}
+        {voiceSlot && (
+          <div className="absolute right-4 top-1/2 -translate-y-1/2">{voiceSlot}</div>
+        )}
       </div>
 
       {/* Hidden native camera input (capture opens the OS camera on mobile) */}

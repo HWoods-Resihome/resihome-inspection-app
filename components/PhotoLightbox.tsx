@@ -158,8 +158,8 @@ export function PhotoLightbox({
                     playsInline
                     preload="metadata"
                     className="max-w-full max-h-full"
-                    // Don't let a drag on the controls flip the carousel.
-                    onPointerDown={(e) => e.stopPropagation()}
+                    // No stopPropagation: a horizontal swipe navigates like a photo;
+                    // a tap still hits the native play/pause control.
                   />
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element

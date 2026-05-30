@@ -248,8 +248,8 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
           Cancel
         </button>
         <span className="text-white/70 text-xs font-heading">Mark up · pinch to resize</span>
-        <button type="button" onClick={save} disabled={!ready} className="bg-brand text-white font-heading font-semibold text-sm px-4 py-1.5 rounded disabled:opacity-40">
-          Save
+        <button type="button" onClick={clearAll} disabled={count === 0} className="text-white/90 font-heading text-sm px-3 py-1.5 rounded hover:bg-white/10 disabled:opacity-30">
+          Clear
         </button>
       </div>
 
@@ -320,7 +320,7 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
 
         <div className="flex items-center gap-1">
           <button type="button" onClick={undo} disabled={count === 0} className="text-white/90 px-2.5 py-1.5 rounded text-[11px] font-heading hover:bg-white/10 disabled:opacity-30">Undo</button>
-          <button type="button" onClick={clearAll} disabled={count === 0} className="text-white/90 px-2.5 py-1.5 rounded text-[11px] font-heading hover:bg-white/10 disabled:opacity-30">Clear</button>
+          <button type="button" onClick={save} disabled={!ready} className="bg-brand text-white font-heading font-semibold px-4 py-1.5 rounded text-[11px] disabled:opacity-40">Save</button>
         </div>
       </div>
     </div>
