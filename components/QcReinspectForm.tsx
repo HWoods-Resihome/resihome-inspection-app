@@ -608,6 +608,23 @@ export function QcReinspectForm(props: Props) {
           isOpen={true}
           onClose={() => setCameraKey(null)}
           uploadPhoto={uploadHelper}
+          rooms={sections.map((s) => {
+            const count = (afterPhotos[s.key] || []).length;
+            return {
+              id: s.key,
+              name: s.displayName,
+              photoCount: count,
+              needsPhotos: count === 0, // QC requires an after-photo per section
+            };
+          })}
+          currentRoomId={cameraKey}
+          onRoomChange={(leavingKey, capturedUrls, enteringKey) => {
+            if (capturedUrls.length > 0) {
+              const sec = sections.find((s) => s.key === leavingKey);
+              if (sec) addAfterPhotos(sec.key, sec.section, sec.location, capturedUrls);
+            }
+            setCameraKey(enteringKey);
+          }}
           onComplete={(urls) => {
             const sec = sections.find((s) => s.key === cameraKey);
             if (sec) addAfterPhotos(sec.key, sec.section, sec.location, urls);

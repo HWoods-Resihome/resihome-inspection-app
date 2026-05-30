@@ -1128,13 +1128,35 @@ export function QuestionForm({
         </div>
       </div>
 
-      {/* In-app camera overlay for section photos. Only mounted when an instance
-          has the camera open; on Done, photos are appended to that instance's
-          sectionPhotos list (autosave picks them up automatically). */}
+      {/* In-app camera overlay for section photos. Multi-room ("whole house")
+          mode: the inspector can switch between sections/rooms without leaving
+          the camera; photos auto-save to the room they were taken in on every
+          switch. Q&A sections are template-driven, so rename/add/delete are not
+          offered here (only navigation). */}
       <CameraCapture
         isOpen={sectionCameraInstance !== null}
         onClose={() => setSectionCameraInstance(null)}
         uploadPhoto={uploadPhoto}
+        rooms={sectionInstances.map((inst) => {
+          const count = (sectionPhotos[inst.instanceKey] || []).length;
+          const required = !sectionPhotosExempt(inst.baseSectionName, inst.sectionOrder);
+          return {
+            id: inst.instanceKey,
+            name: inst.displayName,
+            photoCount: count,
+            needsPhotos: required && count === 0,
+          };
+        })}
+        currentRoomId={sectionCameraInstance || undefined}
+        onRoomChange={(leavingKey, capturedUrls, enteringKey) => {
+          if (capturedUrls.length > 0) {
+            setSectionPhotos((prev) => ({
+              ...prev,
+              [leavingKey]: [...(prev[leavingKey] || []), ...capturedUrls],
+            }));
+          }
+          setSectionCameraInstance(enteringKey);
+        }}
         onComplete={(urls) => {
           const ikey = sectionCameraInstance;
           setSectionCameraInstance(null);
