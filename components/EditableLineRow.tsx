@@ -24,6 +24,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Combobox } from '@/components/Combobox';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { formatMoney } from '@/lib/photoUpload';
+import { displayImageSrc } from '@/lib/photoDisplay';
 import { VENDORS, vendorPillStyle } from '@/lib/vendors';
 import type {
   RateCardLineItem,
@@ -58,6 +59,8 @@ interface Props {
   onSave: (line: RateCardLineInput) => void;
   onDelete: () => void;                 // hide × in view mode? no — always shown
   onDiscardNew?: () => void;            // for new rows that never get saved
+  // Open the line's tagged photo at `index` in the lightbox.
+  onOpenPhoto?: (index: number) => void;
 }
 
 const TENANT_PCT_OPTIONS = Array.from({ length: 21 }, (_, i) => i * 5);
@@ -365,6 +368,7 @@ export function EditableLineRow(props: Props) {
         mobile={mobile}
         onEnterEdit={() => !readOnly && setIsEditing(true)}
         onDelete={onDelete}
+        onOpenPhoto={props.onOpenPhoto}
         onSaveDescription={(text) => {
           // Persist the description change by re-saving the whole line with the
           // new customLaborFullDescription. Other fields stay untouched.
@@ -743,10 +747,11 @@ interface ViewRowProps {
   mobile?: boolean;
   onEnterEdit: () => void;
   onDelete: () => void;
+  onOpenPhoto?: (index: number) => void;
   onSaveDescription: (text: string) => void;
 }
 
-function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, onSaveDescription }: ViewRowProps) {
+function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, onOpenPhoto, onSaveDescription }: ViewRowProps) {
   const [showFull, setShowFull] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState('');
@@ -846,6 +851,21 @@ function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, on
                 {line.note && <span className="text-[11px] italic text-gray-600 truncate">📝 {line.note}</span>}
                 {calc?.isCustomPriced && <span className="text-[11px] font-semibold text-yellow-700">⚡ Custom</span>}
               </div>
+              {(line.photoUrls?.length ?? 0) > 0 && (
+                <div className="mt-1.5 flex gap-1 flex-wrap">
+                  {line.photoUrls.map((u, i) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={`${u}-${i}`}
+                      src={displayImageSrc(u)}
+                      alt=""
+                      onClick={(e) => { e.stopPropagation(); onOpenPhoto?.(i); }}
+                      className="w-10 h-10 object-cover rounded border border-gray-200 cursor-pointer"
+                      title="Tap to view / mark up"
+                    />
+                  ))}
+                </div>
+              )}
             </div>
             {/* Right: fixed-width Vendor / Client / Tenant columns. Each column is
                 a fixed width and right-aligned so values line up across cards

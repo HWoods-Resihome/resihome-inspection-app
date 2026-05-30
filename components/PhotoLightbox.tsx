@@ -1,44 +1,55 @@
 /**
  * PhotoLightbox — full-screen photo viewer launched from the inspection view.
  *
- * - Swipe (or arrows) to move between photos in the current room.
- * - Room dropdown in the header to jump to another room's photos.
- * - "Mark up" opens the annotator (loads the photo through /api/photo-proxy so
- *   the canvas isn't cross-origin tainted; saving re-uploads + replaces it).
- * - Delete removes the current photo.
+ * Works over photo "groups" (a room's section photos, or a single line item's
+ * photos):
+ *  - Swipe (or arrows) to move between photos in the current group.
+ *  - Group dropdown in the header to jump to another group (e.g. another room).
+ *  - "Mark up" opens the annotator (loads via /api/photo-proxy so the canvas
+ *    isn't cross-origin tainted; saving re-uploads + replaces it).
+ *  - "Tag to line" (when tagLinesByGroup is provided) links the photo to a line
+ *    item without removing it from the room.
+ *  - Delete removes the current photo from the group.
  */
 import { useEffect, useRef, useState } from 'react';
 import { PhotoAnnotator } from '@/components/PhotoAnnotator';
 import { displayImageSrc } from '@/lib/photoDisplay';
 
 interface Props {
-  rooms: { id: string; name: string }[];
-  photosBySection: Record<string, string[]>;
-  initialSectionId: string;
+  groups: { id: string; name: string }[];
+  photosByGroup: Record<string, string[]>;
+  initialGroupId: string;
   initialIndex: number;
   readOnly?: boolean;
   onClose: () => void;
-  onDelete: (sectionId: string, index: number) => void;
-  onReplace: (sectionId: string, index: number, file: File) => void;
+  onDelete: (groupId: string, index: number) => void;
+  onReplace: (groupId: string, index: number, file: File) => void;
+  // Optional tag-to-line (only meaningful for room/section groups).
+  tagLinesByGroup?: Record<string, { externalId: string; label: string }[]>;
+  onTagToLine?: (groupId: string, index: number, lineExternalId: string) => void;
 }
 
 export function PhotoLightbox({
-  rooms, photosBySection, initialSectionId, initialIndex, readOnly, onClose, onDelete, onReplace,
+  groups, photosByGroup, initialGroupId, initialIndex, readOnly,
+  onClose, onDelete, onReplace, tagLinesByGroup, onTagToLine,
 }: Props) {
-  const [sectionId, setSectionId] = useState(initialSectionId);
+  const [groupId, setGroupId] = useState(initialGroupId);
   const [index, setIndex] = useState(initialIndex);
   const [annotating, setAnnotating] = useState(false);
+  const [tagged, setTagged] = useState<string | null>(null);
   const swipeStartX = useRef<number | null>(null);
 
-  const photos = photosBySection[sectionId] || [];
-  const room = rooms.find((r) => r.id === sectionId);
+  const photos = photosByGroup[groupId] || [];
+  const tagLines = tagLinesByGroup?.[groupId] || [];
 
-  // Clamp the index if the current room's photo list shrinks (e.g. after a
-  // delete) or we switch rooms.
+  // Clamp / close if the current group's photo list shrinks (e.g. after delete).
   useEffect(() => {
     if (photos.length === 0) { onClose(); return; }
     if (index > photos.length - 1) setIndex(photos.length - 1);
   }, [photos.length, index, onClose]);
+
+  // Reset the transient "Tagged ✓" note when the photo changes.
+  useEffect(() => { setTagged(null); }, [groupId, index]);
 
   const prev = () => setIndex((i) => (i > 0 ? i - 1 : i));
   const next = () => setIndex((i) => (i < photos.length - 1 ? i + 1 : i));
@@ -56,17 +67,17 @@ export function PhotoLightbox({
 
   return (
     <div className="fixed inset-0 z-[55] bg-black flex flex-col">
-      {/* Header: room dropdown + position + close */}
+      {/* Header: group dropdown + position + close */}
       <div className="flex items-center justify-between gap-2 px-3 py-3 bg-black">
         <select
-          value={sectionId}
-          onChange={(e) => { setSectionId(e.target.value); setIndex(0); }}
+          value={groupId}
+          onChange={(e) => { setGroupId(e.target.value); setIndex(0); }}
           className="bg-white/10 text-white text-sm font-heading rounded px-2 py-1.5 max-w-[55%]"
-          aria-label="Switch room"
+          aria-label="Switch group"
         >
-          {rooms.map((r) => {
-            const n = (photosBySection[r.id] || []).length;
-            return <option key={r.id} value={r.id} className="text-black">{r.name}{n ? ` (${n})` : ''}</option>;
+          {groups.map((g) => {
+            const n = (photosByGroup[g.id] || []).length;
+            return <option key={g.id} value={g.id} className="text-black">{g.name}{n ? ` (${n})` : ''}</option>;
           })}
         </select>
         <span className="text-white/70 text-xs font-heading">{photos.length ? `${index + 1} / ${photos.length}` : ''}</span>
@@ -95,9 +106,9 @@ export function PhotoLightbox({
       </div>
 
       {/* Actions */}
-      <div className="bg-black px-4 py-3 flex items-center justify-center gap-3">
-        {!readOnly && (
-          <>
+      {!readOnly && (
+        <div className="bg-black px-4 py-3 flex flex-col items-center gap-2">
+          <div className="flex items-center justify-center gap-3">
             <button type="button" onClick={() => setAnnotating(true)}
               className="flex items-center gap-2 bg-white/15 hover:bg-white/25 text-white font-heading text-sm px-4 py-2 rounded-lg">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -106,22 +117,47 @@ export function PhotoLightbox({
               Mark up
             </button>
             <button type="button"
-              onClick={() => { onDelete(sectionId, index); }}
+              onClick={() => onDelete(groupId, index)}
               className="flex items-center gap-2 bg-white/10 hover:bg-red-600/70 text-white font-heading text-sm px-4 py-2 rounded-lg">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
               </svg>
               Delete
             </button>
-          </>
-        )}
-      </div>
+          </div>
+
+          {/* Tag to line (rooms only) */}
+          {onTagToLine && tagLines.length > 0 && (
+            <div className="flex items-center gap-2">
+              <select
+                value=""
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (!id) return;
+                  onTagToLine(groupId, index, id);
+                  const lbl = tagLines.find((l) => l.externalId === id)?.label || 'line';
+                  setTagged(lbl);
+                  e.currentTarget.value = '';
+                }}
+                className="bg-white/10 text-white text-sm font-heading rounded px-2 py-1.5 max-w-[70vw]"
+                aria-label="Tag this photo to a line item"
+              >
+                <option value="" className="text-black">Tag to a line item…</option>
+                {tagLines.map((l) => (
+                  <option key={l.externalId} value={l.externalId} className="text-black">{l.label}</option>
+                ))}
+              </select>
+              {tagged && <span className="text-emerald-400 text-xs font-heading whitespace-nowrap">Tagged ✓</span>}
+            </div>
+          )}
+        </div>
+      )}
 
       {annotating && url && (
         <PhotoAnnotator
           src={`/api/photo-proxy?url=${encodeURIComponent(url)}`}
           onCancel={() => setAnnotating(false)}
-          onSave={(file) => { setAnnotating(false); onReplace(sectionId, index, file); }}
+          onSave={(file) => { setAnnotating(false); onReplace(groupId, index, file); }}
         />
       )}
     </div>

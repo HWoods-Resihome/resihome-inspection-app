@@ -87,8 +87,12 @@ export function RateCardForm(props: RateCardFormProps) {
   );
   // Manage Sections modal open state
   const [showSectionsManager, setShowSectionsManager] = useState(false);
-  // Photo lightbox (tap a section photo to view/swipe/mark-up/delete).
-  const [lightbox, setLightbox] = useState<{ sectionId: string; index: number } | null>(null);
+  // Photo lightbox (tap a photo to view/swipe/mark-up/tag/delete). Either a
+  // room's section photos or a single line item's photos.
+  type LightboxState =
+    | { kind: 'section'; sectionId: string; index: number }
+    | { kind: 'line'; sectionId: string; externalId: string; index: number };
+  const [lightbox, setLightbox] = useState<LightboxState | null>(null);
 
   // ----- Catalog + regions ---------------------------------------------
   const [catalog, setCatalog] = useState<RateCardLineItem[]>([]);
@@ -979,6 +983,48 @@ export function RateCardForm(props: RateCardFormProps) {
     }
   }
 
+  // Short label for a line (catalog description), used in the tag picker + the
+  // line-photo lightbox header.
+  function lineLabel(line: RateCardLineInput): string {
+    const item = catalog.find((c) => c.lineItemCode === line.lineItemCode);
+    return item?.laborShortDescription || line.lineItemCode;
+  }
+
+  // Tag a section photo to a line item (LINK: also kept as a section photo).
+  function tagPhotoToLine(sectionId: string, index: number, externalId: string) {
+    if (props.readOnly) return;
+    const url = (photosBySection[sectionId] || [])[index];
+    if (!url) return;
+    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
+    if (!line || (line.photoUrls || []).includes(url)) return;
+    handleSaveLineForSection(sectionId, { ...line, photoUrls: [...(line.photoUrls || []), url] });
+  }
+
+  // Untag / delete a photo from a line item.
+  function deleteLinePhoto(sectionId: string, externalId: string, index: number) {
+    if (props.readOnly) return;
+    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
+    if (!line) return;
+    const next = (line.photoUrls || []).filter((_, i) => i !== index);
+    handleSaveLineForSection(sectionId, { ...line, photoUrls: next });
+  }
+
+  // Replace a line photo with an annotated version.
+  async function replaceLinePhoto(sectionId: string, externalId: string, index: number, file: File) {
+    if (props.readOnly) return;
+    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
+    if (!line) return;
+    try {
+      const url = await uploadPhoto(file);
+      const arr = [...(line.photoUrls || [])];
+      if (index < 0 || index >= arr.length) return;
+      arr[index] = url;
+      handleSaveLineForSection(sectionId, { ...line, photoUrls: arr });
+    } catch (e) {
+      console.error('[RateCardForm] line photo replace failed:', e);
+    }
+  }
+
   function handleCameraComplete(hubspotUrls: string[]) {
     if (!cameraSectionId) return;
     if (hubspotUrls.length) {
@@ -1460,7 +1506,7 @@ export function RateCardForm(props: RateCardFormProps) {
                             <img
                               src={displayImageSrc(url)}
                               alt=""
-                              onClick={() => setLightbox({ sectionId: s.id, index: idx })}
+                              onClick={() => setLightbox({ kind: 'section', sectionId: s.id, index: idx })}
                               className="w-16 h-16 object-cover rounded border border-gray-200 cursor-pointer"
                               title="Tap to view, mark up, or delete"
                             />
@@ -1510,6 +1556,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               mobile={isMobile}
                               onSave={(updated) => handleSaveLineForSection(s.id, updated)}
                               onDelete={() => handleDeleteLine(s.id, line.externalId)}
+                              onOpenPhoto={(index) => setLightbox({ kind: 'line', sectionId: s.id, externalId: line.externalId, index })}
                             />
                           ))}
                           {pendingNewBySection[s.id] && (
@@ -1652,18 +1699,37 @@ export function RateCardForm(props: RateCardFormProps) {
         />
       )}
 
-      {lightbox && (
+      {lightbox && lightbox.kind === 'section' && (
         <PhotoLightbox
-          rooms={sections.map((s) => ({ id: s.id, name: s.displayName || s.label }))}
-          photosBySection={photosBySection}
-          initialSectionId={lightbox.sectionId}
+          groups={sections.map((s) => ({ id: s.id, name: s.displayName || s.label }))}
+          photosByGroup={photosBySection}
+          initialGroupId={lightbox.sectionId}
           initialIndex={lightbox.index}
           readOnly={!!props.readOnly}
           onClose={() => setLightbox(null)}
           onDelete={(sectionId, index) => removePhoto(sectionId, index)}
           onReplace={(sectionId, index, file) => replaceSectionPhoto(sectionId, index, file)}
+          tagLinesByGroup={Object.fromEntries(
+            sections.map((s) => [s.id, (linesBySection[s.id] || []).map((l) => ({ externalId: l.externalId, label: lineLabel(l) }))])
+          )}
+          onTagToLine={(sectionId, index, externalId) => tagPhotoToLine(sectionId, index, externalId)}
         />
       )}
+      {lightbox && lightbox.kind === 'line' && (() => {
+        const line = (linesBySection[lightbox.sectionId] || []).find((l) => l.externalId === lightbox.externalId);
+        return (
+          <PhotoLightbox
+            groups={[{ id: lightbox.externalId, name: line ? lineLabel(line) : 'Line photos' }]}
+            photosByGroup={{ [lightbox.externalId]: line?.photoUrls || [] }}
+            initialGroupId={lightbox.externalId}
+            initialIndex={lightbox.index}
+            readOnly={!!props.readOnly}
+            onClose={() => setLightbox(null)}
+            onDelete={(_g, index) => deleteLinePhoto(lightbox.sectionId, lightbox.externalId, index)}
+            onReplace={(_g, index, file) => replaceLinePhoto(lightbox.sectionId, lightbox.externalId, index, file)}
+          />
+        );
+      })()}
 
       {/* Save-error detail modal. Triggered by clicking the "Save failed"
           badge in the sticky header. Shows the raw error message returned
