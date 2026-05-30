@@ -1141,24 +1141,23 @@ export function RateCardForm(props: RateCardFormProps) {
               )}
             </div>
           </div>
-          <div className="flex items-baseline text-[11px] sm:text-xs gap-1.5 sm:gap-0">
-            <span className="text-gray-500 text-right w-[72px] sm:w-[110px]">
-              <span className="text-gray-400">Ven </span>
-              <span className="font-semibold text-gray-700 tabular-nums">${formatMoney(roundMoney(grandTotals.vendor))}</span>
-            </span>
-            <span className="text-gray-500 text-right w-[72px] sm:w-[110px]">
-              <span className="text-gray-400">Cli </span>
-              <span className="font-semibold text-gray-700 tabular-nums">${formatMoney(roundMoney(grandTotals.client))}</span>
-            </span>
-            <span className="text-brand text-right w-[72px] sm:w-[110px]">
-              <span className="text-brand/70">Ten </span>
-              <span className="font-semibold tabular-nums">${formatMoney(roundMoney(grandTotals.tenant))}</span>
-            </span>
-            {/* Net turn cost = what the owner pays after tenant chargeback. */}
-            <span className="text-emerald-700 text-right w-[72px] sm:w-[110px]">
-              <span className="text-emerald-600/70">Net </span>
-              <span className="font-semibold tabular-nums">${formatMoney(roundMoney(grandTotals.client - grandTotals.tenant))}</span>
-            </span>
+          <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden">
+            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px]">
+              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Vendor</div>
+              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.vendor))}</div>
+            </div>
+            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px] border-l border-gray-200/70">
+              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Client</div>
+              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.client))}</div>
+            </div>
+            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px] border-l border-gray-200/70">
+              <div className="text-brand/70 text-[10px] uppercase tracking-wide">Tenant</div>
+              <div className="font-semibold text-brand tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.tenant))}</div>
+            </div>
+            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px] border-l border-gray-200/70">
+              <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net</div>
+              <div className="font-semibold text-emerald-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.client - grandTotals.tenant))}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1821,8 +1820,8 @@ function SectionHeader(p: SectionHeaderProps) {
   return (
     <div
       onClick={editingTitle || p.forceExpanded ? undefined : p.onToggle}
-      className={`w-full px-4 py-3 bg-gray-50 border-b border-gray-200 ${
-        editingTitle || p.forceExpanded ? '' : 'hover:bg-gray-100 cursor-pointer'
+      className={`w-full px-4 py-3 bg-brand/5 border-b border-gray-200 ${
+        editingTitle || p.forceExpanded ? '' : 'hover:bg-brand/10 cursor-pointer'
       }`}
     >
       {/* Row 1: Title + inline edit/delete controls. The title gets the full
@@ -1889,29 +1888,23 @@ function SectionHeader(p: SectionHeaderProps) {
           </span>
         </div>
         {p.lineCount > 0 && (
-          <div className="flex items-baseline text-xs">
-            {/* These widths roughly match the table's Vendor $ / Client $ /
-                Tenant $ columns, so the row totals appear directly above
-                their corresponding column. Tenant $ is the rightmost column
-                with min-w-[80px] + padding; the others are similar. The
-                right padding here (none) lets the Tenant total kiss the
-                same edge the table cells do. */}
-            <span className="text-gray-500 text-right w-[72px] sm:w-[110px]">
-              <span className="text-gray-400">Ven </span>
-              <span className="font-semibold text-gray-700 tabular-nums">${formatMoney(roundMoney(p.vendorTotal))}</span>
-            </span>
-            <span className="text-gray-500 text-right w-[72px] sm:w-[110px]">
-              <span className="text-gray-400">Cli </span>
-              <span className="font-semibold text-gray-700 tabular-nums">${formatMoney(roundMoney(p.clientTotal))}</span>
-            </span>
-            <span className="text-brand text-right w-[72px] sm:w-[110px]">
-              <span className="text-brand/70">Ten </span>
-              <span className="font-semibold tabular-nums">${formatMoney(roundMoney(p.tenantTotal))}</span>
-            </span>
-            <span className="text-emerald-700 text-right w-[72px] sm:w-[110px]">
-              <span className="text-emerald-600/70">Net </span>
-              <span className="font-semibold tabular-nums">${formatMoney(roundMoney(p.clientTotal - p.tenantTotal))}</span>
-            </span>
+          <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden">
+            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px]">
+              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Vendor</div>
+              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.vendorTotal))}</div>
+            </div>
+            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px] border-l border-gray-200/70">
+              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Client</div>
+              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.clientTotal))}</div>
+            </div>
+            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px] border-l border-gray-200/70">
+              <div className="text-brand/70 text-[10px] uppercase tracking-wide">Tenant</div>
+              <div className="font-semibold text-brand tabular-nums mt-0.5">${formatMoney(roundMoney(p.tenantTotal))}</div>
+            </div>
+            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px] border-l border-gray-200/70">
+              <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net</div>
+              <div className="font-semibold text-emerald-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.clientTotal - p.tenantTotal))}</div>
+            </div>
           </div>
         )}
       </div>
