@@ -138,6 +138,12 @@ export function CameraCapture({
   const refCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const geocodedAddrRef = useRef<string | null>(null);
   const geocodeInFlightRef = useRef(false);
+  // Mirrors of the above into state so the live location HUD can render and
+  // explain *why* a photo can or can't be ✓/✗ verified.
+  const [geoFix, setGeoFix] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
+  const [geoDenied, setGeoDenied] = useState(false);
+  const [refCoords, setRefCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [geocodeState, setGeocodeState] = useState<'idle' | 'pending' | 'ok' | 'failed'>('idle');
 
   const [items, setItems] = useState<CaptureItem[]>([]);
   // Mirror items in a ref so async code (handleDone polling) can read the
@@ -259,9 +265,18 @@ export function CameraCapture({
   // Best-effort: if the user denies location or it's unavailable, we just stamp
   // address + time without coordinates.
   useEffect(() => {
-    if (!isOpen || typeof navigator === 'undefined' || !navigator.geolocation) return;
-    const onPos = (pos: GeolocationPosition) => { geoRef.current = pos; };
-    const onErr = () => { /* denied/unavailable — stamp without coords */ };
+    if (!isOpen || typeof navigator === 'undefined' || !navigator.geolocation) { setGeoDenied(true); return; }
+    const onPos = (pos: GeolocationPosition) => {
+      geoRef.current = pos;
+      setGeoDenied(false);
+      const { latitude, longitude, accuracy } = pos.coords;
+      setGeoFix({ lat: latitude, lng: longitude, accuracy });
+    };
+    const onErr = (err: GeolocationPositionError) => {
+      // code 1 = permission denied; 2/3 = unavailable/timeout. Either way we
+      // can't stamp a verdict — surface it in the HUD instead of failing silently.
+      if (err && err.code === 1) setGeoDenied(true);
+    };
     navigator.geolocation.getCurrentPosition(onPos, onErr, {
       enableHighAccuracy: true, timeout: 8000, maximumAge: 30000,
     });
@@ -287,6 +302,7 @@ export function CameraCapture({
     const key = `${propertyRecordId || ''}|${addressSnapshot || ''}`;
     if (geocodedAddrRef.current === key || geocodeInFlightRef.current) return;
     geocodeInFlightRef.current = true;
+    setGeocodeState('pending');
     let cancelled = false;
     const params = new URLSearchParams();
     if (addressSnapshot) params.set('address', addressSnapshot);
@@ -298,9 +314,13 @@ export function CameraCapture({
         if (d && typeof d.lat === 'number' && typeof d.lng === 'number') {
           refCoordsRef.current = { lat: d.lat, lng: d.lng };
           geocodedAddrRef.current = key;
+          setRefCoords({ lat: d.lat, lng: d.lng });
+          setGeocodeState('ok');
+        } else {
+          setGeocodeState('failed'); // address couldn't be resolved → no reference
         }
       })
-      .catch(() => { /* no reference — coords stamp without a ✓/✗ */ })
+      .catch(() => { if (!cancelled) setGeocodeState('failed'); })
       .finally(() => { geocodeInFlightRef.current = false; });
     return () => { cancelled = true; };
   }, [isOpen, addressSnapshot, propertyRecordId]);
@@ -573,6 +593,25 @@ export function CameraCapture({
   const uploadingCount = items.filter((it) => it.status === 'uploading').length;
   const failedCount = items.filter((it) => it.status === 'failed').length;
 
+  // Live location-verification status for the HUD chip. Mirrors exactly what the
+  // burned-in ✓/✗ stamp will (or won't) say, so the inspector sees the cause.
+  const locHud: { tone: 'ok' | 'bad' | 'wait' | 'warn'; text: string } = (() => {
+    if (geoDenied) return { tone: 'warn', text: 'Location off — enable GPS to verify' };
+    if (!geoFix) return { tone: 'wait', text: 'Locating…' };
+    if (geocodeState === 'pending') return { tone: 'wait', text: 'Checking address…' };
+    if (geocodeState !== 'ok' || !refCoords) return { tone: 'warn', text: "Can't verify address (GPS only)" };
+    const m = haversineMeters(geoFix.lat, geoFix.lng, refCoords.lat, refCoords.lng);
+    return m <= GEO_MATCH_RADIUS_M
+      ? { tone: 'ok', text: 'At property ✓' }
+      : { tone: 'bad', text: `Not at property ✗ (~${m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${Math.round(m)}m`})` };
+  })();
+  const locHudClasses = {
+    ok: 'bg-emerald-600/85 text-white',
+    bad: 'bg-red-600/85 text-white',
+    wait: 'bg-black/60 text-white/90',
+    warn: 'bg-amber-500/90 text-black',
+  }[locHud.tone];
+
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col select-none">
       {/* Top bar */}
@@ -822,6 +861,14 @@ export function CameraCapture({
             {permissionState === 'pending' && (
               <div className="absolute inset-0 flex items-center justify-center text-white">
                 <div className="text-sm font-heading">Starting camera&hellip;</div>
+              </div>
+            )}
+            {/* Live location-verification chip (matches the ✓/✗ burned into shots) */}
+            {permissionState === 'granted' && (
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+                <span className={`px-3 py-1.5 rounded-full text-xs font-heading font-semibold shadow ${locHudClasses}`}>
+                  {locHud.text}
+                </span>
               </div>
             )}
             {/* Flip camera button (top right of viewport) */}

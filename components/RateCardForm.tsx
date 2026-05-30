@@ -990,14 +990,23 @@ export function RateCardForm(props: RateCardFormProps) {
     return item?.laborShortDescription || line.lineItemCode;
   }
 
-  // Tag a section photo to a line item (LINK: also kept as a section photo).
+  // Tag a section photo to a line item (MOVE: attach to the line, then remove it
+  // from the room's section photos so it lives only under the line item).
   function tagPhotoToLine(sectionId: string, index: number, externalId: string) {
     if (props.readOnly) return;
-    const url = (photosBySection[sectionId] || [])[index];
+    const sectionPhotos = photosBySection[sectionId] || [];
+    const url = sectionPhotos[index];
     if (!url) return;
     const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
-    if (!line || (line.photoUrls || []).includes(url)) return;
-    handleSaveLineForSection(sectionId, { ...line, photoUrls: [...(line.photoUrls || []), url] });
+    if (!line) return;
+    // Attach to the line (skip if it's somehow already there).
+    if (!(line.photoUrls || []).includes(url)) {
+      handleSaveLineForSection(sectionId, { ...line, photoUrls: [...(line.photoUrls || []), url] });
+    }
+    // Drop it from the section strip.
+    const nextSection = sectionPhotos.filter((_, i) => i !== index);
+    setPhotosBySection((prev) => ({ ...prev, [sectionId]: nextSection }));
+    savePhotosForSection(sectionId, nextSection);
   }
 
   // Untag / delete a photo from a line item.
