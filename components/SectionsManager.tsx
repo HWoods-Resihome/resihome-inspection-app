@@ -18,7 +18,7 @@
  * the dragged row will land in) and render a thin line BETWEEN rows at that
  * gap, rather than highlighting the hovered row.
  */
-import { Fragment, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import { type SectionInstance, titleCaseSectionName } from '@/lib/sections';
 
 interface Props {
@@ -39,9 +39,15 @@ export function SectionsManager(props: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingDraft, setEditingDraft] = useState('');
   // Drag-and-drop state. `dropLineIndex` is the GAP index (0..length) where the
-  // dragged row will be inserted — rendered as a line between rows.
+  // dragged row will be inserted — rendered as a line between rows. We use
+  // POINTER events (not HTML5 DnD) so it works on touch: pressing the handle
+  // starts the drag immediately. Refs hold the authoritative values during a
+  // drag so the pointer handlers never read stale closure state.
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropLineIndex, setDropLineIndex] = useState<number | null>(null);
+  const dragIndexRef = useRef<number | null>(null);
+  const pointerIdRef = useRef<number | null>(null);
+  const rowRefs = useRef<Array<HTMLLIElement | null>>([]);
   // Sections staged to have their content cleared on Done.
   const [pendingClear, setPendingClear] = useState<Set<string>>(new Set());
 
@@ -88,23 +94,36 @@ export function SectionsManager(props: Props) {
     props.onClose();
   }
 
-  function handleDragStart(idx: number) {
-    setDragIndex(idx);
+  // Which gap (0..length) the given screen Y lands in, by comparing against
+  // each row's vertical midpoint.
+  function gapForY(clientY: number): number {
+    for (let i = 0; i < props.sections.length; i++) {
+      const el = rowRefs.current[i];
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) return i;
+    }
+    return props.sections.length;
   }
-  function handleDragOver(idx: number, e: React.DragEvent) {
-    e.preventDefault();   // required to allow drop
-    if (dragIndex == null) return;
-    // Insert before this row if the cursor is in its top half, else after.
-    const rect = e.currentTarget.getBoundingClientRect();
-    const before = (e.clientY - rect.top) < rect.height / 2;
-    setDropLineIndex(before ? idx : idx + 1);
-  }
-  function handleDrop(e: React.DragEvent) {
+
+  function handleHandleDown(idx: number, e: React.PointerEvent) {
+    if (editingId != null) return;
     e.preventDefault();
-    if (dragIndex != null && dropLineIndex != null) {
-      const from = dragIndex;
-      let to = dropLineIndex;
-      // No-op if dropping back into its own slot.
+    dragIndexRef.current = idx;
+    pointerIdRef.current = e.pointerId;
+    setDragIndex(idx);
+    setDropLineIndex(idx);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
+  }
+  function handleHandleMove(e: React.PointerEvent) {
+    if (dragIndexRef.current == null) return;
+    e.preventDefault();
+    setDropLineIndex(gapForY(e.clientY));
+  }
+  function endDrag(e: React.PointerEvent) {
+    const from = dragIndexRef.current;
+    if (from != null) {
+      let to = gapForY(e.clientY);
       if (to !== from && to !== from + 1) {
         const next = [...props.sections];
         const [moved] = next.splice(from, 1);
@@ -113,10 +132,11 @@ export function SectionsManager(props: Props) {
         props.onReorder(next);
       }
     }
-    setDragIndex(null);
-    setDropLineIndex(null);
-  }
-  function handleDragEnd() {
+    try {
+      if (pointerIdRef.current != null) e.currentTarget.releasePointerCapture(pointerIdRef.current);
+    } catch { /* noop */ }
+    dragIndexRef.current = null;
+    pointerIdRef.current = null;
     setDragIndex(null);
     setDropLineIndex(null);
   }
@@ -154,17 +174,22 @@ export function SectionsManager(props: Props) {
                 <Fragment key={s.id}>
                   {dropLineIndex === idx && <DropLine />}
                   <li
-                    draggable={!isEditing}
-                    onDragStart={() => handleDragStart(idx)}
-                    onDragOver={(e) => handleDragOver(idx, e)}
-                    onDrop={handleDrop}
-                    onDragEnd={handleDragEnd}
+                    ref={(el) => { rowRefs.current[idx] = el; }}
                     className={`flex items-center gap-2 px-2 py-2 rounded border ${
-                      isDragging ? 'opacity-40 border-gray-200' : 'border-gray-200 hover:bg-gray-50'
+                      isDragging ? 'border-brand bg-brand/5 shadow-sm' : 'border-gray-200 hover:bg-gray-50'
                     }`}
                   >
-                    {/* Drag handle */}
-                    <div className="cursor-grab text-gray-400 select-none px-1" title="Drag to reorder">⋮⋮</div>
+                    {/* Drag handle — press to start dragging immediately (touch + mouse). */}
+                    <div
+                      onPointerDown={(e) => handleHandleDown(idx, e)}
+                      onPointerMove={handleHandleMove}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                      style={{ touchAction: 'none' }}
+                      className={`text-gray-400 hover:text-gray-600 select-none px-2 py-1.5 -my-1 text-lg leading-none ${isDragging ? 'cursor-grabbing text-brand' : 'cursor-grab'}`}
+                      title="Drag to reorder"
+                      aria-label="Drag to reorder"
+                    >⋮⋮</div>
 
                     {/* Label (display or editing) */}
                     <div className="flex-1 min-w-0">
