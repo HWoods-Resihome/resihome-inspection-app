@@ -1,0 +1,8 @@
+# The native Capacitor shell lives in mobile/ and has its own build lifecycle
+# (Xcode / Android Studio). Vercel only builds the Next.js web app, so it must
+# ignore the mobile project entirely — otherwise Vercel may try to install the
+# shell's Capacitor dependencies or treat its files as part of the web build.
+mobile/
+
+# Planning / native docs that never belong in the web deploy.
+PATH_B_ANALYSIS.md
