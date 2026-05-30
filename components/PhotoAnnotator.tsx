@@ -20,6 +20,10 @@ type Stroke =
 const COLORS = ['#ef4444', '#f59e0b', '#22c55e', '#ffffff'];
 const MAX_EDGE = 1920;
 
+function dist(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
 interface Props {
   src: string;
   onCancel: () => void;
@@ -31,13 +35,19 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const strokesRef = useRef<Stroke[]>([]);
   const drawingRef = useRef<Stroke | null>(null);
-  const pointerIdRef = useRef<number | null>(null);
+  // Active pointers (for two-finger pinch-to-resize the brush).
+  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchRef = useRef<{ startDist: number; startScale: number } | null>(null);
 
   const [tool, setTool] = useState<Tool>('arrow');
   const [color, setColor] = useState<string>('#ef4444');
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [count, setCount] = useState(0); // strokes count → re-render for undo state
+  // Brush thickness multiplier, adjusted by two-finger pinch.
+  const [widthScale, setWidthScale] = useState(1);
+  const widthScaleRef = useRef(1); widthScaleRef.current = widthScale;
+  const [showSize, setShowSize] = useState(false);
   const toolRef = useRef(tool); toolRef.current = tool;
   const colorRef = useRef(color); colorRef.current = color;
 
@@ -115,19 +125,41 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
   }
 
   function onDown(e: React.PointerEvent) {
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* noop */ }
+
+    // Second finger down → pinch to resize the brush (stop drawing).
+    if (pointersRef.current.size >= 2) {
+      drawingRef.current = null; // discard the stroke the first finger may have begun
+      const [a, b] = [...pointersRef.current.values()];
+      pinchRef.current = { startDist: Math.max(1, dist(a, b)), startScale: widthScaleRef.current };
+      setShowSize(true);
+      redraw();
+      return;
+    }
+
     if (!ready) return;
     e.preventDefault();
     const p = toImg(e);
     const t = toolRef.current; const col = colorRef.current;
-    const w = strokeWidthFor(t);
+    const w = Math.max(2, Math.round(strokeWidthFor(t) * widthScaleRef.current));
     drawingRef.current = t === 'pen'
       ? { tool: 'pen', color: col, width: w, points: [p] }
       : { tool: t, color: col, width: w, a: p, b: p };
-    pointerIdRef.current = e.pointerId;
-    try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* noop */ }
     redraw();
   }
   function onMove(e: React.PointerEvent) {
+    if (pointersRef.current.has(e.pointerId)) {
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    // Pinch: scale the brush by the change in finger distance.
+    if (pinchRef.current && pointersRef.current.size >= 2) {
+      e.preventDefault();
+      const [a, b] = [...pointersRef.current.values()];
+      const ratio = dist(a, b) / pinchRef.current.startDist;
+      setWidthScale(Math.min(5, Math.max(0.3, pinchRef.current.startScale * ratio)));
+      return;
+    }
     if (!drawingRef.current) return;
     e.preventDefault();
     const p = toImg(e);
@@ -136,6 +168,18 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
     redraw();
   }
   function onUp(e: React.PointerEvent) {
+    pointersRef.current.delete(e.pointerId);
+    try { (e.currentTarget as Element).releasePointerCapture(e.pointerId); } catch { /* noop */ }
+
+    // Finishing a pinch — don't turn it into a stroke.
+    if (pinchRef.current) {
+      if (pointersRef.current.size < 2) {
+        pinchRef.current = null;
+        setTimeout(() => setShowSize(false), 700);
+      }
+      return;
+    }
+
     const d = drawingRef.current;
     if (!d) return;
     e.preventDefault();
@@ -144,8 +188,6 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
       : Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y) > 4;
     if (keep) strokesRef.current.push(d);
     drawingRef.current = null;
-    try { if (pointerIdRef.current != null) (e.currentTarget as Element).releasePointerCapture(pointerIdRef.current); } catch { /* noop */ }
-    pointerIdRef.current = null;
     redraw();
     setCount(strokesRef.current.length);
   }
@@ -185,14 +227,14 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
         <button type="button" onClick={onCancel} className="text-white/90 font-heading text-sm px-3 py-1.5 rounded hover:bg-white/10">
           Cancel
         </button>
-        <span className="text-white/70 text-xs font-heading">Mark up the photo</span>
+        <span className="text-white/70 text-xs font-heading">Mark up · pinch to resize</span>
         <button type="button" onClick={save} disabled={!ready} className="bg-brand text-white font-heading font-semibold text-sm px-4 py-1.5 rounded disabled:opacity-40">
           Save
         </button>
       </div>
 
       {/* Canvas */}
-      <div className="flex-1 min-h-0 flex items-center justify-center p-2 overflow-hidden">
+      <div className="flex-1 min-h-0 relative flex items-center justify-center p-2 overflow-hidden">
         {loadError ? (
           <div className="text-white/80 text-sm text-center px-6">
             Couldn’t open this photo for markup in your browser.
@@ -207,6 +249,21 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
             style={{ touchAction: 'none' }}
             className="max-w-full max-h-full rounded cursor-crosshair"
           />
+        )}
+        {/* Live brush-size indicator while pinching */}
+        {showSize && (
+          <div className="absolute left-1/2 top-4 -translate-x-1/2 bg-black/70 text-white px-4 py-2 rounded-full flex items-center gap-3 pointer-events-none">
+            <span
+              className="rounded-full inline-block"
+              style={{
+                width: Math.max(4, Math.min(28, Math.round(8 * widthScale))),
+                height: Math.max(4, Math.min(28, Math.round(8 * widthScale))),
+                backgroundColor: color,
+                boxShadow: color === '#ffffff' ? '0 0 0 1px rgba(255,255,255,0.4)' : undefined,
+              }}
+            />
+            <span className="text-xs font-heading">Brush ×{widthScale.toFixed(1)}</span>
+          </div>
         )}
       </div>
 
