@@ -1290,6 +1290,17 @@ export function RateCardForm(props: RateCardFormProps) {
       ? 'Finalize'
       : 'Submit';
 
+  // Collapse/expand-all: mirrors the per-section isOpen logic (undefined =
+  // default-open when the section has content).
+  const anySectionOpen = sections.some((s) => {
+    const uc = expanded[s.id];
+    return uc !== undefined
+      ? uc
+      : ((linesBySection[s.id]?.length || 0) > 0 || (photosBySection[s.id]?.length || 0) > 0);
+  });
+  const setAllSections = (open: boolean) =>
+    setExpanded(Object.fromEntries(sections.map((s) => [s.id, open])));
+
   // ----- Render --------------------------------------------------------
 
   return (
@@ -1306,7 +1317,7 @@ export function RateCardForm(props: RateCardFormProps) {
                 </span>
               )}
             </div>
-            <div className="text-xs text-gray-500 mt-2">Inspector: {props.inspectorName}</div>
+            <div className="text-xs text-gray-500 mt-0.5">Inspector: {props.inspectorName}</div>
             {props.pdfUrl && (
               <a href={props.pdfUrl} target="_blank" rel="noopener noreferrer"
                  className="inline-block mt-2 text-sm text-brand underline">View PDF</a>
@@ -1438,6 +1449,23 @@ export function RateCardForm(props: RateCardFormProps) {
       {dataError && (
         <div className="mb-3 p-3 bg-red-50 border border-red-300 rounded text-sm text-red-800">
           Error loading rate card data: {dataError}
+        </div>
+      )}
+
+      {/* Collapse / expand all */}
+      {sections.length > 1 && (
+        <div className="flex justify-end mb-2">
+          <button
+            type="button"
+            onClick={() => setAllSections(!anySectionOpen)}
+            className="inline-flex items-center gap-1 text-xs font-heading text-gray-500 hover:text-gray-800 transition-colors"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                 className={`transition-transform ${anySectionOpen ? '' : 'rotate-180'}`}>
+              <polyline points="18 15 12 9 6 15" />
+            </svg>
+            {anySectionOpen ? 'Collapse all' : 'Expand all'}
+          </button>
         </div>
       )}
 

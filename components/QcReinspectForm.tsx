@@ -175,6 +175,11 @@ export function QcReinspectForm(props: Props) {
     });
   }
 
+  const allCollapsed = sections.length > 0 && sections.every((s) => collapsed.has(s.key));
+  function setAllCollapsed(c: boolean) {
+    setCollapsed(c ? new Set(sections.map((s) => s.key)) : new Set());
+  }
+
   async function persistAfterPhotos(key: string, section: string, location: string, urls: string[]) {
     const existingId = afterPhotoRecordIds[key];
     const uuid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -305,7 +310,22 @@ export function QcReinspectForm(props: Props) {
 
       <div className="sticky top-0 z-10 -mx-5 sm:-mx-6 px-5 sm:px-6 py-2 mb-3 bg-white border-b border-gray-200 shadow-sm">
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="text-sm font-semibold text-gray-700">{lines.length} items</div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-gray-700">{lines.length} items</span>
+            {sections.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setAllCollapsed(!allCollapsed)}
+                className="inline-flex items-center gap-1 text-xs font-heading text-gray-500 hover:text-gray-800 transition-colors"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                     className={`transition-transform ${allCollapsed ? 'rotate-180' : ''}`}>
+                  <polyline points="18 15 12 9 6 15" />
+                </svg>
+                {allCollapsed ? 'Expand all' : 'Collapse all'}
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-4 text-sm font-bold">
             <span className="text-emerald-600">{totalPass} pass</span>
             <span className="text-gray-300">&middot;</span>

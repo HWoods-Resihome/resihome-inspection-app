@@ -110,19 +110,32 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
 // (and the HubSpot record has no stored coords), we geocode straight from the
 // inspector's device — which CAN reach Nominatim (CORS-enabled). Best-effort.
 async function clientGeocode(address: string): Promise<{ lat: number; lng: number } | null> {
+  // 1) Photon (komoot) — browser-friendly, CORS-enabled, tolerant of partial
+  //    addresses; good first choice from a phone.
+  try {
+    const r = await fetch(`https://photon.komoot.io/api/?limit=1&q=${encodeURIComponent(address)}`);
+    if (r.ok) {
+      const d = await r.json();
+      const c = d?.features?.[0]?.geometry?.coordinates; // [lng, lat]
+      if (Array.isArray(c) && isFinite(Number(c[0])) && isFinite(Number(c[1]))) {
+        return { lat: Number(c[1]), lng: Number(c[0]) };
+      }
+    }
+  } catch { /* try Nominatim */ }
+  // 2) Nominatim (OpenStreetMap).
   try {
     const r = await fetch(
       `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(address)}`,
       { headers: { Accept: 'application/json' } }
     );
-    if (!r.ok) return null;
-    const d = await r.json();
-    const first = Array.isArray(d) ? d[0] : null;
-    const lat = Number(first?.lat), lng = Number(first?.lon);
-    return isFinite(lat) && isFinite(lng) ? { lat, lng } : null;
-  } catch {
-    return null;
-  }
+    if (r.ok) {
+      const d = await r.json();
+      const first = Array.isArray(d) ? d[0] : null;
+      const lat = Number(first?.lat), lng = Number(first?.lon);
+      if (isFinite(lat) && isFinite(lng)) return { lat, lng };
+    }
+  } catch { /* give up */ }
+  return null;
 }
 
 // Distance in meters between two lat/lng points (haversine).
@@ -296,13 +309,12 @@ export function CameraCapture({
         const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
         setTorchSupported(isMobile && facing === 'environment');
       };
-      // Check now, after metadata, and once more on a delay to catch late caps.
+      // Check now, after metadata, and on several delays — some Android devices
+      // only report the torch capability a second or two after the stream starts.
       checkTorch();
+      [600, 1500, 2800].forEach((ms) => setTimeout(checkTorch, ms));
       if (videoRef.current) {
-        videoRef.current.addEventListener('loadedmetadata', () => {
-          checkTorch();
-          setTimeout(checkTorch, 600);
-        }, { once: true });
+        videoRef.current.addEventListener('loadedmetadata', () => { checkTorch(); }, { once: true });
       }
       setTimeout(checkTorch, 800);
       setPermissionState('granted');
@@ -406,6 +418,7 @@ export function CameraCapture({
         setGeocodeState('ok');
       } else {
         setGeocodeState('failed');
+        console.warn('[CameraCapture] geocode failed — no coords for', { address: addressSnapshot, propertyRecordId });
       }
       geocodeInFlightRef.current = false;
     })();
@@ -757,18 +770,30 @@ export function CameraCapture({
       const updated = { ...target, status: 'uploading' as const, error: undefined, abortController: newAbort };
       const next = [...prev];
       next[idx] = updated;
-      // Kick off the upload again (fire-and-forget; state update happens in the .then)
-      uploadPhoto(target.file).then((hubspotUrl) => {
+
+      const onOk = (hubspotUrl: string) => {
         if (newAbort.signal.aborted) return;
-        setItems((cur) =>
-          cur.map((it) => (it.id === id ? { ...it, status: 'uploaded', hubspotUrl } : it))
-        );
-      }).catch((err) => {
+        setItems((cur) => cur.map((it) => (it.id === id ? { ...it, status: 'uploaded', hubspotUrl } : it)));
+      };
+      const onErr = (err: any) => {
         if (newAbort.signal.aborted) return;
-        setItems((cur) =>
-          cur.map((it) => (it.id === id ? { ...it, status: 'failed', error: err?.message || String(err) } : it))
-        );
-      });
+        setItems((cur) => cur.map((it) => (it.id === id ? { ...it, status: 'failed', error: err?.message || String(err) } : it)));
+      };
+
+      if (target.kind === 'video') {
+        // Video items: re-upload the clip AND its poster (the poster blob is
+        // recoverable from the still-live preview object URL), then re-encode
+        // the poster#v=video entry. (The old code ran uploadPhoto on the video
+        // file, which tried to image-compress it and always failed.)
+        (async () => {
+          const posterBlob = await fetch(target.blobUrl).then((r) => r.blob());
+          const posterFile = new File([posterBlob], `clip_${id}_poster.jpg`, { type: 'image/jpeg' });
+          const [pUrl, vUrl] = await Promise.all([uploadPhoto(posterFile), uploadVideo(target.file)]);
+          return makeVideoEntry(pUrl, vUrl);
+        })().then(onOk).catch(onErr);
+      } else {
+        uploadPhoto(target.file).then(onOk).catch(onErr);
+      }
       return next;
     });
   }, [uploadPhoto]);
@@ -856,17 +881,31 @@ export function CameraCapture({
     const track = streamRef.current?.getVideoTracks?.()[0];
     if (!track) return;
     const next = !torchOn;
-    try {
+    const applyTorch = async () => {
       await track.applyConstraints({ advanced: [{ torch: next } as any] });
+    };
+    try {
+      await applyTorch();
       setTorchOn(next);
       setTorchError('');
     } catch (e) {
-      // We optimistically showed the button; this device can't actually do
-      // torch via the web API. Hide it and point the user to the OS camera.
-      console.warn('[CameraCapture] torch toggle failed:', e);
-      setTorchSupported(false);
-      setTorchOn(false);
-      setTorchError('Flash isn\u2019t available in-app on this device. Use "Photo Library / Camera" below for your phone\u2019s camera with flash.');
+      // Some Android devices reject the very first apply (capability settles a
+      // beat late) \u2014 re-read caps and try once more before giving up.
+      try {
+        const caps = (track.getCapabilities?.() as any) || {};
+        if (caps.torch) {
+          await applyTorch();
+          setTorchOn(next);
+          setTorchError('');
+          return;
+        }
+        throw e;
+      } catch (e2) {
+        console.warn('[CameraCapture] torch toggle failed:', e2);
+        setTorchSupported(false);
+        setTorchOn(false);
+        setTorchError('Flash isn\u2019t available in-app on this device/lens. Use "Phone Cam" below to record with your phone\u2019s camera (it has its own flash).');
+      }
     }
   }, [torchOn]);
 
@@ -883,7 +922,13 @@ export function CameraCapture({
     if (geoDenied) return { tone: 'warn', text: 'Location off — enable GPS to verify' };
     if (!geoFix) return { tone: 'wait', text: 'Locating…' };
     if (geocodeState === 'pending') return { tone: 'wait', text: 'Checking address…' };
-    if (geocodeState !== 'ok' || !refCoords) return { tone: 'warn', text: "Can't verify address (GPS only)" };
+    if (geocodeState !== 'ok' || !refCoords) {
+      // Surface the address we tried so it's obvious when it's missing/bad
+      // (e.g. a "Property 12345" placeholder rather than a real street address).
+      const a = (addressSnapshot || '').trim();
+      const short = a.length > 24 ? `${a.slice(0, 24)}…` : a;
+      return { tone: 'warn', text: short ? `Can’t verify: ${short}` : "Can't verify address" };
+    }
     const m = haversineMeters(geoFix.lat, geoFix.lng, refCoords.lat, refCoords.lng);
     return m <= GEO_MATCH_RADIUS_M
       ? { tone: 'ok', text: 'At property ✓' }
