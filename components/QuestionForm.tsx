@@ -83,6 +83,20 @@ function answerKey(questionIdExternal: string, instanceKey: string): string {
   return `${questionIdExternal}::${instanceKey}`;
 }
 
+// Reconstruct the SAME deterministic natural key the autosave hook uses when
+// saving an answer (lib/useAutosave.ts buildAnswerExternalId). Hydration matches
+// saved answers back to form slots by this key — the reliable approach — instead
+// of re-deriving a fragile match from section/location strings.
+function buildAnswerExternalId(
+  inspectionExternalId: string,
+  questionIdExternal: string,
+  instanceKey: string
+): string {
+  const safeQ = questionIdExternal.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeI = instanceKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `${inspectionExternalId}_${safeQ}__${safeI}`;
+}
+
 // Slugify section/instance display name for use in DOM IDs.
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -229,18 +243,45 @@ export function QuestionForm({
         };
       }
     }
-    // Step 2: overlay any existing saved Q&A answers from HubSpot
+    // Step 2: overlay any existing saved Q&A answers from HubSpot.
+    //
+    // PRIMARY match: the deterministic natural key (answer_id_external) that the
+    // answer was SAVED under. This is reliable because save and hydrate now use
+    // the exact same key derivation. This fixes answers silently failing to
+    // re-display (and being miscounted as unanswered) when the location/section
+    // heuristic didn't line up on reopen.
+    //
+    // FALLBACK match: the older location/section heuristic, for any legacy
+    // records saved before answer_id_external matching existed.
     if (existingAnswers && existingAnswers.length > 0) {
+      // Build externalId -> { key, questionIdExternal } across every form slot.
+      const externalIdToKey = new Map<string, string>();
+      for (const inst of sectionInstances) {
+        for (const q of inst.questions) {
+          const eid = buildAnswerExternalId(inspectionExternalId, q.questionIdExternal, inst.instanceKey);
+          externalIdToKey.set(eid, answerKey(q.questionIdExternal, inst.instanceKey));
+        }
+      }
+
       for (const sa of existingAnswers) {
         if (sa.answerType !== 'qa') continue;
-        const matchingInst = sectionInstances.find(
-          (inst) =>
-            inst.questions.some((q) => q.questionIdExternal === sa.questionIdExternal) &&
-            ((sa.location && inst.location === sa.location) ||
-             (!sa.location && !inst.location))
-        );
-        if (!matchingInst) continue;
-        const key = answerKey(sa.questionIdExternal, matchingInst.instanceKey);
+
+        // Try the reliable natural-key match first.
+        let key: string | undefined =
+          sa.answerIdExternal ? externalIdToKey.get(sa.answerIdExternal) : undefined;
+
+        // Fallback: legacy location/section heuristic.
+        if (!key) {
+          const matchingInst = sectionInstances.find(
+            (inst) =>
+              inst.questions.some((q) => q.questionIdExternal === sa.questionIdExternal) &&
+              ((sa.location && inst.location === sa.location) ||
+               (!sa.location && !inst.location))
+          );
+          if (matchingInst) key = answerKey(sa.questionIdExternal, matchingInst.instanceKey);
+        }
+
+        if (!key) continue;
         const existing = init[key];
         if (!existing) continue;
         init[key] = {
@@ -295,6 +336,14 @@ export function QuestionForm({
     if (!existingAnswers) return;
     const m = new Map<string, string>();
     const aMap = new Map<string, string>();
+    // Reliable externalId -> form key lookup for qa answers (same as hydration).
+    const externalIdToKey = new Map<string, string>();
+    for (const inst of sectionInstances) {
+      for (const q of inst.questions) {
+        const eid = buildAnswerExternalId(inspectionExternalId, q.questionIdExternal, inst.instanceKey);
+        externalIdToKey.set(eid, answerKey(q.questionIdExternal, inst.instanceKey));
+      }
+    }
     for (const sa of existingAnswers) {
       if (sa.answerType === 'section_photo') {
         // best-effort instanceKey
@@ -306,15 +355,19 @@ export function QuestionForm({
         const key = matchingInst?.instanceKey ?? locationToInstanceKey(sa.location, sa.section);
         m.set(key, sa.recordId);
       } else if (sa.answerType === 'qa') {
-        const matchingInst = sectionInstances.find(
-          (inst) =>
-            inst.questions.some((q) => q.questionIdExternal === sa.questionIdExternal) &&
-            ((sa.location && inst.location === sa.location) ||
-             (!sa.location && !inst.location))
-        );
-        if (matchingInst) {
-          aMap.set(answerKey(sa.questionIdExternal, matchingInst.instanceKey), sa.recordId);
+        // Reliable natural-key match first; fall back to location heuristic.
+        let key: string | undefined =
+          sa.answerIdExternal ? externalIdToKey.get(sa.answerIdExternal) : undefined;
+        if (!key) {
+          const matchingInst = sectionInstances.find(
+            (inst) =>
+              inst.questions.some((q) => q.questionIdExternal === sa.questionIdExternal) &&
+              ((sa.location && inst.location === sa.location) ||
+               (!sa.location && !inst.location))
+          );
+          if (matchingInst) key = answerKey(sa.questionIdExternal, matchingInst.instanceKey);
         }
+        if (key) aMap.set(key, sa.recordId);
       }
     }
     sectionPhotoRecordIdsRef.current = m;

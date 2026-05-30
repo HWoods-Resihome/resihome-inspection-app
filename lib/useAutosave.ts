@@ -40,8 +40,8 @@ interface Options {
   disabled?: boolean;
 }
 
-const DEBOUNCE_MS = 2000;
-const CHECK_INTERVAL_MS = 500;
+const DEBOUNCE_MS = 800;
+const CHECK_INTERVAL_MS = 400;
 
 export function useAutosave(opts: Options) {
   const { inspectionRecordId, inspectionExternalId, onSaveSuccess, onFirstSave, disabled } = opts;
@@ -233,14 +233,19 @@ export function useAutosave(opts: Options) {
     }
   }, [disabled, inspectionRecordId, inspectionExternalId, hasEverSaved, onSaveSuccess, onFirstSave, buildAnswerExternalId, saveState.kind]);
 
-  // Tick: every 500ms, check if any dirty answers have been stable long enough to flush.
+  // Tick: periodically check if any dirty answers have been stable long enough
+  // to flush. Hold `flush` in a ref so the interval is created ONCE and isn't
+  // torn down / recreated every time saveState changes (which would otherwise
+  // churn the timer and risk orphaning an in-flight save).
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
   useEffect(() => {
     if (disabled) return;
     const id = setInterval(() => {
-      flush(false);
+      void flushRef.current(false);
     }, CHECK_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [flush, disabled]);
+  }, [disabled]);
 
   // Queue an Answer record for archival (when inspector clears a previously-saved field)
   const queueArchive = useCallback((recordId: string) => {
