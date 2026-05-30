@@ -66,6 +66,12 @@ interface Props {
   // inspector can dictate line items while shooting. No-op on browsers without
   // the Web Speech API (e.g. iOS Safari).
   voiceSlot?: React.ReactNode;
+  // Line items for the active room — when non-empty, the in-camera photo viewer
+  // shows a "Tag to line item" control (mirrors the inspection view).
+  tagLines?: { externalId: string; label: string }[];
+  // Tag a captured photo (by its uploaded URL) to a line; returns the new
+  // (stamped) URL so the camera keeps the stamped version.
+  onTagPhotoToLine?: (hubspotUrl: string, lineExternalId: string) => Promise<string>;
 }
 
 // A stamp line; `mark` appends a colored ✓ (location matches the property) or
@@ -192,7 +198,7 @@ function pickClipMime(): string {
 export function CameraCapture({
   isOpen, onClose, onComplete, uploadPhoto, maxPhotos = 30,
   rooms, currentRoomId, onRoomChange, onRenameRoom, onDeleteRoom, onAddRoom,
-  addressSnapshot, propertyRecordId, voiceSlot,
+  addressSnapshot, propertyRecordId, voiceSlot, tagLines, onTagPhotoToLine,
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -1438,6 +1444,24 @@ export function CameraCapture({
               const target = items.filter((p) => p.kind !== 'video')[i];
               if (target) handleAnnotated(target.id, file);
             }}
+            // Tag-to-line — only when the active room actually has line items.
+            tagLinesByGroup={tagLines && tagLines.length > 0 ? { session: tagLines } : undefined}
+            onTagToLine={tagLines && tagLines.length > 0 && onTagPhotoToLine
+              ? (_g, i, lineId) => {
+                  const target = items.filter((p) => p.kind !== 'video')[i];
+                  if (!target) return;
+                  if (target.status !== 'uploaded' || !target.hubspotUrl) {
+                    void dialog.alert('This photo is still uploading — tag it again in a moment.');
+                    return;
+                  }
+                  const prevUrl = target.hubspotUrl;
+                  onTagPhotoToLine(prevUrl, lineId).then((stamped) => {
+                    if (stamped && stamped !== prevUrl) {
+                      setItems((cur) => cur.map((it) => (it.id === target.id ? { ...it, hubspotUrl: stamped } : it)));
+                    }
+                  }).catch((e) => console.warn('[CameraCapture] tag-to-line failed:', e));
+                }
+              : undefined}
           />
         );
       })()}

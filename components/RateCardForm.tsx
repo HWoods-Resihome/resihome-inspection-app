@@ -1029,6 +1029,26 @@ export function RateCardForm(props: RateCardFormProps) {
     }
   }
 
+  // Tag a freshly-captured photo to a line FROM INSIDE THE CAMERA. The photo
+  // isn't in the section strip yet (it joins on camera close), so this only
+  // stamps + links it to the line of the camera's active room and returns the
+  // new (stamped) URL — the camera updates its item so the stamped version is
+  // the one that lands in the room too.
+  async function tagCameraPhotoToLine(url: string, lineExternalId: string): Promise<string> {
+    if (props.readOnly) return url;
+    const sectionId = cameraSectionId;
+    if (!sectionId) return url;
+    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === lineExternalId);
+    if (!line) return url;
+    let tagged = url;
+    try { tagged = await stampEntryWithLabel(url, lineLabel(line)); }
+    catch (e) { console.warn('[RateCardForm] camera tag stamp failed:', e); }
+    if (!(line.photoUrls || []).includes(tagged)) {
+      handleSaveLineForSection(sectionId, { ...line, photoUrls: [...(line.photoUrls || []), tagged] });
+    }
+    return tagged;
+  }
+
   // Untag / delete a photo from a line item.
   function deleteLinePhoto(sectionId: string, externalId: string, index: number) {
     if (props.readOnly) return;
@@ -1757,6 +1777,10 @@ export function RateCardForm(props: RateCardFormProps) {
           })}
           currentRoomId={cameraSectionId}
           onRoomChange={handleCameraRoomChange}
+          tagLines={cameraSectionId
+            ? (linesBySection[cameraSectionId] || []).map((l) => ({ externalId: l.externalId, label: lineLabel(l) }))
+            : []}
+          onTagPhotoToLine={tagCameraPhotoToLine}
           voiceSlot={
             !props.readOnly && props.templateType === 'pm_scope_rate_card' && cameraSectionId ? (
               <VoiceLineAssistant
