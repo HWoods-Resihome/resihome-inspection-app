@@ -55,15 +55,31 @@ function voyageKey(): string {
 // description carries the meaning, category/subcategory disambiguate
 // near-duplicates ("gutter cleaning" vs "gutter repair"), unit helps the
 // downstream agent. We deliberately exclude prices/codes (not semantic).
+// Bump when catalogItemEmbedText changes so the cached vectors re-embed.
+const EMBED_SCHEMA = 'v2';
+
 export function catalogItemEmbedText(item: RateCardLineItem): string {
+  // Include the FULL labor description (and subtext + material) so matching
+  // accounts for everything an item covers — not just the short title. The
+  // inspector's spoken phrasing often matches words in the long description.
   const parts = [
     item.laborShortDescription,
-    item.laborSubtext || item.laborFullDescription,
+    item.laborSubtext,
+    item.laborFullDescription,
+    item.materialDescription,
     item.category,
     item.subcategory,
     item.laborMeas ? `unit ${item.laborMeas}` : '',
   ].filter(Boolean);
-  return parts.join(' — ').slice(0, 400);
+  // Drop exact-duplicate parts (short/subtext/full sometimes overlap).
+  const seen = new Set<string>();
+  const uniq = parts.filter((p) => {
+    const k = p.trim().toLowerCase();
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return uniq.join(' — ').slice(0, 700);
 }
 
 async function voyageEmbed(texts: string[], inputType: 'document' | 'query'): Promise<number[][]> {
@@ -109,8 +125,9 @@ function catalogVersion(items: RateCardLineItem[]): string {
   // Prefer the explicit catalog_version if present; else derive a cheap
   // fingerprint from count + a sample of codes so a changed catalog re-embeds.
   const v = (items[0] as any)?.catalogVersion;
-  if (v) return String(v);
-  return `n${items.length}_${items.slice(0, 3).map((i) => i.lineItemCode).join('-')}`;
+  const base = v ? String(v) : `n${items.length}_${items.slice(0, 3).map((i) => i.lineItemCode).join('-')}`;
+  // Prefix the embed-schema version so changing what we embed re-embeds.
+  return `${EMBED_SCHEMA}_${base}`;
 }
 
 // Get (or build) the catalog embeddings for the given items. Layered cache:
