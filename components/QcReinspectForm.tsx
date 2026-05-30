@@ -24,7 +24,6 @@ import { vendorPillStyle } from '@/lib/vendors';
 import { PhotoStrip } from '@/components/PhotoStrip';
 import { useAppDialog } from '@/components/AppDialog';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
-import { stampEntryWithLabel } from '@/lib/photoStamp';
 
 interface QcLine {
   recordId: string;
@@ -241,37 +240,35 @@ export function QcReinspectForm(props: Props) {
     catch (e: any) { void dialog.alert(`Could not update photos: ${e?.message || e}`); }
   }
 
-  // Tag a freshly-captured photo to a QC line FROM INSIDE THE CAMERA (mirrors
-  // Scope). Stamps the label, attaches to the line record, returns the stamped
-  // URL so the camera carries it into the After strip on close.
+  // Persist a QC line's photo_urls to its answer record (shared by tag/untag).
+  async function saveLinePhotos(lineRecordId: string, urls: string[]) {
+    setLines((cur) => cur.map((l) => (l.recordId === lineRecordId ? { ...l, photoUrls: urls } : l)));
+    try {
+      markSaving();
+      const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          upserts: [{
+            recordId: lineRecordId,
+            answerProps: { photo_urls: joinPhotoUrls(urls), photo_count: urls.length },
+            questionHubspotRecordId: null,
+          }],
+        }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      markSaved();
+    } catch (e: any) { markSaveError(); void dialog.alert(`Could not update line tag: ${e?.message || e}`); }
+  }
+
+  // Tag a freshly-captured photo to a QC line FROM INSIDE THE CAMERA
+  // (non-destructive — attaches the photo to the line record, returns url as-is).
   async function tagCameraPhotoToLineQc(url: string, lineRecordId: string): Promise<string> {
     const line = lines.find((l) => l.recordId === lineRecordId);
     if (!line) return url;
-    let tagged = url;
-    try { tagged = await stampEntryWithLabel(url, line.description || line.lineItemCode); }
-    catch (e) { console.warn('[QC] camera tag stamp failed:', e); }
     const linePhotos = line.photoUrls || [];
-    if (!linePhotos.includes(tagged)) {
-      const next = [...linePhotos, tagged];
-      setLines((cur) => cur.map((l) => (l.recordId === lineRecordId ? { ...l, photoUrls: next } : l)));
-      try {
-        markSaving();
-        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            upserts: [{
-              recordId: lineRecordId,
-              answerProps: { photo_urls: joinPhotoUrls(next), photo_count: next.length },
-              questionHubspotRecordId: null,
-            }],
-          }),
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        markSaved();
-      } catch (e: any) { markSaveError(); }
-    }
-    return tagged;
+    if (!linePhotos.includes(url)) await saveLinePhotos(lineRecordId, [...linePhotos, url]);
+    return url;
   }
 
   // Swap an After photo for its marked-up version (re-upload + replace, persist).
@@ -286,47 +283,29 @@ export function QcReinspectForm(props: Props) {
     } catch (e: any) { void dialog.alert(`Could not update photo: ${e?.message || e}`); }
   }
 
-  // Tag an After photo to one of the section's QC lines: stamp the line label
-  // onto the photo, attach it to that line's record (so it shows under the line
-  // in the scope/PDF), and keep it in the After strip — mirroring Scope.
-  async function tagAfterPhotoToLine(key: string, section: string, location: string, index: number, lineRecordId: string) {
+  // Tag/untag an After photo to/from a QC line (non-destructive). The photo
+  // stays in the After strip; only the line's photo_urls change.
+  async function tagAfterPhotoToLine(key: string, index: number, lineRecordId: string) {
     const url = (afterPhotos[key] || [])[index];
     const line = lines.find((l) => l.recordId === lineRecordId);
     if (!url || !line) return;
-    let tagged = url;
-    try { tagged = await stampEntryWithLabel(url, line.description || line.lineItemCode); }
-    catch (e) { console.warn('[QC] tag stamp failed:', e); }
-
-    // Attach to the line record (append to its photo_urls).
     const linePhotos = line.photoUrls || [];
-    if (!linePhotos.includes(tagged)) {
-      const nextLinePhotos = [...linePhotos, tagged];
-      setLines((cur) => cur.map((l) => (l.recordId === lineRecordId ? { ...l, photoUrls: nextLinePhotos } : l)));
-      try {
-        markSaving();
-        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            upserts: [{
-              recordId: lineRecordId,
-              answerProps: { photo_urls: joinPhotoUrls(nextLinePhotos), photo_count: nextLinePhotos.length },
-              questionHubspotRecordId: null,
-            }],
-          }),
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        markSaved();
-      } catch (e: any) { markSaveError(); void dialog.alert(`Could not tag photo to line: ${e?.message || e}`); }
-    }
-
-    // Swap the stamped version into the After strip so the label shows there too.
-    if (tagged !== url) {
-      const arr = [...(afterPhotos[key] || [])];
-      arr[index] = tagged;
-      setAfterPhotos((cur) => ({ ...cur, [key]: arr }));
-      try { await persistAfterPhotos(key, section, location, arr); } catch { /* best-effort */ }
-    }
+    if (!linePhotos.includes(url)) await saveLinePhotos(lineRecordId, [...linePhotos, url]);
+  }
+  async function untagAfterPhotoFromLine(key: string, index: number, lineRecordId: string) {
+    const url = (afterPhotos[key] || [])[index];
+    const line = lines.find((l) => l.recordId === lineRecordId);
+    if (!url || !line) return;
+    await saveLinePhotos(lineRecordId, (line.photoUrls || []).filter((u) => u !== url));
+  }
+  // Which of a section's lines the After photo at `index` is tagged to.
+  function currentTagsForAfter(key: string, index: number): { externalId: string; label: string }[] {
+    const url = (afterPhotos[key] || [])[index];
+    if (!url) return [];
+    const sec = sections.find((s) => s.key === key);
+    return (sec?.lines || [])
+      .filter((l) => (l.photoUrls || []).includes(url))
+      .map((l) => ({ externalId: l.recordId, label: l.description || l.lineItemCode }));
   }
 
   async function setLinePassFail(line: QcLine, pf: 'pass' | 'fail') {
@@ -812,11 +791,12 @@ export function QcReinspectForm(props: Props) {
                 ]))
               : undefined}
             onTagToLine={isAfter && !props.readOnly
-              ? (gid, i, lineRecordId) => {
-                  const sec = secOf(gid); if (!sec) return;
-                  tagAfterPhotoToLine(sec.key, sec.section, sec.location, i, lineRecordId);
-                }
+              ? (gid, i, lineRecordId) => { if (secOf(gid)) tagAfterPhotoToLine(gid, i, lineRecordId); }
               : undefined}
+            onUntagFromLine={isAfter && !props.readOnly
+              ? (gid, i, lineRecordId) => { if (secOf(gid)) untagAfterPhotoFromLine(gid, i, lineRecordId); }
+              : undefined}
+            currentTagsFor={isAfter ? (gid, i) => currentTagsForAfter(gid, i) : undefined}
           />
         );
       })()}

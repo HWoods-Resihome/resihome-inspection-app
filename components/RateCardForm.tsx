@@ -27,7 +27,6 @@ import { SectionsManager } from '@/components/SectionsManager';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
-import { stampEntryWithLabel } from '@/lib/photoStamp';
 
 interface RateCardFormProps {
   templateType: TemplateType;
@@ -994,59 +993,50 @@ export function RateCardForm(props: RateCardFormProps) {
     return item?.laborShortDescription || line.lineItemCode;
   }
 
-  // Tag a section photo to a line item (LINK: the photo STAYS in the room's
-  // section photos — so the inspector keeps seeing every photo, tagged or not —
-  // and is also attached to the line). The line's short description is burned
-  // onto the image (bottom-right, by the timestamp) so a vendor reading the PDF
-  // section-photo grid can tell which line each photo belongs to.
-  async function tagPhotoToLine(sectionId: string, index: number, externalId: string) {
+  // Tag a section photo to a line item — NON-DESTRUCTIVE: the photo stays in the
+  // room's section strip unchanged AND is attached to the line. Reversible via
+  // untagPhotoFromLine (no burned-in label to undo).
+  function tagPhotoToLine(sectionId: string, index: number, externalId: string) {
     if (props.readOnly) return;
-    const sectionPhotos = photosBySection[sectionId] || [];
-    const entry = sectionPhotos[index];
-    if (!entry) return;
+    const url = (photosBySection[sectionId] || [])[index];
+    if (!url) return;
     const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
     if (!line) return;
-    const label = lineLabel(line);
-
-    // Burn the short-description stamp (best-effort; tag still works if it fails).
-    let tagged = entry;
-    try {
-      tagged = await stampEntryWithLabel(entry, label);
-    } catch (e) {
-      console.warn('[RateCardForm] photo stamp failed; tagging without stamp:', e);
-    }
-
-    // Swap the stamped image into the section strip in place (photo stays put).
-    if (tagged !== entry) {
-      const nextSection = sectionPhotos.map((u, i) => (i === index ? tagged : u));
-      setPhotosBySection((prev) => ({ ...prev, [sectionId]: nextSection }));
-      savePhotosForSection(sectionId, nextSection);
-    }
-
-    // Link to the line (skip if it's somehow already there).
-    if (!(line.photoUrls || []).includes(tagged)) {
-      handleSaveLineForSection(sectionId, { ...line, photoUrls: [...(line.photoUrls || []), tagged] });
+    if (!(line.photoUrls || []).includes(url)) {
+      handleSaveLineForSection(sectionId, { ...line, photoUrls: [...(line.photoUrls || []), url] });
     }
   }
 
-  // Tag a freshly-captured photo to a line FROM INSIDE THE CAMERA. The photo
-  // isn't in the section strip yet (it joins on camera close), so this only
-  // stamps + links it to the line of the camera's active room and returns the
-  // new (stamped) URL — the camera updates its item so the stamped version is
-  // the one that lands in the room too.
+  // Remove a section photo's tag from a line — the photo stays in the room.
+  function untagPhotoFromLine(sectionId: string, index: number, externalId: string) {
+    if (props.readOnly) return;
+    const url = (photosBySection[sectionId] || [])[index];
+    if (!url) return;
+    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
+    if (!line) return;
+    handleSaveLineForSection(sectionId, { ...line, photoUrls: (line.photoUrls || []).filter((u) => u !== url) });
+  }
+
+  // Which lines a given section photo is currently tagged to (for the dropdown).
+  function currentTagsForSection(sectionId: string, index: number): { externalId: string; label: string }[] {
+    const url = (photosBySection[sectionId] || [])[index];
+    if (!url) return [];
+    return (linesBySection[sectionId] || [])
+      .filter((l) => (l.photoUrls || []).includes(url))
+      .map((l) => ({ externalId: l.externalId, label: lineLabel(l) }));
+  }
+
+  // Tag a freshly-captured photo to a line FROM INSIDE THE CAMERA (non-destructive).
   async function tagCameraPhotoToLine(url: string, lineExternalId: string): Promise<string> {
     if (props.readOnly) return url;
     const sectionId = cameraSectionId;
     if (!sectionId) return url;
     const line = (linesBySection[sectionId] || []).find((l) => l.externalId === lineExternalId);
     if (!line) return url;
-    let tagged = url;
-    try { tagged = await stampEntryWithLabel(url, lineLabel(line)); }
-    catch (e) { console.warn('[RateCardForm] camera tag stamp failed:', e); }
-    if (!(line.photoUrls || []).includes(tagged)) {
-      handleSaveLineForSection(sectionId, { ...line, photoUrls: [...(line.photoUrls || []), tagged] });
+    if (!(line.photoUrls || []).includes(url)) {
+      handleSaveLineForSection(sectionId, { ...line, photoUrls: [...(line.photoUrls || []), url] });
     }
-    return tagged;
+    return url;
   }
 
   // Untag / delete a photo from a line item.
@@ -1842,6 +1832,8 @@ export function RateCardForm(props: RateCardFormProps) {
             sections.map((s) => [s.id, (linesBySection[s.id] || []).map((l) => ({ externalId: l.externalId, label: lineLabel(l) }))])
           )}
           onTagToLine={(sectionId, index, externalId) => tagPhotoToLine(sectionId, index, externalId)}
+          onUntagFromLine={(sectionId, index, externalId) => untagPhotoFromLine(sectionId, index, externalId)}
+          currentTagsFor={(sectionId, index) => currentTagsForSection(sectionId, index)}
         />
       )}
       {lightbox && lightbox.kind === 'line' && (() => {

@@ -121,7 +121,20 @@ export async function uploadVideo(file: File): Promise<string> {
   const ext = /webm/i.test(contentType) ? 'webm' : /quicktime|mov/i.test(contentType) ? 'mov' : 'mp4';
   const filename = `clip_${Date.now()}.${ext}`;
 
-  // 1) Direct-to-Blob (preferred).
+  // DEFAULT: HubSpot Files (base64 → /api/upload) for clips that fit under
+  // Vercel's ~4.5MB request-body limit (~3MB of raw video). Keeps videos
+  // alongside the photos in HubSpot.
+  if (file.size <= 3 * 1024 * 1024) {
+    try {
+      return await uploadVideoBase64(file, filename, contentType);
+    } catch (e) {
+      console.warn('[uploadVideo] HubSpot path failed, trying Blob:', e);
+      // fall through to Blob as a last resort
+    }
+  }
+
+  // FALLBACK: larger clips stream straight to Vercel Blob (bypasses the body
+  // limit). Requires a Blob store linked to the project.
   try {
     const { upload } = await import('@vercel/blob/client');
     const blob = await upload(filename, file, {
@@ -132,12 +145,8 @@ export async function uploadVideo(file: File): Promise<string> {
     if (blob?.url) return blob.url;
     throw new Error('Blob upload returned no url');
   } catch (e: any) {
-    // 2) Fallback for short clips when Blob isn't configured.
-    if (file.size <= 3 * 1024 * 1024) {
-      return uploadVideoBase64(file, filename, contentType);
-    }
     throw new Error(
-      `Couldn’t upload this clip. For clips longer than ~10s, enable Vercel Blob storage on the project. (${e?.message || e})`
+      `Couldn’t upload this clip. Longer clips need Vercel Blob storage enabled on the project. (${e?.message || e})`
     );
   }
 }

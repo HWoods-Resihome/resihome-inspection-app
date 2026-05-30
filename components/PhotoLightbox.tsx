@@ -28,16 +28,19 @@ interface Props {
   // Optional tag-to-line (only meaningful for room/section groups).
   tagLinesByGroup?: Record<string, { externalId: string; label: string }[]>;
   onTagToLine?: (groupId: string, index: number, lineExternalId: string) => void;
+  // Remove a photo's tag from a line (back to room level only).
+  onUntagFromLine?: (groupId: string, index: number, lineExternalId: string) => void;
+  // Lines the CURRENT photo is already tagged to (for the toggle dropdown).
+  currentTagsFor?: (groupId: string, index: number) => { externalId: string; label: string }[];
 }
 
 export function PhotoLightbox({
   groups, photosByGroup, initialGroupId, initialIndex, readOnly,
-  onClose, onDelete, onReplace, tagLinesByGroup, onTagToLine,
+  onClose, onDelete, onReplace, tagLinesByGroup, onTagToLine, onUntagFromLine, currentTagsFor,
 }: Props) {
   const [groupId, setGroupId] = useState(initialGroupId);
   const [index, setIndex] = useState(initialIndex);
   const [annotating, setAnnotating] = useState(false);
-  const [tagged, setTagged] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -69,7 +72,6 @@ export function PhotoLightbox({
     if (index > photos.length - 1) setIndex(photos.length - 1);
   }, [photos.length, index, onClose]);
 
-  useEffect(() => { setTagged(null); }, [groupId, index]);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
   const prev = () => setIndex((i) => (i > 0 ? i - 1 : i));
@@ -210,28 +212,36 @@ export function PhotoLightbox({
           </>
         )}
 
-        {/* Tag to line (rooms only) — fills the middle */}
-        {!readOnly && onTagToLine && tagLines.length > 0 ? (
-          <select
-            value=""
-            onChange={(e) => {
-              const id = e.target.value;
-              if (!id) return;
-              onTagToLine(groupId, index, id);
-              const lbl = tagLines.find((l) => l.externalId === id)?.label || 'line';
-              setTagged(lbl);
-              showToast(`Tagged to ${lbl}`);
-              e.currentTarget.value = '';
-            }}
-            className="flex-1 min-w-0 h-11 bg-white/10 text-white text-sm font-heading rounded-lg px-3"
-            aria-label="Tag this photo to a line item"
-          >
-            <option value="" className="text-black">{tagged ? `Tagged → ${tagged}` : 'Tag to a line item…'}</option>
-            {tagLines.map((l) => (
-              <option key={l.externalId} value={l.externalId} className="text-black">{l.label}</option>
-            ))}
-          </select>
-        ) : (
+        {/* Tag / untag to line (rooms only) — fills the middle. Always shown when
+            the room has line items; the dropdown both adds and removes tags. */}
+        {!readOnly && (onTagToLine || onUntagFromLine) && tagLines.length > 0 ? (() => {
+          const cur = currentTagsFor ? currentTagsFor(groupId, index) : [];
+          const curIds = new Set(cur.map((t) => t.externalId));
+          return (
+            <select
+              value=""
+              onChange={(e) => {
+                const id = e.target.value;
+                if (!id) return;
+                const lbl = tagLines.find((l) => l.externalId === id)?.label || 'line';
+                if (curIds.has(id)) { onUntagFromLine?.(groupId, index, id); showToast(`Removed from ${lbl}`); }
+                else { onTagToLine?.(groupId, index, id); showToast(`Tagged to ${lbl}`); }
+                e.currentTarget.value = '';
+              }}
+              className="flex-1 min-w-0 h-11 bg-white/10 text-white text-sm font-heading rounded-lg px-3"
+              aria-label="Tag or untag this photo"
+            >
+              <option value="" className="text-black">
+                {cur.length ? `Tagged: ${cur.map((t) => t.label).join(', ')}` : 'Tag to a line item…'}
+              </option>
+              {tagLines.map((l) => (
+                <option key={l.externalId} value={l.externalId} className="text-black">
+                  {curIds.has(l.externalId) ? `✓ ${l.label} — remove` : l.label}
+                </option>
+              ))}
+            </select>
+          );
+        })() : (
           <div className="flex-1" />
         )}
 
