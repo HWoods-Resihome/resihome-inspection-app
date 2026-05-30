@@ -516,37 +516,39 @@ export function CameraCapture({
                           className="flex-1 min-w-0 bg-white/10 border border-white/30 rounded px-2 py-1 text-sm text-white"
                         />
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => switchToRoom(r.id)}
-                          className="flex-1 min-w-0 flex items-center justify-between gap-2 text-left"
-                        >
-                          <span className="flex items-center gap-2 min-w-0">
-                            {isCurrent && <span className="text-brand text-xs">●</span>}
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => switchToRoom(r.id)}
+                            className="min-w-0 flex items-center gap-2 text-left"
+                          >
+                            {isCurrent && <span className="text-brand text-xs shrink-0">●</span>}
                             <span className="truncate font-heading">{r.name}</span>
-                          </span>
-                          <span className="shrink-0 text-xs">
+                          </button>
+                          {/* Pencil sits right next to the room name. */}
+                          {onRenameRoom && (
+                            <button
+                              type="button"
+                              onClick={() => { setRenamingRoomId(r.id); setRenameDraft(r.name); }}
+                              aria-label={`Rename ${r.name}`}
+                              className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/15 text-white/70"
+                            >
+                              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M11 1.5l3.5 3.5L5 14.5H1.5V11L11 1.5z" />
+                              </svg>
+                            </button>
+                          )}
+                          {/* Count pushed to the right. */}
+                          <span className="shrink-0 text-xs ml-auto">
                             {liveCount > 0
                               ? <span className="text-emerald-400 font-semibold">{liveCount} photo{liveCount === 1 ? '' : 's'}</span>
                               : r.needsPhotos
                                 ? <span className="text-amber-400 font-semibold">needs photos</span>
                                 : <span className="text-white/40">none</span>}
                           </span>
-                        </button>
+                        </>
                       )}
-                      {/* Rename / delete controls */}
-                      {!isRenaming && onRenameRoom && (
-                        <button
-                          type="button"
-                          onClick={() => { setRenamingRoomId(r.id); setRenameDraft(r.name); }}
-                          aria-label={`Rename ${r.name}`}
-                          className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/15 text-white/70"
-                        >
-                          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M11 1.5l3.5 3.5L5 14.5H1.5V11L11 1.5z" />
-                          </svg>
-                        </button>
-                      )}
+                      {/* Delete control */}
                       {!isRenaming && onDeleteRoom && rooms!.length > 1 && (
                         <button
                           type="button"
@@ -564,27 +566,40 @@ export function CameraCapture({
                 {onAddRoom && (
                   <div className="px-3 py-2.5 border-t border-white/15">
                     {addingRoom ? (
-                      <input
-                        autoFocus
-                        value={addDraft}
-                        onChange={(e) => setAddDraft(e.target.value)}
-                        placeholder="New room name…"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
+                      <div className="flex items-center gap-2">
+                        <input
+                          autoFocus
+                          value={addDraft}
+                          onChange={(e) => setAddDraft(e.target.value)}
+                          placeholder="New room name…"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const v = addDraft.trim();
+                              if (v) onAddRoom!(v);
+                              setAddDraft(''); setAddingRoom(false);
+                            } else if (e.key === 'Escape') {
+                              setAddDraft(''); setAddingRoom(false);
+                            }
+                          }}
+                          className="flex-1 min-w-0 bg-white/10 border border-white/30 rounded px-2 py-1.5 text-sm text-white"
+                        />
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
                             const v = addDraft.trim();
-                            if (v) onAddRoom(v);
+                            if (v) onAddRoom!(v);
                             setAddDraft(''); setAddingRoom(false);
-                          } else if (e.key === 'Escape') {
-                            setAddDraft(''); setAddingRoom(false);
-                          }
-                        }}
-                        onBlur={() => {
-                          const v = addDraft.trim();
-                          if (v) onAddRoom(v);
-                          setAddDraft(''); setAddingRoom(false);
-                        }}
-                        className="w-full bg-white/10 border border-white/30 rounded px-2 py-1.5 text-sm text-white"
-                      />
+                          }}
+                          aria-label="Add room"
+                          disabled={!addDraft.trim()}
+                          className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full bg-emerald-600 text-white disabled:opacity-40 hover:bg-emerald-500"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        </button>
+                      </div>
                     ) : (
                       <button
                         type="button"
@@ -765,7 +780,7 @@ export function CameraCapture({
               <circle cx="12" cy="13" r="4" />
             </svg>
           </span>
-          <span className="text-[10px] font-heading">Phone cam</span>
+          <span className="text-[10px] font-heading">Phone Cam</span>
         </button>
 
         <button

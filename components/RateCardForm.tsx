@@ -1077,6 +1077,16 @@ export function RateCardForm(props: RateCardFormProps) {
   // Human-friendly status label shown in the header. We map the HubSpot
   // internal value (snake_case) to title case + apply a color pill.
   const statusLabel = (() => {
+    // While the catalog/answers are still loading on first open, show a
+    // transient "Loading…" pill in place of the status — once everything is
+    // ready it flips to the real inspection status. This covers BOTH the
+    // catalog/region fetch (dataLoading) AND the saved-answers hydration
+    // (linesHydrated), since the answers load is usually the slower one the
+    // inspector feels. Avoids adding a separate spinner or button.
+    const stillLoading = (!props.readOnly && !linesHydrated) || (dataLoading && !dataLoaded);
+    if (stillLoading) {
+      return { label: 'Loading…', color: 'bg-gray-100 text-gray-500 border-gray-200 animate-pulse' };
+    }
     switch (props.inspectionStatus) {
       case 'scheduled': return { label: 'Scheduled', color: 'bg-blue-100 text-blue-800 border-blue-200' };
       case 'in_progress': return { label: 'In Progress', color: 'bg-amber-100 text-amber-800 border-amber-200' };

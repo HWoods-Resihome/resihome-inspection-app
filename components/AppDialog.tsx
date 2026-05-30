@@ -75,7 +75,7 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
           >
             <div className="px-5 pt-4 pb-2 border-b border-gray-100">
               <div className="font-heading font-bold text-ink text-base">
-                RESI<span className="text-brand">HOME</span> Inspections
+                ResiHome Inspection
               </div>
             </div>
             <div className="px-5 py-4 text-sm text-gray-800 whitespace-pre-line leading-relaxed">
