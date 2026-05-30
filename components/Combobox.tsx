@@ -19,6 +19,10 @@ interface Props {
   // Compact variant: tighter padding, smaller font, ~36px height to match the
   // inline edit row's other inputs. Defaults to false (original modal sizing).
   compact?: boolean;
+  // When true, on focus the input scrolls to the top of its scrollable modal so
+  // the dropdown is visible above the on-screen keyboard; on blur it scrolls the
+  // modal back to the top. Only meaningful inside a `[data-modal-scroll]` sheet.
+  scrollIntoViewOnFocus?: boolean;
 }
 
 /**
@@ -41,6 +45,7 @@ export function Combobox({
   emptyLabel = 'No matches found',
   id,
   compact = false,
+  scrollIntoViewOnFocus = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -174,13 +179,42 @@ export function Combobox({
           ref={inputRef}
           id={id}
           type="text"
+          // Mark as a custom combobox + opt out of every autofill/keyboard
+          // helper, so Android Chrome stops showing its password/card/address
+          // autofill bar over this search field.
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={open}
+          name="catalog-search"
           autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          inputMode="search"
+          enterKeyHint="search"
+          data-1p-ignore="true"
+          data-lpignore="true"
           value={open ? query : selectedLabel}
           onChange={(e) => {
             setQuery(e.target.value);
             setOpen(true);
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            setOpen(true);
+            if (scrollIntoViewOnFocus) {
+              // Wait for the keyboard to push up, then bring the field to the top
+              // of the sheet so the dropdown shows above it.
+              setTimeout(() => inputRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 250);
+            }
+          }}
+          onBlur={() => {
+            if (scrollIntoViewOnFocus) {
+              setTimeout(() => {
+                const scroller = containerRef.current?.closest('[data-modal-scroll]') as HTMLElement | null;
+                scroller?.scrollTo({ top: 0, behavior: 'smooth' });
+              }, 180);
+            }
+          }}
           onKeyDown={handleKeyDown}
           placeholder={loading ? 'Loading...' : placeholder}
           disabled={disabled || loading}

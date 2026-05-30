@@ -402,7 +402,7 @@ export function EditableLineRow(props: Props) {
       <tr>
         <td colSpan={12} className="p-0">
           <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center sm:justify-center">
-            <div className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl max-h-[92vh] overflow-y-auto shadow-xl">
+            <div data-modal-scroll className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl max-h-[92vh] overflow-y-auto shadow-xl">
               {/* Sticky header with title + close */}
               <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between z-10">
                 <span className="font-heading font-bold text-base text-ink">
@@ -449,6 +449,7 @@ export function EditableLineRow(props: Props) {
                     onChange={handleLineItemChange}
                     placeholder="Type to search items…"
                     emptyLabel={category ? 'No items in this category' : 'No matching items'}
+                    scrollIntoViewOnFocus
                   />
                   {selectedItem && (
                     <textarea
