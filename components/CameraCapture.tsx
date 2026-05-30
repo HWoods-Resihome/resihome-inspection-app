@@ -824,7 +824,7 @@ export function CameraCapture({
   }[locHud.tone];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col select-none">
+    <div className="fixed inset-0 z-50 bg-black flex flex-col select-none animate-fadeIn">
       {/* Top bar */}
       <div className="flex items-center justify-between px-4 py-3 bg-black/60 text-white">
         <button
@@ -1206,9 +1206,11 @@ export function CameraCapture({
         </div>
       )}
 
-      {/* Voice line-item dictation (optional; hidden where speech isn't supported) */}
+      {/* Voice line-item dictation. `relative` so the assistant's pop-up panel
+          (positioned bottom-full) anchors to THIS bar and stays on-screen,
+          rather than to the full-screen camera root (which pushed it off-screen). */}
       {voiceSlot && (
-        <div className="bg-black px-4 pb-1 flex justify-center">{voiceSlot}</div>
+        <div className="relative bg-black px-4 pb-1 flex justify-center">{voiceSlot}</div>
       )}
 
       {/* Shutter row */}

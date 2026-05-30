@@ -1447,7 +1447,7 @@ export function RateCardForm(props: RateCardFormProps) {
             <section
               key={s.id}
               ref={(el) => { sectionRefs.current[s.id] = el; }}
-              className={`bg-white rounded-lg shadow-md border overflow-hidden ${currentSectionId === s.id ? 'border-brand ring-1 ring-brand/30' : 'border-gray-200'}`}
+              className={`bg-white rounded-xl border overflow-hidden transition-shadow duration-200 ${currentSectionId === s.id ? 'border-brand ring-1 ring-brand/30 shadow-md' : 'border-gray-200 shadow-sm hover:shadow-md'}`}
             >
               <SectionHeader
                 section={s}

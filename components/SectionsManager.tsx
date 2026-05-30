@@ -146,9 +146,9 @@ export function SectionsManager(props: Props) {
   );
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={props.onClose}>
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center z-50 p-4 animate-fadeIn" onClick={props.onClose}>
       <div
-        className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+        className="bg-white rounded-2xl shadow-2xl ring-1 ring-black/5 w-full max-w-2xl max-h-[85vh] flex flex-col animate-popIn"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">

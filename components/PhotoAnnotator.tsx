@@ -241,7 +241,7 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
   );
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black flex flex-col">
+    <div className="fixed inset-0 z-[60] bg-black flex flex-col animate-fadeIn">
       {/* Top bar */}
       <div className="flex items-center justify-between px-4 py-3 bg-black">
         <button type="button" onClick={onCancel} className="text-white/90 font-heading text-sm px-3 py-1.5 rounded hover:bg-white/10">

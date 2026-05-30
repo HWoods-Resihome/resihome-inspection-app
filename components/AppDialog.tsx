@@ -64,11 +64,11 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
       {children}
       {dialog && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-[2px] p-4 animate-fadeIn"
           onClick={() => close(false)}
         >
           <div
-            className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden"
+            className="bg-white rounded-2xl shadow-2xl ring-1 ring-black/5 w-full max-w-sm overflow-hidden animate-popIn"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"

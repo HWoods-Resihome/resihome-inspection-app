@@ -9,10 +9,55 @@ html, body, #__next {
   height: 100%;
 }
 
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
 body {
   background-color: #ffffff;
   color: #1a1a1a;
   font-family: Arial, system-ui, sans-serif;
+}
+
+/* Kill the grey mobile tap flash — we provide our own active states. */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Consistent, subtle motion on interactive elements app-wide. Keeps the UI
+   feeling responsive and "finished" without per-component wiring. */
+button, a, [role="button"], summary, input, select, textarea {
+  transition: background-color 150ms ease, border-color 150ms ease,
+    color 150ms ease, box-shadow 150ms ease, transform 150ms ease, opacity 150ms ease;
+}
+
+/* Keyboard-only focus ring in brand pink (mouse clicks are unaffected). The
+   ring follows each element's own border-radius automatically. */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 0, 96, 0.28);
+}
+
+/* Refined, unobtrusive scrollbars on pointer devices. */
+@media (pointer: fine) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(17, 24, 39, 0.18) transparent;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(17, 24, 39, 0.16);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(17, 24, 39, 0.30);
+    background-clip: content-box;
+  }
 }
 
 h1, h2, h3, h4, h5, h6 {

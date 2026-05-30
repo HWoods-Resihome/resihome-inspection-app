@@ -111,7 +111,7 @@ export function PhotoLightbox({
   const url = photos[index];
 
   return (
-    <div className="fixed inset-0 z-[55] bg-black flex flex-col">
+    <div className="fixed inset-0 z-[55] bg-black flex flex-col animate-fadeIn">
       {/* Header: group dropdown + position + close */}
       <div className="flex items-center justify-between gap-2 px-3 py-3 bg-black">
         <select
