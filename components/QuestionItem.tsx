@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Question, AnswerInput } from '@/lib/types';
 import { CameraCapture } from './CameraCapture';
 import { useAppDialog } from '@/components/AppDialog';
+import { displayImageSrc } from '@/lib/photoDisplay';
 
 // Check once whether the browser supports the camera API. Hidden behind a
 // constant so the "Take Photos" button can be disabled on unsupported browsers
@@ -288,7 +289,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                 {answer.photoUrls.map((url, idx) => (
                   <div key={idx} className="relative">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt="" className="w-full h-16 object-cover rounded" />
+                    <img src={displayImageSrc(url)} alt="" className="w-full h-16 object-cover rounded" />
                     <button
                       type="button"
                       onClick={() => removePhoto(idx)}

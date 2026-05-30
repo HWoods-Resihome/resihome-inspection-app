@@ -25,6 +25,7 @@ import {
 } from '@/lib/sections';
 import { SectionsManager } from '@/components/SectionsManager';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
+import { displayImageSrc } from '@/lib/photoDisplay';
 
 interface RateCardFormProps {
   templateType: TemplateType;
@@ -1457,7 +1458,7 @@ export function RateCardForm(props: RateCardFormProps) {
                           <div key={idx} className="relative shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
-                              src={url}
+                              src={displayImageSrc(url)}
                               alt=""
                               onClick={() => setLightbox({ sectionId: s.id, index: idx })}
                               className="w-16 h-16 object-cover rounded border border-gray-200 cursor-pointer"

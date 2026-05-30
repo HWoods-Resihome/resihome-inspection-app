@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { displayImageSrc } from '@/lib/photoDisplay';
 
 interface PhotoStripProps {
   /** Section/group title shown on the collapsible header (e.g. "Before"). */
@@ -70,7 +71,7 @@ export function PhotoStrip({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <a href={u} target="_blank" rel="noopener noreferrer">
                     <img
-                      src={u}
+                      src={displayImageSrc(u)}
                       alt={label}
                       style={{ width: size, height: size }}
                       className={`object-cover rounded border ${a.thumb}`}

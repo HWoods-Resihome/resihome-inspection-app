@@ -9,6 +9,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { PhotoAnnotator } from '@/components/PhotoAnnotator';
+import { displayImageSrc } from '@/lib/photoDisplay';
 
 interface Props {
   rooms: { id: string; name: string }[];
@@ -81,7 +82,7 @@ export function PhotoLightbox({
       >
         {url && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={url} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
+          <img src={displayImageSrc(url)} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
         )}
         {index > 0 && (
           <button type="button" onClick={prev} aria-label="Previous"

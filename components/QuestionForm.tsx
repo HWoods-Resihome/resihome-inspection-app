@@ -4,6 +4,7 @@ import type { SavedAnswer } from '@/lib/hubspot';
 import { QuestionItem } from './QuestionItem';
 import { CameraCapture } from './CameraCapture';
 import { uploadPhoto, uploadFilesBatch } from '@/lib/photoUpload';
+import { displayImageSrc } from '@/lib/photoDisplay';
 import { useAppDialog } from '@/components/AppDialog';
 
 // Whether this browser supports the camera API. SSR-safe.
@@ -1024,7 +1025,7 @@ export function QuestionForm({
                           <div key={idx} className="relative shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <a href={url} target="_blank" rel="noopener noreferrer">
-                              <img src={url} alt="" className="w-16 h-16 object-cover rounded border border-gray-200" />
+                              <img src={displayImageSrc(url)} alt="" className="w-16 h-16 object-cover rounded border border-gray-200" />
                             </a>
                             {!readOnly && (
                               <button
