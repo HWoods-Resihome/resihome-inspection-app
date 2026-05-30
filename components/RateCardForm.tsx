@@ -27,6 +27,7 @@ import { SectionsManager } from '@/components/SectionsManager';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
+import { stampEntryWithLabel } from '@/lib/photoStamp';
 
 interface RateCardFormProps {
   templateType: TemplateType;
@@ -993,23 +994,39 @@ export function RateCardForm(props: RateCardFormProps) {
     return item?.laborShortDescription || line.lineItemCode;
   }
 
-  // Tag a section photo to a line item (MOVE: attach to the line, then remove it
-  // from the room's section photos so it lives only under the line item).
-  function tagPhotoToLine(sectionId: string, index: number, externalId: string) {
+  // Tag a section photo to a line item (LINK: the photo STAYS in the room's
+  // section photos — so the inspector keeps seeing every photo, tagged or not —
+  // and is also attached to the line). The line's short description is burned
+  // onto the image (bottom-right, by the timestamp) so a vendor reading the PDF
+  // section-photo grid can tell which line each photo belongs to.
+  async function tagPhotoToLine(sectionId: string, index: number, externalId: string) {
     if (props.readOnly) return;
     const sectionPhotos = photosBySection[sectionId] || [];
-    const url = sectionPhotos[index];
-    if (!url) return;
+    const entry = sectionPhotos[index];
+    if (!entry) return;
     const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
     if (!line) return;
-    // Attach to the line (skip if it's somehow already there).
-    if (!(line.photoUrls || []).includes(url)) {
-      handleSaveLineForSection(sectionId, { ...line, photoUrls: [...(line.photoUrls || []), url] });
+    const label = lineLabel(line);
+
+    // Burn the short-description stamp (best-effort; tag still works if it fails).
+    let tagged = entry;
+    try {
+      tagged = await stampEntryWithLabel(entry, label);
+    } catch (e) {
+      console.warn('[RateCardForm] photo stamp failed; tagging without stamp:', e);
     }
-    // Drop it from the section strip.
-    const nextSection = sectionPhotos.filter((_, i) => i !== index);
-    setPhotosBySection((prev) => ({ ...prev, [sectionId]: nextSection }));
-    savePhotosForSection(sectionId, nextSection);
+
+    // Swap the stamped image into the section strip in place (photo stays put).
+    if (tagged !== entry) {
+      const nextSection = sectionPhotos.map((u, i) => (i === index ? tagged : u));
+      setPhotosBySection((prev) => ({ ...prev, [sectionId]: nextSection }));
+      savePhotosForSection(sectionId, nextSection);
+    }
+
+    // Link to the line (skip if it's somehow already there).
+    if (!(line.photoUrls || []).includes(tagged)) {
+      handleSaveLineForSection(sectionId, { ...line, photoUrls: [...(line.photoUrls || []), tagged] });
+    }
   }
 
   // Untag / delete a photo from a line item.

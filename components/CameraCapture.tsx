@@ -155,6 +155,11 @@ const JPEG_QUALITY = 0.88;
 const HOLD_MS = 260;
 const MAX_CLIP_MS = 10000;
 const CLIP_BITRATE = 2_500_000;
+// Digital zoom while recording: drag the thumb up to zoom in, down to zoom out.
+// (Done in-canvas so it works on iOS Safari, which doesn't support the hardware
+// `zoom` track constraint.)
+const MAX_ZOOM = 4;
+const ZOOM_DRAG_PX = 200; // thumb travel (px) for the full 1x→MAX_ZOOM range
 
 // Pick the best MediaRecorder mime type this browser supports (Safari → mp4,
 // Chrome/Android → webm). Returns '' if recording is unsupported entirely.
@@ -204,6 +209,13 @@ export function CameraCapture({
   const clipSupported = useRef<boolean>(false);
   const [recording, setRecording] = useState(false);
   const [recordSecs, setRecordSecs] = useState(0);
+  // Digital-zoom-while-recording state.
+  const zoomRef = useRef(1);
+  const recordCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const recordRafRef = useRef<number | null>(null);
+  const canvasStreamRef = useRef<MediaStream | null>(null);
+  const shutterStartYRef = useRef<number | null>(null);
+  const [zoom, setZoom] = useState(1);
 
   const [items, setItems] = useState<CaptureItem[]>([]);
   // Mirror items in a ref so async code (handleDone polling) can read the
@@ -462,6 +474,12 @@ export function CameraCapture({
       });
   }, [uploadPhoto]);
 
+  function teardownCanvasPipeline() {
+    if (recordRafRef.current != null) { cancelAnimationFrame(recordRafRef.current); recordRafRef.current = null; }
+    if (canvasStreamRef.current) { canvasStreamRef.current.getTracks().forEach((t) => t.stop()); canvasStreamRef.current = null; }
+    recordCanvasRef.current = null;
+  }
+
   function stopRecording() {
     if (maxClipTimerRef.current) { clearTimeout(maxClipTimerRef.current); maxClipTimerRef.current = null; }
     if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null; }
@@ -474,18 +492,27 @@ export function CameraCapture({
   async function finalizeClip(mime: string) {
     const chunks = recordedChunksRef.current;
     recordedChunksRef.current = [];
+    // Grab the poster from the (zoomed) record canvas BEFORE tearing it down so
+    // the still matches the clip; fall back to the raw frame.
+    let poster: Blob | null = null;
+    const canvas = recordCanvasRef.current;
+    if (canvas) {
+      poster = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/jpeg', JPEG_QUALITY));
+    }
+    teardownCanvasPipeline();
     // Stop the audio capture — but NOT the shared video track (it's the live preview).
     if (recordAudioStreamRef.current) {
       recordAudioStreamRef.current.getTracks().forEach((t) => t.stop());
       recordAudioStreamRef.current = null;
     }
     mediaRecorderRef.current = null;
+    zoomRef.current = 1; setZoom(1);
     if (!chunks.length) return;
     const ext = /mp4/i.test(mime) ? 'mp4' : 'webm';
     const type = (mime.split(';')[0] || `video/${ext}`);
     const blob = new Blob(chunks, { type });
     const file = new File([blob], `clip_${Date.now()}.${ext}`, { type });
-    const poster = await grabPoster();
+    if (!poster) poster = await grabPoster();
     if (!poster) { void dialog.alert('Couldn’t save the clip preview frame. Please try again.'); return; }
     enqueueVideo(file, poster);
   }
@@ -493,31 +520,57 @@ export function CameraCapture({
   async function startRecording() {
     if (recordingRef.current || permissionState !== 'granted') return;
     const stream = streamRef.current;
+    const video = videoRef.current;
     const videoTrack = stream?.getVideoTracks?.()[0];
-    if (!videoTrack) return;
+    if (!video || !videoTrack) return;
     const mime = pickClipMime();
     if (!mime) { void dialog.alert('Video recording isn’t supported in this browser. Use "Phone Cam" to record with your phone’s camera app.'); return; }
     if (items.length >= maxPhotos) { void dialog.alert(`You can capture up to ${maxPhotos} items per session. Tap Done to finish.`); return; }
 
     // Best-effort audio narration; fall back to a silent clip if the mic is denied.
-    let tracks: MediaStreamTrack[] = [videoTrack];
+    let audioTracks: MediaStreamTrack[] = [];
     try {
       const audio = await navigator.mediaDevices.getUserMedia({ audio: true });
       recordAudioStreamRef.current = audio;
-      tracks = [videoTrack, ...audio.getAudioTracks()];
+      audioTracks = audio.getAudioTracks();
     } catch { /* video-only */ }
+
+    // Render the camera into a canvas, center-cropped by the live zoom factor,
+    // and record the canvas stream. This gives smooth digital zoom on every
+    // platform (incl. iOS) and keeps the recording in sync with the preview.
+    const vw = video.videoWidth || 1280;
+    const vh = video.videoHeight || 720;
+    const canvas = document.createElement('canvas');
+    canvas.width = vw; canvas.height = vh;
+    const cctx = canvas.getContext('2d');
+    if (!cctx) return;
+    recordCanvasRef.current = canvas;
+    zoomRef.current = 1; setZoom(1);
+    const drawFrame = () => {
+      const z = zoomRef.current;
+      const sw = vw / z, sh = vh / z;
+      const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
+      try { cctx.drawImage(video, sx, sy, sw, sh, 0, 0, vw, vh); } catch { /* not ready yet */ }
+      recordRafRef.current = requestAnimationFrame(drawFrame);
+    };
+    drawFrame();
+
+    let canvasStream: MediaStream;
+    try { canvasStream = canvas.captureStream(30); } catch { teardownCanvasPipeline(); return; }
+    canvasStreamRef.current = canvasStream;
+    const tracks = [...canvasStream.getVideoTracks(), ...audioTracks];
 
     let recorder: MediaRecorder;
     try {
       recorder = new MediaRecorder(new MediaStream(tracks), { mimeType: mime, videoBitsPerSecond: CLIP_BITRATE });
     } catch {
-      try { recorder = new MediaRecorder(new MediaStream(tracks)); } catch { return; }
+      try { recorder = new MediaRecorder(new MediaStream(tracks)); } catch { teardownCanvasPipeline(); return; }
     }
     recordedChunksRef.current = [];
     recorder.ondataavailable = (e) => { if (e.data && e.data.size) recordedChunksRef.current.push(e.data); };
     recorder.onstop = () => { void finalizeClip(mime); };
     mediaRecorderRef.current = recorder;
-    try { recorder.start(); } catch { return; }
+    try { recorder.start(); } catch { teardownCanvasPipeline(); return; }
     recordingRef.current = true;
     setRecording(true);
     setRecordSecs(0);
@@ -527,12 +580,23 @@ export function CameraCapture({
   }
 
   // Shutter: a quick tap takes a photo; press-and-hold (> HOLD_MS) records a clip.
-  function onShutterDown() {
+  // While recording, sliding the thumb UP zooms in, DOWN zooms out.
+  function onShutterDown(e: React.PointerEvent) {
     if (permissionState !== 'granted' || busy) return;
+    shutterStartYRef.current = e.clientY;
+    try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* noop */ }
     if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
     holdTimerRef.current = setTimeout(() => { holdTimerRef.current = null; void startRecording(); }, HOLD_MS);
   }
+  function onShutterMove(e: React.PointerEvent) {
+    if (!recordingRef.current || shutterStartYRef.current == null) return;
+    const dy = shutterStartYRef.current - e.clientY; // up = positive = zoom in
+    const z = Math.min(MAX_ZOOM, Math.max(1, 1 + (dy / ZOOM_DRAG_PX) * (MAX_ZOOM - 1)));
+    zoomRef.current = z;
+    setZoom(z);
+  }
   function onShutterUp() {
+    shutterStartYRef.current = null;
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
@@ -549,10 +613,15 @@ export function CameraCapture({
     if (maxClipTimerRef.current) { clearTimeout(maxClipTimerRef.current); maxClipTimerRef.current = null; }
     if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null; }
     try { if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop(); } catch { /* noop */ }
+    if (recordRafRef.current != null) { cancelAnimationFrame(recordRafRef.current); recordRafRef.current = null; }
+    canvasStreamRef.current?.getTracks().forEach((t) => t.stop());
+    canvasStreamRef.current = null;
+    recordCanvasRef.current = null;
     recordAudioStreamRef.current?.getTracks().forEach((t) => t.stop());
     recordAudioStreamRef.current = null;
     recordingRef.current = false;
     setRecording(false);
+    zoomRef.current = 1; setZoom(1);
   }, [isOpen]);
 
   // Native OS camera fallback. On iOS (no web torch) and as a universal
@@ -1068,6 +1137,7 @@ export function CameraCapture({
               playsInline
               muted
               className="absolute inset-0 w-full h-full object-cover"
+              style={zoom > 1 ? { transform: `scale(${zoom})`, transformOrigin: 'center', transition: 'transform 60ms linear' } : undefined}
             />
             {permissionState === 'pending' && (
               <div className="absolute inset-0 flex items-center justify-center text-white">
@@ -1082,14 +1152,24 @@ export function CameraCapture({
                 </span>
               </div>
             )}
-            {/* Recording indicator */}
+            {/* Recording indicator + live zoom */}
             {recording && (
-              <div className="absolute top-3 left-3 z-10 pointer-events-none flex items-center gap-2 bg-black/60 rounded-full px-3 py-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-white text-xs font-heading font-semibold tabular-nums">
-                  REC {recordSecs}s / {MAX_CLIP_MS / 1000}s
-                </span>
-              </div>
+              <>
+                <div className="absolute top-3 left-3 z-10 pointer-events-none flex items-center gap-2 bg-black/60 rounded-full px-3 py-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-white text-xs font-heading font-semibold tabular-nums">
+                    REC {recordSecs}s / {MAX_CLIP_MS / 1000}s
+                  </span>
+                  {zoom > 1.02 && (
+                    <span className="text-white/90 text-xs font-heading tabular-nums border-l border-white/30 pl-2">
+                      {zoom.toFixed(1)}×
+                    </span>
+                  )}
+                </div>
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none bg-black/50 rounded-full px-3 py-1">
+                  <span className="text-white/80 text-[11px] font-heading">Slide up/down to zoom</span>
+                </div>
+              </>
             )}
             {/* Flip camera button (top right of viewport) */}
             <button
@@ -1237,8 +1317,8 @@ export function CameraCapture({
         <button
           type="button"
           onPointerDown={onShutterDown}
+          onPointerMove={onShutterMove}
           onPointerUp={onShutterUp}
-          onPointerLeave={onShutterUp}
           onPointerCancel={onShutterUp}
           onContextMenu={(e) => e.preventDefault()}
           disabled={busy || permissionState !== 'granted'}
