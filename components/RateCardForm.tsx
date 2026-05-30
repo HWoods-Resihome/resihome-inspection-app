@@ -1158,7 +1158,7 @@ export function RateCardForm(props: RateCardFormProps) {
       )}
 
       {!props.readOnly && (
-        <div className="mb-3 flex items-center justify-end gap-2">
+        <div className="mb-3 flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={async () => {

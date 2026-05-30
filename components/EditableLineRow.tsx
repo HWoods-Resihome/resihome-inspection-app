@@ -800,8 +800,19 @@ function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, on
         <td colSpan={12} className="p-0">
           <div
             onClick={readOnly || editingDesc ? undefined : onEnterEdit}
-            className={`flex gap-2 border border-gray-200 rounded-lg px-3 py-2.5 mb-2 bg-white ${readOnly || editingDesc ? '' : 'active:bg-gray-50 cursor-pointer'}`}
+            className={`relative flex gap-2 border border-gray-200 rounded-lg px-3 py-2.5 mb-2 bg-white ${readOnly || editingDesc ? '' : 'active:bg-gray-50 cursor-pointer'}`}
           >
+            {/* Quick-delete X (top-right). Deletes immediately, no confirm. */}
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                aria-label="Delete line item"
+                className="absolute -top-2 -right-2 w-6 h-6 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-400 hover:text-red-600 hover:border-red-300 shadow-sm text-base leading-none z-10"
+              >
+                ×
+              </button>
+            )}
             {/* Left: description + details (flexes, but never pushes the price
                 block — that block has a fixed width so columns always align) */}
             <div className="flex-1 min-w-0">
