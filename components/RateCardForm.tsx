@@ -91,6 +91,17 @@ export function RateCardForm(props: RateCardFormProps) {
   const [showSectionsManager, setShowSectionsManager] = useState(false);
   // Header settings (gear) dropdown — houses Manage Sections + Refresh Pricing.
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  // Keys of line rows whose edit modal is open — used to hide the floating mic
+  // (it should never float over a modal/other screen when idle).
+  const [openEditors, setOpenEditors] = useState<Set<string>>(new Set());
+  const setEditorOpen = useCallback((key: string, open: boolean) => {
+    setOpenEditors((prev) => {
+      if (open === prev.has(key)) return prev;
+      const next = new Set(prev);
+      if (open) next.add(key); else next.delete(key);
+      return next;
+    });
+  }, []);
   // Photo lightbox (tap a photo to view/swipe/mark-up/tag/delete). Either a
   // room's section photos or a single line item's photos.
   type LightboxState =
@@ -1726,6 +1737,7 @@ export function RateCardForm(props: RateCardFormProps) {
                                   ? { kind: 'section', sectionId: s.id, index: secIdx }
                                   : { kind: 'line', sectionId: s.id, externalId: line.externalId, index });
                               }}
+                              onEditingChange={(o) => setEditorOpen(`${s.id}:${line.externalId}`, o)}
                             />
                           ))}
                           {pendingNewBySection[s.id] && (
@@ -1743,6 +1755,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               onSave={(created) => handleSaveLineForSection(s.id, created)}
                               onDelete={() => handleDiscardNew(s.id)}  /* unused for new rows (no view-mode), kept for typing */
                               onDiscardNew={() => handleDiscardNew(s.id)}
+                              onEditingChange={(o) => setEditorOpen(`${s.id}:new`, o)}
                             />
                           )}
                         </tbody>
@@ -1844,9 +1857,15 @@ export function RateCardForm(props: RateCardFormProps) {
         const voiceSectionId = cameraSectionId ?? currentSectionId;
         if (props.readOnly || props.templateType !== 'pm_scope_rate_card' || !voiceSectionId) return null;
         const cameraOpen = cameraSectionId !== null;
-        // Hide the floating mic while a photo viewer/editor is open (keep it
-        // MOUNTED via display:none so an in-progress conversation isn't lost).
-        const hidden = lightbox !== null;
+        // Hide the floating mic whenever a modal/overlay is up — it should never
+        // float over another screen when idle. Kept MOUNTED via display:none so
+        // an in-progress conversation isn't lost. (The camera is NOT a reason to
+        // hide — the mic lives there for the dictate-while-shooting flow.)
+        const hidden = lightbox !== null
+          || showSectionsManager
+          || finalizeResult !== null
+          || showSaveErrorDetail
+          || openEditors.size > 0;
         return (
           <div
             className="fixed inset-x-0 z-[60] pointer-events-none"

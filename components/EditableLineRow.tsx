@@ -62,6 +62,9 @@ interface Props {
   onDiscardNew?: () => void;            // for new rows that never get saved
   // Open the line's tagged photo at `index` in the lightbox.
   onOpenPhoto?: (index: number) => void;
+  // Reports when this row's edit modal opens/closes (so the parent can hide the
+  // floating mic while a line modal is up).
+  onEditingChange?: (editing: boolean) => void;
 }
 
 const TENANT_PCT_OPTIONS = Array.from({ length: 21 }, (_, i) => i * 5);
@@ -103,6 +106,13 @@ export function EditableLineRow(props: Props) {
   // Mode state
   // -------------------------------------------------------------------
   const [isEditing, setIsEditing] = useState<boolean>(startInEditMode === true);
+
+  // Tell the parent whenever the edit modal opens/closes (and on unmount), so it
+  // can hide the floating mic while a line modal is up.
+  const onEditingChangeRef = useRef(props.onEditingChange);
+  onEditingChangeRef.current = props.onEditingChange;
+  useEffect(() => { onEditingChangeRef.current?.(isEditing); }, [isEditing]);
+  useEffect(() => () => { onEditingChangeRef.current?.(false); }, []);
 
   // -------------------------------------------------------------------
   // Local form state (mirrors the line during editing). Updated from
