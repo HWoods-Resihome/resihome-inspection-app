@@ -322,6 +322,33 @@ export async function fetchProperties(): Promise<Property[]> {
 }
 
 /**
+ * Fetch a single Property's stored coordinates by record id. Used to validate
+ * the camera's GPS fix against the property location. Returns null when the
+ * property has no usable lat/long (the fields exist but aren't always filled
+ * in) — the caller then falls back to geocoding the address.
+ *
+ * Uses the search API (which silently ignores unknown property names) and tries
+ * a few common field-name variants so we don't depend on one exact name.
+ */
+export async function fetchPropertyCoords(recordId: string): Promise<{ lat: number; lng: number } | null> {
+  const { property: typeId } = typeIds();
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+    method: 'POST',
+    body: JSON.stringify({
+      filterGroups: [{ filters: [{ propertyName: 'hs_object_id', operator: 'EQ', value: recordId }] }],
+      properties: ['latitude', 'longitude', 'lat', 'lng', 'lon'],
+      limit: 1,
+    }),
+  });
+  const p = resp.results?.[0]?.properties || {};
+  const lat = Number(p.latitude ?? p.lat);
+  const lng = Number(p.longitude ?? p.lng ?? p.lon);
+  // Treat 0,0 (the null island) as "not set" — it's never a real US property.
+  if (isFinite(lat) && isFinite(lng) && (lat !== 0 || lng !== 0)) return { lat, lng };
+  return null;
+}
+
+/**
  * Fetch all Inspection records for the list view (Round A).
  * Returns lightweight summary records sorted by most-recent-first.
  *

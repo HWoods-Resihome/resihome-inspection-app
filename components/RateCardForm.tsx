@@ -30,6 +30,8 @@ interface RateCardFormProps {
   templateLabel: string;
   inspectorName: string;
   propertyName: string;
+  /** Property record id — used to validate camera GPS against the property. */
+  propertyRecordId?: string;
   bedrooms: number;
   bathrooms: number;
   /** Property's square footage (from `square_footage` on the property object).
@@ -1582,6 +1584,7 @@ export function RateCardForm(props: RateCardFormProps) {
         <CameraCapture
           isOpen={true}
           addressSnapshot={props.propertyName}
+          propertyRecordId={props.propertyRecordId}
           onComplete={handleCameraComplete}
           onClose={() => setCameraSectionId(null)}
           uploadPhoto={uploadPhoto}

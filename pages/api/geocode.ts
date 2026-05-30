@@ -10,10 +10,11 @@
  * same address on every camera open. Behind the session middleware.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { fetchPropertyCoords } from '@/lib/hubspot';
 
 type Coords = { lat: number; lng: number; source: string };
 
-// address -> coords | null (null = a confirmed miss, so we don't keep retrying)
+// cache key (propertyId + address) -> coords | null (null = a confirmed miss)
 const cache = new Map<string, Coords | null>();
 
 async function fetchWithTimeout(url: string, ms: number, headers?: Record<string, string>) {
@@ -63,22 +64,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: 'Method not allowed' });
   }
   const address = String(req.query.address || '').trim();
-  if (address.length < 5) return res.status(400).json({ error: 'address is required' });
+  const propertyId = String(req.query.propertyId || '').trim();
+  if (address.length < 5 && !propertyId) {
+    return res.status(400).json({ error: 'address or propertyId is required' });
+  }
 
-  if (cache.has(address)) {
-    const hit = cache.get(address);
+  const cacheKey = `${propertyId}|${address}`;
+  if (cache.has(cacheKey)) {
+    const hit = cache.get(cacheKey);
     return hit
       ? res.status(200).json(hit)
       : res.status(404).json({ error: 'No geocode match' });
   }
 
   let coords: Coords | null = null;
-  try { coords = await geocodeCensus(address); } catch { /* try fallback */ }
-  if (!coords) {
-    try { coords = await geocodeNominatim(address); } catch { /* give up */ }
+  // 1) Prefer the property's stored coordinates (most reliable when filled in).
+  if (propertyId) {
+    try {
+      const p = await fetchPropertyCoords(propertyId);
+      if (p) coords = { lat: p.lat, lng: p.lng, source: 'property' };
+    } catch { /* fall back to geocoding the address */ }
+  }
+  // 2) Fall back to geocoding the address text.
+  if (!coords && address.length >= 5) {
+    try { coords = await geocodeCensus(address); } catch { /* try next */ }
+    if (!coords) {
+      try { coords = await geocodeNominatim(address); } catch { /* give up */ }
+    }
   }
 
-  cache.set(address, coords);
+  cache.set(cacheKey, coords);
   return coords
     ? res.status(200).json(coords)
     : res.status(404).json({ error: 'No geocode match' });

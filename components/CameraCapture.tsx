@@ -54,6 +54,9 @@ interface Props {
   // Address burned into the corner of each in-app capture (with date/time +
   // GPS) for evidentiary value on chargeback disputes.
   addressSnapshot?: string;
+  // Property record id — lets the GPS check use the property's stored
+  // coordinates first, before falling back to geocoding the address.
+  propertyRecordId?: string;
 }
 
 // A stamp line; `mark` appends a colored ✓ (location matches the property) or
@@ -121,7 +124,7 @@ const JPEG_QUALITY = 0.88;
 export function CameraCapture({
   isOpen, onClose, onComplete, uploadPhoto, maxPhotos = 30,
   rooms, currentRoomId, onRoomChange, onRenameRoom, onDeleteRoom, onAddRoom,
-  addressSnapshot,
+  addressSnapshot, propertyRecordId,
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -277,23 +280,27 @@ export function CameraCapture({
   // reference point for the GPS ✓/✗ check. Best-effort: on failure we simply
   // stamp coordinates without a verdict.
   useEffect(() => {
-    if (!isOpen || !addressSnapshot) return;
-    if (geocodedAddrRef.current === addressSnapshot || geocodeInFlightRef.current) return;
+    if (!isOpen || (!addressSnapshot && !propertyRecordId)) return;
+    const key = `${propertyRecordId || ''}|${addressSnapshot || ''}`;
+    if (geocodedAddrRef.current === key || geocodeInFlightRef.current) return;
     geocodeInFlightRef.current = true;
     let cancelled = false;
-    fetch(`/api/geocode?address=${encodeURIComponent(addressSnapshot)}`)
+    const params = new URLSearchParams();
+    if (addressSnapshot) params.set('address', addressSnapshot);
+    if (propertyRecordId) params.set('propertyId', propertyRecordId);
+    fetch(`/api/geocode?${params.toString()}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (cancelled) return;
         if (d && typeof d.lat === 'number' && typeof d.lng === 'number') {
           refCoordsRef.current = { lat: d.lat, lng: d.lng };
-          geocodedAddrRef.current = addressSnapshot;
+          geocodedAddrRef.current = key;
         }
       })
       .catch(() => { /* no reference — coords stamp without a ✓/✗ */ })
       .finally(() => { geocodeInFlightRef.current = false; });
     return () => { cancelled = true; };
-  }, [isOpen, addressSnapshot]);
+  }, [isOpen, addressSnapshot, propertyRecordId]);
 
   // ----- Capture -----
 

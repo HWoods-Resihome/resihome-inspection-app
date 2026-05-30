@@ -307,6 +307,7 @@ export default function ExistingInspection() {
       {inspection.templateType === 'pm_turn_reinspect_qc' ? (
         <QcReinspectForm
           inspectionRecordId={inspectionId}
+          propertyRecordId={propertyRecordId}
           templateLabel={templateLabel}
           inspectorName={inspection.inspectorName}
           propertyName={propertyName}
@@ -322,6 +323,7 @@ export default function ExistingInspection() {
       ) : inspection.templateType === 'pm_scope_rate_card' ? (
         <RateCardForm
           templateType={inspection.templateType as TemplateType}
+          propertyRecordId={propertyRecordId}
           templateLabel={templateLabel}
           inspectorName={inspection.inspectorName}
           propertyName={propertyName}
@@ -342,6 +344,7 @@ export default function ExistingInspection() {
       ) : (
         <QuestionForm
           questions={questions}
+          propertyRecordId={propertyRecordId}
           templateType={inspection.templateType as TemplateType}
           templateLabel={templateLabel}
           inspectorName={inspection.inspectorName}

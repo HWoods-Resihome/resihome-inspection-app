@@ -45,6 +45,8 @@ interface Props {
   templateLabel: string;
   inspectorName: string;
   propertyName: string;
+  /** Property record id — used to validate camera GPS against the property. */
+  propertyRecordId?: string;
   bedrooms: number;
   bathrooms: number;
   squareFootage: number | null;
@@ -607,6 +609,7 @@ export function QcReinspectForm(props: Props) {
         <CameraCapture
           isOpen={true}
           addressSnapshot={props.propertyName}
+          propertyRecordId={props.propertyRecordId}
           onClose={() => setCameraKey(null)}
           uploadPhoto={uploadHelper}
           rooms={sections.map((s) => {

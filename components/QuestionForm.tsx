@@ -18,6 +18,8 @@ type Props = {
   templateLabel: string;
   inspectorName: string;
   propertyName: string;
+  /** Property record id — used to validate camera GPS against the property. */
+  propertyRecordId?: string;
   bedrooms: number;
   bathrooms: number;
   /** Property's square footage (from `square_footage` on the property object).
@@ -104,7 +106,7 @@ function slugify(s: string): string {
 }
 
 export function QuestionForm({
-  questions, templateType, templateLabel, inspectorName, propertyName,
+  questions, templateType, templateLabel, inspectorName, propertyName, propertyRecordId,
   bedrooms, bathrooms, squareFootage, inspectionRegion, onSubmit, onCancel,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
@@ -1048,6 +1050,7 @@ export function QuestionForm({
                           onUpdate={(patch) => updateAnswer(key, patch)}
                           uploadPhoto={uploadPhoto}
                           propertyName={propertyName}
+                          propertyRecordId={propertyRecordId}
                         />
                       </div>
                     );
@@ -1137,6 +1140,7 @@ export function QuestionForm({
       <CameraCapture
         isOpen={sectionCameraInstance !== null}
         addressSnapshot={propertyName}
+        propertyRecordId={propertyRecordId}
         onClose={() => setSectionCameraInstance(null)}
         uploadPhoto={uploadPhoto}
         rooms={sectionInstances.map((inst) => {
