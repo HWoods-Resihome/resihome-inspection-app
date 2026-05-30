@@ -3,6 +3,7 @@ import {
   upsertAnswers,
   archiveAnswers,
   updateInspection,
+  touchInspection,
   fetchInspectionById,
   fetchRateCardLineItemByCode,
   type AnswerUpsert,
@@ -223,6 +224,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (archives.length > 0) {
       await archiveAnswers(archives);
     }
+    // Stamp "last edited" so the list can sort by most-recently-touched.
+    await touchInspection(inspectionRecordId);
 
     // Stitch the math result back to each saved record so the client can update
     // its UI without re-fetching.

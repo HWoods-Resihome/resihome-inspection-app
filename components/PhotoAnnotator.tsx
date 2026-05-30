@@ -287,8 +287,8 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
         )}
       </div>
 
-      {/* Toolbar */}
-      <div className="bg-black px-3 py-3 flex items-center justify-between gap-2">
+      {/* Toolbar (wraps on narrow screens so Save never clips off the edge) */}
+      <div className="bg-black px-3 py-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
         <div className="flex items-center gap-1">
           {toolBtn('arrow', 'Arrow', (
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -312,7 +312,7 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
               type="button"
               onClick={() => setColor(c)}
               aria-label={`Color ${c}`}
-              className={`w-7 h-7 rounded-full border-2 ${color === c ? 'border-white scale-110' : 'border-white/30'}`}
+              className={`w-6 h-6 rounded-full border-2 ${color === c ? 'border-white scale-110' : 'border-white/30'}`}
               style={{ backgroundColor: c }}
             />
           ))}

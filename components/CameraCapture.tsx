@@ -111,56 +111,6 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.restore();
 }
 
-// Client-side geocode fallback. The SERVER's egress allowlist blocks the public
-// geocoders (Census / Nominatim), so when /api/geocode can't resolve the address
-// (and the HubSpot record has no stored coords), we geocode straight from the
-// inspector's device — which CAN reach Nominatim (CORS-enabled). Best-effort.
-async function clientGeocode(address: string): Promise<{ lat: number; lng: number } | null> {
-  // 1) Photon (komoot) — browser-friendly, CORS-enabled, tolerant of partial
-  //    addresses; good first choice from a phone.
-  try {
-    const r = await fetch(`https://photon.komoot.io/api/?limit=1&q=${encodeURIComponent(address)}`);
-    if (r.ok) {
-      const d = await r.json();
-      const c = d?.features?.[0]?.geometry?.coordinates; // [lng, lat]
-      if (Array.isArray(c) && isFinite(Number(c[0])) && isFinite(Number(c[1]))) {
-        return { lat: Number(c[1]), lng: Number(c[0]) };
-      }
-    }
-  } catch { /* try Nominatim */ }
-  // 2) Nominatim (OpenStreetMap).
-  try {
-    const r = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(address)}`,
-      { headers: { Accept: 'application/json' } }
-    );
-    if (r.ok) {
-      const d = await r.json();
-      const first = Array.isArray(d) ? d[0] : null;
-      const lat = Number(first?.lat), lng = Number(first?.lon);
-      if (isFinite(lat) && isFinite(lng)) return { lat, lng };
-    }
-  } catch { /* give up */ }
-  return null;
-}
-
-// Distance in meters between two lat/lng points (haversine).
-function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-
-// How close the GPS fix must be to the geocoded property to count as a match.
-// Generous on purpose: address geocoding (street centroid) and indoor GPS each
-// carry error, so this is meant to catch gross mismatches (wrong property/city),
-// not pinpoint accuracy.
-const GEO_MATCH_RADIUS_M = 300;
-
 // Target capture resolution: 1920x1440 (4:3). Browser may downgrade if
 // the device can't do it, that's OK.
 const CAPTURE_WIDTH = 1920;
@@ -198,25 +148,15 @@ function pickClipMime(): string {
 export function CameraCapture({
   isOpen, onClose, onComplete, uploadPhoto, maxPhotos = 30,
   rooms, currentRoomId, onRoomChange, onRenameRoom, onDeleteRoom, onAddRoom,
-  addressSnapshot, propertyRecordId, voiceSlot, tagLines, onTagPhotoToLine,
+  addressSnapshot, voiceSlot, tagLines, onTagPhotoToLine,
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  // Latest GPS fix, kept fresh while the camera is open, burned into captures.
+  // Latest GPS fix, kept fresh while the camera is open, burned into captures
+  // (coordinates only — address-match verification was removed).
   const geoRef = useRef<GeolocationPosition | null>(null);
   const geoWatchRef = useRef<number | null>(null);
-  // Geocoded coordinates of the property address (reference point for the
-  // ✓/✗ location check). Null until resolved; stays null if geocoding fails.
-  const refCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
-  const geocodedAddrRef = useRef<string | null>(null);
-  const geocodeInFlightRef = useRef(false);
-  // Mirrors of the above into state so the live location HUD can render and
-  // explain *why* a photo can or can't be ✓/✗ verified.
-  const [geoFix, setGeoFix] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
-  const [geoDenied, setGeoDenied] = useState(false);
-  const [refCoords, setRefCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [geocodeState, setGeocodeState] = useState<'idle' | 'pending' | 'ok' | 'failed'>('idle');
 
   // ----- Video clip recording (press-and-hold the shutter) -----
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -358,18 +298,9 @@ export function CameraCapture({
   // Best-effort: if the user denies location or it's unavailable, we just stamp
   // address + time without coordinates.
   useEffect(() => {
-    if (!isOpen || typeof navigator === 'undefined' || !navigator.geolocation) { setGeoDenied(true); return; }
-    const onPos = (pos: GeolocationPosition) => {
-      geoRef.current = pos;
-      setGeoDenied(false);
-      const { latitude, longitude, accuracy } = pos.coords;
-      setGeoFix({ lat: latitude, lng: longitude, accuracy });
-    };
-    const onErr = (err: GeolocationPositionError) => {
-      // code 1 = permission denied; 2/3 = unavailable/timeout. Either way we
-      // can't stamp a verdict — surface it in the HUD instead of failing silently.
-      if (err && err.code === 1) setGeoDenied(true);
-    };
+    if (!isOpen || typeof navigator === 'undefined' || !navigator.geolocation) return;
+    const onPos = (pos: GeolocationPosition) => { geoRef.current = pos; };
+    const onErr = () => { /* denied/unavailable — stamp without coordinates */ };
     navigator.geolocation.getCurrentPosition(onPos, onErr, {
       enableHighAccuracy: true, timeout: 8000, maximumAge: 30000,
     });
@@ -386,51 +317,6 @@ export function CameraCapture({
       geoRef.current = null;
     };
   }, [isOpen]);
-
-  // Geocode the property address once (when the camera opens) to get a
-  // reference point for the GPS ✓/✗ check. Best-effort: on failure we simply
-  // stamp coordinates without a verdict.
-  useEffect(() => {
-    if (!isOpen || (!addressSnapshot && !propertyRecordId)) return;
-    const key = `${propertyRecordId || ''}|${addressSnapshot || ''}`;
-    if (geocodedAddrRef.current === key || geocodeInFlightRef.current) return;
-    geocodeInFlightRef.current = true;
-    setGeocodeState('pending');
-    let cancelled = false;
-
-    (async () => {
-      const params = new URLSearchParams();
-      if (addressSnapshot) params.set('address', addressSnapshot);
-      if (propertyRecordId) params.set('propertyId', propertyRecordId);
-
-      let coords: { lat: number; lng: number } | null = null;
-      // 1) Server route: HubSpot stored coords first, then server-side geocode.
-      try {
-        const r = await fetch(`/api/geocode?${params.toString()}`);
-        if (r.ok) {
-          const d = await r.json();
-          if (d && typeof d.lat === 'number' && typeof d.lng === 'number') coords = { lat: d.lat, lng: d.lng };
-        }
-      } catch { /* fall through to the client-side geocoder */ }
-
-      // 2) Client-side fallback (server egress can't reach the geocoders).
-      if (!coords && addressSnapshot) coords = await clientGeocode(addressSnapshot);
-
-      if (cancelled) return;
-      if (coords) {
-        refCoordsRef.current = coords;
-        geocodedAddrRef.current = key;
-        setRefCoords(coords);
-        setGeocodeState('ok');
-      } else {
-        setGeocodeState('failed');
-        console.warn('[CameraCapture] geocode failed — no coords for', { address: addressSnapshot, propertyRecordId });
-      }
-      geocodeInFlightRef.current = false;
-    })();
-
-    return () => { cancelled = true; geocodeInFlightRef.current = false; };
-  }, [isOpen, addressSnapshot, propertyRecordId]);
 
   // ----- Capture -----
 
@@ -693,24 +579,15 @@ export function CameraCapture({
         return;
       }
       ctx.drawImage(video, 0, 0, vw, vh);
-      // Burn the evidence stamp (address / timestamp / GPS) into the frame.
-      // The GPS line gets a ✓/✗ when we have geocoded the property to compare.
+      // Burn the evidence stamp (address / timestamp / GPS coordinates) into the
+      // frame. Coordinates are recorded as-is; no address-match verdict.
       const stampLines: StampLine[] = [];
       if (addressSnapshot) stampLines.push({ text: addressSnapshot });
       stampLines.push({ text: new Date().toLocaleString() });
       const pos = geoRef.current;
       if (pos) {
         const { latitude, longitude, accuracy } = pos.coords;
-        let mark: 'ok' | 'bad' | undefined;
-        const ref = refCoordsRef.current;
-        if (ref) {
-          const dist = haversineMeters(latitude, longitude, ref.lat, ref.lng);
-          mark = dist <= GEO_MATCH_RADIUS_M ? 'ok' : 'bad';
-        }
-        stampLines.push({
-          text: `${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)`,
-          mark,
-        });
+        stampLines.push({ text: `${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)` });
       }
       drawEvidenceStamp(ctx, vw, vh, stampLines);
       // Convert to JPEG blob
@@ -921,31 +798,6 @@ export function CameraCapture({
 
   const uploadingCount = items.filter((it) => it.status === 'uploading').length;
   const failedCount = items.filter((it) => it.status === 'failed').length;
-
-  // Live location-verification status for the HUD chip. Mirrors exactly what the
-  // burned-in ✓/✗ stamp will (or won't) say, so the inspector sees the cause.
-  const locHud: { tone: 'ok' | 'bad' | 'wait' | 'warn'; text: string } = (() => {
-    if (geoDenied) return { tone: 'warn', text: 'Location off — enable GPS to verify' };
-    if (!geoFix) return { tone: 'wait', text: 'Locating…' };
-    if (geocodeState === 'pending') return { tone: 'wait', text: 'Checking address…' };
-    if (geocodeState !== 'ok' || !refCoords) {
-      // Surface the address we tried so it's obvious when it's missing/bad
-      // (e.g. a "Property 12345" placeholder rather than a real street address).
-      const a = (addressSnapshot || '').trim();
-      const short = a.length > 24 ? `${a.slice(0, 24)}…` : a;
-      return { tone: 'warn', text: short ? `Can’t verify: ${short}` : "Can't verify address" };
-    }
-    const m = haversineMeters(geoFix.lat, geoFix.lng, refCoords.lat, refCoords.lng);
-    return m <= GEO_MATCH_RADIUS_M
-      ? { tone: 'ok', text: 'At property ✓' }
-      : { tone: 'bad', text: `Not at property ✗ (~${m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${Math.round(m)}m`})` };
-  })();
-  const locHudClasses = {
-    ok: 'bg-emerald-600/85 text-white',
-    bad: 'bg-red-600/85 text-white',
-    wait: 'bg-black/60 text-white/90',
-    warn: 'bg-amber-500/90 text-black',
-  }[locHud.tone];
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col select-none animate-fadeIn">
@@ -1199,14 +1051,6 @@ export function CameraCapture({
                 <div className="text-sm font-heading">Starting camera&hellip;</div>
               </div>
             )}
-            {/* Live location-verification chip (matches the ✓/✗ burned into shots) */}
-            {permissionState === 'granted' && (
-              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
-                <span className={`px-3 py-1.5 rounded-full text-xs font-heading font-semibold shadow ${locHudClasses}`}>
-                  {locHud.text}
-                </span>
-              </div>
-            )}
             {/* Recording indicator + live zoom */}
             {recording && (
               <>
@@ -1407,9 +1251,14 @@ export function CameraCapture({
           <span className="text-[10px] font-heading">Mark</span>
         </button>
 
-        {/* Voice line-item dictation — pinned to the bottom-right of the shutter row. */}
+        {/* Voice line-item dictation. The mic sits bottom-right, but this layer
+            spans the full row width so the assistant's pop-up panel (anchored
+            left-0/right-0 to its positioned ancestor) centers on screen rather
+            than hugging the right edge. */}
         {voiceSlot && (
-          <div className="absolute right-4 top-1/2 -translate-y-1/2">{voiceSlot}</div>
+          <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 px-4 flex justify-end pointer-events-none">
+            <div className="pointer-events-auto">{voiceSlot}</div>
+          </div>
         )}
       </div>
 

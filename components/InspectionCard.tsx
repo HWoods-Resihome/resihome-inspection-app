@@ -18,8 +18,7 @@ interface Props {
 // HubSpot returns Date fields as Unix epoch milliseconds (as a string), while
 // DateTime fields and built-in fields like hs_createdate come back as ISO 8601.
 // Handle both formats.
-function effectiveDate(i: InspectionSummary): string {
-  const raw = i.scheduledDate || i.completedAt || i.createdAt;
+function fmtDate(raw: string | null): string {
   if (!raw) return '';
   // Pure-digit string = epoch milliseconds (HubSpot Date field)
   if (/^\d+$/.test(raw)) {
@@ -28,6 +27,10 @@ function effectiveDate(i: InspectionSummary): string {
   }
   // Otherwise assume ISO 8601 ("2026-03-19T..." -> "2026-03-19")
   return raw.slice(0, 10);
+}
+
+function effectiveDate(i: InspectionSummary): string {
+  return fmtDate(i.scheduledDate || i.completedAt || i.createdAt);
 }
 
 // Split the stored address snapshot into two display lines:
@@ -80,6 +83,7 @@ function prettyTemplate(t: string): string {
 
 export function InspectionCard({ inspection: i, selectMode, selected, selectable, onToggleSelect }: Props) {
   const date = effectiveDate(i);
+  const updated = fmtDate(i.updatedAt);
   const tmpl = prettyTemplate(i.templateType);
 
   // Progress: only show if we have data (Completed inspections always have it;
@@ -108,7 +112,13 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
         {date && <span>{date}</span>}
-        {date && i.inspectorName && <span>&middot;</span>}
+        {updated && (
+          <>
+            {date && <span>&middot;</span>}
+            <span className="text-gray-400">Updated {updated}</span>
+          </>
+        )}
+        {(date || updated) && i.inspectorName && <span>&middot;</span>}
         {i.inspectorName && <span>{i.inspectorName}</span>}
         {tmpl && (
           <>

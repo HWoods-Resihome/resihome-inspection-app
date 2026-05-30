@@ -364,6 +364,7 @@ export async function fetchInspections(): Promise<InspectionSummary[]> {
     'total_questions_answered',
     'pdf_attachment_url',
     'hs_createdate',
+    'last_edited_at', 'hs_lastmodifieddate',
   ];
 
   const out: InspectionSummary[] = [];
@@ -402,6 +403,7 @@ export async function fetchInspections(): Promise<InspectionSummary[]> {
         completedAt: p.completed_at || null,
         scheduledDate: p.scheduled_date || null,
         createdAt: p.hs_createdate || null,
+        updatedAt: p.last_edited_at || p.hs_lastmodifieddate || null,
         totalQuestionsAnswered: p.total_questions_answered != null && p.total_questions_answered !== ''
           ? Number(p.total_questions_answered)
           : null,
@@ -916,6 +918,7 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
       completedAt: p.completed_at || null,
       scheduledDate: p.scheduled_date || null,
       createdAt: p.hs_createdate || null,
+      updatedAt: p.last_edited_at || p.hs_lastmodifieddate || null,
       totalQuestionsAnswered: p.total_questions_answered != null && p.total_questions_answered !== ''
         ? Number(p.total_questions_answered) : null,
       pdfUrl: p.pdf_attachment_url || null,
@@ -1041,6 +1044,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         completedAt: p.completed_at || null,
         scheduledDate: p.scheduled_date || null,
         createdAt: p.hs_createdate || null,
+        updatedAt: p.last_edited_at || p.hs_lastmodifieddate || null,
         totalQuestionsAnswered: p.total_questions_answered != null && p.total_questions_answered !== ''
           ? Number(p.total_questions_answered) : null,
         pdfUrl: p.pdf_attachment_url || null,
@@ -1221,6 +1225,26 @@ export async function updateInspection(recordId: string, props: Record<string, a
     method: 'PATCH',
     body: JSON.stringify({ properties: props }),
   });
+}
+
+/**
+ * Stamp the inspection's "last edited" timestamp. Called on every edit (answers,
+ * photos, rate-card lines) so the list can sort by most-recently-touched.
+ *
+ * Best-effort: if the `last_edited_at` property hasn't been created in HubSpot
+ * yet, we swallow the error (the list falls back to hs_lastmodifieddate) so a
+ * save is never blocked by this. Never throws.
+ */
+export async function touchInspection(recordId: string): Promise<void> {
+  try {
+    await updateInspection(recordId, { last_edited_at: new Date().toISOString() });
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    if (msg.includes('PROPERTY_DOESNT_EXIST') || (msg.includes('Property') && msg.includes('does not exist'))) {
+      return; // property not created yet — handled by the hs_lastmodifieddate fallback
+    }
+    console.warn('[touchInspection] failed (non-fatal):', msg);
+  }
 }
 
 /**

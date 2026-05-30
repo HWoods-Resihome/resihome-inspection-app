@@ -22,7 +22,8 @@ export default function Home() {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  // Sort by scheduled_date (falls back to completedAt, then createdAt).
+  // Sort field + direction. Default: most-recently-updated first.
+  const [sortField, setSortField] = useState<'updated' | 'scheduled'>('updated');
   // 'desc' = newest first (default), 'asc' = oldest first.
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   // Filter by inspector name. 'all' = no filter; otherwise match by name (case-insensitive).
@@ -138,7 +139,11 @@ export default function Home() {
   // back as ISO 8601. Parse both forms.
   const sorted = useMemo(() => {
     const effective = (i: InspectionSummary): number | null => {
-      const raw = i.scheduledDate || i.completedAt || i.createdAt;
+      // "Updated" sorts by last-edited (fallbacks keep older records ordered);
+      // "Scheduled" keeps the prior scheduled-date behavior.
+      const raw = sortField === 'updated'
+        ? (i.updatedAt || i.completedAt || i.createdAt)
+        : (i.scheduledDate || i.completedAt || i.createdAt);
       if (!raw) return null;
       if (/^\d+$/.test(raw)) {
         const n = Number(raw);
@@ -158,7 +163,7 @@ export default function Home() {
       return sortDir === 'desc' ? tb - ta : ta - tb;
     });
     return copy;
-  }, [filtered, sortDir]);
+  }, [filtered, sortField, sortDir]);
 
   // Count by status for filter chips. Cancelled inspections are excluded
   // from the app, so they don't count toward any chip (including "All").
@@ -425,14 +430,23 @@ export default function Home() {
               </svg>
             </div>
 
-            {/* Date sort toggle */}
+            {/* Sort field toggle (Updated / Scheduled) */}
+            <button
+              type="button"
+              onClick={() => setSortField(sortField === 'updated' ? 'scheduled' : 'updated')}
+              className="shrink-0 inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-2 py-1.5 border border-gray-300 rounded-md bg-white whitespace-nowrap"
+              title="Switch between sorting by last-updated and scheduled date"
+            >
+              <span>{sortField === 'updated' ? 'Updated' : 'Scheduled'}</span>
+            </button>
+
+            {/* Sort direction toggle */}
             <button
               type="button"
               onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}
               className="shrink-0 inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-2 py-1.5 border border-gray-300 rounded-md bg-white whitespace-nowrap"
-              title={sortDir === 'desc' ? 'Showing newest first. Tap to flip to oldest first.' : 'Showing oldest first. Tap to flip to newest first.'}
+              title={sortDir === 'desc' ? 'Newest first. Tap for oldest first.' : 'Oldest first. Tap for newest first.'}
             >
-              <span>Date</span>
               {sortDir === 'desc' ? (
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

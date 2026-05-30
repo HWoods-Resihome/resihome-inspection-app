@@ -66,6 +66,10 @@ export interface InspectionSummary {
   completedAt: string | null;
   scheduledDate: string | null;
   createdAt: string | null;
+  // Last time the inspection was edited (from the `last_edited_at` property,
+  // falling back to HubSpot's built-in hs_lastmodifieddate). Drives the list's
+  // default "most recently updated" sort.
+  updatedAt: string | null;
   totalQuestionsAnswered: number | null;
   // The PDF URL stored on the Inspection record (from pdf_attachment_url).
   // Populated when the PDF has been generated. Empty/null for inspections that

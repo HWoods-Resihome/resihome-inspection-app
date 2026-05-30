@@ -1329,10 +1329,10 @@ export function RateCardForm(props: RateCardFormProps) {
       <header className="mb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 min-w-0 flex-wrap">
-              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{props.templateLabel}</h1>
+            <div className="flex items-center gap-2 min-w-0">
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight truncate">{props.templateLabel}</h1>
               {statusLabel && (
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
+                <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
                   {statusLabel.label}
                 </span>
               )}
@@ -2083,7 +2083,7 @@ function TerminalActions(props: {
         <button
           type="button"
           onClick={props.onSaveAndClose}
-          className="px-2.5 sm:px-4 py-2 text-xs sm:text-sm border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 transition-colors whitespace-nowrap"
+          className="px-3.5 sm:px-5 py-2.5 text-sm border border-emerald-300 text-emerald-700 rounded-lg font-semibold hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 transition-colors whitespace-nowrap"
         >
           Save &amp; Close
         </button>
@@ -2097,7 +2097,7 @@ function TerminalActions(props: {
           type="button"
           onClick={props.onSubmit}
           disabled={props.submitDisabled}
-          className="px-3 sm:px-5 py-2 text-xs sm:text-sm bg-white border border-brand text-brand font-semibold rounded hover:bg-brand hover:text-white active:bg-brand-dark active:border-brand-dark active:text-white transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed whitespace-nowrap"
+          className="px-4 sm:px-6 py-2.5 text-sm bg-white border border-brand text-brand font-semibold rounded-lg hover:bg-brand hover:text-white active:bg-brand-dark active:border-brand-dark active:text-white transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed whitespace-nowrap"
         >
           <span className="sm:hidden">{props.submitLabelShort || props.submitLabel}</span>
           <span className="hidden sm:inline">{props.submitLabel}</span>

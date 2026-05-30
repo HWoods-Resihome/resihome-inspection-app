@@ -3,6 +3,7 @@ import {
   upsertAnswers,
   archiveAnswers,
   updateInspection,
+  touchInspection,
   fetchInspectionById,
   type AnswerUpsert,
 } from '@/lib/hubspot';
@@ -53,6 +54,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (archives.length > 0) {
       await archiveAnswers(archives);
     }
+    // Stamp "last edited" so the list can sort by most-recently-touched.
+    await touchInspection(id);
 
     const elapsed = Date.now() - t0;
     if (elapsed > 5000) {
