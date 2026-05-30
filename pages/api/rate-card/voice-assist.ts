@@ -186,7 +186,7 @@ function systemPrompt(
     `1. Use search_catalog to find the line item matching what they described.`,
     `   - search_catalog returns a "confident" flag. If it's false, the catalog has no strong match — do NOT propose a guess. Briefly tell the inspector you're not sure that's in the catalog and ask them to rephrase or describe it differently.`,
     `2. Only ask a clarifying question if genuinely ambiguous (e.g. which of two distinct items). One short question, then proceed.`,
-    `3. You need a quantity. If they stated it, use it; if not, ask once, naming the unit (e.g. "How many linear feet?").`,
+    `3. You need a quantity. If they stated it, use it; if not, ask once, naming the unit (e.g. "How many linear feet?"). EXCEPTION: in the "Whole House" room, items measured in SF (square feet) are auto-filled with the property's square footage — do NOT ask for a square-foot quantity there, just propose the line (quantity 1 is fine; the app replaces it with the property SF).`,
     `4. When you have a code and quantity AND the match is confident, call propose_line. The app adds the line automatically and announces it — you do NOT need the inspector to say yes first, and you must NOT claim you added it in your own words. If the match is not confident (see step 1), ask first instead of proposing.`,
     ``,
     `EDITING an existing line (e.g. "make that 50% tenant", "change the paint line to PPW", "that should be 3 not 1"):`,

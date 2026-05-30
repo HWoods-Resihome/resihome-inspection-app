@@ -58,6 +58,12 @@ const AFFIRMATIVE = /^((yes|yep|yeah|yup|sure|okay|ok|correct|confirm|perfect|go
 // Undo phrases that remove the most recently added line.
 const UNDO = /\b(undo|scratch that|(remove|delete|cancel|drop)\b.{0,12}\b(line|one|item|that|last)|take that (off|out)|never ?mind that)\b/i;
 
+// "I'm done" phrases — close the loop: stop listening, don't call the agent,
+// don't reply. Covers a bare "no", "nope", "that's it", "I'm done", "close",
+// "stop", "nothing", "all set", etc. Kept tight so it doesn't swallow real
+// requests (e.g. "no, make it 50 percent" still goes to the agent).
+const DONE = /^(no|nope|nah|no thanks?|that'?s (it|all)|i'?m (done|good|all set)|all set|all done|done|close|stop|cancel|nothing( else)?|that'?ll do|we'?re good|good for now)[.!]?$/i;
+
 // Minimal typing for the vendor-prefixed SpeechRecognition (webkit on most
 // mobile webviews). We feature-detect at runtime.
 function getRecognition(): any | null {
@@ -119,7 +125,10 @@ function speak(
     }
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(naturalizeForSpeech(text));
-    u.rate = 1.3;
+    // Mobile TTS voices read faster at the same rate value than desktop voices,
+    // so use a gentler 1.2x on mobile and 1.3x on desktop.
+    const isMobileUA = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    u.rate = isMobileUA ? 1.2 : 1.3;
     u.onstart = () => { onSpeakingChange?.(true); };
     u.onend = () => {
       finish();
@@ -173,6 +182,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   // Holds the latest startListening so TTS-onend can trigger it without stale closures.
   const startListeningRef = useRef<() => void>(() => {});
+  const stopListeningRef = useRef<() => void>(() => {});
   // Synchronous access to the pending proposal (for the affirmative intercept).
   const pendingRef = useRef<Pending | null>(null);
   const commitPendingRef = useRef<() => void>(() => {});
@@ -371,6 +381,20 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     (text: string) => {
       const t = text.trim();
       if (!t) return;
+      // "No" / "close" / "that's it" / "stop" — the inspector is done. Stop
+      // listening, acknowledge briefly, and DON'T call the agent (so it can't
+      // get confused trying to interpret "no" as a request). Checked first so a
+      // bare "no" closes out; compound replies like "no, make it 50%" don't
+      // match this anchored pattern and still go to the agent.
+      if (DONE.test(t)) {
+        stopListeningRef.current();
+        setMessages((m) => [...m, { role: 'user', content: t }]);
+        // A short, final acknowledgment. No mic restart.
+        const msg = 'Okay.';
+        setMessages((m) => [...m, { role: 'assistant', content: msg }]);
+        speak(msg, () => { /* no restart — we're done */ }, 0, (sp) => { speakingRef.current = sp; });
+        return;
+      }
       // "Undo" / "remove that last line" — remove the most recent voice-added
       // line without round-tripping the agent.
       if (UNDO.test(t) && lastAddedRef.current && onRemoveLine) {
@@ -447,12 +471,20 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       // Echo guard: while the assistant is still speaking, any result is almost
       // certainly the mic picking up the AI's own voice — discard it entirely.
       if (speakingRef.current) return;
-      // Accumulate finalized chunks; any result (interim or final) means the
-      // inspector is still talking, so reset the silence countdown.
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      // Rebuild the full final transcript from ALL final results every time,
+      // rather than appending incrementally. Some engines (Android) deliver
+      // ev.results as a cumulative list and re-fire overlapping events; appending
+      // duplicated chunks ("hey hey hey whole house..."). Rebuilding is
+      // idempotent and immune to that.
+      let finalText = '';
+      for (let i = 0; i < ev.results.length; i++) {
         const r = ev.results[i];
-        if (r.isFinal) finalTranscriptRef.current += (finalTranscriptRef.current ? ' ' : '') + (r[0]?.transcript || '').trim();
+        if (r.isFinal) {
+          const chunk = (r[0]?.transcript || '').trim();
+          if (chunk) finalText += (finalText ? ' ' : '') + chunk;
+        }
       }
+      finalTranscriptRef.current = finalText;
       clearSilence();
       // Wait for a longer pause before deciding the inspector is done.
       silenceTimerRef.current = setTimeout(finalize, SILENCE_MS);
@@ -521,6 +553,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   // Keep the ref pointing at the latest startListening so TTS-onend (which
   // captures an older closure) always calls the current one.
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
+  useEffect(() => { stopListeningRef.current = stopListening; }, [stopListening]);
 
   // Speak a reply, then open the mic once speech has FULLY finished. We no
   // longer open early — it caused echo and timing issues. The speaking-state

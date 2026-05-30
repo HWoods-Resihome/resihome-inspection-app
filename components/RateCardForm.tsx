@@ -224,8 +224,39 @@ export function RateCardForm(props: RateCardFormProps) {
     // Defer so the expand has applied before we measure/scroll.
     setTimeout(() => {
       const el = sectionRefs.current[sectionId];
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (!el) return;
+      // Scroll so the section sits just BELOW the sticky totals header (so its
+      // top isn't tucked behind it). Manual offset scroll rather than
+      // scrollIntoView, which would hide the top under the sticky bar.
+      const STICKY_OFFSET = 64; // sticky totals header height + a little air
+      const rect = el.getBoundingClientRect();
+      const top = window.scrollY + rect.top - STICKY_OFFSET;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }, 60);
+  }, []);
+
+  // After a voice add/edit, make sure the affected section is on-screen. Unlike
+  // navigateToSection (top-align), this only scrolls if the section's content is
+  // hidden behind the footer/dialogue at the bottom, so it doesn't yank the view
+  // when the inspector is already looking at it. The tall bottom spacer makes
+  // room for even the last section to scroll up.
+  const revealSection = useCallback((sectionId: string) => {
+    setExpanded((e) => ({ ...e, [sectionId]: true }));
+    setTimeout(() => {
+      const el = sectionRefs.current[sectionId];
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      // Footer (~64px) + open assistant panel can cover the bottom ~340px.
+      const bottomObstruction = 340;
+      const viewportH = window.innerHeight;
+      const STICKY_OFFSET = 64;
+      // If the section's bottom is hidden behind the panel/footer, or its top is
+      // under the sticky header, scroll it to just below the sticky header.
+      if (rect.bottom > viewportH - bottomObstruction || rect.top < STICKY_OFFSET) {
+        const top = window.scrollY + rect.top - STICKY_OFFSET;
+        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      }
+    }, 80);
   }, []);
   // form mounts, so the FIRST "add line item" click is instant instead of
   // waiting on the (large) catalog fetch. Fire-and-forget; ensureDataLoaded
@@ -451,6 +482,21 @@ export function RateCardForm(props: RateCardFormProps) {
     const targetSection = sections.find((s) => s.id === sectionId);
     if (targetSection) {
       line = { ...line, section: targetSection.label, location: targetSection.location };
+    }
+    // Whole House + SF unit: default the quantity to the property's square
+    // footage. Only when the quantity is still the default (1) so an explicitly
+    // entered quantity is respected.
+    if (
+      targetSection &&
+      /whole\s*house/i.test(targetSection.label) &&
+      props.squareFootage != null &&
+      props.squareFootage > 0 &&
+      (line.quantity == null || line.quantity === 1)
+    ) {
+      const item = catalog.find((c) => c.lineItemCode === line.lineItemCode);
+      if (item && /^sf$/i.test((item.laborMeas || '').trim())) {
+        line = { ...line, quantity: props.squareFootage };
+      }
     }
     // Optimistic update — push into local state immediately so the UI reflects
     // the change even before the network round-trip.
@@ -1356,8 +1402,11 @@ export function RateCardForm(props: RateCardFormProps) {
         })}
       </div>
 
-      {/* Spacer so the floating footer doesn't cover the last section. */}
-      <div className="h-24 md:h-20" />
+      {/* Spacer so the floating footer doesn't cover the last section AND so
+          the last section can always scroll up to the top of the viewport when
+          the assistant auto-navigates to it (otherwise a line added to the very
+          bottom section stays pinned near the footer). Roughly a viewport tall. */}
+      <div className="h-[85vh]" />
 
       {/* Floating footer — visible on all screen sizes, pinned to the bottom of
           the viewport so the inspector can save/submit/cancel from anywhere.
@@ -1390,9 +1439,9 @@ export function RateCardForm(props: RateCardFormProps) {
                     disabled={dataLoading}
                     currentLines={linesBySection[currentSectionId] || []}
                     catalog={catalog}
-                    onAddLine={(line) => handleSaveLineForSection(currentSectionId, line)}
+                    onAddLine={(line) => { handleSaveLineForSection(currentSectionId, line); revealSection(currentSectionId); }}
                     onRemoveLine={(externalId) => handleDeleteLine(currentSectionId, externalId)}
-                    onAddLineTo={(sectionId, line) => handleSaveLineForSection(sectionId, line)}
+                    onAddLineTo={(sectionId, line) => { handleSaveLineForSection(sectionId, line); revealSection(sectionId); }}
                     onRemoveLineFrom={(sectionId, externalId) => handleDeleteLine(sectionId, externalId)}
                     linesBySection={linesBySection}
                   />
@@ -1642,23 +1691,9 @@ function TerminalActions(props: {
   voiceSlot?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <div className="shrink-0">
-        {!props.readOnly && props.showCancelInspection && (
-          <button
-            type="button"
-            onClick={props.onCancelInspection}
-            className="px-2.5 sm:px-4 py-2 text-xs sm:text-sm border border-red-300 text-red-700 rounded hover:bg-red-50 whitespace-nowrap"
-          >
-            Cancel
-          </button>
-        )}
-      </div>
-      {/* Voice assistant mic — centered between Cancel and Save/Submit. */}
-      {props.voiceSlot && (
-        <div className="flex-1 flex justify-center min-w-0">{props.voiceSlot}</div>
-      )}
-      <div className="flex items-center gap-2 shrink-0">
+    <div className="flex items-center gap-2">
+      {/* Left: Save & Close */}
+      <div className="flex-1 flex justify-start min-w-0">
         <button
           type="button"
           onClick={props.onSaveAndClose}
@@ -1666,6 +1701,12 @@ function TerminalActions(props: {
         >
           Save &amp; Close
         </button>
+      </div>
+      {/* Center: voice assistant mic — dead center because the left and right
+          flex containers are equal-weight. */}
+      <div className="shrink-0 flex justify-center">{props.voiceSlot}</div>
+      {/* Right: Submit / Finalize */}
+      <div className="flex-1 flex justify-end min-w-0">
         <button
           type="button"
           onClick={props.onSubmit}
