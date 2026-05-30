@@ -30,6 +30,21 @@ function effectiveDate(i: InspectionSummary): string {
   return raw.slice(0, 10);
 }
 
+// Split the stored address snapshot into two display lines:
+//   line 1: street address (everything before the first comma)
+//   line 2: "City, State, Zip" (everything after the first comma)
+// The snapshot is composed as "Street, City, State, Zip". If there's no comma
+// (e.g. a bare name fallback), the whole thing goes on line 1 and line 2 is empty.
+function splitAddress(snapshot: string): { street: string; locality: string } {
+  const s = (snapshot || '').trim();
+  const comma = s.indexOf(',');
+  if (comma < 0) return { street: s, locality: '' };
+  return {
+    street: s.slice(0, comma).trim(),
+    locality: s.slice(comma + 1).trim(),
+  };
+}
+
 // Pretty template type: "pm_scope_inspection" -> "PM Scope"
 // Known templates use a canonical short label; unknown ones fall back to the
 // generated form. Keeps acronyms (QC) and hyphenation (Re-Inspect) correct.
@@ -72,12 +87,21 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
   // total_questions_answered is set at submit, so it's only meaningful for Completed/In Progress.
   const hasProgress = i.totalQuestionsAnswered != null && i.totalQuestionsAnswered > 0;
 
+  const { street, locality } = splitAddress(i.propertyAddressSnapshot || i.inspectionName);
+
   const inner = (
     <>
       <div className="flex items-start justify-between gap-3 mb-1.5">
-        <h3 className="font-heading font-bold text-base text-ink flex-1 break-words leading-snug">
-          {i.propertyAddressSnapshot || i.inspectionName}
-        </h3>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-heading font-bold text-base text-ink break-words leading-snug">
+            {street}
+          </h3>
+          {locality && (
+            <p className="font-heading text-sm text-gray-600 break-words leading-snug mt-0.5">
+              {locality}
+            </p>
+          )}
+        </div>
         <div className="shrink-0">
           <StatusBadge status={i.status} />
         </div>
