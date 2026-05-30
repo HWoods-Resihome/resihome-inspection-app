@@ -1266,9 +1266,9 @@ export function RateCardForm(props: RateCardFormProps) {
 
                   {/* Lines table */}
                   {(lines.length > 0 || pendingNewBySection[s.id]) ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50 border-b border-gray-200">
+                    <div className={isMobile ? '' : 'overflow-x-auto'}>
+                      <table className={`w-full text-sm ${isMobile ? 'table-fixed' : ''}`}>
+                        <thead className={`bg-gray-50 border-b border-gray-200 ${isMobile ? 'hidden' : ''}`}>
                           <tr className="text-xs text-gray-600 uppercase tracking-wide">
                             <th className="text-center px-3 py-2 whitespace-nowrap">Category</th>
                             <th className="text-center px-3 py-2 whitespace-nowrap">Sub</th>

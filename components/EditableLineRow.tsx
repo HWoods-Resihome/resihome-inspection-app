@@ -362,6 +362,7 @@ export function EditableLineRow(props: Props) {
         item={selectedItem}
         calc={calc}
         readOnly={readOnly}
+        mobile={mobile}
         onEnterEdit={() => !readOnly && setIsEditing(true)}
         onDelete={onDelete}
         onSaveDescription={(text) => {
@@ -739,12 +740,13 @@ interface ViewRowProps {
   item: RateCardLineItem;
   calc: ReturnType<typeof calculateLine> | null;
   readOnly?: boolean;
+  mobile?: boolean;
   onEnterEdit: () => void;
   onDelete: () => void;
   onSaveDescription: (text: string) => void;
 }
 
-function ViewRow({ line, item, calc, readOnly, onEnterEdit, onDelete, onSaveDescription }: ViewRowProps) {
+function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, onSaveDescription }: ViewRowProps) {
   const [showFull, setShowFull] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState('');
@@ -781,6 +783,75 @@ function ViewRow({ line, item, calc, readOnly, onEnterEdit, onDelete, onSaveDesc
   function cancelDesc() {
     setEditingDesc(false);
     setDescDraft('');
+  }
+
+  // -------------------------------------------------------------------
+  // MOBILE: compact card (no horizontal scroll). Details stacked on the
+  // left, Vendor/Client/Tenant $ as right-aligned mini-columns. Tapping the
+  // card enters edit mode (same as the desktop row). Rendered inside a
+  // full-width <td> so the surrounding <table> stays valid.
+  // -------------------------------------------------------------------
+  if (mobile) {
+    const money2 = (n: number) => `$${formatMoney(roundMoney(n))}`;
+    const subParts = [item.category, item.subcategory].filter(Boolean).join(' · ');
+    const qtyUnit = `${line.quantity} ${item.laborMeas}`.trim();
+    return (
+      <tr>
+        <td colSpan={12} className="p-0">
+          <div
+            onClick={readOnly || editingDesc ? undefined : onEnterEdit}
+            className={`flex gap-2.5 border border-gray-200 rounded-lg px-3 py-2.5 mb-2 bg-white ${readOnly || editingDesc ? '' : 'active:bg-gray-50 cursor-pointer'}`}
+          >
+            {/* Left: description + details */}
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-ink leading-snug">{shortDescription}</div>
+              {/* Full subtext under the short description */}
+              {fullDescription && fullDescription !== shortDescription && (
+                <div className="text-xs text-gray-500 mt-0.5 leading-snug">
+                  {showFull ? fullDescription : truncated}
+                  {isTruncated && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setShowFull((v) => !v); }}
+                      className="ml-1 text-brand underline"
+                    >
+                      {showFull ? 'less' : 'more'}
+                    </button>
+                  )}
+                </div>
+              )}
+              <div className="text-xs text-gray-500 mt-0.5">{subParts}{subParts ? ' · ' : ''}{qtyUnit}</div>
+              <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                {/* Vendor-only chip (no tenant % here) */}
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold max-w-[60%] truncate ${pill.bg} ${pill.text} ${pill.border || ''}`}
+                  title={line.assignedTo}
+                >
+                  {line.assignedTo}
+                </span>
+                {line.note && <span className="text-[11px] italic text-gray-600 truncate">📝 {line.note}</span>}
+                {calc?.isCustomPriced && <span className="text-[11px] font-semibold text-yellow-700">⚡ Custom</span>}
+              </div>
+            </div>
+            {/* Right: Vendor / Client / Tenant $ columns */}
+            <div className="flex gap-3 text-right border-l border-gray-100 pl-3 shrink-0">
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-gray-400">Vendor</div>
+                <div className="text-[13px] text-gray-900 mt-0.5 whitespace-nowrap">{calc ? money2(calc.vendorCost) : '…'}</div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-gray-400">Client</div>
+                <div className="text-[13px] text-gray-900 mt-0.5 whitespace-nowrap">{calc ? money2(calc.clientCost) : '…'}</div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-gray-400">Tenant</div>
+                <div className="text-[13px] font-semibold text-brand mt-0.5 whitespace-nowrap">{calc ? money2(calc.tenantCost) : '…'}</div>
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>
+    );
   }
 
   return (
