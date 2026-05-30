@@ -29,7 +29,12 @@ import type { RateCardLineItem, RateCardLineInput } from '@/lib/types';
 export const config = { api: { bodyParser: { sizeLimit: '1mb' } } };
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-opus-4-8';
+// Two-model split: the smart model is used when the agent must reason about
+// catalog matching (a turn that calls search_catalog); the fast model handles
+// simple clarify turns (e.g. "how many linear feet?"). This keeps the common,
+// chatty turns snappy without sacrificing match quality.
+const MODEL_SMART = 'claude-opus-4-8';
+const MODEL_FAST = 'claude-haiku-4-5-20251001';
 const MAX_TOOL_ROUNDS = 4; // safety cap on tool loops per turn
 
 interface ClientMessage { role: 'user' | 'assistant'; content: string; }
@@ -49,21 +54,21 @@ function anthropicKey(): string {
 function systemPrompt(section: string, location: string): string {
   const loc = location || section;
   return [
-    `You help a property inspector add Scope rate-card line items by voice for the "${loc}" area of a home.`,
-    `Your job: turn what the inspector says into ONE rate-card line item at a time.`,
+    `You help a property inspector add Scope rate-card line items by voice for the "${loc}" area of a home. Speed matters — keep the inspector moving.`,
+    `Your job: turn what the inspector says into ONE rate-card line item at a time, with as few questions as possible.`,
+    ``,
+    `Defaults (use these silently unless the inspector says otherwise):`,
+    `  - Vendor: "Vendor 1".`,
+    `  - Tenant chargeback: 100%.`,
+    `Do NOT ask about vendor or tenant percent. Only use a different value if the inspector explicitly states one (e.g. "assign to PPW", "50 percent tenant").`,
     ``,
     `Steps:`,
-    `1. Use search_catalog to find the most appropriate catalog line item for what they described.`,
-    `2. If several plausibly match, ask ONE short clarifying question to pick the right one.`,
-    `3. Before proposing, you MUST have: the line item code, a quantity (a number), the assigned vendor, and the tenant chargeback percent.`,
-    `   - Ask for any missing field, ONE question at a time, in plain language.`,
-    `   - The quantity unit is the catalog item's unit of measure (EA, LF, SF, HR). Mention the unit when you ask (e.g. "How many linear feet?").`,
-    `   - Vendor MUST be one of: ${VENDORS.join(', ')}. If unclear, ask; suggest "Internal Resolution" as the common default.`,
-    `   - Tenant chargeback percent is 0-100 in steps of 5. If the inspector doesn't say, ask.`,
-    `4. When you have all fields, call propose_line with them. Do not guess values you weren't given.`,
+    `1. Use search_catalog to find the line item that best matches what they described.`,
+    `2. If the top candidate clearly matches, go with it. Only ask a clarifying question if genuinely ambiguous between distinct options (e.g. repair vs replace) — one short question, then proceed.`,
+    `3. You need a quantity (a number in the item's unit of measure). If the inspector already stated it ("120 feet"), use it. If not, ask ONE short question naming the unit, e.g. "How many linear feet?".`,
+    `4. As soon as you have the line item code and a quantity, call propose_line — applying the Vendor 1 / 100% defaults (or any values the inspector gave).`,
     ``,
-    `Keep replies short and spoken-friendly — one question or one confirmation, no lists.`,
-    `Never invent a line item code; only use codes returned by search_catalog.`,
+    `Keep replies very short and spoken-friendly — one question, no lists, no preamble. Never invent a line item code; only use codes returned by search_catalog.`,
   ].join('\n');
 }
 
@@ -92,17 +97,17 @@ function tools() {
     },
     {
       name: 'propose_line',
-      description: 'Propose a complete line item to add, once you have the code, quantity, vendor, and tenant percent. This shows the inspector a draft to confirm — it does not save.',
+      description: 'Propose a complete line item to add, once you have the code and quantity. Vendor and tenant percent are optional — they default to "Vendor 1" and 100% unless the inspector stated otherwise. This shows the inspector a draft to confirm — it does not save.',
       input_schema: {
         type: 'object',
         properties: {
           code: { type: 'string', description: 'Catalog line item code (from search_catalog).' },
           quantity: { type: 'number', description: 'Quantity in the item\'s unit of measure.' },
-          vendor: { type: 'string', description: `Assigned vendor; one of: ${VENDORS.join(', ')}.` },
-          tenantBillBackPercent: { type: 'number', description: 'Tenant chargeback percent, 0-100 in steps of 5.' },
+          vendor: { type: 'string', description: `Assigned vendor; one of: ${VENDORS.join(', ')}. Omit to use the default "Vendor 1".` },
+          tenantBillBackPercent: { type: 'number', description: 'Tenant chargeback percent, 0-100 in steps of 5. Omit to use the default 100.' },
           note: { type: 'string', description: 'Optional short note for the line.' },
         },
-        required: ['code', 'quantity', 'vendor', 'tenantBillBackPercent'],
+        required: ['code', 'quantity'],
       },
     },
   ];
@@ -130,7 +135,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const system = systemPrompt(body.section || '', body.location || '');
 
+    // Model selection: use the smart model while the agent is still reasoning
+    // about which catalog item to pick (the first round, and any round right
+    // after a search where it interprets candidates). Once matching is settled,
+    // simple clarify turns use the fast model. We bias toward smart on round 0
+    // (the match decision) and switch to fast only for follow-up clarify rounds
+    // that didn't involve a fresh search.
+    let usedSearchThisTurn = false;
+
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      // Round 0 is the match decision -> smart. Later rounds: smart if we just
+      // searched (interpreting candidates), fast otherwise (plain clarify).
+      const model = round === 0 || usedSearchThisTurn ? MODEL_SMART : MODEL_FAST;
       const resp = await fetch(ANTHROPIC_URL, {
         method: 'POST',
         headers: {
@@ -139,7 +155,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: MODEL,
+          model,
           max_tokens: 1024,
           system,
           tools: tools(),
@@ -157,9 +173,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const textBlocks = content.filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim();
 
       // No tool calls -> the assistant is asking a question / replying.
+      // awaitingReply=true tells the client to auto-restart the mic (the AI
+      // asked something and is waiting on the inspector).
       if (toolUses.length === 0) {
-        return res.status(200).json({ type: 'question', text: textBlocks || 'Could you tell me more?' });
+        return res.status(200).json({
+          type: 'question',
+          text: textBlocks || 'Could you tell me more?',
+          awaitingReply: true,
+        });
       }
+
+      // Reset per-round; set below if a search runs this round.
+      usedSearchThisTurn = false;
 
       // Append the assistant turn (with tool_use) to history, then resolve tools.
       messages.push({ role: 'assistant', content });
@@ -167,6 +192,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       for (const tu of toolUses) {
         if (tu.name === 'search_catalog') {
+          usedSearchThisTurn = true;
           const q = String(tu.input?.query || '');
           const hint = tu.input?.categoryHint ? String(tu.input.categoryHint) : undefined;
           const matches = await matchCatalog(q, catalog, { topK: 10, categoryHint: hint });
@@ -202,12 +228,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             });
             continue;
           }
-          // Validate + clamp the agent's values against our real constraints.
+          // Apply the streamlined defaults: Vendor 1 / 100% tenant unless the
+          // inspector stated otherwise. Validate + clamp against real constraints.
           const qty = Number(tu.input?.quantity);
-          let vendor = String(tu.input?.vendor || '');
-          if (!VENDORS.includes(vendor)) vendor = VENDORS[0];
-          let pct = Number(tu.input?.tenantBillBackPercent);
-          if (!isFinite(pct)) pct = 0;
+          let vendor = tu.input?.vendor ? String(tu.input.vendor) : 'Vendor 1';
+          if (!VENDORS.includes(vendor)) vendor = 'Vendor 1';
+          let pct = tu.input?.tenantBillBackPercent != null ? Number(tu.input.tenantBillBackPercent) : 100;
+          if (!isFinite(pct)) pct = 100;
           pct = Math.max(0, Math.min(100, Math.round(pct / 5) * 5));
           if (!isFinite(qty) || qty < 0) {
             toolResults.push({
@@ -232,11 +259,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             photoUrls: [],
           };
           // Return the proposal for the client to show as a draft + confirm.
+          // awaitingReply=false: a line was matched, not a question — the mic
+          // should NOT auto-restart (inspector confirms, then chooses to continue).
           return res.status(200).json({
             type: 'proposal',
             line,
             summary: lineToSummary(item, qty, vendor, pct),
             assistantText: textBlocks || undefined,
+            awaitingReply: false,
           });
         } else {
           toolResults.push({

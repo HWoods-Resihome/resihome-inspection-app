@@ -40,6 +40,26 @@ function getRecognition(): any | null {
   return r;
 }
 
+// Speak text aloud via the browser's built-in speechSynthesis (free, no API,
+// works in the mobile webview). Calls onDone when finished (or immediately if
+// TTS is unavailable) so the caller can chain the mic auto-restart.
+function speak(text: string, onDone: () => void) {
+  try {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window) || !text) {
+      onDone();
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05;
+    u.onend = () => onDone();
+    u.onerror = () => onDone();
+    window.speechSynthesis.speak(u);
+  } catch {
+    onDone();
+  }
+}
+
 export function VoiceLineAssistant({ section, location, region, onAddLine, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const [supported, setSupported] = useState(true);
@@ -50,6 +70,9 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
   const [error, setError] = useState<string | null>(null);
   const [typed, setTyped] = useState('');
   const recogRef = useRef<any>(null);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  // Holds the latest startListening so TTS-onend can trigger it without stale closures.
+  const startListeningRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     setSupported(getRecognition() !== null);
@@ -70,13 +93,22 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
 
         if (data.type === 'proposal') {
           setProposal({ line: data.line, summary: data.summary });
-          // Surface any assistant preamble as a message too.
+          // Surface + speak any assistant preamble. A proposal does NOT
+          // auto-restart the mic (inspector confirms first).
+          const say = data.assistantText || data.summary;
           if (data.assistantText) {
             setMessages((m) => [...m, { role: 'assistant', content: data.assistantText }]);
           }
+          speak(say, () => { /* no auto-restart on a proposal */ });
         } else {
-          // 'question' or 'message' — show as an assistant turn.
-          setMessages((m) => [...m, { role: 'assistant', content: data.text }]);
+          // 'question' or 'message' — show + speak it.
+          const text = data.text || '';
+          setMessages((m) => [...m, { role: 'assistant', content: text }]);
+          speak(text, () => {
+            // Auto-restart the mic only when the AI asked a question and is
+            // waiting on the inspector (less clicks, hands-free).
+            if (data.awaitingReply) startListeningRef.current();
+          });
         }
       } catch (e: any) {
         setError(String(e?.message || e));
@@ -101,6 +133,7 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
 
   const startListening = useCallback(() => {
     setError(null);
+    try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
     const recog = getRecognition();
     if (!recog) { setSupported(false); return; }
     recogRef.current = recog;
@@ -128,6 +161,19 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
     try { recogRef.current?.stop(); } catch { /* noop */ }
     setListening(false);
   }, []);
+
+  // Keep the ref pointing at the latest startListening so TTS-onend (which
+  // captures an older closure) always calls the current one.
+  useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
+
+  // Auto-scroll the transcript to the newest message / proposal.
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, proposal]);
+
+  // Stop any in-progress speech if the panel unmounts.
+  useEffect(() => () => { try { window.speechSynthesis?.cancel(); } catch { /* noop */ } }, []);
 
   function confirmProposal() {
     if (!proposal) return;
@@ -179,37 +225,40 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
         </p>
       )}
 
-      {/* Transcript */}
-      {messages.length > 0 && (
-        <div className="space-y-1.5 mb-2 max-h-44 overflow-y-auto">
-          {messages.map((m, i) => (
-            <div key={i} className={m.role === 'user' ? 'text-right' : 'text-left'}>
-              <span className={
-                'inline-block px-2.5 py-1 rounded-lg text-sm ' +
-                (m.role === 'user' ? 'bg-brand text-white' : 'bg-white border border-gray-200 text-ink')
-              }>
-                {m.content}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Draft proposal — confirm before saving */}
-      {proposal && (
-        <div className="rounded-md border border-teal-300 bg-teal-50 p-2.5 mb-2">
-          <div className="text-xs font-heading font-semibold text-teal-800 mb-1">Add this line?</div>
-          <div className="text-sm text-ink mb-2">{proposal.summary}</div>
-          <div className="flex gap-2">
-            <button type="button" onClick={confirmProposal}
-              className="px-3 py-1 text-sm bg-teal-600 text-white rounded hover:bg-teal-700">
-              Add it
-            </button>
-            <button type="button" onClick={rejectProposal}
-              className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100">
-              No
-            </button>
+      {/* Transcript + draft proposal share one scroll region so auto-scroll
+          reaches whichever is newest. */}
+      {(messages.length > 0 || proposal) && (
+        <div ref={transcriptRef} className="max-h-56 overflow-y-auto mb-2">
+          <div className="space-y-1.5">
+            {messages.map((m, i) => (
+              <div key={i} className={m.role === 'user' ? 'text-right' : 'text-left'}>
+                <span className={
+                  'inline-block px-2.5 py-1 rounded-lg text-sm ' +
+                  (m.role === 'user' ? 'bg-brand text-white' : 'bg-white border border-gray-200 text-ink')
+                }>
+                  {m.content}
+                </span>
+              </div>
+            ))}
           </div>
+
+          {/* Draft proposal — confirm before saving */}
+          {proposal && (
+            <div className="rounded-md border border-teal-300 bg-teal-50 p-2.5 mt-2">
+              <div className="text-xs font-heading font-semibold text-teal-800 mb-1">Add this line?</div>
+              <div className="text-sm text-ink mb-2">{proposal.summary}</div>
+              <div className="flex gap-2">
+                <button type="button" onClick={confirmProposal}
+                  className="px-3 py-1 text-sm bg-teal-600 text-white rounded hover:bg-teal-700">
+                  Add it
+                </button>
+                <button type="button" onClick={rejectProposal}
+                  className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100">
+                  No
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
