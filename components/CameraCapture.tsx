@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppDialog } from '@/components/AppDialog';
+import { PhotoAnnotator } from '@/components/PhotoAnnotator';
 
 /**
  * State of each photo in the capture session.
@@ -148,6 +149,8 @@ export function CameraCapture({
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
   const [busy, setBusy] = useState(false);
+  // Id of the captured photo currently open in the annotator (null = closed).
+  const [annotatingId, setAnnotatingId] = useState<string | null>(null);
   // Flash / torch. Only supported on some devices (typically Android Chrome,
   // back camera). torchSupported gates the button so we don't show a control
   // that does nothing (e.g. iOS Safari, front camera).
@@ -406,6 +409,22 @@ export function CameraCapture({
   }, [busy, items.length, maxPhotos, enqueueFile, addressSnapshot]);
 
   // ----- Per-photo retake/delete -----
+
+  // Save annotations: swap in the marked-up file, show it immediately, and
+  // re-upload (the un-annotated HubSpot file is left orphaned — the inspection
+  // uses the new URL).
+  const handleAnnotated = useCallback((id: string, file: File) => {
+    const newBlobUrl = URL.createObjectURL(file);
+    setItems((prev) => prev.map((it) => {
+      if (it.id !== id) return it;
+      try { URL.revokeObjectURL(it.blobUrl); } catch { /* harmless */ }
+      return { ...it, file, blobUrl: newBlobUrl, status: 'uploading', hubspotUrl: undefined };
+    }));
+    setAnnotatingId(null);
+    uploadPhoto(file)
+      .then((url) => setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'uploaded', hubspotUrl: url } : it))))
+      .catch((err) => setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'failed', error: err?.message || String(err) } : it))));
+  }, [uploadPhoto]);
 
   const deletePhoto = useCallback((id: string) => {
     setItems((prev) => {
@@ -854,7 +873,9 @@ export function CameraCapture({
                 <img
                   src={it.blobUrl}
                   alt=""
-                  className="w-16 h-16 object-cover rounded border border-white/20"
+                  onClick={() => setAnnotatingId(it.id)}
+                  className="w-16 h-16 object-cover rounded border border-white/20 cursor-pointer"
+                  title="Tap to mark up"
                 />
                 {/* Status overlay */}
                 {it.status === 'uploading' && (
@@ -937,8 +958,25 @@ export function CameraCapture({
           <span className="block w-full h-full rounded-full bg-white" />
         </button>
 
-        {/* Spacer to keep the shutter visually centered opposite Phone cam */}
-        <span className="w-11" aria-hidden="true" />
+        {/* Mark/annotate the most recent photo (right of shutter). */}
+        <button
+          type="button"
+          onClick={() => { const last = items[items.length - 1]; if (last) setAnnotatingId(last.id); }}
+          disabled={items.length === 0}
+          className="flex flex-col items-center gap-1 text-white/90 disabled:opacity-30"
+          aria-label="Mark up the last photo"
+          title="Draw on the last photo (arrow, circle, pen)"
+        >
+          <span className="w-11 h-11 rounded-full bg-white/15 flex items-center justify-center">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 19l7-7 3 3-7 7-3-3z" />
+              <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+              <path d="M2 2l7.586 7.586" />
+              <circle cx="11" cy="11" r="2" />
+            </svg>
+          </span>
+          <span className="text-[10px] font-heading">Mark</span>
+        </button>
       </div>
 
       {/* Hidden native camera input (capture opens the OS camera on mobile) */}
@@ -951,6 +989,19 @@ export function CameraCapture({
         className="hidden"
         onChange={(e) => { handleNativeFiles(e.target.files); e.currentTarget.value = ''; }}
       />
+
+      {/* Markup editor for a captured photo */}
+      {annotatingId && (() => {
+        const it = items.find((x) => x.id === annotatingId);
+        if (!it) return null;
+        return (
+          <PhotoAnnotator
+            src={it.blobUrl}
+            onCancel={() => setAnnotatingId(null)}
+            onSave={(file) => handleAnnotated(annotatingId, file)}
+          />
+        );
+      })()}
     </div>
   );
 }
