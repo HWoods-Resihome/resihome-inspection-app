@@ -243,6 +243,19 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   const commitPendingRef = useRef<() => void>(() => {});
   // In-flight agent request, so the inspector can cancel a stuck call.
   const abortRef = useRef<AbortController | null>(null);
+  // Push-to-talk audio capture (fallback for browsers w/o the Web Speech API,
+  // e.g. iOS Safari): record a clip → POST to /api/transcribe → submit the text.
+  const audioRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioMimeRef = useRef<string>('audio/mp4');
+  const [recordingAudio, setRecordingAudio] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  // Release the mic if we unmount mid-recording.
+  useEffect(() => () => {
+    try { audioRecorderRef.current?.state !== 'inactive' && audioRecorderRef.current?.stop(); } catch { /* noop */ }
+    audioStreamRef.current?.getTracks().forEach((t) => t.stop());
+  }, []);
   // True while TTS is actively speaking — used to ignore echo (the recognizer
   // hearing the AI's own voice through the speaker).
   const speakingRef = useRef(false);
@@ -664,15 +677,85 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     setTyped('');
   }
 
+  // ---- Push-to-talk audio capture (browsers without the Web Speech API) -----
+  const pushToTalk = !supported;
+
+  // Bias Whisper toward inspection/construction vocabulary so domain terms
+  // (e.g. "mist match") aren't "corrected" to plausible everyday words.
+  function buildVocabPrompt(): string {
+    const base = 'Property inspection scope notes. Construction terms: mist match, LVP, vinyl plank, '
+      + 'linear feet, square feet, drywall, baseboard, casing, J-channel, GFCI, caulk, grout, fascia, soffit.';
+    const extras = (catalog || []).slice(0, 40).map((c) => c.laborShortDescription).filter(Boolean).join(', ');
+    return (extras ? `${base} Catalog items: ${extras}` : base).slice(0, 780);
+  }
+
+  async function startAudioCapture() {
+    if (recordingAudio || transcribing || disabled) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      const mime = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']
+        .find((m) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported?.(m)) || '';
+      audioMimeRef.current = mime || 'audio/mp4';
+      let rec: MediaRecorder;
+      try { rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream); }
+      catch { rec = new MediaRecorder(stream); }
+      audioChunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) audioChunksRef.current.push(e.data); };
+      rec.onstop = () => { void transcribeAndSubmit(); };
+      audioRecorderRef.current = rec;
+      setError(null);
+      rec.start();
+      setRecordingAudio(true);
+    } catch {
+      setError('Microphone access is needed. Allow it in Safari settings and try again.');
+    }
+  }
+
+  function stopAudioCapture() {
+    const rec = audioRecorderRef.current;
+    if (rec && rec.state !== 'inactive') { try { rec.stop(); } catch { /* noop */ } }
+    setRecordingAudio(false);
+  }
+
+  async function transcribeAndSubmit() {
+    const chunks = audioChunksRef.current; audioChunksRef.current = [];
+    const stream = audioStreamRef.current;
+    if (stream) { stream.getTracks().forEach((t) => t.stop()); audioStreamRef.current = null; }
+    audioRecorderRef.current = null;
+    if (!chunks.length) return;
+    const type = (audioMimeRef.current || 'audio/mp4').split(';')[0];
+    const blob = new Blob(chunks, { type });
+    if (blob.size < 1200) return; // ignore accidental taps
+    setTranscribing(true);
+    try {
+      const base64 = await blobToBase64(blob);
+      const r = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64, mime: type, prompt: buildVocabPrompt() }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) { setError(d?.error || 'Transcription failed.'); return; }
+      const text = String(d?.text || '').trim();
+      if (!text) { setError('Didn’t catch that — try again.'); return; }
+      submitUtterance(text);
+    } catch {
+      setError('Couldn’t transcribe — check your connection and try again.');
+    } finally {
+      setTranscribing(false);
+    }
+  }
+
   // Collapsed: just a mic icon that lives inside the footer. Pressing it opens
-  // the conversation panel above and starts listening.
+  // the conversation panel above and (where supported) starts listening.
   if (!open) {
     return (
       <button
         type="button"
         onClick={() => {
           setOpen(true);
-          setTimeout(() => { startListeningRef.current(); }, 0);
+          if (!pushToTalk) setTimeout(() => { startListeningRef.current(); }, 0);
         }}
         disabled={disabled}
         aria-label="Talk to the Voice Assistant"
@@ -698,9 +781,13 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               </button>
             </div>
 
-      {!supported && (
-        <p className="text-xs text-amber-700 mb-2">
-          Voice input isn&apos;t available in this browser. You can still type a request below.
+      {pushToTalk && (
+        <p className="text-xs text-gray-500 mb-2">
+          {recordingAudio
+            ? 'Listening… release the mic when you’re done.'
+            : transcribing
+              ? 'Transcribing…'
+              : 'Tap and hold the mic below to talk (or type a request).'}
         </p>
       )}
 
@@ -805,28 +892,59 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           re-opens) listening so the inspector can talk again — it does NOT
           close the panel. Closing is only via the Close button in the panel. */}
       <span className="relative inline-flex shrink-0">
-        {/* Expanding ring while listening (classic "live" pulse). */}
-        {listening && (
+        {/* Expanding ring while live (speech recognition OR push-to-talk). */}
+        {(listening || recordingAudio) && (
           <span className="absolute inset-0 rounded-full bg-red-500/60 animate-ping" />
         )}
-        <button
-          type="button"
-          onClick={() => {
-            if (listening) { stopListening(); return; }
-            // Barge-in: cut off any ongoing TTS so the inspector can speak now.
-            try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
-            speakingRef.current = false;
-            startListeningRef.current();
-          }}
-          disabled={(busy || warming) && !listening ? true : disabled}
-          aria-label={listening ? 'Stop listening' : 'Talk to the Voice Assistant'}
-          className={`relative inline-flex items-center justify-center w-11 h-11 rounded-full text-white shadow disabled:opacity-50 transition-transform ${listening ? 'bg-red-600 scale-110 animate-pulse' : 'bg-brand hover:bg-brand-dark ring-2 ring-brand/40'}`}
-        >
-          <MicIcon className="w-5 h-5" />
-        </button>
+        {pushToTalk ? (
+          // iOS Safari (no Web Speech API): press-and-hold to record, release to
+          // transcribe via /api/transcribe, then run the normal line flow.
+          <button
+            type="button"
+            onPointerDown={(e) => { e.preventDefault(); try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* noop */ } void startAudioCapture(); }}
+            onPointerUp={(e) => { e.preventDefault(); stopAudioCapture(); }}
+            onPointerCancel={() => stopAudioCapture()}
+            onContextMenu={(e) => e.preventDefault()}
+            disabled={transcribing || disabled}
+            style={{ touchAction: 'none' }}
+            aria-label={recordingAudio ? 'Release to send' : 'Hold to talk'}
+            className={`relative inline-flex items-center justify-center w-11 h-11 rounded-full text-white shadow disabled:opacity-50 transition-transform select-none ${recordingAudio ? 'bg-red-600 scale-110' : 'bg-brand hover:bg-brand-dark ring-2 ring-brand/40'}`}
+          >
+            {transcribing ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <MicIcon className="w-5 h-5" />}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              if (listening) { stopListening(); return; }
+              // Barge-in: cut off any ongoing TTS so the inspector can speak now.
+              try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
+              speakingRef.current = false;
+              startListeningRef.current();
+            }}
+            disabled={(busy || warming) && !listening ? true : disabled}
+            aria-label={listening ? 'Stop listening' : 'Talk to the Voice Assistant'}
+            className={`relative inline-flex items-center justify-center w-11 h-11 rounded-full text-white shadow disabled:opacity-50 transition-transform ${listening ? 'bg-red-600 scale-110 animate-pulse' : 'bg-brand hover:bg-brand-dark ring-2 ring-brand/40'}`}
+          >
+            <MicIcon className="w-5 h-5" />
+          </button>
+        )}
       </span>
     </>
   );
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 function SpinnerIcon({ className }: { className?: string }) {
