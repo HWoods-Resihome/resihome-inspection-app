@@ -368,11 +368,20 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           const answers = data.answersBySection[sectionName] || [];
           const sectionPhotos = data.sectionPhotosBy[sectionName] || [];
           return (
-            <View key={sectionName} wrap break={false}>
-              <View style={styles.sectionHeader}>
-                <Text>{sectionName}</Text>
-              </View>
-              <View style={styles.sectionContent}>
+            <View key={sectionName} wrap>
+              {/*
+                Section title + section photos render as ONE non-splittable
+                block (wrap={false}). Without this, react-pdf can place the
+                title near the bottom of a page and let the photo grid spill
+                past the page boundary into the fixed footer (the overhang bug).
+                Keeping them together forces the whole block to the next page
+                when it doesn't fit. The Q&A rows below still wrap normally.
+                Mirrors PdfSectionHeader in lib/pdfShared.tsx.
+              */}
+              <View wrap={false}>
+                <View style={styles.sectionHeader}>
+                  <Text>{sectionName}</Text>
+                </View>
                 {/* Section photos FIRST (matches form order) */}
                 {sectionPhotos.length > 0 && (
                   <View style={styles.sectionPhotosBlock}>
@@ -385,6 +394,8 @@ export function InspectionPdf({ data }: { data: PdfData }) {
                     </View>
                   </View>
                 )}
+              </View>
+              <View style={styles.sectionContent}>
                 {answers.map((a, idx) => {
                   const isTriggered = data.triggeredValues.has(a.answerValue);
                   const isLast = idx === answers.length - 1;

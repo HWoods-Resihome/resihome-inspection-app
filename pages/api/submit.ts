@@ -95,8 +95,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       };
       if (a.location) props.location = a.location;
       if (a.note) props.note = a.note;
-      if (a.quantity != null) props.quantity = a.quantity;
-      if (a.assignedTo) props.assigned_to = a.assignedTo;
+      // `quantity` and `assigned_to` are Scope-only concepts. Writing them on
+      // non-Scope templates can 400 the whole batch/create if the property
+      // isn't provisioned for that path. (Scope uses RateCardForm/rate-card-lines,
+      // not this endpoint, so in practice this is never true here — but gate it
+      // correctly rather than writing unconditionally.)
+      if (payload.templateType === 'pm_scope_rate_card') {
+        if (a.quantity != null) props.quantity = a.quantity;
+        if (a.assignedTo) props.assigned_to = a.assignedTo;
+      }
       if (a.photoUrls?.length) {
         props.photo_urls = a.photoUrls.join(';');
         props.photo_count = a.photoUrls.length;

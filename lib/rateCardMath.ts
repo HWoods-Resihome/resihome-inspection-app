@@ -247,7 +247,18 @@ export function calculateLine(
     : defaultAdjustedMaterialCost;
 
   // --- Apply the formula ---
-  const qty = inputs.quantity;
+  // Guard the numeric inputs. A NaN/invalid quantity would otherwise silently
+  // propagate through every total and, because roundMoney(NaN) returns 0, get
+  // stored as a $0 line — a financial-integrity bug that's hard to spot after
+  // the fact. Coerce to a sane number and fail loud on garbage.
+  const rawQty = Number(inputs.quantity);
+  if (!isFinite(rawQty) || rawQty < 0) {
+    throw new Error(
+      `Invalid quantity for line calculation: ${JSON.stringify(inputs.quantity)}. ` +
+      `Quantity must be a non-negative number.`
+    );
+  }
+  const qty = rawQty;
   const laborTotal = catalogItem.laborHours * effectiveLaborRate * qty;
 
   let materialTotal = 0;
@@ -261,7 +272,10 @@ export function calculateLine(
   const computedVendorCost = laborTotal + materialTotal;
   const vendorCost = isCustomVendor ? inputs.customVendorCost! : computedVendorCost;
   const clientCost = vendorCost * MARKUP_MULTIPLIER;
-  const tenantPct = Math.max(0, Math.min(100, inputs.tenantBillBackPercent));
+  // Coerce first: Math.max(0, Math.min(100, NaN)) is NaN, so an invalid percent
+  // would slip through the clamp and zero out tenant_cost. Default to 0.
+  const rawPct = Number(inputs.tenantBillBackPercent);
+  const tenantPct = isFinite(rawPct) ? Math.max(0, Math.min(100, rawPct)) : 0;
   const tenantCost = clientCost * (tenantPct / 100);
 
   return {

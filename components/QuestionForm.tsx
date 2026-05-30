@@ -381,7 +381,10 @@ export function QuestionForm({
     inspectionExternalId,
     disabled: !!readOnly,
     onFirstSave: onFirstEdit,
-    isScope: (templateType as string) === 'pm_scope_inspection',
+    // QuestionForm only ever renders Q&A templates (1099, Community, Vacancy,
+    // RRQC). Scope uses RateCardForm, never this component — so quantity /
+    // assigned_to must never be written to HubSpot from here.
+    isScope: false,
   });
 
   // After mount, hydrate the autosave hook with existing data so it knows

@@ -115,9 +115,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         });
       }
 
+      // Validate numeric inputs up front so a malformed payload is a clean 400
+      // rather than a 500 from the math layer (or, worse, a silently-stored $0
+      // line if the guards were ever removed).
+      const qtyNum = Number(line.quantity);
+      if (!isFinite(qtyNum) || qtyNum < 0) {
+        return res.status(400).json({
+          error: `Invalid quantity for line ${line.lineItemCode}: ${JSON.stringify(line.quantity)}`,
+        });
+      }
+      const pctNum = Number(line.tenantBillBackPercent);
+      if (line.tenantBillBackPercent != null && (!isFinite(pctNum) || pctNum < 0 || pctNum > 100)) {
+        return res.status(400).json({
+          error: `Invalid tenant bill-back % for line ${line.lineItemCode}: ${JSON.stringify(line.tenantBillBackPercent)}`,
+        });
+      }
+
       const calc = calculateLine(catalog, region, regions, {
-        quantity: line.quantity,
-        tenantBillBackPercent: line.tenantBillBackPercent,
+        quantity: qtyNum,
+        tenantBillBackPercent: isFinite(pctNum) ? pctNum : 0,
         customLaborRate: line.customLaborRate ?? null,
         customAdjustedMaterialCost: line.customAdjustedMaterialCost ?? null,
         customVendorCost: line.customVendorCost ?? null,
