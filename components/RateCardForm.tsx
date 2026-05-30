@@ -1539,6 +1539,11 @@ export function RateCardForm(props: RateCardFormProps) {
         {sections.map((s) => {
           const lines = linesBySection[s.id] || [];
           const photos = photosBySection[s.id] || [];
+          // Photos tagged to a line are shown UNDER that line's card and hidden
+          // from the room strip (a visual "move"); the data stays in the section
+          // so the PDF still shows it (with the burned label after finalize).
+          const taggedSet = new Set<string>();
+          for (const l of lines) for (const u of (l.photoUrls || [])) taggedSet.add(u);
           // Sections default to open when they have line items or photos
           // (so the inspector sees their work) but the user can collapse
           // them at any time via the chevron. The `expanded` state is now a
@@ -1646,6 +1651,8 @@ export function RateCardForm(props: RateCardFormProps) {
                     {photos.length > 0 && !photosCollapsed[s.id] && (
                       <div className="flex gap-1.5 overflow-x-auto pb-1 mt-2 -mx-0.5 px-0.5">
                         {photos.map((url, idx) => (
+                          // Tagged photos live on their line card, not the room strip.
+                          taggedSet.has(url) ? null : (
                           <div key={idx} className="relative shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
@@ -1670,6 +1677,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               >&times;</button>
                             )}
                           </div>
+                          )
                         ))}
                       </div>
                     )}
@@ -1708,7 +1716,16 @@ export function RateCardForm(props: RateCardFormProps) {
                               mobile={isMobile}
                               onSave={(updated) => handleSaveLineForSection(s.id, updated)}
                               onDelete={() => handleDeleteLine(s.id, line.externalId)}
-                              onOpenPhoto={(index) => setLightbox({ kind: 'line', sectionId: s.id, externalId: line.externalId, index })}
+                              onOpenPhoto={(index) => {
+                                // Open the unified SECTION viewer (all the room's
+                                // photos, room selector on top, tag/untag on the
+                                // bottom) positioned on the clicked line photo.
+                                const url = (line.photoUrls || [])[index];
+                                const secIdx = (photosBySection[s.id] || []).indexOf(url);
+                                setLightbox(secIdx >= 0
+                                  ? { kind: 'section', sectionId: s.id, index: secIdx }
+                                  : { kind: 'line', sectionId: s.id, externalId: line.externalId, index });
+                              }}
                             />
                           ))}
                           {pendingNewBySection[s.id] && (
