@@ -1321,6 +1321,7 @@ export function RateCardForm(props: RateCardFormProps) {
                             currentLines={lines}
                             catalog={catalog}
                             onAddLine={(line) => handleSaveLineForSection(s.id, line)}
+                            onRemoveLine={(externalId) => handleDeleteLine(s.id, externalId)}
                           />
                         )}
                       </div>

@@ -20,6 +20,8 @@ interface Props {
   // RateCardForm's handleSaveLineForSection, which upserts by externalId — so
   // passing an existing line's externalId edits it in place.
   onAddLine: (line: RateCardLineInput) => void;
+  // Remove a line by externalId (for "undo that" / "remove the last line").
+  onRemoveLine?: (externalId: string) => void;
   // The lines already in this section (so the agent can edit them by voice).
   currentLines?: RateCardLineInput[];
   // Catalog for resolving codes -> descriptions in edit summaries.
@@ -31,8 +33,13 @@ type ChatMsg = { role: 'user' | 'assistant'; content: string };
 
 type Pending = { line: RateCardLineInput; summary: string; spoken: string; action: 'add' | 'edit' };
 
-// Affirmatives that commit a pending proposal when spoken.
-const AFFIRMATIVE = /^(yes|yep|yeah|yup|sure|ok|okay|correct|add it|add|do it|confirm|that'?s right|looks good|perfect|go ahead)\b/i;
+// Affirmatives that commit a pending proposal when spoken. A leading
+// yes/yeah/sure/ok/etc (optionally followed by a short tail) confirms. A bare
+// "add <noun>" is a NEW request, so "add" only counts alone or as "add it/that".
+const AFFIRMATIVE = /^((yes|yep|yeah|yup|sure|okay|ok|correct|confirm|perfect|go ahead|looks good|that'?s right|do it)\b|add(\s+(it|that))?\s*$)/i;
+
+// Undo phrases that remove the most recently added line.
+const UNDO = /\b(undo|scratch that|(remove|delete|cancel|drop)\b.{0,12}\b(line|one|item|that|last)|take that (off|out)|never ?mind that)\b/i;
 
 // Minimal typing for the vendor-prefixed SpeechRecognition (webkit on most
 // mobile webviews). We feature-detect at runtime.
@@ -53,24 +60,58 @@ function getRecognition(): any | null {
 // we run our own timer and only submit once speech has paused this long.
 const SILENCE_MS = 1500;
 
+// Make text read more naturally when spoken: expand unit abbreviations and
+// currency so TTS says "square feet" not "ess eff", "dollars" not "dollar sign".
+function naturalizeForSpeech(text: string): string {
+  let t = text;
+  // Currency: "$1,278.34" -> "1278 dollars and 34 cents" (approx, spoken-friendly)
+  t = t.replace(/\$([\d,]+)(?:\.(\d{2}))?/g, (_m, whole, cents) => {
+    const dollars = whole.replace(/,/g, '');
+    const c = cents && cents !== '00' ? ` and ${Number(cents)} cents` : '';
+    return `${Number(dollars).toLocaleString('en-US')} dollars${c}`;
+  });
+  // Units as standalone tokens (avoid touching words). Order matters.
+  t = t
+    .replace(/\bSF\b/g, 'square feet')
+    .replace(/\bLF\b/g, 'linear feet')
+    .replace(/\bEA\b/g, 'each')
+    .replace(/\bHR\b/g, 'hours')
+    .replace(/\bSY\b/g, 'square yards');
+  return t;
+}
+
 // Speak text aloud via the browser's built-in speechSynthesis (free, no API,
 // works in the mobile webview). Calls onDone when finished. If earlyMs > 0, we
 // fire onDone that many ms BEFORE speech is estimated to end, so the mic can
-// open early and catch a fast reply (with onend as a fallback). onDone runs
-// at most once.
-function speak(text: string, onDone: () => void, earlyMs = 0) {
+// open early. To prevent echo (the mic transcribing the AI's own voice), the
+// caller is told when speech actually STARTS and ENDS via onSpeakingChange, and
+// the recognizer ignores any results received while speaking is true.
+function speak(
+  text: string,
+  onDone: () => void,
+  earlyMs = 0,
+  onSpeakingChange?: (speaking: boolean) => void
+) {
   let done = false;
   const finish = () => { if (done) return; done = true; onDone(); };
   try {
     if (typeof window === 'undefined' || !('speechSynthesis' in window) || !text) {
+      onSpeakingChange?.(false);
       finish();
       return;
     }
     window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
+    const u = new SpeechSynthesisUtterance(naturalizeForSpeech(text));
     u.rate = 1.3;
-    u.onend = () => finish();
-    u.onerror = () => finish();
+    u.onstart = () => { onSpeakingChange?.(true); };
+    u.onend = () => {
+      finish();
+      // Speaker audio can lag slightly; keep the echo guard up a touch longer
+      // so trailing echo after TTS ends isn't captured as input.
+      setTimeout(() => onSpeakingChange?.(false), 400);
+    };
+    u.onerror = () => { onSpeakingChange?.(false); finish(); };
+    onSpeakingChange?.(true);
     window.speechSynthesis.speak(u);
 
     if (earlyMs > 0) {
@@ -84,7 +125,7 @@ function speak(text: string, onDone: () => void, earlyMs = 0) {
   }
 }
 
-export function VoiceLineAssistant({ section, location, region, onAddLine, currentLines, catalog, disabled }: Props) {
+export function VoiceLineAssistant({ section, location, region, onAddLine, onRemoveLine, currentLines, catalog, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const [supported, setSupported] = useState(true);
   const [listening, setListening] = useState(false);
@@ -109,6 +150,13 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
   // Synchronous access to the pending proposal (for the affirmative intercept).
   const pendingRef = useRef<Pending | null>(null);
   const commitPendingRef = useRef<() => void>(() => {});
+  // In-flight agent request, so the inspector can cancel a stuck call.
+  const abortRef = useRef<AbortController | null>(null);
+  // True while TTS is actively speaking — used to ignore echo (the recognizer
+  // hearing the AI's own voice through the speaker).
+  const speakingRef = useRef(false);
+  // externalId + short label of the most recent voice-added line, for "undo".
+  const lastAddedRef = useRef<{ externalId: string; label: string } | null>(null);
 
   useEffect(() => {
     setSupported(getRecognition() !== null);
@@ -136,10 +184,16 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
       setError(null);
       setStreamingText('');
       let accumulated = '';
+      // Abort if the request stalls (flaky field LTE) so the panel never hangs
+      // in "Thinking…" with no way out.
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      const timeout = setTimeout(() => ctrl.abort(), 25000);
       try {
         const r = await fetch('/api/rate-card/voice-assist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: ctrl.signal,
           body: JSON.stringify({
             messages: history,
             section,
@@ -204,17 +258,26 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
         if (finalType === 'error') {
           setError(finalData?.error || 'Something went wrong.');
         } else if (finalType === 'proposal') {
-          // Hold the proposal as PENDING — preview it, ask for confirmation, and
-          // wait for a spoken "yes" / change, or a button tap. Nothing saves yet.
+          // The agent only proposes when the match is confident, so AUTO-ADD it
+          // (no confirm step) and announce it. The line is saved here, and the
+          // CLIENT speaks success only after the save actually happens.
           const line: RateCardLineInput = finalData.line;
-          setPending({ line, summary: finalData.summary, spoken: finalData.spokenSummary || finalData.summary, action: finalData.action === 'edit' ? 'edit' : 'add' });
-          // On screen: full detail (qty, vendor, cost). Spoken: just the short
-          // description + the confirm question — no need to read numbers aloud.
-          const verb = finalData.action === 'edit' ? 'Change to' : 'Add';
-          const spoken = `${verb} ${finalData.spokenSummary || finalData.summary}. Is this what you want, or any changes?`;
-          setMessages((m) => [...m, { role: 'assistant', content: `${finalData.action === 'edit' ? 'Change to' : 'Add this'}: ${finalData.summary}. Is this what you want, or any changes?` }]);
-          // Reopen the mic slightly BEFORE speech ends so a fast reply is caught.
-          speakThenListenRef.current(spoken);
+          const action = finalData.action === 'edit' ? 'edit' : 'add';
+          const spokenLabel = finalData.spokenSummary || finalData.summary;
+          const verb = action === 'edit' ? 'Updated' : 'Added';
+          try {
+            onAddLine(line); // upserts by externalId (new or existing)
+            if (action === 'add') lastAddedRef.current = { externalId: line.externalId, label: spokenLabel };
+            // On screen: full detail. Spoken: short label only.
+            const onScreen = `${verb}: ${finalData.summary}. Any changes or additional items?`;
+            const spoken = `${verb} ${spokenLabel}. Any changes, or additional items?`;
+            setMessages((m) => [...m, { role: 'assistant', content: onScreen }]);
+            speakThenListenRef.current(spoken);
+          } catch (e: any) {
+            const msg = `I couldn't save that line (${String(e?.message || e)}). Try again or add it manually.`;
+            setMessages((m) => [...m, { role: 'assistant', content: msg }]);
+            speak(msg, () => { /* no restart */ }, 0, (sp) => { speakingRef.current = sp; });
+          }
         } else {
           // question or message — the text already streamed; finalize it.
           const text = finalData?.text || accumulated;
@@ -222,13 +285,19 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
           if (finalData?.awaitingReply) {
             speakThenListenRef.current(text);
           } else {
-            speak(text, () => { /* no restart */ });
+            speak(text, () => { /* no restart */ }, 0, (sp) => { speakingRef.current = sp; });
           }
         }
       } catch (e: any) {
         setStreamingText('');
-        setError(String(e?.message || e));
+        if (e?.name === 'AbortError') {
+          setError('That took too long — check your connection and try again, or add the line manually.');
+        } else {
+          setError(String(e?.message || e));
+        }
       } finally {
+        clearTimeout(timeout);
+        abortRef.current = null;
         setBusy(false);
       }
     },
@@ -239,6 +308,24 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
     (text: string) => {
       const t = text.trim();
       if (!t) return;
+      // "Undo" / "remove that last line" — remove the most recent voice-added
+      // line without round-tripping the agent.
+      if (UNDO.test(t) && lastAddedRef.current && onRemoveLine) {
+        const removed = lastAddedRef.current;
+        lastAddedRef.current = null;
+        setMessages((m) => [...m, { role: 'user', content: t }]);
+        try {
+          onRemoveLine(removed.externalId);
+          const msg = `Removed ${removed.label}. Anything else?`;
+          setMessages((m) => [...m, { role: 'assistant', content: msg }]);
+          speakThenListenRef.current(msg);
+        } catch {
+          const msg = `I couldn't remove that — you can delete it from the list. Anything else?`;
+          setMessages((m) => [...m, { role: 'assistant', content: msg }]);
+          speakThenListenRef.current(msg);
+        }
+        return;
+      }
       // If a proposal is pending and the inspector just said "yes"/"add it",
       // commit it directly rather than round-tripping the agent.
       if (pendingRef.current && AFFIRMATIVE.test(t)) {
@@ -250,7 +337,7 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
       setMessages(next);
       void sendToAgent(next);
     },
-    [messages, sendToAgent]
+    [messages, sendToAgent, onRemoveLine]
   );
 
   const startListening = useCallback(() => {
@@ -294,6 +381,9 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
     };
 
     recog.onresult = (ev: any) => {
+      // Echo guard: while the assistant is still speaking, any result is almost
+      // certainly the mic picking up the AI's own voice — discard it entirely.
+      if (speakingRef.current) return;
       // Accumulate finalized chunks; any result (interim or final) means the
       // inspector is still talking, so reset the silence countdown.
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
@@ -322,9 +412,11 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
       listeningRef.current = true;
       setListening(true);
     };
-    // Fires when the recognizer detects the inspector actually speaking — THIS
-    // is when we stop the assistant's voice, not merely when the mic opened.
+    // Fires when the recognizer detects speech. If WE'RE still speaking, it's
+    // almost certainly echo — ignore it. Otherwise it's the inspector, so stop
+    // any remaining TTS so they're not talked over.
     recog.onspeechstart = () => {
+      if (speakingRef.current) return;
       try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
     };
     recog.onend = () => {
@@ -370,7 +462,7 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
   // Speak a reply, then open the mic ~600ms BEFORE the speech finishes so a
   // quick verbal reply isn't missed. startListening cancels any remaining TTS.
   const speakThenListen = useCallback((text: string) => {
-    speak(text, () => { startListeningRef.current(); }, 600);
+    speak(text, () => { startListeningRef.current(); }, 600, (sp) => { speakingRef.current = sp; });
   }, []);
   const speakThenListenRef = useRef(speakThenListen);
   useEffect(() => { speakThenListenRef.current = speakThenListen; }, [speakThenListen]);
@@ -384,6 +476,8 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
     const verb = p.action === 'edit' ? 'Updated' : 'Added';
     try {
       onAddLine(p.line);
+      // Remember adds (not edits) so "undo" can remove the last one.
+      if (p.action === 'add') lastAddedRef.current = { externalId: p.line.externalId, label: p.spoken };
       // On screen: full detail. Spoken: short — "Added [short]. Anything else?"
       const onScreen = `${verb}: ${p.summary}. Anything else for this area?`;
       const spoken = `${verb} ${p.spoken}. Anything else?`;
@@ -392,7 +486,7 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
     } catch (e: any) {
       const msg = `I couldn't save that line (${String(e?.message || e)}). Try again or add it manually.`;
       setMessages((m) => [...m, { role: 'assistant', content: msg }]);
-      speak(msg, () => { /* no restart on failure */ });
+      speak(msg, () => { /* no restart on failure */ }, 0, (sp) => { speakingRef.current = sp; });
     }
   }, [onAddLine]);
 
@@ -534,6 +628,15 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
           disabled={busy || disabled}
           className="flex-1 min-w-0 text-sm border border-gray-300 rounded px-2 py-1.5 bg-white"
         />
+        {busy && (
+          <button
+            type="button"
+            onClick={() => { try { abortRef.current?.abort(); } catch { /* noop */ } }}
+            className="px-2.5 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-100 shrink-0"
+          >
+            Cancel
+          </button>
+        )}
       </div>
 
       {messages.length > 0 && (

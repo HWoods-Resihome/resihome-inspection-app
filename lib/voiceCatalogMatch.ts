@@ -165,28 +165,64 @@ export interface CandidateMatch {
   score: number;
 }
 
-// Embed the utterance and return the top-K most similar catalog items.
-// `categoryHint` (optional) lightly boosts items in a matching category — cheap
-// help for phrases that clearly map to one category (e.g. "gutter ...").
+export interface MatchResult {
+  candidates: CandidateMatch[];
+  topScore: number;       // cosine score of the best match (0..~1)
+  confident: boolean;     // topScore clears the floor
+}
+
+// Cosine score below which we treat the best match as "not confident" — the
+// agent should then double-check with the inspector rather than assume.
+// voyage-3-lite retrieval scores for a good match typically sit well above this.
+const CONFIDENCE_FLOOR = 0.45;
+
+// Embed the utterance and return the top-K most similar catalog items, plus a
+// confidence read on the best match. `categoryHint` (from the agent) and
+// `sectionName` (the room/area) lightly boost on-topic items.
 export async function matchCatalog(
   utterance: string,
   items: RateCardLineItem[],
-  opts: { topK?: number; categoryHint?: string } = {}
-): Promise<CandidateMatch[]> {
+  opts: { topK?: number; categoryHint?: string; sectionName?: string } = {}
+): Promise<MatchResult> {
   const topK = opts.topK ?? 10;
   const cache = await getCatalogEmbeddings(items);
   const [queryVec] = await voyageEmbed([utterance.slice(0, 400)], 'query');
-  if (!queryVec) return [];
+  if (!queryVec) return { candidates: [], topScore: 0, confident: false };
 
   const hint = (opts.categoryHint || '').toLowerCase().trim();
+  // Map common section words to likely catalog categories for a gentle bias.
+  const sectionCats = sectionCategoryHints(opts.sectionName || '');
+
   const scored: CandidateMatch[] = [];
   for (const item of items) {
     const v = cache.byCode.get(item.lineItemCode);
     if (!v) continue;
-    let score = cosine(queryVec, v);
-    if (hint && item.category.toLowerCase().includes(hint)) score += 0.05;
+    const baseScore = cosine(queryVec, v);
+    let score = baseScore;
+    const cat = item.category.toLowerCase();
+    if (hint && cat.includes(hint)) score += 0.05;
+    if (sectionCats.some((c) => cat.includes(c))) score += 0.03;
+    // Store the RAW cosine for confidence; biases only affect ranking.
     scored.push({ item, score });
   }
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, topK);
+  const candidates = scored.slice(0, topK);
+  // Confidence uses the raw cosine of the top-ranked item (recompute without bias).
+  const top = candidates[0];
+  const topScore = top ? cosine(queryVec, cache.byCode.get(top.item.lineItemCode) || []) : 0;
+  return { candidates, topScore, confident: topScore >= CONFIDENCE_FLOOR };
+}
+
+// Very light section→category hinting. Not exhaustive; just nudges ranking for
+// the obvious cases. Unknown sections contribute nothing.
+function sectionCategoryHints(section: string): string[] {
+  const s = section.toLowerCase();
+  const out: string[] = [];
+  if (/exterior|yard|gutter|roof|siding/.test(s)) out.push('gutter', 'roof', 'siding', 'exterior', 'paint');
+  if (/kitchen/.test(s)) out.push('appliance', 'cabinet', 'plumbing', 'countertop');
+  if (/bath/.test(s)) out.push('plumbing', 'tile', 'cabinet');
+  if (/bedroom|living|hall|stair/.test(s)) out.push('carpet', 'paint', 'drywall', 'flooring');
+  if (/hvac|mechanical/.test(s)) out.push('hvac');
+  if (/garage/.test(s)) out.push('door', 'concrete');
+  return out;
 }
