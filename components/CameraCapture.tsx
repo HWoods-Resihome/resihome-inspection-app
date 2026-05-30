@@ -492,7 +492,7 @@ export function CameraCapture({
                   return (
                     <div
                       key={r.id}
-                      className={`flex items-center gap-2 px-3 py-2.5 border-b border-white/5 last:border-0 ${isCurrent ? 'bg-brand/30' : ''}`}
+                      className={`relative flex items-center gap-2 px-3 py-3 border-b border-white/5 last:border-0 ${isCurrent ? 'bg-brand/30' : ''}`}
                     >
                       {isRenaming ? (
                         <input
@@ -517,29 +517,34 @@ export function CameraCapture({
                         />
                       ) : (
                         <>
+                          {/* Full-row tap target to SWITCH rooms (sits behind the
+                              name/count; the pencil/delete buttons are layered
+                              above it so they remain independently tappable). */}
                           <button
                             type="button"
                             onClick={() => switchToRoom(r.id)}
-                            className="min-w-0 flex items-center gap-2 text-left"
-                          >
+                            aria-label={`Switch to ${r.name}`}
+                            className="absolute inset-0 z-0"
+                          />
+                          <span className="relative z-10 min-w-0 flex items-center gap-2 pointer-events-none">
                             {isCurrent && <span className="text-brand text-xs shrink-0">●</span>}
                             <span className="truncate font-heading">{r.name}</span>
-                          </button>
+                          </span>
                           {/* Pencil sits right next to the room name. */}
                           {onRenameRoom && (
                             <button
                               type="button"
                               onClick={() => { setRenamingRoomId(r.id); setRenameDraft(r.name); }}
                               aria-label={`Rename ${r.name}`}
-                              className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/15 text-white/70"
+                              className="relative z-10 shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/15 text-white/70"
                             >
                               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M11 1.5l3.5 3.5L5 14.5H1.5V11L11 1.5z" />
                               </svg>
                             </button>
                           )}
-                          {/* Count pushed to the right. */}
-                          <span className="shrink-0 text-xs ml-auto">
+                          {/* Count pushed to the right (non-interactive). */}
+                          <span className="relative z-10 shrink-0 text-xs ml-auto pointer-events-none">
                             {liveCount > 0
                               ? <span className="text-emerald-400 font-semibold">{liveCount} photo{liveCount === 1 ? '' : 's'}</span>
                               : r.needsPhotos
@@ -554,7 +559,7 @@ export function CameraCapture({
                           type="button"
                           onClick={() => onDeleteRoom(r.id)}
                           aria-label={`Delete ${r.name}`}
-                          className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full hover:bg-red-500/30 text-white/70 hover:text-red-300 text-lg leading-none"
+                          className="relative z-10 shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-500/30 text-white/70 hover:text-red-300 text-lg leading-none"
                         >
                           ×
                         </button>
