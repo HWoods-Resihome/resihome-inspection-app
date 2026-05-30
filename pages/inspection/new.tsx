@@ -10,12 +10,16 @@ import { Combobox } from '@/components/Combobox';
 
 type Stage = 'setup' | 'loading_questions' | 'error';
 
-// Default scheduled date: tomorrow at 9am local time, formatted YYYY-MM-DD
-// (input[type=date] only accepts date-only format).
-function defaultScheduledDate(): string {
+// Today's date in the user's LOCAL timezone, formatted YYYY-MM-DD
+// (input[type=date] only accepts date-only format). We avoid toISOString()
+// here because that's UTC and would roll over to "tomorrow" for users in
+// the evening in US timezones.
+function todayLocalStr(): string {
   const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 const TEMPLATE_OPTIONS: { value: TemplateType; label: string; sublabel: string }[] = [
@@ -55,10 +59,11 @@ export default function NewInspection() {
   const [selectedSourceId, setSelectedSourceId] = useState('');
   const isQcTemplate = selectedTemplate === 'pm_turn_reinspect_qc';
 
-  // Schedule-mode state. When `scheduling` is true, the schedule panel is shown
-  // below the buttons. The user picks a date + inspector, then confirms.
-  const [scheduling, setScheduling] = useState(false);
-  const [scheduledDate, setScheduledDate] = useState<string>(defaultScheduledDate());
+  // Scheduling state. The "Scheduled Date" field is always visible and defaults
+  // to today. Picking a future date turns the form into a scheduled (assignable)
+  // inspection: the action button becomes "Schedule & Save" and an inspector
+  // dropdown appears. Today (or past) = jump straight into the inspection.
+  const [scheduledDate, setScheduledDate] = useState<string>(todayLocalStr());
   const [scheduledInspectorEmail, setScheduledInspectorEmail] = useState<string>('');
   const [users, setUsers] = useState<HubSpotUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -177,6 +182,11 @@ export default function NewInspection() {
     // QC requires a source Scope Rate Card inspection to validate.
     && (!isQcTemplate || !!selectedSourceId);
 
+  // A future scheduled date (vs. today, in local time) means we save a
+  // Scheduled inspection and assign it, rather than starting it now.
+  const todayStr = todayLocalStr();
+  const isFuture = !!scheduledDate && scheduledDate > todayStr;
+
   async function handleBegin() {
     if (!setupReady) {
       void dialog.alert('Please complete every field before beginning.');
@@ -210,33 +220,23 @@ export default function NewInspection() {
     }
   }
 
-  // Open the schedule panel. Lazy-load users on first open.
-  async function handleOpenSchedule() {
-    if (!setupReady) {
-      void dialog.alert('Please complete the template, property, and bed/bath counts first.');
-      return;
-    }
-    setScheduling(true);
-    // Default assignee = the current user
+  // When a future date is picked, lazy-load the inspector list (once) and
+  // default the assignee to the current user.
+  useEffect(() => {
+    if (!isFuture) return;
     if (!scheduledInspectorEmail && sessionUser?.email) {
       setScheduledInspectorEmail(sessionUser.email);
     }
-    // Load users if we haven't already
     if (users.length === 0 && !usersLoading) {
       setUsersLoading(true);
-      try {
-        const r = await fetch('/api/users');
-        const data = await r.json();
-        if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
-        setUsers(data.users || []);
-      } catch (e) {
-        console.error('Failed to load users for scheduling:', e);
-        // Non-fatal: user can still schedule for themselves
-      } finally {
-        setUsersLoading(false);
-      }
+      fetch('/api/users')
+        .then((r) => r.json())
+        .then((data) => { if (!data.error) setUsers(data.users || []); })
+        .catch((e) => console.error('Failed to load users for scheduling:', e))
+        .finally(() => setUsersLoading(false));
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFuture, sessionUser]);
 
   // Confirm the scheduled inspection: create the record, then go back home.
   async function handleConfirmSchedule() {
@@ -408,39 +408,6 @@ export default function NewInspection() {
                 </div>
               )}
 
-              {/* Inspector - locked to logged-in user */}
-              <div>
-                <label className="block text-sm font-heading font-semibold text-ink mb-1.5">
-                  Inspector
-                </label>
-                <div className="flex items-center w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5">
-                  {sessionLoading ? (
-                    <span className="text-sm text-gray-400">Loading...</span>
-                  ) : sessionUser ? (
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-heading font-semibold text-ink truncate">
-                        {sessionUser.name}
-                      </div>
-                      <div className="text-xs text-gray-500 truncate">{sessionUser.email}</div>
-                    </div>
-                  ) : (
-                    <span className="text-sm text-brand">Not signed in</span>
-                  )}
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                       className="text-gray-400 ml-2 shrink-0">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                  </svg>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Signed in as the inspector. <button type="button" onClick={async () => {
-                    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
-                    router.replace('/login');
-                  }} className="text-brand underline">Sign out</button> to change.
-                </p>
-              </div>
-
               {/* Dependent bed/bath */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -477,95 +444,100 @@ export default function NewInspection() {
                 </p>
               )}
 
-              {/* Two-button row: Begin (primary) | Schedule (secondary) */}
-              {!scheduling && (
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <button
-                    onClick={handleBegin}
-                    disabled={!setupReady}
-                    className="bg-brand hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-heading font-semibold py-3.5 px-3 rounded-lg transition active:scale-[0.98]"
-                  >
-                    Begin Inspection
-                  </button>
-                  <button
-                    onClick={handleOpenSchedule}
-                    disabled={!setupReady}
-                    className="border-2 border-brand text-brand hover:bg-pink-100 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed font-heading font-semibold py-3.5 px-3 rounded-lg transition active:scale-[0.98]"
-                    title="Create a Scheduled Inspection for someone (or yourself) to start later"
-                  >
-                    Schedule Inspection
-                  </button>
-                </div>
-              )}
+              {/* Scheduled Date \u2014 always visible, defaults to today. Picking a
+                  future date turns this into a scheduled (assignable) inspection. */}
+              <div>
+                <label htmlFor="sched-date" className="block text-sm font-heading font-semibold text-ink mb-1.5">
+                  Scheduled Date
+                </label>
+                <input
+                  id="sched-date"
+                  type="date"
+                  min={todayStr}
+                  value={scheduledDate}
+                  onChange={(e) => setScheduledDate(e.target.value)}
+                  onClick={(e) => {
+                    // Open the native date picker on tap anywhere in the input,
+                    // not just the tiny calendar icon. showPicker() needs a user
+                    // gesture (Chrome 99+, Safari 16+, Firefox 101+).
+                    const el = e.currentTarget as HTMLInputElement & { showPicker?: () => void };
+                    try { el.showPicker?.(); } catch { /* fallback: native behavior */ }
+                  }}
+                  className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base bg-white cursor-pointer"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  {isFuture
+                    ? 'Future date \u2014 saved as a Scheduled inspection and assigned below.'
+                    : 'Today \u2014 you\u2019ll go straight into the inspection.'}
+                </p>
+              </div>
 
-              {/* Schedule panel: shown when "Schedule Inspection" was clicked. */}
-              {scheduling && (
-                <div className="mt-2 bg-pink-100 border border-pink-200 rounded-lg p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-heading font-bold text-brand text-sm">Schedule this Inspection</h3>
-                    <button
-                      type="button"
-                      onClick={() => setScheduling(false)}
-                      className="text-xs text-gray-600 hover:text-ink underline"
+              {/* Inspector. Today: locked to the signed-in user. Future date:
+                  becomes an assignable dropdown. */}
+              <div>
+                <label className="block text-sm font-heading font-semibold text-ink mb-1.5">
+                  {isFuture ? 'Assign to Inspector' : 'Inspector'}
+                </label>
+                {isFuture ? (
+                  usersLoading ? (
+                    <div className="text-sm text-gray-500 border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5">Loading inspectors&hellip;</div>
+                  ) : users.length === 0 ? (
+                    <div className="text-sm text-gray-600 border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5">
+                      Couldn&apos;t load the inspector list. This will be assigned to you ({sessionUser?.name}).
+                    </div>
+                  ) : (
+                    <select
+                      value={scheduledInspectorEmail}
+                      onChange={(e) => setScheduledInspectorEmail(e.target.value)}
+                      className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base bg-white"
                     >
-                      Cancel
-                    </button>
-                  </div>
+                      {users.map((u) => (
+                        <option key={u.id} value={u.email}>
+                          {u.fullName} {u.email === sessionUser?.email ? '(me)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )
+                ) : (
+                  <>
+                    <div className="flex items-center w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5">
+                      {sessionLoading ? (
+                        <span className="text-sm text-gray-400">Loading...</span>
+                      ) : sessionUser ? (
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-heading font-semibold text-ink truncate">
+                            {sessionUser.name}
+                          </div>
+                          <div className="text-xs text-gray-500 truncate">{sessionUser.email}</div>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-brand">Not signed in</span>
+                      )}
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                           className="text-gray-400 ml-2 shrink-0">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </svg>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Signed in as the inspector. <button type="button" onClick={async () => {
+                        try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
+                        router.replace('/login');
+                      }} className="text-brand underline">Sign out</button> to change.
+                    </p>
+                  </>
+                )}
+              </div>
 
-                  <div>
-                    <label className="block text-xs font-heading font-bold text-ink uppercase tracking-wider mb-1">
-                      Scheduled Date
-                    </label>
-                    <input
-                      type="date"
-                      value={scheduledDate}
-                      onChange={(e) => setScheduledDate(e.target.value)}
-                      onClick={(e) => {
-                        // Open the native date picker when the user taps anywhere
-                        // in the input, not just the tiny calendar icon.
-                        // showPicker() requires a user gesture (which onClick provides)
-                        // and is supported in Chrome 99+, Safari 16+, Firefox 101+.
-                        const el = e.currentTarget as HTMLInputElement & { showPicker?: () => void };
-                        try { el.showPicker?.(); } catch { /* fallback: native behavior */ }
-                      }}
-                      className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base bg-white cursor-pointer"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-heading font-bold text-ink uppercase tracking-wider mb-1">
-                      Assign to Inspector
-                    </label>
-                    {usersLoading ? (
-                      <div className="text-sm text-gray-500 py-2">Loading inspectors&hellip;</div>
-                    ) : users.length === 0 ? (
-                      <div className="text-sm text-gray-600 py-2">
-                        Couldn&apos;t load the inspector list. The Inspection will be assigned to you ({sessionUser?.name}).
-                      </div>
-                    ) : (
-                      <select
-                        value={scheduledInspectorEmail}
-                        onChange={(e) => setScheduledInspectorEmail(e.target.value)}
-                        className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base bg-white"
-                      >
-                        {users.map((u) => (
-                          <option key={u.id} value={u.email}>
-                            {u.fullName} {u.email === sessionUser?.email ? '(me)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-
-                  <button
-                    onClick={handleConfirmSchedule}
-                    disabled={schedulingBusy || !scheduledDate}
-                    className="w-full bg-brand hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-heading font-semibold py-3 px-4 rounded-lg transition active:scale-[0.98]"
-                  >
-                    {schedulingBusy ? 'Scheduling\u2026' : 'Confirm Schedule'}
-                  </button>
-                </div>
-              )}
+              {/* Single action button: Begin now (today) or Schedule & Save (future). */}
+              <button
+                onClick={isFuture ? handleConfirmSchedule : handleBegin}
+                disabled={!setupReady || schedulingBusy || (isFuture && !scheduledDate)}
+                className="w-full bg-brand hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-heading font-semibold py-3.5 px-3 rounded-lg transition active:scale-[0.98] mt-2"
+              >
+                {schedulingBusy ? 'Scheduling\u2026' : (isFuture ? 'Schedule & Save' : 'Begin Inspection')}
+              </button>
             </div>
           </div>
         </div>

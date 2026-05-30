@@ -802,15 +802,15 @@ function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, on
             onClick={readOnly || editingDesc ? undefined : onEnterEdit}
             className={`relative flex gap-2 border border-gray-200 rounded-lg pl-3 py-2.5 mb-2 bg-white ${readOnly ? 'pr-3' : 'pr-8'} ${readOnly || editingDesc ? '' : 'active:bg-gray-50 cursor-pointer'}`}
           >
-            {/* Quick-delete X — sits in the right gutter, vertically centered, so
-                it stays inside the card edge and clear of the price columns.
-                Deletes immediately, no confirm. */}
+            {/* Quick-delete X — top-right corner of the card. Low z-index so it
+                scrolls UNDER the sticky totals header instead of floating over
+                it. Deletes immediately, no confirm. */}
             {!readOnly && (
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onDelete(); }}
                 aria-label="Delete line item"
-                className="absolute top-1/2 -translate-y-1/2 right-1 w-6 h-6 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-400 hover:text-red-600 hover:border-red-300 shadow-sm text-base leading-none z-10"
+                className="absolute top-1 right-1 w-6 h-6 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-400 hover:text-red-600 hover:border-red-300 shadow-sm text-base leading-none z-0"
               >
                 ×
               </button>

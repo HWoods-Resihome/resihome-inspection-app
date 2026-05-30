@@ -1148,7 +1148,7 @@ export function RateCardForm(props: RateCardFormProps) {
       {/* Sticky header bar — the single home for address + property data
           (the top header no longer repeats it). Five centered boxes:
           Lines + Vendor / Client / Tenant / Net Turn. */}
-      <div id="sticky-totals-header" className="sticky top-0 z-10 -mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
+      <div id="sticky-totals-header" className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
         <div className="sm:flex sm:items-center sm:justify-between sm:gap-4">
           <div className="text-center sm:text-left mb-2 sm:mb-0 min-w-0">
             <div className="text-sm font-semibold text-gray-800 truncate">{props.propertyName}</div>
@@ -1917,33 +1917,37 @@ function SectionHeader(p: SectionHeaderProps) {
           {!editingTitle && p.photosCount > 0 && (
             <span className="text-gray-500 text-xs whitespace-nowrap shrink-0">📷 {p.photosCount}</span>
           )}
-          {!p.readOnly && !editingTitle && (
-            <>
-              <button
-                type="button"
-                onClick={startEdit}
-                className="text-gray-400 hover:text-brand p-0.5 flex-shrink-0"
-                title="Rename section"
-                aria-label="Rename section"
-              >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M11 1.5l3.5 3.5L5 14.5H1.5V11L11 1.5z" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); p.onDelete(); }}
-                className="text-gray-400 hover:text-red-600 p-0.5 flex-shrink-0 text-base leading-none"
-                title="Delete section"
-                aria-label="Delete section"
-              >
-                ×
-              </button>
-            </>
-          )}
-          {!p.forceExpanded && (
-            <span className="text-gray-400 flex-shrink-0">{p.isOpen ? '▾' : '▸'}</span>
-          )}
+          {/* Edit / delete / collapse controls — right-aligned to the edge of
+              the name row (the X and chevron sit flush right). */}
+          <div className="flex items-center gap-2 ml-auto shrink-0">
+            {!p.readOnly && !editingTitle && (
+              <>
+                <button
+                  type="button"
+                  onClick={startEdit}
+                  className="text-gray-400 hover:text-brand p-0.5 flex-shrink-0"
+                  title="Rename section"
+                  aria-label="Rename section"
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 1.5l3.5 3.5L5 14.5H1.5V11L11 1.5z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); p.onDelete(); }}
+                  className="text-gray-400 hover:text-red-600 p-0.5 flex-shrink-0 text-base leading-none"
+                  title="Delete section"
+                  aria-label="Delete section"
+                >
+                  ×
+                </button>
+              </>
+            )}
+            {!p.forceExpanded && (
+              <span className="text-gray-400 flex-shrink-0">{p.isOpen ? '▾' : '▸'}</span>
+            )}
+          </div>
         </div>
         {/* Totals pill — centered on mobile (its own wrapped row), pushed to
             the right (with a little edge gap) on desktop. */}
