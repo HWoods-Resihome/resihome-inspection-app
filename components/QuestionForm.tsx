@@ -381,6 +381,7 @@ export function QuestionForm({
     inspectionExternalId,
     disabled: !!readOnly,
     onFirstSave: onFirstEdit,
+    isScope: (templateType as string) === 'pm_scope_inspection',
   });
 
   // After mount, hydrate the autosave hook with existing data so it knows
@@ -754,8 +755,15 @@ export function QuestionForm({
           };
           if (inst.location) props.location = inst.location;
           if (a.note) props.note = a.note;
-          if (a.quantity != null) props.quantity = a.quantity;
-          if (a.assignedTo) props.assigned_to = a.assignedTo;
+          // `quantity` and `assigned_to` are Scope-only concepts. Non-Scope
+          // templates (1099, Community, Vacancy, RRQC) hide them in the UI, so
+          // they must not be written to HubSpot on those templates — doing so
+          // can 400 the whole batch/create if the property isn't provisioned
+          // for that path. (See scripts/fix_quantity_field.)
+          if ((templateType as string) === 'pm_scope_inspection') {
+            if (a.quantity != null) props.quantity = a.quantity;
+            if (a.assignedTo) props.assigned_to = a.assignedTo;
+          }
           if (a.photoUrls?.length) {
             props.photo_urls = a.photoUrls.join(';');
             props.photo_count = a.photoUrls.length;

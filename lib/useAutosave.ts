@@ -38,13 +38,18 @@ interface Options {
   onFirstSave?: () => void;
   // If true, all the answer machinery is disabled (read-only mode for Completed inspections)
   disabled?: boolean;
+  // Scope-only properties (quantity, assigned_to) are written to HubSpot only
+  // when this is true. Non-Scope templates (1099, Community, Vacancy, RRQC)
+  // must not write them — see QuestionForm submit path and
+  // scripts/fix_quantity_field.
+  isScope?: boolean;
 }
 
 const DEBOUNCE_MS = 800;
 const CHECK_INTERVAL_MS = 400;
 
 export function useAutosave(opts: Options) {
-  const { inspectionRecordId, inspectionExternalId, onSaveSuccess, onFirstSave, disabled } = opts;
+  const { inspectionRecordId, inspectionExternalId, onSaveSuccess, onFirstSave, disabled, isScope } = opts;
 
   // Persistent reference to the latest answer states, indexed by composite key.
   // We use a ref (not state) to avoid stale closures inside the interval timer.
@@ -152,8 +157,11 @@ export function useAutosave(opts: Options) {
         };
         if (a.location) props.location = a.location;
         if (a.note) props.note = a.note;
-        if (a.quantity != null) props.quantity = a.quantity;
-        if (a.assignedTo) props.assigned_to = a.assignedTo;
+        // Scope-only properties — never written on non-Scope templates.
+        if (isScope) {
+          if (a.quantity != null) props.quantity = a.quantity;
+          if (a.assignedTo) props.assigned_to = a.assignedTo;
+        }
         if (a.photoUrls?.length) {
           props.photo_urls = a.photoUrls.join(';');
           props.photo_count = a.photoUrls.length;
@@ -233,7 +241,7 @@ export function useAutosave(opts: Options) {
     } finally {
       inFlightRef.current = false;
     }
-  }, [disabled, inspectionRecordId, inspectionExternalId, hasEverSaved, onSaveSuccess, onFirstSave, buildAnswerExternalId, saveState.kind]);
+  }, [disabled, inspectionRecordId, inspectionExternalId, hasEverSaved, onSaveSuccess, onFirstSave, buildAnswerExternalId, saveState.kind, isScope]);
 
   // Tick: periodically check if any dirty answers have been stable long enough
   // to flush. Hold `flush` in a ref so the interval is created ONCE and isn't
