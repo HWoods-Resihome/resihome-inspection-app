@@ -248,9 +248,9 @@ function lineToSummary(
   let vendorCostStr = '';
   try {
     const calc = calculateLine(item, region, regions, { quantity: qty, tenantBillBackPercent: pct });
-    vendorCostStr = ` — vendor ${money(calc.vendorCost)}`;
+    vendorCostStr = ` — Vendor ${money(calc.vendorCost)}`;
   } catch { /* if calc fails, omit the cost rather than block the line */ }
-  return `${item.laborShortDescription} — ${qty} ${item.laborMeas || 'EA'}, ${vendor}, ${pct}% tenant${vendorCostStr}`;
+  return `${item.laborShortDescription} — ${qty} ${item.laborMeas || 'EA'}, ${vendor}, ${pct}% Tenant${vendorCostStr}`;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -393,6 +393,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             action: 'add',
             line,
             summary: lineToSummary(item, qty, vendor, pct, region, regions),
+            spokenSummary: item.laborShortDescription,
             assistantText: textBlocks || undefined,
             awaitingReply: false,
           });
@@ -440,7 +441,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           sse(res, 'proposal', {
             action: 'edit',
             line,
-            summary: item ? lineToSummary(item, qty, vendor, pct, region, regions) : `${existing.lineItemCode} — ${qty}, ${vendor}, ${pct}% tenant`,
+            summary: item ? lineToSummary(item, qty, vendor, pct, region, regions) : `${existing.lineItemCode} — ${qty}, ${vendor}, ${pct}% Tenant`,
+            spokenSummary: item ? item.laborShortDescription : existing.lineItemCode,
             assistantText: textBlocks || undefined,
             awaitingReply: false,
           });

@@ -29,7 +29,7 @@ interface Props {
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
 
-type Pending = { line: RateCardLineInput; summary: string; action: 'add' | 'edit' };
+type Pending = { line: RateCardLineInput; summary: string; spoken: string; action: 'add' | 'edit' };
 
 // Affirmatives that commit a pending proposal when spoken.
 const AFFIRMATIVE = /^(yes|yep|yeah|yup|sure|ok|okay|correct|add it|add|do it|confirm|that'?s right|looks good|perfect|go ahead)\b/i;
@@ -54,22 +54,33 @@ function getRecognition(): any | null {
 const SILENCE_MS = 1500;
 
 // Speak text aloud via the browser's built-in speechSynthesis (free, no API,
-// works in the mobile webview). Calls onDone when finished (or immediately if
-// TTS is unavailable) so the caller can chain the mic auto-restart.
-function speak(text: string, onDone: () => void) {
+// works in the mobile webview). Calls onDone when finished. If earlyMs > 0, we
+// fire onDone that many ms BEFORE speech is estimated to end, so the mic can
+// open early and catch a fast reply (with onend as a fallback). onDone runs
+// at most once.
+function speak(text: string, onDone: () => void, earlyMs = 0) {
+  let done = false;
+  const finish = () => { if (done) return; done = true; onDone(); };
   try {
     if (typeof window === 'undefined' || !('speechSynthesis' in window) || !text) {
-      onDone();
+      finish();
       return;
     }
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1.3;
-    u.onend = () => onDone();
-    u.onerror = () => onDone();
+    u.onend = () => finish();
+    u.onerror = () => finish();
     window.speechSynthesis.speak(u);
+
+    if (earlyMs > 0) {
+      // Estimate speech duration: ~13 chars/sec at rate 1, scaled by rate.
+      const estMs = (text.length / 13) * 1000 / 1.3;
+      const fireAt = Math.max(600, estMs - earlyMs);
+      setTimeout(finish, fireAt);
+    }
   } catch {
-    onDone();
+    finish();
   }
 }
 
@@ -196,19 +207,23 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
           // Hold the proposal as PENDING — preview it, ask for confirmation, and
           // wait for a spoken "yes" / change, or a button tap. Nothing saves yet.
           const line: RateCardLineInput = finalData.line;
-          setPending({ line, summary: finalData.summary, action: finalData.action === 'edit' ? 'edit' : 'add' });
-          const verb = finalData.action === 'edit' ? 'Change to' : 'Add this';
-          const prompt = `${verb}: ${finalData.summary}. Is this what you want, or any changes?`;
-          setMessages((m) => [...m, { role: 'assistant', content: prompt }]);
-          // Speak the prompt, then reopen the mic to catch "yes" or a change.
-          speak(prompt, () => { startListeningRef.current(); });
+          setPending({ line, summary: finalData.summary, spoken: finalData.spokenSummary || finalData.summary, action: finalData.action === 'edit' ? 'edit' : 'add' });
+          // On screen: full detail (qty, vendor, cost). Spoken: just the short
+          // description + the confirm question — no need to read numbers aloud.
+          const verb = finalData.action === 'edit' ? 'Change to' : 'Add';
+          const spoken = `${verb} ${finalData.spokenSummary || finalData.summary}. Is this what you want, or any changes?`;
+          setMessages((m) => [...m, { role: 'assistant', content: `${finalData.action === 'edit' ? 'Change to' : 'Add this'}: ${finalData.summary}. Is this what you want, or any changes?` }]);
+          // Reopen the mic slightly BEFORE speech ends so a fast reply is caught.
+          speakThenListenRef.current(spoken);
         } else {
           // question or message — the text already streamed; finalize it.
           const text = finalData?.text || accumulated;
           setMessages((m) => [...m, { role: 'assistant', content: text }]);
-          speak(text, () => {
-            if (finalData?.awaitingReply) startListeningRef.current();
-          });
+          if (finalData?.awaitingReply) {
+            speakThenListenRef.current(text);
+          } else {
+            speak(text, () => { /* no restart */ });
+          }
         }
       } catch (e: any) {
         setStreamingText('');
@@ -240,7 +255,9 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
 
   const startListening = useCallback(() => {
     setError(null);
-    try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
+    // NOTE: do NOT cancel speech here. Opening the mic early shouldn't cut off
+    // the assistant's reply — only the inspector actually speaking should
+    // interrupt it (handled via onspeechstart below).
 
     // Guard: if we're already listening (or a recognition is mid-start), don't
     // start a second one — calling start() on an active recognizer throws and
@@ -305,6 +322,11 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
       listeningRef.current = true;
       setListening(true);
     };
+    // Fires when the recognizer detects the inspector actually speaking — THIS
+    // is when we stop the assistant's voice, not merely when the mic opened.
+    recog.onspeechstart = () => {
+      try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
+    };
     recog.onend = () => {
       startingRef.current = false;
       listeningRef.current = false;
@@ -345,6 +367,14 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
   // captures an older closure) always calls the current one.
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
+  // Speak a reply, then open the mic ~600ms BEFORE the speech finishes so a
+  // quick verbal reply isn't missed. startListening cancels any remaining TTS.
+  const speakThenListen = useCallback((text: string) => {
+    speak(text, () => { startListeningRef.current(); }, 600);
+  }, []);
+  const speakThenListenRef = useRef(speakThenListen);
+  useEffect(() => { speakThenListenRef.current = speakThenListen; }, [speakThenListen]);
+
   // Commit the pending proposal: save it (the CLIENT announces success only
   // after the save), then prompt for the next line and reopen the mic.
   const commitPending = useCallback(() => {
@@ -354,9 +384,11 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
     const verb = p.action === 'edit' ? 'Updated' : 'Added';
     try {
       onAddLine(p.line);
-      const confirm = `${verb}: ${p.summary}. Anything else for this area?`;
-      setMessages((m) => [...m, { role: 'assistant', content: confirm }]);
-      speak(confirm, () => { startListeningRef.current(); });
+      // On screen: full detail. Spoken: short — "Added [short]. Anything else?"
+      const onScreen = `${verb}: ${p.summary}. Anything else for this area?`;
+      const spoken = `${verb} ${p.spoken}. Anything else?`;
+      setMessages((m) => [...m, { role: 'assistant', content: onScreen }]);
+      speakThenListenRef.current(spoken);
     } catch (e: any) {
       const msg = `I couldn't save that line (${String(e?.message || e)}). Try again or add it manually.`;
       setMessages((m) => [...m, { role: 'assistant', content: msg }]);
