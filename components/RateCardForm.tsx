@@ -1071,11 +1071,11 @@ export function RateCardForm(props: RateCardFormProps) {
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-4">
       {/* Header */}
       <header className="mb-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <h1 className="text-xl font-bold text-gray-900">{props.templateLabel}</h1>
-              <span className="text-sm text-gray-700 font-semibold">— {props.propertyName}</span>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-x-3 min-w-0">
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900 whitespace-nowrap">{props.templateLabel}</h1>
+              <span className="text-sm text-gray-700 font-semibold truncate min-w-0">{props.propertyName}</span>
             </div>
             <div className="text-xs text-gray-500 mt-1">
               Inspector: {props.inspectorName} · {props.bedrooms} bed / {props.bathrooms} bath
@@ -1100,12 +1100,11 @@ export function RateCardForm(props: RateCardFormProps) {
           </div>
 
           {/* Back button — saves any open/pending edits then exits, exactly
-              like Save & Close. Shown for every status (read-only inspections
-              just have nothing to commit, so it exits cleanly). */}
+              like Save & Close. Pinned to the upper-right with edge padding. */}
           <button
             type="button"
             onClick={handleSaveAndClose}
-            className="flex-shrink-0 inline-flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-3 py-1.5 bg-white"
+            className="flex-shrink-0 self-start inline-flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-3 py-1.5 bg-white"
             title="Save and go back"
           >
             <span aria-hidden>←</span> Back
@@ -1142,18 +1141,23 @@ export function RateCardForm(props: RateCardFormProps) {
               )}
             </div>
           </div>
-          <div className="flex items-baseline text-xs">
-            <span className="text-gray-500 text-right" style={{ width: 110 }}>
-              <span className="text-gray-400">Vendor </span>
-              <span className="font-semibold text-gray-700">${formatMoney(roundMoney(grandTotals.vendor))}</span>
+          <div className="flex items-baseline text-[11px] sm:text-xs gap-1.5 sm:gap-0">
+            <span className="text-gray-500 text-right w-[72px] sm:w-[110px]">
+              <span className="text-gray-400">Ven </span>
+              <span className="font-semibold text-gray-700 tabular-nums">${formatMoney(roundMoney(grandTotals.vendor))}</span>
             </span>
-            <span className="text-gray-500 text-right" style={{ width: 110 }}>
-              <span className="text-gray-400">Client </span>
-              <span className="font-semibold text-gray-700">${formatMoney(roundMoney(grandTotals.client))}</span>
+            <span className="text-gray-500 text-right w-[72px] sm:w-[110px]">
+              <span className="text-gray-400">Cli </span>
+              <span className="font-semibold text-gray-700 tabular-nums">${formatMoney(roundMoney(grandTotals.client))}</span>
             </span>
-            <span className="text-brand text-right" style={{ width: 110 }}>
-              <span className="text-brand/70">Tenant </span>
-              <span className="font-semibold">${formatMoney(roundMoney(grandTotals.tenant))}</span>
+            <span className="text-brand text-right w-[72px] sm:w-[110px]">
+              <span className="text-brand/70">Ten </span>
+              <span className="font-semibold tabular-nums">${formatMoney(roundMoney(grandTotals.tenant))}</span>
+            </span>
+            {/* Net turn cost = what the owner pays after tenant chargeback. */}
+            <span className="text-emerald-700 text-right w-[72px] sm:w-[110px]">
+              <span className="text-emerald-600/70">Net </span>
+              <span className="font-semibold tabular-nums">${formatMoney(roundMoney(grandTotals.client - grandTotals.tenant))}</span>
             </span>
           </div>
         </div>
@@ -1892,17 +1896,21 @@ function SectionHeader(p: SectionHeaderProps) {
                 with min-w-[80px] + padding; the others are similar. The
                 right padding here (none) lets the Tenant total kiss the
                 same edge the table cells do. */}
-            <span className="text-gray-500 text-right" style={{ width: 110 }}>
-              <span className="text-gray-400">Vendor </span>
-              <span className="font-semibold text-gray-700">${formatMoney(roundMoney(p.vendorTotal))}</span>
+            <span className="text-gray-500 text-right w-[72px] sm:w-[110px]">
+              <span className="text-gray-400">Ven </span>
+              <span className="font-semibold text-gray-700 tabular-nums">${formatMoney(roundMoney(p.vendorTotal))}</span>
             </span>
-            <span className="text-gray-500 text-right" style={{ width: 110 }}>
-              <span className="text-gray-400">Client </span>
-              <span className="font-semibold text-gray-700">${formatMoney(roundMoney(p.clientTotal))}</span>
+            <span className="text-gray-500 text-right w-[72px] sm:w-[110px]">
+              <span className="text-gray-400">Cli </span>
+              <span className="font-semibold text-gray-700 tabular-nums">${formatMoney(roundMoney(p.clientTotal))}</span>
             </span>
-            <span className="text-brand text-right" style={{ width: 110 }}>
-              <span className="text-brand/70">Tenant </span>
-              <span className="font-semibold">${formatMoney(roundMoney(p.tenantTotal))}</span>
+            <span className="text-brand text-right w-[72px] sm:w-[110px]">
+              <span className="text-brand/70">Ten </span>
+              <span className="font-semibold tabular-nums">${formatMoney(roundMoney(p.tenantTotal))}</span>
+            </span>
+            <span className="text-emerald-700 text-right w-[72px] sm:w-[110px]">
+              <span className="text-emerald-600/70">Net </span>
+              <span className="font-semibold tabular-nums">${formatMoney(roundMoney(p.clientTotal - p.tenantTotal))}</span>
             </span>
           </div>
         )}
