@@ -28,7 +28,9 @@ import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { VENDORS } from '@/lib/vendors';
 import type { RateCardLineItem, RateCardLineInput, RegionRate } from '@/lib/types';
 
-export const config = { api: { bodyParser: { sizeLimit: '1mb' } } };
+// maxDuration: compound voice turns ("X and Y") run several tool rounds with the
+// smart model and can take 30-40s; without this, Vercel kills the function early.
+export const config = { maxDuration: 60, api: { bodyParser: { sizeLimit: '1mb' } } };
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 // Two-model split: the smart model is used when the agent must reason about

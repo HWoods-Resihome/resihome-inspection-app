@@ -301,7 +301,9 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       // in "Thinking…" with no way out.
       const ctrl = new AbortController();
       abortRef.current = ctrl;
-      const timeout = setTimeout(() => ctrl.abort(), 25000);
+      // Generous: compound requests ("X and Y") run multiple tool rounds; keep
+      // just under the server's maxDuration (60s) so the server can finish.
+      const timeout = setTimeout(() => ctrl.abort(), 55000);
       try {
         const r = await fetch('/api/rate-card/voice-assist', {
           method: 'POST',

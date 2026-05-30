@@ -1792,29 +1792,6 @@ export function RateCardForm(props: RateCardFormProps) {
               onCancelInspection={handleCancelInspectionClick}
               onSaveAndClose={handleSaveAndClose}
               onSubmit={handleSubmitOrFinalize}
-              voiceSlot={
-                !props.readOnly && props.templateType === 'pm_scope_rate_card' && currentSectionId ? (
-                  <VoiceLineAssistant
-                    sections={sections.map((s) => ({
-                      id: s.id,
-                      label: s.label,
-                      location: s.location,
-                      displayName: s.displayName,
-                    }))}
-                    currentSectionId={currentSectionId}
-                    onNavigate={navigateToSection}
-                    region={inspectionRegion}
-                    disabled={dataLoading}
-                    currentLines={linesBySection[currentSectionId] || []}
-                    catalog={catalog}
-                    onAddLine={(line) => { handleSaveLineForSection(currentSectionId, line); revealSection(currentSectionId, line.externalId); }}
-                    onRemoveLine={(externalId) => handleDeleteLine(currentSectionId, externalId)}
-                    onAddLineTo={(sectionId, line) => { handleSaveLineForSection(sectionId, line); revealSection(sectionId, line.externalId); }}
-                    onRemoveLineFrom={(sectionId, externalId) => handleDeleteLine(sectionId, externalId)}
-                    linesBySection={linesBySection}
-                  />
-                ) : null
-              }
             />
           </div>
         </div>
@@ -1843,24 +1820,6 @@ export function RateCardForm(props: RateCardFormProps) {
             ? (linesBySection[cameraSectionId] || []).map((l) => ({ externalId: l.externalId, label: lineLabel(l) }))
             : []}
           onTagPhotoToLine={tagCameraPhotoToLine}
-          voiceSlot={
-            !props.readOnly && props.templateType === 'pm_scope_rate_card' && cameraSectionId ? (
-              <VoiceLineAssistant
-                sections={sections.map((s) => ({ id: s.id, label: s.label, location: s.location, displayName: s.displayName }))}
-                currentSectionId={cameraSectionId}
-                onNavigate={(id) => setCameraSectionId(id)}
-                region={inspectionRegion}
-                disabled={dataLoading}
-                currentLines={linesBySection[cameraSectionId] || []}
-                catalog={catalog}
-                onAddLine={(line) => handleSaveLineForSection(cameraSectionId!, line)}
-                onRemoveLine={(externalId) => handleDeleteLine(cameraSectionId!, externalId)}
-                onAddLineTo={(sectionId, line) => handleSaveLineForSection(sectionId, line)}
-                onRemoveLineFrom={(sectionId, externalId) => handleDeleteLine(sectionId, externalId)}
-                linesBySection={linesBySection}
-              />
-            ) : null
-          }
           onRenameRoom={(roomId, newName) => handleRenameSection(roomId, newName)}
           onAddRoom={(name) => handleAddSection(name)}
           onDeleteRoom={async (roomId) => {
@@ -1875,6 +1834,42 @@ export function RateCardForm(props: RateCardFormProps) {
           }}
         />
       )}
+
+      {/* Voice assistant — ONE persistent instance so a conversation started in
+          the camera keeps going after Done (and vice-versa). It floats above
+          everything (z over the camera); the mic sits bottom-right while the
+          camera is open and bottom-center otherwise. Targets the camera's active
+          room when open, else the focused section. */}
+      {(() => {
+        const voiceSectionId = cameraSectionId ?? currentSectionId;
+        if (props.readOnly || props.templateType !== 'pm_scope_rate_card' || !voiceSectionId) return null;
+        const cameraOpen = cameraSectionId !== null;
+        return (
+          <div className="fixed inset-x-0 z-[60] pointer-events-none" style={{ bottom: cameraOpen ? 96 : 84 }}>
+            <div
+              className="relative max-w-7xl mx-auto px-4 flex pointer-events-none"
+              style={{ justifyContent: cameraOpen ? 'flex-end' : 'center' }}
+            >
+              <span className="pointer-events-auto">
+                <VoiceLineAssistant
+                  sections={sections.map((s) => ({ id: s.id, label: s.label, location: s.location, displayName: s.displayName }))}
+                  currentSectionId={voiceSectionId}
+                  onNavigate={(id) => { if (cameraOpen) setCameraSectionId(id); else navigateToSection(id); }}
+                  region={inspectionRegion}
+                  disabled={dataLoading}
+                  currentLines={linesBySection[voiceSectionId] || []}
+                  catalog={catalog}
+                  onAddLine={(line) => { handleSaveLineForSection(voiceSectionId, line); if (!cameraOpen) revealSection(voiceSectionId, line.externalId); }}
+                  onRemoveLine={(externalId) => handleDeleteLine(voiceSectionId, externalId)}
+                  onAddLineTo={(sectionId, line) => { handleSaveLineForSection(sectionId, line); if (!cameraOpen) revealSection(sectionId, line.externalId); }}
+                  onRemoveLineFrom={(sectionId, externalId) => handleDeleteLine(sectionId, externalId)}
+                  linesBySection={linesBySection}
+                />
+              </span>
+            </div>
+          </div>
+        );
+      })()}
 
       {showSectionsManager && (
         <SectionsManager
