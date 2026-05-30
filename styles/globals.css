@@ -53,6 +53,35 @@ h1, h2, h3, h4, h5, h6 {
   border-radius: 0.75rem;
 }
 
+/* ---- Reusable micro-interactions (kept subtle/high-class) ---------------- */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes popIn {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fadeIn { animation: fadeIn 160ms ease-out; }
+.animate-scaleIn { animation: scaleIn 160ms cubic-bezier(0.16, 1, 0.3, 1); }
+.animate-popIn { animation: popIn 140ms cubic-bezier(0.16, 1, 0.3, 1); }
+.animate-slideUp { animation: slideUp 200ms cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* Respect reduced-motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fadeIn, .animate-scaleIn, .animate-popIn, .animate-slideUp,
+  .flash-highlight { animation: none; }
+  * { scroll-behavior: auto !important; }
+}
+
 /* Hide spinner buttons on number inputs marked with .no-spinner.
    Used for tight table cells where the up/down arrows look cluttered.
    The user can still type numbers and use arrow keys; only the visible

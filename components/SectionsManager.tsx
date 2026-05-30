@@ -292,9 +292,6 @@ export function SectionsManager(props: Props) {
                 Add
               </button>
             </div>
-            <div className="text-xs text-gray-500 mt-1">
-              Typing &quot;sun room&quot; will be saved as &quot;Sun Room&quot;.
-            </div>
           </div>
         </div>
 

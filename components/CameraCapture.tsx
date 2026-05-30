@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppDialog } from '@/components/AppDialog';
 import { PhotoAnnotator } from '@/components/PhotoAnnotator';
+import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadVideo } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
 
@@ -104,6 +105,26 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.restore();
 }
 
+// Client-side geocode fallback. The SERVER's egress allowlist blocks the public
+// geocoders (Census / Nominatim), so when /api/geocode can't resolve the address
+// (and the HubSpot record has no stored coords), we geocode straight from the
+// inspector's device — which CAN reach Nominatim (CORS-enabled). Best-effort.
+async function clientGeocode(address: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(address)}`,
+      { headers: { Accept: 'application/json' } }
+    );
+    if (!r.ok) return null;
+    const d = await r.json();
+    const first = Array.isArray(d) ? d[0] : null;
+    const lat = Number(first?.lat), lng = Number(first?.lon);
+    return isFinite(lat) && isFinite(lng) ? { lat, lng } : null;
+  } catch {
+    return null;
+  }
+}
+
 // Distance in meters between two lat/lng points (haversine).
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
@@ -196,6 +217,8 @@ export function CameraCapture({
   const [busy, setBusy] = useState(false);
   // Id of the captured photo currently open in the annotator (null = closed).
   const [annotatingId, setAnnotatingId] = useState<string | null>(null);
+  // Index (within photo-only items) of the photo open in the swipeable viewer.
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   // Flash / torch. Only supported on some devices (typically Android Chrome,
   // back camera). torchSupported gates the button so we don't show a control
   // that does nothing (e.g. iOS Safari, front camera).
@@ -343,25 +366,38 @@ export function CameraCapture({
     geocodeInFlightRef.current = true;
     setGeocodeState('pending');
     let cancelled = false;
-    const params = new URLSearchParams();
-    if (addressSnapshot) params.set('address', addressSnapshot);
-    if (propertyRecordId) params.set('propertyId', propertyRecordId);
-    fetch(`/api/geocode?${params.toString()}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (cancelled) return;
-        if (d && typeof d.lat === 'number' && typeof d.lng === 'number') {
-          refCoordsRef.current = { lat: d.lat, lng: d.lng };
-          geocodedAddrRef.current = key;
-          setRefCoords({ lat: d.lat, lng: d.lng });
-          setGeocodeState('ok');
-        } else {
-          setGeocodeState('failed'); // address couldn't be resolved → no reference
+
+    (async () => {
+      const params = new URLSearchParams();
+      if (addressSnapshot) params.set('address', addressSnapshot);
+      if (propertyRecordId) params.set('propertyId', propertyRecordId);
+
+      let coords: { lat: number; lng: number } | null = null;
+      // 1) Server route: HubSpot stored coords first, then server-side geocode.
+      try {
+        const r = await fetch(`/api/geocode?${params.toString()}`);
+        if (r.ok) {
+          const d = await r.json();
+          if (d && typeof d.lat === 'number' && typeof d.lng === 'number') coords = { lat: d.lat, lng: d.lng };
         }
-      })
-      .catch(() => { if (!cancelled) setGeocodeState('failed'); })
-      .finally(() => { geocodeInFlightRef.current = false; });
-    return () => { cancelled = true; };
+      } catch { /* fall through to the client-side geocoder */ }
+
+      // 2) Client-side fallback (server egress can't reach the geocoders).
+      if (!coords && addressSnapshot) coords = await clientGeocode(addressSnapshot);
+
+      if (cancelled) return;
+      if (coords) {
+        refCoordsRef.current = coords;
+        geocodedAddrRef.current = key;
+        setRefCoords(coords);
+        setGeocodeState('ok');
+      } else {
+        setGeocodeState('failed');
+      }
+      geocodeInFlightRef.current = false;
+    })();
+
+    return () => { cancelled = true; geocodeInFlightRef.current = false; };
   }, [isOpen, addressSnapshot, propertyRecordId]);
 
   // ----- Capture -----
@@ -1104,9 +1140,14 @@ export function CameraCapture({
                 <img
                   src={it.blobUrl}
                   alt=""
-                  onClick={() => { if (it.kind !== 'video') setAnnotatingId(it.id); }}
+                  onClick={() => {
+                    if (it.kind === 'video') return;
+                    const photoItems = items.filter((p) => p.kind !== 'video');
+                    const vIdx = photoItems.findIndex((p) => p.id === it.id);
+                    if (vIdx >= 0) setViewerIndex(vIdx);
+                  }}
                   className={`w-16 h-16 object-cover rounded border border-white/20 ${it.kind === 'video' ? '' : 'cursor-pointer'}`}
-                  title={it.kind === 'video' ? 'Video clip' : 'Tap to mark up'}
+                  title={it.kind === 'video' ? 'Video clip' : 'Tap to view'}
                 />
                 {it.kind === 'video' && (
                   <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -1218,8 +1259,8 @@ export function CameraCapture({
         {/* Mark/annotate the most recent photo (right of shutter). */}
         <button
           type="button"
-          onClick={() => { const last = items[items.length - 1]; if (last) setAnnotatingId(last.id); }}
-          disabled={items.length === 0}
+          onClick={() => { const last = [...items].reverse().find((p) => p.kind !== 'video'); if (last) setAnnotatingId(last.id); }}
+          disabled={items.filter((p) => p.kind !== 'video').length === 0}
           className="flex flex-col items-center gap-1 text-white/90 disabled:opacity-30"
           aria-label="Mark up the last photo"
           title="Draw on the last photo (arrow, circle, pen)"
@@ -1247,7 +1288,31 @@ export function CameraCapture({
         onChange={(e) => { handleNativeFiles(e.target.files); e.currentTarget.value = ''; }}
       />
 
-      {/* Markup editor for a captured photo */}
+      {/* Swipeable viewer for captured photos (markup is opt-in, not auto-on) */}
+      {viewerIndex !== null && (() => {
+        const photoItems = items.filter((p) => p.kind !== 'video');
+        if (photoItems.length === 0) { return null; }
+        const idx = Math.min(viewerIndex, photoItems.length - 1);
+        return (
+          <PhotoLightbox
+            groups={[{ id: 'session', name: 'Photos' }]}
+            photosByGroup={{ session: photoItems.map((p) => p.blobUrl) }}
+            initialGroupId="session"
+            initialIndex={idx}
+            onClose={() => setViewerIndex(null)}
+            onDelete={(_g, i) => {
+              const target = items.filter((p) => p.kind !== 'video')[i];
+              if (target) deletePhoto(target.id);
+            }}
+            onReplace={(_g, i, file) => {
+              const target = items.filter((p) => p.kind !== 'video')[i];
+              if (target) handleAnnotated(target.id, file);
+            }}
+          />
+        );
+      })()}
+
+      {/* Markup editor (explicit "Mark" action) */}
       {annotatingId && (() => {
         const it = items.find((x) => x.id === annotatingId);
         if (!it) return null;

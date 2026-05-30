@@ -246,7 +246,9 @@ export function PhotoLightbox({
 
       {annotating && url && (
         <PhotoAnnotator
-          src={`/api/photo-proxy?url=${encodeURIComponent(url)}`}
+          // Local blob/data URLs (e.g. in-camera previews) load directly; remote
+          // HubSpot URLs go through the proxy to avoid canvas cross-origin taint.
+          src={/^(blob:|data:)/.test(url) ? url : `/api/photo-proxy?url=${encodeURIComponent(url)}`}
           onCancel={() => setAnnotating(false)}
           onSave={(file) => { setAnnotating(false); onReplace(groupId, index, file); }}
         />

@@ -88,6 +88,8 @@ export function RateCardForm(props: RateCardFormProps) {
   );
   // Manage Sections modal open state
   const [showSectionsManager, setShowSectionsManager] = useState(false);
+  // Header settings (gear) dropdown — houses Manage Sections + Refresh Pricing.
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   // Photo lightbox (tap a photo to view/swipe/mark-up/tag/delete). Either a
   // room's section photos or a single line item's photos.
   type LightboxState =
@@ -1294,16 +1296,70 @@ export function RateCardForm(props: RateCardFormProps) {
             )}
           </div>
 
-          {/* Back button — saves any open/pending edits then exits, exactly
-              like Save & Close. Pinned to the upper-right with edge padding. */}
-          <button
-            type="button"
-            onClick={handleSaveAndClose}
-            className="flex-shrink-0 self-start inline-flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-3 py-1.5 bg-white"
-            title="Save and go back"
-          >
-            <span aria-hidden>←</span> Back
-          </button>
+          {/* Settings (gear) + Back, pinned upper-right. The gear houses the
+              lower-frequency Manage Sections / Refresh Pricing actions to keep
+              the body clean. */}
+          <div className="flex-shrink-0 self-start flex items-center gap-2">
+            {!props.readOnly && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowSettingsMenu((v) => !v)}
+                  aria-label="Settings"
+                  aria-expanded={showSettingsMenu}
+                  title="Settings"
+                  className="inline-flex items-center justify-center w-9 h-9 text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white transition-colors"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  </svg>
+                </button>
+                {showSettingsMenu && (
+                  <>
+                    {/* click-away backdrop */}
+                    <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setShowSettingsMenu(false)} />
+                    <div className="absolute right-0 mt-1.5 z-50 w-52 rounded-xl border border-gray-200 bg-white shadow-lg ring-1 ring-black/5 overflow-hidden animate-[fadeIn_120ms_ease-out]">
+                      <button
+                        type="button"
+                        onClick={() => { setShowSettingsMenu(false); setShowSectionsManager(true); }}
+                        className="w-full text-left px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors"
+                      >
+                        <span aria-hidden className="text-gray-400">⚙</span> Manage Sections
+                      </button>
+                      <button
+                        type="button"
+                        disabled={dataLoading}
+                        onClick={async () => {
+                          setShowSettingsMenu(false);
+                          const ok = await dialog.confirm(
+                            'Refresh rate card pricing from HubSpot?\n\n' +
+                            'This will pull the latest line item costs and regional labor rates. ' +
+                            'Already-saved lines keep their original pricing — only new lines will use the refreshed rates.',
+                            { confirmLabel: 'Refresh' }
+                          );
+                          if (!ok) return;
+                          await refreshCatalogFromHubSpot();
+                        }}
+                        className="w-full text-left px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors disabled:opacity-50 border-t border-gray-100"
+                        title="Force-refresh line item catalog and regional rates from HubSpot."
+                      >
+                        <span aria-hidden className="text-gray-400">⟳</span> {dataLoading ? 'Refreshing…' : 'Refresh Pricing'}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleSaveAndClose}
+              className="inline-flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-3 py-1.5 bg-white transition-colors"
+              title="Save and go back"
+            >
+              <span aria-hidden>←</span> Back
+            </button>
+          </div>
         </div>
       </header>
 
@@ -1365,37 +1421,6 @@ export function RateCardForm(props: RateCardFormProps) {
       {dataError && (
         <div className="mb-3 p-3 bg-red-50 border border-red-300 rounded text-sm text-red-800">
           Error loading rate card data: {dataError}
-        </div>
-      )}
-
-      {!props.readOnly && (
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={async () => {
-              const ok = await dialog.confirm(
-                'Refresh rate card pricing from HubSpot?\n\n' +
-                'This will pull the latest line item costs and regional labor rates. ' +
-                'Already-saved lines keep their original pricing — only new lines will use the refreshed rates.',
-                { confirmLabel: 'Refresh' }
-              );
-              if (!ok) return;
-              await refreshCatalogFromHubSpot();
-            }}
-            disabled={dataLoading}
-            className="text-xs px-3 py-1.5 border border-gray-300 rounded bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Force-refresh line item catalog and regional rates from HubSpot. Use after editing pricing in the HubSpot sandbox."
-          >
-            {dataLoading ? '⟳ Refreshing...' : '⟳ Refresh Pricing'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowSectionsManager(true)}
-            className="text-xs px-3 py-1.5 border border-gray-300 rounded bg-white hover:bg-gray-50 text-gray-700"
-            title="Add, remove, rename, or reorder sections"
-          >
-            ⚙ Manage Sections
-          </button>
         </div>
       )}
 
