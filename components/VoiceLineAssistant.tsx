@@ -84,6 +84,60 @@ function getRecognition(): any | null {
   return r;
 }
 
+// Defensive de-duplication for misbehaving speech engines (some Android
+// WebViews stream a GROWING transcript and re-report it, producing
+// "change change to change to the change to the exterior…"). This collapses
+// that pattern down to the final clean sentence.
+//
+// Strategy: walk word by word; only append a word if it actually extends the
+// sentence (i.e. the running result is a prefix of what we'd get by appending).
+// In practice the duplicated stream is a sequence of ever-growing prefixes of
+// the final utterance, so the LAST maximal prefix is the answer — which equals
+// "drop any word that just re-states a prefix we already have". The simplest
+// robust form: split on whitespace and remove any span that is an exact repeat
+// of the immediately preceding span of the same length, repeatedly.
+function dedupeTranscript(raw: string): string {
+  const text = raw.trim().replace(/\s+/g, ' ');
+  if (!text) return '';
+  const words = text.split(' ');
+  // If there's no duplication, this is cheap and returns the same thing.
+  // Collapse the "growing prefix" pattern: the correct sentence is the longest
+  // run with no immediate word-level repetition of an earlier prefix. We detect
+  // it by collapsing consecutive duplicate subsequences.
+  // 1) Collapse immediate single-word repeats ("change change" -> "change").
+  const noWordRepeat: string[] = [];
+  for (const w of words) {
+    if (noWordRepeat.length === 0 || noWordRepeat[noWordRepeat.length - 1].toLowerCase() !== w.toLowerCase()) {
+      noWordRepeat.push(w);
+    }
+  }
+  // 2) Collapse repeated multi-word phrases where a phrase is immediately
+  // followed by the same phrase plus one more word (the growing-prefix shape).
+  // We do this by scanning for the longest result: repeatedly remove any prefix
+  // that is duplicated right after itself.
+  let arr = noWordRepeat;
+  let changed = true;
+  let guard = 0;
+  while (changed && guard++ < 200) {
+    changed = false;
+    for (let len = Math.floor(arr.length / 2); len >= 1; len--) {
+      let collapsed = false;
+      for (let i = 0; i + 2 * len <= arr.length; i++) {
+        const a = arr.slice(i, i + len).join(' ').toLowerCase();
+        const b = arr.slice(i + len, i + 2 * len).join(' ').toLowerCase();
+        if (a === b) {
+          arr = [...arr.slice(0, i + len), ...arr.slice(i + 2 * len)];
+          collapsed = true;
+          changed = true;
+          break;
+        }
+      }
+      if (collapsed) break;
+    }
+  }
+  return arr.join(' ');
+}
+
 // Make text read more naturally when spoken: expand unit abbreviations and
 // currency so TTS says "square feet" not "ess eff", "dollars" not "dollar sign".
 function naturalizeForSpeech(text: string): string {
@@ -336,25 +390,27 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         setStreamingText('');
         if (finalType === 'error') {
           setError(finalData?.error || 'Something went wrong.');
+        } else if (addedThisTurn > 0) {
+          // Lines were added/updated this turn. ALWAYS use our synthesized
+          // summary and ignore any trailing agent text — the agent sometimes
+          // leaks a stray "I'll search for that…" after it already acted, which
+          // is confusing. The action already happened; just confirm it.
+          const roomName = currentSection?.displayName || currentSection?.label || 'this room';
+          const what = addedThisTurn === 1 ? 'that' : `${addedThisTurn} lines`;
+          const spoken = `Done — ${what} in ${roomName}. Anything else?`;
+          setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
+          speakThenListenRef.current(spoken);
         } else if (finalType === 'question') {
           // The agent needs more info (e.g. ambiguous item, missing quantity).
           const text = finalData?.text || accumulated || 'Could you clarify that?';
           setMessages((m) => [...m, { role: 'assistant', content: text }]);
           speakThenListenRef.current(text);
         } else if (finalType === 'message') {
-          // An explicit closing message from the agent.
+          // An explicit closing message from the agent (no actions this turn).
           const text = finalData?.text || accumulated;
           setMessages((m) => [...m, { role: 'assistant', content: text }]);
           if (finalData?.awaitingReply) speakThenListenRef.current(text);
           else speak(text, () => { /* no restart */ }, 0, (sp) => { speakingRef.current = sp; });
-        } else if (addedThisTurn > 0) {
-          // Lines were added/updated this turn (possibly after a room switch).
-          // Announce in the current room and keep the mic open for more.
-          const roomName = currentSection?.displayName || currentSection?.label || 'this room';
-          const what = addedThisTurn === 1 ? 'that' : `${addedThisTurn} lines`;
-          const spoken = `Done — ${what} in ${roomName}. Anything else?`;
-          setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
-          speakThenListenRef.current(spoken);
         } else {
           // Nothing actionable came back (e.g. a bare navigate). Prompt for next.
           const roomName = currentSection?.displayName || currentSection?.label || 'this room';
@@ -380,7 +436,9 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
 
   const submitUtterance = useCallback(
     (text: string) => {
-      const t = text.trim();
+      // Collapse any growing-prefix duplication some speech engines emit
+      // ("change change to change to the…") before doing anything with it.
+      const t = dedupeTranscript(text);
       if (!t) return;
       // "No" / "close" / "that's it" / "stop" — the inspector is done. Stop
       // listening, acknowledge briefly, and DON'T call the agent (so it can't

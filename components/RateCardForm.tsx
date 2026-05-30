@@ -235,28 +235,20 @@ export function RateCardForm(props: RateCardFormProps) {
     }, 60);
   }, []);
 
-  // After a voice add/edit, make sure the affected section is on-screen. Unlike
-  // navigateToSection (top-align), this only scrolls if the section's content is
-  // hidden behind the footer/dialogue at the bottom, so it doesn't yank the view
-  // when the inspector is already looking at it. The tall bottom spacer makes
-  // room for even the last section to scroll up.
+  // After a voice add/edit, bring the affected section up to the top of the
+  // viewport (just below the sticky header) so the newly added line is easy to
+  // see. Same behavior on desktop and mobile. The tall bottom spacer guarantees
+  // there's room to scroll even the last section to the top.
   const revealSection = useCallback((sectionId: string) => {
     setExpanded((e) => ({ ...e, [sectionId]: true }));
     setTimeout(() => {
       const el = sectionRefs.current[sectionId];
       if (!el) return;
+      const STICKY_OFFSET = 64; // sticky totals header + a little air
       const rect = el.getBoundingClientRect();
-      // Footer (~64px) + open assistant panel can cover the bottom ~340px.
-      const bottomObstruction = 340;
-      const viewportH = window.innerHeight;
-      const STICKY_OFFSET = 64;
-      // If the section's bottom is hidden behind the panel/footer, or its top is
-      // under the sticky header, scroll it to just below the sticky header.
-      if (rect.bottom > viewportH - bottomObstruction || rect.top < STICKY_OFFSET) {
-        const top = window.scrollY + rect.top - STICKY_OFFSET;
-        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-      }
-    }, 80);
+      const top = window.scrollY + rect.top - STICKY_OFFSET;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }, 90);
   }, []);
   // form mounts, so the FIRST "add line item" click is instant instead of
   // waiting on the (large) catalog fetch. Fire-and-forget; ensureDataLoaded
