@@ -129,11 +129,22 @@ export function parseSectionListJson(json: string | null | undefined): SectionIn
       if (!id) continue;   // an id is required
       const label = String(item.label || id);
       const location = String(item.location || '');
-      // displayName isn't always stored — fall back to label, plus location
-      // suffix for repeating sections (when location differs from label).
-      const displayName = item.displayName != null
-        ? String(item.displayName)
-        : (location && location !== label ? `${label} — ${location}` : label);
+      // displayName isn't always stored — derive a clean one. The `location`
+      // (e.g. "Bedroom 1", "Half Bath", "Bathroom 2") is already descriptive on
+      // its own, so prefer it; only the bare `label` when there's no location.
+      // Avoids doubled names like "Bedroom — Bedroom 1" or "Bathroom — Half Bath".
+      let displayName: string;
+      if (item.displayName != null) {
+        displayName = String(item.displayName);
+        // Repair previously-saved doubled names ("Label — Location" where the
+        // location is self-descriptive) down to just the location.
+        const m = displayName.match(/^(.*?)\s+—\s+(.*)$/);
+        if (m && location && m[2].trim() === location.trim()) {
+          displayName = location;
+        }
+      } else {
+        displayName = location || label;
+      }
       out.push({
         id,
         key: String(item.key || id),

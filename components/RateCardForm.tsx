@@ -1826,90 +1826,91 @@ function SectionHeader(p: SectionHeaderProps) {
         editingTitle || p.forceExpanded ? '' : 'hover:bg-brand/10 cursor-pointer'
       }`}
     >
-      {/* Row 1: Title + inline edit/delete controls. The title gets the full
-          row width on mobile so it doesn't truncate behind the totals. */}
-      <div className="flex items-center gap-2 min-w-0">
-        {editingTitle ? (
-          <input
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-              else if (e.key === 'Enter') { e.preventDefault(); commit(); }
-            }}
-            onClick={(e) => e.stopPropagation()}
-            className="font-semibold text-gray-900 border border-brand rounded px-2 py-1 text-sm bg-white flex-1 min-w-0"
-          />
-        ) : (
-          <div className="font-semibold text-gray-900 min-w-0 break-words">{p.heading}</div>
-        )}
-        {/* Photo status inline next to the room name to save a row. */}
-        {!editingTitle && p.photosMissing && (
-          <span title="Section photo required" className="text-amber-600 font-semibold text-xs whitespace-nowrap shrink-0">📷 Photos Needed</span>
-        )}
-        {!editingTitle && p.photosCount > 0 && (
-          <span className="text-gray-500 text-xs whitespace-nowrap shrink-0">📷 {p.photosCount}</span>
-        )}
-        {!editingTitle && <div className="flex-1 min-w-0" />}
-        {!p.readOnly && !editingTitle && (
-          <>
-            <button
-              type="button"
-              onClick={startEdit}
-              className="text-gray-400 hover:text-brand p-0.5 flex-shrink-0"
-              title="Rename section"
-              aria-label="Rename section"
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M11 1.5l3.5 3.5L5 14.5H1.5V11L11 1.5z" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); p.onDelete(); }}
-              className="text-gray-400 hover:text-red-600 p-0.5 flex-shrink-0 text-base leading-none"
-              title="Delete section"
-              aria-label="Delete section"
-            >
-              ×
-            </button>
-          </>
-        )}
-        {!p.forceExpanded && (
-          <span className="text-gray-400 flex-shrink-0">{p.isOpen ? '▾' : '▸'}</span>
-        )}
-      </div>
-      {/* Row 2: centered 5-box totals pill that mirrors the floating header
-          (Lines + Vendor / Client / Tenant / Net Turn). Photo status now lives
-          inline in the title row above. */}
-      {p.lineCount > 0 && (
-        <div className="mt-1 flex justify-center">
-          <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden">
+      {/* One responsive row. Desktop: room name + photo status on the left,
+          totals pill pushed to the right — all on a single line (no wasted
+          height). Mobile: the totals pill wraps below, and the room name
+          TRUNCATES rather than wrapping so the line stays clean. */}
+      <div className="flex items-center gap-2 min-w-0 flex-wrap">
+        {/* Left group: name + photo status + edit/delete + chevron. Takes the
+            remaining width; the name truncates inside it. */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          {editingTitle ? (
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+                else if (e.key === 'Enter') { e.preventDefault(); commit(); }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="font-semibold text-gray-900 border border-brand rounded px-2 py-1 text-sm bg-white flex-1 min-w-0"
+            />
+          ) : (
+            <div className="font-semibold text-gray-900 min-w-0 truncate text-sm sm:text-base">{p.heading}</div>
+          )}
+          {/* Photo status inline next to the room name. */}
+          {!editingTitle && p.photosMissing && (
+            <span title="Section photo required" className="text-amber-600 font-semibold text-xs whitespace-nowrap shrink-0">📷 Photos Needed</span>
+          )}
+          {!editingTitle && p.photosCount > 0 && (
+            <span className="text-gray-500 text-xs whitespace-nowrap shrink-0">📷 {p.photosCount}</span>
+          )}
+          {!p.readOnly && !editingTitle && (
+            <>
+              <button
+                type="button"
+                onClick={startEdit}
+                className="text-gray-400 hover:text-brand p-0.5 flex-shrink-0"
+                title="Rename section"
+                aria-label="Rename section"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 1.5l3.5 3.5L5 14.5H1.5V11L11 1.5z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); p.onDelete(); }}
+                className="text-gray-400 hover:text-red-600 p-0.5 flex-shrink-0 text-base leading-none"
+                title="Delete section"
+                aria-label="Delete section"
+              >
+                ×
+              </button>
+            </>
+          )}
+          {!p.forceExpanded && (
+            <span className="text-gray-400 flex-shrink-0">{p.isOpen ? '▾' : '▸'}</span>
+          )}
+        </div>
+        {/* Totals pill — sits to the right on desktop, wraps below on mobile. */}
+        {p.lineCount > 0 && (
+          <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden shrink-0 ml-auto">
             <div className="text-center px-2 py-1 w-[58px] sm:w-[84px]">
               <div className="text-gray-400 text-[10px] uppercase tracking-wide">Lines</div>
               <div className="font-semibold text-gray-700 tabular-nums mt-0.5">{p.lineCount}</div>
             </div>
-              <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
-                <div className="text-gray-400 text-[10px] uppercase tracking-wide">Vendor</div>
-                <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.vendorTotal))}</div>
-              </div>
-              <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
-                <div className="text-gray-400 text-[10px] uppercase tracking-wide">Client</div>
-                <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.clientTotal))}</div>
-              </div>
-              <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
-                <div className="text-brand/70 text-[10px] uppercase tracking-wide">Tenant</div>
-                <div className="font-semibold text-brand tabular-nums mt-0.5">${formatMoney(roundMoney(p.tenantTotal))}</div>
-              </div>
-              <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
-                <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net Turn</div>
-                <div className="font-semibold text-emerald-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.clientTotal - p.tenantTotal))}</div>
-              </div>
+            <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
+              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Vendor</div>
+              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.vendorTotal))}</div>
+            </div>
+            <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
+              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Client</div>
+              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.clientTotal))}</div>
+            </div>
+            <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
+              <div className="text-brand/70 text-[10px] uppercase tracking-wide">Tenant</div>
+              <div className="font-semibold text-brand tabular-nums mt-0.5">${formatMoney(roundMoney(p.tenantTotal))}</div>
+            </div>
+            <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
+              <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net Turn</div>
+              <div className="font-semibold text-emerald-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.clientTotal - p.tenantTotal))}</div>
             </div>
           </div>
         )}
+      </div>
     </div>
   );
 }

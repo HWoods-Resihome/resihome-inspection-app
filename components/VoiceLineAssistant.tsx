@@ -1,6 +1,6 @@
 // components/VoiceLineAssistant.tsx
 //
-// Roaming conversational ResiWALK AI Assistant for the Scope rate card.
+// Roaming conversational Voice Assistant for the Scope rate card.
 // Online-only. ONE floating panel travels across rooms: it always shows the
 // room it's working on, lets the inspector change rooms manually (dropdown) or
 // by voice ("close this out, go to Bedroom 2"), scrolls the form to that room,
@@ -670,7 +670,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           setTimeout(() => { startListeningRef.current(); }, 0);
         }}
         disabled={disabled}
-        aria-label="Talk to the ResiWALK AI Assistant"
+        aria-label="Talk to the Voice Assistant"
         className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-brand text-white hover:bg-brand-dark disabled:opacity-50 shadow"
       >
         <MicIcon className="w-5 h-5" />
@@ -687,7 +687,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         <div className="max-w-7xl mx-auto flex justify-center">
           <div className="pointer-events-auto w-full sm:w-[440px] rounded-lg border border-brand/30 bg-white shadow-xl p-3">
             <div className="flex items-center justify-between gap-2 mb-2">
-              <span className="text-sm font-heading font-semibold text-brand">ResiWALK AI Assistant</span>
+              <span className="text-sm font-heading font-semibold text-brand">Voice Assistant</span>
               <button type="button" onClick={() => { reset(); setOpen(false); }} className="text-xs text-gray-500 hover:text-gray-700 shrink-0">
                 Close
               </button>
@@ -809,7 +809,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           startListeningRef.current();
         }}
         disabled={(busy || warming) && !listening ? true : disabled}
-        aria-label={listening ? 'Stop listening' : 'Talk to the ResiWALK AI Assistant'}
+        aria-label={listening ? 'Stop listening' : 'Talk to the Voice Assistant'}
         className={`inline-flex items-center justify-center w-11 h-11 rounded-full text-white shadow disabled:opacity-50 ${listening ? 'bg-red-600 animate-pulse' : 'bg-brand hover:bg-brand-dark ring-2 ring-brand/40'}`}
       >
         <MicIcon className="w-5 h-5" />
