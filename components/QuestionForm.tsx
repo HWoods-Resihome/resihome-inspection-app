@@ -457,17 +457,16 @@ export function QuestionForm({
     // Skip noop-only updates (like toggling optionalPanelOpen) -- they shouldn't trigger autosave
     const onlyPanelToggle = Object.keys(patch).length === 1 && 'optionalPanelOpen' in patch;
 
-    // Compute the new value outside the setter so we can capture it for autosave
-    let updated: AnswerInput | undefined;
-    setAnswers((prev) => {
-      const merged = { ...prev[key], ...patch };
-      updated = merged;
-      return { ...prev, [key]: merged };
-    });
+    // Compute the merged value from the CURRENT answers (not via a side-effect
+    // inside the setter, which is unreliable under React 18 strict mode and can
+    // cause the autosave noteEdit to be skipped — the bug where the "Saving…"
+    // indicator never appeared on the question form).
+    const merged: AnswerInput = { ...answers[key], ...patch };
+    setAnswers((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
 
-    if (!onlyPanelToggle && updated) {
+    if (!onlyPanelToggle) {
       const [, instanceKey] = key.split('::');
-      autosave.noteEdit(key, updated, updated.questionHubspotRecordId, instanceKey);
+      autosave.noteEdit(key, merged, merged.questionHubspotRecordId, instanceKey);
     }
   }
 
