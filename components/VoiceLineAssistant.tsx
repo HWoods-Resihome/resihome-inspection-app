@@ -523,6 +523,11 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     recogRef.current = recog;
     startingRef.current = true;
     finalTranscriptRef.current = '';
+    // Optimistically reflect the listening state so the UI ("Listening…" + the
+    // pulsing mic) updates the instant the inspector taps, rather than waiting
+    // for the engine's onstart, which can lag noticeably on mobile.
+    listeningRef.current = true;
+    setListening(true);
 
     const clearSilence = () => {
       if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
@@ -799,21 +804,27 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       {/* The mic stays in the footer slot while open. Tapping it starts (or
           re-opens) listening so the inspector can talk again — it does NOT
           close the panel. Closing is only via the Close button in the panel. */}
-      <button
-        type="button"
-        onClick={() => {
-          if (listening) { stopListening(); return; }
-          // Barge-in: cut off any ongoing TTS so the inspector can speak now.
-          try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
-          speakingRef.current = false;
-          startListeningRef.current();
-        }}
-        disabled={(busy || warming) && !listening ? true : disabled}
-        aria-label={listening ? 'Stop listening' : 'Talk to the Voice Assistant'}
-        className={`inline-flex items-center justify-center w-11 h-11 rounded-full text-white shadow disabled:opacity-50 ${listening ? 'bg-red-600 animate-pulse' : 'bg-brand hover:bg-brand-dark ring-2 ring-brand/40'}`}
-      >
-        <MicIcon className="w-5 h-5" />
-      </button>
+      <span className="relative inline-flex shrink-0">
+        {/* Expanding ring while listening (classic "live" pulse). */}
+        {listening && (
+          <span className="absolute inset-0 rounded-full bg-red-500/60 animate-ping" />
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            if (listening) { stopListening(); return; }
+            // Barge-in: cut off any ongoing TTS so the inspector can speak now.
+            try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
+            speakingRef.current = false;
+            startListeningRef.current();
+          }}
+          disabled={(busy || warming) && !listening ? true : disabled}
+          aria-label={listening ? 'Stop listening' : 'Talk to the Voice Assistant'}
+          className={`relative inline-flex items-center justify-center w-11 h-11 rounded-full text-white shadow disabled:opacity-50 transition-transform ${listening ? 'bg-red-600 scale-110 animate-pulse' : 'bg-brand hover:bg-brand-dark ring-2 ring-brand/40'}`}
+        >
+          <MicIcon className="w-5 h-5" />
+        </button>
+      </span>
     </>
   );
 }
