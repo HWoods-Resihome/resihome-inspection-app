@@ -68,6 +68,7 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [streamingText, setStreamingText] = useState('');
   const [typed, setTyped] = useState('');
   const recogRef = useRef<any>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
@@ -78,39 +79,99 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
     setSupported(getRecognition() !== null);
   }, []);
 
+  // Warm-up: when the panel opens, ping the endpoint (GET) so the catalog +
+  // embeddings cold-start work happens BEFORE the first spoken line. Fire and
+  // forget; failure is harmless (the real request still works, just slower).
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await fetch('/api/rate-card/voice-assist', { method: 'GET' });
+      } catch { /* non-fatal */ }
+      if (cancelled) return;
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
+
   const sendToAgent = useCallback(
     async (history: ChatMsg[]) => {
       setBusy(true);
       setError(null);
+      setStreamingText('');
+      let accumulated = '';
       try {
         const r = await fetch('/api/rate-card/voice-assist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ messages: history, section, location, region }),
         });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        if (!r.ok || !r.body) {
+          // Try to read a JSON error (non-stream failure path).
+          let msg = `HTTP ${r.status}`;
+          try { const j = await r.json(); msg = j.error || msg; } catch { /* noop */ }
+          throw new Error(msg);
+        }
 
-        if (data.type === 'proposal') {
-          setProposal({ line: data.line, summary: data.summary });
-          // Surface + speak any assistant preamble. A proposal does NOT
-          // auto-restart the mic (inspector confirms first).
-          const say = data.assistantText || data.summary;
-          if (data.assistantText) {
-            setMessages((m) => [...m, { role: 'assistant', content: data.assistantText }]);
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalType: string | null = null;
+        let finalData: any = null;
+
+        // Parse the SSE event stream.
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const chunks = buffer.split('\n\n');
+          buffer = chunks.pop() || '';
+          for (const chunk of chunks) {
+            const lines = chunk.split('\n');
+            let ev = 'message';
+            let dataStr = '';
+            for (const l of lines) {
+              if (l.startsWith('event:')) ev = l.slice(6).trim();
+              else if (l.startsWith('data:')) dataStr += l.slice(5).trim();
+            }
+            if (!dataStr) continue;
+            let data: any;
+            try { data = JSON.parse(dataStr); } catch { continue; }
+
+            if (ev === 'delta') {
+              accumulated += data.text || '';
+              setStreamingText(accumulated);
+            } else if (ev === 'question' || ev === 'proposal' || ev === 'message' || ev === 'error') {
+              finalType = ev;
+              finalData = data;
+            } else if (ev === 'done') {
+              // terminal
+            }
+          }
+        }
+
+        // Finalize based on the last terminal event.
+        setStreamingText('');
+        if (finalType === 'error') {
+          setError(finalData?.error || 'Something went wrong.');
+        } else if (finalType === 'proposal') {
+          setProposal({ line: finalData.line, summary: finalData.summary });
+          const say = finalData.assistantText || accumulated || finalData.summary;
+          if (finalData.assistantText || accumulated) {
+            setMessages((m) => [...m, { role: 'assistant', content: finalData.assistantText || accumulated }]);
           }
           speak(say, () => { /* no auto-restart on a proposal */ });
         } else {
-          // 'question' or 'message' — show + speak it.
-          const text = data.text || '';
+          // question or message — the text already streamed; finalize it.
+          const text = finalData?.text || accumulated;
           setMessages((m) => [...m, { role: 'assistant', content: text }]);
           speak(text, () => {
-            // Auto-restart the mic only when the AI asked a question and is
-            // waiting on the inspector (less clicks, hands-free).
-            if (data.awaitingReply) startListeningRef.current();
+            if (finalData?.awaitingReply) startListeningRef.current();
           });
         }
       } catch (e: any) {
+        setStreamingText('');
         setError(String(e?.message || e));
       } finally {
         setBusy(false);
@@ -166,11 +227,11 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
   // captures an older closure) always calls the current one.
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
-  // Auto-scroll the transcript to the newest message / proposal.
+  // Auto-scroll the transcript to the newest message / streaming text / proposal.
   useEffect(() => {
     const el = transcriptRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, proposal]);
+  }, [messages, proposal, streamingText]);
 
   // Stop any in-progress speech if the panel unmounts.
   useEffect(() => () => { try { window.speechSynthesis?.cancel(); } catch { /* noop */ } }, []);
@@ -227,7 +288,7 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
 
       {/* Transcript + draft proposal share one scroll region so auto-scroll
           reaches whichever is newest. */}
-      {(messages.length > 0 || proposal) && (
+      {(messages.length > 0 || proposal || streamingText) && (
         <div ref={transcriptRef} className="max-h-56 overflow-y-auto mb-2">
           <div className="space-y-1.5">
             {messages.map((m, i) => (
@@ -240,6 +301,14 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
                 </span>
               </div>
             ))}
+            {/* Live streaming reply (tokens as they generate) */}
+            {streamingText && (
+              <div className="text-left">
+                <span className="inline-block px-2.5 py-1 rounded-lg text-sm bg-white border border-gray-200 text-ink">
+                  {streamingText}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Draft proposal — confirm before saving */}

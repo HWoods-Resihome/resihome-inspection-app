@@ -22,7 +22,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { fetchRateCardCatalog } from '@/lib/hubspot';
-import { matchCatalog } from '@/lib/voiceCatalogMatch';
+import { matchCatalog, getCatalogEmbeddings } from '@/lib/voiceCatalogMatch';
 import { VENDORS } from '@/lib/vendors';
 import type { RateCardLineItem, RateCardLineInput } from '@/lib/types';
 
@@ -49,6 +49,88 @@ function anthropicKey(): string {
   const k = process.env.ANTHROPIC_API_KEY;
   if (!k) throw new Error('ANTHROPIC_API_KEY is not set — voice assistant is unavailable.');
   return k;
+}
+
+// Call Anthropic with streaming on. Forward any assistant TEXT deltas to the
+// client over SSE as they arrive (this is what makes clarify turns feel
+// instant), while assembling the full content-block array (text + tool_use) so
+// the tool loop can run normally once the turn completes.
+// `onTextDelta` is called with each text chunk; returns { content, stopReason }.
+async function streamAnthropic(
+  payload: any,
+  onTextDelta: (chunk: string) => void
+): Promise<{ content: any[]; stopReason: string | null }> {
+  const resp = await fetch(ANTHROPIC_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': anthropicKey(),
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({ ...payload, stream: true }),
+  });
+  if (!resp.ok || !resp.body) {
+    const t = await resp.text().catch(() => '');
+    throw new Error(`Assistant call failed ${resp.status}: ${t.slice(0, 200)}`);
+  }
+
+  // Assemble content blocks from the SSE event stream.
+  const blocks: any[] = [];
+  let stopReason: string | null = null;
+  const toolJsonByIndex: Record<number, string> = {};
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const json = trimmed.slice(5).trim();
+      if (!json || json === '[DONE]') continue;
+      let ev: any;
+      try { ev = JSON.parse(json); } catch { continue; }
+
+      if (ev.type === 'content_block_start') {
+        const cb = ev.content_block;
+        if (cb?.type === 'text') blocks[ev.index] = { type: 'text', text: '' };
+        else if (cb?.type === 'tool_use') {
+          blocks[ev.index] = { type: 'tool_use', id: cb.id, name: cb.name, input: {} };
+          toolJsonByIndex[ev.index] = '';
+        }
+      } else if (ev.type === 'content_block_delta') {
+        const d = ev.delta;
+        if (d?.type === 'text_delta') {
+          if (blocks[ev.index]) blocks[ev.index].text += d.text;
+          onTextDelta(d.text);
+        } else if (d?.type === 'input_json_delta') {
+          toolJsonByIndex[ev.index] = (toolJsonByIndex[ev.index] || '') + (d.partial_json || '');
+        }
+      } else if (ev.type === 'content_block_stop') {
+        if (toolJsonByIndex[ev.index] != null && blocks[ev.index]?.type === 'tool_use') {
+          try { blocks[ev.index].input = JSON.parse(toolJsonByIndex[ev.index] || '{}'); }
+          catch { blocks[ev.index].input = {}; }
+        }
+      } else if (ev.type === 'message_delta') {
+        if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
+      }
+    }
+  }
+  // Compact any holes left by index gaps.
+  return { content: blocks.filter(Boolean), stopReason };
+}
+
+// SSE write helpers.
+function sse(res: NextApiResponse, event: string, data: any) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 function systemPrompt(section: string, location: string): string {
@@ -120,73 +202,70 @@ function lineToSummary(item: RateCardLineItem, qty: number, vendor: string, pct:
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
+
+  // Warm-up ping (GET): pre-load the expensive cold-start work — the catalog
+  // and its embeddings — so the inspector's FIRST spoken line is fast. No LLM
+  // call, so it's cheap. The client fires this when the voice panel opens.
+  if (req.method === 'GET') {
+    try {
+      const catalog = await fetchRateCardCatalog();
+      await getCatalogEmbeddings(catalog); // builds/loads the vector cache
+      return res.status(200).json({ warm: true, items: catalog.length });
+    } catch (e: any) {
+      // Warm-up failure is non-fatal; the real request will surface errors.
+      return res.status(200).json({ warm: false, error: String(e?.message || e) });
+    }
+  }
+
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  // Stream the response as Server-Sent Events. Text deltas (clarify questions /
+  // preamble) flow to the client as they generate; the final resolution is sent
+  // as a 'question' | 'proposal' | 'message' event, then 'done'.
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
 
   try {
     const body = req.body as BodyShape;
     const clientMessages = Array.isArray(body?.messages) ? body.messages : [];
-    if (clientMessages.length === 0) return res.status(400).json({ error: 'No messages' });
+    if (clientMessages.length === 0) {
+      sse(res, 'error', { error: 'No messages' });
+      sse(res, 'done', {});
+      return res.end();
+    }
 
     const catalog = await fetchRateCardCatalog();
     const byCode = new Map(catalog.map((c) => [c.lineItemCode, c]));
 
-    // Build the Anthropic message list from the client transcript.
     const messages: any[] = clientMessages.map((m) => ({ role: m.role, content: m.content }));
-
     const system = systemPrompt(body.section || '', body.location || '');
 
-    // Model selection: use the smart model while the agent is still reasoning
-    // about which catalog item to pick (the first round, and any round right
-    // after a search where it interprets candidates). Once matching is settled,
-    // simple clarify turns use the fast model. We bias toward smart on round 0
-    // (the match decision) and switch to fast only for follow-up clarify rounds
-    // that didn't involve a fresh search.
     let usedSearchThisTurn = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      // Round 0 is the match decision -> smart. Later rounds: smart if we just
-      // searched (interpreting candidates), fast otherwise (plain clarify).
       const model = round === 0 || usedSearchThisTurn ? MODEL_SMART : MODEL_FAST;
-      const resp = await fetch(ANTHROPIC_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey(),
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 1024,
-          system,
-          tools: tools(),
-          messages,
-        }),
-      });
-      if (!resp.ok) {
-        const t = await resp.text().catch(() => '');
-        return res.status(502).json({ error: `Assistant call failed ${resp.status}: ${t.slice(0, 200)}` });
-      }
-      const data = await resp.json();
-      const content: any[] = data.content || [];
+
+      // Stream this model call; forward text deltas live to the client.
+      const { content } = await streamAnthropic(
+        { model, max_tokens: 1024, system, tools: tools(), messages },
+        (chunk) => sse(res, 'delta', { text: chunk })
+      );
 
       const toolUses = content.filter((c) => c.type === 'tool_use');
       const textBlocks = content.filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim();
 
-      // No tool calls -> the assistant is asking a question / replying.
-      // awaitingReply=true tells the client to auto-restart the mic (the AI
-      // asked something and is waiting on the inspector).
+      // No tool calls -> the assistant asked a question / replied. The text has
+      // already streamed via 'delta'; send the final marker so the client knows
+      // to (a) finalize the message and (b) auto-restart the mic.
       if (toolUses.length === 0) {
-        return res.status(200).json({
-          type: 'question',
-          text: textBlocks || 'Could you tell me more?',
-          awaitingReply: true,
-        });
+        sse(res, 'question', { text: textBlocks || 'Could you tell me more?', awaitingReply: true });
+        sse(res, 'done', {});
+        return res.end();
       }
 
-      // Reset per-round; set below if a search runs this round.
       usedSearchThisTurn = false;
-
-      // Append the assistant turn (with tool_use) to history, then resolve tools.
       messages.push({ role: 'assistant', content });
       const toolResults: any[] = [];
 
@@ -203,11 +282,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             subcategory: m.item.subcategory,
             unit: m.item.laborMeas,
           }));
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: tu.id,
-            content: JSON.stringify(compact),
-          });
+          toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(compact) });
         } else if (tu.name === 'get_line_details') {
           const code = String(tu.input?.code || '');
           const item = byCode.get(code);
@@ -228,8 +303,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             });
             continue;
           }
-          // Apply the streamlined defaults: Vendor 1 / 100% tenant unless the
-          // inspector stated otherwise. Validate + clamp against real constraints.
           const qty = Number(tu.input?.quantity);
           let vendor = tu.input?.vendor ? String(tu.input.vendor) : 'Vendor 1';
           if (!VENDORS.includes(vendor)) vendor = 'Vendor 1';
@@ -244,8 +317,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             continue;
           }
 
-          // Build the RateCardLineInput. externalId is a fresh client-style key;
-          // the save endpoint upserts by it (same pattern as a manual add).
           const externalId = `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
           const line: RateCardLineInput = {
             externalId,
@@ -258,16 +329,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             note: tu.input?.note ? String(tu.input.note) : '',
             photoUrls: [],
           };
-          // Return the proposal for the client to show as a draft + confirm.
-          // awaitingReply=false: a line was matched, not a question — the mic
-          // should NOT auto-restart (inspector confirms, then chooses to continue).
-          return res.status(200).json({
-            type: 'proposal',
+          // A line was matched. Any preamble text already streamed via 'delta';
+          // awaitingReply=false (proposal, not a question — mic stays off).
+          sse(res, 'proposal', {
             line,
             summary: lineToSummary(item, qty, vendor, pct),
             assistantText: textBlocks || undefined,
             awaitingReply: false,
           });
+          sse(res, 'done', {});
+          return res.end();
         } else {
           toolResults.push({
             type: 'tool_result', tool_use_id: tu.id, is_error: true,
@@ -276,17 +347,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       }
 
-      // Feed tool results back and loop for the next assistant turn.
       messages.push({ role: 'user', content: toolResults });
     }
 
-    // Exhausted tool rounds without a proposal/question — bail gracefully.
-    return res.status(200).json({
-      type: 'message',
-      text: "I couldn't pin that down. Try rephrasing what's needed, or add it manually.",
-    });
+    sse(res, 'message', { text: "I couldn't pin that down. Try rephrasing what's needed, or add it manually." });
+    sse(res, 'done', {});
+    return res.end();
   } catch (e: any) {
     console.error('POST /api/rate-card/voice-assist failed:', e);
-    return res.status(500).json({ error: String(e?.message || e) });
+    try {
+      sse(res, 'error', { error: String(e?.message || e) });
+      sse(res, 'done', {});
+      return res.end();
+    } catch {
+      return res.status(500).json({ error: String(e?.message || e) });
+    }
   }
 }
