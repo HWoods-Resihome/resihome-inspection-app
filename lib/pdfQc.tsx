@@ -59,7 +59,7 @@ export interface QcPdfContext {
 }
 
 // QC column layout mirrors Scope (no client/tenant) + Result:
-//   Cat 13 | Sub 12 | Description 30 | Unit 6 | Qty 6 | Vendor 12 | Ven$ 10 | Result 11
+//   Cat 13 | Sub 12 | Description 30 | Qty 6 | Unit 6 | Vendor 12 | Ven$ 10 | Result 11
 const COL = {
   category: '13%',
   subcategory: '12%',
@@ -183,8 +183,8 @@ function QcSection({ section: s }: { section: QcPdfSection }) {
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.category }]}>Category</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.subcategory }]}>Sub</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.description }]}>Line Item</Text>
-            <Text style={[pdfStyles.tableHeaderCell, { width: COL.unit, textAlign: 'center' }]}>Unit</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.qty, textAlign: 'center' }]}>Qty</Text>
+            <Text style={[pdfStyles.tableHeaderCell, { width: COL.unit, textAlign: 'center' }]}>Unit</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.vendor, textAlign: 'center' }]}>Vendor</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.vendorCost, textAlign: 'right' }]}>Vendor $</Text>
             <Text style={[pdfStyles.tableHeaderCell, { width: COL.result, textAlign: 'center' }]}>Result</Text>
@@ -197,8 +197,8 @@ function QcSection({ section: s }: { section: QcPdfSection }) {
               <View style={{ width: COL.description }}>
                 <Text style={pdfStyles.tableCell}>{line.description}</Text>
               </View>
-              <Text style={[pdfStyles.tableCellCentered, { width: COL.unit }]}>{line.unit}</Text>
               <Text style={[pdfStyles.tableCellCentered, { width: COL.qty }]}>{line.quantity != null ? formatQtyPdf(line.quantity) : ''}</Text>
+              <Text style={[pdfStyles.tableCellCentered, { width: COL.unit }]}>{line.unit}</Text>
               <Text style={[pdfStyles.tableCellCentered, { width: COL.vendor }]}>{line.vendor}</Text>
               <Text style={[pdfStyles.tableCellNumeric, { width: COL.vendorCost }]}>{line.vendorCost != null ? `$${formatMoneyPdf(line.vendorCost)}` : ''}</Text>
               <View style={{ width: COL.result }}><ResultChip pf={line.passFail} /></View>

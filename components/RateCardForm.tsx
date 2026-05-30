@@ -1249,8 +1249,8 @@ export function RateCardForm(props: RateCardFormProps) {
                             <th className="text-center px-3 py-2 whitespace-nowrap">Category</th>
                             <th className="text-center px-3 py-2 whitespace-nowrap">Sub</th>
                             <th className="text-left px-3 py-2">Line Item</th>
-                            <th className="text-center px-3 py-2 whitespace-nowrap">Unit</th>
                             <th className="text-center px-3 py-2 whitespace-nowrap">Qty</th>
+                            <th className="text-center px-3 py-2 whitespace-nowrap">Unit</th>
                             <th className="text-center px-3 py-2 whitespace-nowrap">Vendor</th>
                             <th className="text-right px-3 py-2 whitespace-nowrap">Vendor $</th>
                             <th className="text-right px-3 py-2 whitespace-nowrap">Client $</th>

@@ -11,7 +11,7 @@
  *           - Required: line item code + quantity > 0 + vendor.
  *
  * Columns (final order, matches the v0.16.3 header):
- *   Cat | Sub | Line Item | Unit | Qty | Vendor | Vendor $ | Client $ | Ten % | Tenant $ | Actions
+ *   Cat | Sub | Line Item | Qty | Unit | Vendor | Vendor $ | Client $ | Ten % | Tenant $ | Actions
  *
  * All data cells use a uniform text-sm size for visual consistency.
  *
@@ -457,12 +457,6 @@ export function EditableLineRow(props: Props) {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Unit</label>
-                    <div className="h-11 flex items-center px-3 border border-gray-200 rounded-lg bg-gray-50 text-base text-gray-700">
-                      {selectedItem?.laborMeas || '—'}
-                    </div>
-                  </div>
-                  <div>
                     <label className="block text-xs font-heading font-bold text-gray-700 mb-1">
                       Quantity <span className="text-brand">*</span>
                     </label>
@@ -472,6 +466,12 @@ export function EditableLineRow(props: Props) {
                       onChange={(e) => setQuantity(e.target.value)}
                       className="no-spinner h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white"
                     />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Unit</label>
+                    <div className="h-11 flex items-center px-3 border border-gray-200 rounded-lg bg-gray-50 text-base text-gray-700">
+                      {selectedItem?.laborMeas || '—'}
+                    </div>
                   </div>
                 </div>
 
@@ -613,10 +613,6 @@ export function EditableLineRow(props: Props) {
           />
         )}
       </td>
-      {/* Unit (read-only — auto from line item) */}
-      <td className="px-2 py-1.5 text-center text-sm text-gray-700 align-middle">
-        {selectedItem?.laborMeas || '—'}
-      </td>
       {/* Qty (center-aligned, no spinner) */}
       <td className="px-2 py-1.5 text-center align-middle">
         <input
@@ -627,6 +623,10 @@ export function EditableLineRow(props: Props) {
           onChange={(e) => setQuantity(e.target.value)}
           className="no-spinner h-9 w-14 border border-gray-300 rounded px-1 text-sm text-center bg-white mx-auto"
         />
+      </td>
+      {/* Unit (read-only — auto from line item) */}
+      <td className="px-2 py-1.5 text-center text-sm text-gray-700 align-middle">
+        {selectedItem?.laborMeas || '—'}
       </td>
       {/* Vendor */}
       <td className="px-2 py-1.5 align-middle min-w-[100px] max-w-[130px]">
@@ -846,8 +846,8 @@ function ViewRow({ line, item, calc, readOnly, onEnterEdit, onDelete, onSaveDesc
         {line.note && <div className="text-xs italic text-gray-600 mt-1">📝 {line.note}</div>}
         {calc?.isCustomPriced && <div className="text-xs font-semibold text-yellow-700 mt-1">⚡ Custom Priced</div>}
       </td>
-      <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{item.laborMeas}</td>
       <td className="px-3 py-2 text-center text-sm text-gray-900 whitespace-nowrap">{line.quantity}</td>
+      <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{item.laborMeas}</td>
       <td className="px-3 py-2 text-center whitespace-nowrap">
         <span
           className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold max-w-[140px] truncate ${pill.bg} ${pill.text} ${pill.border || ''}`}

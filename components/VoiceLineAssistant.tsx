@@ -459,10 +459,11 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, onRem
   // captures an older closure) always calls the current one.
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
-  // Speak a reply, then open the mic ~600ms BEFORE the speech finishes so a
-  // quick verbal reply isn't missed. startListening cancels any remaining TTS.
+  // Speak a reply, then open the mic once speech has FULLY finished. We no
+  // longer open early — it caused echo and timing issues. The speaking-state
+  // callback still drives the echo guard during playback.
   const speakThenListen = useCallback((text: string) => {
-    speak(text, () => { startListeningRef.current(); }, 600, (sp) => { speakingRef.current = sp; });
+    speak(text, () => { startListeningRef.current(); }, 0, (sp) => { speakingRef.current = sp; });
   }, []);
   const speakThenListenRef = useRef(speakThenListen);
   useEffect(() => { speakThenListenRef.current = speakThenListen; }, [speakThenListen]);

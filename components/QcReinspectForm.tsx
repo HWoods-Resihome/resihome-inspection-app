@@ -3,7 +3,7 @@
  *
  * Validates that a vendor completed the work dispatched on a Scope Rate Card.
  * Visually mirrors the Scope Rate Card read-only view: collapsible sections,
- * the full column set (Category / Sub / Line Item / Unit / Qty / Vendor /
+ * the full column set (Category / Sub / Line Item / Qty / Unit / Vendor /
  * Vendor $), the same section-photo layout — plus two QC additions:
  *   - a Result column with Pass (check) / Fail (x) chips per line
  *   - an "After Photos" capture block (highlighted teal) alongside the
@@ -395,8 +395,8 @@ export function QcReinspectForm(props: Props) {
                         <th className="px-3 py-2 font-semibold">Category</th>
                         <th className="px-3 py-2 font-semibold">Sub</th>
                         <th className="px-3 py-2 font-semibold">Line Item</th>
-                        <th className="px-3 py-2 font-semibold text-center">Unit</th>
                         <th className="px-3 py-2 font-semibold text-center">Qty</th>
+                        <th className="px-3 py-2 font-semibold text-center">Unit</th>
                         <th className="px-3 py-2 font-semibold text-center">Vendor</th>
                         <th className="px-3 py-2 font-semibold text-right">Vendor $</th>
                         <th className="px-3 py-2 font-semibold text-center">Result</th>
@@ -408,8 +408,8 @@ export function QcReinspectForm(props: Props) {
                           <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{ln.category}</td>
                           <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{ln.subcategory}</td>
                           <td className="px-3 py-2.5 text-gray-900 min-w-[200px]">{ln.description}</td>
-                          <td className="px-3 py-2.5 text-center text-gray-600">{ln.unit}</td>
                           <td className="px-3 py-2.5 text-center text-gray-600">{ln.quantity != null ? ln.quantity : ''}</td>
+                          <td className="px-3 py-2.5 text-center text-gray-600">{ln.unit}</td>
                           <td className="px-3 py-2.5 text-center">
                             {ln.vendor && (() => {
                               const ps = vendorPillStyle(ln.vendor);
