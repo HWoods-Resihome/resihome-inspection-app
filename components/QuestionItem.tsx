@@ -20,9 +20,6 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto }: Props)
   const dialog = useAppDialog();
   const triggered = !!answer.answerValue && question.noteRequiredOnValues.includes(answer.answerValue);
 
-  // Underline required questions that don't have a default answer
-  const needsUnderline = question.isRequired && !question.defaultValue;
-
   // Optional panel is open if:
   //  - inspector explicitly opened it, OR
   //  - answer is triggered (action required), OR
@@ -107,12 +104,8 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto }: Props)
       {/* Question text + Notes/Photos toggle button */}
       <div className="flex items-start justify-between gap-3 mb-2">
         <label className="block font-heading font-semibold text-ink text-sm flex-1">
-          <span
-            className={needsUnderline ? 'underline decoration-brand decoration-2 underline-offset-4' : ''}
-          >
-            {question.questionText}
-          </span>
-          {question.isRequired && <span className="text-brand ml-1 no-underline">*</span>}
+          {question.questionText}
+          {question.isRequired && <span className="text-brand ml-1">*</span>}
         </label>
         <button
           type="button"
