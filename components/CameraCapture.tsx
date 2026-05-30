@@ -46,6 +46,11 @@ interface Props {
   // room being LEFT, and the id of the room being entered. The parent should
   // persist the urls to the left room and update currentRoomId.
   onRoomChange?: (leavingRoomId: string, capturedUrls: string[], enteringRoomId: string) => void;
+  // Optional room management from inside the camera. If provided, the room list
+  // dropdown gains rename / delete / add controls.
+  onRenameRoom?: (roomId: string, newName: string) => void;
+  onDeleteRoom?: (roomId: string) => void;        // parent handles confirm-if-has-lines
+  onAddRoom?: (name: string) => void;
 }
 
 // Target capture resolution: 1920x1440 (4:3). Browser may downgrade if
@@ -58,7 +63,7 @@ const JPEG_QUALITY = 0.88;
 
 export function CameraCapture({
   isOpen, onClose, onComplete, uploadPhoto, maxPhotos = 30,
-  rooms, currentRoomId, onRoomChange,
+  rooms, currentRoomId, onRoomChange, onRenameRoom, onDeleteRoom, onAddRoom,
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -331,6 +336,10 @@ export function CameraCapture({
   }, []);
 
   const [roomMenuOpen, setRoomMenuOpen] = useState(false);
+  const [renamingRoomId, setRenamingRoomId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [addingRoom, setAddingRoom] = useState(false);
+  const [addDraft, setAddDraft] = useState('');
   const multiRoom = !!(rooms && rooms.length && currentRoomId && onRoomChange);
   const currentRoom = multiRoom ? rooms!.find((r) => r.id === currentRoomId) : undefined;
   const currentIdx = multiRoom ? rooms!.findIndex((r) => r.id === currentRoomId) : -1;
@@ -479,27 +488,114 @@ export function CameraCapture({
                 {rooms!.map((r) => {
                   const isCurrent = r.id === currentRoomId;
                   const liveCount = r.photoCount + (isCurrent ? items.length : 0);
+                  const isRenaming = renamingRoomId === r.id;
                   return (
-                    <button
+                    <div
                       key={r.id}
-                      type="button"
-                      onClick={() => switchToRoom(r.id)}
-                      className={`w-full flex items-center justify-between gap-2 px-4 py-3 text-left border-b border-white/5 last:border-0 ${isCurrent ? 'bg-brand/30' : 'hover:bg-white/10'}`}
+                      className={`flex items-center gap-2 px-3 py-2.5 border-b border-white/5 last:border-0 ${isCurrent ? 'bg-brand/30' : ''}`}
                     >
-                      <span className="flex items-center gap-2 min-w-0">
-                        {isCurrent && <span className="text-brand text-xs">●</span>}
-                        <span className="truncate font-heading">{r.name}</span>
-                      </span>
-                      <span className="shrink-0 text-xs">
-                        {liveCount > 0
-                          ? <span className="text-emerald-400 font-semibold">{liveCount} photo{liveCount === 1 ? '' : 's'}</span>
-                          : r.needsPhotos
-                            ? <span className="text-amber-400 font-semibold">needs photos</span>
-                            : <span className="text-white/40">none</span>}
-                      </span>
-                    </button>
+                      {isRenaming ? (
+                        <input
+                          autoFocus
+                          value={renameDraft}
+                          onChange={(e) => setRenameDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const v = renameDraft.trim();
+                              if (v && onRenameRoom) onRenameRoom(r.id, v);
+                              setRenamingRoomId(null);
+                            } else if (e.key === 'Escape') {
+                              setRenamingRoomId(null);
+                            }
+                          }}
+                          onBlur={() => {
+                            const v = renameDraft.trim();
+                            if (v && v !== r.name && onRenameRoom) onRenameRoom(r.id, v);
+                            setRenamingRoomId(null);
+                          }}
+                          className="flex-1 min-w-0 bg-white/10 border border-white/30 rounded px-2 py-1 text-sm text-white"
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => switchToRoom(r.id)}
+                          className="flex-1 min-w-0 flex items-center justify-between gap-2 text-left"
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            {isCurrent && <span className="text-brand text-xs">●</span>}
+                            <span className="truncate font-heading">{r.name}</span>
+                          </span>
+                          <span className="shrink-0 text-xs">
+                            {liveCount > 0
+                              ? <span className="text-emerald-400 font-semibold">{liveCount} photo{liveCount === 1 ? '' : 's'}</span>
+                              : r.needsPhotos
+                                ? <span className="text-amber-400 font-semibold">needs photos</span>
+                                : <span className="text-white/40">none</span>}
+                          </span>
+                        </button>
+                      )}
+                      {/* Rename / delete controls */}
+                      {!isRenaming && onRenameRoom && (
+                        <button
+                          type="button"
+                          onClick={() => { setRenamingRoomId(r.id); setRenameDraft(r.name); }}
+                          aria-label={`Rename ${r.name}`}
+                          className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/15 text-white/70"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 1.5l3.5 3.5L5 14.5H1.5V11L11 1.5z" />
+                          </svg>
+                        </button>
+                      )}
+                      {!isRenaming && onDeleteRoom && rooms!.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteRoom(r.id)}
+                          aria-label={`Delete ${r.name}`}
+                          className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full hover:bg-red-500/30 text-white/70 hover:text-red-300 text-lg leading-none"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
+                {/* Add-room footer */}
+                {onAddRoom && (
+                  <div className="px-3 py-2.5 border-t border-white/15">
+                    {addingRoom ? (
+                      <input
+                        autoFocus
+                        value={addDraft}
+                        onChange={(e) => setAddDraft(e.target.value)}
+                        placeholder="New room name…"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const v = addDraft.trim();
+                            if (v) onAddRoom(v);
+                            setAddDraft(''); setAddingRoom(false);
+                          } else if (e.key === 'Escape') {
+                            setAddDraft(''); setAddingRoom(false);
+                          }
+                        }}
+                        onBlur={() => {
+                          const v = addDraft.trim();
+                          if (v) onAddRoom(v);
+                          setAddDraft(''); setAddingRoom(false);
+                        }}
+                        className="w-full bg-white/10 border border-white/30 rounded px-2 py-1.5 text-sm text-white"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => { setAddDraft(''); setAddingRoom(true); }}
+                        className="w-full text-left text-sm text-brand font-semibold py-1"
+                      >
+                        + Add room
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </>
           )}

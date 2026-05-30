@@ -642,13 +642,24 @@ export function RateCardForm(props: RateCardFormProps) {
     });
   }
 
-  async function handleDeleteSection(sectionId: string, skipConfirm = false) {
-    void skipConfirm; // kept for call-site compatibility; deletion is now immediate (no confirm)
+  async function handleDeleteSection(sectionId: string, skipConfirm = false): Promise<boolean> {
     const section = sections.find((s) => s.id === sectionId);
-    if (!section) return;
+    if (!section) return false;
+
+    const lines = linesBySection[sectionId] || [];
+    // Confirm ONLY when the room has line items (deleting those is destructive).
+    // An empty room deletes immediately with no prompt. `skipConfirm` (used by
+    // the Sections manager, which has its own UX) can still bypass.
+    if (!skipConfirm && lines.length > 0) {
+      const roomName = section.displayName || section.label;
+      const ok = await dialog.confirm(
+        `"${roomName}" has ${lines.length} line item${lines.length === 1 ? '' : 's'}. Deleting the room removes ${lines.length === 1 ? 'it' : 'them all'}. Delete the room?`,
+        { confirmLabel: 'Delete Room', cancelLabel: 'Keep' }
+      );
+      if (!ok) return false;
+    }
 
     // Cascade: archive every saved line + section photo for this section.
-    const lines = linesBySection[sectionId] || [];
     const lineArchives: string[] = [];
     for (const line of lines) {
       const recordId = recordIdsByExternalId[line.externalId];
@@ -712,6 +723,7 @@ export function RateCardForm(props: RateCardFormProps) {
         saveInFlightRef.current--;
       }
     }
+    return true;
   }
 
   function handleAddSection(rawLabel: string) {
@@ -1489,6 +1501,18 @@ export function RateCardForm(props: RateCardFormProps) {
           })}
           currentRoomId={cameraSectionId}
           onRoomChange={handleCameraRoomChange}
+          onRenameRoom={(roomId, newName) => handleRenameSection(roomId, newName)}
+          onAddRoom={(name) => handleAddSection(name)}
+          onDeleteRoom={async (roomId) => {
+            const idx = sections.findIndex((s) => s.id === roomId);
+            const neighbor = sections[idx + 1] || sections[idx - 1];
+            const deleted = await handleDeleteSection(roomId);
+            // If the deleted room was the camera's active room, move to a
+            // neighbor (or close the camera if it was the only room).
+            if (deleted && roomId === cameraSectionId) {
+              setCameraSectionId(neighbor ? neighbor.id : null);
+            }
+          }}
         />
       )}
 
@@ -1499,7 +1523,7 @@ export function RateCardForm(props: RateCardFormProps) {
           photoCounts={Object.fromEntries(sections.map((s) => [s.id, (photosBySection[s.id] || []).length]))}
           onClose={() => setShowSectionsManager(false)}
           onRename={handleRenameSection}
-          onDelete={(id) => handleDeleteSection(id, true)}
+          onDelete={(id) => handleDeleteSection(id)}
           onAdd={handleAddSection}
           onReorder={handleReorderSections}
         />
