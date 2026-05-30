@@ -14,9 +14,10 @@ type Props = {
   answer: AnswerInput;
   onUpdate: (patch: Partial<AnswerInput>) => void;
   uploadPhoto: (file: File) => Promise<string>;
+  propertyName?: string;
 };
 
-export function QuestionItem({ question, answer, onUpdate, uploadPhoto }: Props) {
+export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName }: Props) {
   const dialog = useAppDialog();
   const triggered = !!answer.answerValue && question.noteRequiredOnValues.includes(answer.answerValue);
 
@@ -270,6 +271,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto }: Props)
             )}
             <CameraCapture
               isOpen={cameraOpen}
+              addressSnapshot={propertyName}
               onClose={() => setCameraOpen(false)}
               uploadPhoto={uploadPhoto}
               onComplete={(urls) => {

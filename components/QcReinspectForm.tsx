@@ -606,6 +606,7 @@ export function QcReinspectForm(props: Props) {
       {cameraKey != null && (
         <CameraCapture
           isOpen={true}
+          addressSnapshot={props.propertyName}
           onClose={() => setCameraKey(null)}
           uploadPhoto={uploadHelper}
           rooms={sections.map((s) => {

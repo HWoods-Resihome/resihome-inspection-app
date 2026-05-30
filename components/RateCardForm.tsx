@@ -1581,6 +1581,7 @@ export function RateCardForm(props: RateCardFormProps) {
       {cameraSectionId !== null && (
         <CameraCapture
           isOpen={true}
+          addressSnapshot={props.propertyName}
           onComplete={handleCameraComplete}
           onClose={() => setCameraSectionId(null)}
           uploadPhoto={uploadPhoto}

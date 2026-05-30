@@ -51,6 +51,37 @@ interface Props {
   onRenameRoom?: (roomId: string, newName: string) => void;
   onDeleteRoom?: (roomId: string) => void;        // parent handles confirm-if-has-lines
   onAddRoom?: (name: string) => void;
+  // Address burned into the corner of each in-app capture (with date/time +
+  // GPS) for evidentiary value on chargeback disputes.
+  addressSnapshot?: string;
+}
+
+// Burn an evidence stamp (address / timestamp / GPS) into the bottom-left of a
+// captured frame. Drawn straight onto the canvas BEFORE encoding, so it's part
+// of the image pixels — not strippable metadata.
+function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, lines: string[]) {
+  const text = lines.filter(Boolean);
+  if (!text.length) return;
+  const pad = Math.round(w * 0.014);
+  const fontSize = Math.max(16, Math.round(w / 54));
+  const lineH = Math.round(fontSize * 1.34);
+  const barH = lineH * text.length + pad * 2;
+  // Translucent backdrop for legibility over any photo.
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.42)';
+  ctx.fillRect(0, h - barH, w, barH);
+  ctx.font = `600 ${fontSize}px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = 'rgba(0,0,0,0.85)';
+  ctx.shadowBlur = Math.round(fontSize * 0.3);
+  let y = h - barH + pad;
+  for (const ln of text) {
+    ctx.fillText(ln, pad, y);
+    y += lineH;
+  }
+  ctx.restore();
 }
 
 // Target capture resolution: 1920x1440 (4:3). Browser may downgrade if
@@ -64,10 +95,14 @@ const JPEG_QUALITY = 0.88;
 export function CameraCapture({
   isOpen, onClose, onComplete, uploadPhoto, maxPhotos = 30,
   rooms, currentRoomId, onRoomChange, onRenameRoom, onDeleteRoom, onAddRoom,
+  addressSnapshot,
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // Latest GPS fix, kept fresh while the camera is open, burned into captures.
+  const geoRef = useRef<GeolocationPosition | null>(null);
+  const geoWatchRef = useRef<number | null>(null);
 
   const [items, setItems] = useState<CaptureItem[]>([]);
   // Mirror items in a ref so async code (handleDone polling) can read the
@@ -183,6 +218,30 @@ export function CameraCapture({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, facing]);
 
+  // While the camera is open, keep a fresh GPS fix so each shot can be stamped.
+  // Best-effort: if the user denies location or it's unavailable, we just stamp
+  // address + time without coordinates.
+  useEffect(() => {
+    if (!isOpen || typeof navigator === 'undefined' || !navigator.geolocation) return;
+    const onPos = (pos: GeolocationPosition) => { geoRef.current = pos; };
+    const onErr = () => { /* denied/unavailable — stamp without coords */ };
+    navigator.geolocation.getCurrentPosition(onPos, onErr, {
+      enableHighAccuracy: true, timeout: 8000, maximumAge: 30000,
+    });
+    try {
+      geoWatchRef.current = navigator.geolocation.watchPosition(onPos, onErr, {
+        enableHighAccuracy: true, timeout: 20000, maximumAge: 15000,
+      });
+    } catch { /* watchPosition unsupported — getCurrentPosition fix still applies */ }
+    return () => {
+      if (geoWatchRef.current != null) {
+        try { navigator.geolocation.clearWatch(geoWatchRef.current); } catch { /* noop */ }
+        geoWatchRef.current = null;
+      }
+      geoRef.current = null;
+    };
+  }, [isOpen]);
+
   // ----- Capture -----
 
   // Upload one File through the background pipeline + optimistic thumbnail.
@@ -248,6 +307,16 @@ export function CameraCapture({
         return;
       }
       ctx.drawImage(video, 0, 0, vw, vh);
+      // Burn the evidence stamp (address / timestamp / GPS) into the frame.
+      const stampLines: string[] = [];
+      if (addressSnapshot) stampLines.push(addressSnapshot);
+      stampLines.push(new Date().toLocaleString());
+      const pos = geoRef.current;
+      if (pos) {
+        const { latitude, longitude, accuracy } = pos.coords;
+        stampLines.push(`${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)`);
+      }
+      drawEvidenceStamp(ctx, vw, vh, stampLines);
       // Convert to JPEG blob
       const blob: Blob | null = await new Promise((resolve) => {
         canvas.toBlob((b) => resolve(b), 'image/jpeg', JPEG_QUALITY);
@@ -264,7 +333,7 @@ export function CameraCapture({
     } finally {
       setBusy(false);
     }
-  }, [busy, items.length, maxPhotos, enqueueFile]);
+  }, [busy, items.length, maxPhotos, enqueueFile, addressSnapshot]);
 
   // ----- Per-photo retake/delete -----
 

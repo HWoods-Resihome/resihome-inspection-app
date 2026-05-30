@@ -1047,6 +1047,7 @@ export function QuestionForm({
                           answer={answers[key]}
                           onUpdate={(patch) => updateAnswer(key, patch)}
                           uploadPhoto={uploadPhoto}
+                          propertyName={propertyName}
                         />
                       </div>
                     );
@@ -1135,6 +1136,7 @@ export function QuestionForm({
           offered here (only navigation). */}
       <CameraCapture
         isOpen={sectionCameraInstance !== null}
+        addressSnapshot={propertyName}
         onClose={() => setSectionCameraInstance(null)}
         uploadPhoto={uploadPhoto}
         rooms={sectionInstances.map((inst) => {
