@@ -507,6 +507,19 @@ async function getAssociationTypeId(fromTypeId: string, toTypeId: string, label:
   return null;
 }
 
+// Fallback: return the first available association type between two objects
+// (prefers an unlabeled/primary type). Used when a specifically-labeled type
+// isn't found, so answers still get associated to their inspection rather than
+// being created orphaned (which would make them invisible on reopen).
+async function getDefaultAssociationTypeId(fromTypeId: string, toTypeId: string): Promise<number | null> {
+  const resp = await hubspotFetch(assocLabelsUrl(fromTypeId, toTypeId));
+  const results = resp.results || [];
+  if (results.length === 0) return null;
+  // Prefer a type with no custom label (the primary/unlabeled association).
+  const unlabeled = results.find((a: any) => !a.label);
+  return (unlabeled?.typeId ?? results[0]?.typeId) ?? null;
+}
+
 async function createInspection(props: Record<string, any>): Promise<string> {
   const { inspection: typeId } = typeIds();
   const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, {
@@ -1360,13 +1373,36 @@ export async function upsertAnswers(
       }
     }
 
-    // Associate each new Answer to the Inspection (batch)
-    const inspToAnswer = await getAssociationTypeId(tids.inspection, tids.answer, 'Answer of');
-    if (inspToAnswer != null && newAnswers.length > 0) {
-      await batchCreateAssociations(
+    // Associate each new Answer to the Inspection (batch). This association is
+    // CRITICAL: fetchAnswersForInspection reads answers BY this association, so
+    // an answer created without it is orphaned and invisible on reopen (looks
+    // like data loss even though the record exists). Resolve the labeled type,
+    // fall back to the default association type, and fail loudly if neither
+    // works rather than silently creating orphaned answers.
+    let inspToAnswer = await getAssociationTypeId(tids.inspection, tids.answer, 'Answer of');
+    if (inspToAnswer == null) {
+      inspToAnswer = await getDefaultAssociationTypeId(tids.inspection, tids.answer);
+      console.warn(`[upsertAnswers] 'Answer of' label not found; using default association type ${inspToAnswer}`);
+    }
+    if (inspToAnswer == null) {
+      throw new Error(
+        'Could not resolve the Inspection→Answer association type. Answers would be ' +
+        'orphaned (invisible on reopen), so the save was aborted. Check the association ' +
+        'labels between the Inspection and Answer objects in HubSpot.'
+      );
+    }
+    if (newAnswers.length > 0) {
+      const assocResult = await batchCreateAssociations(
         tids.inspection, tids.answer, inspToAnswer,
         newAnswers.map((a) => ({ fromId: inspectionRecordId, toId: a.recordId })),
       );
+      if (assocResult.ok === 0 && newAnswers.length > 0) {
+        throw new Error(
+          `Created ${newAnswers.length} answer record(s) but FAILED to associate any ` +
+          `to the inspection — they would be invisible on reopen. Aborting so the issue ` +
+          `is visible rather than causing silent data loss.`
+        );
+      }
     }
 
     // Associate each new Answer to its source Question (batch)

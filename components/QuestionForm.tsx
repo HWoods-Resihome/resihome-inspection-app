@@ -712,9 +712,94 @@ export function QuestionForm({
     );
     if (!ok) return;
 
-    // Force a final flush of any pending autosave changes before finalizing
+    // Persist ALL answered questions to HubSpot before finalizing. Do NOT rely
+    // solely on the debounced autosave having flushed — if real-time autosave
+    // hiccupped, those edits would otherwise live only in memory, the PDF would
+    // still build (it reads in-memory state), and the record would be empty on
+    // reopen. This explicit upsert is the authoritative save and MUST succeed.
     if (!readOnly) {
-      await autosave.flush(true);
+      // Flush any pending debounced edits first (handles recordId tracking).
+      try { await autosave.flush(true); } catch { /* re-saved explicitly below */ }
+
+      // Build a full upsert payload for every answered question, keyed by the
+      // same deterministic natural key (answer_id_external) used everywhere.
+      const upserts: Array<{
+        recordId?: string;
+        answerProps: Record<string, any>;
+        questionHubspotRecordId?: string;
+      }> = [];
+      for (const inst of sectionInstances) {
+        for (const q of inst.questions) {
+          const key = answerKey(q.questionIdExternal, inst.instanceKey);
+          const a = answers[key];
+          if (!a) continue;
+          const hasContent =
+            (a.answerValue && a.answerValue.trim() !== '') ||
+            (a.note && a.note.trim() !== '') ||
+            a.quantity != null ||
+            (a.assignedTo && a.assignedTo.trim() !== '') ||
+            (a.photoUrls && a.photoUrls.length > 0);
+          if (!hasContent) continue;
+
+          const externalId = buildAnswerExternalId(inspectionExternalId, q.questionIdExternal, inst.instanceKey);
+          const existingRecordId = answerRecordIdsRef.current.get(key);
+          const props: Record<string, any> = {
+            answer_id_external: externalId,
+            answer_summary: `${a.section} ${inst.instanceKey} / ${a.questionText.slice(0, 80)}`,
+            answer_type: 'qa',
+            section: a.section,
+            answer_value: a.answerValue || '',
+            submitted_at: new Date().toISOString(),
+            inspection_id_external: inspectionExternalId,
+            question_id_external: a.questionIdExternal,
+          };
+          if (inst.location) props.location = inst.location;
+          if (a.note) props.note = a.note;
+          if (a.quantity != null) props.quantity = a.quantity;
+          if (a.assignedTo) props.assigned_to = a.assignedTo;
+          if (a.photoUrls?.length) {
+            props.photo_urls = a.photoUrls.join(';');
+            props.photo_count = a.photoUrls.length;
+          }
+          upserts.push({
+            recordId: existingRecordId || undefined,
+            answerProps: props,
+            questionHubspotRecordId: existingRecordId ? undefined : q.hubspotRecordId,
+          });
+        }
+      }
+
+      if (upserts.length > 0) {
+        const resp = await fetch(`/api/inspections/${inspectionRecordId}/answers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ upserts, archives: [], bumpStatusToInProgress: true }),
+        });
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          await dialog.alert(
+            `Could not save answers to HubSpot before submitting (${resp.status}). ` +
+            `Your inspection was NOT submitted so nothing is lost — please check your ` +
+            `connection and try Submit again.${text ? `\n\n${text.slice(0, 160)}` : ''}`
+          );
+          return; // Block submit — do not finalize an empty record.
+        }
+        // Update recordId map from the response so a later re-submit PATCHes.
+        try {
+          const data = await resp.json();
+          for (const r of (data.results || []) as Array<{ recordId: string; answerIdExternal: string }>) {
+            // Find the form key whose external id matches and store its recordId.
+            for (const inst of sectionInstances) {
+              for (const q of inst.questions) {
+                const eid = buildAnswerExternalId(inspectionExternalId, q.questionIdExternal, inst.instanceKey);
+                if (eid === r.answerIdExternal) {
+                  answerRecordIdsRef.current.set(answerKey(q.questionIdExternal, inst.instanceKey), r.recordId);
+                }
+              }
+            }
+          }
+        } catch { /* response parse is best-effort */ }
+      }
     }
 
     // For non-Scope: ensure triggered answers get quantity=1 if not set

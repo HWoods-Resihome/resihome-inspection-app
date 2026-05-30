@@ -133,6 +133,7 @@ export function useAutosave(opts: Options) {
 
     inFlightRef.current = true;
     setSaveState({ kind: 'saving' });
+    console.log(`[autosave] flushing ${toUpsert.length} upserts, ${toArchive.length} archives to inspection ${inspectionRecordId}`);
 
     try {
       // Build the upsert payload
@@ -180,6 +181,7 @@ export function useAutosave(opts: Options) {
         throw new Error(`Autosave failed (${resp.status}): ${text.slice(0, 200)}`);
       }
       const data = await resp.json();
+      console.log(`[autosave] saved OK: ${(data.results || []).length} records persisted`);
 
       // Update record IDs in our state map based on what came back
       const results: Array<{ recordId: string; answerIdExternal: string }> = data.results || [];
