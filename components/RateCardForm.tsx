@@ -217,6 +217,16 @@ export function RateCardForm(props: RateCardFormProps) {
     if (currentSectionId) setExpanded((e) => (e[currentSectionId] ? e : { ...e, [currentSectionId]: true }));
   }, [currentSectionId]);
 
+  // Height of the sticky totals header (measured live so it stays correct as
+  // the header grows/shrinks), plus a little breathing room. Used to scroll a
+  // section to just below the header rather than under it.
+  const stickyOffset = () => {
+    const h = (typeof document !== 'undefined'
+      ? document.getElementById('sticky-totals-header')?.getBoundingClientRect().height
+      : 0) || 0;
+    return Math.round(h) + 12;
+  };
+
   // Switch the assistant's working room: expand it and scroll it into view.
   const navigateToSection = useCallback((sectionId: string) => {
     setCurrentSectionId(sectionId);
@@ -225,28 +235,23 @@ export function RateCardForm(props: RateCardFormProps) {
     setTimeout(() => {
       const el = sectionRefs.current[sectionId];
       if (!el) return;
-      // Scroll so the section sits just BELOW the sticky totals header (so its
-      // top isn't tucked behind it). Manual offset scroll rather than
-      // scrollIntoView, which would hide the top under the sticky bar.
-      const STICKY_OFFSET = 64; // sticky totals header height + a little air
       const rect = el.getBoundingClientRect();
-      const top = window.scrollY + rect.top - STICKY_OFFSET;
+      const top = window.scrollY + rect.top - stickyOffset();
       window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }, 60);
   }, []);
 
-  // After a voice add/edit, bring the affected section up to the top of the
-  // viewport (just below the sticky header) so the newly added line is easy to
-  // see. Same behavior on desktop and mobile. The tall bottom spacer guarantees
-  // there's room to scroll even the last section to the top.
+  // After a voice add/edit, bring the affected section up to just below the
+  // sticky header so the newly added/edited line is easy to see. Same behavior
+  // on desktop and mobile. The tall bottom spacer guarantees there's room to
+  // scroll even the last section to the top.
   const revealSection = useCallback((sectionId: string) => {
     setExpanded((e) => ({ ...e, [sectionId]: true }));
     setTimeout(() => {
       const el = sectionRefs.current[sectionId];
       if (!el) return;
-      const STICKY_OFFSET = 64; // sticky totals header + a little air
       const rect = el.getBoundingClientRect();
-      const top = window.scrollY + rect.top - STICKY_OFFSET;
+      const top = window.scrollY + rect.top - stickyOffset();
       window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }, 90);
   }, []);
@@ -1065,26 +1070,15 @@ export function RateCardForm(props: RateCardFormProps) {
       <header className="mb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-x-3 min-w-0">
-              <h1 className="text-lg sm:text-xl font-bold text-gray-900 whitespace-nowrap">{props.templateLabel}</h1>
-              <span className="text-sm text-gray-700 font-semibold truncate min-w-0">{props.propertyName}</span>
-            </div>
-            <div className="text-xs text-gray-500 mt-1">
-              Inspector: {props.inspectorName} · {props.bedrooms} bed / {props.bathrooms} bath
-              {props.squareFootage != null && props.squareFootage > 0 && (
-                <span> · {props.squareFootage.toLocaleString()} sqft</span>
-              )}
-              {inspectionRegion && <span> · {inspectionRegion}</span>}
-              {!inspectionRegion && <span className="text-yellow-700"> · fallback (GA: Atlanta)</span>}
+            <div className="flex items-center gap-2 min-w-0 flex-wrap">
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900">{props.templateLabel}</h1>
               {statusLabel && (
-                <>
-                  {' · '}
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
-                    {statusLabel.label}
-                  </span>
-                </>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
+                  {statusLabel.label}
+                </span>
               )}
             </div>
+            <div className="text-xs text-gray-500 mt-1">Inspector: {props.inspectorName}</div>
             {props.pdfUrl && (
               <a href={props.pdfUrl} target="_blank" rel="noopener noreferrer"
                  className="inline-block mt-2 text-sm text-brand underline">View PDF</a>
@@ -1104,10 +1098,10 @@ export function RateCardForm(props: RateCardFormProps) {
         </div>
       </header>
 
-      {/* Sticky header bar. Keeps the address + property data row AND the
-          totals visible while scrolling. Five centered boxes: Scope Lines +
-          Vendor / Client / Tenant / Net Turn. */}
-      <div className="sticky top-0 z-10 -mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
+      {/* Sticky header bar — the single home for address + property data
+          (the top header no longer repeats it). Five centered boxes:
+          Lines + Vendor / Client / Tenant / Net Turn. */}
+      <div id="sticky-totals-header" className="sticky top-0 z-10 -mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
         <div className="text-center mb-2">
           <div className="text-sm font-semibold text-gray-800 truncate">{props.propertyName}</div>
           <div className="text-[11px] text-gray-500 truncate">
@@ -1133,23 +1127,23 @@ export function RateCardForm(props: RateCardFormProps) {
         </div>
         <div className="flex justify-center">
           <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden">
-            <div className="text-center px-2.5 py-1 w-[70px] sm:w-[96px]">
-              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Scope Lines</div>
+            <div className="text-center px-2 py-1 w-[58px] sm:w-[84px]">
+              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Lines</div>
               <div className="font-semibold text-gray-700 tabular-nums mt-0.5">{grandTotals.count}</div>
             </div>
-            <div className="text-center px-2.5 py-1 w-[70px] sm:w-[96px] border-l border-gray-200/70">
+            <div className="text-center px-2 py-1 w-[74px] sm:w-[104px] border-l border-gray-200/70">
               <div className="text-gray-400 text-[10px] uppercase tracking-wide">Vendor</div>
               <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.vendor))}</div>
             </div>
-            <div className="text-center px-2.5 py-1 w-[70px] sm:w-[96px] border-l border-gray-200/70">
+            <div className="text-center px-2 py-1 w-[74px] sm:w-[104px] border-l border-gray-200/70">
               <div className="text-gray-400 text-[10px] uppercase tracking-wide">Client</div>
               <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.client))}</div>
             </div>
-            <div className="text-center px-2.5 py-1 w-[70px] sm:w-[96px] border-l border-gray-200/70">
+            <div className="text-center px-2 py-1 w-[74px] sm:w-[104px] border-l border-gray-200/70">
               <div className="text-brand/70 text-[10px] uppercase tracking-wide">Tenant</div>
               <div className="font-semibold text-brand tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.tenant))}</div>
             </div>
-            <div className="text-center px-2.5 py-1 w-[70px] sm:w-[96px] border-l border-gray-200/70">
+            <div className="text-center px-2 py-1 w-[74px] sm:w-[104px] border-l border-gray-200/70">
               <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net Turn</div>
               <div className="font-semibold text-emerald-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.client - grandTotals.tenant))}</div>
             </div>

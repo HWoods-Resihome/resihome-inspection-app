@@ -183,7 +183,7 @@ function speak(
     // Mobile TTS voices read faster at the same rate value than desktop voices,
     // so use a gentler 1.2x on mobile and 1.3x on desktop.
     const isMobileUA = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-    u.rate = isMobileUA ? 1.2 : 1.3;
+    u.rate = isMobileUA ? 1.15 : 1.3;
     u.onstart = () => { onSpeakingChange?.(true); };
     u.onend = () => {
       finish();
