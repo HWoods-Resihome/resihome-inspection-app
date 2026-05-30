@@ -800,20 +800,21 @@ function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, on
         <td colSpan={12} className="p-0">
           <div
             onClick={readOnly || editingDesc ? undefined : onEnterEdit}
-            className={`flex gap-2.5 border border-gray-200 rounded-lg px-3 py-2.5 mb-2 bg-white ${readOnly || editingDesc ? '' : 'active:bg-gray-50 cursor-pointer'}`}
+            className={`flex gap-2 border border-gray-200 rounded-lg px-3 py-2.5 mb-2 bg-white ${readOnly || editingDesc ? '' : 'active:bg-gray-50 cursor-pointer'}`}
           >
-            {/* Left: description + details */}
+            {/* Left: description + details (flexes, but never pushes the price
+                block — that block has a fixed width so columns always align) */}
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium text-ink leading-snug">{shortDescription}</div>
-              {/* Full subtext under the short description */}
+              {/* Subtext: clamp to 2 lines, then a "more" toggle. */}
               {fullDescription && fullDescription !== shortDescription && (
                 <div className="text-xs text-gray-500 mt-0.5 leading-snug">
-                  {showFull ? fullDescription : truncated}
+                  <span className={showFull ? '' : 'line-clamp-2'}>{fullDescription}</span>
                   {isTruncated && (
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); setShowFull((v) => !v); }}
-                      className="ml-1 text-brand underline"
+                      className="text-brand underline"
                     >
                       {showFull ? 'less' : 'more'}
                     </button>
@@ -822,9 +823,9 @@ function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, on
               )}
               <div className="text-xs text-gray-500 mt-0.5">{subParts}{subParts ? ' · ' : ''}{qtyUnit}</div>
               <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                {/* Vendor-only chip (no tenant % here) */}
+                {/* Vendor-only chip */}
                 <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold max-w-[60%] truncate ${pill.bg} ${pill.text} ${pill.border || ''}`}
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold max-w-full truncate ${pill.bg} ${pill.text} ${pill.border || ''}`}
                   title={line.assignedTo}
                 >
                   {line.assignedTo}
@@ -833,19 +834,23 @@ function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, on
                 {calc?.isCustomPriced && <span className="text-[11px] font-semibold text-yellow-700">⚡ Custom</span>}
               </div>
             </div>
-            {/* Right: Vendor / Client / Tenant $ columns */}
-            <div className="flex gap-3 text-right border-l border-gray-100 pl-3 shrink-0">
-              <div>
+            {/* Right: fixed-width Vendor / Client / Tenant columns. Each column is
+                a fixed width and right-aligned so values line up across cards
+                regardless of amount length or left-side subtext. */}
+            <div className="flex border-l border-gray-100 pl-2 shrink-0">
+              <div className="w-[60px] text-right">
                 <div className="text-[10px] uppercase tracking-wide text-gray-400">Vendor</div>
-                <div className="text-[13px] text-gray-900 mt-0.5 whitespace-nowrap">{calc ? money2(calc.vendorCost) : '…'}</div>
+                <div className="text-[12px] text-gray-900 mt-0.5 tabular-nums whitespace-nowrap">{calc ? money2(calc.vendorCost) : '…'}</div>
               </div>
-              <div>
+              <div className="w-[60px] text-right">
                 <div className="text-[10px] uppercase tracking-wide text-gray-400">Client</div>
-                <div className="text-[13px] text-gray-900 mt-0.5 whitespace-nowrap">{calc ? money2(calc.clientCost) : '…'}</div>
+                <div className="text-[12px] text-gray-900 mt-0.5 tabular-nums whitespace-nowrap">{calc ? money2(calc.clientCost) : '…'}</div>
               </div>
-              <div>
+              <div className="w-[60px] text-right">
                 <div className="text-[10px] uppercase tracking-wide text-gray-400">Tenant</div>
-                <div className="text-[13px] font-semibold text-brand mt-0.5 whitespace-nowrap">{calc ? money2(calc.tenantCost) : '…'}</div>
+                <div className="text-[12px] font-semibold text-brand mt-0.5 tabular-nums whitespace-nowrap">{calc ? money2(calc.tenantCost) : '…'}</div>
+                {/* Tenant % in parens under the tenant $ */}
+                <div className="text-[10px] text-gray-400 tabular-nums">({line.tenantBillBackPercent}%)</div>
               </div>
             </div>
           </div>

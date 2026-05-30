@@ -31,6 +31,14 @@ interface Props {
   onAddLine: (line: RateCardLineInput) => void;
   // Remove a line by externalId (for "undo that" / "remove the last line").
   onRemoveLine?: (externalId: string) => void;
+  // Section-targeted variants — used when a single voice turn switches rooms and
+  // THEN adds/edits a line, so the line lands in the room active at that moment
+  // (not whatever the panel shows when the stream finishes).
+  onAddLineTo?: (sectionId: string, line: RateCardLineInput) => void;
+  onRemoveLineFrom?: (sectionId: string, externalId: string) => void;
+  // Lines per section, so edits/undo after a mid-turn room switch can resolve
+  // existing lines in the room the agent is now working on.
+  linesBySection?: Record<string, RateCardLineInput[]>;
   // Lines already in the CURRENT room (parent supplies based on currentSectionId).
   currentLines?: RateCardLineInput[];
   // Catalog for resolving codes -> descriptions in edit summaries.
@@ -134,7 +142,7 @@ function speak(
   }
 }
 
-export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, currentLines, catalog, disabled }: Props) {
+export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, linesBySection, currentLines, catalog, disabled }: Props) {
   // The room the assistant is working on right now.
   const currentSection = useMemo(
     () => sections.find((s) => s.id === currentSectionId) || sections[0],
@@ -175,6 +183,10 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   const speakingRef = useRef(false);
   // externalId + short label of the most recent voice-added line, for "undo".
   const lastAddedRef = useRef<{ externalId: string; label: string } | null>(null);
+  // The section the agent is working on DURING the current stream. Starts at the
+  // panel's current room and is updated by navigate events mid-stream so a line
+  // proposed after a room switch is saved to the new room.
+  const streamSectionRef = useRef<string>(currentSectionId);
 
   useEffect(() => {
     setSupported(getRecognition() !== null);
@@ -202,6 +214,10 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       setError(null);
       setStreamingText('');
       let accumulated = '';
+      // Reset the stream-local room to whatever the panel currently shows; a
+      // navigate event mid-stream will update it so later proposals route right.
+      streamSectionRef.current = currentSectionId;
+      let addedThisTurn = 0;
       // Abort if the request stalls (flaky field LTE) so the panel never hangs
       // in "Thinking…" with no way out.
       const ctrl = new AbortController();
@@ -265,66 +281,75 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
             if (ev === 'delta') {
               accumulated += data.text || '';
               setStreamingText(accumulated);
-            } else if (ev === 'question' || ev === 'proposal' || ev === 'message' || ev === 'error') {
-              finalType = ev;
-              finalData = data;
             } else if (ev === 'navigate') {
-              // Agent asked to switch rooms. Resolve to a real section and move
-              // there (parent scrolls/expands). Handle inline so it works even
-              // alongside a proposal in the same turn.
+              // Switch rooms mid-stream. Update the stream-local target so any
+              // line proposed AFTER this lands in the new room, then move the UI.
               const target = sections.find((s) => s.id === data.sectionId)
                 || sections.find((s) => (s.displayName || s.label).toLowerCase() === String(data.roomName || '').toLowerCase());
               if (target) {
+                streamSectionRef.current = target.id;
                 onNavigate(target.id);
-                const msg = `Okay — ${target.displayName || target.label}. What do you need here?`;
-                setMessages((m) => [...m, { role: 'assistant', content: msg }]);
-                speakThenListenRef.current(msg);
-                // A navigate turn is terminal for our purposes; skip other finals.
-                finalType = 'navigated';
-                finalData = null;
+                // Brief on-screen note; only SPEAK if nothing else follows (the
+                // closing message will speak otherwise). Keep it quiet inline.
+                setMessages((m) => [...m, { role: 'assistant', content: `→ ${target.displayName || target.label}` }]);
               }
+            } else if (ev === 'proposal') {
+              // A line matched. AUTO-ADD it to the stream-local room (which a
+              // prior navigate may have changed) and announce briefly. Multiple
+              // proposals can arrive in one turn.
+              const line: RateCardLineInput = data.line;
+              const action = data.action === 'edit' ? 'edit' : 'add';
+              const spokenLabel = data.spokenSummary || data.summary;
+              const verb = action === 'edit' ? 'Updated' : 'Added';
+              const targetId = streamSectionRef.current;
+              try {
+                if (onAddLineTo) onAddLineTo(targetId, line);
+                else onAddLine(line);
+                if (action === 'add') lastAddedRef.current = { externalId: line.externalId, label: spokenLabel };
+                addedThisTurn++;
+                setMessages((m) => [...m, { role: 'assistant', content: `${verb}: ${data.summary}` }]);
+              } catch (e: any) {
+                setMessages((m) => [...m, { role: 'assistant', content: `Couldn't save ${spokenLabel}.` }]);
+              }
+            } else if (ev === 'question' || ev === 'message' || ev === 'error') {
+              finalType = ev;
+              finalData = data;
             } else if (ev === 'done') {
               // terminal
             }
           }
         }
 
-        // Finalize based on the last terminal event.
+        // Finalize: navigate + proposals were applied inline as they streamed.
+        // Now produce ONE spoken closing line.
         setStreamingText('');
-        if (finalType === 'navigated') {
-          // Already handled inline (room switched + spoke). Nothing more to do.
-        } else if (finalType === 'error') {
+        if (finalType === 'error') {
           setError(finalData?.error || 'Something went wrong.');
-        } else if (finalType === 'proposal') {
-          // The agent only proposes when the match is confident, so AUTO-ADD it
-          // (no confirm step) and announce it. The line is saved here, and the
-          // CLIENT speaks success only after the save actually happens.
-          const line: RateCardLineInput = finalData.line;
-          const action = finalData.action === 'edit' ? 'edit' : 'add';
-          const spokenLabel = finalData.spokenSummary || finalData.summary;
-          const verb = action === 'edit' ? 'Updated' : 'Added';
-          try {
-            onAddLine(line); // upserts by externalId (new or existing)
-            if (action === 'add') lastAddedRef.current = { externalId: line.externalId, label: spokenLabel };
-            // On screen: full detail. Spoken: short label only.
-            const onScreen = `${verb}: ${finalData.summary}. Any changes or additional items?`;
-            const spoken = `${verb} ${spokenLabel}. Any changes, or additional items?`;
-            setMessages((m) => [...m, { role: 'assistant', content: onScreen }]);
-            speakThenListenRef.current(spoken);
-          } catch (e: any) {
-            const msg = `I couldn't save that line (${String(e?.message || e)}). Try again or add it manually.`;
-            setMessages((m) => [...m, { role: 'assistant', content: msg }]);
-            speak(msg, () => { /* no restart */ }, 0, (sp) => { speakingRef.current = sp; });
-          }
-        } else {
-          // question or message — the text already streamed; finalize it.
+        } else if (finalType === 'question') {
+          // The agent needs more info (e.g. ambiguous item, missing quantity).
+          const text = finalData?.text || accumulated || 'Could you clarify that?';
+          setMessages((m) => [...m, { role: 'assistant', content: text }]);
+          speakThenListenRef.current(text);
+        } else if (finalType === 'message') {
+          // An explicit closing message from the agent.
           const text = finalData?.text || accumulated;
           setMessages((m) => [...m, { role: 'assistant', content: text }]);
-          if (finalData?.awaitingReply) {
-            speakThenListenRef.current(text);
-          } else {
-            speak(text, () => { /* no restart */ }, 0, (sp) => { speakingRef.current = sp; });
-          }
+          if (finalData?.awaitingReply) speakThenListenRef.current(text);
+          else speak(text, () => { /* no restart */ }, 0, (sp) => { speakingRef.current = sp; });
+        } else if (addedThisTurn > 0) {
+          // Lines were added/updated this turn (possibly after a room switch).
+          // Announce in the current room and keep the mic open for more.
+          const roomName = currentSection?.displayName || currentSection?.label || 'this room';
+          const what = addedThisTurn === 1 ? 'that' : `${addedThisTurn} lines`;
+          const spoken = `Done — ${what} in ${roomName}. Anything else?`;
+          setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
+          speakThenListenRef.current(spoken);
+        } else {
+          // Nothing actionable came back (e.g. a bare navigate). Prompt for next.
+          const roomName = currentSection?.displayName || currentSection?.label || 'this room';
+          const spoken = `Okay — ${roomName}. What do you need here?`;
+          setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
+          speakThenListenRef.current(spoken);
         }
       } catch (e: any) {
         setStreamingText('');
@@ -339,7 +364,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         setBusy(false);
       }
     },
-    [section, location, region, currentLines, onAddLine, sections, onNavigate, currentRoomName]
+    [section, location, region, currentLines, onAddLine, onAddLineTo, sections, onNavigate, currentRoomName, currentSection, currentSectionId]
   );
 
   const submitUtterance = useCallback(
@@ -553,63 +578,39 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     setTyped('');
   }
 
-  // A compact room picker (manual room change). Used in both states.
-  const roomSelect = (
-    <select
-      value={currentSectionId}
-      onChange={(e) => onNavigate(e.target.value)}
-      disabled={disabled}
-      title="Change the room the assistant is working on"
-      className="max-w-[44vw] sm:max-w-[200px] text-sm border border-brand/40 rounded px-2 py-1 bg-white text-ink truncate"
-    >
-      {sections.map((s) => (
-        <option key={s.id} value={s.id}>{s.displayName || s.label}</option>
-      ))}
-    </select>
-  );
-
+  // Collapsed: just a mic icon that lives inside the footer. Pressing it opens
+  // the conversation panel above and starts listening.
   if (!open) {
     return (
-      <div className="fixed inset-x-0 bottom-[64px] sm:bottom-[68px] z-20 pointer-events-none">
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 flex justify-end">
-          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-brand/30 bg-white shadow-lg px-2.5 py-1.5">
-            <span className="text-xs text-gray-500 hidden sm:inline">Assistant · room:</span>
-            {roomSelect}
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(true);
-                // Start listening immediately — warm-up runs silently in the
-                // background. Defer one tick so the panel mounts and the ref is live.
-                setTimeout(() => { startListeningRef.current(); }, 0);
-              }}
-              disabled={disabled}
-              aria-label="Talk to the inspection assistant"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-brand text-white rounded-full hover:bg-brand-dark disabled:opacity-50"
-            >
-              <MicIcon className="w-4 h-4" />
-              Talk
-            </button>
-          </div>
-        </div>
-      </div>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(true);
+          setTimeout(() => { startListeningRef.current(); }, 0);
+        }}
+        disabled={disabled}
+        aria-label="Talk to the inspection assistant"
+        className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-brand text-white hover:bg-brand-dark disabled:opacity-50 shadow"
+      >
+        <MicIcon className="w-5 h-5" />
+      </button>
     );
   }
 
+  // Open: the mic stays in the footer; the conversation panel floats just above
+  // it. The active room is shown by the pink border on the section itself (and
+  // it auto-expands), so there's no room label/picker here.
   return (
-    <div className="fixed inset-x-0 bottom-[64px] sm:bottom-[68px] z-20 pointer-events-none">
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 flex justify-end">
-        <div className="pointer-events-auto w-full sm:w-[420px] rounded-lg border border-brand/30 bg-white shadow-xl p-3">
-          {/* Header: current room + manual room picker + close */}
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-sm font-heading font-semibold text-brand whitespace-nowrap">Assistant ·</span>
-              {roomSelect}
+    <>
+      <div className="absolute left-0 right-0 bottom-full mb-2 px-3 sm:px-4 z-40 pointer-events-none">
+        <div className="max-w-7xl mx-auto flex justify-center">
+          <div className="pointer-events-auto w-full sm:w-[440px] rounded-lg border border-brand/30 bg-white shadow-xl p-3">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span className="text-sm font-heading font-semibold text-brand">Inspection assistant</span>
+              <button type="button" onClick={() => { reset(); setOpen(false); }} className="text-xs text-gray-500 hover:text-gray-700 shrink-0">
+                Close
+              </button>
             </div>
-            <button type="button" onClick={() => { reset(); setOpen(false); }} className="text-xs text-gray-500 hover:text-gray-700 shrink-0">
-              Close
-            </button>
-          </div>
 
       {!supported && (
         <p className="text-xs text-amber-700 mb-2">
@@ -712,9 +713,19 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           Start over
         </button>
       )}
+          </div>
         </div>
       </div>
-    </div>
+      {/* The mic stays in the footer slot while open — tapping it again closes. */}
+      <button
+        type="button"
+        onClick={() => { reset(); setOpen(false); }}
+        aria-label="Close the inspection assistant"
+        className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-brand text-white hover:bg-brand-dark shadow ring-2 ring-brand/40"
+      >
+        <MicIcon className="w-5 h-5" />
+      </button>
+    </>
   );
 }
 

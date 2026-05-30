@@ -211,6 +211,12 @@ export function RateCardForm(props: RateCardFormProps) {
     if (!currentSectionId && sections.length > 0) setCurrentSectionId(sections[0].id);
   }, [sections, currentSectionId]);
 
+  // The active room (where the assistant is adding line items) is always kept
+  // expanded so the inspector can see the lines landing.
+  useEffect(() => {
+    if (currentSectionId) setExpanded((e) => (e[currentSectionId] ? e : { ...e, [currentSectionId]: true }));
+  }, [currentSectionId]);
+
   // Switch the assistant's working room: expand it and scroll it into view.
   const navigateToSection = useCallback((sectionId: string) => {
     setCurrentSectionId(sectionId);
@@ -437,6 +443,15 @@ export function RateCardForm(props: RateCardFormProps) {
   // chatter (one save per row edit instead of per 2s burst) but for an
   // inspector typing maybe 20-30 lines per inspection that's fine.
   async function handleSaveLineForSection(sectionId: string, line: RateCardLineInput) {
+    // Stamp the line's section/location from the TARGET section. Voice proposals
+    // may have been generated for a different room earlier in the same turn
+    // (e.g. "go to the kitchen and add a microwave"); routing is by sectionId, so
+    // the section/location written to the record must match that section — not
+    // whatever the proposal happened to carry.
+    const targetSection = sections.find((s) => s.id === sectionId);
+    if (targetSection) {
+      line = { ...line, section: targetSection.label, location: targetSection.location };
+    }
     // Optimistic update — push into local state immediately so the UI reflects
     // the change even before the network round-trip.
     setLinesBySection((m) => {
@@ -1344,44 +1359,47 @@ export function RateCardForm(props: RateCardFormProps) {
       {/* Spacer so the floating footer doesn't cover the last section. */}
       <div className="h-24 md:h-20" />
 
-      {/* Roaming voice assistant — Scope rate card only, online-only. ONE panel
-          that travels across rooms: it shows/changes the current room, scrolls
-          the form there, and routes line adds/edits/undo to that room. Sits just
-          above the terminal footer. */}
-      {!props.readOnly && props.templateType === 'pm_scope_rate_card' && currentSectionId && (
-        <VoiceLineAssistant
-          sections={sections.map((s) => ({
-            id: s.id,
-            label: s.label,
-            location: s.location,
-            displayName: s.displayName,
-          }))}
-          currentSectionId={currentSectionId}
-          onNavigate={navigateToSection}
-          region={inspectionRegion}
-          disabled={dataLoading}
-          currentLines={linesBySection[currentSectionId] || []}
-          catalog={catalog}
-          onAddLine={(line) => handleSaveLineForSection(currentSectionId, line)}
-          onRemoveLine={(externalId) => handleDeleteLine(currentSectionId, externalId)}
-        />
-      )}
-
       {/* Floating footer — visible on all screen sizes, pinned to the bottom of
           the viewport so the inspector can save/submit/cancel from anywhere.
-          TerminalActions handles the responsive (one-line) mobile layout. */}
+          The voice assistant lives in the CENTER of this footer: a mic icon that
+          expands upward into the conversation panel when pressed. */}
       <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3">
-          <TerminalActions
-            readOnly={!!props.readOnly}
-            showCancelInspection={!!props.onCancelInspection}
-            submitLabel={submitLabel}
-            submitLabelShort={submitLabelShort}
-            submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing}
-            onCancelInspection={handleCancelInspectionClick}
-            onSaveAndClose={handleSaveAndClose}
-            onSubmit={handleSubmitOrFinalize}
-          />
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <TerminalActions
+              readOnly={!!props.readOnly}
+              showCancelInspection={!!props.onCancelInspection}
+              submitLabel={submitLabel}
+              submitLabelShort={submitLabelShort}
+              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing}
+              onCancelInspection={handleCancelInspectionClick}
+              onSaveAndClose={handleSaveAndClose}
+              onSubmit={handleSubmitOrFinalize}
+              voiceSlot={
+                !props.readOnly && props.templateType === 'pm_scope_rate_card' && currentSectionId ? (
+                  <VoiceLineAssistant
+                    sections={sections.map((s) => ({
+                      id: s.id,
+                      label: s.label,
+                      location: s.location,
+                      displayName: s.displayName,
+                    }))}
+                    currentSectionId={currentSectionId}
+                    onNavigate={navigateToSection}
+                    region={inspectionRegion}
+                    disabled={dataLoading}
+                    currentLines={linesBySection[currentSectionId] || []}
+                    catalog={catalog}
+                    onAddLine={(line) => handleSaveLineForSection(currentSectionId, line)}
+                    onRemoveLine={(externalId) => handleDeleteLine(currentSectionId, externalId)}
+                    onAddLineTo={(sectionId, line) => handleSaveLineForSection(sectionId, line)}
+                    onRemoveLineFrom={(sectionId, externalId) => handleDeleteLine(sectionId, externalId)}
+                    linesBySection={linesBySection}
+                  />
+                ) : null
+              }
+            />
+          </div>
         </div>
       </div>
 
@@ -1621,6 +1639,7 @@ function TerminalActions(props: {
   onCancelInspection: () => void;
   onSaveAndClose: () => void;
   onSubmit: () => void;
+  voiceSlot?: React.ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between gap-2">
@@ -1635,6 +1654,10 @@ function TerminalActions(props: {
           </button>
         )}
       </div>
+      {/* Voice assistant mic — centered between Cancel and Save/Submit. */}
+      {props.voiceSlot && (
+        <div className="flex-1 flex justify-center min-w-0">{props.voiceSlot}</div>
+      )}
       <div className="flex items-center gap-2 shrink-0">
         <button
           type="button"

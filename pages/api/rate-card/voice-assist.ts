@@ -37,7 +37,7 @@ const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 // chatty turns snappy without sacrificing match quality.
 const MODEL_SMART = 'claude-opus-4-8';
 const MODEL_FAST = 'claude-haiku-4-5-20251001';
-const MAX_TOOL_ROUNDS = 4; // safety cap on tool loops per turn
+const MAX_TOOL_ROUNDS = 8; // safety cap on tool loops per turn (compound requests: switch + multiple items)
 
 interface ClientMessage { role: 'user' | 'assistant'; content: string; }
 interface CurrentLine {
@@ -195,6 +195,8 @@ function systemPrompt(
     ``,
     `${linesDesc}`,
     ``,
+    `The inspector may ask for SEVERAL things in one breath — e.g. "I'm back in the kitchen, replace the black microwave" (switch room + add a line), or "add a new water heater and replace the kitchen faucet" (two lines). Handle the WHOLE request in this turn: call the tools one after another (switch_room first if a room change was mentioned, then search_catalog + propose_line for each item). Don't stop after the first action — keep going until everything they said is done, then give one short wrap-up. Each line still needs a confident match and a quantity; if one item is unclear, do the clear ones and ask about just the unclear one.`,
+    ``,
     `When you call propose_line, edit_line, or switch_room, do not write any sentence at all — the app shows/speaks the result itself. Only produce text when you genuinely need to ask the inspector a question. Keep questions very short and spoken-friendly. Never invent a code; only use codes from search_catalog.`
   );
   return lines.join('\n');
@@ -346,7 +348,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const roomTools = tools(rooms);
     const system = systemPrompt(body.section || '', body.location || '', describeLines(byCode, currentLines), currentRoom, rooms);
 
+    // The room a newly-proposed line belongs to. switch_room updates these so a
+    // line added AFTER a switch is written to the new room, not the old one.
+    // The client sends section+location for the room it currently shows; when
+    // the agent switches rooms mid-turn we use the switched-to room's NAME for
+    // both (the client resolves sectionId from the navigate event and the line's
+    // section/location are matched back by the existing label||location lookup).
+    let activeSection = body.section || '';
+    let activeLocation = body.location || '';
+    // Map room id/name -> the section + location to stamp on lines for that room.
+    // The client passes rooms as {id, name}; for repeating rooms the name is the
+    // location (e.g. "Bedroom 2") and for static rooms it's the label.
+
     let usedSearchThisTurn = false;
+    // Whether the agent performed any action (add/edit/switch) this turn. If so,
+    // a tool-free final round is a wrap-up message; if not, it's a question.
+    let didAct = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const model = round === 0 || usedSearchThisTurn ? MODEL_SMART : MODEL_FAST;
@@ -360,11 +377,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const toolUses = content.filter((c) => c.type === 'tool_use');
       const textBlocks = content.filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim();
 
-      // No tool calls -> the assistant asked a question / replied. The text has
-      // already streamed via 'delta'; send the final marker so the client knows
-      // to (a) finalize the message and (b) auto-restart the mic.
+      // No more tool calls -> the agent is done for this turn.
       if (toolUses.length === 0) {
-        sse(res, 'question', { text: textBlocks || 'Could you tell me more?', awaitingReply: true });
+        if (didAct) {
+          // It acted (and may add a brief wrap-up). The client synthesizes the
+          // spoken summary of what changed; pass any text along as a message.
+          sse(res, 'message', { text: textBlocks || '', awaitingReply: true });
+        } else {
+          // It only wants more info — a clarifying question.
+          sse(res, 'question', { text: textBlocks || 'Could you tell me more?', awaitingReply: true });
+        }
         sse(res, 'done', {});
         return res.end();
       }
@@ -381,7 +403,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const result = await matchCatalog(q, catalog, {
             topK: 10,
             categoryHint: hint,
-            sectionName: body.section || '',
+            sectionName: activeSection || body.section || '',
           });
           const compact = result.candidates.map((m) => ({
             code: m.item.lineItemCode,
@@ -440,8 +462,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const externalId = `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
           const line: RateCardLineInput = {
             externalId,
-            section: body.section || '',
-            location: body.location || '',
+            section: activeSection,
+            location: activeLocation,
             lineItemCode: code,
             quantity: qty,
             tenantBillBackPercent: pct,
@@ -449,18 +471,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             note: tu.input?.note ? String(tu.input.note) : '',
             photoUrls: [],
           };
-          // A line was matched. Any preamble text already streamed via 'delta';
-          // the client auto-saves and announces it.
+          // Emit the line; the client auto-saves it to the active room. Then keep
+          // the loop going so the agent can add MORE items in the same turn.
           sse(res, 'proposal', {
             action: 'add',
             line,
             summary: lineToSummary(item, qty, vendor, pct, region, regions),
             spokenSummary: item.laborShortDescription,
-            assistantText: textBlocks || undefined,
             awaitingReply: false,
           });
-          sse(res, 'done', {});
-          return res.end();
+          didAct = true;
+          toolResults.push({
+            type: 'tool_result', tool_use_id: tu.id,
+            content: JSON.stringify({ ok: true, added: item.laborShortDescription, note: 'Line added. If the inspector listed more items, continue; otherwise stop.' }),
+          });
+          continue;
         } else if (tu.name === 'edit_line') {
           const externalId = String(tu.input?.externalId || '');
           const existing = linesByExternalId.get(externalId);
@@ -505,11 +530,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             line,
             summary: item ? lineToSummary(item, qty, vendor, pct, region, regions) : `${existing.lineItemCode} — ${qty}, ${vendor}, ${pct}% Tenant`,
             spokenSummary: item ? item.laborShortDescription : existing.lineItemCode,
-            assistantText: textBlocks || undefined,
             awaitingReply: false,
           });
-          sse(res, 'done', {});
-          return res.end();
+          didAct = true;
+          toolResults.push({
+            type: 'tool_result', tool_use_id: tu.id,
+            content: JSON.stringify({ ok: true, edited: existing.lineItemCode, note: 'Line updated. Continue if more was requested; otherwise stop.' }),
+          });
+          continue;
         } else if (tu.name === 'switch_room') {
           const roomId = String(tu.input?.roomId || '');
           const room = rooms.find((r) => r.id === roomId)
@@ -521,10 +549,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             });
             continue;
           }
-          // Tell the client to switch rooms (it scrolls/expands + greets).
+          // Tell the client to switch rooms (it scrolls/expands). The active room
+          // for any subsequent propose_line in THIS turn is now the new one.
           sse(res, 'navigate', { sectionId: room.id, roomName: room.name });
-          sse(res, 'done', {});
-          return res.end();
+          activeLocation = room.name;
+          activeSection = room.name;
+          didAct = true;
+          toolResults.push({
+            type: 'tool_result', tool_use_id: tu.id,
+            content: JSON.stringify({ ok: true, switchedTo: room.name, note: 'Now working in this room. If the inspector also asked to add or change a line, continue with that now.' }),
+          });
+          continue;
         } else {
           toolResults.push({
             type: 'tool_result', tool_use_id: tu.id, is_error: true,
