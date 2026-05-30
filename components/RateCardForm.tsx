@@ -1844,8 +1844,14 @@ export function RateCardForm(props: RateCardFormProps) {
         const voiceSectionId = cameraSectionId ?? currentSectionId;
         if (props.readOnly || props.templateType !== 'pm_scope_rate_card' || !voiceSectionId) return null;
         const cameraOpen = cameraSectionId !== null;
+        // Hide the floating mic while a photo viewer/editor is open (keep it
+        // MOUNTED via display:none so an in-progress conversation isn't lost).
+        const hidden = lightbox !== null;
         return (
-          <div className="fixed inset-x-0 z-[60] pointer-events-none" style={{ bottom: cameraOpen ? 96 : 84 }}>
+          <div
+            className="fixed inset-x-0 z-[60] pointer-events-none"
+            style={{ bottom: cameraOpen ? 96 : 14, display: hidden ? 'none' : undefined }}
+          >
             <div
               className="relative max-w-7xl mx-auto px-4 flex pointer-events-none"
               style={{ justifyContent: cameraOpen ? 'flex-end' : 'center' }}

@@ -236,7 +236,7 @@ export function PhotoLightbox({
               </option>
               {tagLines.map((l) => (
                 <option key={l.externalId} value={l.externalId} className="text-black">
-                  {curIds.has(l.externalId) ? `✓ ${l.label} — remove` : l.label}
+                  {curIds.has(l.externalId) ? `✓ ${l.label} — Remove Tag` : l.label}
                 </option>
               ))}
             </select>
