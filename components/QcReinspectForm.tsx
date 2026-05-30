@@ -238,6 +238,13 @@ export function QcReinspectForm(props: Props) {
     setAfterPhotos((cur) => ({ ...cur, [key]: merged }));
     try { await persistAfterPhotos(key, section, location, merged); }
     catch (e: any) { void dialog.alert(`Could not update photos: ${e?.message || e}`); }
+    // Keep line tags in sync — a deleted After photo can't stay on a line.
+    const sec = sections.find((s) => s.key === key);
+    for (const line of (sec?.lines || [])) {
+      if ((line.photoUrls || []).includes(url)) {
+        await saveLinePhotos(line.recordId, (line.photoUrls || []).filter((u) => u !== url));
+      }
+    }
   }
 
   // Persist a QC line's photo_urls to its answer record (shared by tag/untag).
@@ -277,9 +284,19 @@ export function QcReinspectForm(props: Props) {
       const url = await uploadPhoto(file);
       const arr = [...(afterPhotos[key] || [])];
       if (index < 0 || index >= arr.length) return;
+      const oldUrl = arr[index];
       arr[index] = url;
       setAfterPhotos((cur) => ({ ...cur, [key]: arr }));
       await persistAfterPhotos(key, section, location, arr);
+      // Keep line tags in sync — swap the old URL for the marked-up one.
+      if (oldUrl && oldUrl !== url) {
+        const sec = sections.find((s) => s.key === key);
+        for (const line of (sec?.lines || [])) {
+          if ((line.photoUrls || []).includes(oldUrl)) {
+            await saveLinePhotos(line.recordId, (line.photoUrls || []).map((u) => (u === oldUrl ? url : u)));
+          }
+        }
+      }
     } catch (e: any) { void dialog.alert(`Could not update photo: ${e?.message || e}`); }
   }
 

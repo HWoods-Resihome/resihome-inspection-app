@@ -965,9 +965,18 @@ export function RateCardForm(props: RateCardFormProps) {
   function removePhoto(sectionId: string, idx: number) {
     if (props.readOnly) return;
     const current = photosBySection[sectionId] || [];
+    const url = current[idx];
     const next = current.filter((_, i) => i !== idx);
     setPhotosBySection((m) => ({ ...m, [sectionId]: next }));
     savePhotosForSection(sectionId, next);
+    // Keep line tags in sync: a deleted photo can't stay attached to a line.
+    if (url) {
+      for (const line of (linesBySection[sectionId] || [])) {
+        if ((line.photoUrls || []).includes(url)) {
+          handleSaveLineForSection(sectionId, { ...line, photoUrls: line.photoUrls.filter((u) => u !== url) });
+        }
+      }
+    }
   }
 
   // Replace a section photo with an annotated version (from the lightbox):
@@ -978,9 +987,19 @@ export function RateCardForm(props: RateCardFormProps) {
       const url = await uploadPhoto(file);
       const current = [...(photosBySection[sectionId] || [])];
       if (idx < 0 || idx >= current.length) return;
+      const oldUrl = current[idx];
       current[idx] = url;
       setPhotosBySection((m) => ({ ...m, [sectionId]: current }));
       await savePhotosForSection(sectionId, current);
+      // Keep line tags in sync: swap the old URL for the marked-up one on any
+      // line it was tagged to (otherwise the line keeps the un-marked photo).
+      if (oldUrl && oldUrl !== url) {
+        for (const line of (linesBySection[sectionId] || [])) {
+          if ((line.photoUrls || []).includes(oldUrl)) {
+            handleSaveLineForSection(sectionId, { ...line, photoUrls: line.photoUrls.map((u) => (u === oldUrl ? url : u)) });
+          }
+        }
+      }
     } catch (e) {
       console.error('[RateCardForm] annotate replace failed:', e);
     }
