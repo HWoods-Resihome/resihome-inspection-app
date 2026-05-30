@@ -753,6 +753,90 @@ export function RateCardForm(props: RateCardFormProps) {
     persistSectionList(newOrder);
   }
 
+  // Clear the CONTENT (all lines + section photos) of one or more sections
+  // without deleting the sections themselves. Called by the Sections manager
+  // when the user confirms staged "clear" actions by hitting Done.
+  async function handleClearSections(sectionIds: string[]) {
+    if (props.readOnly || sectionIds.length === 0) return;
+
+    // Gather the saved records to archive + external ids to forget.
+    const lineArchives: string[] = [];
+    const clearedExternalIds: string[] = [];
+    const photoArchives: string[] = [];
+    for (const sectionId of sectionIds) {
+      for (const line of (linesBySection[sectionId] || [])) {
+        const recordId = recordIdsByExternalId[line.externalId];
+        if (recordId) lineArchives.push(recordId);
+        clearedExternalIds.push(line.externalId);
+      }
+      const photoRecordId = sectionPhotoRecordIds[sectionId];
+      if (photoRecordId) photoArchives.push(photoRecordId);
+    }
+
+    // Local state: empty the lines + photos for those sections (keep the rooms).
+    setLinesBySection((m) => {
+      const next = { ...m };
+      for (const id of sectionIds) next[id] = [];
+      return next;
+    });
+    setPhotosBySection((m) => {
+      const next = { ...m };
+      for (const id of sectionIds) next[id] = [];
+      return next;
+    });
+
+    if (!linesHydrated) return;
+
+    // Network: archive the line records, then the section-photo records.
+    if (lineArchives.length > 0) {
+      saveInFlightRef.current++;
+      setSaveStatus({ kind: 'saving' });
+      try {
+        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/rate-card-lines`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ upserts: [], archives: lineArchives }),
+        });
+        if (!r.ok) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0, 400)}`); }
+        setRecordIdsByExternalId((cur) => {
+          const next = { ...cur };
+          for (const ext of clearedExternalIds) delete next[ext];
+          return next;
+        });
+        setSaveStatus({ kind: 'saved', at: Date.now() });
+      } catch (e: any) {
+        console.error('[RateCardForm] clear sections: line archive failed', e);
+        setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+      } finally {
+        saveInFlightRef.current--;
+      }
+    }
+
+    if (photoArchives.length > 0) {
+      saveInFlightRef.current++;
+      setSaveStatus({ kind: 'saving' });
+      try {
+        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ upserts: [], archives: photoArchives }),
+        });
+        if (!r.ok) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0, 400)}`); }
+        setSectionPhotoRecordIds((cur) => {
+          const next = { ...cur };
+          for (const id of sectionIds) delete next[id];
+          return next;
+        });
+        setSaveStatus({ kind: 'saved', at: Date.now() });
+      } catch (e: any) {
+        console.error('[RateCardForm] clear sections: photo archive failed', e);
+        setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+      } finally {
+        saveInFlightRef.current--;
+      }
+    }
+  }
+
   // ----- Photo handlers ------------------------------------------------
 
   /**
@@ -1536,6 +1620,7 @@ export function RateCardForm(props: RateCardFormProps) {
           onDelete={(id) => handleDeleteSection(id)}
           onAdd={handleAddSection}
           onReorder={handleReorderSections}
+          onClearSections={handleClearSections}
         />
       )}
 
