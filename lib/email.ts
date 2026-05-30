@@ -189,21 +189,25 @@ function buildHtmlBody(args: {
           <td style="padding:8px 24px 8px 24px;">
             <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f9fafb;border-radius:6px;">
               <tr>
-                <td style="padding:14px 16px;text-align:center;">
-                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Vendor Total</div>
+                <td style="padding:14px 12px;text-align:center;">
+                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Scope Lines</div>
+                  <div style="font-size:18px;font-weight:bold;margin-top:4px;">${ctx.grandTotals.lineCount}</div>
+                </td>
+                <td style="padding:14px 12px;text-align:center;border-left:1px solid #e5e7eb;">
+                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Vendor</div>
                   <div style="font-size:18px;font-weight:bold;margin-top:4px;">${fmtMoney(ctx.grandTotals.vendor)}</div>
                 </td>
-                <td style="padding:14px 16px;text-align:center;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;">
-                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Client Total</div>
+                <td style="padding:14px 12px;text-align:center;border-left:1px solid #e5e7eb;">
+                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Client</div>
                   <div style="font-size:20px;font-weight:bold;color:#ff0060;margin-top:4px;">${fmtMoney(ctx.grandTotals.client)}</div>
                 </td>
-                <td style="padding:14px 16px;text-align:center;">
-                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Tenant Total</div>
+                <td style="padding:14px 12px;text-align:center;border-left:1px solid #e5e7eb;">
+                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Tenant</div>
                   <div style="font-size:18px;font-weight:bold;margin-top:4px;">${fmtMoney(ctx.grandTotals.tenant)}</div>
                 </td>
-                <td style="padding:14px 16px;text-align:center;border-left:1px solid #e5e7eb;">
-                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Net Turn Cost</div>
-                  <div style="font-size:18px;font-weight:bold;margin-top:4px;">${fmtMoney(ctx.grandTotals.client - ctx.grandTotals.tenant)}</div>
+                <td style="padding:14px 12px;text-align:center;border-left:1px solid #e5e7eb;">
+                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Net Turn</div>
+                  <div style="font-size:18px;font-weight:bold;color:#0f766e;margin-top:4px;">${fmtMoney(ctx.grandTotals.client - ctx.grandTotals.tenant)}</div>
                 </td>
               </tr>
             </table>

@@ -1104,50 +1104,53 @@ export function RateCardForm(props: RateCardFormProps) {
         </div>
       </header>
 
-      {/* Sticky grand-total bar. The 3 money totals on the right use the
-          same fixed column widths as the section row totals below, so all
-          Vendor / Client / Tenant figures stack into visual columns from
-          the top of the page down through each section header. */}
-      <div className="sticky top-0 z-10 -mx-4 px-4 py-2 mb-3 bg-white border-b border-gray-200 shadow-sm">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="text-sm font-semibold text-gray-700">
-              {grandTotals.count} {grandTotals.count === 1 ? 'line' : 'lines'}
-            </div>
-            {/* Save status: visible while the inspector is making edits so they
-                get immediate feedback that work is being persisted. The
-                'error' state is a button: clicking it opens a modal with the
-                actual HubSpot error text so issues can be reported. */}
-            <div className="text-xs flex items-center min-h-[1rem]">
-              {saveStatus.kind === 'saving' && <span className="text-brand font-semibold">Saving...</span>}
-              {saveStatus.kind === 'saved' && <span className="text-emerald-700 font-semibold">✓ Saved</span>}
-              {saveStatus.kind === 'error' && (
-                <button
-                  type="button"
-                  onClick={() => setShowSaveErrorDetail(true)}
-                  className="text-red-700 font-semibold underline hover:text-red-900"
-                  title="Click for details"
-                >
-                  ⚠ Save failed — click for details
-                </button>
-              )}
-            </div>
+      {/* Sticky header bar. Keeps the address + property data row AND the
+          totals visible while scrolling. Five centered boxes: Scope Lines +
+          Vendor / Client / Tenant / Net Turn. */}
+      <div className="sticky top-0 z-10 -mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
+        <div className="text-center mb-2">
+          <div className="text-sm font-semibold text-gray-800 truncate">{props.propertyName}</div>
+          <div className="text-[11px] text-gray-500 truncate">
+            {props.bedrooms} bed / {props.bathrooms} bath
+            {props.squareFootage != null && props.squareFootage > 0 && (
+              <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
+            )}
+            {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
+            {!inspectionRegion && <span className="text-yellow-700"> &middot; fallback (GA: Atlanta)</span>}
+            {saveStatus.kind === 'saving' && <span className="text-brand font-semibold"> &middot; Saving...</span>}
+            {saveStatus.kind === 'saved' && <span className="text-emerald-700 font-semibold"> &middot; &#10003; Saved</span>}
+            {saveStatus.kind === 'error' && (
+              <button
+                type="button"
+                onClick={() => setShowSaveErrorDetail(true)}
+                className="text-red-700 font-semibold underline hover:text-red-900 ml-1"
+                title="Click for details"
+              >
+                &middot; Save failed
+              </button>
+            )}
           </div>
+        </div>
+        <div className="flex justify-center">
           <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden">
-            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px]">
+            <div className="text-center px-2.5 py-1 w-[70px] sm:w-[96px]">
+              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Scope Lines</div>
+              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">{grandTotals.count}</div>
+            </div>
+            <div className="text-center px-2.5 py-1 w-[70px] sm:w-[96px] border-l border-gray-200/70">
               <div className="text-gray-400 text-[10px] uppercase tracking-wide">Vendor</div>
               <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.vendor))}</div>
             </div>
-            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px] border-l border-gray-200/70">
+            <div className="text-center px-2.5 py-1 w-[70px] sm:w-[96px] border-l border-gray-200/70">
               <div className="text-gray-400 text-[10px] uppercase tracking-wide">Client</div>
               <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.client))}</div>
             </div>
-            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px] border-l border-gray-200/70">
+            <div className="text-center px-2.5 py-1 w-[70px] sm:w-[96px] border-l border-gray-200/70">
               <div className="text-brand/70 text-[10px] uppercase tracking-wide">Tenant</div>
               <div className="font-semibold text-brand tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.tenant))}</div>
             </div>
-            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px] border-l border-gray-200/70">
-              <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net</div>
+            <div className="text-center px-2.5 py-1 w-[70px] sm:w-[96px] border-l border-gray-200/70">
+              <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net Turn</div>
               <div className="font-semibold text-emerald-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.client - grandTotals.tenant))}</div>
             </div>
           </div>
