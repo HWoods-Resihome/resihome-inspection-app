@@ -19,6 +19,13 @@ interface CaptureItem {
   abortController?: AbortController;
 }
 
+interface CameraRoom {
+  id: string;
+  name: string;
+  photoCount: number;
+  needsPhotos: boolean;
+}
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -28,6 +35,17 @@ interface Props {
   uploadPhoto: (file: File) => Promise<string>;
   // Optional cap on number of photos in a single session
   maxPhotos?: number;
+  // --- Multi-room mode (optional) -----------------------------------------
+  // When provided, the camera shows a room switcher in the top bar so the
+  // inspector can photograph the whole house without leaving the camera.
+  // Switching rooms (or pressing Done) flushes the current room's captures back
+  // to the inspection via onRoomChange / onComplete.
+  rooms?: CameraRoom[];
+  currentRoomId?: string;
+  // Called when the user switches rooms. Receives the URLs captured for the
+  // room being LEFT, and the id of the room being entered. The parent should
+  // persist the urls to the left room and update currentRoomId.
+  onRoomChange?: (leavingRoomId: string, capturedUrls: string[], enteringRoomId: string) => void;
 }
 
 // Target capture resolution: 1920x1440 (4:3). Browser may downgrade if
@@ -40,6 +58,7 @@ const JPEG_QUALITY = 0.88;
 
 export function CameraCapture({
   isOpen, onClose, onComplete, uploadPhoto, maxPhotos = 30,
+  rooms, currentRoomId, onRoomChange,
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -289,24 +308,51 @@ export function CameraCapture({
 
   // ----- Done / Cancel -----
 
-  const handleDone = useCallback(async () => {
-    // If any uploads are still in flight, wait for them. Hard ceiling: 60 seconds.
+  // Wait for any in-flight uploads (hard ceiling), then return uploaded URLs
+  // and clean up object URLs / clear the tray. Shared by Done and room-switch.
+  const flushUploads = useCallback(async (): Promise<{ urls: string[]; failures: number }> => {
     const startedAt = Date.now();
     const TIMEOUT_MS = 60_000;
-
     while (Date.now() - startedAt < TIMEOUT_MS) {
       const current = itemsRef.current;
-      const stillUploading = current.some((it) => it.status === 'uploading');
-      if (!stillUploading) break;
+      if (!current.some((it) => it.status === 'uploading')) break;
       await new Promise((r) => setTimeout(r, 200));
     }
-
     const finalItems = itemsRef.current;
     const urls = finalItems
       .filter((it) => it.status === 'uploaded' && it.hubspotUrl)
       .map((it) => it.hubspotUrl!) as string[];
-
     const failures = finalItems.filter((it) => it.status !== 'uploaded').length;
+    for (const it of finalItems) {
+      try { URL.revokeObjectURL(it.blobUrl); } catch { /* harmless */ }
+    }
+    setItems([]);
+    return { urls, failures };
+  }, []);
+
+  const [roomMenuOpen, setRoomMenuOpen] = useState(false);
+  const multiRoom = !!(rooms && rooms.length && currentRoomId && onRoomChange);
+  const currentRoom = multiRoom ? rooms!.find((r) => r.id === currentRoomId) : undefined;
+  const currentIdx = multiRoom ? rooms!.findIndex((r) => r.id === currentRoomId) : -1;
+
+  // Switch to another room: push the current room's captures back to the
+  // inspection, clear the tray, and keep the camera open on the new room.
+  const switchToRoom = useCallback(async (enteringRoomId: string) => {
+    if (!multiRoom || enteringRoomId === currentRoomId) { setRoomMenuOpen(false); return; }
+    setRoomMenuOpen(false);
+    const { urls } = await flushUploads();
+    onRoomChange!(currentRoomId!, urls, enteringRoomId);
+  }, [multiRoom, currentRoomId, flushUploads, onRoomChange]);
+
+  const goAdjacentRoom = useCallback((dir: -1 | 1) => {
+    if (!multiRoom) return;
+    const n = rooms!.length;
+    const next = (currentIdx + dir + n) % n;
+    void switchToRoom(rooms![next].id);
+  }, [multiRoom, rooms, currentIdx, switchToRoom]);
+
+  const handleDone = useCallback(async () => {
+    const { urls, failures } = await flushUploads();
     if (failures > 0) {
       const ok = await dialog.confirm(
         `${failures} photo${failures === 1 ? '' : 's'} did not upload successfully. ` +
@@ -315,15 +361,9 @@ export function CameraCapture({
       );
       if (!ok) return;
     }
-
-    // Clean up object URLs
-    for (const it of finalItems) {
-      try { URL.revokeObjectURL(it.blobUrl); } catch { /* harmless */ }
-    }
-    setItems([]);
     stopStream();
     onComplete(urls);
-  }, [onComplete, stopStream]);
+  }, [flushUploads, onComplete, stopStream, dialog]);
 
   const handleCancel = useCallback(() => {
     // Abort all in-flight uploads and discard all photos
@@ -385,12 +425,86 @@ export function CameraCapture({
         <button
           type="button"
           onClick={handleDone}
-          disabled={items.length === 0}
-          className="text-sm font-heading font-bold px-3 py-1.5 rounded-md bg-brand text-white disabled:bg-gray-600 disabled:text-gray-400"
+          className="text-sm font-heading font-bold px-3 py-1.5 rounded-md bg-brand text-white hover:bg-brand-dark"
         >
           Done
         </button>
       </div>
+
+      {/* Room switcher (multi-room mode): ‹ Room Name (N) › — name opens a
+          scrollable room list showing photo counts and which rooms still need
+          photos, so the inspector can shoot the whole house without leaving. */}
+      {multiRoom && (
+        <div className="relative bg-black/70 text-white border-b border-white/10">
+          <div className="flex items-center justify-between px-3 py-2 gap-2">
+            <button
+              type="button"
+              onClick={() => goAdjacentRoom(-1)}
+              aria-label="Previous room"
+              className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10 text-2xl leading-none shrink-0"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              onClick={() => setRoomMenuOpen((o) => !o)}
+              className="flex-1 min-w-0 flex items-center justify-center gap-2 px-3 py-1.5 rounded-md hover:bg-white/10"
+            >
+              <span className="font-heading font-semibold truncate">{currentRoom?.name || 'Room'}</span>
+              <span className="text-xs text-white/70 shrink-0">
+                {currentRoom ? `(${currentRoom.photoCount + items.length})` : ''}
+              </span>
+              <span className={`text-[10px] transition-transform ${roomMenuOpen ? 'rotate-180' : ''}`}>▼</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => goAdjacentRoom(1)}
+              aria-label="Next room"
+              className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10 text-2xl leading-none shrink-0"
+            >
+              ›
+            </button>
+          </div>
+
+          {roomMenuOpen && (
+            <>
+              {/* tap-away backdrop */}
+              <button
+                type="button"
+                aria-label="Close room list"
+                onClick={() => setRoomMenuOpen(false)}
+                className="fixed inset-0 z-10 cursor-default"
+              />
+              <div className="absolute left-2 right-2 top-full mt-1 z-20 max-h-[50vh] overflow-y-auto rounded-lg bg-black/90 backdrop-blur border border-white/15 shadow-xl">
+                {rooms!.map((r) => {
+                  const isCurrent = r.id === currentRoomId;
+                  const liveCount = r.photoCount + (isCurrent ? items.length : 0);
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => switchToRoom(r.id)}
+                      className={`w-full flex items-center justify-between gap-2 px-4 py-3 text-left border-b border-white/5 last:border-0 ${isCurrent ? 'bg-brand/30' : 'hover:bg-white/10'}`}
+                    >
+                      <span className="flex items-center gap-2 min-w-0">
+                        {isCurrent && <span className="text-brand text-xs">●</span>}
+                        <span className="truncate font-heading">{r.name}</span>
+                      </span>
+                      <span className="shrink-0 text-xs">
+                        {liveCount > 0
+                          ? <span className="text-emerald-400 font-semibold">{liveCount} photo{liveCount === 1 ? '' : 's'}</span>
+                          : r.needsPhotos
+                            ? <span className="text-amber-400 font-semibold">needs photos</span>
+                            : <span className="text-white/40">none</span>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Camera viewport */}
       <div className="flex-1 relative bg-black overflow-hidden">

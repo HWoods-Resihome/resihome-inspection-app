@@ -863,11 +863,26 @@ export function RateCardForm(props: RateCardFormProps) {
 
   function handleCameraComplete(hubspotUrls: string[]) {
     if (!cameraSectionId) return;
-    const current = photosBySection[cameraSectionId] || [];
-    const next = [...current, ...hubspotUrls];
-    setPhotosBySection((prev) => ({ ...prev, [cameraSectionId]: next }));
-    savePhotosForSection(cameraSectionId, next);
+    if (hubspotUrls.length) {
+      const current = photosBySection[cameraSectionId] || [];
+      const next = [...current, ...hubspotUrls];
+      setPhotosBySection((prev) => ({ ...prev, [cameraSectionId]: next }));
+      savePhotosForSection(cameraSectionId, next);
+    }
     setCameraSectionId(null);
+  }
+
+  // Multi-room camera: when the inspector switches rooms inside the camera,
+  // push the just-captured photos to the room they were taken in, then move the
+  // camera's active room. This lets them shoot the whole house in one session.
+  function handleCameraRoomChange(leavingRoomId: string, capturedUrls: string[], enteringRoomId: string) {
+    if (capturedUrls.length) {
+      const current = photosBySection[leavingRoomId] || [];
+      const next = [...current, ...capturedUrls];
+      setPhotosBySection((prev) => ({ ...prev, [leavingRoomId]: next }));
+      savePhotosForSection(leavingRoomId, next);
+    }
+    setCameraSectionId(enteringRoomId);
   }
 
   // ----- Math helpers --------------------------------------------------
@@ -1463,6 +1478,17 @@ export function RateCardForm(props: RateCardFormProps) {
           onComplete={handleCameraComplete}
           onClose={() => setCameraSectionId(null)}
           uploadPhoto={uploadPhoto}
+          rooms={sections.map((s) => {
+            const count = (photosBySection[s.id] || []).length;
+            return {
+              id: s.id,
+              name: s.displayName || s.label,
+              photoCount: count,
+              needsPhotos: !s.photoOptional && count === 0,
+            };
+          })}
+          currentRoomId={cameraSectionId}
+          onRoomChange={handleCameraRoomChange}
         />
       )}
 
@@ -1885,9 +1911,11 @@ function SectionHeader(p: SectionHeaderProps) {
             <span className="text-gray-400 flex-shrink-0">{p.isOpen ? '▾' : '▸'}</span>
           )}
         </div>
-        {/* Totals pill — sits to the right on desktop, wraps below on mobile. */}
+        {/* Totals pill — centered on mobile (its own wrapped row), pushed to
+            the right (with a little edge gap) on desktop. */}
         {p.lineCount > 0 && (
-          <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden shrink-0 ml-auto">
+          <div className="w-full sm:w-auto sm:ml-auto sm:mr-1 flex justify-center sm:justify-end">
+            <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden shrink-0">
             <div className="text-center px-2 py-1 w-[58px] sm:w-[84px]">
               <div className="text-gray-400 text-[10px] uppercase tracking-wide">Lines</div>
               <div className="font-semibold text-gray-700 tabular-nums mt-0.5">{p.lineCount}</div>
@@ -1908,6 +1936,7 @@ function SectionHeader(p: SectionHeaderProps) {
               <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net Turn</div>
               <div className="font-semibold text-emerald-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.clientTotal - p.tenantTotal))}</div>
             </div>
+          </div>
           </div>
         )}
       </div>
