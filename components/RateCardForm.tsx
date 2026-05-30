@@ -1243,9 +1243,10 @@ export function RateCardForm(props: RateCardFormProps) {
               />
               {isOpen && (
                 <div className="border-t border-gray-100">
-                  {/* Section photos — compact single-row layout */}
-                  <div className={`px-3 py-2 ${photosMissing ? 'bg-amber-50' : 'bg-gray-50'} border-b border-gray-100`}>
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                  {/* Section photos — compact single-row layout (Take/Upload on
+                      the right on every state, like the "added" state). */}
+                  <div className={`px-3 py-1.5 ${photosMissing ? 'bg-amber-50' : 'bg-gray-50'} border-b border-gray-100`}>
+                    <div className="flex items-center justify-between gap-2">
                       <div className="flex items-baseline gap-2 min-w-0">
                         <button
                           type="button"
@@ -1254,26 +1255,26 @@ export function RateCardForm(props: RateCardFormProps) {
                         >
                           <span className={`text-gray-400 text-[10px] self-center transition-transform ${photosCollapsed[s.id] ? '' : 'rotate-90'}`}>&#9654;</span>
                           <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap">
-                            Section Photos
+                            Photos
                             {photosRequired
                               ? <span className="text-brand ml-1">*</span>
-                              : <span className="text-gray-400 normal-case font-normal ml-1">(optional)</span>}
+                              : <span className="text-gray-400 normal-case font-normal ml-1">(opt)</span>}
                           </span>
                         </button>
                         {photosMissing && !isUploadingHere && (
-                          <span className="text-xs text-amber-800 font-semibold">at least 1 required</span>
+                          <span className="text-xs text-amber-800 font-semibold whitespace-nowrap">&ge;1 req</span>
                         )}
                         {isUploadingHere && (
-                          <span className="text-xs text-brand font-semibold">
-                            Uploading {uploadingSection!.current} of {uploadingSection!.total}...
+                          <span className="text-xs text-brand font-semibold whitespace-nowrap">
+                            {uploadingSection!.current}/{uploadingSection!.total}…
                           </span>
                         )}
                         {photos.length > 0 && !photosMissing && !isUploadingHere && (
-                          <span className="text-xs text-gray-500">{photos.length} added</span>
+                          <span className="text-xs text-gray-500 whitespace-nowrap">{photos.length} added</span>
                         )}
                       </div>
                       {!props.readOnly && (
-                        <div className="flex gap-2 items-center">
+                        <div className="flex gap-2 items-center shrink-0">
                           <button
                             type="button"
                             onClick={() => setCameraSectionId(s.id)}
@@ -1842,8 +1843,16 @@ function SectionHeader(p: SectionHeaderProps) {
             className="font-semibold text-gray-900 border border-brand rounded px-2 py-1 text-sm bg-white flex-1 min-w-0"
           />
         ) : (
-          <div className="font-semibold text-gray-900 flex-1 min-w-0 break-words">{p.heading}</div>
+          <div className="font-semibold text-gray-900 min-w-0 break-words">{p.heading}</div>
         )}
+        {/* Photo status inline next to the room name to save a row. */}
+        {!editingTitle && p.photosMissing && (
+          <span title="Section photo required" className="text-amber-600 font-semibold text-xs whitespace-nowrap shrink-0">📷 Photos Needed</span>
+        )}
+        {!editingTitle && p.photosCount > 0 && (
+          <span className="text-gray-500 text-xs whitespace-nowrap shrink-0">📷 {p.photosCount}</span>
+        )}
+        {!editingTitle && <div className="flex-1 min-w-0" />}
         {!p.readOnly && !editingTitle && (
           <>
             <button
@@ -1872,24 +1881,16 @@ function SectionHeader(p: SectionHeaderProps) {
           <span className="text-gray-400 flex-shrink-0">{p.isOpen ? '▾' : '▸'}</span>
         )}
       </div>
-      {/* Row 2: photo status, then a centered 5-box totals pill that mirrors
-          the floating header (Lines + Vendor / Client / Tenant / Net Turn). */}
-      <div className="mt-1">
-        <div className="flex items-baseline gap-x-3 gap-y-1 flex-wrap text-xs justify-center mb-1">
-          {p.photosMissing && (
-            <span title="Section photo required" className="text-amber-600 font-semibold">📷 Photos Needed</span>
-          )}
-          {p.photosCount > 0 && (
-            <span className="text-gray-500">📷 {p.photosCount}</span>
-          )}
-        </div>
-        {p.lineCount > 0 && (
-          <div className="flex justify-center">
-            <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden">
-              <div className="text-center px-2 py-1 w-[58px] sm:w-[84px]">
-                <div className="text-gray-400 text-[10px] uppercase tracking-wide">Lines</div>
-                <div className="font-semibold text-gray-700 tabular-nums mt-0.5">{p.lineCount}</div>
-              </div>
+      {/* Row 2: centered 5-box totals pill that mirrors the floating header
+          (Lines + Vendor / Client / Tenant / Net Turn). Photo status now lives
+          inline in the title row above. */}
+      {p.lineCount > 0 && (
+        <div className="mt-1 flex justify-center">
+          <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden">
+            <div className="text-center px-2 py-1 w-[58px] sm:w-[84px]">
+              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Lines</div>
+              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">{p.lineCount}</div>
+            </div>
               <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
                 <div className="text-gray-400 text-[10px] uppercase tracking-wide">Vendor</div>
                 <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.vendorTotal))}</div>
@@ -1909,7 +1910,6 @@ function SectionHeader(p: SectionHeaderProps) {
             </div>
           </div>
         )}
-      </div>
     </div>
   );
 }

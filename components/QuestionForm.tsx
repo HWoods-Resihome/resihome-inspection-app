@@ -952,8 +952,8 @@ export function QuestionForm({
               {!isCollapsed && (
                 <div className="bg-white border-x border-b border-gray-200 divide-y divide-gray-100">
                   {/* Section photos — compact single-row layout (matches RateCardForm) */}
-                  <div className={`px-3 py-2 ${photosMissing ? 'bg-amber-50' : 'bg-gray-50'}`}>
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className={`px-3 py-1.5 ${photosMissing ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                    <div className="flex items-center justify-between gap-2">
                       <div className="flex items-baseline gap-2 min-w-0">
                         <button
                           type="button"
@@ -962,26 +962,26 @@ export function QuestionForm({
                         >
                           <span className={`text-gray-400 text-[10px] self-center transition-transform ${photosCollapsed[inst.instanceKey] ? '' : 'rotate-90'}`}>&#9654;</span>
                           <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap">
-                            Section Photos
+                            Photos
                             {photosRequired
                               ? <span className="text-brand ml-1">*</span>
-                              : <span className="text-gray-400 normal-case font-normal ml-1">(optional)</span>}
+                              : <span className="text-gray-400 normal-case font-normal ml-1">(opt)</span>}
                           </span>
                         </button>
                         {photosMissing && uploadingSection?.instanceKey !== inst.instanceKey && (
-                          <span className="text-xs text-amber-800 font-semibold">at least 1 required</span>
+                          <span className="text-xs text-amber-800 font-semibold whitespace-nowrap">&ge;1 req</span>
                         )}
                         {uploadingSection?.instanceKey === inst.instanceKey && (
                           <span className="text-xs text-brand font-semibold">
-                            Uploading {uploadingSection.current} of {uploadingSection.total}...
+                            {uploadingSection.current}/{uploadingSection.total}…
                           </span>
                         )}
                         {sectionPhotoUrls.length > 0 && !photosMissing && uploadingSection?.instanceKey !== inst.instanceKey && (
-                          <span className="text-xs text-gray-500">{sectionPhotoUrls.length} added</span>
+                          <span className="text-xs text-gray-500 whitespace-nowrap">{sectionPhotoUrls.length} added</span>
                         )}
                       </div>
                       {!readOnly && (
-                        <div className="flex gap-2 items-center">
+                        <div className="flex gap-2 items-center shrink-0">
                           <button
                             type="button"
                             onClick={() => setSectionCameraInstance(inst.instanceKey)}

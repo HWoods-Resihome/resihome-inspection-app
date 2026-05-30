@@ -1,6 +1,6 @@
 // components/VoiceLineAssistant.tsx
 //
-// Roaming conversational inspection assistant for the Scope rate card.
+// Roaming conversational ResiWALK AI Assistant for the Scope rate card.
 // Online-only. ONE floating panel travels across rooms: it always shows the
 // room it's working on, lets the inspector change rooms manually (dropdown) or
 // by voice ("close this out, go to Bedroom 2"), scrolls the form to that room,
@@ -670,7 +670,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           setTimeout(() => { startListeningRef.current(); }, 0);
         }}
         disabled={disabled}
-        aria-label="Talk to the inspection assistant"
+        aria-label="Talk to the ResiWALK AI Assistant"
         className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-brand text-white hover:bg-brand-dark disabled:opacity-50 shadow"
       >
         <MicIcon className="w-5 h-5" />
@@ -687,7 +687,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         <div className="max-w-7xl mx-auto flex justify-center">
           <div className="pointer-events-auto w-full sm:w-[440px] rounded-lg border border-brand/30 bg-white shadow-xl p-3">
             <div className="flex items-center justify-between gap-2 mb-2">
-              <span className="text-sm font-heading font-semibold text-brand">Inspection assistant</span>
+              <span className="text-sm font-heading font-semibold text-brand">ResiWALK AI Assistant</span>
               <button type="button" onClick={() => { reset(); setOpen(false); }} className="text-xs text-gray-500 hover:text-gray-700 shrink-0">
                 Close
               </button>
@@ -748,32 +748,24 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
 
       {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
 
-      {/* Controls */}
+      {/* Controls — status only (the mic action is the bottom footer button).
+          A typed fallback stays for when speech mishears or isn't available. */}
       <div className="flex items-center gap-2">
         {supported && (
-          <button
-            type="button"
-            onClick={() => {
-              if (listening) { stopListening(); return; }
-              // Barge-in: if the assistant is mid-sentence, cut it off so the
-              // inspector can start talking immediately.
-              try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
-              speakingRef.current = false;
-              startListening();
-            }}
-            disabled={(busy || warming) && !listening ? true : disabled}
+          <div
             className={
-              'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded disabled:opacity-60 ' +
-              (listening ? 'bg-red-600 text-white animate-pulse' : 'bg-brand text-white hover:bg-brand-dark')
+              'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded shrink-0 ' +
+              (listening ? 'bg-red-600 text-white animate-pulse' : 'bg-gray-100 text-gray-600')
             }
+            aria-live="polite"
           >
             {listening
               ? <MicIcon className="w-4 h-4" />
               : (warming || busy)
                 ? <SpinnerIcon className="w-4 h-4 animate-spin" />
                 : <MicIcon className="w-4 h-4" />}
-            {listening ? 'Listening… tap to stop' : warming ? 'Getting ready…' : busy ? 'Thinking…' : 'Speak'}
-          </button>
+            {listening ? 'Listening…' : warming ? 'Getting ready…' : busy ? 'Thinking…' : 'Tap the mic below'}
+          </div>
         )}
         {/* Typed fallback (also handy when STT mishears) */}
         <input
@@ -804,12 +796,21 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           </div>
         </div>
       </div>
-      {/* The mic stays in the footer slot while open — tapping it again closes. */}
+      {/* The mic stays in the footer slot while open. Tapping it starts (or
+          re-opens) listening so the inspector can talk again — it does NOT
+          close the panel. Closing is only via the Close button in the panel. */}
       <button
         type="button"
-        onClick={() => { reset(); setOpen(false); }}
-        aria-label="Close the inspection assistant"
-        className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-brand text-white hover:bg-brand-dark shadow ring-2 ring-brand/40"
+        onClick={() => {
+          if (listening) { stopListening(); return; }
+          // Barge-in: cut off any ongoing TTS so the inspector can speak now.
+          try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
+          speakingRef.current = false;
+          startListeningRef.current();
+        }}
+        disabled={(busy || warming) && !listening ? true : disabled}
+        aria-label={listening ? 'Stop listening' : 'Talk to the ResiWALK AI Assistant'}
+        className={`inline-flex items-center justify-center w-11 h-11 rounded-full text-white shadow disabled:opacity-50 ${listening ? 'bg-red-600 animate-pulse' : 'bg-brand hover:bg-brand-dark ring-2 ring-brand/40'}`}
       >
         <MicIcon className="w-5 h-5" />
       </button>
