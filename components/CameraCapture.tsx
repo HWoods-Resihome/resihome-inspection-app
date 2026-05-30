@@ -122,7 +122,7 @@ const JPEG_QUALITY = 0.88;
 // Press-and-hold video clips: hold the shutter > HOLD_MS to start recording;
 // clips auto-stop at MAX_CLIP_MS. Bitrate-capped so a 10s clip stays small.
 const HOLD_MS = 260;
-const MAX_CLIP_MS = 10000;
+const MAX_CLIP_MS = 60000; // clips upload direct-to-Blob, so the old ~10s base64 wall is gone
 const CLIP_BITRATE = 2_500_000;
 // Digital zoom while recording: drag the thumb up to zoom in, down to zoom out.
 // (Done in-canvas so it works on iOS Safari, which doesn't support the hardware

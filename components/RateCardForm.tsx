@@ -1329,8 +1329,8 @@ export function RateCardForm(props: RateCardFormProps) {
       <header className="mb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 min-w-0">
-              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight truncate">{props.templateLabel}</h1>
+            <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{props.templateLabel}</h1>
               {statusLabel && (
                 <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
                   {statusLabel.label}

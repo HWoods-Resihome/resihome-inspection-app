@@ -17,7 +17,7 @@ type Stroke =
   | { tool: 'arrow'; color: string; width: number; a: Pt; b: Pt }
   | { tool: 'circle'; color: string; width: number; a: Pt; b: Pt };
 
-const COLORS = ['#ef4444', '#f59e0b', '#22c55e', '#ffffff'];
+const COLORS = ['#ef4444', '#f59e0b', '#ffffff'];
 const MAX_EDGE = 1920;
 
 function dist(a: { x: number; y: number }, b: { x: number; y: number }): number {
@@ -230,7 +230,7 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
       type="button"
       onClick={() => setTool(t)}
       aria-pressed={tool === t}
-      className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg text-[11px] font-heading ${
+      className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-[10px] font-heading ${
         tool === t ? 'bg-white text-black' : 'text-white/90 hover:bg-white/10'
       }`}
       title={label}
@@ -287,8 +287,8 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
         )}
       </div>
 
-      {/* Toolbar (wraps on narrow screens so Save never clips off the edge) */}
-      <div className="bg-black px-3 py-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
+      {/* Toolbar — single row (tools · colors · Undo/Save) */}
+      <div className="bg-black px-2 py-3 flex items-center justify-between gap-1.5">
         <div className="flex items-center gap-1">
           {toolBtn('arrow', 'Arrow', (
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

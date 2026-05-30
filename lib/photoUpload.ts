@@ -106,23 +106,49 @@ export async function uploadPhoto(file: File): Promise<string> {
 }
 
 /**
- * Upload a short video clip (from the in-app recorder) as-is — no image
- * compression. The recorder already bitrate-caps the clip; we just base64 it
- * and POST through the same /api/upload endpoint (which now allowlists
- * video/mp4 + video/webm). Returns the HubSpot Files URL.
+ * Upload a video clip from the in-app recorder.
+ *
+ * PRIMARY PATH: stream the file straight to Vercel Blob from the browser
+ * (`@vercel/blob/client`). This bypasses Vercel's ~4.5MB serverless request-body
+ * limit, so clips can be much longer than the old ~10s base64 ceiling.
+ *
+ * FALLBACK: if Blob isn't configured yet (no Blob store / BLOB_READ_WRITE_TOKEN),
+ * small clips (≤ ~3MB) still upload via the base64 /api/upload path so nothing
+ * breaks before the store is set up. Larger clips throw an actionable error.
  */
 export async function uploadVideo(file: File): Promise<string> {
-  // Safety net: the recorder caps bitrate + duration, but never send something
-  // that would blow past the API body limit (48MB → ~36MB raw after base64).
-  if (file.size > 32 * 1024 * 1024) {
-    throw new Error(`Video too large (${formatBytes(file.size)}). Record a shorter clip.`);
-  }
   const contentType = (file.type || 'video/mp4').split(';')[0].trim();
   const ext = /webm/i.test(contentType) ? 'webm' : /quicktime|mov/i.test(contentType) ? 'mov' : 'mp4';
-  const base = (file.name || 'clip').replace(/\.[^.]+$/, '').trim() || 'clip';
-  const base64 = await fileToBase64(file);
-  const payload = JSON.stringify({ filename: `${base}.${ext}`, contentType, base64 });
+  const filename = `clip_${Date.now()}.${ext}`;
 
+  // 1) Direct-to-Blob (preferred).
+  try {
+    const { upload } = await import('@vercel/blob/client');
+    const blob = await upload(filename, file, {
+      access: 'public',
+      handleUploadUrl: '/api/blob-upload',
+      contentType,
+    });
+    if (blob?.url) return blob.url;
+    throw new Error('Blob upload returned no url');
+  } catch (e: any) {
+    // 2) Fallback for short clips when Blob isn't configured.
+    if (file.size <= 3 * 1024 * 1024) {
+      return uploadVideoBase64(file, filename, contentType);
+    }
+    throw new Error(
+      `Couldn’t upload this clip. For clips longer than ~10s, enable Vercel Blob storage on the project. (${e?.message || e})`
+    );
+  }
+}
+
+/** Legacy base64 → /api/upload path (used as a fallback for short clips). */
+async function uploadVideoBase64(file: File, filename: string, contentType: string): Promise<string> {
+  if (file.size > 4 * 1024 * 1024) {
+    throw new Error(`Video too large for fallback upload (${formatBytes(file.size)}). Enable Vercel Blob storage.`);
+  }
+  const base64 = await fileToBase64(file);
+  const payload = JSON.stringify({ filename, contentType, base64 });
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
     try {
