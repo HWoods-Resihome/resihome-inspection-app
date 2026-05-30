@@ -4,12 +4,11 @@ import Link from 'next/link';
 import { useAppDialog } from '@/components/AppDialog';
 import { useRouter } from 'next/router';
 import type {
-  Question, Property, AnswerInput, SubmitPayload, SubmitResult, TemplateType, HubSpotUser,
+  Property, TemplateType, HubSpotUser,
 } from '@/lib/types';
-import { QuestionForm } from '@/components/QuestionForm';
 import { Combobox } from '@/components/Combobox';
 
-type Stage = 'setup' | 'loading_questions' | 'form' | 'submitting' | 'generating_pdf' | 'done' | 'error';
+type Stage = 'setup' | 'loading_questions' | 'error';
 
 // Default scheduled date: tomorrow at 9am local time, formatted YYYY-MM-DD
 // (input[type=date] only accepts date-only format).
@@ -27,10 +26,6 @@ const TEMPLATE_OPTIONS: { value: TemplateType; label: string; sublabel: string }
   { value: 'qc_new_construction_rrqc',                  label: '(QC) New Construction RRQC',           sublabel: 'Rent-ready QC for new construction' },
   { value: 'leasing_agent_1099_property_inspection',    label: '(1099) Leasing Agent Property Inspection', sublabel: 'Pre-tour assessment by leasing agent' },
 ];
-
-function templateLabel(v: TemplateType): string {
-  return TEMPLATE_OPTIONS.find((t) => t.value === v)?.label || v;
-}
 
 export default function NewInspection() {
   const dialog = useAppDialog();
@@ -69,12 +64,8 @@ export default function NewInspection() {
   const [usersLoading, setUsersLoading] = useState(false);
   const [schedulingBusy, setSchedulingBusy] = useState(false);
 
-  // Form stage state
-  const [questions, setQuestions] = useState<Question[]>([]);
   const [stage, setStage] = useState<Stage>('setup');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
-  const [startedAt] = useState<string>(new Date().toISOString());
 
   // Load properties + session in parallel
   useEffect(() => {
@@ -288,74 +279,6 @@ export default function NewInspection() {
     }
   }
 
-  async function handleSubmit(answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>) {
-    setStage('submitting');
-
-    const payload: SubmitPayload = {
-      templateType: selectedTemplate as TemplateType,
-      propertyRecordId: selectedPropertyId,
-      propertyAddressSnapshot: addressSnapshot,
-      inspectorName: sessionUser?.name || '',
-      inspectorEmail: sessionUser?.email || undefined,
-      bedrooms: bedrooms || 0,
-      bathrooms: bathrooms || 0,
-      startedAt,
-      completedAt: new Date().toISOString(),
-      answers,
-      sectionPhotoUrls,
-    };
-
-    let submitData: SubmitResult;
-    try {
-      const r = await fetch('/api/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      submitData = await r.json();
-      if (!submitData.success) {
-        throw new Error(submitData.error || 'Submission failed');
-      }
-    } catch (e: any) {
-      setErrorMsg(String(e.message || e));
-      setStage('error');
-      return;
-    }
-
-    setStage('generating_pdf');
-    try {
-      const pdfReq = {
-        inspectionRecordId: submitData.inspectionRecordId,
-        externalId: submitData.inspectionExternalId,
-        templateLabel: templateLabel(selectedTemplate as TemplateType),
-        inspectionName: submitData.inspectionName || `Inspection ${submitData.inspectionExternalId}`,
-        propertyAddress: payload.propertyAddressSnapshot,
-        inspectorName: payload.inspectorName,
-        bedrooms: payload.bedrooms,
-        bathrooms: payload.bathrooms,
-        completedAt: payload.completedAt,
-        answers: payload.answers,
-        sectionPhotoUrls: payload.sectionPhotoUrls,
-      };
-      const r = await fetch('/api/pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(pdfReq),
-      });
-      const pdfData = await r.json();
-      if (pdfData.success) {
-        submitData.pdfUrl = pdfData.pdfUrl;
-      } else {
-        console.error('PDF generation failed:', pdfData.error);
-      }
-    } catch (e: any) {
-      console.error('PDF generation error:', e);
-    }
-
-    setSubmitResult(submitData);
-    setStage('done');
-  }
-
   if (stage === 'error') {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-white">
@@ -368,71 +291,6 @@ export default function NewInspection() {
           >
             Start over
           </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (stage === 'done' && submitResult) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-white">
-        <div className="max-w-md w-full bg-white p-8 rounded-2xl border border-gray-200 shadow text-center">
-          <div className="w-20 h-20 mx-auto bg-accent rounded-full flex items-center justify-center mb-4">
-            <svg className="w-10 h-10 text-ink" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h2 className="text-2xl font-heading font-bold mb-2">Inspection submitted</h2>
-          <p className="text-gray-600 mb-6 text-sm">
-            Created in HubSpot.<br />
-            <span className="text-xs text-gray-400">{submitResult.inspectionExternalId}</span>
-          </p>
-          <div className="space-y-3">
-            {submitResult.pdfUrl && (
-              <a
-                href={submitResult.pdfUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="block w-full bg-brand hover:bg-brand-dark text-white font-heading font-semibold py-3 px-4 rounded-lg"
-              >
-                Download PDF
-              </a>
-            )}
-            <a
-              href={submitResult.hubspotUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="block w-full bg-ink hover:bg-gray-800 text-white font-heading font-semibold py-3 px-4 rounded-lg"
-            >
-              Open in HubSpot
-            </a>
-            <Link href="/" className="block text-brand hover:underline font-heading">
-              Back to home
-            </Link>
-          </div>
-          {!submitResult.pdfUrl && (
-            <p className="text-xs text-gray-400 mt-4">
-              PDF generation didn&apos;t complete, but your data is saved.
-            </p>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (stage === 'submitting' || stage === 'generating_pdf') {
-    const label = stage === 'submitting'
-      ? 'Submitting inspection to HubSpot...'
-      : 'Generating PDF...';
-    const sublabel = stage === 'submitting'
-      ? 'Creating Inspection, Answer records, and associations'
-      : 'Composing PDF and uploading to HubSpot Files';
-    return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-white">
-        <div className="text-center">
-          <div className="inline-block w-14 h-14 border-4 border-brand border-t-transparent rounded-full animate-spin mb-4" />
-          <p className="text-gray-700 font-heading font-semibold">{label}</p>
-          <p className="text-xs text-gray-400 mt-2">{sublabel}</p>
         </div>
       </div>
     );

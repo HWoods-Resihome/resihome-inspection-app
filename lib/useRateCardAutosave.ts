@@ -33,6 +33,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RateCardLineInput } from '@/lib/types';
+import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 
 const DEBOUNCE_MS = 2000;
 const SAVED_FLASH_MS = 2000;     // how long "Saved" stays visible after a successful save
@@ -202,14 +203,14 @@ export function useRateCardAutosave(args: Args): AutosaveHandle {
         }
 
         // Upsert the section_photo record
-        const props = {
-          answer_id_external: externalId,
-          answer_type: 'section_photo',
+        const props = buildSectionPhotoAnswerProps({
+          answerIdExternal: externalId,
+          inspectionIdExternal: args.inspectionExternalId,
           section: section?.label || '',
+          summaryLabel: section?.label || sectionId,
           location: section?.location || '',
-          photo_urls: urls.join(','),
-          answer_summary: `${section?.label || sectionId} / Section Photo (${urls.length})`,
-        };
+          photoUrls: urls,
+        });
         const r = await fetch(`/api/inspections/${inspectionRecordId}/answers`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

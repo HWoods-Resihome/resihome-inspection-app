@@ -277,7 +277,10 @@ export async function fetchProperties(): Promise<Property[]> {
   // Anything not on your object is silently ignored by HubSpot.
   const candidateProps = [
     'hs_object_id', 'name',
-    'address', 'city', 'state', 'zip',
+    // The postal field is `zip_code` on this object (with legacy `zip` as a
+    // fallback). Requesting only `zip` is why new inspections lost the zip in
+    // their address snapshot. Mirror the PDF-header logic in fetchInspection*.
+    'address', 'city', 'state', 'zip', 'zip_code',
     'bedrooms', 'bathrooms',
   ];
 
@@ -295,7 +298,7 @@ export async function fetchProperties(): Promise<Property[]> {
       const address = p.address || '';
       const city = p.city || '';
       const state = p.state || '';
-      const zip = p.zip || '';
+      const zip = (p.zip_code || p.zip || '').toString().trim();
       let name = p.name || '';
       if (!name) name = [address, city, state, zip].filter(Boolean).join(', ');
       if (!name) name = `(Property ${r.id})`;

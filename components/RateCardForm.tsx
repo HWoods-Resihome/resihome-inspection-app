@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TemplateType, RateCardLineItem, RegionRate, RateCardLineInput } from '@/lib/types';
 import { EditableLineRow } from '@/components/EditableLineRow';
+import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 import { CameraCapture } from '@/components/CameraCapture';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
@@ -700,14 +701,14 @@ export function RateCardForm(props: RateCardFormProps) {
           body: JSON.stringify({
             upserts: [{
               recordId: existingRecordId,
-              answerProps: {
-                answer_id_external: externalId,
-                answer_type: 'section_photo',
+              answerProps: buildSectionPhotoAnswerProps({
+                answerIdExternal: externalId,
+                inspectionIdExternal: props.inspectionExternalId,
                 section: section.label,
+                summaryLabel: section.label,
                 location: section.location,
-                photo_urls: urls.join(','),
-                answer_summary: `${section.label} / Section Photo (${urls.length})`,
-              },
+                photoUrls: urls,
+              }),
               questionHubspotRecordId: null,
             }],
             archives: [],

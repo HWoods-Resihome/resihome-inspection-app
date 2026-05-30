@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AnswerInput } from '@/lib/types';
+import { buildQaAnswerProps } from '@/lib/answerProps';
 
 /**
  * State of each answer in the autosave queue.
@@ -145,27 +146,20 @@ export function useAutosave(opts: Options) {
       const upserts = toUpsert.map(({ state }) => {
         const a = state.answer;
         const externalId = buildAnswerExternalId(a.questionIdExternal, state.instanceKey);
-        const props: Record<string, any> = {
-          answer_id_external: externalId,
-          answer_summary: `${a.section} ${state.instanceKey} / ${a.questionText.slice(0, 80)}`,
-          answer_type: 'qa',
+        const props = buildQaAnswerProps({
+          answerIdExternal: externalId,
+          inspectionIdExternal: inspectionExternalId,
+          questionIdExternal: a.questionIdExternal,
+          questionText: a.questionText,
           section: a.section,
-          answer_value: a.answerValue || '',
-          submitted_at: new Date().toISOString(),
-          inspection_id_external: inspectionExternalId,
-          question_id_external: a.questionIdExternal,
-        };
-        if (a.location) props.location = a.location;
-        if (a.note) props.note = a.note;
-        // Scope-only properties — never written on non-Scope templates.
-        if (isScope) {
-          if (a.quantity != null) props.quantity = a.quantity;
-          if (a.assignedTo) props.assigned_to = a.assignedTo;
-        }
-        if (a.photoUrls?.length) {
-          props.photo_urls = a.photoUrls.join(';');
-          props.photo_count = a.photoUrls.length;
-        }
+          summaryInstanceLabel: state.instanceKey,
+          answerValue: a.answerValue || '',
+          location: a.location,
+          note: a.note,
+          quantity: a.quantity,
+          assignedTo: a.assignedTo,
+          photoUrls: a.photoUrls,
+        }, { isScope: !!isScope });
         return {
           recordId: state.recordId || undefined,
           answerProps: props,

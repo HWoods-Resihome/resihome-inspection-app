@@ -10,6 +10,7 @@ import { useAppDialog } from '@/components/AppDialog';
 const hasMediaDevices = typeof navigator !== 'undefined'
   && !!navigator.mediaDevices?.getUserMedia;
 import { useAutosave, type SaveState } from '@/lib/useAutosave';
+import { buildQaAnswerProps, buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 
 type Props = {
   questions: Question[];
@@ -419,19 +420,13 @@ export function QuestionForm({
 
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     const c = new Set<string>();
-    if ((templateType as string) === 'pm_scope_inspection') {
-      // Collapse everything except the first instance in render order
-      for (let i = 0; i < sectionInstances.length; i++) {
-        if (i === 0) continue;
-        c.add(sectionInstances[i].instanceKey);
-      }
-    } else {
-      for (const inst of sectionInstances) {
-        if ((inst.roomType === 'bedroom' && (inst.instanceNumber ?? 0) > 1)
-           || (inst.roomType === 'bathroom' && (inst.instanceNumber ?? 0) > 1)
-           || inst.instanceKey === 'bathroom-half') {
-          c.add(inst.instanceKey);
-        }
+    // Q&A templates: everything open except repeating bedroom/bathroom
+    // instances 2..N and the Half Bath.
+    for (const inst of sectionInstances) {
+      if ((inst.roomType === 'bedroom' && (inst.instanceNumber ?? 0) > 1)
+         || (inst.roomType === 'bathroom' && (inst.instanceNumber ?? 0) > 1)
+         || inst.instanceKey === 'bathroom-half') {
+        c.add(inst.instanceKey);
       }
     }
     return c;
@@ -570,17 +565,14 @@ export function QuestionForm({
         externalIdToInstance.set(externalId, instanceKey);
 
         const baseSection = inst.baseSectionName;
-        const props: Record<string, any> = {
-          answer_id_external: externalId,
-          answer_summary: `${inst.displayName} / Section Photo (${urls.length})`,
-          answer_type: 'section_photo',
+        const props = buildSectionPhotoAnswerProps({
+          answerIdExternal: externalId,
+          inspectionIdExternal: inspectionExternalId,
           section: baseSection,
-          photo_urls: urls.join(';'),
-          photo_count: urls.length,
-          submitted_at: new Date().toISOString(),
-          inspection_id_external: inspectionExternalId,
-        };
-        if (inst.location) props.location = inst.location;
+          summaryLabel: inst.displayName,
+          photoUrls: urls,
+          location: inst.location,
+        });
 
         upserts.push({
           recordId: existingRecordId,
@@ -663,15 +655,6 @@ export function QuestionForm({
               instanceKey: inst.instanceKey,
             };
           }
-          if ((templateType as string) === 'pm_scope_inspection') {
-            if (a.quantity == null || Number.isNaN(a.quantity)) {
-              return {
-                message: `Quantity required: ${locTag}${q.questionText} (Scope)`,
-                scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
-                instanceKey: inst.instanceKey,
-              };
-            }
-          }
           // Assigned To validation: only if the question supports it.
           // useEffect in QuestionItem auto-defaults to "Vendor 1", so this is a backstop.
           if (q.hasAssignedTo && !a.assignedTo?.trim()) {
@@ -746,31 +729,22 @@ export function QuestionForm({
 
           const externalId = buildAnswerExternalId(inspectionExternalId, q.questionIdExternal, inst.instanceKey);
           const existingRecordId = answerRecordIdsRef.current.get(key);
-          const props: Record<string, any> = {
-            answer_id_external: externalId,
-            answer_summary: `${a.section} ${inst.instanceKey} / ${a.questionText.slice(0, 80)}`,
-            answer_type: 'qa',
+          // QuestionForm only renders Q&A templates; Scope uses RateCardForm.
+          // So quantity / assigned_to are never written from here (isScope:false).
+          const props = buildQaAnswerProps({
+            answerIdExternal: externalId,
+            inspectionIdExternal: inspectionExternalId,
+            questionIdExternal: a.questionIdExternal,
+            questionText: a.questionText,
             section: a.section,
-            answer_value: a.answerValue || '',
-            submitted_at: new Date().toISOString(),
-            inspection_id_external: inspectionExternalId,
-            question_id_external: a.questionIdExternal,
-          };
-          if (inst.location) props.location = inst.location;
-          if (a.note) props.note = a.note;
-          // `quantity` and `assigned_to` are Scope-only concepts. Non-Scope
-          // templates (1099, Community, Vacancy, RRQC) hide them in the UI, so
-          // they must not be written to HubSpot on those templates — doing so
-          // can 400 the whole batch/create if the property isn't provisioned
-          // for that path. (See scripts/fix_quantity_field.)
-          if ((templateType as string) === 'pm_scope_inspection') {
-            if (a.quantity != null) props.quantity = a.quantity;
-            if (a.assignedTo) props.assigned_to = a.assignedTo;
-          }
-          if (a.photoUrls?.length) {
-            props.photo_urls = a.photoUrls.join(';');
-            props.photo_count = a.photoUrls.length;
-          }
+            summaryInstanceLabel: inst.instanceKey,
+            answerValue: a.answerValue || '',
+            location: inst.location,
+            note: a.note,
+            quantity: a.quantity,
+            assignedTo: a.assignedTo,
+            photoUrls: a.photoUrls,
+          }, { isScope: false });
           upserts.push({
             recordId: existingRecordId || undefined,
             answerProps: props,
@@ -1071,7 +1045,6 @@ export function QuestionForm({
                         <QuestionItem
                           question={q}
                           answer={answers[key]}
-                          templateType={templateType}
                           onUpdate={(patch) => updateAnswer(key, patch)}
                           uploadPhoto={uploadPhoto}
                         />

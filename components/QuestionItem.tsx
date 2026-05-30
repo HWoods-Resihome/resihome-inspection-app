@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Question, AnswerInput, TemplateType } from '@/lib/types';
+import type { Question, AnswerInput } from '@/lib/types';
 import { CameraCapture } from './CameraCapture';
 import { useAppDialog } from '@/components/AppDialog';
 
@@ -12,15 +12,13 @@ const hasMediaDevices = typeof navigator !== 'undefined'
 type Props = {
   question: Question;
   answer: AnswerInput;
-  templateType: TemplateType;
   onUpdate: (patch: Partial<AnswerInput>) => void;
   uploadPhoto: (file: File) => Promise<string>;
 };
 
-export function QuestionItem({ question, answer, templateType, onUpdate, uploadPhoto }: Props) {
+export function QuestionItem({ question, answer, onUpdate, uploadPhoto }: Props) {
   const dialog = useAppDialog();
   const triggered = !!answer.answerValue && question.noteRequiredOnValues.includes(answer.answerValue);
-  const isScope = (templateType as string) === 'pm_scope_inspection';
 
   // Underline required questions that don't have a default answer
   const needsUnderline = question.isRequired && !question.defaultValue;
@@ -31,16 +29,6 @@ export function QuestionItem({ question, answer, templateType, onUpdate, uploadP
   //  - panel already has content (note/photos/quantity)
   const hasContent = !!answer.note || answer.photoUrls.length > 0 || answer.quantity != null;
   const panelOpen = answer.optionalPanelOpen || triggered || hasContent;
-
-  // Auto-default quantity to 1 on Scope when the answer becomes triggered
-  // (matches user request: quantity is visible and pre-filled with 1, inspector can change)
-  useEffect(() => {
-    if (isScope && triggered && answer.quantity == null) {
-      onUpdate({ quantity: 1 });
-    }
-    // intentionally only watching triggered/template flip
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [triggered, isScope]);
 
   // Auto-default assignedTo to "Vendor 1" when the question supports it and is triggered.
   // Inspector can change to other vendors via the dropdown.
@@ -239,30 +227,6 @@ export function QuestionItem({ question, answer, templateType, onUpdate, uploadP
               </div>
             );
           })()}
-
-          {/* Quantity (renamed from Score in v0.8): ONLY visible on Scope template;
-              pre-filled with 1 when triggered. */}
-          {isScope && triggered && (
-            <div>
-              <label className="block text-xs font-heading font-semibold text-amber-900 mb-1">
-                Quantity <span className="text-brand">(required)</span>
-              </label>
-              <input
-                type="number"
-                value={answer.quantity ?? 1}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  onUpdate({ quantity: v === '' ? null : Number(v) });
-                }}
-                placeholder="1"
-                min={1}
-                className="focus-brand w-32 text-sm border border-amber-300 rounded-md px-2 py-1.5 bg-white"
-              />
-              <p className="text-xs text-amber-700 mt-1">
-                Defaulted to 1. Increase for multiple units affected.
-              </p>
-            </div>
-          )}
 
           {/* Photos */}
           <div>

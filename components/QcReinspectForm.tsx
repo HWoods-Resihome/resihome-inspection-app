@@ -22,6 +22,7 @@ import { CameraCapture } from '@/components/CameraCapture';
 import { vendorPillStyle } from '@/lib/vendors';
 import { PhotoStrip } from '@/components/PhotoStrip';
 import { useAppDialog } from '@/components/AppDialog';
+import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 
 interface QcLine {
   recordId: string;
@@ -183,15 +184,14 @@ export function QcReinspectForm(props: Props) {
       body: JSON.stringify({
         upserts: [{
           recordId: existingId,
-          answerProps: {
-            answer_id_external: externalId,
-            answer_type: 'section_photo',
+          answerProps: buildSectionPhotoAnswerProps({
+            answerIdExternal: externalId,
             section,
+            summaryLabel: section,
             location,
-            photo_phase: 'after',
-            photo_urls: urls.join(','),
-            answer_summary: `${section} / After Photos (${urls.length})`,
-          },
+            photoUrls: urls,
+            photoPhase: 'after',
+          }),
           questionHubspotRecordId: null,
         }],
         bumpStatusToInProgress: true,

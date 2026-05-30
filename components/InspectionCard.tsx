@@ -40,6 +40,8 @@ const SHORT_LABELS: Record<string, string> = {
   pm_vacancy_occupancy_check: 'Vacancy / Occupancy Check',
   qc_new_construction_rrqc: 'QC New Construction',
   leasing_agent_1099_property_inspection: 'Leasing Agent 1099 Property',
+  // Legacy template types — retired from the app but kept here so historical
+  // records created under them still show a clean label (not auto-generated).
   pm_scope_inspection: 'Scope',
   pm_turn_inspection: 'Turn',
 };
@@ -73,21 +75,21 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
   const inner = (
     <>
       <div className="flex items-start justify-between gap-3 mb-1.5">
-        <h3 className="font-heading font-bold text-base text-ink truncate flex-1">
+        <h3 className="font-heading font-bold text-base text-ink flex-1 break-words leading-snug">
           {i.propertyAddressSnapshot || i.inspectionName}
         </h3>
         <div className="shrink-0">
           <StatusBadge status={i.status} />
         </div>
       </div>
-      <div className="flex items-center gap-2 text-xs text-gray-500">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
         {date && <span>{date}</span>}
         {date && i.inspectorName && <span>&middot;</span>}
-        {i.inspectorName && <span className="truncate">{i.inspectorName}</span>}
+        {i.inspectorName && <span>{i.inspectorName}</span>}
         {tmpl && (
           <>
             <span>&middot;</span>
-            <span className="truncate">{tmpl}</span>
+            <span>{tmpl}</span>
           </>
         )}
       </div>
