@@ -23,31 +23,43 @@ const TARGET_MAX_SIZE_MB = 0.6;     // aim for ~600KB output
 const TARGET_MAX_DIMENSION = 1280;  // 1280px on the long edge
 
 export async function uploadPhoto(file: File): Promise<string> {
-  // Step 1: compress. Try the library first; if it throws or returns a still-huge
-  // file, fall back to a manual canvas resize. Phone-camera 4000x3000 photos
-  // (~5-8 MB) are the main reason we have a fallback at all.
-  let compressed: Blob = file;
+  // HEIC/HEIF (the default iPhone format) does NOT render in <img> tags in most
+  // browsers, nor in the PDF renderer — so we must always end up with a JPEG.
+  const isHeic = /image\/(heic|heif)/i.test(file.type) || /\.(heic|heif)$/i.test(file.name || '');
+
+  // Step 1: compress to JPEG. `fileType: 'image/jpeg'` forces JPEG output even
+  // when the source is HEIC/PNG. On browsers that can't decode HEIC the library
+  // throws — we then try the canvas path (which decodes via <img>, working on
+  // Safari/iOS where HEIC photos originate). We only accept the library result
+  // if it's actually a JPEG.
+  let compressed: Blob | null = null;
   try {
     const result = await imageCompression(file, {
       maxSizeMB: TARGET_MAX_SIZE_MB,
       maxWidthOrHeight: TARGET_MAX_DIMENSION,
       useWebWorker: false,  // web worker is faster but silently OOMs on big files
       initialQuality: 0.75, // a good baseline for photos viewed on screens
+      fileType: 'image/jpeg',
     });
-    compressed = result;
+    if (result && result.type === 'image/jpeg') compressed = result;
   } catch (e: any) {
-    console.warn('[uploadPhoto] library compression failed, using canvas fallback:', e?.message || e);
+    console.warn('[uploadPhoto] library compression failed, will try canvas:', e?.message || e);
   }
 
-  // Canvas fallback if the file is still too big (> ~2 MB compressed means
-  // base64-encoded payload could exceed the 10MB API body limit).
-  if (compressed.size > 2 * 1024 * 1024) {
+  // Canvas path: run it whenever we don't yet have a confirmed JPEG, or the JPEG
+  // is still too big (> ~2 MB → base64 could exceed the 10MB API body limit).
+  // This is also what converts HEIC → JPEG on Safari/iOS.
+  if (!compressed || compressed.size > 2 * 1024 * 1024) {
     try {
       compressed = await canvasDownscale(file, TARGET_MAX_DIMENSION, 0.72);
     } catch (e: any) {
-      // If canvas fallback ALSO fails, surface a clear error instead of trying
-      // to upload a 5MB+ file and getting a confusing 413.
-      throw new Error(`Could not resize image (${formatBytes(file.size)}). Try a different photo or update your browser.`);
+      // Couldn't decode/resize. For HEIC this means the browser can't decode it
+      // (non-Safari) — give actionable guidance instead of uploading a file that
+      // won't render anywhere.
+      if (isHeic) {
+        throw new Error('This HEIC photo couldn’t be converted in this browser. On iPhone, set Settings → Camera → Formats to "Most Compatible", or use the in-app camera, then re-upload.');
+      }
+      throw new Error(`Could not process image (${formatBytes(file.size)}). Try a different photo or update your browser.`);
     }
   }
 
@@ -59,9 +71,11 @@ export async function uploadPhoto(file: File): Promise<string> {
   }
 
   const base64 = await fileToBase64(compressed);
+  // Always upload as .jpg / image/jpeg — never trust the original name/type
+  // (which could be .heic), so HubSpot stores a renderable file.
   const payload = JSON.stringify({
-    filename: file.name,
-    contentType: compressed.type || 'image/jpeg',
+    filename: toJpegName(file.name),
+    contentType: 'image/jpeg',
     base64,
   });
 
@@ -202,6 +216,12 @@ function canvasDownscale(file: File, maxDimension: number, quality: number): Pro
     };
     img.src = url;
   });
+}
+
+/** Force a .jpg extension on the upload filename (input may be .heic/.png/etc). */
+function toJpegName(name: string): string {
+  const base = (name || 'photo').replace(/\.[^.]+$/, '').trim();
+  return `${base || 'photo'}.jpg`;
 }
 
 function formatBytes(bytes: number): string {
