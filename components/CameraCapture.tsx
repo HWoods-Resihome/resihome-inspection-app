@@ -56,16 +56,20 @@ interface Props {
   addressSnapshot?: string;
 }
 
+// A stamp line; `mark` appends a colored ✓ (location matches the property) or
+// ✗ (GPS is far from the property address) after the text.
+type StampLine = { text: string; mark?: 'ok' | 'bad' };
+
 // Burn an evidence stamp (address / timestamp / GPS) into the bottom-left of a
 // captured frame. Drawn straight onto the canvas BEFORE encoding, so it's part
 // of the image pixels — not strippable metadata.
-function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, lines: string[]) {
-  const text = lines.filter(Boolean);
-  if (!text.length) return;
+function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, lines: StampLine[]) {
+  const rows = lines.filter((l) => l.text);
+  if (!rows.length) return;
   const pad = Math.round(w * 0.014);
   const fontSize = Math.max(16, Math.round(w / 54));
   const lineH = Math.round(fontSize * 1.34);
-  const barH = lineH * text.length + pad * 2;
+  const barH = lineH * rows.length + pad * 2;
   // Translucent backdrop for legibility over any photo.
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,0.42)';
@@ -73,16 +77,38 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.font = `600 ${fontSize}px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
   ctx.textBaseline = 'top';
   ctx.textAlign = 'left';
-  ctx.fillStyle = '#ffffff';
   ctx.shadowColor = 'rgba(0,0,0,0.85)';
   ctx.shadowBlur = Math.round(fontSize * 0.3);
   let y = h - barH + pad;
-  for (const ln of text) {
-    ctx.fillText(ln, pad, y);
+  for (const row of rows) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(row.text, pad, y);
+    if (row.mark) {
+      const x = pad + ctx.measureText(row.text + '  ').width;
+      ctx.fillStyle = row.mark === 'ok' ? '#34d399' : '#f87171';
+      ctx.fillText(row.mark === 'ok' ? '✓' : '✗', x, y);
+    }
     y += lineH;
   }
   ctx.restore();
 }
+
+// Distance in meters between two lat/lng points (haversine).
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// How close the GPS fix must be to the geocoded property to count as a match.
+// Generous on purpose: address geocoding (street centroid) and indoor GPS each
+// carry error, so this is meant to catch gross mismatches (wrong property/city),
+// not pinpoint accuracy.
+const GEO_MATCH_RADIUS_M = 300;
 
 // Target capture resolution: 1920x1440 (4:3). Browser may downgrade if
 // the device can't do it, that's OK.
@@ -103,6 +129,11 @@ export function CameraCapture({
   // Latest GPS fix, kept fresh while the camera is open, burned into captures.
   const geoRef = useRef<GeolocationPosition | null>(null);
   const geoWatchRef = useRef<number | null>(null);
+  // Geocoded coordinates of the property address (reference point for the
+  // ✓/✗ location check). Null until resolved; stays null if geocoding fails.
+  const refCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  const geocodedAddrRef = useRef<string | null>(null);
+  const geocodeInFlightRef = useRef(false);
 
   const [items, setItems] = useState<CaptureItem[]>([]);
   // Mirror items in a ref so async code (handleDone polling) can read the
@@ -242,6 +273,28 @@ export function CameraCapture({
     };
   }, [isOpen]);
 
+  // Geocode the property address once (when the camera opens) to get a
+  // reference point for the GPS ✓/✗ check. Best-effort: on failure we simply
+  // stamp coordinates without a verdict.
+  useEffect(() => {
+    if (!isOpen || !addressSnapshot) return;
+    if (geocodedAddrRef.current === addressSnapshot || geocodeInFlightRef.current) return;
+    geocodeInFlightRef.current = true;
+    let cancelled = false;
+    fetch(`/api/geocode?address=${encodeURIComponent(addressSnapshot)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled) return;
+        if (d && typeof d.lat === 'number' && typeof d.lng === 'number') {
+          refCoordsRef.current = { lat: d.lat, lng: d.lng };
+          geocodedAddrRef.current = addressSnapshot;
+        }
+      })
+      .catch(() => { /* no reference — coords stamp without a ✓/✗ */ })
+      .finally(() => { geocodeInFlightRef.current = false; });
+    return () => { cancelled = true; };
+  }, [isOpen, addressSnapshot]);
+
   // ----- Capture -----
 
   // Upload one File through the background pipeline + optimistic thumbnail.
@@ -308,13 +361,23 @@ export function CameraCapture({
       }
       ctx.drawImage(video, 0, 0, vw, vh);
       // Burn the evidence stamp (address / timestamp / GPS) into the frame.
-      const stampLines: string[] = [];
-      if (addressSnapshot) stampLines.push(addressSnapshot);
-      stampLines.push(new Date().toLocaleString());
+      // The GPS line gets a ✓/✗ when we have geocoded the property to compare.
+      const stampLines: StampLine[] = [];
+      if (addressSnapshot) stampLines.push({ text: addressSnapshot });
+      stampLines.push({ text: new Date().toLocaleString() });
       const pos = geoRef.current;
       if (pos) {
         const { latitude, longitude, accuracy } = pos.coords;
-        stampLines.push(`${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)`);
+        let mark: 'ok' | 'bad' | undefined;
+        const ref = refCoordsRef.current;
+        if (ref) {
+          const dist = haversineMeters(latitude, longitude, ref.lat, ref.lng);
+          mark = dist <= GEO_MATCH_RADIUS_M ? 'ok' : 'bad';
+        }
+        stampLines.push({
+          text: `${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)`,
+          mark,
+        });
       }
       drawEvidenceStamp(ctx, vw, vh, stampLines);
       // Convert to JPEG blob
