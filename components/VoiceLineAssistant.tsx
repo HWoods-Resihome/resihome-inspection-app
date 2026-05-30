@@ -98,8 +98,6 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
   // Synchronous access to the pending proposal (for the affirmative intercept).
   const pendingRef = useRef<Pending | null>(null);
   const commitPendingRef = useRef<() => void>(() => {});
-  // When true, start listening as soon as warm-up completes (set on panel open).
-  const wantAutoStartRef = useRef(false);
 
   useEffect(() => {
     setSupported(getRecognition() !== null);
@@ -116,14 +114,7 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
       try {
         await fetch('/api/rate-card/voice-assist', { method: 'GET' });
       } catch { /* non-fatal */ }
-      if (!cancelled) {
-        setWarming(false);
-        // If the panel was just opened, start listening now that we're primed.
-        if (wantAutoStartRef.current) {
-          wantAutoStartRef.current = false;
-          setTimeout(() => { startListeningRef.current(); }, 0);
-        }
-      }
+      if (!cancelled) setWarming(false);
     })();
     return () => { cancelled = true; };
   }, [open]);
@@ -403,9 +394,9 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
         type="button"
         onClick={() => {
           setOpen(true);
-          // Auto-start the mic once warm-up finishes (so the icon shows
-          // "Getting ready…" then "Listening"). The warm-up effect triggers it.
-          wantAutoStartRef.current = true;
+          // Start listening immediately — warm-up runs silently in the
+          // background. Defer one tick so the panel mounts and the ref is live.
+          setTimeout(() => { startListeningRef.current(); }, 0);
         }}
         disabled={disabled}
         aria-label="Add line items by voice"
@@ -487,16 +478,18 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, curre
           <button
             type="button"
             onClick={listening ? stopListening : startListening}
-            disabled={busy || warming || disabled}
+            disabled={(busy || warming) && !listening ? true : disabled}
             className={
               'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded disabled:opacity-60 ' +
               (listening ? 'bg-red-600 text-white animate-pulse' : 'bg-brand text-white hover:bg-brand-dark')
             }
           >
-            {warming || busy
-              ? <SpinnerIcon className="w-4 h-4 animate-spin" />
-              : <MicIcon className="w-4 h-4" />}
-            {warming ? 'Getting ready…' : listening ? 'Listening… tap to stop' : busy ? 'Thinking…' : 'Speak'}
+            {listening
+              ? <MicIcon className="w-4 h-4" />
+              : (warming || busy)
+                ? <SpinnerIcon className="w-4 h-4 animate-spin" />
+                : <MicIcon className="w-4 h-4" />}
+            {listening ? 'Listening… tap to stop' : warming ? 'Getting ready…' : busy ? 'Thinking…' : 'Speak'}
           </button>
         )}
         {/* Typed fallback (also handy when STT mishears) */}
