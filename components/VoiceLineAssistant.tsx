@@ -260,7 +260,13 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
     return (
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setOpen(true);
+          // Start listening immediately so the inspector doesn't have to tap
+          // again. Defer to the next tick so the panel mounts and the ref points
+          // at the live startListening.
+          setTimeout(() => { startListeningRef.current(); }, 0);
+        }}
         disabled={disabled}
         aria-label="Add line items by voice"
         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-brand text-brand rounded hover:bg-brand/5 disabled:opacity-50"
@@ -274,7 +280,7 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
   return (
     <div className="rounded-lg border border-brand/30 bg-brand/5 p-3 mt-2">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-heading font-semibold text-brand">Voice assistant — {location || section}</span>
+        <span className="text-sm font-heading font-semibold text-brand">Voice Assistant — {location || section}</span>
         <button type="button" onClick={() => { reset(); setOpen(false); }} className="text-xs text-gray-500 hover:text-gray-700">
           Close
         </button>
