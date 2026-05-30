@@ -27,6 +27,7 @@ import { SectionsManager } from '@/components/SectionsManager';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
+import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 
 interface RateCardFormProps {
   templateType: TemplateType;
@@ -1184,6 +1185,38 @@ export function RateCardForm(props: RateCardFormProps) {
     props.onCancel();
   }
 
+  // At finalize, permanently burn each tagged photo's line label onto the image
+  // (bottom-right). Tagging is non-destructive while editing; this is the one
+  // place the label is baked in, so the vendor PDF's section-photo grid shows
+  // which line each photo belongs to — with no PDF changes. Idempotent.
+  async function burnTaggedLabels() {
+    for (const section of sections) {
+      const lines = linesBySection[section.id] || [];
+      if (lines.length === 0) continue;
+      const secPhotos = [...(photosBySection[section.id] || [])];
+      const swaps = new Map<string, string>();
+      for (let i = 0; i < secPhotos.length; i++) {
+        const url = secPhotos[i];
+        if (isStamped(url)) continue; // already burned (e.g. re-finalize)
+        const taggedLines = lines.filter((l) => (l.photoUrls || []).includes(url));
+        if (taggedLines.length === 0) continue;
+        const label = taggedLines.map((l) => lineLabel(l)).join(' · ');
+        try {
+          const stamped = await stampEntryWithLabel(url, label);
+          if (stamped && stamped !== url) { secPhotos[i] = stamped; swaps.set(url, stamped); }
+        } catch (e) { console.warn('[burnTaggedLabels] stamp failed:', e); }
+      }
+      if (swaps.size > 0) {
+        setPhotosBySection((m) => ({ ...m, [section.id]: secPhotos }));
+        await savePhotosForSection(section.id, secPhotos);
+        for (const line of lines) {
+          if (!(line.photoUrls || []).some((u) => swaps.has(u))) continue;
+          await handleSaveLineForSection(section.id, { ...line, photoUrls: (line.photoUrls || []).map((u) => swaps.get(u) || u) });
+        }
+      }
+    }
+  }
+
   async function handleSubmitOrFinalize() {
     // Pre-flight: required section photos present?
     const missingSections: string[] = [];
@@ -1245,6 +1278,9 @@ export function RateCardForm(props: RateCardFormProps) {
       // afterward to surface the downloads.
       setFinalizing(true);
       try {
+        // Burn line labels onto tagged photos before the server builds the PDF
+        // (finalize reads photos from HubSpot, so these must be saved first).
+        await burnTaggedLabels();
         const r = await fetch(`/api/inspections/${props.inspectionRecordId}/finalize`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

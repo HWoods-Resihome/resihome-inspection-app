@@ -24,6 +24,7 @@ import { vendorPillStyle } from '@/lib/vendors';
 import { PhotoStrip } from '@/components/PhotoStrip';
 import { useAppDialog } from '@/components/AppDialog';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
+import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 
 interface QcLine {
   recordId: string;
@@ -347,12 +348,43 @@ export function QcReinspectForm(props: Props) {
     }
   }
 
+  // Burn each tagged After photo's line label into the image before submit, so
+  // the QC PDF shows which line each photo evidences (idempotent; tagging stays
+  // non-destructive until this terminal step).
+  async function burnTaggedLabelsQc() {
+    for (const sec of sections) {
+      if (sec.lines.length === 0) continue;
+      const after = [...(afterPhotos[sec.key] || [])];
+      const swaps = new Map<string, string>();
+      for (let i = 0; i < after.length; i++) {
+        const url = after[i];
+        if (isStamped(url)) continue;
+        const taggedLines = sec.lines.filter((l) => (l.photoUrls || []).includes(url));
+        if (taggedLines.length === 0) continue;
+        const label = taggedLines.map((l) => l.description || l.lineItemCode).join(' · ');
+        try {
+          const stamped = await stampEntryWithLabel(url, label);
+          if (stamped && stamped !== url) { after[i] = stamped; swaps.set(url, stamped); }
+        } catch (e) { console.warn('[QC burnTaggedLabels] stamp failed:', e); }
+      }
+      if (swaps.size > 0) {
+        setAfterPhotos((cur) => ({ ...cur, [sec.key]: after }));
+        await persistAfterPhotos(sec.key, sec.section, sec.location, after);
+        for (const line of sec.lines) {
+          if (!(line.photoUrls || []).some((u) => swaps.has(u))) continue;
+          await saveLinePhotos(line.recordId, (line.photoUrls || []).map((u) => swaps.get(u) || u));
+        }
+      }
+    }
+  }
+
   async function handleSubmit() {
     if (!allMarked) { void dialog.alert('Every line item must be marked Pass or Fail before submitting.'); return; }
     if (!allSectionsHaveAfter) { void dialog.alert('Every section needs at least one After Photo before submitting.'); return; }
     if (verdict !== 'pass' && verdict !== 'fail') { void dialog.alert('Select an overall Pass or Fail verdict.'); return; }
     setSubmitting(true);
     try {
+      await burnTaggedLabelsQc();
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}/qc-finalize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
