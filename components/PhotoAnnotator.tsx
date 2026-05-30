@@ -63,10 +63,12 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
-  function strokeWidth(): number {
+  function strokeWidthFor(t: Tool): number {
     const c = canvasRef.current;
     const base = c ? Math.max(c.width, c.height) : 1000;
-    return Math.max(3, Math.round(base / 240));
+    const w = Math.max(4, Math.round(base / 200));
+    // Arrows read better noticeably thicker by default.
+    return t === 'arrow' ? Math.round(w * 1.6) : w;
   }
 
   function drawStroke(ctx: CanvasRenderingContext2D, s: Stroke) {
@@ -116,8 +118,8 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
     if (!ready) return;
     e.preventDefault();
     const p = toImg(e);
-    const w = strokeWidth();
     const t = toolRef.current; const col = colorRef.current;
+    const w = strokeWidthFor(t);
     drawingRef.current = t === 'pen'
       ? { tool: 'pen', color: col, width: w, points: [p] }
       : { tool: t, color: col, width: w, a: p, b: p };

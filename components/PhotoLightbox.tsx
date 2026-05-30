@@ -3,13 +3,13 @@
  *
  * Works over photo "groups" (a room's section photos, or a single line item's
  * photos):
- *  - Swipe (or arrows) to move between photos in the current group.
+ *  - Drag/swipe the photo (finger-following carousel that snaps) or use arrows.
  *  - Group dropdown in the header to jump to another group (e.g. another room).
  *  - "Mark up" opens the annotator (loads via /api/photo-proxy so the canvas
  *    isn't cross-origin tainted; saving re-uploads + replaces it).
  *  - "Tag to line" (when tagLinesByGroup is provided) links the photo to a line
  *    item without removing it from the room.
- *  - Delete removes the current photo from the group.
+ *  - Delete removes the current photo (with a brief "Photo deleted" toast).
  */
 import { useEffect, useRef, useState } from 'react';
 import { PhotoAnnotator } from '@/components/PhotoAnnotator';
@@ -37,10 +37,30 @@ export function PhotoLightbox({
   const [index, setIndex] = useState(initialIndex);
   const [annotating, setAnnotating] = useState(false);
   const [tagged, setTagged] = useState<string | null>(null);
-  const swipeStartX = useRef<number | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Carousel drag state.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [cw, setCw] = useState(0);
+  const [dragPx, setDragPx] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragStartX = useRef<number | null>(null);
+  const pointerIdRef = useRef<number | null>(null);
 
   const photos = photosByGroup[groupId] || [];
   const tagLines = tagLinesByGroup?.[groupId] || [];
+
+  // Track container width so we can translate the carousel in pixels.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') { if (el) setCw(el.clientWidth); return; }
+    const update = () => setCw(el.clientWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Clamp / close if the current group's photo list shrinks (e.g. after delete).
   useEffect(() => {
@@ -48,19 +68,43 @@ export function PhotoLightbox({
     if (index > photos.length - 1) setIndex(photos.length - 1);
   }, [photos.length, index, onClose]);
 
-  // Reset the transient "Tagged ✓" note when the photo changes.
   useEffect(() => { setTagged(null); }, [groupId, index]);
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
   const prev = () => setIndex((i) => (i > 0 ? i - 1 : i));
   const next = () => setIndex((i) => (i < photos.length - 1 ? i + 1 : i));
 
-  function onPointerDown(e: React.PointerEvent) { swipeStartX.current = e.clientX; }
-  function onPointerUp(e: React.PointerEvent) {
-    if (swipeStartX.current == null) return;
-    const dx = e.clientX - swipeStartX.current;
-    swipeStartX.current = null;
-    if (dx > 45) prev();
-    else if (dx < -45) next();
+  function showToast(msg: string) {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 1300);
+  }
+
+  function onPointerDown(e: React.PointerEvent) {
+    dragStartX.current = e.clientX;
+    pointerIdRef.current = e.pointerId;
+    setDragging(true);
+    try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* noop */ }
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    if (dragStartX.current == null) return;
+    setDragPx(e.clientX - dragStartX.current);
+  }
+  function onPointerUp() {
+    if (dragStartX.current == null) { setDragging(false); return; }
+    const threshold = Math.min(80, (cw || 300) * 0.18);
+    if (dragPx < -threshold && index < photos.length - 1) setIndex((i) => i + 1);
+    else if (dragPx > threshold && index > 0) setIndex((i) => i - 1);
+    dragStartX.current = null;
+    pointerIdRef.current = null;
+    setDragPx(0);
+    setDragging(false);
+  }
+
+  function handleDelete(e: React.MouseEvent) {
+    onDelete(groupId, index);
+    showToast('Photo deleted');
+    (e.currentTarget as HTMLElement).blur(); // clear the sticky touch highlight
   }
 
   const url = photos[index];
@@ -71,7 +115,7 @@ export function PhotoLightbox({
       <div className="flex items-center justify-between gap-2 px-3 py-3 bg-black">
         <select
           value={groupId}
-          onChange={(e) => { setGroupId(e.target.value); setIndex(0); }}
+          onChange={(e) => { setGroupId(e.target.value); setIndex(0); setDragPx(0); }}
           className="bg-white/10 text-white text-sm font-heading rounded px-2 py-1.5 max-w-[55%]"
           aria-label="Switch group"
         >
@@ -84,24 +128,48 @@ export function PhotoLightbox({
         <button type="button" onClick={onClose} className="text-white text-2xl leading-none px-2" aria-label="Close">×</button>
       </div>
 
-      {/* Image + swipe + arrows */}
+      {/* Carousel: finger-following track that snaps */}
       <div
-        className="flex-1 min-h-0 relative flex items-center justify-center overflow-hidden select-none"
+        ref={containerRef}
+        className="flex-1 min-h-0 relative overflow-hidden select-none"
         onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
         style={{ touchAction: 'pan-y' }}
       >
-        {url && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={displayImageSrc(url)} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
-        )}
+        <div
+          className="flex h-full"
+          style={{
+            transform: `translateX(${-index * cw + dragPx}px)`,
+            transition: dragging ? 'none' : 'transform 220ms ease-out',
+          }}
+        >
+          {photos.map((p, i) => (
+            <div key={`${p}-${i}`} className="h-full shrink-0 flex items-center justify-center" style={{ width: cw || '100%' }}>
+              {/* Only render images near the current index to keep it light. */}
+              {Math.abs(i - index) <= 1 ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={displayImageSrc(p)} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
+              ) : null}
+            </div>
+          ))}
+        </div>
+
         {index > 0 && (
           <button type="button" onClick={prev} aria-label="Previous"
-            className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 text-white text-2xl leading-none flex items-center justify-center">‹</button>
+            className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 text-white text-2xl leading-none flex items-center justify-center">‹</button>
         )}
         {index < photos.length - 1 && (
           <button type="button" onClick={next} aria-label="Next"
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 text-white text-2xl leading-none flex items-center justify-center">›</button>
+            className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 text-white text-2xl leading-none flex items-center justify-center">›</button>
+        )}
+
+        {/* Transient toast */}
+        {toast && (
+          <div className="absolute left-1/2 bottom-6 -translate-x-1/2 bg-black/70 text-white text-sm font-heading px-4 py-2 rounded-full pointer-events-none">
+            {toast}
+          </div>
         )}
       </div>
 
@@ -110,15 +178,14 @@ export function PhotoLightbox({
         <div className="bg-black px-4 py-3 flex flex-col items-center gap-2">
           <div className="flex items-center justify-center gap-3">
             <button type="button" onClick={() => setAnnotating(true)}
-              className="flex items-center gap-2 bg-white/15 hover:bg-white/25 text-white font-heading text-sm px-4 py-2 rounded-lg">
+              className="flex items-center gap-2 bg-white/15 active:bg-white/30 text-white font-heading text-sm px-4 py-2 rounded-lg">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><circle cx="11" cy="11" r="2" />
               </svg>
               Mark up
             </button>
-            <button type="button"
-              onClick={() => onDelete(groupId, index)}
-              className="flex items-center gap-2 bg-white/10 hover:bg-red-600/70 text-white font-heading text-sm px-4 py-2 rounded-lg">
+            <button type="button" onClick={handleDelete}
+              className="flex items-center gap-2 bg-white/10 active:bg-red-600/80 text-white font-heading text-sm px-4 py-2 rounded-lg">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
               </svg>
@@ -137,6 +204,7 @@ export function PhotoLightbox({
                   onTagToLine(groupId, index, id);
                   const lbl = tagLines.find((l) => l.externalId === id)?.label || 'line';
                   setTagged(lbl);
+                  showToast(`Tagged to ${lbl}`);
                   e.currentTarget.value = '';
                 }}
                 className="bg-white/10 text-white text-sm font-heading rounded px-2 py-1.5 max-w-[70vw]"
