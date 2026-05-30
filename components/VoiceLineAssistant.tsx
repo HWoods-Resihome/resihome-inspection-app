@@ -72,16 +72,17 @@ function getRecognition(): any | null {
   if (!Ctor) return null;
   const r = new Ctor();
   r.lang = 'en-US';
-  r.interimResults = true;   // needed so we can detect ongoing speech across pauses
+  // IMPORTANT: interimResults + continuous cause severe transcript duplication
+  // on Android WebView (it re-reports cumulative results marked final, so a
+  // growing utterance gets concatenated: "change… change to… change to the…").
+  // Disabling both gives ONE clean final transcript per utterance. We handle
+  // multi-pause speech by restarting recognition on `onend` if the inspector
+  // hasn't been silent long enough yet.
+  r.interimResults = false;
   r.maxAlternatives = 1;
-  r.continuous = true;       // keep listening through natural pauses; we end it ourselves
+  r.continuous = false;
   return r;
 }
-
-// How long to wait after the inspector stops talking before finalizing the
-// utterance. Browser SpeechRecognition has no native silence-timeout knob, so
-// we run our own timer and only submit once speech has paused this long.
-const SILENCE_MS = 1500;
 
 // Make text read more naturally when spoken: expand unit abbreviations and
 // currency so TTS says "square feet" not "ess eff", "dollars" not "dollar sign".
@@ -457,37 +458,18 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     const clearSilence = () => {
       if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
     };
-    const finalize = () => {
-      clearSilence();
-      const text = finalTranscriptRef.current.trim();
-      finalTranscriptRef.current = '';
-      try { recog.stop(); } catch { /* noop */ }
-      listeningRef.current = false;
-      setListening(false);
-      if (text) submitUtterance(text);
-    };
 
     recog.onresult = (ev: any) => {
       // Echo guard: while the assistant is still speaking, any result is almost
-      // certainly the mic picking up the AI's own voice — discard it entirely.
+      // certainly the mic picking up the AI's own voice — discard it.
       if (speakingRef.current) return;
-      // Rebuild the full final transcript from ALL final results every time,
-      // rather than appending incrementally. Some engines (Android) deliver
-      // ev.results as a cumulative list and re-fire overlapping events; appending
-      // duplicated chunks ("hey hey hey whole house..."). Rebuilding is
-      // idempotent and immune to that.
-      let finalText = '';
-      for (let i = 0; i < ev.results.length; i++) {
-        const r = ev.results[i];
-        if (r.isFinal) {
-          const chunk = (r[0]?.transcript || '').trim();
-          if (chunk) finalText += (finalText ? ' ' : '') + chunk;
-        }
-      }
-      finalTranscriptRef.current = finalText;
-      clearSilence();
-      // Wait for a longer pause before deciding the inspector is done.
-      silenceTimerRef.current = setTimeout(finalize, SILENCE_MS);
+      // With interimResults=false + continuous=false, the engine delivers the
+      // final transcript for this utterance. Take the LAST result's transcript
+      // (the complete utterance); do not concatenate, which is what caused the
+      // Android duplication. onend will submit it.
+      const last = ev.results[ev.results.length - 1];
+      const text = (last && last[0]?.transcript ? String(last[0].transcript) : '').trim();
+      if (text) finalTranscriptRef.current = text;
     };
     recog.onerror = (ev: any) => {
       startingRef.current = false;
@@ -517,16 +499,13 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     recog.onend = () => {
       startingRef.current = false;
       listeningRef.current = false;
-      // If recognition ended on its own (e.g. mobile hard cap) but we captured
-      // speech, submit what we have rather than dropping it.
-      const captured = finalTranscriptRef.current.trim();
-      if (captured && !silenceTimerRef.current) {
-        finalTranscriptRef.current = '';
-        setListening(false);
-        submitUtterance(captured);
-        return;
-      }
       setListening(false);
+      clearSilence();
+      // The recognizer ended (utterance complete, since continuous=false).
+      // Submit whatever we captured.
+      const captured = finalTranscriptRef.current.trim();
+      finalTranscriptRef.current = '';
+      if (captured) submitUtterance(captured);
     };
 
     try {
