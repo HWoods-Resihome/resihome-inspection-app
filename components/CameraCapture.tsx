@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAppDialog } from '@/components/AppDialog';
 
 /**
  * State of each photo in the capture session.
@@ -40,6 +41,7 @@ const JPEG_QUALITY = 0.88;
 export function CameraCapture({
   isOpen, onClose, onComplete, uploadPhoto, maxPhotos = 30,
 }: Props) {
+  const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -189,7 +191,7 @@ export function CameraCapture({
     const room = Math.max(0, maxPhotos - itemsRef.current.length);
     const picked = Array.from(files).slice(0, room);
     if (picked.length < files.length) {
-      alert(`Only the first ${room} photo(s) were added (max ${maxPhotos} per session).`);
+      void dialog.alert(`Only the first ${room} photo(s) were added (max ${maxPhotos} per session).`);
     }
     for (const f of picked) enqueueFile(f);
   }, [enqueueFile, maxPhotos]);
@@ -197,7 +199,7 @@ export function CameraCapture({
   const capturePhoto = useCallback(async () => {
     if (busy) return;
     if (items.length >= maxPhotos) {
-      alert(`You can capture up to ${maxPhotos} photos per session. Tap Done to finish.`);
+      void dialog.alert(`You can capture up to ${maxPhotos} photos per session. Tap Done to finish.`);
       return;
     }
     const video = videoRef.current;
@@ -306,9 +308,10 @@ export function CameraCapture({
 
     const failures = finalItems.filter((it) => it.status !== 'uploaded').length;
     if (failures > 0) {
-      const ok = confirm(
+      const ok = await dialog.confirm(
         `${failures} photo${failures === 1 ? '' : 's'} did not upload successfully. ` +
-        `Continue with the ${urls.length} that succeeded?`
+        `Continue with the ${urls.length} that succeeded?`,
+        { confirmLabel: 'Continue' }
       );
       if (!ok) return;
     }

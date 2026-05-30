@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
+import { useAppDialog } from '@/components/AppDialog';
 import { useRouter } from 'next/router';
 import type {
   Question, Property, AnswerInput, SubmitPayload, SubmitResult, TemplateType, HubSpotUser,
@@ -32,6 +33,7 @@ function templateLabel(v: TemplateType): string {
 }
 
 export default function NewInspection() {
+  const dialog = useAppDialog();
   const router = useRouter();
 
   // Setup stage state
@@ -186,7 +188,7 @@ export default function NewInspection() {
 
   async function handleBegin() {
     if (!setupReady) {
-      alert('Please complete every field before beginning.');
+      void dialog.alert('Please complete every field before beginning.');
       return;
     }
     setStage('loading_questions'); // shows a loading state while we create+navigate
@@ -220,7 +222,7 @@ export default function NewInspection() {
   // Open the schedule panel. Lazy-load users on first open.
   async function handleOpenSchedule() {
     if (!setupReady) {
-      alert('Please complete the template, property, and bed/bath counts first.');
+      void dialog.alert('Please complete the template, property, and bed/bath counts first.');
       return;
     }
     setScheduling(true);
@@ -249,7 +251,7 @@ export default function NewInspection() {
   async function handleConfirmSchedule() {
     if (!setupReady) return;
     if (!scheduledDate) {
-      alert('Please pick a scheduled date.');
+      void dialog.alert('Please pick a scheduled date.');
       return;
     }
     // Resolve the inspector: lookup by email in the users list; fall back to current user
@@ -281,7 +283,7 @@ export default function NewInspection() {
       // search index catches up (it can lag a second or two for fresh creates).
       router.push('/?just_scheduled=1');
     } catch (e: any) {
-      alert(`Could not schedule inspection: ${e.message || e}`);
+      void dialog.alert(`Could not schedule inspection: ${e.message || e}`);
       setSchedulingBusy(false);
     }
   }

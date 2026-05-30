@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Question, AnswerInput, TemplateType } from '@/lib/types';
 import { CameraCapture } from './CameraCapture';
+import { useAppDialog } from '@/components/AppDialog';
 
 // Check once whether the browser supports the camera API. Hidden behind a
 // constant so the "Take Photos" button can be disabled on unsupported browsers
@@ -17,6 +18,7 @@ type Props = {
 };
 
 export function QuestionItem({ question, answer, templateType, onUpdate, uploadPhoto }: Props) {
+  const dialog = useAppDialog();
   const triggered = !!answer.answerValue && question.noteRequiredOnValues.includes(answer.answerValue);
   const isScope = (templateType as string) === 'pm_scope_inspection';
 
@@ -92,13 +94,13 @@ export function QuestionItem({ question, answer, templateType, onUpdate, uploadP
       );
       await Promise.all(workers);
       if (failed > 0) {
-        alert(
+        void dialog.alert(
           `${failed} of ${fileArr.length} photo${fileArr.length === 1 ? '' : 's'} failed to upload. ` +
           `Photos that succeeded have been saved.`
         );
       }
     } catch (e: any) {
-      alert(`Photo upload failed: ${e.message || e}`);
+      void dialog.alert(`Photo upload failed: ${e.message || e}`);
     } finally {
       setUploadProgress(null);
     }

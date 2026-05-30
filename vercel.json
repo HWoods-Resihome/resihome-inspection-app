@@ -4,12 +4,15 @@
       "maxDuration": 10
     },
     "pages/api/pdf.ts": {
-      "maxDuration": 10
+      "maxDuration": 60
     },
     "pages/api/upload.ts": {
       "maxDuration": 10
     },
     "pages/api/inspections/[id]/finalize.ts": {
+      "maxDuration": 60
+    },
+    "pages/api/inspections/[id]/qc-finalize.ts": {
       "maxDuration": 60
     }
   }

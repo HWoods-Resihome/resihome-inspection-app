@@ -21,6 +21,7 @@ import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
 import { CameraCapture } from '@/components/CameraCapture';
 import { vendorPillStyle } from '@/lib/vendors';
 import { PhotoStrip } from '@/components/PhotoStrip';
+import { useAppDialog } from '@/components/AppDialog';
 
 interface QcLine {
   recordId: string;
@@ -68,6 +69,7 @@ function sectionKey(section: string, location: string) {
 }
 
 export function QcReinspectForm(props: Props) {
+  const dialog = useAppDialog();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [lines, setLines] = useState<QcLine[]>([]);
@@ -209,7 +211,7 @@ export function QcReinspectForm(props: Props) {
     const merged = [...(afterPhotos[key] || []), ...newUrls];
     setAfterPhotos((cur) => ({ ...cur, [key]: merged }));
     try { await persistAfterPhotos(key, section, location, merged); }
-    catch (e: any) { alert(`Could not save photos: ${e?.message || e}`); }
+    catch (e: any) { void dialog.alert(`Could not save photos: ${e?.message || e}`); }
   }
 
   async function handleFilePick(key: string, section: string, location: string, files: FileList | null) {
@@ -223,7 +225,7 @@ export function QcReinspectForm(props: Props) {
     const merged = (afterPhotos[key] || []).filter((u) => u !== url);
     setAfterPhotos((cur) => ({ ...cur, [key]: merged }));
     try { await persistAfterPhotos(key, section, location, merged); }
-    catch (e: any) { alert(`Could not update photos: ${e?.message || e}`); }
+    catch (e: any) { void dialog.alert(`Could not update photos: ${e?.message || e}`); }
   }
 
   async function setLinePassFail(line: QcLine, pf: 'pass' | 'fail') {
@@ -244,14 +246,14 @@ export function QcReinspectForm(props: Props) {
     } catch (e: any) {
       markSaveError();
       setLines((cur) => cur.map((l) => (l.recordId === line.recordId ? { ...l, passFail: line.passFail } : l)));
-      alert(`Could not save pass/fail: ${e?.message || e}`);
+      void dialog.alert(`Could not save pass/fail: ${e?.message || e}`);
     }
   }
 
   async function handleSubmit() {
-    if (!allMarked) { alert('Every line item must be marked Pass or Fail before submitting.'); return; }
-    if (!allSectionsHaveAfter) { alert('Every section needs at least one After Photo before submitting.'); return; }
-    if (verdict !== 'pass' && verdict !== 'fail') { alert('Select an overall Pass or Fail verdict.'); return; }
+    if (!allMarked) { void dialog.alert('Every line item must be marked Pass or Fail before submitting.'); return; }
+    if (!allSectionsHaveAfter) { void dialog.alert('Every section needs at least one After Photo before submitting.'); return; }
+    if (verdict !== 'pass' && verdict !== 'fail') { void dialog.alert('Select an overall Pass or Fail verdict.'); return; }
     setSubmitting(true);
     try {
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}/qc-finalize`, {
@@ -262,7 +264,7 @@ export function QcReinspectForm(props: Props) {
       if (!r.ok) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0, 300)}`); }
       setResult(await r.json());
     } catch (e: any) {
-      alert(`Submit failed: ${e?.message || e}`);
+      void dialog.alert(`Submit failed: ${e?.message || e}`);
     } finally {
       setSubmitting(false);
     }

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import Head from 'next/head';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAppDialog } from '@/components/AppDialog';
 import { useRouter } from 'next/router';
 import type { InspectionSummary } from '@/lib/types';
 import { InspectionCard } from '@/components/InspectionCard';
@@ -10,6 +11,7 @@ interface MeUser { userId: string; email: string; name: string; }
 type StatusFilter = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
 
 export default function Home() {
+  const dialog = useAppDialog();
   const router = useRouter();
   const [hasLogo, setHasLogo] = useState(false);
   const [me, setMe] = useState<MeUser | null>(null);
@@ -219,7 +221,7 @@ export default function Home() {
   async function handleBulkCancel() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
-    if (!confirm(`Move ${ids.length} inspection${ids.length === 1 ? '' : 's'} to Cancelled? This can't be undone from here.`)) return;
+    if (!(await dialog.confirm(`Move ${ids.length} inspection${ids.length === 1 ? '' : 's'} to Cancelled? This can't be undone from here.`, { confirmLabel: 'Move to Cancelled', cancelLabel: 'Keep' }))) return;
     setCancelBusy(true);
     try {
       const r = await fetch('/api/inspections/bulk-cancel', {
@@ -235,10 +237,10 @@ export default function Home() {
       setTimeout(() => { fetchInspections(); }, 1200);
       const skippedCompleted = (data.skipped || []).filter((s: any) => s.reason === 'completed').length;
       if (skippedCompleted > 0) {
-        alert(`${data.cancelled.length} cancelled. ${skippedCompleted} completed inspection${skippedCompleted === 1 ? ' was' : 's were'} skipped (completed inspections can't be cancelled).`);
+        void dialog.alert(`${data.cancelled.length} cancelled. ${skippedCompleted} completed inspection${skippedCompleted === 1 ? ' was' : 's were'} skipped (completed inspections can't be cancelled).`);
       }
     } catch (e: any) {
-      alert(`Could not cancel: ${e.message || e}`);
+      void dialog.alert(`Could not cancel: ${e.message || e}`);
     } finally {
       setCancelBusy(false);
     }

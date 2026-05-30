@@ -6,6 +6,14 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+/** Fallback title-case for any template type not in the explicit prefix map:
+ *  "some_new_template" -> "Some New Template". */
+function properCase(templateType: string): string {
+  return templateType
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function shortId(): string {
   // crypto.randomUUID (Node 18+) for collision-proof ids; strip dashes.
   if (typeof crypto !== 'undefined' && (crypto as any).randomUUID) {
@@ -45,14 +53,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const externalId = `INSP-${nowIso().slice(0, 10)}-${shortId().slice(0, 8)}`;
 
     // Inspection name format: Rate Card inspections use "Rate Card – <address> – <date>"
-    // per the Phase 1 Q-M decision; others use the existing pattern.
+    // per the Phase 1 Q-M decision; others use a proper-cased template label
+    // prefix (matching the labels shown in the UI) so names read cleanly on the
+    // HubSpot record instead of "leasing agent 1099 property inspection".
     const isRateCard = body.templateType === 'pm_scope_rate_card';
     const isQc = body.templateType === 'pm_turn_reinspect_qc';
+    const TEMPLATE_NAME_PREFIX: Record<string, string> = {
+      pm_community_inspection: 'Community / Visit Inspection',
+      pm_vacancy_occupancy_check: 'Vacancy / Occupancy Check',
+      qc_new_construction_rrqc: 'New Construction RRQC',
+      leasing_agent_1099_property_inspection: '1099 Leasing Agent Property Inspection',
+    };
+    const today = nowIso().slice(0, 10);
     const inspectionName = isRateCard
-      ? `Rate Card – ${body.propertyAddressSnapshot} – ${nowIso().slice(0, 10)}`
+      ? `Rate Card – ${body.propertyAddressSnapshot} – ${today}`
       : isQc
-        ? `Turn Re-Inspect QC – ${body.propertyAddressSnapshot} – ${nowIso().slice(0, 10)}`
-        : `${body.templateType.replace(/_/g, ' ')} -- ${body.propertyAddressSnapshot} -- ${nowIso().slice(0, 10)}`;
+        ? `Turn Re-Inspect QC – ${body.propertyAddressSnapshot} – ${today}`
+        : `${TEMPLATE_NAME_PREFIX[body.templateType] || properCase(body.templateType)} – ${body.propertyAddressSnapshot} – ${today}`;
 
     // HubSpot's scheduled_date is a Date field (not DateTime), so the value MUST be
     // exactly midnight UTC. We send the YYYY-MM-DD string form, which HubSpot interprets

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
+import { useAppDialog } from '@/components/AppDialog';
 import type {
   Question, AnswerInput, TemplateType, InspectionSummary,
 } from '@/lib/types';
@@ -25,6 +26,7 @@ const TEMPLATE_LABELS: Record<string, string> = {
 type Stage = 'loading' | 'loading_questions' | 'form' | 'submitting' | 'generating_pdf' | 'done' | 'error';
 
 export default function ExistingInspection() {
+  const dialog = useAppDialog();
   const router = useRouter();
   const idParam = router.query.id;
   const inspectionId = typeof idParam === 'string' ? idParam : '';
@@ -150,7 +152,7 @@ export default function ExistingInspection() {
   }
 
   async function handleCancelInspection() {
-    if (!confirm('Mark this Inspection as Cancelled? This will preserve all current answers but flag the Inspection as cancelled in HubSpot.')) return;
+    if (!(await dialog.confirm('Mark this Inspection as Cancelled? This will preserve all current answers but flag the Inspection as cancelled in HubSpot.', { confirmLabel: 'Mark Cancelled', cancelLabel: 'Keep' }))) return;
     try {
       const r = await fetch(`/api/inspections/${inspectionId}/cancel`, { method: 'POST' });
       if (!r.ok) {
@@ -159,12 +161,12 @@ export default function ExistingInspection() {
       }
       router.push('/?just_cancelled=1');
     } catch (e: any) {
-      alert(`Cancel failed: ${e.message || e}`);
+      void dialog.alert(`Cancel failed: ${e.message || e}`);
     }
   }
 
   async function handleReopen() {
-    if (!confirm('Reopen this completed inspection for editing? Status will change back to In Progress.')) return;
+    if (!(await dialog.confirm('Reopen this completed inspection for editing? Status will change back to In Progress.', { confirmLabel: 'Reopen' }))) return;
     try {
       const r = await fetch(`/api/inspections/${inspectionId}/reopen`, { method: 'POST' });
       if (!r.ok) {
@@ -174,7 +176,7 @@ export default function ExistingInspection() {
       // Refresh
       window.location.reload();
     } catch (e: any) {
-      alert(`Reopen failed: ${e.message || e}`);
+      void dialog.alert(`Reopen failed: ${e.message || e}`);
     }
   }
 

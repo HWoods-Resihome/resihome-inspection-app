@@ -4,6 +4,7 @@ import type { SavedAnswer } from '@/lib/hubspot';
 import { QuestionItem } from './QuestionItem';
 import { CameraCapture } from './CameraCapture';
 import { uploadPhoto, uploadFilesBatch } from '@/lib/photoUpload';
+import { useAppDialog } from '@/components/AppDialog';
 
 // Whether this browser supports the camera API. SSR-safe.
 const hasMediaDevices = typeof navigator !== 'undefined'
@@ -93,6 +94,7 @@ export function QuestionForm({
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
 }: Props) {
+  const dialog = useAppDialog();
   // Build the list of section instances. Repeating sections expand into multiple.
   const sectionInstances: SectionInstance[] = useMemo(() => {
     // First group questions by base section
@@ -447,13 +449,13 @@ export function QuestionForm({
         // Show the first error reason so the inspector knows WHY it failed
         // (network drop, file too big, server reject) instead of a bare count.
         const reason = errors[0] ? `\n\nReason: ${errors[0]}` : '';
-        alert(
+        void dialog.alert(
           `${failed} of ${fileArr.length} photo${fileArr.length === 1 ? '' : 's'} failed to upload. ` +
           `Photos that succeeded have been saved.${reason}`
         );
       }
     } catch (e: any) {
-      alert(`Photo upload failed: ${e.message || e}`);
+      void dialog.alert(`Photo upload failed: ${e.message || e}`);
     } finally {
       setUploadingSection(null);
     }
@@ -643,16 +645,17 @@ export function QuestionForm({
   async function handleSubmit() {
     const err = validate();
     if (err) {
-      alert(err.message);
+      await dialog.alert(err.message);
       scrollToAndFlash(err.scrollToDomId, err.instanceKey);
       return;
     }
     const totalSectionPhotos = Object.values(sectionPhotos).flat().length;
     const totalQuestionPhotos = Object.values(answers).reduce((acc, a) => acc + a.photoUrls.length, 0);
-    const ok = confirm(
+    const ok = await dialog.confirm(
       `Submit ${Object.keys(answers).length} answers, ` +
       `${totalQuestionPhotos} question photos, ` +
-      `${totalSectionPhotos} section photos to HubSpot?`
+      `${totalSectionPhotos} section photos to HubSpot?`,
+      { confirmLabel: 'Submit' }
     );
     if (!ok) return;
 

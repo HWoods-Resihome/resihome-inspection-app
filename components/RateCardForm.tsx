@@ -13,6 +13,7 @@ import { EditableLineRow } from '@/components/EditableLineRow';
 import { CameraCapture } from '@/components/CameraCapture';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
+import { useAppDialog } from '@/components/AppDialog';
 import {
   type SectionInstance,
   resolveSections,
@@ -71,6 +72,7 @@ interface RateCardFormProps {
 // the SectionInstance.photoOptional flag.
 
 export function RateCardForm(props: RateCardFormProps) {
+  const dialog = useAppDialog();
   // Sections are now stateful — they may be customized (renamed, deleted,
   // reordered, or have additions). The initial value is taken from the prop
   // `sectionListJson` if set, else derived from bedrooms+bathrooms.
@@ -259,10 +261,10 @@ export function RateCardForm(props: RateCardFormProps) {
       setCatalog(catData.items || []);
       setRegions(regData.regions || []);
       setDataLoaded(true);
-      alert(`Rate card refreshed: ${catData.items?.length || 0} line items, ${regData.regions?.length || 0} regions loaded from HubSpot.`);
+      void dialog.alert(`Rate card refreshed: ${catData.items?.length || 0} line items, ${regData.regions?.length || 0} regions loaded from HubSpot.`);
     } catch (e: any) {
       setDataError(String(e?.message || e));
-      alert(`Refresh failed: ${e?.message || e}`);
+      void dialog.alert(`Refresh failed: ${e?.message || e}`);
     } finally {
       setDataLoading(false);
     }
@@ -749,13 +751,13 @@ export function RateCardForm(props: RateCardFormProps) {
       );
       if (failed > 0) {
         const reason = errors[0] ? `\n\nReason: ${errors[0]}` : '';
-        alert(`${failed} of ${fileArr.length} photo${fileArr.length === 1 ? '' : 's'} failed to upload. Successful uploads were saved.${reason}`);
+        void dialog.alert(`${failed} of ${fileArr.length} photo${fileArr.length === 1 ? '' : 's'} failed to upload. Successful uploads were saved.${reason}`);
       }
       // Save with the resulting full list (existing + new)
       const allUrls = [...(photosBySection[sectionId] || []), ...newUrls];
       await savePhotosForSection(sectionId, allUrls);
     } catch (e: any) {
-      alert(`Photo upload failed: ${e.message || e}`);
+      void dialog.alert(`Photo upload failed: ${e.message || e}`);
     } finally {
       setUploadingSection(null);
     }
@@ -827,10 +829,11 @@ export function RateCardForm(props: RateCardFormProps) {
 
   async function handleCancelInspectionClick() {
     if (!props.onCancelInspection) return;
-    const confirmed = window.confirm(
+    const confirmed = await dialog.confirm(
       'Cancel this inspection? It will be marked as Cancelled in HubSpot. ' +
       'Already-saved lines and photos will remain on the record but the ' +
-      'inspection won\'t progress further. This cannot be undone.'
+      'inspection won\'t progress further. This cannot be undone.',
+      { confirmLabel: 'Cancel Inspection', cancelLabel: 'Keep' }
     );
     if (!confirmed) return;
     try { await commitAndWait(); } catch {}
@@ -845,8 +848,9 @@ export function RateCardForm(props: RateCardFormProps) {
       await commitAndWait();
     } catch (e: any) {
       const msg = e?.message || String(e);
-      const proceed = window.confirm(
-        `Save failed: ${msg}\n\nLeave anyway? Your unsaved changes will be lost.`
+      const proceed = await dialog.confirm(
+        `Save failed: ${msg}\n\nLeave anyway? Your unsaved changes will be lost.`,
+        { confirmLabel: 'Leave anyway', cancelLabel: 'Stay' }
       );
       if (!proceed) return;
     }
@@ -862,7 +866,7 @@ export function RateCardForm(props: RateCardFormProps) {
       if (required && photos.length === 0) missingSections.push(s.displayName);
     }
     if (missingSections.length > 0) {
-      alert(
+      await dialog.alert(
         'Section photos are still required for:\n\n' +
         missingSections.slice(0, 10).map((n) => `  • ${n}`).join('\n') +
         (missingSections.length > 10 ? `\n  ...and ${missingSections.length - 10} more` : '')
@@ -872,14 +876,14 @@ export function RateCardForm(props: RateCardFormProps) {
     // No lines at all? Probably a mistake.
     const totalLines = Object.values(linesBySection).reduce((s, arr) => s + arr.length, 0);
     if (totalLines === 0) {
-      const ok = window.confirm('No line items have been added. Submit anyway?');
+      const ok = await dialog.confirm('No line items have been added. Submit anyway?', { confirmLabel: 'Submit' });
       if (!ok) return;
     }
     // Flush pending edits to make sure HubSpot has everything before the submit.
     try {
       await commitAndWait();
     } catch (e: any) {
-      alert(`Could not finish saving before submit: ${e.message || e}\n\nPlease try again.`);
+      await dialog.alert(`Could not finish saving before submit: ${e.message || e}\n\nPlease try again.`);
       return;
     }
     // Branch on status: pending_approval -> finalize flow, else submit flow.
@@ -926,7 +930,7 @@ export function RateCardForm(props: RateCardFormProps) {
         const data = await r.json();
         setFinalizeResult(data as FinalizeResult);
       } catch (e: any) {
-        alert(`Finalize failed: ${e?.message || e}\n\nThe inspection status was NOT changed. You can try again.`);
+        await dialog.alert(`Finalize failed: ${e?.message || e}\n\nThe inspection status was NOT changed. You can try again.`);
       } finally {
         setFinalizing(false);
       }
@@ -945,7 +949,7 @@ export function RateCardForm(props: RateCardFormProps) {
       }
       props.onSubmit();
     } catch (e: any) {
-      alert(`Submit failed: ${e.message || e}`);
+      await dialog.alert(`Submit failed: ${e.message || e}`);
     }
   }
 
@@ -1083,10 +1087,11 @@ export function RateCardForm(props: RateCardFormProps) {
           <button
             type="button"
             onClick={async () => {
-              const ok = window.confirm(
+              const ok = await dialog.confirm(
                 'Refresh rate card pricing from HubSpot?\n\n' +
                 'This will pull the latest line item costs and regional labor rates. ' +
-                'Already-saved lines keep their original pricing — only new lines will use the refreshed rates.'
+                'Already-saved lines keep their original pricing — only new lines will use the refreshed rates.',
+                { confirmLabel: 'Refresh' }
               );
               if (!ok) return;
               await refreshCatalogFromHubSpot();

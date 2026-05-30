@@ -147,7 +147,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Step 6: patch Inspection record with PDF URL + attach to Attachments card.
     await attachPdfUrlToInspection(body.inspectionRecordId, pdfUrl);
     if (pdfFileId) {
-      await attachFilesToInspectionRecord(body.inspectionRecordId, [pdfFileId], 'Inspection report');
+      try {
+        const noteId = await attachFilesToInspectionRecord(body.inspectionRecordId, [pdfFileId], 'Inspection report');
+        console.log(`[pdf] attached file ${pdfFileId} to record ${body.inspectionRecordId} via note ${noteId}`);
+      } catch (e) {
+        console.error('[pdf] attachFilesToInspectionRecord failed (URL still saved):', e);
+      }
+    } else {
+      console.warn('[pdf] no pdfFileId returned from upload; cannot attach to record');
     }
 
     const total = Date.now() - t0;
