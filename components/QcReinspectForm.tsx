@@ -19,10 +19,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
 import { CameraCapture } from '@/components/CameraCapture';
+import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { vendorPillStyle } from '@/lib/vendors';
 import { PhotoStrip } from '@/components/PhotoStrip';
 import { useAppDialog } from '@/components/AppDialog';
-import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
+import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
+import { stampEntryWithLabel } from '@/lib/photoStamp';
 
 interface QcLine {
   recordId: string;
@@ -38,6 +40,7 @@ interface QcLine {
   vendor: string;
   vendorCost: number | null;
   passFail: 'pass' | 'fail' | '';
+  photoUrls: string[];
 }
 
 interface Props {
@@ -84,6 +87,9 @@ export function QcReinspectForm(props: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<null | { verdict: string; passCount: number; failCount: number; pdf: { name: string; url: string } }>(null);
   const [cameraKey, setCameraKey] = useState<string | null>(null);
+  // Photo viewer (swipe / markup / delete / tag-to-line / video). `phase`
+  // distinguishes the read-only source "before" photos from editable "after".
+  const [qcLightbox, setQcLightbox] = useState<{ phase: 'before' | 'after'; key: string; index: number } | null>(null);
   // Per-section photo collapse — Before + After share one state so collapsing
   // either folds both.
   const [photosCollapsed, setPhotosCollapsed] = useState<Record<string, boolean>>({});
@@ -235,6 +241,94 @@ export function QcReinspectForm(props: Props) {
     catch (e: any) { void dialog.alert(`Could not update photos: ${e?.message || e}`); }
   }
 
+  // Tag a freshly-captured photo to a QC line FROM INSIDE THE CAMERA (mirrors
+  // Scope). Stamps the label, attaches to the line record, returns the stamped
+  // URL so the camera carries it into the After strip on close.
+  async function tagCameraPhotoToLineQc(url: string, lineRecordId: string): Promise<string> {
+    const line = lines.find((l) => l.recordId === lineRecordId);
+    if (!line) return url;
+    let tagged = url;
+    try { tagged = await stampEntryWithLabel(url, line.description || line.lineItemCode); }
+    catch (e) { console.warn('[QC] camera tag stamp failed:', e); }
+    const linePhotos = line.photoUrls || [];
+    if (!linePhotos.includes(tagged)) {
+      const next = [...linePhotos, tagged];
+      setLines((cur) => cur.map((l) => (l.recordId === lineRecordId ? { ...l, photoUrls: next } : l)));
+      try {
+        markSaving();
+        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            upserts: [{
+              recordId: lineRecordId,
+              answerProps: { photo_urls: joinPhotoUrls(next), photo_count: next.length },
+              questionHubspotRecordId: null,
+            }],
+          }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        markSaved();
+      } catch (e: any) { markSaveError(); }
+    }
+    return tagged;
+  }
+
+  // Swap an After photo for its marked-up version (re-upload + replace, persist).
+  async function replaceAfterPhoto(key: string, section: string, location: string, index: number, file: File) {
+    try {
+      const url = await uploadPhoto(file);
+      const arr = [...(afterPhotos[key] || [])];
+      if (index < 0 || index >= arr.length) return;
+      arr[index] = url;
+      setAfterPhotos((cur) => ({ ...cur, [key]: arr }));
+      await persistAfterPhotos(key, section, location, arr);
+    } catch (e: any) { void dialog.alert(`Could not update photo: ${e?.message || e}`); }
+  }
+
+  // Tag an After photo to one of the section's QC lines: stamp the line label
+  // onto the photo, attach it to that line's record (so it shows under the line
+  // in the scope/PDF), and keep it in the After strip — mirroring Scope.
+  async function tagAfterPhotoToLine(key: string, section: string, location: string, index: number, lineRecordId: string) {
+    const url = (afterPhotos[key] || [])[index];
+    const line = lines.find((l) => l.recordId === lineRecordId);
+    if (!url || !line) return;
+    let tagged = url;
+    try { tagged = await stampEntryWithLabel(url, line.description || line.lineItemCode); }
+    catch (e) { console.warn('[QC] tag stamp failed:', e); }
+
+    // Attach to the line record (append to its photo_urls).
+    const linePhotos = line.photoUrls || [];
+    if (!linePhotos.includes(tagged)) {
+      const nextLinePhotos = [...linePhotos, tagged];
+      setLines((cur) => cur.map((l) => (l.recordId === lineRecordId ? { ...l, photoUrls: nextLinePhotos } : l)));
+      try {
+        markSaving();
+        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            upserts: [{
+              recordId: lineRecordId,
+              answerProps: { photo_urls: joinPhotoUrls(nextLinePhotos), photo_count: nextLinePhotos.length },
+              questionHubspotRecordId: null,
+            }],
+          }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        markSaved();
+      } catch (e: any) { markSaveError(); void dialog.alert(`Could not tag photo to line: ${e?.message || e}`); }
+    }
+
+    // Swap the stamped version into the After strip so the label shows there too.
+    if (tagged !== url) {
+      const arr = [...(afterPhotos[key] || [])];
+      arr[index] = tagged;
+      setAfterPhotos((cur) => ({ ...cur, [key]: arr }));
+      try { await persistAfterPhotos(key, section, location, arr); } catch { /* best-effort */ }
+    }
+  }
+
   async function setLinePassFail(line: QcLine, pf: 'pass' | 'fail') {
     const next = line.passFail === pf ? '' : pf;
     setLines((cur) => cur.map((l) => (l.recordId === line.recordId ? { ...l, passFail: next } : l)));
@@ -376,6 +470,7 @@ export function QcReinspectForm(props: Props) {
                       emptyLabel="No before photos on source"
                       collapsed={!!photosCollapsed[s.key]}
                       onToggle={() => setPhotosCollapsed((c) => ({ ...c, [s.key]: !c[s.key] }))}
+                      onPhotoClick={(i) => setQcLightbox({ phase: 'before', key: s.key, index: i })}
                     />
                   </div>
 
@@ -388,6 +483,7 @@ export function QcReinspectForm(props: Props) {
                       collapsed={!!photosCollapsed[s.key]}
                       onToggle={() => setPhotosCollapsed((c) => ({ ...c, [s.key]: !c[s.key] }))}
                       onRemove={props.readOnly ? undefined : (u) => removeAfterPhoto(s.key, s.section, s.location, u)}
+                      onPhotoClick={(i) => setQcLightbox({ phase: 'after', key: s.key, index: i })}
                     >
                       {!props.readOnly && (
                         <div className="flex items-center gap-1.5 flex-nowrap">
@@ -642,6 +738,9 @@ export function QcReinspectForm(props: Props) {
             };
           })}
           currentRoomId={cameraKey}
+          tagLines={(sections.find((s) => s.key === cameraKey)?.lines || [])
+            .map((l) => ({ externalId: l.recordId, label: l.description || l.lineItemCode }))}
+          onTagPhotoToLine={tagCameraPhotoToLineQc}
           onRoomChange={(leavingKey, capturedUrls, enteringKey) => {
             if (capturedUrls.length > 0) {
               const sec = sections.find((s) => s.key === leavingKey);
@@ -678,6 +777,49 @@ export function QcReinspectForm(props: Props) {
           </div>
         </div>
       )}
+
+      {/* Photo viewer (swipe / markup / delete / tag-to-line / video) */}
+      {qcLightbox && (() => {
+        const isAfter = qcLightbox.phase === 'after';
+        const photosByGroup = Object.fromEntries(
+          sections.map((s) => [s.key, (isAfter ? (afterPhotos[s.key] || []) : s.beforePhotos)])
+        );
+        if ((photosByGroup[qcLightbox.key] || []).length === 0) return null;
+        const groups = sections.map((s) => ({ id: s.key, name: s.displayName }));
+        const secOf = (gid: string) => sections.find((s) => s.key === gid);
+        return (
+          <PhotoLightbox
+            groups={groups}
+            photosByGroup={photosByGroup}
+            initialGroupId={qcLightbox.key}
+            initialIndex={qcLightbox.index}
+            // Before photos are the read-only source; After is editable.
+            readOnly={!isAfter || props.readOnly}
+            onClose={() => setQcLightbox(null)}
+            onDelete={(gid, i) => {
+              const sec = secOf(gid); if (!sec) return;
+              const url = (afterPhotos[gid] || [])[i];
+              if (url) removeAfterPhoto(sec.key, sec.section, sec.location, url);
+            }}
+            onReplace={(gid, i, file) => {
+              const sec = secOf(gid); if (!sec) return;
+              replaceAfterPhoto(sec.key, sec.section, sec.location, i, file);
+            }}
+            tagLinesByGroup={isAfter && !props.readOnly
+              ? Object.fromEntries(sections.map((s) => [
+                  s.key,
+                  s.lines.map((l) => ({ externalId: l.recordId, label: l.description || l.lineItemCode })),
+                ]))
+              : undefined}
+            onTagToLine={isAfter && !props.readOnly
+              ? (gid, i, lineRecordId) => {
+                  const sec = secOf(gid); if (!sec) return;
+                  tagAfterPhotoToLine(sec.key, sec.section, sec.location, i, lineRecordId);
+                }
+              : undefined}
+          />
+        );
+      })()}
     </div>
   );
 }

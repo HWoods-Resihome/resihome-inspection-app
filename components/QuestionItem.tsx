@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { Question, AnswerInput } from '@/lib/types';
 import { CameraCapture } from './CameraCapture';
+import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { useAppDialog } from '@/components/AppDialog';
 import { displayImageSrc } from '@/lib/photoDisplay';
+import { isVideoEntry } from '@/lib/media';
 
 // Check once whether the browser supports the camera API. Hidden behind a
 // constant so the "Take Photos" button can be disabled on unsupported browsers
@@ -42,6 +44,20 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
   // Upload progress: { current, total } while uploading; null when idle
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
+  // Replace a photo with its marked-up version (re-upload + swap at index).
+  async function replacePhoto(index: number, file: File) {
+    try {
+      const url = await uploadPhoto(file);
+      const arr = [...answer.photoUrls];
+      if (index < 0 || index >= arr.length) return;
+      arr[index] = url;
+      onUpdate({ photoUrls: arr });
+    } catch (e) {
+      console.error('[QuestionItem] photo replace failed:', e);
+    }
+  }
 
   async function handlePhotoUpload(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -289,7 +305,19 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                 {answer.photoUrls.map((url, idx) => (
                   <div key={idx} className="relative">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={displayImageSrc(url)} alt="" className="w-full h-16 object-cover rounded" />
+                    <img
+                      src={displayImageSrc(url)}
+                      alt=""
+                      onClick={() => setLightboxIndex(idx)}
+                      className="w-full h-16 object-cover rounded cursor-pointer"
+                    />
+                    {isVideoEntry(url) && (
+                      <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <span className="w-6 h-6 rounded-full bg-black/55 flex items-center justify-center">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z" /></svg>
+                        </span>
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => removePhoto(idx)}
@@ -301,6 +329,17 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             )}
           </div>
         </div>
+      )}
+      {lightboxIndex !== null && answer.photoUrls.length > 0 && (
+        <PhotoLightbox
+          groups={[{ id: 'q', name: 'Photos' }]}
+          photosByGroup={{ q: answer.photoUrls }}
+          initialGroupId="q"
+          initialIndex={Math.min(lightboxIndex, answer.photoUrls.length - 1)}
+          onClose={() => setLightboxIndex(null)}
+          onDelete={(_g, i) => removePhoto(i)}
+          onReplace={(_g, i, file) => replacePhoto(i, file)}
+        />
       )}
     </div>
   );

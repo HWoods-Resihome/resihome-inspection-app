@@ -10,6 +10,10 @@ interface PhotoStripProps {
   size?: number;
   /** Optional remove handler — when provided, each thumb gets an × button. */
   onRemove?: (url: string) => void;
+  /** Optional click handler — when provided, tapping a thumb calls this (with
+   *  its index) instead of opening the file in a new tab (used to open a
+   *  lightbox with swipe/markup/delete/tag). */
+  onPhotoClick?: (index: number) => void;
   /** Optional tint for the label/border (e.g. teal for After). */
   accent?: 'gray' | 'teal' | 'brand';
   /** Optional extra controls rendered under the strip (e.g. Take/Upload). */
@@ -37,7 +41,7 @@ const ACCENTS = {
  * and desktop.
  */
 export function PhotoStrip({
-  label, photoUrls, size = 80, onRemove, accent = 'gray', children, emptyLabel,
+  label, photoUrls, size = 80, onRemove, onPhotoClick, accent = 'gray', children, emptyLabel,
   defaultCollapsed, collapsed: collapsedProp, onToggle,
 }: PhotoStripProps) {
   const [collapsedState, setCollapsedState] = useState(!!defaultCollapsed);
@@ -67,10 +71,10 @@ export function PhotoStrip({
             emptyLabel ? <div className="text-xs text-gray-400 mb-1">{emptyLabel}</div> : null
           ) : (
             <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-0.5 px-0.5">
-              {photoUrls.map((u, i) => (
-                <div key={`${u}-${i}`} className="relative shrink-0">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <a href={isVideoEntry(u) ? getVideoUrl(u) : u} target="_blank" rel="noopener noreferrer">
+              {photoUrls.map((u, i) => {
+                const inner = (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={displayImageSrc(u)}
                       alt={label}
@@ -84,7 +88,15 @@ export function PhotoStrip({
                         </span>
                       </span>
                     )}
-                  </a>
+                  </>
+                );
+                return (
+                <div key={`${u}-${i}`} className="relative shrink-0">
+                  {onPhotoClick ? (
+                    <button type="button" onClick={() => onPhotoClick(i)} className="block cursor-pointer">{inner}</button>
+                  ) : (
+                    <a href={isVideoEntry(u) ? getVideoUrl(u) : u} target="_blank" rel="noopener noreferrer" className="block">{inner}</a>
+                  )}
                   {onRemove && (
                     <button
                       type="button"
@@ -94,7 +106,8 @@ export function PhotoStrip({
                     >&times;</button>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
           {children && <div className="mt-2">{children}</div>}

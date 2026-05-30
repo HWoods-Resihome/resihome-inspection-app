@@ -3,8 +3,10 @@ import type { Question, AnswerInput, TemplateType } from '@/lib/types';
 import type { SavedAnswer } from '@/lib/hubspot';
 import { QuestionItem } from './QuestionItem';
 import { CameraCapture } from './CameraCapture';
+import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadPhoto, uploadFilesBatch } from '@/lib/photoUpload';
 import { displayImageSrc } from '@/lib/photoDisplay';
+import { isVideoEntry } from '@/lib/media';
 import { useAppDialog } from '@/components/AppDialog';
 
 // Whether this browser supports the camera API. SSR-safe.
@@ -515,12 +517,32 @@ export function QuestionForm({
     }
   }
 
+  // Section-photo lightbox (swipe / markup / delete / video).
+  const [photoLightbox, setPhotoLightbox] = useState<{ instanceKey: string; index: number } | null>(null);
+
   function removeSectionPhoto(instanceKey: string, idx: number) {
     if (readOnly) return;
     setSectionPhotos((prev) => ({
       ...prev,
       [instanceKey]: (prev[instanceKey] || []).filter((_, i) => i !== idx),
     }));
+  }
+
+  // Swap a section photo for its marked-up version (re-upload + replace in
+  // place; the dirty-tracking effect persists it).
+  async function replaceSectionPhoto(instanceKey: string, idx: number, file: File) {
+    if (readOnly) return;
+    try {
+      const url = await uploadPhoto(file);
+      setSectionPhotos((prev) => {
+        const arr = [...(prev[instanceKey] || [])];
+        if (idx < 0 || idx >= arr.length) return prev;
+        arr[idx] = url;
+        return { ...prev, [instanceKey]: arr };
+      });
+    } catch (e) {
+      console.error('[QuestionForm] section photo replace failed:', e);
+    }
   }
 
   // Sync section photos to HubSpot whenever they change (debounced).
@@ -1024,9 +1046,19 @@ export function QuestionForm({
                         {sectionPhotoUrls.map((url, idx) => (
                           <div key={idx} className="relative shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <a href={url} target="_blank" rel="noopener noreferrer">
-                              <img src={displayImageSrc(url)} alt="" className="w-16 h-16 object-cover rounded border border-gray-200" />
-                            </a>
+                            <img
+                              src={displayImageSrc(url)}
+                              alt=""
+                              onClick={() => setPhotoLightbox({ instanceKey: inst.instanceKey, index: idx })}
+                              className="w-16 h-16 object-cover rounded border border-gray-200 cursor-pointer"
+                            />
+                            {isVideoEntry(url) && (
+                              <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                <span className="w-6 h-6 rounded-full bg-black/55 flex items-center justify-center">
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z" /></svg>
+                                </span>
+                              </span>
+                            )}
                             {!readOnly && (
                               <button
                                 type="button"
@@ -1175,6 +1207,20 @@ export function QuestionForm({
           }
         }}
       />
+
+      {/* Section-photo viewer (swipe / markup / delete / video) */}
+      {photoLightbox && (sectionPhotos[photoLightbox.instanceKey] || []).length > 0 && (
+        <PhotoLightbox
+          groups={[{ id: photoLightbox.instanceKey, name: 'Photos' }]}
+          photosByGroup={{ [photoLightbox.instanceKey]: sectionPhotos[photoLightbox.instanceKey] || [] }}
+          initialGroupId={photoLightbox.instanceKey}
+          initialIndex={Math.min(photoLightbox.index, (sectionPhotos[photoLightbox.instanceKey] || []).length - 1)}
+          readOnly={readOnly}
+          onClose={() => setPhotoLightbox(null)}
+          onDelete={(_g, i) => removeSectionPhoto(photoLightbox.instanceKey, i)}
+          onReplace={(_g, i, file) => replaceSectionPhoto(photoLightbox.instanceKey, i, file)}
+        />
+      )}
     </main>
   );
 }
