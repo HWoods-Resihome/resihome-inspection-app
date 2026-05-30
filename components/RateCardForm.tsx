@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TemplateType, RateCardLineItem, RegionRate, RateCardLineInput } from '@/lib/types';
 import { EditableLineRow } from '@/components/EditableLineRow';
 import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
+import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
@@ -1299,14 +1300,28 @@ export function RateCardForm(props: RateCardFormProps) {
                   )}
                   {!props.readOnly && (
                     <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
-                      <button
-                        type="button"
-                        onClick={() => handleAddLine(s)}
-                        disabled={dataLoading || pendingNewBySection[s.id]}
-                        className="px-3 py-1.5 text-sm bg-brand text-white rounded hover:bg-brand-dark disabled:bg-gray-300"
-                      >
-                        {dataLoading ? 'Loading...' : pendingNewBySection[s.id] ? 'Finish current row first' : '+ Add Line Item'}
-                      </button>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => handleAddLine(s)}
+                          disabled={dataLoading || pendingNewBySection[s.id]}
+                          className="px-3 py-1.5 text-sm bg-brand text-white rounded hover:bg-brand-dark disabled:bg-gray-300"
+                        >
+                          {dataLoading ? 'Loading...' : pendingNewBySection[s.id] ? 'Finish current row first' : '+ Add Line Item'}
+                        </button>
+                        {/* Voice assistant — Scope rate card only. Online-only;
+                            proposes lines for the inspector to confirm, then saves
+                            through the same handleSaveLineForSection path. */}
+                        {props.templateType === 'pm_scope_rate_card' && (
+                          <VoiceLineAssistant
+                            section={s.label}
+                            location={s.location}
+                            region={inspectionRegion}
+                            disabled={dataLoading}
+                            onAddLine={(line) => handleSaveLineForSection(s.id, line)}
+                          />
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
