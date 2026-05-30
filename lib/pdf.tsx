@@ -5,6 +5,7 @@ import React from 'react';
 import {
   Document, Page, Text, View, StyleSheet, Image, Link,
 } from '@react-pdf/renderer';
+import { isVideoEntry, getPosterUrl, getVideoUrl } from '@/lib/media';
 
 // Brand colors from ResiHome brand guidelines
 const COLORS = {
@@ -227,6 +228,22 @@ const styles = StyleSheet.create({
     margin: 2,
     objectFit: 'cover',
   },
+  photoFill: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+  },
+  videoBadge: {
+    position: 'absolute',
+    bottom: 2,
+    left: 2,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    color: '#ffffff',
+    fontSize: 6,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    borderRadius: 2,
+  },
   sectionPhotosLabel: {
     fontSize: 9,
     color: COLORS.gray,
@@ -387,10 +404,20 @@ export function InspectionPdf({ data }: { data: PdfData }) {
                   <View style={styles.sectionPhotosBlock}>
                     <Text style={styles.sectionPhotosLabel}>Section Photos</Text>
                     <View style={styles.photoGrid}>
-                      {sectionPhotos.map((url, i) => (
-                        // eslint-disable-next-line jsx-a11y/alt-text
-                        <Image key={i} src={url} style={styles.photo} />
-                      ))}
+                      {sectionPhotos.map((entry, i) => {
+                        const poster = getPosterUrl(entry);
+                        if (!isVideoEntry(entry)) {
+                          // eslint-disable-next-line jsx-a11y/alt-text
+                          return <Image key={i} src={poster} style={styles.photo} />;
+                        }
+                        return (
+                          <Link key={i} src={getVideoUrl(entry)} style={styles.photo}>
+                            {/* eslint-disable-next-line jsx-a11y/alt-text */}
+                            <Image src={poster} style={styles.photoFill} />
+                            <Text style={styles.videoBadge}>VIDEO</Text>
+                          </Link>
+                        );
+                      })}
                     </View>
                   </View>
                 )}
@@ -439,10 +466,20 @@ export function InspectionPdf({ data }: { data: PdfData }) {
                       )}
                       {a.photoUrls && a.photoUrls.length > 0 && (
                         <View style={styles.photoGrid}>
-                          {a.photoUrls.map((url, i) => (
-                            // eslint-disable-next-line jsx-a11y/alt-text
-                            <Image key={i} src={url} style={styles.photo} />
-                          ))}
+                          {a.photoUrls.map((entry, i) => {
+                            const poster = getPosterUrl(entry);
+                            if (!isVideoEntry(entry)) {
+                              // eslint-disable-next-line jsx-a11y/alt-text
+                              return <Image key={i} src={poster} style={styles.photo} />;
+                            }
+                            return (
+                              <Link key={i} src={getVideoUrl(entry)} style={styles.photo}>
+                                {/* eslint-disable-next-line jsx-a11y/alt-text */}
+                                <Image src={poster} style={styles.photoFill} />
+                                <Text style={styles.videoBadge}>VIDEO</Text>
+                              </Link>
+                            );
+                          })}
                         </View>
                       )}
                     </View>

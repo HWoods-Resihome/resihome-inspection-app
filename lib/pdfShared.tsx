@@ -12,6 +12,7 @@
 
 import React from 'react';
 import { StyleSheet, Text, View, Image, Link, Font } from '@react-pdf/renderer';
+import { isVideoEntry, getPosterUrl, getVideoUrl } from '@/lib/media';
 
 // Disable word hyphenation globally. @react-pdf's default hyphenation breaks
 // long words mid-word (e.g. "Internal Resolution" becomes "Internal Resolu-"
@@ -262,6 +263,17 @@ export const pdfStyles = StyleSheet.create({
     height: '100%',
     objectFit: 'cover',
   },
+  videoBadge: {
+    position: 'absolute',
+    bottom: 2,
+    left: 2,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    color: '#ffffff',
+    fontSize: 6,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    borderRadius: 2,
+  },
 
   // ---- Footer ----
   footer: {
@@ -346,12 +358,18 @@ export function PdfSectionPhotos(props: { photoUrls: string[] }) {
   if (props.photoUrls.length === 0) return null;
   return (
     <View style={pdfStyles.photoGrid}>
-      {props.photoUrls.map((url, i) => (
-        <Link key={`${url}-${i}`} src={url} style={pdfStyles.photoCell}>
-          {/* eslint-disable-next-line jsx-a11y/alt-text */}
-          <Image src={url} style={pdfStyles.photoCellImage} />
-        </Link>
-      ))}
+      {props.photoUrls.map((entry, i) => {
+        // Video clips embed the poster image and link to the playable file.
+        const poster = getPosterUrl(entry);
+        const video = isVideoEntry(entry) ? getVideoUrl(entry) : '';
+        return (
+          <Link key={`${entry}-${i}`} src={video || poster} style={pdfStyles.photoCell}>
+            {/* eslint-disable-next-line jsx-a11y/alt-text */}
+            <Image src={poster} style={pdfStyles.photoCellImage} />
+            {video ? <Text style={pdfStyles.videoBadge}>VIDEO</Text> : null}
+          </Link>
+        );
+      })}
     </View>
   );
 }

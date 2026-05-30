@@ -5,10 +5,10 @@ import { uploadFile } from '@/lib/hubspot';
 export const config = {
   api: {
     bodyParser: {
-      // 20MB is well over what we should ever send post-compression (target is
-      // ~600KB; canvas fallback caps at ~2MB raw → ~2.7MB base64). The headroom
-      // is safety margin for unusual phone outputs.
-      sizeLimit: '20mb',
+      // 48MB headroom: photos are tiny post-compression (~600KB), but short
+      // video clips (≤10s, bitrate-capped to ~2.5Mbps → ~3MB) inflate ~33% as
+      // base64, so this leaves comfortable margin for the largest expected clip.
+      sizeLimit: '48mb',
     },
   },
 };
@@ -30,11 +30,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Missing filename or base64 body' });
     }
 
-    // Only accept image uploads. Without this, any authenticated user could push
-    // arbitrary file types (e.g. HTML) to HubSpot Files, which then serves them
-    // from a public CDN URL — a stored-content / file-abuse vector.
+    // Only accept image + short-clip video uploads. Without this allowlist, any
+    // authenticated user could push arbitrary file types (e.g. HTML) to HubSpot
+    // Files, which then serves them from a public CDN URL — a stored-content /
+    // file-abuse vector. Video is limited to the formats MediaRecorder emits.
     const ALLOWED_TYPES = new Set([
       'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif',
+      'video/mp4', 'video/webm', 'video/quicktime',
     ]);
     const safeContentType = String(contentType || 'image/jpeg').toLowerCase().split(';')[0].trim();
     if (!ALLOWED_TYPES.has(safeContentType)) {

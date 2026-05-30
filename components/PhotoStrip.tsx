@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { displayImageSrc } from '@/lib/photoDisplay';
+import { isVideoEntry, getVideoUrl } from '@/lib/media';
 
 interface PhotoStripProps {
   /** Section/group title shown on the collapsible header (e.g. "Before"). */
@@ -69,13 +70,20 @@ export function PhotoStrip({
               {photoUrls.map((u, i) => (
                 <div key={`${u}-${i}`} className="relative shrink-0">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <a href={u} target="_blank" rel="noopener noreferrer">
+                  <a href={isVideoEntry(u) ? getVideoUrl(u) : u} target="_blank" rel="noopener noreferrer">
                     <img
                       src={displayImageSrc(u)}
                       alt={label}
                       style={{ width: size, height: size }}
                       className={`object-cover rounded border ${a.thumb}`}
                     />
+                    {isVideoEntry(u) && (
+                      <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <span className="w-7 h-7 rounded-full bg-black/55 flex items-center justify-center">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z" /></svg>
+                        </span>
+                      </span>
+                    )}
                   </a>
                   {onRemove && (
                     <button

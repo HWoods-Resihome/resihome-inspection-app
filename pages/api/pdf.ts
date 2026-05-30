@@ -5,6 +5,7 @@ import React from 'react';
 import { InspectionPdf, PdfData, PdfAnswer } from '@/lib/pdf';
 import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord } from '@/lib/hubspot';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
+import { isVideoEntry, getPosterUrl, getVideoUrl, makeVideoEntry } from '@/lib/media';
 import type { AnswerInput } from '@/lib/types';
 
 export const config = {
@@ -46,12 +47,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const body = req.body as GeneratePdfBody;
 
     // Step 1: collect every image URL referenced anywhere in the inspection.
+    // For video clips the entry is `poster#v=video`; we only fetch/embed the
+    // POSTER image (getPosterUrl) — the video itself is linked, not embedded.
     const allUrls: string[] = [];
     for (const a of body.answers) {
-      if (a.photoUrls && a.photoUrls.length) allUrls.push(...a.photoUrls);
+      if (a.photoUrls && a.photoUrls.length) for (const u of a.photoUrls) allUrls.push(getPosterUrl(u));
     }
     for (const urls of Object.values(body.sectionPhotoUrls || {})) {
-      if (urls && urls.length) allUrls.push(...urls);
+      if (urls && urls.length) for (const u of urls) allUrls.push(getPosterUrl(u));
     }
 
     // Step 2: pre-fetch + resize all in parallel (the big perf win).
@@ -60,8 +63,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const tImg = Date.now() - t1;
     console.log(`[pdf] resolved ${urlToDataUri.size} images in ${tImg}ms`);
 
-    // Step 3: build PDF data, swapping each URL for its resolved data URI.
-    const swap = (urls?: string[]) => urls?.map((u) => urlToDataUri.get(u) || u);
+    // Step 3: build PDF data, swapping each URL for its resolved data URI. For a
+    // video entry, we embed the poster data URI but preserve the video URL in the
+    // same `poster#v=video` encoding so the PDF can link to the playable file.
+    const swap = (urls?: string[]) =>
+      urls?.map((u) => {
+        const posterData = urlToDataUri.get(getPosterUrl(u)) || getPosterUrl(u);
+        return isVideoEntry(u) ? makeVideoEntry(posterData, getVideoUrl(u)) : posterData;
+      });
 
     // Group answers by an effective "section display name":
     //   - non-repeating: just the section ("Yard / Exterior")

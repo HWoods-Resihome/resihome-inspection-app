@@ -8,9 +8,13 @@
  */
 export function displayImageSrc(url: string): string {
   if (!url) return url;
-  const path = url.split('?')[0];
+  // Video clips are stored as `posterUrl#v=<videoUrl>` (see lib/media.ts). For
+  // an <img>, we want the poster only — drop the fragment so the src is clean.
+  const v = url.indexOf('#v=');
+  const clean = v === -1 ? url : url.slice(0, v);
+  const path = clean.split('?')[0];
   if (/\.(heic|heif)$/i.test(path)) {
-    return `/api/photo-proxy?url=${encodeURIComponent(url)}`;
+    return `/api/photo-proxy?url=${encodeURIComponent(clean)}`;
   }
-  return url;
+  return clean;
 }

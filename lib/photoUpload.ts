@@ -106,6 +106,49 @@ export async function uploadPhoto(file: File): Promise<string> {
 }
 
 /**
+ * Upload a short video clip (from the in-app recorder) as-is — no image
+ * compression. The recorder already bitrate-caps the clip; we just base64 it
+ * and POST through the same /api/upload endpoint (which now allowlists
+ * video/mp4 + video/webm). Returns the HubSpot Files URL.
+ */
+export async function uploadVideo(file: File): Promise<string> {
+  // Safety net: the recorder caps bitrate + duration, but never send something
+  // that would blow past the API body limit (48MB → ~36MB raw after base64).
+  if (file.size > 32 * 1024 * 1024) {
+    throw new Error(`Video too large (${formatBytes(file.size)}). Record a shorter clip.`);
+  }
+  const contentType = (file.type || 'video/mp4').split(';')[0].trim();
+  const ext = /webm/i.test(contentType) ? 'webm' : /quicktime|mov/i.test(contentType) ? 'mov' : 'mp4';
+  const base = (file.name || 'clip').replace(/\.[^.]+$/, '').trim() || 'clip';
+  const base64 = await fileToBase64(file);
+  const payload = JSON.stringify({ filename: `${base}.${ext}`, contentType, base64 });
+
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
+    try {
+      const r = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(`HTTP ${r.status}: ${text.slice(0, 300)}`);
+      }
+      const data = await r.json();
+      if (!data.url) throw new Error('Server response missing url');
+      return data.url as string;
+    } catch (e: any) {
+      lastError = e instanceof Error ? e : new Error(String(e));
+      if (attempt < MAX_UPLOAD_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, RETRY_BASE_DELAY_MS * attempt));
+      }
+    }
+  }
+  throw lastError || new Error('Video upload failed for unknown reason');
+}
+
+/**
  * Upload multiple files in parallel with a small concurrency cap.
  * Photos are added to state progressively (as each upload completes), so the
  * inspector sees thumbnails appear in real time rather than waiting for all

@@ -26,6 +26,7 @@ import {
 import { SectionsManager } from '@/components/SectionsManager';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { displayImageSrc } from '@/lib/photoDisplay';
+import { isVideoEntry } from '@/lib/media';
 
 interface RateCardFormProps {
   templateType: TemplateType;
@@ -1517,8 +1518,15 @@ export function RateCardForm(props: RateCardFormProps) {
                               alt=""
                               onClick={() => setLightbox({ kind: 'section', sectionId: s.id, index: idx })}
                               className="w-16 h-16 object-cover rounded border border-gray-200 cursor-pointer"
-                              title="Tap to view, mark up, or delete"
+                              title={isVideoEntry(url) ? 'Tap to play, tag, or delete' : 'Tap to view, mark up, or delete'}
                             />
+                            {isVideoEntry(url) && (
+                              <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                <span className="w-6 h-6 rounded-full bg-black/55 flex items-center justify-center">
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z" /></svg>
+                                </span>
+                              </span>
+                            )}
                             {!props.readOnly && (
                               <button
                                 type="button"
@@ -1679,6 +1687,24 @@ export function RateCardForm(props: RateCardFormProps) {
           })}
           currentRoomId={cameraSectionId}
           onRoomChange={handleCameraRoomChange}
+          voiceSlot={
+            !props.readOnly && props.templateType === 'pm_scope_rate_card' && cameraSectionId ? (
+              <VoiceLineAssistant
+                sections={sections.map((s) => ({ id: s.id, label: s.label, location: s.location, displayName: s.displayName }))}
+                currentSectionId={cameraSectionId}
+                onNavigate={(id) => setCameraSectionId(id)}
+                region={inspectionRegion}
+                disabled={dataLoading}
+                currentLines={linesBySection[cameraSectionId] || []}
+                catalog={catalog}
+                onAddLine={(line) => handleSaveLineForSection(cameraSectionId!, line)}
+                onRemoveLine={(externalId) => handleDeleteLine(cameraSectionId!, externalId)}
+                onAddLineTo={(sectionId, line) => handleSaveLineForSection(sectionId, line)}
+                onRemoveLineFrom={(sectionId, externalId) => handleDeleteLine(sectionId, externalId)}
+                linesBySection={linesBySection}
+              />
+            ) : null
+          }
           onRenameRoom={(roomId, newName) => handleRenameSection(roomId, newName)}
           onAddRoom={(name) => handleAddSection(name)}
           onDeleteRoom={async (roomId) => {

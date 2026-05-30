@@ -25,6 +25,7 @@ import { Combobox } from '@/components/Combobox';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { formatMoney } from '@/lib/photoUpload';
 import { displayImageSrc } from '@/lib/photoDisplay';
+import { isVideoEntry } from '@/lib/media';
 import { VENDORS, vendorPillStyle } from '@/lib/vendors';
 import type {
   RateCardLineItem,
@@ -854,15 +855,23 @@ function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, on
               {(line.photoUrls?.length ?? 0) > 0 && (
                 <div className="mt-1.5 flex gap-1 flex-wrap">
                   {line.photoUrls.map((u, i) => (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      key={`${u}-${i}`}
-                      src={displayImageSrc(u)}
-                      alt=""
-                      onClick={(e) => { e.stopPropagation(); onOpenPhoto?.(i); }}
-                      className="w-10 h-10 object-cover rounded border border-gray-200 cursor-pointer"
-                      title="Tap to view / mark up"
-                    />
+                    <span key={`${u}-${i}`} className="relative inline-block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={displayImageSrc(u)}
+                        alt=""
+                        onClick={(e) => { e.stopPropagation(); onOpenPhoto?.(i); }}
+                        className="w-10 h-10 object-cover rounded border border-gray-200 cursor-pointer"
+                        title={isVideoEntry(u) ? 'Tap to play' : 'Tap to view / mark up'}
+                      />
+                      {isVideoEntry(u) && (
+                        <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <span className="w-4 h-4 rounded-full bg-black/55 flex items-center justify-center">
+                            <svg width="9" height="9" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z" /></svg>
+                          </span>
+                        </span>
+                      )}
+                    </span>
                   ))}
                 </div>
               )}

@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PhotoAnnotator } from '@/components/PhotoAnnotator';
 import { displayImageSrc } from '@/lib/photoDisplay';
+import { isVideoEntry, getVideoUrl } from '@/lib/media';
 
 interface Props {
   groups: { id: string; name: string }[];
@@ -147,10 +148,23 @@ export function PhotoLightbox({
         >
           {photos.map((p, i) => (
             <div key={`${p}-${i}`} className="h-full shrink-0 flex items-center justify-center" style={{ width: cw || '100%' }}>
-              {/* Only render images near the current index to keep it light. */}
+              {/* Only render media near the current index to keep it light. */}
               {Math.abs(i - index) <= 1 ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={displayImageSrc(p)} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
+                isVideoEntry(p) ? (
+                  <video
+                    src={getVideoUrl(p)}
+                    poster={displayImageSrc(p)}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="max-w-full max-h-full"
+                    // Don't let a drag on the controls flip the carousel.
+                    onPointerDown={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={displayImageSrc(p)} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
+                )
               ) : null}
             </div>
           ))}
@@ -177,13 +191,15 @@ export function PhotoLightbox({
       <div className="bg-black px-2 py-3 flex items-center gap-2">
         {!readOnly && (
           <>
-            <button type="button" onClick={() => setAnnotating(true)} title="Mark up"
-              className="shrink-0 flex items-center gap-2 h-11 px-3 bg-white/15 active:bg-white/30 text-white font-heading text-sm rounded-lg">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><circle cx="11" cy="11" r="2" />
-              </svg>
-              <span className="hidden sm:inline">Mark up</span>
-            </button>
+            {!isVideoEntry(url) && (
+              <button type="button" onClick={() => setAnnotating(true)} title="Mark up"
+                className="shrink-0 flex items-center gap-2 h-11 px-3 bg-white/15 active:bg-white/30 text-white font-heading text-sm rounded-lg">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><circle cx="11" cy="11" r="2" />
+                </svg>
+                <span className="hidden sm:inline">Mark up</span>
+              </button>
+            )}
             <button type="button" onClick={handleDelete} title="Delete"
               className="shrink-0 flex items-center gap-2 h-11 px-3 bg-white/10 active:bg-red-600/80 text-white font-heading text-sm rounded-lg">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

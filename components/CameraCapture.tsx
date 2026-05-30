@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppDialog } from '@/components/AppDialog';
 import { PhotoAnnotator } from '@/components/PhotoAnnotator';
+import { uploadVideo } from '@/lib/photoUpload';
+import { makeVideoEntry } from '@/lib/media';
 
 /**
  * State of each photo in the capture session.
@@ -15,9 +17,10 @@ interface CaptureItem {
   blobUrl: string;               // object URL for local preview thumbnail
   file: File;                    // the captured file
   status: 'uploading' | 'uploaded' | 'failed';
-  hubspotUrl?: string;           // populated when upload succeeds
+  hubspotUrl?: string;           // populated when upload succeeds (videos: poster#v=video entry)
   error?: string;                // populated when upload fails
   abortController?: AbortController;
+  kind?: 'photo' | 'video';      // 'video' = press-and-hold clip (blobUrl is its poster)
 }
 
 interface CameraRoom {
@@ -58,6 +61,10 @@ interface Props {
   // Property record id — lets the GPS check use the property's stored
   // coordinates first, before falling back to geocoding the address.
   propertyRecordId?: string;
+  // Optional voice line-item assistant rendered inside the camera, so the
+  // inspector can dictate line items while shooting. No-op on browsers without
+  // the Web Speech API (e.g. iOS Safari).
+  voiceSlot?: React.ReactNode;
 }
 
 // A stamp line; `mark` appends a colored ✓ (location matches the property) or
@@ -122,10 +129,30 @@ const CAPTURE_HEIGHT = 1440;
 // JPEG quality (0..1). 0.88 is a good balance of file size vs visual quality.
 const JPEG_QUALITY = 0.88;
 
+// Press-and-hold video clips: hold the shutter > HOLD_MS to start recording;
+// clips auto-stop at MAX_CLIP_MS. Bitrate-capped so a 10s clip stays small.
+const HOLD_MS = 260;
+const MAX_CLIP_MS = 10000;
+const CLIP_BITRATE = 2_500_000;
+
+// Pick the best MediaRecorder mime type this browser supports (Safari → mp4,
+// Chrome/Android → webm). Returns '' if recording is unsupported entirely.
+function pickClipMime(): string {
+  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
+  const candidates = [
+    'video/mp4',
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=h264',
+    'video/webm',
+  ];
+  return candidates.find((c) => MediaRecorder.isTypeSupported(c)) || '';
+}
+
 export function CameraCapture({
   isOpen, onClose, onComplete, uploadPhoto, maxPhotos = 30,
   rooms, currentRoomId, onRoomChange, onRenameRoom, onDeleteRoom, onAddRoom,
-  addressSnapshot, propertyRecordId,
+  addressSnapshot, propertyRecordId, voiceSlot,
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -144,6 +171,18 @@ export function CameraCapture({
   const [geoDenied, setGeoDenied] = useState(false);
   const [refCoords, setRefCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [geocodeState, setGeocodeState] = useState<'idle' | 'pending' | 'ok' | 'failed'>('idle');
+
+  // ----- Video clip recording (press-and-hold the shutter) -----
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordAudioStreamRef = useRef<MediaStream | null>(null);
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maxClipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingRef = useRef(false);
+  const clipSupported = useRef<boolean>(false);
+  const [recording, setRecording] = useState(false);
+  const [recordSecs, setRecordSecs] = useState(0);
 
   const [items, setItems] = useState<CaptureItem[]>([]);
   // Mirror items in a ref so async code (handleDone polling) can read the
@@ -343,6 +382,142 @@ export function CameraCapture({
       setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'failed', error: err?.message || String(err) } : it)));
     });
   }, [uploadPhoto]);
+
+  // ----- Video clips (press-and-hold the shutter) -----
+
+  // Grab the current live frame as a JPEG poster for a clip (same evidence stamp
+  // as photos, for consistency).
+  const grabPoster = useCallback(async (): Promise<Blob | null> => {
+    const video = videoRef.current;
+    if (!video) return null;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = vw; canvas.height = vh;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(video, 0, 0, vw, vh);
+    const stampLines: StampLine[] = [];
+    if (addressSnapshot) stampLines.push({ text: addressSnapshot });
+    stampLines.push({ text: new Date().toLocaleString() });
+    drawEvidenceStamp(ctx, vw, vh, stampLines);
+    return await new Promise((res) => canvas.toBlob((b) => res(b), 'image/jpeg', JPEG_QUALITY));
+  }, [addressSnapshot]);
+
+  // Upload the poster + video together and store them as one encoded photo_urls
+  // entry (poster#v=video) so the clip rides the normal photo persistence.
+  const enqueueVideo = useCallback((videoFile: File, posterBlob: Blob) => {
+    const rid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 8);
+    const id = `${Date.now()}_${rid}`;
+    const posterUrl = URL.createObjectURL(posterBlob);
+    const abortController = new AbortController();
+    const posterFile = new File([posterBlob], `clip_${id}_poster.jpg`, { type: 'image/jpeg' });
+    const item: CaptureItem = { id, blobUrl: posterUrl, file: videoFile, status: 'uploading', abortController, kind: 'video' };
+    setItems((prev) => [...prev, item]);
+    Promise.all([uploadPhoto(posterFile), uploadVideo(videoFile)])
+      .then(([pUrl, vUrl]) => {
+        if (abortController.signal.aborted) return;
+        const entry = makeVideoEntry(pUrl, vUrl);
+        setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'uploaded', hubspotUrl: entry } : it)));
+      })
+      .catch((err) => {
+        if (abortController.signal.aborted) return;
+        setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'failed', error: err?.message || String(err) } : it)));
+      });
+  }, [uploadPhoto]);
+
+  function stopRecording() {
+    if (maxClipTimerRef.current) { clearTimeout(maxClipTimerRef.current); maxClipTimerRef.current = null; }
+    if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null; }
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state !== 'inactive') { try { mr.stop(); } catch { /* noop */ } }
+    recordingRef.current = false;
+    setRecording(false);
+  }
+
+  async function finalizeClip(mime: string) {
+    const chunks = recordedChunksRef.current;
+    recordedChunksRef.current = [];
+    // Stop the audio capture — but NOT the shared video track (it's the live preview).
+    if (recordAudioStreamRef.current) {
+      recordAudioStreamRef.current.getTracks().forEach((t) => t.stop());
+      recordAudioStreamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+    if (!chunks.length) return;
+    const ext = /mp4/i.test(mime) ? 'mp4' : 'webm';
+    const type = (mime.split(';')[0] || `video/${ext}`);
+    const blob = new Blob(chunks, { type });
+    const file = new File([blob], `clip_${Date.now()}.${ext}`, { type });
+    const poster = await grabPoster();
+    if (!poster) { void dialog.alert('Couldn’t save the clip preview frame. Please try again.'); return; }
+    enqueueVideo(file, poster);
+  }
+
+  async function startRecording() {
+    if (recordingRef.current || permissionState !== 'granted') return;
+    const stream = streamRef.current;
+    const videoTrack = stream?.getVideoTracks?.()[0];
+    if (!videoTrack) return;
+    const mime = pickClipMime();
+    if (!mime) { void dialog.alert('Video recording isn’t supported in this browser. Use "Phone Cam" to record with your phone’s camera app.'); return; }
+    if (items.length >= maxPhotos) { void dialog.alert(`You can capture up to ${maxPhotos} items per session. Tap Done to finish.`); return; }
+
+    // Best-effort audio narration; fall back to a silent clip if the mic is denied.
+    let tracks: MediaStreamTrack[] = [videoTrack];
+    try {
+      const audio = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordAudioStreamRef.current = audio;
+      tracks = [videoTrack, ...audio.getAudioTracks()];
+    } catch { /* video-only */ }
+
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(new MediaStream(tracks), { mimeType: mime, videoBitsPerSecond: CLIP_BITRATE });
+    } catch {
+      try { recorder = new MediaRecorder(new MediaStream(tracks)); } catch { return; }
+    }
+    recordedChunksRef.current = [];
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) recordedChunksRef.current.push(e.data); };
+    recorder.onstop = () => { void finalizeClip(mime); };
+    mediaRecorderRef.current = recorder;
+    try { recorder.start(); } catch { return; }
+    recordingRef.current = true;
+    setRecording(true);
+    setRecordSecs(0);
+    const startedAt = Date.now();
+    elapsedTimerRef.current = setInterval(() => setRecordSecs(Math.floor((Date.now() - startedAt) / 1000)), 200);
+    maxClipTimerRef.current = setTimeout(() => stopRecording(), MAX_CLIP_MS);
+  }
+
+  // Shutter: a quick tap takes a photo; press-and-hold (> HOLD_MS) records a clip.
+  function onShutterDown() {
+    if (permissionState !== 'granted' || busy) return;
+    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+    holdTimerRef.current = setTimeout(() => { holdTimerRef.current = null; void startRecording(); }, HOLD_MS);
+  }
+  function onShutterUp() {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+      if (!recordingRef.current) void capturePhoto();
+      return;
+    }
+    if (recordingRef.current) stopRecording();
+  }
+
+  // Tear down recording when the camera closes.
+  useEffect(() => {
+    if (isOpen) return;
+    if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
+    if (maxClipTimerRef.current) { clearTimeout(maxClipTimerRef.current); maxClipTimerRef.current = null; }
+    if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null; }
+    try { if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop(); } catch { /* noop */ }
+    recordAudioStreamRef.current?.getTracks().forEach((t) => t.stop());
+    recordAudioStreamRef.current = null;
+    recordingRef.current = false;
+    setRecording(false);
+  }, [isOpen]);
 
   // Native OS camera fallback. On iOS (no web torch) and as a universal
   // backup, this opens the phone's built-in camera — which has its own flash
@@ -871,6 +1046,15 @@ export function CameraCapture({
                 </span>
               </div>
             )}
+            {/* Recording indicator */}
+            {recording && (
+              <div className="absolute top-3 left-3 z-10 pointer-events-none flex items-center gap-2 bg-black/60 rounded-full px-3 py-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-white text-xs font-heading font-semibold tabular-nums">
+                  REC {recordSecs}s / {MAX_CLIP_MS / 1000}s
+                </span>
+              </div>
+            )}
             {/* Flip camera button (top right of viewport) */}
             <button
               type="button"
@@ -920,10 +1104,17 @@ export function CameraCapture({
                 <img
                   src={it.blobUrl}
                   alt=""
-                  onClick={() => setAnnotatingId(it.id)}
-                  className="w-16 h-16 object-cover rounded border border-white/20 cursor-pointer"
-                  title="Tap to mark up"
+                  onClick={() => { if (it.kind !== 'video') setAnnotatingId(it.id); }}
+                  className={`w-16 h-16 object-cover rounded border border-white/20 ${it.kind === 'video' ? '' : 'cursor-pointer'}`}
+                  title={it.kind === 'video' ? 'Video clip' : 'Tap to mark up'}
                 />
+                {it.kind === 'video' && (
+                  <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <span className="w-6 h-6 rounded-full bg-black/55 flex items-center justify-center">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z" /></svg>
+                    </span>
+                  </span>
+                )}
                 {/* Status overlay */}
                 {it.status === 'uploading' && (
                   <div className="absolute inset-0 bg-black/60 rounded flex items-center justify-center">
@@ -974,6 +1165,11 @@ export function CameraCapture({
         </div>
       )}
 
+      {/* Voice line-item dictation (optional; hidden where speech isn't supported) */}
+      {voiceSlot && (
+        <div className="bg-black px-4 pb-1 flex justify-center">{voiceSlot}</div>
+      )}
+
       {/* Shutter row */}
       <div className="bg-black px-4 py-4 flex items-center justify-center gap-8">
         {/* Phone camera fallback (left of shutter). Always available: gives iOS
@@ -997,12 +1193,26 @@ export function CameraCapture({
 
         <button
           type="button"
-          onClick={capturePhoto}
+          onPointerDown={onShutterDown}
+          onPointerUp={onShutterUp}
+          onPointerLeave={onShutterUp}
+          onPointerCancel={onShutterUp}
+          onContextMenu={(e) => e.preventDefault()}
           disabled={busy || permissionState !== 'granted'}
-          className="w-16 h-16 rounded-full bg-white border-4 border-white ring-2 ring-white/50 disabled:opacity-30 active:scale-95 transition"
-          aria-label="Take photo"
+          className={`relative w-16 h-16 rounded-full border-4 disabled:opacity-30 active:scale-95 transition select-none ${
+            recording ? 'bg-red-600 border-red-500 ring-2 ring-red-400 scale-110' : 'bg-white border-white ring-2 ring-white/50'
+          }`}
+          style={{ touchAction: 'none' }}
+          aria-label={recording ? 'Stop recording' : 'Take photo (hold to record video)'}
+          title="Tap for photo · press and hold for video"
         >
-          <span className="block w-full h-full rounded-full bg-white" />
+          {recording ? (
+            <span className="absolute inset-0 flex items-center justify-center">
+              <span className="block w-6 h-6 rounded-sm bg-white" />
+            </span>
+          ) : (
+            <span className="block w-full h-full rounded-full bg-white" />
+          )}
         </button>
 
         {/* Mark/annotate the most recent photo (right of shutter). */}
