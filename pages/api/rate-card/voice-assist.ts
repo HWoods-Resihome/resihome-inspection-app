@@ -23,8 +23,10 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { fetchRateCardCatalog } from '@/lib/hubspot';
 import { matchCatalog, getCatalogEmbeddings } from '@/lib/voiceCatalogMatch';
+import { calculateLine } from '@/lib/rateCardMath';
+import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { VENDORS } from '@/lib/vendors';
-import type { RateCardLineItem, RateCardLineInput } from '@/lib/types';
+import type { RateCardLineItem, RateCardLineInput, RegionRate } from '@/lib/types';
 
 export const config = { api: { bodyParser: { sizeLimit: '1mb' } } };
 
@@ -38,11 +40,19 @@ const MODEL_FAST = 'claude-haiku-4-5-20251001';
 const MAX_TOOL_ROUNDS = 4; // safety cap on tool loops per turn
 
 interface ClientMessage { role: 'user' | 'assistant'; content: string; }
+interface CurrentLine {
+  externalId: string;
+  lineItemCode: string;
+  quantity: number;
+  assignedTo: string;
+  tenantBillBackPercent: number;
+}
 interface BodyShape {
   messages: ClientMessage[];
   section: string;
   location: string;
   region: string;
+  currentLines?: CurrentLine[];
 }
 
 function anthropicKey(): string {
@@ -133,24 +143,38 @@ function sse(res: NextApiResponse, event: string, data: any) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-function systemPrompt(section: string, location: string): string {
+function describeLines(catalogByCode: Map<string, RateCardLineItem>, lines: CurrentLine[]): string {
+  if (!lines.length) return 'There are no line items in this area yet.';
+  const rows = lines.map((l, i) => {
+    const item = catalogByCode.get(l.lineItemCode);
+    const desc = item ? item.laborShortDescription : l.lineItemCode;
+    return `  ${i + 1}. id=${l.externalId} | ${desc} | qty ${l.quantity} | ${l.assignedTo} | ${l.tenantBillBackPercent}% tenant`;
+  });
+  return `Existing line items in this area:\n${rows.join('\n')}`;
+}
+
+function systemPrompt(section: string, location: string, linesDesc: string): string {
   const loc = location || section;
   return [
-    `You help a property inspector add Scope rate-card line items by voice for the "${loc}" area of a home. Speed matters — keep the inspector moving.`,
-    `Your job: turn what the inspector says into ONE rate-card line item at a time, with as few questions as possible.`,
+    `You help a property inspector manage Scope rate-card line items by voice for the "${loc}" area of a home. Speed matters — keep the inspector moving.`,
     ``,
-    `Defaults (use these silently unless the inspector says otherwise):`,
-    `  - Vendor: "Vendor 1".`,
-    `  - Tenant chargeback: 100%.`,
-    `Do NOT ask about vendor or tenant percent. Only use a different value if the inspector explicitly states one (e.g. "assign to PPW", "50 percent tenant").`,
+    `Defaults (apply silently unless the inspector says otherwise):`,
+    `  - Vendor: "Vendor 1".  - Tenant chargeback: 100%.`,
+    `Never ask about vendor or tenant percent. Only use a different value if the inspector states one (e.g. "assign to PPW", "50 percent tenant").`,
     ``,
-    `Steps:`,
-    `1. Use search_catalog to find the line item that best matches what they described.`,
-    `2. If the top candidate clearly matches, go with it. Only ask a clarifying question if genuinely ambiguous between distinct options (e.g. repair vs replace) — one short question, then proceed.`,
-    `3. You need a quantity (a number in the item's unit of measure). If the inspector already stated it ("120 feet"), use it. If not, ask ONE short question naming the unit, e.g. "How many linear feet?".`,
-    `4. As soon as you have the line item code and a quantity, call propose_line — applying the Vendor 1 / 100% defaults (or any values the inspector gave).`,
+    `ADDING a line:`,
+    `1. Use search_catalog to find the line item matching what they described.`,
+    `2. Only ask a clarifying question if genuinely ambiguous (e.g. which of two distinct items). One short question, then proceed.`,
+    `3. You need a quantity. If they stated it, use it; if not, ask once, naming the unit (e.g. "How many linear feet?").`,
+    `4. When you have a code and quantity, call propose_line. The inspector's spoken "yes" within this chat IS their confirmation — the app saves automatically when you call propose_line. Do NOT claim a line was added in your own words; the app announces the save.`,
     ``,
-    `Keep replies very short and spoken-friendly — one question, no lists, no preamble. Never invent a line item code; only use codes returned by search_catalog.`,
+    `EDITING an existing line (e.g. "make that 50% tenant", "change the paint line to PPW", "that should be 3 not 1"):`,
+    `  - Identify which existing line they mean (the most recent one if they say "that"/"the last one", or by description). Use the id from the list below.`,
+    `  - Call edit_line with that externalId and only the fields to change. The app saves and announces it.`,
+    ``,
+    `${linesDesc}`,
+    ``,
+    `When you call propose_line or edit_line, do not write any sentence at all — no "I'll find...", no "Added..." — the app shows and speaks the confirmation prompt itself. Only produce text when you genuinely need to ask the inspector a question. Keep questions very short and spoken-friendly. Never invent a code; only use codes from search_catalog.`,
   ].join('\n');
 }
 
@@ -179,7 +203,7 @@ function tools() {
     },
     {
       name: 'propose_line',
-      description: 'Propose a complete line item to add, once you have the code and quantity. Vendor and tenant percent are optional — they default to "Vendor 1" and 100% unless the inspector stated otherwise. This shows the inspector a draft to confirm — it does not save.',
+      description: 'Add a new line item, once you have the code and quantity. Vendor and tenant percent default to "Vendor 1" and 100% unless the inspector stated otherwise. The app saves it automatically and announces it.',
       input_schema: {
         type: 'object',
         properties: {
@@ -192,11 +216,41 @@ function tools() {
         required: ['code', 'quantity'],
       },
     },
+    {
+      name: 'edit_line',
+      description: 'Edit an EXISTING line item in this area (change its vendor, tenant percent, and/or quantity). Use the externalId from the existing-lines list. The app saves the change and announces it.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          externalId: { type: 'string', description: 'The id of the existing line to change (from the existing-lines list).' },
+          quantity: { type: 'number', description: 'New quantity (omit to keep current).' },
+          vendor: { type: 'string', description: `New vendor, one of: ${VENDORS.join(', ')} (omit to keep current).` },
+          tenantBillBackPercent: { type: 'number', description: 'New tenant percent, 0-100 step 5 (omit to keep current).' },
+        },
+        required: ['externalId'],
+      },
+    },
   ];
 }
 
-function lineToSummary(item: RateCardLineItem, qty: number, vendor: string, pct: number): string {
-  return `${item.laborShortDescription} — ${qty} ${item.laborMeas || 'EA'}, ${vendor}, ${pct}% tenant`;
+function money(n: number): string {
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function lineToSummary(
+  item: RateCardLineItem,
+  qty: number,
+  vendor: string,
+  pct: number,
+  region: string,
+  regions: RegionRate[]
+): string {
+  let vendorCostStr = '';
+  try {
+    const calc = calculateLine(item, region, regions, { quantity: qty, tenantBillBackPercent: pct });
+    vendorCostStr = ` — vendor ${money(calc.vendorCost)}`;
+  } catch { /* if calc fails, omit the cost rather than block the line */ }
+  return `${item.laborShortDescription} — ${qty} ${item.laborMeas || 'EA'}, ${vendor}, ${pct}% tenant${vendorCostStr}`;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -238,9 +292,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const catalog = await fetchRateCardCatalog();
     const byCode = new Map(catalog.map((c) => [c.lineItemCode, c]));
+    const regions = await getCachedRegions().catch(() => [] as RegionRate[]);
+    const region = body.region || '';
+    const currentLines: CurrentLine[] = Array.isArray(body?.currentLines) ? body.currentLines : [];
+    const linesByExternalId = new Map(currentLines.map((l) => [l.externalId, l]));
 
     const messages: any[] = clientMessages.map((m) => ({ role: m.role, content: m.content }));
-    const system = systemPrompt(body.section || '', body.location || '');
+    const system = systemPrompt(body.section || '', body.location || '', describeLines(byCode, currentLines));
 
     let usedSearchThisTurn = false;
 
@@ -330,10 +388,59 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             photoUrls: [],
           };
           // A line was matched. Any preamble text already streamed via 'delta';
-          // awaitingReply=false (proposal, not a question — mic stays off).
+          // the client auto-saves and announces it.
           sse(res, 'proposal', {
+            action: 'add',
             line,
-            summary: lineToSummary(item, qty, vendor, pct),
+            summary: lineToSummary(item, qty, vendor, pct, region, regions),
+            assistantText: textBlocks || undefined,
+            awaitingReply: false,
+          });
+          sse(res, 'done', {});
+          return res.end();
+        } else if (tu.name === 'edit_line') {
+          const externalId = String(tu.input?.externalId || '');
+          const existing = linesByExternalId.get(externalId);
+          if (!existing) {
+            toolResults.push({
+              type: 'tool_result', tool_use_id: tu.id, is_error: true,
+              content: JSON.stringify({ error: `No existing line with id ${externalId}. Use an id from the existing-lines list.` }),
+            });
+            continue;
+          }
+          const item = byCode.get(existing.lineItemCode);
+          // Start from the existing values; apply only the provided changes.
+          let qty = existing.quantity;
+          if (tu.input?.quantity != null) {
+            const q = Number(tu.input.quantity);
+            if (isFinite(q) && q >= 0) qty = q;
+          }
+          let vendor = existing.assignedTo || 'Vendor 1';
+          if (tu.input?.vendor != null) {
+            const v = String(tu.input.vendor);
+            vendor = VENDORS.includes(v) ? v : vendor;
+          }
+          let pct = existing.tenantBillBackPercent;
+          if (tu.input?.tenantBillBackPercent != null) {
+            let p = Number(tu.input.tenantBillBackPercent);
+            if (isFinite(p)) pct = Math.max(0, Math.min(100, Math.round(p / 5) * 5));
+          }
+          // Re-save with the SAME externalId so the existing record is updated.
+          const line: RateCardLineInput = {
+            externalId,
+            section: body.section || '',
+            location: body.location || '',
+            lineItemCode: existing.lineItemCode,
+            quantity: qty,
+            tenantBillBackPercent: pct,
+            assignedTo: vendor,
+            note: '',
+            photoUrls: [],
+          };
+          sse(res, 'proposal', {
+            action: 'edit',
+            line,
+            summary: item ? lineToSummary(item, qty, vendor, pct, region, regions) : `${existing.lineItemCode} — ${qty}, ${vendor}, ${pct}% tenant`,
             assistantText: textBlocks || undefined,
             awaitingReply: false,
           });

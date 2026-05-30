@@ -10,21 +10,29 @@
 // math + natural-key upsert). Reject discards it.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { RateCardLineInput } from '@/lib/types';
+import type { RateCardLineInput, RateCardLineItem } from '@/lib/types';
 
 interface Props {
   section: string;        // base section name (e.g. "Yard / Exterior")
   location: string;       // location label (e.g. "Bedroom 1" or "")
   region: string;         // inspection region snapshot (for context only)
-  // Called when the inspector confirms a proposed line. Reuses RateCardForm's
-  // handleSaveLineForSection so the save path is identical to a manual add.
+  // Called when the inspector confirms a proposed line (new OR edited). Reuses
+  // RateCardForm's handleSaveLineForSection, which upserts by externalId — so
+  // passing an existing line's externalId edits it in place.
   onAddLine: (line: RateCardLineInput) => void;
+  // The lines already in this section (so the agent can edit them by voice).
+  currentLines?: RateCardLineInput[];
+  // Catalog for resolving codes -> descriptions in edit summaries.
+  catalog?: RateCardLineItem[];
   disabled?: boolean;
 }
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
 
-type Proposal = { line: RateCardLineInput; summary: string };
+type Pending = { line: RateCardLineInput; summary: string; action: 'add' | 'edit' };
+
+// Affirmatives that commit a pending proposal when spoken.
+const AFFIRMATIVE = /^(yes|yep|yeah|yup|sure|ok|okay|correct|add it|add|do it|confirm|that'?s right|looks good|perfect|go ahead)\b/i;
 
 // Minimal typing for the vendor-prefixed SpeechRecognition (webkit on most
 // mobile webviews). We feature-detect at runtime.
@@ -34,11 +42,16 @@ function getRecognition(): any | null {
   if (!Ctor) return null;
   const r = new Ctor();
   r.lang = 'en-US';
-  r.interimResults = false;
+  r.interimResults = true;   // needed so we can detect ongoing speech across pauses
   r.maxAlternatives = 1;
-  r.continuous = false;
+  r.continuous = true;       // keep listening through natural pauses; we end it ourselves
   return r;
 }
+
+// How long to wait after the inspector stops talking before finalizing the
+// utterance. Browser SpeechRecognition has no native silence-timeout knob, so
+// we run our own timer and only submit once speech has paused this long.
+const SILENCE_MS = 1500;
 
 // Speak text aloud via the browser's built-in speechSynthesis (free, no API,
 // works in the mobile webview). Calls onDone when finished (or immediately if
@@ -51,7 +64,7 @@ function speak(text: string, onDone: () => void) {
     }
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.05;
+    u.rate = 1.3;
     u.onend = () => onDone();
     u.onerror = () => onDone();
     window.speechSynthesis.speak(u);
@@ -60,36 +73,57 @@ function speak(text: string, onDone: () => void) {
   }
 }
 
-export function VoiceLineAssistant({ section, location, region, onAddLine, disabled }: Props) {
+export function VoiceLineAssistant({ section, location, region, onAddLine, currentLines, catalog, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const [supported, setSupported] = useState(true);
   const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [warming, setWarming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState('');
   const [typed, setTyped] = useState('');
   const recogRef = useRef<any>(null);
+  // Synchronous guards (state updates are async, so we can't rely on `listening`
+  // inside the start handler to prevent double-starts).
+  const startingRef = useRef(false);
+  const listeningRef = useRef(false);
+  // Silence timer + accumulated final transcript across pauses.
+  const silenceTimerRef = useRef<any>(null);
+  const finalTranscriptRef = useRef('');
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   // Holds the latest startListening so TTS-onend can trigger it without stale closures.
   const startListeningRef = useRef<() => void>(() => {});
+  // Synchronous access to the pending proposal (for the affirmative intercept).
+  const pendingRef = useRef<Pending | null>(null);
+  const commitPendingRef = useRef<() => void>(() => {});
+  // When true, start listening as soon as warm-up completes (set on panel open).
+  const wantAutoStartRef = useRef(false);
 
   useEffect(() => {
     setSupported(getRecognition() !== null);
   }, []);
 
   // Warm-up: when the panel opens, ping the endpoint (GET) so the catalog +
-  // embeddings cold-start work happens BEFORE the first spoken line. Fire and
-  // forget; failure is harmless (the real request still works, just slower).
+  // embeddings cold-start work happens BEFORE the first spoken line. We surface
+  // a "getting ready" state on the mic so the inspector knows it's priming.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    setWarming(true);
     (async () => {
       try {
         await fetch('/api/rate-card/voice-assist', { method: 'GET' });
       } catch { /* non-fatal */ }
-      if (cancelled) return;
+      if (!cancelled) {
+        setWarming(false);
+        // If the panel was just opened, start listening now that we're primed.
+        if (wantAutoStartRef.current) {
+          wantAutoStartRef.current = false;
+          setTimeout(() => { startListeningRef.current(); }, 0);
+        }
+      }
     })();
     return () => { cancelled = true; };
   }, [open]);
@@ -104,7 +138,19 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
         const r = await fetch('/api/rate-card/voice-assist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: history, section, location, region }),
+          body: JSON.stringify({
+            messages: history,
+            section,
+            location,
+            region,
+            currentLines: (currentLines || []).map((l) => ({
+              externalId: l.externalId,
+              lineItemCode: l.lineItemCode,
+              quantity: l.quantity,
+              assignedTo: l.assignedTo,
+              tenantBillBackPercent: l.tenantBillBackPercent,
+            })),
+          }),
         });
         if (!r.ok || !r.body) {
           // Try to read a JSON error (non-stream failure path).
@@ -156,12 +202,15 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
         if (finalType === 'error') {
           setError(finalData?.error || 'Something went wrong.');
         } else if (finalType === 'proposal') {
-          setProposal({ line: finalData.line, summary: finalData.summary });
-          const say = finalData.assistantText || accumulated || finalData.summary;
-          if (finalData.assistantText || accumulated) {
-            setMessages((m) => [...m, { role: 'assistant', content: finalData.assistantText || accumulated }]);
-          }
-          speak(say, () => { /* no auto-restart on a proposal */ });
+          // Hold the proposal as PENDING — preview it, ask for confirmation, and
+          // wait for a spoken "yes" / change, or a button tap. Nothing saves yet.
+          const line: RateCardLineInput = finalData.line;
+          setPending({ line, summary: finalData.summary, action: finalData.action === 'edit' ? 'edit' : 'add' });
+          const verb = finalData.action === 'edit' ? 'Change to' : 'Add this';
+          const prompt = `${verb}: ${finalData.summary}. Is this what you want, or any changes?`;
+          setMessages((m) => [...m, { role: 'assistant', content: prompt }]);
+          // Speak the prompt, then reopen the mic to catch "yes" or a change.
+          speak(prompt, () => { startListeningRef.current(); });
         } else {
           // question or message — the text already streamed; finalize it.
           const text = finalData?.text || accumulated;
@@ -177,14 +226,20 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
         setBusy(false);
       }
     },
-    [section, location, region]
+    [section, location, region, currentLines, onAddLine]
   );
 
   const submitUtterance = useCallback(
     (text: string) => {
       const t = text.trim();
       if (!t) return;
-      setProposal(null);
+      // If a proposal is pending and the inspector just said "yes"/"add it",
+      // commit it directly rather than round-tripping the agent.
+      if (pendingRef.current && AFFIRMATIVE.test(t)) {
+        setMessages((m) => [...m, { role: 'user', content: t }]);
+        commitPendingRef.current();
+        return;
+      }
       const next: ChatMsg[] = [...messages, { role: 'user', content: t }];
       setMessages(next);
       void sendToAgent(next);
@@ -195,63 +250,149 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
   const startListening = useCallback(() => {
     setError(null);
     try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
+
+    // Guard: if we're already listening (or a recognition is mid-start), don't
+    // start a second one — calling start() on an active recognizer throws and
+    // surfaces a spurious "aborted" error.
+    if (startingRef.current || listeningRef.current) return;
+
     const recog = getRecognition();
     if (!recog) { setSupported(false); return; }
+
+    // Tear down any previous instance cleanly first.
+    if (recogRef.current) {
+      try {
+        recogRef.current.onresult = null;
+        recogRef.current.onerror = null;
+        recogRef.current.onend = null;
+        recogRef.current.abort?.();
+      } catch { /* noop */ }
+    }
     recogRef.current = recog;
-    recog.onresult = (ev: any) => {
-      const text = ev.results?.[0]?.[0]?.transcript || '';
+    startingRef.current = true;
+    finalTranscriptRef.current = '';
+
+    const clearSilence = () => {
+      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    };
+    const finalize = () => {
+      clearSilence();
+      const text = finalTranscriptRef.current.trim();
+      finalTranscriptRef.current = '';
+      try { recog.stop(); } catch { /* noop */ }
+      listeningRef.current = false;
       setListening(false);
-      submitUtterance(text);
+      if (text) submitUtterance(text);
+    };
+
+    recog.onresult = (ev: any) => {
+      // Accumulate finalized chunks; any result (interim or final) means the
+      // inspector is still talking, so reset the silence countdown.
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const r = ev.results[i];
+        if (r.isFinal) finalTranscriptRef.current += (finalTranscriptRef.current ? ' ' : '') + (r[0]?.transcript || '').trim();
+      }
+      clearSilence();
+      // Wait for a longer pause before deciding the inspector is done.
+      silenceTimerRef.current = setTimeout(finalize, SILENCE_MS);
     };
     recog.onerror = (ev: any) => {
+      startingRef.current = false;
+      listeningRef.current = false;
+      clearSilence();
       setListening(false);
-      setError(ev?.error === 'not-allowed'
+      const code = ev?.error;
+      // 'aborted' (we stopped/superseded it) and 'no-speech' (silence timeout)
+      // are benign — don't show them as errors.
+      if (code === 'aborted' || code === 'no-speech') return;
+      setError(code === 'not-allowed'
         ? 'Microphone permission denied.'
-        : `Couldn't hear that (${ev?.error || 'error'}). Try again or type below.`);
+        : `Couldn't hear that (${code || 'error'}). Try again or type below.`);
     };
-    recog.onend = () => setListening(false);
+    recog.onstart = () => {
+      startingRef.current = false;
+      listeningRef.current = true;
+      setListening(true);
+    };
+    recog.onend = () => {
+      startingRef.current = false;
+      listeningRef.current = false;
+      // If recognition ended on its own (e.g. mobile hard cap) but we captured
+      // speech, submit what we have rather than dropping it.
+      const captured = finalTranscriptRef.current.trim();
+      if (captured && !silenceTimerRef.current) {
+        finalTranscriptRef.current = '';
+        setListening(false);
+        submitUtterance(captured);
+        return;
+      }
+      setListening(false);
+    };
+
     try {
       recog.start();
-      setListening(true);
     } catch {
+      startingRef.current = false;
+      listeningRef.current = false;
       setListening(false);
     }
   }, [submitUtterance]);
 
   const stopListening = useCallback(() => {
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
     try { recogRef.current?.stop(); } catch { /* noop */ }
+    startingRef.current = false;
+    listeningRef.current = false;
     setListening(false);
-  }, []);
+    // If the inspector tapped stop after speaking, submit what we captured.
+    const captured = finalTranscriptRef.current.trim();
+    finalTranscriptRef.current = '';
+    if (captured) submitUtterance(captured);
+  }, [submitUtterance]);
 
   // Keep the ref pointing at the latest startListening so TTS-onend (which
   // captures an older closure) always calls the current one.
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
-  // Auto-scroll the transcript to the newest message / streaming text / proposal.
+  // Commit the pending proposal: save it (the CLIENT announces success only
+  // after the save), then prompt for the next line and reopen the mic.
+  const commitPending = useCallback(() => {
+    const p = pendingRef.current;
+    if (!p) return;
+    setPending(null);
+    const verb = p.action === 'edit' ? 'Updated' : 'Added';
+    try {
+      onAddLine(p.line);
+      const confirm = `${verb}: ${p.summary}. Anything else for this area?`;
+      setMessages((m) => [...m, { role: 'assistant', content: confirm }]);
+      speak(confirm, () => { startListeningRef.current(); });
+    } catch (e: any) {
+      const msg = `I couldn't save that line (${String(e?.message || e)}). Try again or add it manually.`;
+      setMessages((m) => [...m, { role: 'assistant', content: msg }]);
+      speak(msg, () => { /* no restart on failure */ });
+    }
+  }, [onAddLine]);
+
+  // Keep synchronous refs current for the affirmative intercept.
+  useEffect(() => { pendingRef.current = pending; }, [pending]);
+  useEffect(() => { commitPendingRef.current = commitPending; }, [commitPending]);
+
+  // Auto-scroll the transcript to the newest message / streaming text.
   useEffect(() => {
     const el = transcriptRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, proposal, streamingText]);
+  }, [messages, streamingText, pending]);
 
   // Stop any in-progress speech if the panel unmounts.
-  useEffect(() => () => { try { window.speechSynthesis?.cancel(); } catch { /* noop */ } }, []);
-
-  function confirmProposal() {
-    if (!proposal) return;
-    onAddLine(proposal.line);
-    setMessages((m) => [...m, { role: 'assistant', content: `Added: ${proposal.summary}. Anything else for this area?` }]);
-    setProposal(null);
-  }
-
-  function rejectProposal() {
-    setProposal(null);
-    setMessages((m) => [...m, { role: 'assistant', content: 'Okay, discarded. Tell me what you need instead.' }]);
-  }
+  useEffect(() => () => {
+    try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+  }, []);
 
   function reset() {
     stopListening();
     setMessages([]);
-    setProposal(null);
+    setPending(null);
     setError(null);
     setTyped('');
   }
@@ -262,10 +403,9 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
         type="button"
         onClick={() => {
           setOpen(true);
-          // Start listening immediately so the inspector doesn't have to tap
-          // again. Defer to the next tick so the panel mounts and the ref points
-          // at the live startListening.
-          setTimeout(() => { startListeningRef.current(); }, 0);
+          // Auto-start the mic once warm-up finishes (so the icon shows
+          // "Getting ready…" then "Listening"). The warm-up effect triggers it.
+          wantAutoStartRef.current = true;
         }}
         disabled={disabled}
         aria-label="Add line items by voice"
@@ -292,9 +432,8 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
         </p>
       )}
 
-      {/* Transcript + draft proposal share one scroll region so auto-scroll
-          reaches whichever is newest. */}
-      {(messages.length > 0 || proposal || streamingText) && (
+      {/* Transcript */}
+      {(messages.length > 0 || streamingText) && (
         <div ref={transcriptRef} className="max-h-56 overflow-y-auto mb-2">
           <div className="space-y-1.5">
             {messages.map((m, i) => (
@@ -316,24 +455,27 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
               </div>
             )}
           </div>
+        </div>
+      )}
 
-          {/* Draft proposal — confirm before saving */}
-          {proposal && (
-            <div className="rounded-md border border-teal-300 bg-teal-50 p-2.5 mt-2">
-              <div className="text-xs font-heading font-semibold text-teal-800 mb-1">Add this line?</div>
-              <div className="text-sm text-ink mb-2">{proposal.summary}</div>
-              <div className="flex gap-2">
-                <button type="button" onClick={confirmProposal}
-                  className="px-3 py-1 text-sm bg-teal-600 text-white rounded hover:bg-teal-700">
-                  Add it
-                </button>
-                <button type="button" onClick={rejectProposal}
-                  className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100">
-                  No
-                </button>
-              </div>
-            </div>
-          )}
+      {/* Pending proposal preview — confirm by voice ("yes") or button. */}
+      {pending && (
+        <div className="rounded-md border border-teal-300 bg-teal-50 p-2.5 mb-2">
+          <div className="text-xs font-heading font-semibold text-teal-800 mb-1">
+            {pending.action === 'edit' ? 'Apply this change?' : 'Add this line?'}
+          </div>
+          <div className="text-sm text-ink mb-2">{pending.summary}</div>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => { stopListening(); commitPending(); }}
+              className="px-3 py-1 text-sm bg-teal-600 text-white rounded hover:bg-teal-700">
+              {pending.action === 'edit' ? 'Apply' : 'Add it'}
+            </button>
+            <button type="button" onClick={() => { setPending(null); startListening(); }}
+              className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100">
+              Change
+            </button>
+          </div>
+          <div className="text-[11px] text-gray-500 mt-1.5">…or just say “yes” to add, or tell me what to change.</div>
         </div>
       )}
 
@@ -345,14 +487,16 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
           <button
             type="button"
             onClick={listening ? stopListening : startListening}
-            disabled={busy || disabled}
+            disabled={busy || warming || disabled}
             className={
-              'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded disabled:opacity-50 ' +
+              'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded disabled:opacity-60 ' +
               (listening ? 'bg-red-600 text-white animate-pulse' : 'bg-brand text-white hover:bg-brand-dark')
             }
           >
-            <MicIcon className="w-4 h-4" />
-            {listening ? 'Listening… tap to stop' : busy ? 'Thinking…' : 'Speak'}
+            {warming || busy
+              ? <SpinnerIcon className="w-4 h-4 animate-spin" />
+              : <MicIcon className="w-4 h-4" />}
+            {warming ? 'Getting ready…' : listening ? 'Listening… tap to stop' : busy ? 'Thinking…' : 'Speak'}
           </button>
         )}
         {/* Typed fallback (also handy when STT mishears) */}
@@ -373,6 +517,14 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, disab
         </button>
       )}
     </div>
+  );
+}
+
+function SpinnerIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+      <path d="M12 3a9 9 0 1 0 9 9" />
+    </svg>
   );
 }
 

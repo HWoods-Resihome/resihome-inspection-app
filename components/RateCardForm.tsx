@@ -1318,6 +1318,8 @@ export function RateCardForm(props: RateCardFormProps) {
                             location={s.location}
                             region={inspectionRegion}
                             disabled={dataLoading}
+                            currentLines={lines}
+                            catalog={catalog}
                             onAddLine={(line) => handleSaveLineForSection(s.id, line)}
                           />
                         )}
