@@ -701,7 +701,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
 
       {/* Transcript */}
       {(messages.length > 0 || streamingText) && (
-        <div ref={transcriptRef} className="max-h-56 overflow-y-auto mb-2">
+        <div ref={transcriptRef} className="max-h-28 overflow-y-auto mb-2">
           <div className="space-y-1.5">
             {messages.map((m, i) => (
               <div key={i} className={m.role === 'user' ? 'text-right' : 'text-left'}>
@@ -753,7 +753,14 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         {supported && (
           <button
             type="button"
-            onClick={listening ? stopListening : startListening}
+            onClick={() => {
+              if (listening) { stopListening(); return; }
+              // Barge-in: if the assistant is mid-sentence, cut it off so the
+              // inspector can start talking immediately.
+              try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
+              speakingRef.current = false;
+              startListening();
+            }}
             disabled={(busy || warming) && !listening ? true : disabled}
             className={
               'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded disabled:opacity-60 ' +

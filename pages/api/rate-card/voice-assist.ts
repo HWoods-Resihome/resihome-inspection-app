@@ -195,7 +195,7 @@ function systemPrompt(
     ``,
     `${linesDesc}`,
     ``,
-    `The inspector may ask for SEVERAL things in one breath — e.g. "I'm back in the kitchen, replace the black microwave" (switch room + add a line), "add a new water heater and replace the kitchen faucet" (two lines), or "bedroom one needs new carpet and pad and paint two walls" (switch to Bedroom 1 + carpet/pad line + paint line = TWO separate items). Treat each thing joined by "and" / "also" / commas as a SEPARATE line item and process every one. Handle the WHOLE request in this turn: call the tools one after another (switch_room first if a room change was mentioned, then search_catalog + propose_line for EACH item separately). Do a separate search_catalog per item — never fold two different items into one search. Don't stop after the first action — keep going until everything they said is added, then give one short wrap-up. Each line still needs a confident match and a quantity; if one item is unclear, add the clear ones and ask about just the unclear one. Before wrapping up, re-read the inspector's sentence and confirm you acted on every distinct item in it.`,
+    `The inspector may ask for SEVERAL things in one breath — e.g. "I'm back in the kitchen, replace the black microwave" (switch room + add a line), "add a new water heater and replace the kitchen faucet" (two lines), or "bedroom one needs new carpet and pad and paint two walls" (switch to Bedroom 1 + carpet/pad line + paint line = TWO separate items). Treat each thing joined by "and" / "also" / commas as a SEPARATE line item and process every one. EFFICIENT FLOW for multiple items: (1) switch_room first if a room change was mentioned; (2) call search_catalog ONCE with the \`queries\` array containing every item (e.g. queries: ["carpet and pad", "paint two walls"]) — this searches them all together; (3) then add every confident match — you can emit multiple propose_line calls in a single step. For a single item just use \`query\`. Don't stop after the first item — add all of them, then give one short wrap-up. Each line still needs a confident match and a quantity; add the clear ones and ask about only the unclear/low-confidence one. Before wrapping up, re-read the inspector's sentence and confirm every distinct item was added.`,
     ``,
     `When you call propose_line, edit_line, or switch_room, do not write any sentence at all — the app shows/speaks the result itself. NEVER narrate what you are about to do or just did (no "I'll search for that", no "Let me add that", no "Added X"); narration after acting is confusing because the app already announced it. Only produce text when you genuinely need to ask the inspector a question. Keep questions very short and spoken-friendly. Never invent a code; only use codes from search_catalog.`,
     ``,
@@ -208,14 +208,14 @@ function tools(rooms: { id: string; name: string }[] = []) {
   const base = [
     {
       name: 'search_catalog',
-      description: 'Semantic search of the rate-card catalog for the line item that best matches what the inspector described. Returns the top candidate line items with their code, description, category, and unit of measure.',
+      description: 'Semantic search of the rate-card catalog for the line item(s) that best match what the inspector described. For a SINGLE item pass `query`. For MULTIPLE items in one request (e.g. "carpet and pad and paint two walls"), pass `queries` as an array — they are all searched in one call, returning a candidate set per query. Prefer the batch form when the inspector lists several items; it is much faster.',
       input_schema: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'What the inspector wants done, e.g. "gutter cleaning" or "replace broken window screen".' },
+          query: { type: 'string', description: 'A single item to find, e.g. "gutter cleaning".' },
+          queries: { type: 'array', items: { type: 'string' }, description: 'Several items to find at once, e.g. ["carpet and pad", "paint two walls"]. Use this for multi-item requests.' },
           categoryHint: { type: 'string', description: 'Optional category guess to bias results, e.g. "Gutters".' },
         },
-        required: ['query'],
       },
     },
     {
@@ -308,6 +308,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       const catalog = await fetchRateCardCatalog();
       await getCatalogEmbeddings(catalog); // builds/loads the vector cache
+      // Also warm the Voyage QUERY path + region cache so the first real
+      // utterance doesn't pay cold-start latency on either.
+      await Promise.allSettled([
+        matchCatalog('warmup', catalog, { topK: 1 }),
+        getCachedRegions(),
+      ]);
       return res.status(200).json({ warm: true, items: catalog.length });
     } catch (e: any) {
       // Warm-up failure is non-fatal; the real request will surface errors.
@@ -367,12 +373,61 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // a tool-free final round is a wrap-up message; if not, it's a question.
     let didAct = false;
 
+    // --- Speculative pre-search (latency optimization) -------------------
+    // The dominant cost is two sequential model round-trips: round 1 decides to
+    // search, round 2 proposes after seeing candidates. For the common case
+    // (the inspector names item(s) to add) we can run the catalog search up
+    // front — in parallel for multiple items — and hand the candidates to the
+    // model in the system prompt, so it can propose in ROUND 1. The model can
+    // still call search_catalog for anything not covered. We only do this on a
+    // fresh user turn (last message is the user's), and skip it for obvious
+    // edits ("make that 50%") where no catalog lookup is needed.
+    let preSearchBlock = '';
+    try {
+      const lastMsg = clientMessages[clientMessages.length - 1];
+      const utter = lastMsg && lastMsg.role === 'user' ? String(lastMsg.content || '') : '';
+      const looksLikeEdit = /\b(make (it|that)|change (it|that|the)|set (it|that)|that should be|instead|tenant|percent|vendor)\b/i.test(utter)
+        && !/\b(add|install|replace|need|put in)\b/i.test(utter);
+      if (utter && utter.length >= 3 && !looksLikeEdit) {
+        // Split on "and"/"also"/commas into candidate item phrases (cheap heuristic;
+        // the model still owns the final decomposition).
+        const phrases = utter
+          .split(/\b(?:and then|and also|and|also|plus|,)\b/i)
+          .map((s) => s.trim())
+          .filter((s) => s.length >= 3)
+          .slice(0, 5);
+        const queries = phrases.length ? phrases : [utter];
+        const matches = await Promise.all(
+          queries.map((q) => matchCatalog(q, catalog, { topK: 5, sectionName: activeSection || body.section || '' }).then((r) => ({ q, r })).catch(() => null))
+        );
+        const blocks: string[] = [];
+        for (const m of matches) {
+          if (!m || !m.r.confident || !m.r.candidates.length) continue;
+          const top = m.r.candidates.slice(0, 4).map((c) =>
+            `${c.item.lineItemCode} — ${c.item.laborShortDescription} [${c.item.category}/${c.item.subcategory}, ${c.item.laborMeas}]`
+          ).join('; ');
+          blocks.push(`"${m.q}" → ${top}`);
+        }
+        if (blocks.length) {
+          preSearchBlock = [
+            ``,
+            `LIKELY CATALOG MATCHES (pre-searched for this request — use these to propose directly without calling search_catalog again, IF one clearly fits; otherwise call search_catalog yourself):`,
+            ...blocks.map((b) => `  - ${b}`),
+          ].join('\n');
+        }
+      }
+    } catch { /* pre-search is best-effort; the model can still search */ }
+
+    const systemWithHints = preSearchBlock ? `${system}\n${preSearchBlock}` : system;
+
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      // Round 0 always uses the smart model. After that, the smart model is only
+      // needed if a fresh catalog search happened (interpreting candidates).
       const model = round === 0 || usedSearchThisTurn ? MODEL_SMART : MODEL_FAST;
 
       // Stream this model call; forward text deltas live to the client.
       const { content } = await streamAnthropic(
-        { model, max_tokens: 1024, system, tools: roomTools, messages },
+        { model, max_tokens: 1024, system: systemWithHints, tools: roomTools, messages },
         (chunk) => sse(res, 'delta', { text: chunk })
       );
 
@@ -400,32 +455,40 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       for (const tu of toolUses) {
         if (tu.name === 'search_catalog') {
           usedSearchThisTurn = true;
-          const q = String(tu.input?.query || '');
           const hint = tu.input?.categoryHint ? String(tu.input.categoryHint) : undefined;
-          const result = await matchCatalog(q, catalog, {
-            topK: 10,
-            categoryHint: hint,
-            sectionName: activeSection || body.section || '',
-          });
-          const compact = result.candidates.map((m) => ({
-            code: m.item.lineItemCode,
-            description: m.item.laborShortDescription,
-            category: m.item.category,
-            subcategory: m.item.subcategory,
-            unit: m.item.laborMeas,
-          }));
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: tu.id,
-            content: JSON.stringify({
-              candidates: compact,
-              // When the best match is weak, tell the agent so it verifies with
-              // the inspector instead of confidently proposing a wrong line.
+          const sectionName = activeSection || body.section || '';
+          // Batch form: an array of queries searched together.
+          const queryList: string[] = Array.isArray(tu.input?.queries) && tu.input.queries.length
+            ? tu.input.queries.map((x: any) => String(x)).filter(Boolean)
+            : [String(tu.input?.query || '')].filter(Boolean);
+
+          const runOne = async (q: string) => {
+            const result = await matchCatalog(q, catalog, { topK: 8, categoryHint: hint, sectionName });
+            return {
+              query: q,
               confident: result.confident,
+              candidates: result.candidates.map((m) => ({
+                code: m.item.lineItemCode,
+                description: m.item.laborShortDescription,
+                category: m.item.category,
+                subcategory: m.item.subcategory,
+                unit: m.item.laborMeas,
+              })),
               guidance: result.confident
                 ? 'Top candidates look relevant.'
                 : 'No strong match — none of these may be right. Confirm with the inspector or ask them to rephrase before proposing; do not assume.',
-            }),
+            };
+          };
+
+          const results = await Promise.all(queryList.map(runOne));
+          // Single-query callers get the old flat shape; batch callers get `results`.
+          const payload = results.length === 1
+            ? results[0]
+            : { results };
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: tu.id,
+            content: JSON.stringify(payload),
           });
         } else if (tu.name === 'get_line_details') {
           const code = String(tu.input?.code || '');

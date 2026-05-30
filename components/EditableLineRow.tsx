@@ -796,19 +796,21 @@ function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, on
     const subParts = [item.category, item.subcategory].filter(Boolean).join(' · ');
     const qtyUnit = `${line.quantity} ${item.laborMeas}`.trim();
     return (
-      <tr>
+      <tr data-line-id={line.externalId}>
         <td colSpan={12} className="p-0">
           <div
             onClick={readOnly || editingDesc ? undefined : onEnterEdit}
-            className={`relative flex gap-2 border border-gray-200 rounded-lg px-3 py-2.5 mb-2 bg-white ${readOnly || editingDesc ? '' : 'active:bg-gray-50 cursor-pointer'}`}
+            className={`relative flex gap-2 border border-gray-200 rounded-lg pl-3 py-2.5 mb-2 bg-white ${readOnly ? 'pr-3' : 'pr-8'} ${readOnly || editingDesc ? '' : 'active:bg-gray-50 cursor-pointer'}`}
           >
-            {/* Quick-delete X (top-right). Deletes immediately, no confirm. */}
+            {/* Quick-delete X — sits in the right gutter, vertically centered, so
+                it stays inside the card edge and clear of the price columns.
+                Deletes immediately, no confirm. */}
             {!readOnly && (
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onDelete(); }}
                 aria-label="Delete line item"
-                className="absolute -top-2 -right-2 w-6 h-6 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-400 hover:text-red-600 hover:border-red-300 shadow-sm text-base leading-none z-10"
+                className="absolute top-1/2 -translate-y-1/2 right-1 w-6 h-6 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-400 hover:text-red-600 hover:border-red-300 shadow-sm text-base leading-none z-10"
               >
                 ×
               </button>
@@ -860,8 +862,8 @@ function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, on
               <div className="w-[60px] text-right">
                 <div className="text-[10px] uppercase tracking-wide text-gray-400">Tenant</div>
                 <div className="text-[12px] font-semibold text-brand mt-0.5 tabular-nums whitespace-nowrap">{calc ? money2(calc.tenantCost) : '…'}</div>
-                {/* Tenant % in parens under the tenant $ */}
-                <div className="text-[10px] text-gray-400 tabular-nums">({line.tenantBillBackPercent}%)</div>
+                {/* Tenant % in parens under the tenant $ — same pink as the $ */}
+                <div className="text-[10px] text-brand tabular-nums">({line.tenantBillBackPercent}%)</div>
               </div>
             </div>
           </div>
@@ -872,6 +874,7 @@ function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, on
 
   return (
     <tr
+      data-line-id={line.externalId}
       onClick={readOnly || editingDesc ? undefined : onEnterEdit}
       className={`border-b border-gray-100 ${readOnly || editingDesc ? '' : 'hover:bg-gray-50 cursor-pointer'}`}
     >

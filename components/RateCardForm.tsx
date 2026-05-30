@@ -241,19 +241,24 @@ export function RateCardForm(props: RateCardFormProps) {
     }, 60);
   }, []);
 
-  // After a voice add/edit, bring the affected section up to just below the
-  // sticky header so the newly added/edited line is easy to see. Same behavior
-  // on desktop and mobile. The tall bottom spacer guarantees there's room to
-  // scroll even the last section to the top.
-  const revealSection = useCallback((sectionId: string) => {
+  // After a voice add/edit, bring the affected LINE (preferred) or section up
+  // to just below the sticky header so the change is easy to see. Same behavior
+  // on desktop and mobile. The tall bottom spacer guarantees room to scroll even
+  // the last line to the top.
+  const revealSection = useCallback((sectionId: string, lineExternalId?: string) => {
     setExpanded((e) => ({ ...e, [sectionId]: true }));
     setTimeout(() => {
-      const el = sectionRefs.current[sectionId];
+      // Prefer the specific line element so the changed card lands at the top.
+      let el: Element | null = null;
+      if (lineExternalId && typeof document !== 'undefined') {
+        el = document.querySelector(`[data-line-id="${CSS.escape(lineExternalId)}"]`);
+      }
+      if (!el) el = sectionRefs.current[sectionId] || null;
       if (!el) return;
       const rect = el.getBoundingClientRect();
       const top = window.scrollY + rect.top - stickyOffset();
       window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-    }, 90);
+    }, 120);
   }, []);
   // form mounts, so the FIRST "add line item" click is instant instead of
   // waiting on the (large) catalog fetch. Fire-and-forget; ensureDataLoaded
@@ -1438,9 +1443,9 @@ export function RateCardForm(props: RateCardFormProps) {
                     disabled={dataLoading}
                     currentLines={linesBySection[currentSectionId] || []}
                     catalog={catalog}
-                    onAddLine={(line) => { handleSaveLineForSection(currentSectionId, line); revealSection(currentSectionId); }}
+                    onAddLine={(line) => { handleSaveLineForSection(currentSectionId, line); revealSection(currentSectionId, line.externalId); }}
                     onRemoveLine={(externalId) => handleDeleteLine(currentSectionId, externalId)}
-                    onAddLineTo={(sectionId, line) => { handleSaveLineForSection(sectionId, line); revealSection(sectionId); }}
+                    onAddLineTo={(sectionId, line) => { handleSaveLineForSection(sectionId, line); revealSection(sectionId, line.externalId); }}
                     onRemoveLineFrom={(sectionId, externalId) => handleDeleteLine(sectionId, externalId)}
                     linesBySection={linesBySection}
                   />
@@ -1867,39 +1872,40 @@ function SectionHeader(p: SectionHeaderProps) {
           <span className="text-gray-400 flex-shrink-0">{p.isOpen ? '▾' : '▸'}</span>
         )}
       </div>
-      {/* Row 2: photo badges + line count on the LEFT, money totals on the
-          RIGHT, with each total in a fixed-width column so that Vendor /
-          Client / Tenant totals visually line up with the corresponding
-          columns in the table below. */}
-      <div className="flex items-center justify-between gap-2 mt-1 flex-wrap">
-        <div className="flex items-baseline gap-x-3 gap-y-1 flex-wrap text-xs">
+      {/* Row 2: photo status, then a centered 5-box totals pill that mirrors
+          the floating header (Lines + Vendor / Client / Tenant / Net Turn). */}
+      <div className="mt-1">
+        <div className="flex items-baseline gap-x-3 gap-y-1 flex-wrap text-xs justify-center mb-1">
           {p.photosMissing && (
             <span title="Section photo required" className="text-amber-600 font-semibold">📷 Photos Needed</span>
           )}
           {p.photosCount > 0 && (
             <span className="text-gray-500">📷 {p.photosCount}</span>
           )}
-          <span className={p.lineCount > 0 ? 'font-semibold text-gray-700' : 'text-gray-500'}>
-            {p.lineCount} {p.lineCount === 1 ? 'line' : 'lines'}
-          </span>
         </div>
         {p.lineCount > 0 && (
-          <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden">
-            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px]">
-              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Vendor</div>
-              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.vendorTotal))}</div>
-            </div>
-            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px] border-l border-gray-200/70">
-              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Client</div>
-              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.clientTotal))}</div>
-            </div>
-            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px] border-l border-gray-200/70">
-              <div className="text-brand/70 text-[10px] uppercase tracking-wide">Tenant</div>
-              <div className="font-semibold text-brand tabular-nums mt-0.5">${formatMoney(roundMoney(p.tenantTotal))}</div>
-            </div>
-            <div className="text-center px-2.5 py-1 w-[78px] sm:w-[96px] border-l border-gray-200/70">
-              <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net</div>
-              <div className="font-semibold text-emerald-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.clientTotal - p.tenantTotal))}</div>
+          <div className="flex justify-center">
+            <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden">
+              <div className="text-center px-2 py-1 w-[58px] sm:w-[84px]">
+                <div className="text-gray-400 text-[10px] uppercase tracking-wide">Lines</div>
+                <div className="font-semibold text-gray-700 tabular-nums mt-0.5">{p.lineCount}</div>
+              </div>
+              <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
+                <div className="text-gray-400 text-[10px] uppercase tracking-wide">Vendor</div>
+                <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.vendorTotal))}</div>
+              </div>
+              <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
+                <div className="text-gray-400 text-[10px] uppercase tracking-wide">Client</div>
+                <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.clientTotal))}</div>
+              </div>
+              <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
+                <div className="text-brand/70 text-[10px] uppercase tracking-wide">Tenant</div>
+                <div className="font-semibold text-brand tabular-nums mt-0.5">${formatMoney(roundMoney(p.tenantTotal))}</div>
+              </div>
+              <div className="text-center px-2 py-1 w-[74px] sm:w-[96px] border-l border-gray-200/70">
+                <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net Turn</div>
+                <div className="font-semibold text-emerald-700 tabular-nums mt-0.5">${formatMoney(roundMoney(p.clientTotal - p.tenantTotal))}</div>
+              </div>
             </div>
           </div>
         )}
