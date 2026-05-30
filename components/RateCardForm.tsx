@@ -480,10 +480,15 @@ export function RateCardForm(props: RateCardFormProps) {
     if (targetSection) {
       line = { ...line, section: targetSection.label, location: targetSection.location };
     }
+    // Is this a brand-new line or an edit of an existing one? Used to gate the
+    // Whole House auto-fill so a deliberate quantity edit isn't overwritten.
+    const isNewLine = !((linesBySection[sectionId] || []).some((l) => l.externalId === line.externalId));
     // Whole House + SF unit: default the quantity to the property's square
-    // footage. Only when the quantity is still the default (1) so an explicitly
-    // entered quantity is respected.
+    // footage — but ONLY when first adding the line (not on a later edit), and
+    // only when the quantity is still the default (1/empty), so a deliberate
+    // quantity is always respected.
     if (
+      isNewLine &&
       targetSection &&
       /whole\s*house/i.test(targetSection.label) &&
       props.squareFootage != null &&
