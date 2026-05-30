@@ -283,6 +283,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       // navigate event mid-stream will update it so later proposals route right.
       streamSectionRef.current = currentSectionId;
       let addedThisTurn = 0;
+      const addedRoomIds = new Set<string>();
       // Abort if the request stalls (flaky field LTE) so the panel never hangs
       // in "Thinking…" with no way out.
       const ctrl = new AbortController();
@@ -372,6 +373,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
                 else onAddLine(line);
                 if (action === 'add') lastAddedRef.current = { externalId: line.externalId, label: spokenLabel };
                 addedThisTurn++;
+                if (targetId) addedRoomIds.add(targetId);
                 setMessages((m) => [...m, { role: 'assistant', content: `${verb}: ${data.summary}` }]);
               } catch (e: any) {
                 setMessages((m) => [...m, { role: 'assistant', content: `Couldn't save ${spokenLabel}.` }]);
@@ -392,12 +394,21 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           setError(finalData?.error || 'Something went wrong.');
         } else if (addedThisTurn > 0) {
           // Lines were added/updated this turn. ALWAYS use our synthesized
-          // summary and ignore any trailing agent text — the agent sometimes
-          // leaks a stray "I'll search for that…" after it already acted, which
-          // is confusing. The action already happened; just confirm it.
-          const roomName = currentSection?.displayName || currentSection?.label || 'this room';
+          // summary and ignore any trailing agent text. Name the room(s) the
+          // lines ACTUALLY landed in (from the stream), not React state, which
+          // lags during the stream and would name the wrong/old room.
+          const roomNames = Array.from(addedRoomIds)
+            .map((id) => {
+              const s = sections.find((x) => x.id === id);
+              return s ? (s.displayName || s.label) : null;
+            })
+            .filter(Boolean) as string[];
           const what = addedThisTurn === 1 ? 'that' : `${addedThisTurn} lines`;
-          const spoken = `Done — ${what} in ${roomName}. Anything else?`;
+          let where: string;
+          if (roomNames.length === 1) where = ` in ${roomNames[0]}`;
+          else if (roomNames.length > 1) where = ` across ${roomNames.length} rooms`;
+          else where = '';
+          const spoken = `Done — ${what}${where}. Anything else?`;
           setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
           speakThenListenRef.current(spoken);
         } else if (finalType === 'question') {

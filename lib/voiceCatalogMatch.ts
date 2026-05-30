@@ -179,6 +179,17 @@ const CONFIDENCE_FLOOR = 0.45;
 // Embed the utterance and return the top-K most similar catalog items, plus a
 // confidence read on the best match. `categoryHint` (from the agent) and
 // `sectionName` (the room/area) lightly boost on-topic items.
+// Speech engines mishear some domain terms. Normalize known ones before
+// matching so the right catalog item is found. "Mist Match" (a paint blending
+// line item) is routinely transcribed as "mismatch/mismatched/missed match".
+function normalizeDomainTerms(text: string): string {
+  let t = text;
+  t = t.replace(/\bmis[\s-]?match(ed|ing)?\b/gi, 'mist match');
+  t = t.replace(/\bmissed[\s-]?match(ed|ing)?\b/gi, 'mist match');
+  t = t.replace(/\bmist[\s-]?match(ed|ing)\b/gi, 'mist match');
+  return t;
+}
+
 export async function matchCatalog(
   utterance: string,
   items: RateCardLineItem[],
@@ -186,7 +197,8 @@ export async function matchCatalog(
 ): Promise<MatchResult> {
   const topK = opts.topK ?? 10;
   const cache = await getCatalogEmbeddings(items);
-  const [queryVec] = await voyageEmbed([utterance.slice(0, 400)], 'query');
+  const normalized = normalizeDomainTerms(utterance);
+  const [queryVec] = await voyageEmbed([normalized.slice(0, 400)], 'query');
   if (!queryVec) return { candidates: [], topScore: 0, confident: false };
 
   const hint = (opts.categoryHint || '').toLowerCase().trim();

@@ -1102,50 +1102,52 @@ export function RateCardForm(props: RateCardFormProps) {
           (the top header no longer repeats it). Five centered boxes:
           Lines + Vendor / Client / Tenant / Net Turn. */}
       <div id="sticky-totals-header" className="sticky top-0 z-10 -mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
-        <div className="text-center mb-2">
-          <div className="text-sm font-semibold text-gray-800 truncate">{props.propertyName}</div>
-          <div className="text-[11px] text-gray-500 truncate">
-            {props.bedrooms} bed / {props.bathrooms} bath
-            {props.squareFootage != null && props.squareFootage > 0 && (
-              <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
-            )}
-            {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
-            {!inspectionRegion && <span className="text-yellow-700"> &middot; fallback (GA: Atlanta)</span>}
-            {saveStatus.kind === 'saving' && <span className="text-brand font-semibold"> &middot; Saving...</span>}
-            {saveStatus.kind === 'saved' && <span className="text-emerald-700 font-semibold"> &middot; &#10003; Saved</span>}
-            {saveStatus.kind === 'error' && (
-              <button
-                type="button"
-                onClick={() => setShowSaveErrorDetail(true)}
-                className="text-red-700 font-semibold underline hover:text-red-900 ml-1"
-                title="Click for details"
-              >
-                &middot; Save failed
-              </button>
-            )}
+        <div className="sm:flex sm:items-center sm:justify-between sm:gap-4">
+          <div className="text-center sm:text-left mb-2 sm:mb-0 min-w-0">
+            <div className="text-sm font-semibold text-gray-800 truncate">{props.propertyName}</div>
+            <div className="text-[11px] text-gray-500 truncate">
+              {props.bedrooms} bed / {props.bathrooms} bath
+              {props.squareFootage != null && props.squareFootage > 0 && (
+                <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
+              )}
+              {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
+              {!inspectionRegion && <span className="text-yellow-700"> &middot; fallback (GA: Atlanta)</span>}
+              {saveStatus.kind === 'saving' && <span className="text-brand font-semibold"> &middot; Saving...</span>}
+              {saveStatus.kind === 'saved' && <span className="text-emerald-700 font-semibold"> &middot; &#10003; Saved</span>}
+              {saveStatus.kind === 'error' && (
+                <button
+                  type="button"
+                  onClick={() => setShowSaveErrorDetail(true)}
+                  className="text-red-700 font-semibold underline hover:text-red-900 ml-1"
+                  title="Click for details"
+                >
+                  &middot; Save failed
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-        <div className="flex justify-center">
-          <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden">
-            <div className="text-center px-2 py-1 w-[58px] sm:w-[84px]">
-              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Lines</div>
-              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">{grandTotals.count}</div>
-            </div>
-            <div className="text-center px-2 py-1 w-[74px] sm:w-[104px] border-l border-gray-200/70">
-              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Vendor</div>
-              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.vendor))}</div>
-            </div>
-            <div className="text-center px-2 py-1 w-[74px] sm:w-[104px] border-l border-gray-200/70">
-              <div className="text-gray-400 text-[10px] uppercase tracking-wide">Client</div>
-              <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.client))}</div>
-            </div>
-            <div className="text-center px-2 py-1 w-[74px] sm:w-[104px] border-l border-gray-200/70">
-              <div className="text-brand/70 text-[10px] uppercase tracking-wide">Tenant</div>
-              <div className="font-semibold text-brand tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.tenant))}</div>
-            </div>
-            <div className="text-center px-2 py-1 w-[74px] sm:w-[104px] border-l border-gray-200/70">
-              <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net Turn</div>
-              <div className="font-semibold text-emerald-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.client - grandTotals.tenant))}</div>
+          <div className="flex justify-center sm:justify-end shrink-0">
+            <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden">
+              <div className="text-center px-2 py-1 w-[58px] sm:w-[84px]">
+                <div className="text-gray-400 text-[10px] uppercase tracking-wide">Lines</div>
+                <div className="font-semibold text-gray-700 tabular-nums mt-0.5">{grandTotals.count}</div>
+              </div>
+              <div className="text-center px-2 py-1 w-[74px] sm:w-[104px] border-l border-gray-200/70">
+                <div className="text-gray-400 text-[10px] uppercase tracking-wide">Vendor</div>
+                <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.vendor))}</div>
+              </div>
+              <div className="text-center px-2 py-1 w-[74px] sm:w-[104px] border-l border-gray-200/70">
+                <div className="text-gray-400 text-[10px] uppercase tracking-wide">Client</div>
+                <div className="font-semibold text-gray-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.client))}</div>
+              </div>
+              <div className="text-center px-2 py-1 w-[74px] sm:w-[104px] border-l border-gray-200/70">
+                <div className="text-brand/70 text-[10px] uppercase tracking-wide">Tenant</div>
+                <div className="font-semibold text-brand tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.tenant))}</div>
+              </div>
+              <div className="text-center px-2 py-1 w-[74px] sm:w-[104px] border-l border-gray-200/70">
+                <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net Turn</div>
+                <div className="font-semibold text-emerald-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.client - grandTotals.tenant))}</div>
+              </div>
             </div>
           </div>
         </div>
