@@ -173,53 +173,60 @@ export function PhotoLightbox({
         )}
       </div>
 
-      {/* Actions */}
-      {!readOnly && (
-        <div className="bg-black px-4 py-3 flex flex-col items-center gap-2">
-          <div className="flex items-center justify-center gap-3">
-            <button type="button" onClick={() => setAnnotating(true)}
-              className="flex items-center gap-2 bg-white/15 active:bg-white/30 text-white font-heading text-sm px-4 py-2 rounded-lg">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {/* Actions — all on one line, with Return at the far right */}
+      <div className="bg-black px-2 py-3 flex items-center gap-2">
+        {!readOnly && (
+          <>
+            <button type="button" onClick={() => setAnnotating(true)} title="Mark up"
+              className="shrink-0 flex items-center gap-2 h-11 px-3 bg-white/15 active:bg-white/30 text-white font-heading text-sm rounded-lg">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><circle cx="11" cy="11" r="2" />
               </svg>
-              Mark up
+              <span className="hidden sm:inline">Mark up</span>
             </button>
-            <button type="button" onClick={handleDelete}
-              className="flex items-center gap-2 bg-white/10 active:bg-red-600/80 text-white font-heading text-sm px-4 py-2 rounded-lg">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <button type="button" onClick={handleDelete} title="Delete"
+              className="shrink-0 flex items-center gap-2 h-11 px-3 bg-white/10 active:bg-red-600/80 text-white font-heading text-sm rounded-lg">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
               </svg>
-              Delete
+              <span className="hidden sm:inline">Delete</span>
             </button>
-          </div>
+          </>
+        )}
 
-          {/* Tag to line (rooms only) */}
-          {onTagToLine && tagLines.length > 0 && (
-            <div className="flex items-center gap-2">
-              <select
-                value=""
-                onChange={(e) => {
-                  const id = e.target.value;
-                  if (!id) return;
-                  onTagToLine(groupId, index, id);
-                  const lbl = tagLines.find((l) => l.externalId === id)?.label || 'line';
-                  setTagged(lbl);
-                  showToast(`Tagged to ${lbl}`);
-                  e.currentTarget.value = '';
-                }}
-                className="bg-white/10 text-white text-sm font-heading rounded px-2 py-1.5 max-w-[70vw]"
-                aria-label="Tag this photo to a line item"
-              >
-                <option value="" className="text-black">Tag to a line item…</option>
-                {tagLines.map((l) => (
-                  <option key={l.externalId} value={l.externalId} className="text-black">{l.label}</option>
-                ))}
-              </select>
-              {tagged && <span className="text-emerald-400 text-xs font-heading whitespace-nowrap">Tagged ✓</span>}
-            </div>
-          )}
-        </div>
-      )}
+        {/* Tag to line (rooms only) — fills the middle */}
+        {!readOnly && onTagToLine && tagLines.length > 0 ? (
+          <select
+            value=""
+            onChange={(e) => {
+              const id = e.target.value;
+              if (!id) return;
+              onTagToLine(groupId, index, id);
+              const lbl = tagLines.find((l) => l.externalId === id)?.label || 'line';
+              setTagged(lbl);
+              showToast(`Tagged to ${lbl}`);
+              e.currentTarget.value = '';
+            }}
+            className="flex-1 min-w-0 h-11 bg-white/10 text-white text-sm font-heading rounded-lg px-3"
+            aria-label="Tag this photo to a line item"
+          >
+            <option value="" className="text-black">{tagged ? `Tagged → ${tagged}` : 'Tag to a line item…'}</option>
+            {tagLines.map((l) => (
+              <option key={l.externalId} value={l.externalId} className="text-black">{l.label}</option>
+            ))}
+          </select>
+        ) : (
+          <div className="flex-1" />
+        )}
+
+        <button type="button" onClick={onClose} title="Return" aria-label="Return"
+          className="shrink-0 flex items-center gap-2 h-11 px-3 bg-white/15 active:bg-white/30 text-white font-heading text-sm rounded-lg">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 14 4 9 9 4" /><path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+          </svg>
+          <span className="hidden sm:inline">Return</span>
+        </button>
+      </div>
 
       {annotating && url && (
         <PhotoAnnotator

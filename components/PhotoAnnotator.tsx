@@ -94,13 +94,18 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
       ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
     } else {
       const { a, b } = s;
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
       const ang = Math.atan2(b.y - a.y, b.x - a.x);
-      const head = s.width * 4.5;
+      const head = Math.max(s.width * 3.2, s.width + 10);
+      // End the shaft at the back of the arrowhead so the round line cap
+      // doesn't poke through and blunt the tip.
+      const bx = b.x - Math.cos(ang) * head * 0.7;
+      const by = b.y - Math.sin(ang) * head * 0.7;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(bx, by); ctx.stroke();
+      // Solid triangular head, narrow angle so it clearly reads as an arrow.
       ctx.beginPath();
       ctx.moveTo(b.x, b.y);
-      ctx.lineTo(b.x - head * Math.cos(ang - Math.PI / 6), b.y - head * Math.sin(ang - Math.PI / 6));
-      ctx.lineTo(b.x - head * Math.cos(ang + Math.PI / 6), b.y - head * Math.sin(ang + Math.PI / 6));
+      ctx.lineTo(b.x - head * Math.cos(ang - Math.PI / 7), b.y - head * Math.sin(ang - Math.PI / 7));
+      ctx.lineTo(b.x - head * Math.cos(ang + Math.PI / 7), b.y - head * Math.sin(ang + Math.PI / 7));
       ctx.closePath(); ctx.fill();
     }
   }
@@ -128,9 +133,9 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* noop */ }
 
-    // Second finger down → pinch to resize the brush (stop drawing).
+    // Second finger down → pinch to resize the brush. Keep the stroke the first
+    // finger is drawing so it grows/shrinks live (the inspector doesn't lose it).
     if (pointersRef.current.size >= 2) {
-      drawingRef.current = null; // discard the stroke the first finger may have begun
       const [a, b] = [...pointersRef.current.values()];
       pinchRef.current = { startDist: Math.max(1, dist(a, b)), startScale: widthScaleRef.current };
       setShowSize(true);
@@ -152,12 +157,17 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
     if (pointersRef.current.has(e.pointerId)) {
       pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     }
-    // Pinch: scale the brush by the change in finger distance.
+    // Pinch: scale the brush by the change in finger distance, and resize the
+    // in-progress stroke (if any) live.
     if (pinchRef.current && pointersRef.current.size >= 2) {
       e.preventDefault();
       const [a, b] = [...pointersRef.current.values()];
       const ratio = dist(a, b) / pinchRef.current.startDist;
-      setWidthScale(Math.min(5, Math.max(0.3, pinchRef.current.startScale * ratio)));
+      const ns = Math.min(5, Math.max(0.3, pinchRef.current.startScale * ratio));
+      setWidthScale(ns);
+      const d = drawingRef.current;
+      if (d) d.width = Math.max(2, Math.round(strokeWidthFor(d.tool) * ns));
+      redraw();
       return;
     }
     if (!drawingRef.current) return;
@@ -171,11 +181,21 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
     pointersRef.current.delete(e.pointerId);
     try { (e.currentTarget as Element).releasePointerCapture(e.pointerId); } catch { /* noop */ }
 
-    // Finishing a pinch — don't turn it into a stroke.
+    // Finishing a pinch — commit the (resized) active stroke instead of dropping it.
     if (pinchRef.current) {
       if (pointersRef.current.size < 2) {
         pinchRef.current = null;
         setTimeout(() => setShowSize(false), 700);
+        const d = drawingRef.current;
+        if (d) {
+          const keep = d.tool === 'pen'
+            ? d.points.length > 1
+            : Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y) > 4;
+          if (keep) strokesRef.current.push(d);
+          drawingRef.current = null;
+          setCount(strokesRef.current.length);
+        }
+        redraw();
       }
       return;
     }
