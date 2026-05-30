@@ -53,6 +53,8 @@ interface BodyShape {
   location: string;
   region: string;
   currentLines?: CurrentLine[];
+  rooms?: { id: string; name: string }[];
+  currentRoom?: string;
 }
 
 function anthropicKey(): string {
@@ -153,10 +155,28 @@ function describeLines(catalogByCode: Map<string, RateCardLineItem>, lines: Curr
   return `Existing line items in this area:\n${rows.join('\n')}`;
 }
 
-function systemPrompt(section: string, location: string, linesDesc: string): string {
+function systemPrompt(
+  section: string,
+  location: string,
+  linesDesc: string,
+  currentRoom: string,
+  rooms: { id: string; name: string }[] = []
+): string {
   const loc = location || section;
-  return [
-    `You help a property inspector manage Scope rate-card line items by voice for the "${loc}" area of a home. Speed matters — keep the inspector moving.`,
+  const roomName = currentRoom || loc;
+  const lines = [
+    `You are a property inspector's voice assistant for a home inspection. You help manage Scope rate-card line items hands-free as the inspector walks the home. Speed matters — keep them moving.`,
+    ``,
+    `You are currently working on the "${roomName}" room/area. Line items you add or edit go to THIS room.`,
+  ];
+  if (rooms.length > 1) {
+    lines.push(
+      ``,
+      `ROOMS in this inspection: ${rooms.map((r) => r.name).join(', ')}.`,
+      `The inspector can move you between rooms. When they say things like "close this out and go to Bedroom 2", "let's do the kitchen", "next room, primary bath", call switch_room with the matching room id. Resolve natural phrasing to the closest room name. After a successful switch, the app moves the form to that room and greets the inspector — you do NOT need to add anything. Only switch when they clearly ask to change rooms; if they're describing damage, that's a line item, not a room change.`
+    );
+  }
+  lines.push(
     ``,
     `Defaults (apply silently unless the inspector says otherwise):`,
     `  - Vendor: "Vendor 1".  - Tenant chargeback: 100%.`,
@@ -175,12 +195,13 @@ function systemPrompt(section: string, location: string, linesDesc: string): str
     ``,
     `${linesDesc}`,
     ``,
-    `When you call propose_line or edit_line, do not write any sentence at all — no "I'll find...", no "Added..." — the app shows and speaks the confirmation prompt itself. Only produce text when you genuinely need to ask the inspector a question. Keep questions very short and spoken-friendly. Never invent a code; only use codes from search_catalog.`,
-  ].join('\n');
+    `When you call propose_line, edit_line, or switch_room, do not write any sentence at all — the app shows/speaks the result itself. Only produce text when you genuinely need to ask the inspector a question. Keep questions very short and spoken-friendly. Never invent a code; only use codes from search_catalog.`
+  );
+  return lines.join('\n');
 }
 
-function tools() {
-  return [
+function tools(rooms: { id: string; name: string }[] = []) {
+  const base = [
     {
       name: 'search_catalog',
       description: 'Semantic search of the rate-card catalog for the line item that best matches what the inspector described. Returns the top candidate line items with their code, description, category, and unit of measure.',
@@ -232,6 +253,24 @@ function tools() {
       },
     },
   ];
+  // Only offer room navigation when there's more than one room to move between.
+  if (rooms.length > 1) {
+    base.push({
+      name: 'switch_room',
+      description: 'Change which room/area the inspector is working on (e.g. "close this out and go to Bedroom 2", "let\'s do the kitchen next"). Resolve the inspector\'s phrasing to one of the room ids below. After switching, line items will be added to the new room. Only call this when the inspector clearly asks to move to a different room.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          roomId: {
+            type: 'string',
+            description: `The id of the room to switch to. Available rooms (id → name): ${rooms.map((r) => `${r.id} → ${r.name}`).join('; ')}.`,
+          },
+        },
+        required: ['roomId'],
+      },
+    } as any);
+  }
+  return base;
 }
 
 function money(n: number): string {
@@ -299,7 +338,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const linesByExternalId = new Map(currentLines.map((l) => [l.externalId, l]));
 
     const messages: any[] = clientMessages.map((m) => ({ role: m.role, content: m.content }));
-    const system = systemPrompt(body.section || '', body.location || '', describeLines(byCode, currentLines));
+    // Room navigation context.
+    const rooms: { id: string; name: string }[] = Array.isArray(body?.rooms)
+      ? body.rooms.filter((r: any) => r && r.id).map((r: any) => ({ id: String(r.id), name: String(r.name || r.id) }))
+      : [];
+    const currentRoom = String(body?.currentRoom || body?.location || body?.section || '');
+    const roomTools = tools(rooms);
+    const system = systemPrompt(body.section || '', body.location || '', describeLines(byCode, currentLines), currentRoom, rooms);
 
     let usedSearchThisTurn = false;
 
@@ -308,7 +353,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       // Stream this model call; forward text deltas live to the client.
       const { content } = await streamAnthropic(
-        { model, max_tokens: 1024, system, tools: tools(), messages },
+        { model, max_tokens: 1024, system, tools: roomTools, messages },
         (chunk) => sse(res, 'delta', { text: chunk })
       );
 
@@ -463,6 +508,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             assistantText: textBlocks || undefined,
             awaitingReply: false,
           });
+          sse(res, 'done', {});
+          return res.end();
+        } else if (tu.name === 'switch_room') {
+          const roomId = String(tu.input?.roomId || '');
+          const room = rooms.find((r) => r.id === roomId)
+            || rooms.find((r) => r.name.toLowerCase() === roomId.toLowerCase());
+          if (!room) {
+            toolResults.push({
+              type: 'tool_result', tool_use_id: tu.id, is_error: true,
+              content: JSON.stringify({ error: `No room matching "${roomId}". Available: ${rooms.map((r) => r.name).join(', ')}.` }),
+            });
+            continue;
+          }
+          // Tell the client to switch rooms (it scrolls/expands + greets).
+          sse(res, 'navigate', { sectionId: room.id, roomName: room.name });
           sse(res, 'done', {});
           return res.end();
         } else {

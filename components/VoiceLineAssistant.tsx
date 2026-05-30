@@ -1,28 +1,37 @@
 // components/VoiceLineAssistant.tsx
 //
-// Per-section conversational assistant for adding Scope rate-card lines by voice.
-// Online-only. Uses the browser Web Speech API for input (Decision 3-A) and the
-// /api/rate-card/voice-assist agent (Claude tool-calling + Voyage matching).
+// Roaming conversational inspection assistant for the Scope rate card.
+// Online-only. ONE floating panel travels across rooms: it always shows the
+// room it's working on, lets the inspector change rooms manually (dropdown) or
+// by voice ("close this out, go to Bedroom 2"), scrolls the form to that room,
+// and routes all line adds/edits/undo to the current room.
 //
-// It NEVER saves directly: when the agent returns a complete line proposal, this
-// shows it as a draft the inspector confirms; on confirm it calls onAddLine(),
-// which routes through RateCardForm's existing save path (server-authoritative
-// math + natural-key upsert). Reject discards it.
+// Uses the browser Web Speech API for input and the /api/rate-card/voice-assist
+// agent (Claude tool-calling + Voyage matching). It NEVER saves directly: line
+// adds go through onAddLine (RateCardForm's server-authoritative upsert path).
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RateCardLineInput, RateCardLineItem } from '@/lib/types';
 
+// A room the assistant can work on / navigate to.
+export interface AssistantSection {
+  id: string;
+  label: string;        // base section name (e.g. "Yard / Exterior")
+  location: string;     // location label (e.g. "Bedroom 1" or "")
+  displayName: string;  // UI label shown to the inspector (e.g. "Bedroom 1")
+}
+
 interface Props {
-  section: string;        // base section name (e.g. "Yard / Exterior")
-  location: string;       // location label (e.g. "Bedroom 1" or "")
-  region: string;         // inspection region snapshot (for context only)
-  // Called when the inspector confirms a proposed line (new OR edited). Reuses
-  // RateCardForm's handleSaveLineForSection, which upserts by externalId — so
-  // passing an existing line's externalId edits it in place.
+  sections: AssistantSection[];   // all rooms, for display + navigation
+  currentSectionId: string;       // the room currently being worked on
+  onNavigate: (sectionId: string) => void; // switch room (parent scrolls/expands)
+  region: string;                 // inspection region snapshot (context only)
+  // Called when a line is added (new OR edited) — upserts by externalId, routed
+  // by the parent to the CURRENT room.
   onAddLine: (line: RateCardLineInput) => void;
   // Remove a line by externalId (for "undo that" / "remove the last line").
   onRemoveLine?: (externalId: string) => void;
-  // The lines already in this section (so the agent can edit them by voice).
+  // Lines already in the CURRENT room (parent supplies based on currentSectionId).
   currentLines?: RateCardLineInput[];
   // Catalog for resolving codes -> descriptions in edit summaries.
   catalog?: RateCardLineItem[];
@@ -125,7 +134,16 @@ function speak(
   }
 }
 
-export function VoiceLineAssistant({ section, location, region, onAddLine, onRemoveLine, currentLines, catalog, disabled }: Props) {
+export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, currentLines, catalog, disabled }: Props) {
+  // The room the assistant is working on right now.
+  const currentSection = useMemo(
+    () => sections.find((s) => s.id === currentSectionId) || sections[0],
+    [sections, currentSectionId]
+  );
+  const section = currentSection?.label || '';
+  const location = currentSection?.location || '';
+  const currentRoomName = currentSection?.displayName || currentSection?.label || 'this room';
+
   const [open, setOpen] = useState(false);
   const [supported, setSupported] = useState(true);
   const [listening, setListening] = useState(false);
@@ -199,6 +217,9 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, onRem
             section,
             location,
             region,
+            // Room context so the agent can navigate ("go to Bedroom 2").
+            currentRoom: currentRoomName,
+            rooms: sections.map((s) => ({ id: s.id, name: s.displayName || s.label })),
             currentLines: (currentLines || []).map((l) => ({
               externalId: l.externalId,
               lineItemCode: l.lineItemCode,
@@ -247,6 +268,21 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, onRem
             } else if (ev === 'question' || ev === 'proposal' || ev === 'message' || ev === 'error') {
               finalType = ev;
               finalData = data;
+            } else if (ev === 'navigate') {
+              // Agent asked to switch rooms. Resolve to a real section and move
+              // there (parent scrolls/expands). Handle inline so it works even
+              // alongside a proposal in the same turn.
+              const target = sections.find((s) => s.id === data.sectionId)
+                || sections.find((s) => (s.displayName || s.label).toLowerCase() === String(data.roomName || '').toLowerCase());
+              if (target) {
+                onNavigate(target.id);
+                const msg = `Okay — ${target.displayName || target.label}. What do you need here?`;
+                setMessages((m) => [...m, { role: 'assistant', content: msg }]);
+                speakThenListenRef.current(msg);
+                // A navigate turn is terminal for our purposes; skip other finals.
+                finalType = 'navigated';
+                finalData = null;
+              }
             } else if (ev === 'done') {
               // terminal
             }
@@ -255,7 +291,9 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, onRem
 
         // Finalize based on the last terminal event.
         setStreamingText('');
-        if (finalType === 'error') {
+        if (finalType === 'navigated') {
+          // Already handled inline (room switched + spoke). Nothing more to do.
+        } else if (finalType === 'error') {
           setError(finalData?.error || 'Something went wrong.');
         } else if (finalType === 'proposal') {
           // The agent only proposes when the match is confident, so AUTO-ADD it
@@ -301,7 +339,7 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, onRem
         setBusy(false);
       }
     },
-    [section, location, region, currentLines, onAddLine]
+    [section, location, region, currentLines, onAddLine, sections, onNavigate, currentRoomName]
   );
 
   const submitUtterance = useCallback(
@@ -515,34 +553,63 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, onRem
     setTyped('');
   }
 
+  // A compact room picker (manual room change). Used in both states.
+  const roomSelect = (
+    <select
+      value={currentSectionId}
+      onChange={(e) => onNavigate(e.target.value)}
+      disabled={disabled}
+      title="Change the room the assistant is working on"
+      className="max-w-[44vw] sm:max-w-[200px] text-sm border border-brand/40 rounded px-2 py-1 bg-white text-ink truncate"
+    >
+      {sections.map((s) => (
+        <option key={s.id} value={s.id}>{s.displayName || s.label}</option>
+      ))}
+    </select>
+  );
+
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => {
-          setOpen(true);
-          // Start listening immediately — warm-up runs silently in the
-          // background. Defer one tick so the panel mounts and the ref is live.
-          setTimeout(() => { startListeningRef.current(); }, 0);
-        }}
-        disabled={disabled}
-        aria-label="Add line items by voice"
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-brand text-brand rounded hover:bg-brand/5 disabled:opacity-50"
-      >
-        <MicIcon className="w-4 h-4" />
-        Voice add
-      </button>
+      <div className="fixed inset-x-0 bottom-[64px] sm:bottom-[68px] z-20 pointer-events-none">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 flex justify-end">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-brand/30 bg-white shadow-lg px-2.5 py-1.5">
+            <span className="text-xs text-gray-500 hidden sm:inline">Assistant · room:</span>
+            {roomSelect}
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(true);
+                // Start listening immediately — warm-up runs silently in the
+                // background. Defer one tick so the panel mounts and the ref is live.
+                setTimeout(() => { startListeningRef.current(); }, 0);
+              }}
+              disabled={disabled}
+              aria-label="Talk to the inspection assistant"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-brand text-white rounded-full hover:bg-brand-dark disabled:opacity-50"
+            >
+              <MicIcon className="w-4 h-4" />
+              Talk
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 
   return (
-    <div className="rounded-lg border border-brand/30 bg-brand/5 p-3 mt-2">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-heading font-semibold text-brand">Voice Assistant — {location || section}</span>
-        <button type="button" onClick={() => { reset(); setOpen(false); }} className="text-xs text-gray-500 hover:text-gray-700">
-          Close
-        </button>
-      </div>
+    <div className="fixed inset-x-0 bottom-[64px] sm:bottom-[68px] z-20 pointer-events-none">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 flex justify-end">
+        <div className="pointer-events-auto w-full sm:w-[420px] rounded-lg border border-brand/30 bg-white shadow-xl p-3">
+          {/* Header: current room + manual room picker + close */}
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-sm font-heading font-semibold text-brand whitespace-nowrap">Assistant ·</span>
+              {roomSelect}
+            </div>
+            <button type="button" onClick={() => { reset(); setOpen(false); }} className="text-xs text-gray-500 hover:text-gray-700 shrink-0">
+              Close
+            </button>
+          </div>
 
       {!supported && (
         <p className="text-xs text-amber-700 mb-2">
@@ -645,6 +712,8 @@ export function VoiceLineAssistant({ section, location, region, onAddLine, onRem
           Start over
         </button>
       )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -200,7 +200,27 @@ export function RateCardForm(props: RateCardFormProps) {
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  // Eagerly warm the catalog + region rates in the background as soon as the
+  // The room the floating voice assistant is currently working on. Changing it
+  // (manually or by voice) expands + scrolls to that section.
+  const [currentSectionId, setCurrentSectionId] = useState<string>('');
+  // sectionId -> the section's DOM node, for scroll-into-view on room change.
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  // Default the assistant's current room to the first section once loaded.
+  useEffect(() => {
+    if (!currentSectionId && sections.length > 0) setCurrentSectionId(sections[0].id);
+  }, [sections, currentSectionId]);
+
+  // Switch the assistant's working room: expand it and scroll it into view.
+  const navigateToSection = useCallback((sectionId: string) => {
+    setCurrentSectionId(sectionId);
+    setExpanded((e) => ({ ...e, [sectionId]: true }));
+    // Defer so the expand has applied before we measure/scroll.
+    setTimeout(() => {
+      const el = sectionRefs.current[sectionId];
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+  }, []);
   // form mounts, so the FIRST "add line item" click is instant instead of
   // waiting on the (large) catalog fetch. Fire-and-forget; ensureDataLoaded
   // guards against double-loading, and the hydration effect below will reuse
@@ -1135,7 +1155,11 @@ export function RateCardForm(props: RateCardFormProps) {
           const photosMissing = photosRequired && photos.length === 0;
           const isUploadingHere = uploadingSection?.sectionId === s.id;
           return (
-            <section key={s.id} className="bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden">
+            <section
+              key={s.id}
+              ref={(el) => { sectionRefs.current[s.id] = el; }}
+              className={`bg-white rounded-lg shadow-md border overflow-hidden ${currentSectionId === s.id ? 'border-brand ring-1 ring-brand/30' : 'border-gray-200'}`}
+            >
               <SectionHeader
                 section={s}
                 heading={heading}
@@ -1300,31 +1324,14 @@ export function RateCardForm(props: RateCardFormProps) {
                   )}
                   {!props.readOnly && (
                     <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => handleAddLine(s)}
-                          disabled={dataLoading || pendingNewBySection[s.id]}
-                          className="px-3 py-1.5 text-sm bg-brand text-white rounded hover:bg-brand-dark disabled:bg-gray-300"
-                        >
-                          {dataLoading ? 'Loading...' : pendingNewBySection[s.id] ? 'Finish current row first' : '+ Add Line Item'}
-                        </button>
-                        {/* Voice assistant — Scope rate card only. Online-only;
-                            proposes lines for the inspector to confirm, then saves
-                            through the same handleSaveLineForSection path. */}
-                        {props.templateType === 'pm_scope_rate_card' && (
-                          <VoiceLineAssistant
-                            section={s.label}
-                            location={s.location}
-                            region={inspectionRegion}
-                            disabled={dataLoading}
-                            currentLines={lines}
-                            catalog={catalog}
-                            onAddLine={(line) => handleSaveLineForSection(s.id, line)}
-                            onRemoveLine={(externalId) => handleDeleteLine(s.id, externalId)}
-                          />
-                        )}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleAddLine(s)}
+                        disabled={dataLoading || pendingNewBySection[s.id]}
+                        className="px-3 py-1.5 text-sm bg-brand text-white rounded hover:bg-brand-dark disabled:bg-gray-300"
+                      >
+                        {dataLoading ? 'Loading...' : pendingNewBySection[s.id] ? 'Finish current row first' : '+ Add Line Item'}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1336,6 +1343,29 @@ export function RateCardForm(props: RateCardFormProps) {
 
       {/* Spacer so the floating footer doesn't cover the last section. */}
       <div className="h-24 md:h-20" />
+
+      {/* Roaming voice assistant — Scope rate card only, online-only. ONE panel
+          that travels across rooms: it shows/changes the current room, scrolls
+          the form there, and routes line adds/edits/undo to that room. Sits just
+          above the terminal footer. */}
+      {!props.readOnly && props.templateType === 'pm_scope_rate_card' && currentSectionId && (
+        <VoiceLineAssistant
+          sections={sections.map((s) => ({
+            id: s.id,
+            label: s.label,
+            location: s.location,
+            displayName: s.displayName,
+          }))}
+          currentSectionId={currentSectionId}
+          onNavigate={navigateToSection}
+          region={inspectionRegion}
+          disabled={dataLoading}
+          currentLines={linesBySection[currentSectionId] || []}
+          catalog={catalog}
+          onAddLine={(line) => handleSaveLineForSection(currentSectionId, line)}
+          onRemoveLine={(externalId) => handleDeleteLine(currentSectionId, externalId)}
+        />
+      )}
 
       {/* Floating footer — visible on all screen sizes, pinned to the bottom of
           the viewport so the inspector can save/submit/cancel from anywhere.
