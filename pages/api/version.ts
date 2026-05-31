@@ -9,5 +9,8 @@ import pkg from '../../package.json';
  */
 export default function handler(_req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('Cache-Control', 'no-store');
-  res.status(200).json({ version: (pkg as { version: string }).version });
+  // Must mirror NEXT_PUBLIC_APP_VERSION in next.config.js: the live deployment's
+  // git SHA (so each deploy is a new version), falling back to package.json.
+  const version = (process.env.VERCEL_GIT_COMMIT_SHA || (pkg as { version: string }).version).slice(0, 7);
+  res.status(200).json({ version });
 }

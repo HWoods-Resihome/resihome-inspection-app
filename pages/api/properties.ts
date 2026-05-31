@@ -18,7 +18,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const properties = await fetchProperties({ search });
     return res.status(200).json({ properties });
   } catch (e: any) {
-    console.error('GET /api/properties failed:', e);
-    return res.status(500).json({ error: String(e.message || e) });
+    // Surface HubSpot's actual rejection reason (attached as `.detail` by
+    // hubspotFetch). This is an authenticated internal tool, and the message
+    // is what we need to diagnose a 400 — e.g. an unknown property in a filter,
+    // or a bad object type id. It renders under the picker via propertiesError.
+    console.error('GET /api/properties failed:', e?.message, e?.detail);
+    const detail = e?.detail ? ` — ${e.detail}` : '';
+    return res.status(500).json({ error: `${String(e.message || e)}${detail}`, detail: e?.detail });
   }
 }
