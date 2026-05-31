@@ -1911,11 +1911,13 @@ export function RateCardForm(props: RateCardFormProps) {
 
       for (const a of approved) {
         const sec = sections.find((s) => s.id === a.sectionId);
-        // Wrong-room: MOVE the line to the correct room (keep the same record).
-        if (a.wrongRoom && a.suggested?.moveToSectionId && a.lineExternalId) {
-          const toSec = sections.find((s) => s.id === a.suggested!.moveToSectionId);
+        // Wrong-room: MOVE the line to the chosen room (keep the same record).
+        // No-op if the inspector left it in its current room.
+        if (a.wrongRoom && a.lineExternalId) {
+          const toSid = a.suggested?.moveToSectionId;
+          const toSec = toSid ? sections.find((s) => s.id === toSid) : undefined;
           const line = (projected[a.sectionId] || []).find((l) => l.externalId === a.lineExternalId);
-          if (toSec && line) {
+          if (toSec && line && toSec.id !== a.sectionId) {
             projected[a.sectionId] = (projected[a.sectionId] || []).filter((l) => l.externalId !== a.lineExternalId);
             const moved = { ...line, section: toSec.label, location: toSec.location || '' };
             projected[toSec.id] = [...(projected[toSec.id] || []), moved];
@@ -1976,7 +1978,7 @@ export function RateCardForm(props: RateCardFormProps) {
               catch (ne: any) { lastErr = String(ne?.message || ne); r = null; continue; }
               if (r.ok) break;
               if (r.status >= 400 && r.status < 500 && r.status !== 429) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0, 200)}`); }
-              lastErr = `HTTP ${r.status}`;
+              { const t = await r.text().catch(() => ''); lastErr = `HTTP ${r.status}${t ? `: ${t.slice(0, 200)}` : ''}`; }
             }
             if (!r || !r.ok) throw new Error(lastErr || 'save failed after retries');
             const data = await r.json();
@@ -2012,6 +2014,9 @@ export function RateCardForm(props: RateCardFormProps) {
       setAiDecisions({});
       refreshPending();
       setAiModalOpen(false);
+      // Return to the inspection and scroll to the top so the inspector sees the
+      // updated totals / submit.
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* noop */ }
     } catch (e: any) {
       setAiError(`Could not apply all changes: ${e?.message || e}`);
     } finally {

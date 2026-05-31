@@ -34,6 +34,12 @@ interface Props {
 // cleared / retyped freely (parsed to numbers only on apply).
 type Edit = { tenantPct?: string; quantity?: string; moveToSectionId?: string };
 
+// Capitalize the first letter of every word (preserves existing caps/acronyms
+// like SS, EA, QC). Used to clean up the AI's suggestion titles.
+function titleCase(s: string): string {
+  return (s || '').replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+
 function money(n: number | undefined): string {
   if (n == null || !isFinite(n)) return '';
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -85,9 +91,8 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
     .map((a) => {
       // Wrong-room: apply the inspector's chosen target room (dropdown).
       if (a.wrongRoom) {
-        const sel = edits[a.id]?.moveToSectionId;
-        if (sel && a.suggested) return { ...a, suggested: { ...a.suggested, moveToSectionId: sel, moveToRoomName: rooms?.find((r) => r.id === sel)?.name || a.suggested.moveToRoomName } };
-        return a;
+        const sel = edits[a.id]?.moveToSectionId ?? a.suggested?.moveToSectionId ?? a.sectionId;
+        return { ...a, suggested: { ...(a.suggested || {}), moveToSectionId: sel, moveToRoomName: rooms?.find((r) => r.id === sel)?.name || a.suggested?.moveToRoomName } };
       }
       if (a.type === 'remove') return a; // remove ignores field edits
       const e = edits[a.id];
@@ -183,7 +188,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                             <div className="flex items-start gap-2">
                               <span className={`mt-[5px] w-2.5 h-2.5 rounded-full shrink-0 ${SEV[a.severity || 'medium']}`} />
                               <div className="text-sm font-semibold text-ink leading-snug min-w-0 flex-1">
-                                {a.title}
+                                {titleCase(a.title)}
                                 {a.sectionName && <span className="ml-1.5 text-[11px] font-normal text-gray-400">· {a.sectionName}</span>}
                               </div>
                             </div>
@@ -211,7 +216,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                           setAddingPhoto(null);
                                           if (ok) { setPhotoAdded((m) => ({ ...m, [a.id]: true })); setDecisions((m) => ({ ...m, [a.id]: 'decline' })); }
                                         }}
-                                        className="px-3 py-1 text-xs font-heading font-semibold rounded-md bg-brand text-white hover:bg-brand-dark disabled:opacity-50 inline-flex items-center gap-1"
+                                        className="px-3 py-1 text-xs font-heading font-semibold rounded-md border border-gray-300 text-gray-700 hover:border-brand/50 disabled:opacity-50 inline-flex items-center gap-1"
                                       >
                                         {addingPhoto === a.id ? 'Adding…' : '📷 Add photo'}
                                       </button>
@@ -228,18 +233,18 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                     </div>
                                   )}
                                 </>
-                              ) : (a.wrongRoom && a.suggested?.moveToSectionId) ? (
+                              ) : a.wrongRoom ? (
                                 /* Wrong room: pick the correct room (dropdown) and move the line there
-                                   (keeps it — doesn't delete). */
+                                   (keeps it — doesn't delete). Defaults to the AI's suggested room. */
                                 <div className="mt-2">
                                   <div className="flex items-center gap-2 mb-2">
                                     <span className="text-[11px] text-gray-500">Move to</span>
                                     <select
-                                      value={edits[a.id]?.moveToSectionId ?? a.suggested.moveToSectionId}
+                                      value={edits[a.id]?.moveToSectionId ?? a.suggested?.moveToSectionId ?? a.sectionId}
                                       onChange={(e) => setEdit(a.id, { moveToSectionId: e.target.value })}
-                                      className="text-sm border border-gray-300 rounded px-2 py-1 bg-white max-w-[170px]"
+                                      className="text-sm border border-gray-300 rounded px-2 py-1 bg-white max-w-[180px]"
                                     >
-                                      {(rooms && rooms.length ? rooms : [{ id: a.suggested.moveToSectionId!, name: a.suggested.moveToRoomName || 'room' }]).map((r) => (
+                                      {(rooms && rooms.length ? rooms : [{ id: a.sectionId, name: a.sectionName || 'room' }]).map((r) => (
                                         <option key={r.id} value={r.id}>{r.name}</option>
                                       ))}
                                     </select>

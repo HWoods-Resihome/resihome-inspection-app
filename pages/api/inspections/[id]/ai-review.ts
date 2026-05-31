@@ -317,14 +317,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       } catch { /* keep model estimate */ }
 
-      // Wrong-room: resolve the suggested target room so the inspector can MOVE
-      // the line instead of deleting it.
-      const wrongRoom = a?.wrongRoom === true;
-      if (wrongRoom && a?.suggestedRoom) {
-        const want = String(a.suggestedRoom).trim().toLowerCase();
-        const target = sections.find((s) => s.name.toLowerCase() === want)
-          || sections.find((s) => s.name.toLowerCase().includes(want) || want.includes(s.name.toLowerCase()));
-        if (target && target.id !== sectionId) { suggested.moveToSectionId = target.id; suggested.moveToRoomName = target.name; }
+      // Wrong-room: a line filed in the wrong room. Treat it as a move (the
+      // inspector picks the destination room from a dropdown). Inferred from the
+      // explicit flag OR a "Move …" title (the model sometimes titles a move
+      // without setting the flag). Resolve the suggested target when we can.
+      const wrongRoom = a?.wrongRoom === true || /^\s*move\b/i.test(String(a?.title || ''));
+      if (wrongRoom) {
+        const want = String(a?.suggestedRoom || '').trim().toLowerCase();
+        if (want) {
+          const target = sections.find((s) => s.name.toLowerCase() === want)
+            || sections.find((s) => s.name.toLowerCase().includes(want) || want.includes(s.name.toLowerCase()));
+          if (target && target.id !== sectionId) { suggested.moveToSectionId = target.id; suggested.moveToRoomName = target.name; }
+        }
       }
 
       const norm = {
@@ -334,7 +338,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         rationale: String(a?.rationale || ''),
         severity: ['high', 'medium', 'low'].includes(a?.severity) ? a.severity : 'medium',
         needsPhoto: a?.needsPhoto === true,
-        wrongRoom: wrongRoom && !!suggested.moveToSectionId,
+        wrongRoom,
         current,
         suggested: Object.keys(suggested).length ? suggested : undefined,
         suggestedTenantDollars: suggestedTenantDollars != null && isFinite(suggestedTenantDollars) ? suggestedTenantDollars : undefined,

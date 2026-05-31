@@ -139,9 +139,11 @@ export async function flushOutbox(
       remove(entry.id);
       failedPermanently++;
     } else {
-      // 429 / 5xx — transient server error. Count the attempt; after too many,
+      // 429 / 5xx — transient server error. Surface the server's message so a
+      // recurring failure can be diagnosed. Count the attempt; after too many,
       // drop+skip so one bad entry can't wedge the queue indefinitely.
-      lastError = `Server error (HTTP ${res.status}) — retrying.`;
+      const body = await res.text().catch(() => '');
+      lastError = `Server error (HTTP ${res.status})${body ? `: ${body.slice(0, 200)}` : ''} — retrying.`;
       if (bumpAttempts(entry.id) >= MAX_ATTEMPTS) {
         console.error(`[outbox] dropping entry ${entry.id} after ${MAX_ATTEMPTS} failed attempts (HTTP ${res.status})`);
         remove(entry.id); failedPermanently++; continue;
