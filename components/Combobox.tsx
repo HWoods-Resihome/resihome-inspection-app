@@ -49,10 +49,6 @@ export function Combobox({
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  // Start readOnly so Android Chrome won't classify this as a fillable field and
-  // pop its password/card/address autofill bar. We drop readOnly the instant the
-  // field is focused, so typing is unaffected.
-  const [autofillBlock, setAutofillBlock] = useState(true);
   const [activeIndex, setActiveIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -198,14 +194,12 @@ export function Combobox({
           enterKeyHint="search"
           data-1p-ignore="true"
           data-lpignore="true"
-          readOnly={autofillBlock}
           value={open ? query : selectedLabel}
           onChange={(e) => {
             setQuery(e.target.value);
             setOpen(true);
           }}
           onFocus={() => {
-            setAutofillBlock(false); // allow typing now that the field is focused
             setOpen(true);
             if (scrollIntoViewOnFocus) {
               // Wait for the keyboard to push up, then scroll the sheet (only the
@@ -223,7 +217,6 @@ export function Combobox({
             }
           }}
           onBlur={() => {
-            setAutofillBlock(true); // re-arm the autofill block when focus leaves
             if (scrollIntoViewOnFocus) {
               setTimeout(() => {
                 const scroller = containerRef.current?.closest('[data-modal-scroll]') as HTMLElement | null;
