@@ -332,7 +332,7 @@ export async function fetchProperties(
   const candidateProps = [
     'hs_object_id', 'name',
     'address', 'city', 'state', 'state_code', 'zip', 'zip_code',
-    'bedrooms', 'bathrooms',
+    'region', 'bedrooms', 'bathrooms',
     PROPERTY_STATUS_PROPERTY,
   ];
 
@@ -413,6 +413,7 @@ export async function fetchProperties(
       city: city || undefined,
       state: state || undefined,
       zip: zip || undefined,
+      region: (p.region || '').toString().trim() || undefined,
       status: (p[PROPERTY_STATUS_PROPERTY] || '').toString().trim() || undefined,
       bedrooms,
       bathrooms,

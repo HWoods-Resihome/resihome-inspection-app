@@ -158,10 +158,11 @@ export default function NewInspection() {
       list.unshift(selectedProp);
     }
     return list.map((p) => {
-      const loc = [p.city, p.state].filter(Boolean).join(', ');
-      // Show status as subtext so the inspector can confirm they picked the
-      // right property (e.g. "Austin, TX • Active").
-      const sublabel = [loc, p.status].filter(Boolean).join(' • ') || undefined;
+      // The address/city/state already show in the main label, so the subtext
+      // shows region + status instead — e.g. "GA: Atlanta • Pending MOI/Recap" —
+      // to confirm the right property without repeating the location.
+      const region = p.state && p.region ? `${p.state}: ${p.region}` : (p.region || p.state || '');
+      const sublabel = [region, p.status].filter(Boolean).join(' • ') || undefined;
       return { value: p.recordId, label: p.name, sublabel };
     });
   }, [properties, selectedProp]);
