@@ -80,10 +80,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // - If absent, use today's date in UTC.
     let scheduledDateValue: string;
     if (body.scheduledDate) {
-      const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(body.scheduledDate);
-      scheduledDateValue = isDateOnly
-        ? body.scheduledDate
-        : new Date(body.scheduledDate).toISOString().slice(0, 10);
+      // Scheduled is a plain calendar date. Take the leading YYYY-MM-DD exactly
+      // as written — do NOT reparse a full ISO string through Date(), which
+      // converts to UTC and rolls the day forward for users in negative-offset
+      // timezones (e.g. an 8pm ET pick would become the next day).
+      const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(body.scheduledDate));
+      scheduledDateValue = m ? m[1] : nowIso().slice(0, 10);
     } else {
       scheduledDateValue = nowIso().slice(0, 10);
     }

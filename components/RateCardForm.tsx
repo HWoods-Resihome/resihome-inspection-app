@@ -1265,7 +1265,9 @@ export function RateCardForm(props: RateCardFormProps) {
       let v = 0, c = 0, t = 0;
       for (const line of lines) {
         const calc = totalsFor(line);
-        if (calc) { v += calc.vendorCost; c += calc.clientCost; t += calc.tenantCost; }
+        // Round EACH line then sum (one consistent policy) so section/grand
+        // totals match the per-line stored/displayed values to the cent.
+        if (calc) { v += roundMoney(calc.vendorCost); c += roundMoney(calc.clientCost); t += roundMoney(calc.tenantCost); }
       }
       out[s.id] = { count: lines.length, vendor: v, client: c, tenant: t };
     }

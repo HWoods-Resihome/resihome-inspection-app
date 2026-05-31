@@ -5,12 +5,12 @@ import {
   updateInspection,
   touchInspection,
   fetchInspectionById,
-  fetchRateCardLineItemByCode,
   type AnswerUpsert,
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
+import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import type { RateCardLineInput } from '@/lib/types';
 
 /**
@@ -37,6 +37,9 @@ import type { RateCardLineInput } from '@/lib/types';
  */
 
 export const config = {
+  // Saves can batch several lines; give headroom over the 10s default so a
+  // multi-line save under load doesn't time out mid-write.
+  maxDuration: 30,
   api: { bodyParser: { sizeLimit: '5mb' } },
 };
 
@@ -104,12 +107,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 || (inspection as any).region_snapshot
                 || ''; // empty triggers fallback
 
+    // Look codes up against the cached catalog (one load, reused) instead of a
+    // per-line HubSpot search — that N+1 against the slowest CRM endpoint could
+    // time out / rate-limit a multi-line save.
+    const catalogList = await getCachedCatalog();
+    const catalogByCode = new Map(catalogList.map((c) => [c.lineItemCode, c]));
+
     for (const u of upserts) {
       const line = u.line;
       if (!line?.lineItemCode) {
         return res.status(400).json({ error: 'Missing lineItemCode in upsert' });
       }
-      const catalog = await fetchRateCardLineItemByCode(line.lineItemCode);
+      const catalog = catalogByCode.get(line.lineItemCode);
       if (!catalog) {
         return res.status(400).json({
           error: `Catalog item not found: ${line.lineItemCode}`,

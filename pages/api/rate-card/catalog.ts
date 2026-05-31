@@ -30,6 +30,22 @@ let CACHE: CachedCatalog | null = null;
 let INFLIGHT: Promise<RateCardLineItem[]> | null = null;
 const TTL_MS = 60 * 60 * 1000;   // 60 minutes
 
+/** Internal: load + cache, coalescing concurrent fetches. */
+async function loadCatalog(forceRefresh: boolean): Promise<RateCardLineItem[]> {
+  if (!INFLIGHT || forceRefresh) {
+    INFLIGHT = (async () => {
+      try {
+        const items = await fetchRateCardCatalog();
+        CACHE = { data: items, fetchedAt: Date.now() };
+        return items;
+      } finally {
+        INFLIGHT = null;
+      }
+    })();
+  }
+  return INFLIGHT;
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
@@ -48,22 +64,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    // Coalesce concurrent loads: if another request is already fetching the
-    // catalog, await its promise instead of starting a parallel paginated fetch.
-    // Without this, two browser tabs hitting /api/rate-card/catalog at the same
-    // time both trigger 9-page paginations that can blow HubSpot's secondly limit.
-    if (!INFLIGHT || refresh) {
-      INFLIGHT = (async () => {
-        try {
-          const items = await fetchRateCardCatalog();
-          CACHE = { data: items, fetchedAt: Date.now() };
-          return items;
-        } finally {
-          INFLIGHT = null;
-        }
-      })();
-    }
-    const items = await INFLIGHT;
+    const items = await loadCatalog(refresh);
     return res.status(200).json({
       items,
       cached: false,
@@ -71,6 +72,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   } catch (e: any) {
     console.error('GET /api/rate-card/catalog failed:', e);
-    return res.status(500).json({ error: String(e?.message || e) });
+    // Serve-stale-on-error so a refresh blip doesn't break the picker.
+    if (CACHE) {
+      return res.status(200).json({
+        items: CACHE.data,
+        cached: true,
+        stale: true,
+        ageSeconds: Math.round((now - CACHE.fetchedAt) / 1000),
+      });
+    }
+    return res.status(500).json({ error: 'Could not load the rate card catalog.' });
+  }
+}
+
+/**
+ * Helper exported for server-side use (finalize, qc-finalize, rate-card-lines)
+ * so they reuse this 60-minute cache instead of re-paginating the full ~850-row
+ * catalog on every call. Mirrors getCachedRegions.
+ */
+export async function getCachedCatalog(forceRefresh = false): Promise<RateCardLineItem[]> {
+  const now = Date.now();
+  const fresh = CACHE && (now - CACHE.fetchedAt) < TTL_MS && !forceRefresh;
+  if (fresh) return CACHE!.data;
+  try {
+    return await loadCatalog(forceRefresh);
+  } catch (e) {
+    if (CACHE) {
+      console.warn('[getCachedCatalog] refresh failed, serving stale cache:', e);
+      return CACHE.data;
+    }
+    throw e;
   }
 }

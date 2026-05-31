@@ -68,7 +68,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   } catch (e: any) {
     console.error('GET /api/rate-card/regions failed:', e);
-    return res.status(500).json({ error: String(e?.message || e) });
+    // Serve-stale-on-error: a refresh failure shouldn't take pricing down if we
+    // still have a last-good copy in memory.
+    if (CACHE) {
+      return res.status(200).json({
+        regions: CACHE.data,
+        cached: true,
+        stale: true,
+        ageSeconds: Math.round((now - CACHE.fetchedAt) / 1000),
+      });
+    }
+    return res.status(500).json({ error: 'Could not load region rates.' });
   }
 }
 
@@ -80,5 +90,14 @@ export async function getCachedRegions(forceRefresh = false): Promise<RegionRate
   const now = Date.now();
   const fresh = CACHE && (now - CACHE.fetchedAt) < TTL_MS && !forceRefresh;
   if (fresh) return CACHE!.data;
-  return loadRegions(forceRefresh);
+  try {
+    return await loadRegions(forceRefresh);
+  } catch (e) {
+    // Serve-stale rather than fail a save/finalize when a refresh blips.
+    if (CACHE) {
+      console.warn('[getCachedRegions] refresh failed, serving stale cache:', e);
+      return CACHE.data;
+    }
+    throw e;
+  }
 }

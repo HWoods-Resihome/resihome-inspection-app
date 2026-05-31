@@ -17,14 +17,14 @@ import { getSessionFromRequest } from '@/lib/auth';
 import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
-  fetchRateCardCatalog,
-  fetchRegionRates,
   uploadFileWithId,
   attachFilesToInspectionRecord,
   updateInspection,
 } from '@/lib/hubspot';
+import { getCachedRegions } from '@/pages/api/rate-card/regions';
+import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { resolveSections, resolveStateCode, type SectionInstance } from '@/lib/sections';
-import { calculateLine } from '@/lib/rateCardMath';
+import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { renderMasterPdf } from '@/lib/pdfMaster';
 import { renderChargebackPdf } from '@/lib/pdfChargeback';
 import { renderVendorPdfs } from '@/lib/pdfVendor';
@@ -81,8 +81,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const [answers, regions, catalog] = await Promise.all([
       fetchAnswersForInspection(id),
-      fetchRegionRates(),
-      fetchRateCardCatalog(),
+      getCachedRegions(),
+      getCachedCatalog(),
     ]);
 
     // ---- 2. Build the section list (using stored section_list_json) ----
@@ -190,9 +190,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         };
 
         group.lines.push(line);
-        group.vendorTotal += calc.vendorCost;
-        group.clientTotal += calc.clientCost;
-        group.tenantTotal += calc.tenantCost;
+        // Round each line then sum (matches per-line stored totals + the form's
+        // grand totals) so the PDF can't drift a cent from the stored values.
+        group.vendorTotal += roundMoney(calc.vendorCost);
+        group.clientTotal += roundMoney(calc.clientCost);
+        group.tenantTotal += roundMoney(calc.tenantCost);
       } else if (ans.answerType === 'section_photo') {
         const s = sectionLookup.get(ans.location) || sectionLookup.get(`${ans.section}||${ans.location}`);
         if (!s) continue;

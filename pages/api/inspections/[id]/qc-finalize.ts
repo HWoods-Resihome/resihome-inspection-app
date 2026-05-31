@@ -16,11 +16,11 @@ import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
   fetchSourceSectionPhotos,
-  fetchRateCardCatalog,
   uploadFileWithId,
   attachFilesToInspectionRecord,
   updateInspection,
 } from '@/lib/hubspot';
+import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
 
@@ -75,7 +75,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let catByCode: Record<string, { category: string; subcategory: string; unit: string }> = {};
     if (lineAnswers.length > 0) {
       try {
-        const catalog = await fetchRateCardCatalog();
+        const catalog = await getCachedCatalog();
         for (const c of catalog) {
           catByCode[c.lineItemCode] = { category: c.category || '', subcategory: c.subcategory || '', unit: c.laborMeas || '' };
         }
