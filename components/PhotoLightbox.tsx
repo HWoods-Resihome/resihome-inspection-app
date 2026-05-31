@@ -114,12 +114,15 @@ export function PhotoLightbox({
 
   return (
     <div className="fixed inset-0 z-[55] bg-black flex flex-col animate-fadeIn">
-      {/* Header: group dropdown + position + close */}
-      <div className="flex items-center justify-between gap-2 px-3 py-3 bg-black">
+      {/* Header: counter (left) · room dropdown (centered) · close (right) */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-3 bg-black">
+        <span className="text-white/70 text-xs font-heading justify-self-start">
+          {photos.length ? `${index + 1} / ${photos.length}` : ''}
+        </span>
         <select
           value={groupId}
           onChange={(e) => { setGroupId(e.target.value); setIndex(0); setDragPx(0); }}
-          className="bg-white/10 text-white text-sm font-heading rounded px-2 py-1.5 max-w-[55%]"
+          className="justify-self-center bg-white/10 text-white text-sm font-heading rounded px-2 py-1.5 max-w-[60vw]"
           aria-label="Switch group"
         >
           {groups.map((g) => {
@@ -127,8 +130,7 @@ export function PhotoLightbox({
             return <option key={g.id} value={g.id} className="text-black">{g.name}{n ? ` (${n})` : ''}</option>;
           })}
         </select>
-        <span className="text-white/70 text-xs font-heading">{photos.length ? `${index + 1} / ${photos.length}` : ''}</span>
-        <button type="button" onClick={onClose} className="text-white text-2xl leading-none px-2" aria-label="Close">×</button>
+        <button type="button" onClick={onClose} className="text-white text-2xl leading-none px-2 justify-self-end" aria-label="Close">×</button>
       </div>
 
       {/* Carousel: finger-following track that snaps */}
