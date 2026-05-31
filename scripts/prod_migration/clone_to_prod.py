@@ -192,11 +192,39 @@ def existing_prop_names(type_id: str):
     return {p["name"] for p in res}
 
 
+def sanitize_options(props):
+    """Drop enumeration options with a blank value/label. Sandbox tolerates legacy
+    blank options; the production schemas API rejects them (OPTION_HAS_BLANK_VALUE).
+    Mutates the prop list in place and reports what it removed."""
+    for p in props:
+        opts = p.get("options")
+        if not opts:
+            continue
+        kept, dropped = [], 0
+        for o in opts:
+            val = o.get("value")
+            lbl = o.get("label")
+            if val is None or str(val).strip() == "" or lbl is None or str(lbl).strip() == "":
+                dropped += 1
+                continue
+            kept.append(o)
+        if dropped:
+            p["options"] = kept
+            print(f"    ! sanitized {p['name']}: dropped {dropped} blank option(s)")
+    return props
+
+
 def cmd_import(portal_arg: str, live: bool):
     pid = require_prod(portal_arg)
     mode = "LIVE" if live else "DRY-RUN (no writes)"
     print(f"Import into portal {pid} — {mode}\n")
     data = json.load(open(SCHEMAS_FILE, encoding="utf-8"))
+    # Strip blank-value options up front so object-create, per-property ensure,
+    # and the ref-object field ensure all send production-valid payloads.
+    for obj in data["objects"]:
+        sanitize_options(obj.get("properties", []))
+    if data.get("ref_object"):
+        sanitize_options(data["ref_object"].get("fields", []))
     prod = {s["name"]: s["objectTypeId"] for s in all_schemas()}
     new_ids = {}
 
