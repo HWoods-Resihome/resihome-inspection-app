@@ -22,9 +22,23 @@ export type OutboxEntry = {
   // that happened before the entry synced.
   meta?: { sectionId?: string; line?: any; externalId?: string };
   createdAt: number;
+  // Failed replay attempts; a wedged entry is dropped after MAX_ATTEMPTS so it
+  // can't block the queue (and the "Syncing…" banner) forever.
+  attempts?: number;
 };
 
 const KEY = 'resiwalk_outbox_v1';
+const MAX_ATTEMPTS = 6;
+
+/** Increment an entry's attempt counter in storage; returns the new count. */
+function bumpAttempts(id: string): number {
+  const list = read();
+  const e = list.find((x) => x.id === id);
+  if (!e) return Infinity; // already gone — treat as "drop"
+  e.attempts = (e.attempts || 0) + 1;
+  write(list);
+  return e.attempts;
+}
 
 function read(): OutboxEntry[] {
   if (typeof window === 'undefined') return [];
@@ -91,7 +105,15 @@ export async function flushOutbox(
         body: JSON.stringify(entry.body),
       });
     } catch {
-      // Still offline / network error — keep this and everything after it.
+      // If the device is genuinely offline, keep everything and stop.
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
+      // Online but the request failed (DNS/CORS/transient). Count the attempt;
+      // drop+skip a wedged entry after too many so it can't block the queue
+      // forever, otherwise stop and retry in order next time.
+      if (bumpAttempts(entry.id) >= MAX_ATTEMPTS) {
+        console.error(`[outbox] dropping entry ${entry.id} after ${MAX_ATTEMPTS} failed attempts (network)`);
+        remove(entry.id); failedPermanently++; continue;
+      }
       break;
     }
     if (res.ok) {
@@ -112,11 +134,24 @@ export async function flushOutbox(
       remove(entry.id);
       failedPermanently++;
     } else {
-      // 429 / 5xx — keep for the next flush.
+      // 429 / 5xx — transient server error. Count the attempt; after too many,
+      // drop+skip so one bad entry can't wedge the queue indefinitely.
+      if (bumpAttempts(entry.id) >= MAX_ATTEMPTS) {
+        console.error(`[outbox] dropping entry ${entry.id} after ${MAX_ATTEMPTS} failed attempts (HTTP ${res.status})`);
+        remove(entry.id); failedPermanently++; continue;
+      }
       break;
     }
   }
   return { synced, remaining: read().length, failedPermanently };
+}
+
+/** Drop every queued entry for an inspection (manual "clear stuck items"). */
+export function clearFor(inspectionRecordId: string): number {
+  const list = read();
+  const remaining = list.filter((e) => e.inspectionRecordId !== inspectionRecordId);
+  write(remaining);
+  return list.length - remaining.length;
 }
 
 /** Heuristic: was a thrown save error a network/offline failure (vs a 4xx)? */

@@ -33,6 +33,7 @@ export type QueuedPhoto = {
   replacesUrl?: string;
   lineExternalId?: string;
   createdAt: number;
+  attempts?: number;     // failed upload attempts; dropped after MAX_ATTEMPTS
   // Set by the service worker's Background Sync handler once the blob has been
   // uploaded to HubSpot with the tab closed. When present, the foreground flush
   // skips re-uploading and only performs the (cheap) attach step on next open.
@@ -42,6 +43,7 @@ export type QueuedPhoto = {
 const DB_NAME = 'resiwalk_photos';
 const STORE = 'queue';
 const DB_VERSION = 1;
+const MAX_ATTEMPTS = 6;
 
 // localId -> live display URL + the raw object URLs to revoke (session-scoped;
 // not persisted). For a video the display URL is the composite poster#v=video
@@ -189,6 +191,19 @@ export async function countQueuedPhotos(inspectionRecordId: string): Promise<num
   return all.filter((r) => r.inspectionRecordId === inspectionRecordId).length;
 }
 
+/** Discard every queued photo/video for an inspection (manual "clear stuck"). */
+export async function clearQueuedPhotos(inspectionRecordId: string): Promise<number> {
+  const all = await getAllRecords();
+  let n = 0;
+  for (const r of all) {
+    if (r.inspectionRecordId !== inspectionRecordId) continue;
+    const entry = urlByLocalId.get(r.localId);
+    if (entry) { for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } } urlByLocalId.delete(r.localId); }
+    try { await deleteRecord(r.localId); n++; } catch { /* noop */ }
+  }
+  return n;
+}
+
 /**
  * Recreate object URLs for this inspection's queued photos (e.g. after a reload
  * while still offline) so they can be re-shown. Returns [{ localId, sectionId,
@@ -261,8 +276,22 @@ export async function flushQueuedPhotos(
         newUrl = await uploadJpegBlob(rec.blob, rec.filename);
       }
     } catch (e) {
-      if (isOfflineErr(e)) break; // still offline — keep the rest queued
-      // Permanent failure: drop so it can't wedge the queue.
+      // Genuinely offline → keep everything and stop.
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
+      if (isOfflineErr(e)) {
+        // Online but the upload failed in a network-ish way (HubSpot hiccup,
+        // oversized blob, etc.). Count the attempt; after too many, drop+skip
+        // so one wedged photo can't block the queue (and the banner) forever.
+        const attempts = (rec.attempts || 0) + 1;
+        if (attempts >= MAX_ATTEMPTS) {
+          console.error(`[offlinePhotoStore] dropping ${rec.localId} after ${MAX_ATTEMPTS} failed attempts`);
+          await deleteRecord(rec.localId);
+          continue;
+        }
+        try { await putRecord({ ...rec, attempts }); } catch { /* noop */ }
+        break;
+      }
+      // Permanent failure (decodable 4xx etc.): drop so it can't wedge the queue.
       console.error(`[offlinePhotoStore] dropping ${rec.localId} after permanent error`, e);
       await deleteRecord(rec.localId);
       continue;

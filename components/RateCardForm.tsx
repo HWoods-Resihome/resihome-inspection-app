@@ -17,8 +17,8 @@ import { AiReviewModal } from '@/components/AiReviewModal';
 import { scopeHash, getPassedReviewHash, setPassedReviewHash, type AiAdjustment } from '@/lib/aiReview';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
-import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError } from '@/lib/offlineOutbox';
-import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
+import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
 import { setErrorContext } from '@/lib/clientErrorReporter';
 import { useAppDialog } from '@/components/AppDialog';
@@ -172,6 +172,11 @@ export function RateCardForm(props: RateCardFormProps) {
   // and whether the browser currently reports being online.
   const [pendingSync, setPendingSync] = useState(0);
   const [pendingPhotos, setPendingPhotos] = useState(0);
+  // True when queued items have stopped draining (no progress across ticks) so
+  // the banner can offer Retry / Clear instead of an endless "Syncing…".
+  const [syncStuck, setSyncStuck] = useState(false);
+  // Start high so the first tick can't falsely flag "stuck" before a sync round.
+  const lastPendingRef = useRef(Number.POSITIVE_INFINITY);
   const [online, setOnline] = useState(true);
   // Device storage: photos/video queue in IndexedDB until they sync. Warn the
   // inspector before they run out of room (otherwise captures silently fail).
@@ -565,6 +570,21 @@ export function RateCardForm(props: RateCardFormProps) {
     void countQueuedPhotos(props.inspectionRecordId).then(setPendingPhotos).catch(() => {});
   }, [props.inspectionRecordId]);
 
+  // Escape hatch: discard the queued items that can't sync so the inspector
+  // isn't stuck behind a wedged entry. Confirmed, since it drops unsynced work.
+  const clearStuckQueue = useCallback(async () => {
+    const ok = await dialog.confirm(
+      'Discard the changes that haven’t synced?\n\nThis removes the queued items stuck on this device that can’t upload. Anything already saved to the server is unaffected. This can’t be undone.',
+      { confirmLabel: 'Discard queued', cancelLabel: 'Keep trying' }
+    );
+    if (!ok) return;
+    try { outboxClearFor(props.inspectionRecordId); } catch { /* noop */ }
+    await clearQueuedPhotos(props.inspectionRecordId).catch(() => {});
+    setSyncStuck(false);
+    lastPendingRef.current = 0;
+    refreshPending();
+  }, [props.inspectionRecordId, refreshPending, dialog]);
+
   // Live handle to savePhotosForSection so the memoized flusher always calls
   // the latest closure (current sectionPhotoRecordIds / sections), not a stale one.
   const savePhotosRef = useRef<(sectionId: string, urls: string[]) => Promise<void>>(async () => {});
@@ -671,10 +691,13 @@ export function RateCardForm(props: RateCardFormProps) {
         // Reconcile the displayed counts (clears a stale banner).
         setPendingSync(outbox);
         setPendingPhotos(photos);
-        // Retry the flush only when there's something to send and we're online.
-        if ((outbox > 0 || photos > 0) && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
-          void runFlush();
-        }
+        const total = outbox + photos;
+        const onlineNow = typeof navigator === 'undefined' || navigator.onLine !== false;
+        // "Stuck" = still pending and not shrinking since the last tick while
+        // online (the flush isn't making progress). Surfaces Retry/Clear.
+        setSyncStuck(total > 0 && onlineNow && total >= lastPendingRef.current);
+        lastPendingRef.current = total;
+        if (total > 0 && onlineNow) void runFlush();
       }).catch(() => {});
     }, 15000);
     void runFlush(); // attempt anything left from a previous session
@@ -2202,14 +2225,25 @@ export function RateCardForm(props: RateCardFormProps) {
         const totalPending = pendingSync + pendingPhotos;
         if (online && totalPending === 0) return null;
         const noun = totalPending === 1 ? 'change' : 'changes';
+        if (!online) {
+          return (
+            <div className="-mx-4 px-4 py-1.5 mb-2 text-xs font-heading font-semibold flex items-center justify-center gap-2 bg-amber-100 text-amber-800">
+              <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
+              {totalPending > 0
+                ? `Offline — ${totalPending} ${noun}${pendingPhotos > 0 ? ` (incl. ${pendingPhotos} photo/video)` : ''} saved here, will sync when you're back online`
+                : `Offline — your changes are saved on this device and will sync automatically`}
+            </div>
+          );
+        }
+        // Online with a non-empty queue: actively syncing, or stuck (offer Retry/Clear).
         return (
-          <div className={`-mx-4 px-4 py-1.5 mb-2 text-xs font-heading font-semibold flex items-center justify-center gap-2 ${!online ? 'bg-amber-100 text-amber-800' : 'bg-blue-50 text-blue-700'}`}>
-            <span className={`inline-block w-2 h-2 rounded-full ${!online ? 'bg-amber-500' : 'bg-blue-500 animate-pulse'}`} />
-            {!online
-              ? (totalPending > 0
-                  ? `Offline — ${totalPending} ${noun}${pendingPhotos > 0 ? ` (incl. ${pendingPhotos} photo/video)` : ''} saved here, will sync when you're back online`
-                  : `Offline — your changes are saved on this device and will sync automatically`)
-              : `Syncing ${totalPending} ${noun}…`}
+          <div className={`-mx-4 px-4 py-1.5 mb-2 text-xs font-heading font-semibold flex items-center justify-center gap-2 ${syncStuck ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
+            <span className={`inline-block w-2 h-2 rounded-full ${syncStuck ? 'bg-red-500' : 'bg-blue-500 animate-pulse'}`} />
+            <span>{syncStuck ? `${totalPending} ${noun} haven’t synced` : `Syncing ${totalPending} ${noun}…`}</span>
+            <button type="button" onClick={() => void runFlush()} className="underline hover:no-underline">Retry</button>
+            {syncStuck && (
+              <button type="button" onClick={() => void clearStuckQueue()} className="underline hover:no-underline">Clear</button>
+            )}
           </div>
         );
       })()}
