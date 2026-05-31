@@ -426,7 +426,7 @@ export default function Home() {
                 <option value="all">All Inspectors</option>
                 {inspectorOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>
-                    {opt.label} ({opt.count})
+                    {opt.label}
                   </option>
                 ))}
               </select>
@@ -454,7 +454,7 @@ export default function Home() {
                 <option value="all">All Templates</option>
                 {templateOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>
-                    {opt.label} ({opt.count})
+                    {opt.label}
                   </option>
                 ))}
               </select>
