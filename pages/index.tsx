@@ -392,9 +392,9 @@ export default function Home() {
             />
           </div>
 
-          {/* Status filter chips — kept on a single line; scrolls horizontally
-              on narrow screens rather than wrapping. */}
-          <div className="flex gap-1.5 mb-3 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+          {/* Status filter chips — compact and centered, wrapping neatly into
+              their own section on narrow screens (never horizontal-scroll). */}
+          <div className="flex flex-wrap justify-center gap-1.5 mb-3">
             <FilterChip label={`All (${counts.all})`} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
             <FilterChip label={`Scheduled (${counts.scheduled})`} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter('scheduled')} />
             <FilterChip label={`In Progress (${counts.in_progress})`} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter('in_progress')} />
@@ -402,9 +402,9 @@ export default function Home() {
             <FilterChip label={`Completed (${counts.completed})`} active={statusFilter === 'completed'} onClick={() => setStatusFilter('completed')} />
           </div>
 
-          {/* Filter controls row: inspector dropdown | template dropdown | date
-              sort — all on one line, scrolling horizontally on narrow screens. */}
-          <div className="flex items-center gap-2 mb-2 pb-1 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+          {/* Filter controls: inspector | template | date sort — centered and
+              wrapping (no horizontal scroll on mobile). */}
+          <div className="flex flex-wrap justify-center items-center gap-2 mb-2 pb-1">
             {/* Inspector filter */}
             <div className="relative shrink-0">
               <select
@@ -610,7 +610,7 @@ function FilterChip({ label, active, onClick }: ChipProps) {
     <button
       type="button"
       onClick={onClick}
-      className={`shrink-0 text-xs font-heading font-semibold px-3 py-1.5 rounded-full border transition whitespace-nowrap ${
+      className={`shrink-0 text-[11px] font-heading font-semibold px-2.5 py-1 rounded-full border transition whitespace-nowrap ${
         active
           ? 'bg-brand text-white border-brand'
           : 'bg-white text-ink border-gray-300 hover:border-brand/50'
