@@ -120,14 +120,23 @@ export function RateCardForm(props: RateCardFormProps) {
   // Save & Close / Submit row (exact regardless of device safe-area padding).
   const footerRef = useRef<HTMLDivElement | null>(null);
   const [footerH, setFooterH] = useState(60);
+  // The bottom action row only (Save & Close / Submit), measured separately so
+  // the centered voice mic stays centered on THAT row even when the AI-review
+  // status bar adds height above it.
+  const actionRowRef = useRef<HTMLDivElement | null>(null);
+  const [actionRowH, setActionRowH] = useState(60);
   useEffect(() => {
     const el = footerRef.current;
     if (!el) return;
-    const update = () => setFooterH(el.offsetHeight || 60);
+    const update = () => {
+      setFooterH(el.offsetHeight || 60);
+      setActionRowH(actionRowRef.current?.offsetHeight || el.offsetHeight || 60);
+    };
     update();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(update);
     ro.observe(el);
+    if (actionRowRef.current) ro.observe(actionRowRef.current);
     return () => ro.disconnect();
   }, []);
   // Photo lightbox (tap a photo to view/swipe/mark-up/tag/delete). Either a
@@ -1738,6 +1747,31 @@ export function RateCardForm(props: RateCardFormProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, props.inspectionRecordId, props.bedrooms, props.bathrooms, props.squareFootage, inspectionRegion]);
 
+  // Live tenant-$ preview for the review popup as the inspector edits the
+  // tenant % / quantity on a suggestion (uses the same authoritative math).
+  const previewTenantDollars = useCallback((a: AiAdjustment, o: { tenantPct?: number; quantity?: number }): number | undefined => {
+    const code = a.suggested?.lineItemCode || a.current?.lineItemCode;
+    if (!code) return undefined;
+    const item = catalog.find((c) => c.lineItemCode === code);
+    if (!item) return undefined;
+    const existing = a.lineExternalId ? (linesBySectionRef.current[a.sectionId] || []).find((l) => l.externalId === a.lineExternalId) : undefined;
+    const qty = o.quantity ?? a.suggested?.quantity ?? existing?.quantity ?? 1;
+    const pct = o.tenantPct ?? a.suggested?.tenantBillBackPercent ?? existing?.tenantBillBackPercent ?? 100;
+    const calc = totalsFor({
+      externalId: existing?.externalId || 'preview',
+      section: '', location: '',
+      lineItemCode: code,
+      quantity: qty,
+      tenantBillBackPercent: pct,
+      assignedTo: a.suggested?.assignedTo || existing?.assignedTo || 'Vendor 1',
+      note: '',
+      customVendorCost: a.suggested?.customVendorCost ?? existing?.customVendorCost ?? null,
+      photoUrls: [],
+    });
+    return calc ? roundMoney(calc.tenantCost) : undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalog, regions, inspectionRegion]);
+
   // Apply the approved adjustments, then mark the review passed for the
   // resulting scope (so submit unlocks). Declined items are left untouched.
   const applyApproved = useCallback(async (approved: AiAdjustment[]) => {
@@ -2555,7 +2589,7 @@ export function RateCardForm(props: RateCardFormProps) {
             </button>
           </div>
         )}
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-2">
+        <div ref={actionRowRef} className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-2">
           <div className="flex-1 min-w-0">
             <TerminalActions
               readOnly={!!props.readOnly}
@@ -2581,6 +2615,7 @@ export function RateCardForm(props: RateCardFormProps) {
         onClose={() => setAiModalOpen(false)}
         onRetry={() => runAiReview()}
         onApply={(approved) => applyApproved(approved)}
+        previewTenantDollars={previewTenantDollars}
       />
 
       {cameraSectionId !== null && (
@@ -2651,7 +2686,7 @@ export function RateCardForm(props: RateCardFormProps) {
             style={{
               // In the form, center the 44px mic on the footer button row; in the
               // camera, sit ON the shutter-control line at the bottom-LEFT.
-              bottom: cameraOpen ? 34 : Math.max(6, Math.round(footerH / 2 - 22)),
+              bottom: cameraOpen ? 34 : Math.max(6, Math.round(actionRowH / 2 - 22)),
               display: hidden ? 'none' : undefined,
             }}
           >

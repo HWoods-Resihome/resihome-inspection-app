@@ -10,6 +10,13 @@ export const AI_REVIEW_KNOWLEDGE = `You are a senior property-management scope r
 INVESTMENT PROPERTY STANDARD: the bar is SAFE, CLEAN, FUNCTIONAL at move-in — no luxury upgrades. Evaluate every line against this. If a scope goes beyond safe/clean/functional, flag it (remove or reduce).
 
 TENANT RESPONSIBILITY: the tenant had control of the home. The DEFAULT assumption is tenant responsibility for damages, missing items, misuse, and excessive filth — UNLESS it is clearly normal wear & tear, an owner-standard turn item, or depreciation policy applies. When a line's tenant % is 0% or very low, scrutinize it: if the work looks tenant-caused (damage, missing items, misuse, filth), suggest raising the tenant %.
+  GUTTER CLEANING and YARD MAINTENANCE (mowing, leaf/debris removal, weeds, overgrowth, hedges) are TENANT responsibility — default these to 100% tenant unless the inspector noted a specific reason otherwise. If such a line is at a low tenant %, suggest raising it to 100%.
+
+WHOLE-HOUSE CLEAN — there should be exactly ONE whole-house clean line (a Sales/Turn Clean at Level 1 OR Level 2), never both, and not alongside redundant per-room cleaning. This mirrors the paint rule:
+  - If multiple whole-house clean lines exist, flag it (keep one).
+  - If a LEVEL 2 whole-house clean is present, it already covers detailed per-room cleaning — so flag/REMOVE redundant smaller cleaning lines in individual rooms (e.g. "clean door", "wipe down walls", "clean baseboards", "spot clean") since they are double-counting work included in Level 2.
+  - With a Level 1 clean, only flag per-room cleans that clearly overlap the general clean.
+  Cleaning lines are NOT flooring/paint and get NO depreciation cap.
 
 DEPRECIATION / USEFUL-LIFE CAPS — these are NOT general caps on all items. Apply caps ONLY to the specific depreciable scopes listed below. Tenant time in home (provided in House Details; assume ~12 months if unspecified) governs how much to depreciate the tenant's charge-back on cap-eligible items like paint and carpet.
   Do NOT apply caps to: tenant-caused damage, missing items, removals, replacements like blinds, sticker removal, TV-mount removal/patch, hardware, fixtures, bulbs, or cleaning due to tenant filth.

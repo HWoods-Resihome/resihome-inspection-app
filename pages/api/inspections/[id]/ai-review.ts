@@ -25,12 +25,12 @@ export const config = { maxDuration: 120, api: { bodyParser: { sizeLimit: '2mb' 
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-6';
-const MAX_TOOL_ROUNDS = 6;
-// Photo budget — keep token cost bounded. The newest few per room are the most
-// relevant to the current scope.
-const MAX_PHOTOS_PER_ROOM = 3;
-const MAX_PHOTOS_TOTAL = 18;
-const PHOTO_EDGE = 512; // px, long edge after downscale
+const MAX_TOOL_ROUNDS = 4;
+// Photo budget — keep token cost (and latency) bounded. The newest few per room
+// are the most relevant to the current scope. Smaller + fewer = faster review.
+const MAX_PHOTOS_PER_ROOM = 2;
+const MAX_PHOTOS_TOTAL = 12;
+const PHOTO_EDGE = 448; // px, long edge after downscale
 
 interface InLine {
   sectionId: string;
@@ -212,22 +212,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ].join('\n');
 
     // ---- Photos (downsized), grouped by room, capped ----
-    const photoContent: any[] = [];
+    // Build the capped pick list first, then fetch+downsize ALL of them in
+    // parallel (the slow part), then group — much faster than awaiting per room.
     const photosBySection = body?.photosBySection || {};
-    let totalPhotos = 0;
+    const picks: { sectionId: string; sectionName: string; url: string }[] = [];
     for (const s of sections) {
-      if (totalPhotos >= MAX_PHOTOS_TOTAL) break;
+      if (picks.length >= MAX_PHOTOS_TOTAL) break;
       const urls = (photosBySection[s.id] || []).filter((u) => /^https?:\/\//i.test(u.split('#')[0]));
-      if (urls.length === 0) continue;
-      const pick = urls.slice(-MAX_PHOTOS_PER_ROOM); // newest few
-      const blocks = (await Promise.all(pick.map(fetchPhotoBlock))).filter(Boolean) as any[];
-      if (blocks.length === 0) continue;
-      photoContent.push({ type: 'text', text: `Photos for room "${s.name}" (id=${s.id}):` });
-      for (const b of blocks) {
-        if (totalPhotos >= MAX_PHOTOS_TOTAL) break;
-        photoContent.push(b);
-        totalPhotos++;
+      for (const url of urls.slice(-MAX_PHOTOS_PER_ROOM)) {
+        if (picks.length >= MAX_PHOTOS_TOTAL) break;
+        picks.push({ sectionId: s.id, sectionName: s.name, url });
       }
+    }
+    const fetched = await Promise.all(picks.map((p) => fetchPhotoBlock(p.url)));
+    const photoContent: any[] = [];
+    let lastSection = '';
+    for (let i = 0; i < picks.length; i++) {
+      const block = fetched[i];
+      if (!block) continue;
+      if (picks[i].sectionId !== lastSection) {
+        photoContent.push({ type: 'text', text: `Photos for room "${picks[i].sectionName}" (id=${picks[i].sectionId}):` });
+        lastSection = picks[i].sectionId;
+      }
+      photoContent.push(block);
     }
 
     const scopeText = scopeBlocks.length
@@ -314,6 +321,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           tenantBillBackPercent: cur.tenantBillBackPercent,
           tenantDollars,
           vendorCost,
+          unit: item?.laborMeas,
+          lineItemCode: cur.lineItemCode,
         };
       }
 

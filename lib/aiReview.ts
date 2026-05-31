@@ -31,6 +31,8 @@ export interface AiAdjustment {
     tenantBillBackPercent?: number;
     tenantDollars?: number;
     vendorCost?: number;
+    unit?: string;        // labor unit of measure (EA/SF/LF…) for labeling the qty input
+    lineItemCode?: string;
   };
   /** The change to apply if approved. */
   suggested?: {
