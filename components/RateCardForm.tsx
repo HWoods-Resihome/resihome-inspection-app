@@ -1997,9 +1997,13 @@ export function RateCardForm(props: RateCardFormProps) {
           }
           setSaveStatus({ kind: 'saved', at: Date.now() });
         } catch (e: any) {
-          // Offline / transient: queue each change so it syncs later (the
-          // "Syncing…" banner then reflects it). Otherwise surface the error.
-          if (isOfflineError(e)) {
+          // ONLY defer-save when the device is genuinely offline — then the
+          // changes are queued and will sync, and we mark the review applied.
+          // If we're online but the server errored (e.g. a 5xx after retries),
+          // the changes did NOT persist — surface it as a real failure so the
+          // inspector knows (and the approver isn't handed un-saved edits).
+          const genuinelyOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+          if (genuinelyOffline) {
             for (const u of upserts) {
               outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint, method: 'POST', body: { upserts: [{ recordId: u.recordId, line: u.line }], archives: [], bumpStatusToInProgress: true }, kind: 'line', meta: { sectionId: u.sectionId, line: u.line, externalId: u.line.externalId } });
             }
@@ -2536,6 +2540,24 @@ export function RateCardForm(props: RateCardFormProps) {
       {/* Totals drill-down: category roll-up → line items, same $ columns. */}
       {overviewExpanded && (
         <div className="mb-3 rounded-lg border border-gray-200 bg-white overflow-hidden">
+          {/* Expand all / collapse all every category (and its line items). */}
+          {categoryBreakdown.length > 0 && (() => {
+            const anyOpen = categoryBreakdown.some((g) => expandedCats[g.category]);
+            return (
+              <div className="flex justify-end px-2.5 pt-1.5">
+                <button
+                  type="button"
+                  onClick={() => setExpandedCats(anyOpen ? {} : Object.fromEntries(categoryBreakdown.map((g) => [g.category, true])))}
+                  className="inline-flex items-center gap-1 text-[11px] font-heading font-semibold text-gray-500 hover:text-brand"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${anyOpen ? '' : 'rotate-180'}`}>
+                    <polyline points="18 15 12 9 6 15" />
+                  </svg>
+                  {anyOpen ? 'Collapse all' : 'Expand all'}
+                </button>
+              </div>
+            );
+          })()}
           {/* Column header */}
           <div className="flex items-end gap-1 px-2.5 py-1.5 bg-gray-50 border-b border-gray-200 text-[9px] sm:text-[10px] uppercase tracking-wide text-gray-400">
             <div className="flex-1 min-w-0">Category</div>
@@ -2875,7 +2897,7 @@ export function RateCardForm(props: RateCardFormProps) {
               onCancelInspection={handleCancelInspectionClick}
               onSaveAndClose={handleSaveAndClose}
               onSubmit={handleSubmitOrFinalize}
-              aiSlot={isScopeTemplate && !props.readOnly && props.inspectionStatus !== 'pending_approval' ? (
+              aiSlot={isScopeTemplate && !props.readOnly ? (
                 <button
                   type="button"
                   onClick={() => { if (aiAdjustments.length > 0 && !aiModalOpen) setAiModalOpen(true); else void runAiReview(); }}
