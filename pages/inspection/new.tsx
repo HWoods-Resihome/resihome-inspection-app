@@ -22,13 +22,15 @@ function todayLocalStr(): string {
   return `${y}-${m}-${day}`;
 }
 
-const TEMPLATE_OPTIONS: { value: TemplateType; label: string; sublabel: string }[] = [
-  { value: 'pm_scope_rate_card',                        label: '(PM) Scope Rate Card',                 sublabel: 'Priced line items; tenant chargebacks + vendor bids' },
-  { value: 'pm_turn_reinspect_qc',                      label: '(PM) Turn Re-Inspect QC',              sublabel: 'Validate vendor work against a Scope Rate Card' },
-  { value: 'pm_community_inspection',                   label: '(PM) Community / Visit Inspection',    sublabel: 'Community grounds, amenities, signage' },
-  { value: 'pm_vacancy_occupancy_check',                label: '(PM) Vacancy / Occupancy Check',       sublabel: 'Quick visit to confirm vacancy/security' },
-  { value: 'qc_new_construction_rrqc',                  label: '(QC) New Construction RRQC',           sublabel: 'Rent-ready QC for new construction' },
-  { value: 'leasing_agent_1099_property_inspection',    label: '(1099) Leasing Agent Property Inspection', sublabel: 'Pre-tour assessment by leasing agent' },
+// Templates are grouped into sections (Turn / PM / 1099 / QC) shown as headers
+// in the dropdown; the bare template name sits under its section.
+const TEMPLATE_OPTIONS: { value: TemplateType; label: string; sublabel: string; group: string }[] = [
+  { value: 'pm_scope_rate_card',                        group: 'Turn', label: 'Scope Rate Card',                 sublabel: 'Priced line items; tenant chargebacks + vendor bids' },
+  { value: 'pm_turn_reinspect_qc',                      group: 'Turn', label: 'Turn Re-Inspect QC',              sublabel: 'Validate vendor work against a Scope Rate Card' },
+  { value: 'pm_community_inspection',                   group: 'PM',   label: 'Community / Visit Inspection',    sublabel: 'Community grounds, amenities, signage' },
+  { value: 'pm_vacancy_occupancy_check',                group: 'PM',   label: 'Vacancy / Occupancy Check',       sublabel: 'Quick visit to confirm vacancy/security' },
+  { value: 'leasing_agent_1099_property_inspection',    group: '1099', label: 'Leasing Agent Property Inspection', sublabel: 'Pre-tour assessment by leasing agent' },
+  { value: 'qc_new_construction_rrqc',                  group: 'QC',   label: 'New Construction RRQC',           sublabel: 'Rent-ready QC for new construction' },
 ];
 
 export default function NewInspection() {
@@ -170,7 +172,7 @@ export default function NewInspection() {
     return () => { cancelled = true; };
   }, [isQcTemplate, selectedPropertyId]);
   const templateOptions = useMemo(
-    () => TEMPLATE_OPTIONS.map((t) => ({ value: t.value, label: t.label, sublabel: t.sublabel })),
+    () => TEMPLATE_OPTIONS.map((t) => ({ value: t.value, label: t.label, sublabel: t.sublabel, group: t.group })),
     []
   );
 

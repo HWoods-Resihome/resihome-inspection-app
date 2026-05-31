@@ -4,6 +4,7 @@ export interface ComboboxOption {
   value: string;          // The actual value passed back on selection
   label: string;          // The display label
   sublabel?: string;      // Optional secondary text (e.g., email under name)
+  group?: string;         // Optional section header to group options under
 }
 
 interface Props {
@@ -274,36 +275,54 @@ export function Combobox({
             <div className="p-3 text-sm text-gray-500">{emptyLabel}</div>
           ) : (
             <ul role="listbox" className="py-1">
-              {filtered.map((opt, idx) => {
-                const isActive = idx === activeIndex;
-                const isSelected = opt.value === value;
-                return (
-                  <li
-                    key={opt.value}
-                    role="option"
-                    aria-selected={isSelected}
-                    onMouseDown={(e) => { e.preventDefault(); handleSelect(opt); }}
-                    onMouseEnter={() => setActiveIndex(idx)}
-                    title={opt.sublabel ? `${opt.label}\n\n${opt.sublabel}` : opt.label}
-                    className={`px-3 py-2 cursor-pointer text-sm ${
-                      isActive ? 'bg-brand/10' : ''
-                    } ${isSelected ? 'font-semibold' : ''}`}
-                  >
-                    <div className="text-ink">{opt.label}</div>
-                    {opt.sublabel && (
-                      <div
-                        title={opt.sublabel}
-                        className="text-xs text-gray-500 overflow-hidden"
-                        style={{
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                        }}
-                      >{opt.sublabel}</div>
+              {(() => {
+                // Group options into ordered sections (by first appearance),
+                // rendering a non-selectable header before each named group.
+                // Keyboard/active indexing still references the flat `filtered`.
+                const groups: { name: string; items: { opt: ComboboxOption; idx: number }[] }[] = [];
+                const gi = new Map<string, number>();
+                filtered.forEach((opt, idx) => {
+                  const g = opt.group || '';
+                  let i = gi.get(g);
+                  if (i === undefined) { i = groups.length; gi.set(g, i); groups.push({ name: g, items: [] }); }
+                  groups[i].items.push({ opt, idx });
+                });
+                return groups.map((grp) => (
+                  <li key={grp.name || '__ungrouped'} role="presentation">
+                    {grp.name && (
+                      <div className="px-3 pt-2 pb-1 text-[10px] font-heading font-bold uppercase tracking-wider text-gray-400 bg-gray-50/60 sticky top-0">
+                        {grp.name}
+                      </div>
                     )}
+                    <ul role="group" aria-label={grp.name || undefined}>
+                      {grp.items.map(({ opt, idx }) => {
+                        const isActive = idx === activeIndex;
+                        const isSelected = opt.value === value;
+                        return (
+                          <li
+                            key={opt.value}
+                            role="option"
+                            aria-selected={isSelected}
+                            onMouseDown={(e) => { e.preventDefault(); handleSelect(opt); }}
+                            onMouseEnter={() => setActiveIndex(idx)}
+                            title={opt.sublabel ? `${opt.label}\n\n${opt.sublabel}` : opt.label}
+                            className={`px-3 py-2 cursor-pointer text-sm ${isActive ? 'bg-brand/10' : ''} ${isSelected ? 'font-semibold' : ''}`}
+                          >
+                            <div className="text-ink">{opt.label}</div>
+                            {opt.sublabel && (
+                              <div
+                                title={opt.sublabel}
+                                className="text-xs text-gray-500 overflow-hidden"
+                                style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
+                              >{opt.sublabel}</div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
                   </li>
-                );
-              })}
+                ));
+              })()}
             </ul>
           )}
         </div>
