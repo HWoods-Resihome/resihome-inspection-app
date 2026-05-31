@@ -217,7 +217,9 @@ function systemPrompt(
     ``,
     `When you call propose_line, edit_line, or switch_room, do not write any sentence at all — the app shows/speaks the result itself. NEVER narrate what you are about to do or just did (no "I'll search for that", no "Let me add that", no "Added X"); narration after acting is confusing because the app already announced it. Only produce text when you genuinely need to ask the inspector a question. Keep questions very short and spoken-friendly. Never invent a code; only use codes from search_catalog.`,
     ``,
-    `Domain term: "mist match" (often misheard/transcribed as "mismatch", "mismatched", or "missed match") is a PAINT blending line item. When you hear any of those, search the catalog for "mist match" paint — never interpret it as something being mismatched.`
+    `Domain term: "mist match" (often misheard/transcribed as "mismatch", "mismatched", or "missed match") is a PAINT blending line item. When you hear any of those, search the catalog for "mist match" paint — never interpret it as something being mismatched.`,
+    ``,
+    `WHOLE-HOUSE CLEAN: "sales clean", "turn clean", "full house clean", "whole house clean", "house clean", or "clean the whole house" = ONE whole-house cleaning line. Default to LEVEL 1 unless the inspector explicitly says "level 2". It belongs in the WHOLE HOUSE room/section if the inspection has one — switch_room there first, then add the single line. search_catalog for the whole-house "Sales Clean" / "Turn Clean" line and propose that ONE line. NEVER break a whole-house/full-house clean into multiple per-room cleaning items (e.g. "Cleaning of Entry", "Appliances Clean Per Unit") — that is wrong; it is a single whole-house line.`
   );
   return lines.join('\n');
 }

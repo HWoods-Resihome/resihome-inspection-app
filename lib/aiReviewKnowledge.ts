@@ -13,7 +13,8 @@ TENANT RESPONSIBILITY: the tenant had control of the home. The DEFAULT assumptio
   GUTTER CLEANING and YARD MAINTENANCE (mowing, leaf/debris removal, weeds, overgrowth, hedges) are TENANT responsibility — default these to 100% tenant unless the inspector noted a specific reason otherwise. If such a line is at a low tenant %, suggest raising it to 100%.
 
 WHOLE-HOUSE CLEAN — there should be exactly ONE whole-house clean line (a Sales/Turn Clean at Level 1 OR Level 2), never both, and not alongside redundant per-room cleaning. This mirrors the paint rule:
-  - If multiple whole-house clean lines exist, flag it (keep one).
+  - HIGH PRIORITY: if BOTH a Level 1 and a Level 2 whole-house clean are present, that is a duplicate — flag it and remove one (keep the Level 2 if a detailed clean is warranted, otherwise the Level 1). Always check for this Level-1-and-Level-2 pair explicitly.
+  - If multiple whole-house clean lines of any kind exist, flag it (keep one).
   - If a LEVEL 2 whole-house clean is present, it already covers detailed per-room cleaning — so flag/REMOVE redundant smaller cleaning lines in individual rooms (e.g. "clean door", "wipe down walls", "clean baseboards", "spot clean") since they are double-counting work included in Level 2.
   - With a Level 1 clean, only flag per-room cleans that clearly overlap the general clean.
   Cleaning lines are NOT flooring/paint and get NO depreciation cap.

@@ -21,6 +21,8 @@ interface Props {
   // For needsPhoto suggestions: capture a photo of the damage and attach it to
   // the room + line. Resolves true if a photo was added.
   onAddPhoto?: (a: AiAdjustment) => Promise<boolean>;
+  // Permanently dismiss a photo-gap flag so future reviews don't re-raise it.
+  onIgnore?: (a: AiAdjustment) => void;
 }
 
 // Per-suggestion inspector edits — raw input strings so the field can be
@@ -44,7 +46,7 @@ const TYPE_LABEL: Record<string, string> = {
   add: 'Add',
 };
 
-export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars, onAddPhoto }: Props) {
+export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars, onAddPhoto, onIgnore }: Props) {
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [photoAdded, setPhotoAdded] = useState<Record<string, boolean>>({});
@@ -62,7 +64,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
   const waitingForFirst = !error && (loading || (streaming && adjustments.length === 0));
   useEffect(() => {
     if (!open || !waitingForFirst) { setPhase(0); return; }
-    const t = setInterval(() => setPhase((p) => (p + 1) % PHASES.length), 2200);
+    const t = setInterval(() => setPhase((p) => (p + 1) % PHASES.length), 3800);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, waitingForFirst]);
@@ -188,7 +190,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                   {photoAdded[a.id] ? (
                                     <div className="text-xs text-emerald-700 font-heading font-semibold mt-2">✓ Photo added — line kept</div>
                                   ) : (
-                                    <div className="flex gap-2 mt-2">
+                                    <div className="flex gap-2 mt-2 flex-wrap items-center">
                                       <button
                                         type="button"
                                         disabled={addingPhoto === a.id}
@@ -206,6 +208,12 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                       <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'approve' }))}
                                         className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'approve' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
                                         Remove line
+                                      </button>
+                                      <button type="button"
+                                        onClick={() => { onIgnore?.(a); setDecisions((m) => ({ ...m, [a.id]: 'decline' })); }}
+                                        className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'decline' ? 'bg-gray-200 text-gray-700 border-gray-300' : 'border-gray-300 text-gray-500 hover:border-gray-400'}`}
+                                        title="Keep the line as-is and don't flag it for a photo again">
+                                        Ignore
                                       </button>
                                     </div>
                                   )}

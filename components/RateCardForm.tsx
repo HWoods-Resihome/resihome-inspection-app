@@ -14,7 +14,7 @@ import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { AiReviewModal } from '@/components/AiReviewModal';
-import { scopeHash, getPassedReviewHash, setPassedReviewHash, type AiAdjustment } from '@/lib/aiReview';
+import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, type AiAdjustment } from '@/lib/aiReview';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
@@ -1758,6 +1758,9 @@ export function RateCardForm(props: RateCardFormProps) {
           sections: sections.map((s) => ({ id: s.id, name: s.displayName || s.label, location: s.location })),
           lines: flatLines,
           photosBySection: photosBySectionPayload,
+          // Lines the inspector chose to "Ignore" for photo evidence — the
+          // review won't re-flag these for a photo.
+          ignoredLineIds: getIgnoredPhotoLines(props.inspectionRecordId),
           property: {
             bedrooms: props.bedrooms,
             bathrooms: props.bathrooms,
@@ -2796,6 +2799,7 @@ export function RateCardForm(props: RateCardFormProps) {
         onApply={(approved) => applyApproved(approved)}
         previewTenantDollars={previewTenantDollars}
         onAddPhoto={addPhotoForAdjustment}
+        onIgnore={(a) => { if (a.lineExternalId) addIgnoredPhotoLine(props.inspectionRecordId, a.lineExternalId); }}
       />
       {/* Hidden input for the review popup's "Add photo" action (attaches the
           damage photo to the room + the flagged line). */}

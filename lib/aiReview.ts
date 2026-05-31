@@ -125,3 +125,30 @@ export function setPassedReviewHash(inspectionId: string, hash: string): void {
     window.localStorage.setItem(STORE_KEY, JSON.stringify(all));
   } catch { /* storage disabled — gating falls back to in-memory state */ }
 }
+
+// ----- Ignored photo-gap lines (per inspection) ---------------------------
+// When the inspector taps "Ignore" on a photo-evidence flag, we remember that
+// line so future AI reviews don't keep calling it out. Sent to the endpoint as
+// an exemption list.
+const IGNORE_KEY = 'resiwalk_ai_ignore_photo_v1';
+
+function readIgnore(): Record<string, string[]> {
+  if (typeof window === 'undefined') return {};
+  try { return JSON.parse(window.localStorage.getItem(IGNORE_KEY) || '{}') || {}; }
+  catch { return {}; }
+}
+
+export function getIgnoredPhotoLines(inspectionId: string): string[] {
+  return readIgnore()[inspectionId] || [];
+}
+
+export function addIgnoredPhotoLine(inspectionId: string, lineExternalId: string): void {
+  if (typeof window === 'undefined' || !lineExternalId) return;
+  try {
+    const all = readIgnore();
+    const list = all[inspectionId] || [];
+    if (!list.includes(lineExternalId)) list.push(lineExternalId);
+    all[inspectionId] = list;
+    window.localStorage.setItem(IGNORE_KEY, JSON.stringify(all));
+  } catch { /* storage disabled */ }
+}

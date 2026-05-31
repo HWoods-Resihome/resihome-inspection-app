@@ -51,6 +51,7 @@ interface BodyShape {
   photosBySection?: Record<string, string[]>;
   property?: { bedrooms?: number; bathrooms?: number; squareFootage?: number | null; tenantMonths?: number };
   region?: string;
+  ignoredLineIds?: string[];
 }
 
 function anthropicKey(): string {
@@ -199,6 +200,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const region = body?.region || '';
     const rawMonths = Number(body?.property?.tenantMonths);
     const tenantMonths = Number.isFinite(rawMonths) && rawMonths >= 0 ? rawMonths : 12;
+    const ignoredLineIds: string[] = Array.isArray(body?.ignoredLineIds) ? body.ignoredLineIds.map(String) : [];
 
     const catalog = await fetchRateCardCatalog();
     const byCode = new Map(catalog.map((c) => [c.lineItemCode, c]));
@@ -265,6 +267,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         text:
           `Review this Scope rate card.\n\nHOUSE DETAILS:\n${houseDetails}\n\nSCOPE (all rooms and their line items, priced):\n${scopeText}\n\n` +
           (photoContent.length ? `Inspection photos for the rooms follow — use them to confirm scope and tenant responsibility.` : `No usable inspection photos were available; review on the scope data.`) +
+          (ignoredLineIds.length ? `\n\nDo NOT raise photo-evidence (needsPhoto) flags for these line ids — the inspector has already accepted them without a photo: ${ignoredLineIds.join(', ')}.` : '') +
           `\n\nAnalyze against the standard and rules in the system prompt. Call add_adjustment once per issue as you find it (for ADDs, search_catalog first for a real code). Provide suggested tenant % AND $ where possible. When finished, call finish_review with a short summary. If the scope is already compliant, just call finish_review.`,
       },
       ...photoContent,
