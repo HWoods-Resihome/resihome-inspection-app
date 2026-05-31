@@ -72,6 +72,9 @@ interface Props {
   // Tag a captured photo (by its uploaded URL) to a line; returns the new
   // (stamped) URL so the camera keeps the stamped version.
   onTagPhotoToLine?: (hubspotUrl: string, lineExternalId: string) => Promise<string>;
+  // Reports when an in-camera overlay (photo viewer or markup editor) is open, so
+  // the parent can hide the floating mic over it (unless a conversation is engaged).
+  onOverlayChange?: (open: boolean) => void;
 }
 
 // A stamp line; `mark` appends a colored ✓ (location matches the property) or
@@ -148,7 +151,7 @@ function pickClipMime(): string {
 export function CameraCapture({
   isOpen, onClose, onComplete, uploadPhoto, maxPhotos = 30,
   rooms, currentRoomId, onRoomChange, onRenameRoom, onDeleteRoom, onAddRoom,
-  addressSnapshot, voiceSlot, tagLines, onTagPhotoToLine,
+  addressSnapshot, voiceSlot, tagLines, onTagPhotoToLine, onOverlayChange,
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -191,6 +194,14 @@ export function CameraCapture({
   const [annotatingId, setAnnotatingId] = useState<string | null>(null);
   // Index (within photo-only items) of the photo open in the swipeable viewer.
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  // Tell the parent when a photo viewer/markup editor is open over the camera
+  // (so it can hide the floating mic). Report closed on unmount.
+  const onOverlayChangeRef = useRef(onOverlayChange);
+  onOverlayChangeRef.current = onOverlayChange;
+  useEffect(() => {
+    onOverlayChangeRef.current?.(viewerIndex !== null || annotatingId !== null);
+  }, [viewerIndex, annotatingId]);
+  useEffect(() => () => { onOverlayChangeRef.current?.(false); }, []);
   // Flash / torch. Only supported on some devices (typically Android Chrome,
   // back camera). torchSupported gates the button so we don't show a control
   // that does nothing (e.g. iOS Safari, front camera).
@@ -815,13 +826,8 @@ export function CameraCapture({
           {uploadingCount > 0 && ` · ${uploadingCount} uploading`}
           {failedCount > 0 && ` · ${failedCount} failed`}
         </div>
-        <button
-          type="button"
-          onClick={handleDone}
-          className="text-sm font-heading font-bold px-3 py-1.5 rounded-md bg-brand text-white hover:bg-brand-dark"
-        >
-          Done
-        </button>
+        {/* Spacer to keep the count centered now that Done moved to the bottom. */}
+        <div className="w-14" aria-hidden />
       </div>
 
       {/* Room switcher (multi-room mode): ‹ Room Name (N) › — name opens a
@@ -1251,15 +1257,14 @@ export function CameraCapture({
           <span className="text-[10px] font-heading">Mark</span>
         </button>
 
-        {/* Voice line-item dictation. The mic sits bottom-right, but this layer
-            spans the full row width so the assistant's pop-up panel (anchored
-            left-0/right-0 to its positioned ancestor) centers on screen rather
-            than hugging the right edge. */}
-        {voiceSlot && (
-          <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 px-4 flex justify-end pointer-events-none">
-            <div className="pointer-events-auto">{voiceSlot}</div>
-          </div>
-        )}
+        {/* Done — bottom-right of the shutter line (moved from the top bar). */}
+        <button
+          type="button"
+          onClick={handleDone}
+          className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-heading font-bold px-4 py-2 rounded-md bg-brand text-white hover:bg-brand-dark"
+        >
+          Done
+        </button>
       </div>
 
       {/* Hidden native camera input (capture opens the OS camera on mobile) */}

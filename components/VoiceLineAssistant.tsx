@@ -44,6 +44,9 @@ interface Props {
   // Catalog for resolving codes -> descriptions in edit summaries.
   catalog?: RateCardLineItem[];
   disabled?: boolean;
+  // Reports when the conversation panel opens/closes (engaged) so the parent can
+  // keep the mic visible over other screens only while a conversation is active.
+  onEngagedChange?: (engaged: boolean) => void;
 }
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
@@ -206,7 +209,7 @@ function speak(
   }
 }
 
-export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, linesBySection, currentLines, catalog, disabled }: Props) {
+export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, linesBySection, currentLines, catalog, disabled, onEngagedChange }: Props) {
   // The room the assistant is working on right now.
   const currentSection = useMemo(
     () => sections.find((s) => s.id === currentSectionId) || sections[0],
@@ -217,6 +220,9 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   const currentRoomName = currentSection?.displayName || currentSection?.label || 'this room';
 
   const [open, setOpen] = useState(false);
+  const onEngagedRef = useRef(onEngagedChange);
+  onEngagedRef.current = onEngagedChange;
+  useEffect(() => { onEngagedRef.current?.(open); }, [open]);
   const [supported, setSupported] = useState(true);
   const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);

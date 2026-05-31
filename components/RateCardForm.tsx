@@ -102,6 +102,10 @@ export function RateCardForm(props: RateCardFormProps) {
       return next;
     });
   }, []);
+  // Floating-mic visibility: the mic only lives on the bare form + camera. Over
+  // any other overlay it hides UNLESS a conversation is actively engaged.
+  const [voiceEngaged, setVoiceEngaged] = useState(false);
+  const [cameraOverlayOpen, setCameraOverlayOpen] = useState(false);
   // Measured footer height, so the floating mic vertically centers on the
   // Save & Close / Submit row (exact regardless of device safe-area padding).
   const footerRef = useRef<HTMLDivElement | null>(null);
@@ -1847,6 +1851,7 @@ export function RateCardForm(props: RateCardFormProps) {
             ? (linesBySection[cameraSectionId] || []).map((l) => ({ externalId: l.externalId, label: lineLabel(l) }))
             : []}
           onTagPhotoToLine={tagCameraPhotoToLine}
+          onOverlayChange={setCameraOverlayOpen}
           onRenameRoom={(roomId, newName) => handleRenameSection(roomId, newName)}
           onAddRoom={(name) => handleAddSection(name)}
           onDeleteRoom={async (roomId) => {
@@ -1871,29 +1876,30 @@ export function RateCardForm(props: RateCardFormProps) {
         const voiceSectionId = cameraSectionId ?? currentSectionId;
         if (props.readOnly || props.templateType !== 'pm_scope_rate_card' || !voiceSectionId) return null;
         const cameraOpen = cameraSectionId !== null;
-        // Hide the floating mic whenever a modal/overlay is up — it should never
-        // float over another screen when idle. Kept MOUNTED via display:none so
-        // an in-progress conversation isn't lost. (The camera is NOT a reason to
-        // hide — the mic lives there for the dictate-while-shooting flow.)
-        const hidden = lightbox !== null
+        // The mic lives only on the bare form + the bare camera. Over ANY other
+        // overlay (form modals, the in-camera photo viewer/markup editor) it
+        // hides — UNLESS a conversation is actively engaged. Kept MOUNTED via
+        // display:none so an in-progress conversation is never lost.
+        const overlayOpen = lightbox !== null
           || showSectionsManager
           || finalizeResult !== null
           || showSaveErrorDetail
-          || openEditors.size > 0;
+          || openEditors.size > 0
+          || cameraOverlayOpen;
+        const hidden = overlayOpen && !voiceEngaged;
         return (
           <div
             className="fixed inset-x-0 z-[60] pointer-events-none"
             style={{
               // In the form, center the 44px mic on the footer button row; in the
-              // camera, sit ON the shutter-control line, vertically level with the
-              // Phone Cam / Mark icons (bottom-right).
+              // camera, sit ON the shutter-control line at the bottom-LEFT.
               bottom: cameraOpen ? 34 : Math.max(6, Math.round(footerH / 2 - 22)),
               display: hidden ? 'none' : undefined,
             }}
           >
             <div
               className="relative max-w-7xl mx-auto px-4 flex pointer-events-none"
-              style={{ justifyContent: cameraOpen ? 'flex-end' : 'center' }}
+              style={{ justifyContent: cameraOpen ? 'flex-start' : 'center' }}
             >
               <span className="pointer-events-auto">
                 <VoiceLineAssistant
@@ -1909,6 +1915,7 @@ export function RateCardForm(props: RateCardFormProps) {
                   onAddLineTo={(sectionId, line) => { handleSaveLineForSection(sectionId, line); if (!cameraOpen) revealSection(sectionId, line.externalId); }}
                   onRemoveLineFrom={(sectionId, externalId) => handleDeleteLine(sectionId, externalId)}
                   linesBySection={linesBySection}
+                  onEngagedChange={setVoiceEngaged}
                 />
               </span>
             </div>

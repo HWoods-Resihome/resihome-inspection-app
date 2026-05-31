@@ -422,8 +422,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (blocks.length) {
           preSearchBlock = [
             ``,
-            `LIKELY CATALOG MATCHES (pre-searched for this request — use these to propose directly without calling search_catalog again, IF one clearly fits; otherwise call search_catalog yourself):`,
+            `LIKELY CATALOG MATCHES (pre-searched for this request — propose directly from these without calling search_catalog again when one clearly fits; otherwise call search_catalog yourself):`,
             ...blocks.map((b) => `  - ${b}`),
+            ``,
+            `CRITICAL — address EVERY phrase above in THIS turn. The inspector listed multiple items; do not stop after the first. In a single turn: call propose_line for each item that has a clear match AND a known/derivable quantity (EA/count items default to qty 1), AND ask ONE short question for any item that still needs a measured quantity (LF/SF). Do NOT say "anything else"/"done" or end the turn while any listed phrase is still unaddressed. Example: "paint the walls and replace carpet and pad" → propose_line the wall paint (1 EA) now, and in the same turn ask the carpet/pad square footage.`,
           ].join('\n');
         }
       }
