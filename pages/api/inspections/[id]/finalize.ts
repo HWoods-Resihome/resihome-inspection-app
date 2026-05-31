@@ -51,13 +51,15 @@ export const config = {
 const inFlightFinalize = new Map<string, number>();
 const FINALIZE_LOCK_MS = 5 * 60 * 1000;
 
-// Optional durable cross-instance lock. Serverless instances don't share the
-// Map above, so set FINALIZE_LOCK_PROPERTY to a HubSpot datetime/text property
-// name to enable a best-effort durable guard (and email-dedupe) across
-// instances. Fail-safe: if unset or the property is missing, finalize behaves
-// exactly as before. (HubSpot has no conditional write, so this is best-effort,
-// but it closes the common concurrent-double-finalize window.)
-const FINALIZE_LOCK_PROP = process.env.FINALIZE_LOCK_PROPERTY || '';
+// Durable cross-instance lock. Serverless instances don't share the Map above,
+// so we mark a HubSpot datetime/text property while finalize runs to guard
+// against a concurrent double-finalize from another device/tab. Defaults to the
+// `finalize_in_progress` property (now created in HubSpot); override the name
+// via FINALIZE_LOCK_PROPERTY if needed. Fail-safe: every read/write is wrapped,
+// so if the property is missing or a different type, finalize behaves exactly
+// as before (per-instance guard only). HubSpot has no conditional write, so
+// this is best-effort, but it closes the common concurrent-double window.
+const FINALIZE_LOCK_PROP = process.env.FINALIZE_LOCK_PROPERTY || 'finalize_in_progress';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -87,7 +89,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         inFlightFinalize.delete(id);
         return res.status(409).json({ error: 'This inspection is already being finalized on another device. Please wait.' });
       }
-      await updateInspection(id, { [FINALIZE_LOCK_PROP]: new Date(lockNow).toISOString() });
+      // Epoch-ms string: accepted by a HubSpot datetime property AND fine for a
+      // single-line text property (the read parses either form).
+      await updateInspection(id, { [FINALIZE_LOCK_PROP]: String(lockNow) });
       durableLockHeld = true;
     } catch (e) {
       console.warn('[finalize] durable lock unavailable (continuing without it):', e);
