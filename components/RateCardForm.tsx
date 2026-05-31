@@ -494,9 +494,9 @@ export function RateCardForm(props: RateCardFormProps) {
   // as "Added" vanished on reload. Chaining them guarantees one-at-a-time,
   // ordered persistence.
   const saveChainRef = useRef<Promise<void>>(Promise.resolve());
-  function enqueueSave(work: () => Promise<void>): Promise<void> {
+  function enqueueSave<T>(work: () => Promise<T>): Promise<T> {
     const next = saveChainRef.current.catch(() => { /* isolate prior failures */ }).then(work);
-    saveChainRef.current = next.catch(() => { /* keep the chain alive */ });
+    saveChainRef.current = next.then(() => { /* drop value */ }, () => { /* keep chain alive */ });
     return next;
   }
   async function commitAndWait(): Promise<void> {
@@ -530,7 +530,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // we eliminate that window entirely. The trade-off is slightly more network
   // chatter (one save per row edit instead of per 2s burst) but for an
   // inspector typing maybe 20-30 lines per inspection that's fine.
-  async function handleSaveLineForSection(sectionId: string, line: RateCardLineInput) {
+  async function handleSaveLineForSection(sectionId: string, line: RateCardLineInput): Promise<{ ok: boolean; error?: string }> {
     // Stamp the line's section/location from the TARGET section. Voice proposals
     // may have been generated for a different room earlier in the same turn
     // (e.g. "go to the kitchen and add a microwave"); routing is by sectionId, so
@@ -580,28 +580,51 @@ export function RateCardForm(props: RateCardFormProps) {
     // Skip the network call if we're not yet ready to save (still hydrating).
     // The line is now in linesBySection; once linesHydrated flips true the
     // useEffect below will catch up any pending dirty lines.
-    if (!linesHydrated || props.readOnly) return;
+    // Not ready to persist yet (still hydrating) or read-only: the line is in
+    // local state; treat as a non-failure so the assistant doesn't cry wolf.
+    if (!linesHydrated || props.readOnly) return { ok: true };
 
     saveInFlightRef.current++;
     setSaveStatus({ kind: 'saving' });
     // Run through the serial queue so concurrent voice adds don't race each
     // other (and the inspection record) at HubSpot. recordId is read at
     // execution time so a create that just stitched back its id is reused.
-    await enqueueSave(async () => {
+    // Returns the real outcome so callers (voice) can report the truth.
+    return enqueueSave<{ ok: boolean; error?: string }>(async () => {
       try {
         const recordId = recordIdsByExternalId[line.externalId];
-        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/rate-card-lines`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            upserts: [{ recordId, line }],
-            archives: [],
-            bumpStatusToInProgress: true,
-          }),
+        // Retry transient failures (flaky field LTE, HubSpot 429/5xx) so a line
+        // the inspector saw "Added" isn't silently lost. A 4xx (bad request) is
+        // not retryable — fail fast so the real error surfaces.
+        const body = JSON.stringify({
+          upserts: [{ recordId, line }],
+          archives: [],
+          bumpStatusToInProgress: true,
         });
-        if (!r.ok) {
-          const text = await r.text();
-          throw new Error(`HTTP ${r.status}: ${text.slice(0, 200)}`);
+        let r: Response | null = null;
+        let lastErr = '';
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (attempt > 0) await new Promise((res) => setTimeout(res, 600 * attempt));
+          try {
+            r = await fetch(`/api/inspections/${props.inspectionRecordId}/rate-card-lines`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body,
+            });
+          } catch (netErr: any) {
+            lastErr = String(netErr?.message || netErr);
+            r = null;
+            continue; // network blip — retry
+          }
+          if (r.ok) break;
+          if (r.status >= 400 && r.status < 500 && r.status !== 429) {
+            const text = await r.text();
+            throw new Error(`HTTP ${r.status}: ${text.slice(0, 200)}`); // not retryable
+          }
+          lastErr = `HTTP ${r.status}`;
+        }
+        if (!r || !r.ok) {
+          throw new Error(lastErr || 'save failed after retries');
         }
         const data = await r.json();
         // Stitch the new record id back if this was a fresh create
@@ -613,9 +636,12 @@ export function RateCardForm(props: RateCardFormProps) {
           }));
         }
         setSaveStatus({ kind: 'saved', at: Date.now() });
+        return { ok: true };
       } catch (e: any) {
         console.error('[RateCardForm] line save failed:', e);
-        setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+        const error = String(e?.message || e);
+        setSaveStatus({ kind: 'error', message: error });
+        return { ok: false, error };
       } finally {
         saveInFlightRef.current--;
       }
@@ -1927,9 +1953,9 @@ export function RateCardForm(props: RateCardFormProps) {
                   disabled={dataLoading}
                   currentLines={linesBySection[voiceSectionId] || []}
                   catalog={catalog}
-                  onAddLine={(line) => { handleSaveLineForSection(voiceSectionId, line); if (!cameraOpen) revealSection(voiceSectionId, line.externalId); }}
+                  onAddLine={(line) => { const p = handleSaveLineForSection(voiceSectionId, line); if (!cameraOpen) revealSection(voiceSectionId, line.externalId); return p; }}
                   onRemoveLine={(externalId) => handleDeleteLine(voiceSectionId, externalId)}
-                  onAddLineTo={(sectionId, line) => { handleSaveLineForSection(sectionId, line); if (!cameraOpen) revealSection(sectionId, line.externalId); }}
+                  onAddLineTo={(sectionId, line) => { const p = handleSaveLineForSection(sectionId, line); if (!cameraOpen) revealSection(sectionId, line.externalId); return p; }}
                   onRemoveLineFrom={(sectionId, externalId) => handleDeleteLine(sectionId, externalId)}
                   linesBySection={linesBySection}
                   onEngagedChange={setVoiceEngaged}

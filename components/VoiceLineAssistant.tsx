@@ -27,14 +27,15 @@ interface Props {
   onNavigate: (sectionId: string) => void; // switch room (parent scrolls/expands)
   region: string;                 // inspection region snapshot (context only)
   // Called when a line is added (new OR edited) — upserts by externalId, routed
-  // by the parent to the CURRENT room.
-  onAddLine: (line: RateCardLineInput) => void;
+  // by the parent to the CURRENT room. Resolves once the SAVE round-trip is done
+  // so the assistant only claims "Added" for lines that actually persisted.
+  onAddLine: (line: RateCardLineInput) => Promise<SaveResult> | void;
   // Remove a line by externalId (for "undo that" / "remove the last line").
   onRemoveLine?: (externalId: string) => void;
   // Section-targeted variants — used when a single voice turn switches rooms and
   // THEN adds/edits a line, so the line lands in the room active at that moment
   // (not whatever the panel shows when the stream finishes).
-  onAddLineTo?: (sectionId: string, line: RateCardLineInput) => void;
+  onAddLineTo?: (sectionId: string, line: RateCardLineInput) => Promise<SaveResult> | void;
   onRemoveLineFrom?: (sectionId: string, externalId: string) => void;
   // Lines per section, so edits/undo after a mid-turn room switch can resolve
   // existing lines in the room the agent is now working on.
@@ -50,6 +51,10 @@ interface Props {
 }
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
+
+// Result of a line save round-trip, so the assistant can report the truth
+// (and the actual error) instead of optimistically claiming success.
+export type SaveResult = { ok: boolean; error?: string };
 
 type Pending = { line: RateCardLineInput; summary: string; spoken: string; action: 'add' | 'edit' };
 
@@ -311,6 +316,10 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       streamSectionRef.current = currentSectionId;
       let addedThisTurn = 0;
       const addedRoomIds = new Set<string>();
+      // Save round-trips kicked off by proposals this turn. We await ALL of them
+      // before composing the closing line, so we report what actually persisted
+      // (and surface any save error) rather than optimistically claiming success.
+      const savePromises: Promise<SaveResult>[] = [];
       // Abort if the request stalls (flaky field LTE) so the panel never hangs
       // in "Thinking…" with no way out.
       const ctrl = new AbortController();
@@ -402,13 +411,20 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               const refId = streamSectionRef.current;
               const targetId = (refId && sections.some((s) => s.id === refId)) ? refId : currentSectionId;
               try {
-                if (onAddLineTo) onAddLineTo(targetId, line);
-                else onAddLine(line);
+                const ret = onAddLineTo ? onAddLineTo(targetId, line) : onAddLine(line);
+                // The parent now returns a promise that resolves once the SAVE
+                // round-trip finishes. Collect it so the closing line reflects
+                // what truly persisted. (Tolerate a void return for safety.)
+                const p: Promise<SaveResult> = ret && typeof (ret as any).then === 'function'
+                  ? (ret as Promise<SaveResult>)
+                  : Promise.resolve({ ok: true } as SaveResult);
+                savePromises.push(p.then((r) => r || { ok: true }).catch((e) => ({ ok: false, error: String(e?.message || e) })));
                 if (action === 'add') lastAddedRef.current = { externalId: line.externalId, label: spokenLabel };
                 addedThisTurn++;
                 if (targetId) addedRoomIds.add(targetId);
                 setMessages((m) => [...m, { role: 'assistant', content: `${verb}: ${data.summary}` }]);
               } catch (e: any) {
+                savePromises.push(Promise.resolve({ ok: false, error: String(e?.message || e) }));
                 setMessages((m) => [...m, { role: 'assistant', content: `Couldn't save ${spokenLabel}.` }]);
               }
             } else if (ev === 'question' || ev === 'message' || ev === 'error') {
@@ -426,28 +442,40 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         if (finalType === 'error') {
           setError(finalData?.error || 'Something went wrong.');
         } else if (addedThisTurn > 0) {
-          // Lines were added/updated this turn. ALWAYS use our synthesized
-          // summary and ignore any trailing agent text. Name the room(s) the
-          // lines ACTUALLY landed in (from the stream), not React state, which
-          // lags during the stream and would name the wrong/old room.
+          // Wait for the save round-trips to finish so we report the TRUTH, not
+          // an optimistic guess. If any failed, say so (and show the error) —
+          // never claim "Added" for a line that didn't persist.
+          const results = await Promise.all(savePromises);
+          const failed = results.filter((r) => !r.ok);
+          const savedCount = addedThisTurn - failed.length;
+          // Name the room(s) the lines ACTUALLY landed in (from the stream), not
+          // React state, which lags during the stream and would name the wrong room.
           const roomNames = Array.from(addedRoomIds)
             .map((id) => {
               const s = sections.find((x) => x.id === id);
               return s ? (s.displayName || s.label) : null;
             })
             .filter(Boolean) as string[];
-          // Speak ONLY a short one-sentence summary — never read each line's
-          // full detail aloud (those are shown on screen, not spoken).
-          const what = `Added ${addedThisTurn} item${addedThisTurn === 1 ? '' : 's'}`;
           let where: string;
           if (roomNames.length === 1) where = ` in ${roomNames[0]}`;
           else if (roomNames.length > 1) where = ` across ${roomNames.length} rooms`;
           else where = '';
-          const spoken = `${what}${where}. Anything else?`;
-          // On-screen we keep the per-line detail (already appended above); the
-          // closing chat line is the same short summary we speak.
-          setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
-          speakThenListenRef.current(spoken);
+          if (failed.length === 0) {
+            // Speak ONLY a short one-sentence summary — never read each line's
+            // full detail aloud (those are shown on screen, not spoken).
+            const spoken = `Added ${savedCount} item${savedCount === 1 ? '' : 's'}${where}. Anything else?`;
+            setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
+            speakThenListenRef.current(spoken);
+          } else {
+            // Some (or all) saves failed. Be honest and surface the error on
+            // screen so the cause is visible; speak a short recoverable message.
+            const detail = failed[0].error ? ` (${failed[0].error})` : '';
+            const spoken = savedCount > 0
+              ? `Saved ${savedCount}, but ${failed.length} didn't save. Please try those again.`
+              : `That didn't save — please try again or check your connection.`;
+            setMessages((m) => [...m, { role: 'assistant', content: `${spoken}${detail}` }]);
+            speakThenListenRef.current(spoken);
+          }
         } else if (finalType === 'question') {
           // The agent needs more info (e.g. ambiguous item, missing quantity).
           const text = finalData?.text || accumulated || 'Could you clarify that?';
