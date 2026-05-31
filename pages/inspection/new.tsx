@@ -159,10 +159,9 @@ export default function NewInspection() {
     }
     return list.map((p) => {
       // The address/city/state already show in the main label, so the subtext
-      // shows region + status instead — e.g. "GA: Atlanta • Pending MOI/Recap" —
+      // shows region + status instead — e.g. "Atlanta • Pending MOI/Recap" —
       // to confirm the right property without repeating the location.
-      const region = p.state && p.region ? `${p.state}: ${p.region}` : (p.region || p.state || '');
-      const sublabel = [region, p.status].filter(Boolean).join(' • ') || undefined;
+      const sublabel = [p.region, p.status].filter(Boolean).join(' • ') || undefined;
       return { value: p.recordId, label: p.name, sublabel };
     });
   }, [properties, selectedProp]);
