@@ -15,6 +15,7 @@ import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
+import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError } from '@/lib/offlineOutbox';
 import { useAppDialog } from '@/components/AppDialog';
 import {
   type SectionInstance,
@@ -148,6 +149,11 @@ export function RateCardForm(props: RateCardFormProps) {
   const [recordIdsByExternalId, setRecordIdsByExternalId] = useState<Record<string, string>>({});
   // sectionId -> HubSpot inspection_answer record id (for section_photo records)
   const [sectionPhotoRecordIds, setSectionPhotoRecordIds] = useState<Record<string, string>>({});
+
+  // Offline outbox: number of saves queued for this inspection (waiting to sync)
+  // and whether the browser currently reports being online.
+  const [pendingSync, setPendingSync] = useState(0);
+  const [online, setOnline] = useState(true);
 
   // Tracks whether existing data has been loaded so we don't trigger autosave
   // during the initial hydration.
@@ -513,6 +519,69 @@ export function RateCardForm(props: RateCardFormProps) {
     });
   }, [linesHydrated, catalog]);
 
+  // ----- Offline outbox: replay queued saves when back online ----------
+  const refreshPending = useCallback(() => {
+    setPendingSync(outboxCountFor(props.inspectionRecordId));
+  }, [props.inspectionRecordId]);
+
+  const runFlush = useCallback(async () => {
+    const { synced } = await flushOutbox((entry, data) => {
+      // Stitch results back so the in-memory state stays correct without a reload.
+      if (entry.kind === 'line') {
+        const result = data?.results?.[0];
+        if (result?.recordId && result?.answerIdExternal) {
+          setRecordIdsByExternalId((cur) => ({ ...cur, [result.answerIdExternal]: result.recordId }));
+        }
+      } else if (entry.kind === 'sectionList' && entry.body?.section_list_json) {
+        lastSavedSectionJsonRef.current = entry.body.section_list_json;
+      }
+    });
+    refreshPending();
+    if (synced > 0) setSaveStatus({ kind: 'saved', at: Date.now() });
+  }, [refreshPending]);
+
+  useEffect(() => {
+    if (typeof navigator !== 'undefined') setOnline(navigator.onLine !== false);
+    refreshPending();
+    const onOnline = () => { setOnline(true); void runFlush(); };
+    const onOffline = () => setOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    // Periodic retry while anything is queued (covers flaky/intermittent signal
+    // where the 'online' event doesn't fire).
+    const iv = setInterval(() => {
+      if (outboxCountFor(props.inspectionRecordId) > 0) void runFlush();
+    }, 20000);
+    void runFlush(); // attempt anything left from a previous session
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+      clearInterval(iv);
+    };
+  }, [runFlush, refreshPending, props.inspectionRecordId]);
+
+  // After hydration, re-show any line saves still queued offline (created in a
+  // prior session/refresh while offline) so the inspector's work isn't lost
+  // from view before it syncs.
+  const outboxMergedRef = useRef(false);
+  useEffect(() => {
+    if (outboxMergedRef.current || !linesHydrated) return;
+    outboxMergedRef.current = true;
+    const pending = outboxEntriesFor(props.inspectionRecordId)
+      .filter((e) => e.kind === 'line' && e.meta?.line && e.meta?.sectionId);
+    if (pending.length === 0) return;
+    setLinesBySection((bySection) => {
+      const next = { ...bySection };
+      for (const e of pending) {
+        const sid = e.meta!.sectionId as string;
+        const line = e.meta!.line as RateCardLineInput;
+        const arr = next[sid] ? [...next[sid]] : [];
+        if (!arr.some((l) => l.externalId === line.externalId)) { arr.push(line); next[sid] = arr; }
+      }
+      return next;
+    });
+  }, [linesHydrated, props.inspectionRecordId]);
+
   /**
    * Used by Save & Close / Submit / Cancel Inspection to ensure any open
    * inline edits get committed (pushing their state into linesBySection,
@@ -662,8 +731,9 @@ export function RateCardForm(props: RateCardFormProps) {
     // execution time so a create that just stitched back its id is reused.
     // Returns the real outcome so callers (voice) can report the truth.
     return enqueueSave<{ ok: boolean; error?: string }>(async () => {
+      // Declared outside try so the offline-enqueue path in catch can reuse it.
+      const recordId = recordIdsByExternalId[line.externalId];
       try {
-        const recordId = recordIdsByExternalId[line.externalId];
         // Retry transient failures (flaky field LTE, HubSpot 429/5xx) so a line
         // the inspector saw "Added" isn't silently lost. A 4xx (bad request) is
         // not retryable — fail fast so the real error surfaces.
@@ -711,6 +781,21 @@ export function RateCardForm(props: RateCardFormProps) {
       } catch (e: any) {
         console.error('[RateCardForm] line save failed:', e);
         const error = String(e?.message || e);
+        // Offline / transient: queue the save so it isn't lost, and treat it as
+        // a success for the UI (the line stays; it'll sync when back online).
+        if (isOfflineError(e)) {
+          outboxEnqueue({
+            inspectionRecordId: props.inspectionRecordId,
+            endpoint: `/api/inspections/${props.inspectionRecordId}/rate-card-lines`,
+            method: 'POST',
+            body: { upserts: [{ recordId, line }], archives: [], bumpStatusToInProgress: true },
+            kind: 'line',
+            meta: { sectionId: effSectionId, line, externalId: line.externalId },
+          });
+          setPendingSync(outboxCountFor(props.inspectionRecordId));
+          setSaveStatus({ kind: 'saved', at: Date.now() });
+          return { ok: true, ...routing, recordId: undefined };
+        }
         setSaveStatus({ kind: 'error', message: error });
         return { ok: false, error, ...routing };
       } finally {
@@ -763,17 +848,30 @@ export function RateCardForm(props: RateCardFormProps) {
         setSaveStatus({ kind: 'saved', at: Date.now() });
       } catch (e: any) {
         console.error('[RateCardForm] line delete failed:', e);
-        // Restore the line at its original spot so the UI matches reality.
-        if (removed) {
-          setLinesBySection((m) => {
-            const existing = m[sectionId] || [];
-            if (existing.some((l) => l.externalId === externalId)) return m;
-            const next = [...existing];
-            next.splice(Math.min(removedIdx, next.length), 0, removed);
-            return { ...m, [sectionId]: next };
+        // Offline / transient: queue the archive and keep the line removed (it
+        // syncs when back online). Otherwise restore it so the UI matches HubSpot.
+        if (isOfflineError(e)) {
+          outboxEnqueue({
+            inspectionRecordId: props.inspectionRecordId,
+            endpoint: `/api/inspections/${props.inspectionRecordId}/rate-card-lines`,
+            method: 'POST',
+            body: { upserts: [], archives: [recordId] },
+            kind: 'lineArchive',
           });
+          setPendingSync(outboxCountFor(props.inspectionRecordId));
+          setSaveStatus({ kind: 'saved', at: Date.now() });
+        } else {
+          if (removed) {
+            setLinesBySection((m) => {
+              const existing = m[sectionId] || [];
+              if (existing.some((l) => l.externalId === externalId)) return m;
+              const next = [...existing];
+              next.splice(Math.min(removedIdx, next.length), 0, removed);
+              return { ...m, [sectionId]: next };
+            });
+          }
+          setSaveStatus({ kind: 'error', message: String(e?.message || e) });
         }
-        setSaveStatus({ kind: 'error', message: String(e?.message || e) });
       } finally {
         saveInFlightRef.current--;
       }
@@ -811,6 +909,17 @@ export function RateCardForm(props: RateCardFormProps) {
       }
     } catch (e) {
       console.error('[RateCardForm] section_list_json save failed:', e);
+      // Offline: queue the layout change to sync later.
+      if (isOfflineError(e)) {
+        outboxEnqueue({
+          inspectionRecordId: props.inspectionRecordId,
+          endpoint: `/api/inspections/${props.inspectionRecordId}`,
+          method: 'PATCH',
+          body: { section_list_json: json, baseSectionListJson: lastSavedSectionJsonRef.current },
+          kind: 'sectionList',
+        });
+        setPendingSync(outboxCountFor(props.inspectionRecordId));
+      }
     }
   }
 
@@ -1646,6 +1755,20 @@ export function RateCardForm(props: RateCardFormProps) {
       {/* Sticky header bar — the single home for address + property data
           (the top header no longer repeats it). Five centered boxes:
           Lines + Vendor / Client / Tenant / Net Turn. */}
+      {/* Offline / pending-sync banner. Saves are queued locally and replay
+          automatically when the connection returns, so work is never lost in a
+          dead zone. */}
+      {(!online || pendingSync > 0) && (
+        <div className={`-mx-4 px-4 py-1.5 mb-2 text-xs font-heading font-semibold flex items-center justify-center gap-2 ${!online ? 'bg-amber-100 text-amber-800' : 'bg-blue-50 text-blue-700'}`}>
+          <span className={`inline-block w-2 h-2 rounded-full ${!online ? 'bg-amber-500' : 'bg-blue-500 animate-pulse'}`} />
+          {!online
+            ? (pendingSync > 0
+                ? `Offline — ${pendingSync} change${pendingSync === 1 ? '' : 's'} saved here, will sync when you're back online`
+                : `Offline — your changes are saved here and will sync automatically`)
+            : `Syncing ${pendingSync} change${pendingSync === 1 ? '' : 's'}…`}
+        </div>
+      )}
+
       <div id="sticky-totals-header" className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
         <div className="sm:flex sm:items-center sm:justify-between sm:gap-4">
           <div className="text-center sm:text-left mb-2 sm:mb-0 min-w-0">
