@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { useRef } from 'react';
 import type { InspectionSummary } from '@/lib/types';
 import { StatusBadge } from './StatusBadge';
 
@@ -10,6 +11,9 @@ interface Props {
   selected?: boolean;
   selectable?: boolean;   // false for completed inspections (can't be cancelled)
   onToggleSelect?: (recordId: string) => void;
+  // Press-and-hold (outside select mode) to enter bulk-select with this card
+  // pre-selected.
+  onLongPress?: (recordId: string) => void;
 }
 
 // Derive the most meaningful date to show on the card.
@@ -81,7 +85,7 @@ function prettyTemplate(t: string): string {
     .join(' ');
 }
 
-export function InspectionCard({ inspection: i, selectMode, selected, selectable, onToggleSelect }: Props) {
+export function InspectionCard({ inspection: i, selectMode, selected, selectable, onToggleSelect, onLongPress }: Props) {
   const date = effectiveDate(i);
   const updated = fmtDate(i.updatedAt);
   const tmpl = prettyTemplate(i.templateType);
@@ -112,21 +116,16 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
         {date && <span>{date}</span>}
-        {updated && (
-          <>
-            {date && <span>&middot;</span>}
-            <span className="text-gray-400">Updated {updated}</span>
-          </>
-        )}
-        {(date || updated) && i.inspectorName && <span>&middot;</span>}
+        {date && i.inspectorName && <span>&middot;</span>}
         {i.inspectorName && <span>{i.inspectorName}</span>}
-        {tmpl && (
-          <>
-            <span>&middot;</span>
-            <span>{tmpl}</span>
-          </>
-        )}
       </div>
+      {/* Bottom row: template on the left, last-updated tag pushed to the right. */}
+      {(tmpl || updated) && (
+        <div className="flex items-center gap-2 text-xs mt-1">
+          {tmpl && <span className="text-gray-500 min-w-0 truncate">{tmpl}</span>}
+          {updated && <span className="text-gray-400 shrink-0 ml-auto">Updated {updated}</span>}
+        </div>
+      )}
       {hasProgress && (
         <div className="mt-2">
           <div className="text-xs text-gray-500 font-heading">
@@ -165,11 +164,43 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
     );
   }
 
-  // ---- Normal mode: navigate to the inspection ----
+  // ---- Normal mode: navigate to the inspection (with press-and-hold to
+  // enter bulk-select). A ~500ms hold fires onLongPress; a normal tap (which
+  // releases sooner) navigates as usual. We swallow the click that follows a
+  // long press so the hold doesn't also open the inspection.
+  const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lpFired = useRef(false);
+  const lpStart = useRef<{ x: number; y: number } | null>(null);
+
+  const clearLp = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!onLongPress) return;
+    lpFired.current = false;
+    lpStart.current = { x: e.clientX, y: e.clientY };
+    clearLp();
+    lpTimer.current = setTimeout(() => {
+      lpFired.current = true;
+      try { navigator.vibrate?.(15); } catch { /* not supported */ }
+      onLongPress(i.recordId);
+    }, 500);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!lpTimer.current || !lpStart.current) return;
+    // A scroll/drag cancels the hold.
+    if (Math.abs(e.clientX - lpStart.current.x) > 10 || Math.abs(e.clientY - lpStart.current.y) > 10) clearLp();
+  };
+
   return (
     <Link
       href={`/inspection/${i.recordId}`}
-      className="block bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm hover:border-brand/40 hover:shadow-md transition active:scale-[0.995]"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={clearLp}
+      onPointerCancel={clearLp}
+      onClick={(e) => { if (lpFired.current) { e.preventDefault(); e.stopPropagation(); lpFired.current = false; } }}
+      onContextMenu={(e) => { if (onLongPress) e.preventDefault(); }}
+      className="block select-none bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm hover:border-brand/40 hover:shadow-md transition active:scale-[0.995]"
+      style={{ WebkitTouchCallout: 'none' }}
     >
       {inner}
     </Link>

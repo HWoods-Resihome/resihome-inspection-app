@@ -224,6 +224,14 @@ export default function Home() {
     setSelectedIds(new Set());
   }
 
+  // Press-and-hold a card to enter bulk-select with it pre-selected (only if
+  // it's a cancellable inspection; completed ones still flip into select mode).
+  function enterSelectWith(recordId: string) {
+    const ins = inspections.find((x) => x.recordId === recordId);
+    setSelectMode(true);
+    setSelectedIds(ins && isSelectable(ins) ? new Set([recordId]) : new Set());
+  }
+
   // Select / clear all currently-visible selectable inspections.
   const selectableVisible = useMemo(
     () => sorted.filter(isSelectable),
@@ -384,8 +392,9 @@ export default function Home() {
             />
           </div>
 
-          {/* Filter chips */}
-          <div className="flex flex-wrap gap-1.5 mb-3">
+          {/* Status filter chips — kept on a single line; scrolls horizontally
+              on narrow screens rather than wrapping. */}
+          <div className="flex gap-1.5 mb-3 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
             <FilterChip label={`All (${counts.all})`} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
             <FilterChip label={`Scheduled (${counts.scheduled})`} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter('scheduled')} />
             <FilterChip label={`In Progress (${counts.in_progress})`} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter('in_progress')} />
@@ -393,10 +402,9 @@ export default function Home() {
             <FilterChip label={`Completed (${counts.completed})`} active={statusFilter === 'completed'} onClick={() => setStatusFilter('completed')} />
           </div>
 
-          {/* Filter controls row: inspector dropdown | template dropdown | date sort.
-              Wraps to a second line on narrow screens so Date stays visible
-              without horizontal scrolling on mobile. */}
-          <div className="flex flex-wrap items-center gap-2 mb-2 pb-1">
+          {/* Filter controls row: inspector dropdown | template dropdown | date
+              sort — all on one line, scrolling horizontally on narrow screens. */}
+          <div className="flex items-center gap-2 mb-2 pb-1 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
             {/* Inspector filter */}
             <div className="relative shrink-0">
               <select
@@ -582,6 +590,7 @@ export default function Home() {
               selected={selectedIds.has(i.recordId)}
               selectable={isSelectable(i)}
               onToggleSelect={toggleSelect}
+              onLongPress={enterSelectWith}
             />
           ))}
         </div>
@@ -601,7 +610,7 @@ function FilterChip({ label, active, onClick }: ChipProps) {
     <button
       type="button"
       onClick={onClick}
-      className={`text-xs font-heading font-semibold px-3 py-1.5 rounded-full border transition whitespace-nowrap ${
+      className={`shrink-0 text-xs font-heading font-semibold px-3 py-1.5 rounded-full border transition whitespace-nowrap ${
         active
           ? 'bg-brand text-white border-brand'
           : 'bg-white text-ink border-gray-300 hover:border-brand/50'
