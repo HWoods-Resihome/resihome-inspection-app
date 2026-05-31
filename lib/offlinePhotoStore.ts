@@ -33,6 +33,10 @@ export type QueuedPhoto = {
   replacesUrl?: string;
   lineExternalId?: string;
   createdAt: number;
+  // Set by the service worker's Background Sync handler once the blob has been
+  // uploaded to HubSpot with the tab closed. When present, the foreground flush
+  // skips re-uploading and only performs the (cheap) attach step on next open.
+  uploadedUrl?: string;
 };
 
 const DB_NAME = 'resiwalk_photos';
@@ -46,6 +50,21 @@ const urlByLocalId = new Map<string, { displayUrl: string; revokables: string[] 
 
 function idbAvailable(): boolean {
   return typeof window !== 'undefined' && 'indexedDB' in window;
+}
+
+/**
+ * Ask the service worker to run a Background Sync for queued photos. The browser
+ * fires the registered `sync` event when connectivity returns — even if the tab
+ * has since been closed — so blobs can leave the device unattended. Where the
+ * API isn't supported (notably iOS Safari) this is a no-op and the in-app
+ * foreground flush still covers syncing while the app is open.
+ */
+export async function requestPhotoBackgroundSync(): Promise<void> {
+  try {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+    const reg: any = await navigator.serviceWorker.ready;
+    if (reg && 'sync' in reg) await reg.sync.register('resiwalk-photo-sync');
+  } catch { /* unsupported / permission denied — foreground flush still works */ }
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -128,6 +147,7 @@ export async function uploadPhotoOrQueue(
     });
     const url = URL.createObjectURL(blob);
     urlByLocalId.set(localId, { displayUrl: url, revokables: [url] });
+    void requestPhotoBackgroundSync();
     return url;
   }
 }
@@ -159,6 +179,7 @@ export async function uploadVideoEntryOrQueue(
     const vObj = URL.createObjectURL(videoFile);
     const entry = makeVideoEntry(pObj, vObj);
     urlByLocalId.set(localId, { displayUrl: entry, revokables: [pObj, vObj] });
+    void requestPhotoBackgroundSync();
     return entry;
   }
 }
@@ -216,6 +237,21 @@ export async function flushQueuedPhotos(
   let synced = 0;
   for (const rec of all) {
     let newUrl: string;
+    // Already uploaded by the background-sync service worker (tab was closed) —
+    // skip the network and go straight to attaching it.
+    if (rec.uploadedUrl) {
+      newUrl = rec.uploadedUrl;
+      const entry = urlByLocalId.get(rec.localId);
+      const oldUrl = entry?.displayUrl || '';
+      await deleteRecord(rec.localId);
+      onSynced({ localId: rec.localId, sectionId: rec.sectionId, oldUrl, newUrl, replacesUrl: rec.replacesUrl, lineExternalId: rec.lineExternalId });
+      if (entry) {
+        for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
+        urlByLocalId.delete(rec.localId);
+      }
+      synced++;
+      continue;
+    }
     try {
       if (rec.kind === 'video' && rec.videoBlob) {
         const vFile = new File([rec.videoBlob], `clip.${/(webm)/i.test(rec.videoType || '') ? 'webm' : /(quicktime|mov)/i.test(rec.videoType || '') ? 'mov' : 'mp4'}`, { type: rec.videoType || 'video/mp4' });

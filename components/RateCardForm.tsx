@@ -626,6 +626,10 @@ export function RateCardForm(props: RateCardFormProps) {
     const onOffline = () => setOnline(false);
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
+    // The service worker's Background Sync asks the open tab to run the full
+    // upload+attach flow (it has the form context the SW lacks).
+    const onSwMessage = (e: MessageEvent) => { if (e.data?.type === 'resiwalk-flush') void runFlush(); };
+    navigator.serviceWorker?.addEventListener?.('message', onSwMessage);
     // Periodic retry while anything is queued (covers flaky/intermittent signal
     // where the 'online' event doesn't fire).
     const iv = setInterval(() => {
@@ -635,6 +639,7 @@ export function RateCardForm(props: RateCardFormProps) {
     return () => {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
+      navigator.serviceWorker?.removeEventListener?.('message', onSwMessage);
       clearInterval(iv);
     };
   }, [runFlush, refreshPending, props.inspectionRecordId]);

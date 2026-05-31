@@ -34,6 +34,107 @@ self.addEventListener('message', (event) => {
   if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
+/* ------------------------------------------------------------------ *
+ * Background Sync: upload queued photos even after the tab is closed.
+ *
+ * Queued captures live in IndexedDB (resiwalk_photos/queue), written by
+ * lib/offlinePhotoStore.ts. When connectivity returns the browser fires this
+ * `sync` event (Chromium; iOS Safari has no Background Sync, where it's a
+ * no-op and the in-app flush handles it).
+ *
+ * If a window is open we let the page run its normal upload+attach flow (it
+ * has the form context to attach URLs to sections/lines). Only when no window
+ * is open do we upload blobs here, recording the resulting HubSpot URL back on
+ * the record so the cheap attach step completes next time the app opens.
+ * Throwing makes the browser retry the sync later.
+ * ------------------------------------------------------------------ */
+const PHOTO_DB = 'resiwalk_photos';
+const PHOTO_STORE = 'queue';
+const PHOTO_SYNC_TAG = 'resiwalk-photo-sync';
+
+self.addEventListener('sync', (event) => {
+  if (event.tag === PHOTO_SYNC_TAG) event.waitUntil(handlePhotoSync());
+});
+
+async function handlePhotoSync() {
+  const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  if (clients.length > 0) {
+    // A tab is open — it can do the full upload AND attach correctly.
+    for (const c of clients) c.postMessage({ type: 'resiwalk-flush' });
+    return;
+  }
+  await uploadQueuedPhotosInBackground();
+}
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PHOTO_DB, 1);
+    // Don't create the store here — if it doesn't exist there's nothing to sync.
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function idbGetAll(db) {
+  return new Promise((resolve, reject) => {
+    if (!db.objectStoreNames.contains(PHOTO_STORE)) return resolve([]);
+    const t = db.transaction(PHOTO_STORE, 'readonly');
+    const req = t.objectStore(PHOTO_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function idbPut(db, rec) {
+  return new Promise((resolve, reject) => {
+    const t = db.transaction(PHOTO_STORE, 'readwrite');
+    t.objectStore(PHOTO_STORE).put(rec);
+    t.oncomplete = () => resolve();
+    t.onerror = () => reject(t.error);
+  });
+}
+
+function bufToBase64(buffer) {
+  // Chunked to avoid a call-stack overflow on large arrays.
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+async function uploadQueuedPhotosInBackground() {
+  let db;
+  try { db = await idbOpen(); } catch { return; }
+  const all = await idbGetAll(db);
+  // Photos only — video uses a Vercel Blob client flow that can't run here; it
+  // syncs via the foreground flush when the app reopens.
+  const pending = all
+    .filter((r) => r && r.kind === 'photo' && !r.uploadedUrl && r.blob)
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  for (const rec of pending) {
+    const base64 = bufToBase64(await rec.blob.arrayBuffer());
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: rec.filename, contentType: 'image/jpeg', base64 }),
+    });
+    if (!res.ok) {
+      // 401 (session expired) / 5xx / offline — stop and let the browser retry
+      // the whole sync later. Leaves the record intact for the next attempt.
+      throw new Error(`background upload failed: HTTP ${res.status}`);
+    }
+    const data = await res.json().catch(() => ({}));
+    if (data && data.url) {
+      rec.uploadedUrl = data.url;
+      await idbPut(db, rec);
+    }
+  }
+}
+
 function isStaticAsset(url) {
   return (
     url.pathname.startsWith('/_next/static/') ||
