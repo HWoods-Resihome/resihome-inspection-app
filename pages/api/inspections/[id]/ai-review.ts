@@ -19,6 +19,7 @@ import { matchCatalog } from '@/lib/voiceCatalogMatch';
 import { calculateLine } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { AI_REVIEW_KNOWLEDGE } from '@/lib/aiReviewKnowledge';
+import { depreciationRates } from '@/lib/depreciation';
 import type { RegionRate } from '@/lib/types';
 
 export const config = { maxDuration: 120, api: { bodyParser: { sizeLimit: '2mb' } } };
@@ -240,7 +241,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const houseDetails = [
       `Bedrooms: ${body?.property?.bedrooms ?? '?'}, Bathrooms: ${body?.property?.bathrooms ?? '?'}, Square footage: ${body?.property?.squareFootage ?? '?'}`,
       `Region: ${region || 'unknown'}`,
-      `Tenant time in home: ~${tenantMonths} months (use for depreciation on cap-eligible scopes only).`,
+      `Tenant time in home: ~${tenantMonths} months.`,
+      `DEPRECIATION SCHEDULE at ${tenantMonths} months → cap-eligible PAINT lines should be ${depreciationRates(tenantMonths).paint}% tenant, cap-eligible FLOORING lines ${depreciationRates(tenantMonths).flooring}% tenant. Apply these EXACT percentages to cap-eligible paint/flooring lines (whole-house paint, mist-match, normal-wear touchups; carpet/pad/LVP/tile/grout flooring material). Do NOT cap tenant-damage paint patches, removals, fixtures, bulbs, or cleaning. Flag cap-eligible lines whose tenant % differs and suggest the scheduled %.`,
       `Sum of all PAINT line client costs so far: ${money(paintTotal)} (compare against a whole-house mist-match Level 1/2).`,
     ].join('\n');
 

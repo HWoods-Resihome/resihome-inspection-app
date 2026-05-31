@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
 import { Combobox } from '@/components/Combobox';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { formatMoney } from '@/lib/photoUpload';
@@ -53,6 +54,9 @@ interface Props {
   // When set (Whole House sections), a newly-picked SF-measured item defaults
   // its quantity to this (the property square footage) instead of 1.
   autoSfQuantity?: number | null;
+  // Tenant's months in the home — auto-sets the tenant % on paint/flooring lines
+  // per the depreciation schedule (new rows only, until manually changed).
+  tenantMonths?: number | null;
   // Behavior
   readOnly?: boolean;
   startInEditMode?: boolean;            // true for new rows
@@ -102,7 +106,7 @@ export function EditableLineRow(props: Props) {
   const {
     line, catalog, regions, inspectionRegion,
     section, location, readOnly, startInEditMode, mobile,
-    onSave, onDelete, onDiscardNew, autoSfQuantity,
+    onSave, onDelete, onDiscardNew, autoSfQuantity, tenantMonths,
   } = props;
 
   // -------------------------------------------------------------------
@@ -206,6 +210,20 @@ export function EditableLineRow(props: Props) {
     setQuantity((q) => (q === '1' || q.trim() === '' ? String(autoSfQuantity) : q));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedItem, autoSfQuantity]);
+
+  // Paint/flooring depreciation: on a NEW row, default the tenant % from the
+  // schedule (by the tenant's months in home) when a paint/flooring item is
+  // picked — until the inspector changes it manually.
+  const tenantTouchedRef = useRef(false);
+  useEffect(() => {
+    if (line) return;                 // existing rows keep their saved %
+    if (tenantTouchedRef.current) return;
+    if (!selectedItem) return;
+    const kind = depKindForCategory(selectedItem.category);
+    if (!kind) return;
+    setTenantPct(depreciationTenantPct(kind, typeof tenantMonths === 'number' ? tenantMonths : 12));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedItem, tenantMonths]);
 
   // -------------------------------------------------------------------
   // Live calculation
@@ -526,7 +544,7 @@ export function EditableLineRow(props: Props) {
                   </label>
                   <select
                     value={String(tenantPct)}
-                    onChange={(e) => setTenantPct(Number(e.target.value))}
+                    onChange={(e) => { tenantTouchedRef.current = true; setTenantPct(Number(e.target.value)); }}
                     className="h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white"
                   >
                     {TENANT_PCT_OPTIONS.map((p) => <option key={p} value={String(p)}>{p}%</option>)}

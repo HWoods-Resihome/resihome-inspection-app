@@ -23,6 +23,9 @@ interface Props {
   onAddPhoto?: (a: AiAdjustment) => Promise<boolean>;
   // Permanently dismiss a photo-gap flag so future reviews don't re-raise it.
   onIgnore?: (a: AiAdjustment) => void;
+  // Persisted approve/decline decisions (restored across reload) + change report.
+  initialDecisions?: Record<string, Decision>;
+  onDecisionsChange?: (d: Record<string, Decision>) => void;
 }
 
 // Per-suggestion inspector edits — raw input strings so the field can be
@@ -40,8 +43,10 @@ const SEV: Record<string, string> = {
   low: 'bg-gray-400',
 };
 
-export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars, onAddPhoto, onIgnore }: Props) {
-  const [decisions, setDecisions] = useState<Record<string, Decision>>({});
+export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars, onAddPhoto, onIgnore, initialDecisions, onDecisionsChange }: Props) {
+  const [decisions, setDecisions] = useState<Record<string, Decision>>(() => initialDecisions || {});
+  // Report decision changes up so they can be persisted across reload.
+  useEffect(() => { onDecisionsChange?.(decisions); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [decisions]);
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [photoAdded, setPhotoAdded] = useState<Record<string, boolean>>({});
   const [addingPhoto, setAddingPhoto] = useState<string | null>(null);

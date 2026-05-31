@@ -229,6 +229,8 @@ export function RateCardForm(props: RateCardFormProps) {
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiSummary, setAiSummary] = useState('');
   const [aiAdjustments, setAiAdjustments] = useState<AiAdjustment[]>([]);
+  // Approve/decline decisions, persisted so they survive a reload mid-review.
+  const [aiDecisions, setAiDecisions] = useState<Record<string, 'approve' | 'decline'>>({});
   // The scope hash that last passed review (null = never reviewed this scope).
   // Persisted per inspection so it survives a reload (see lib/aiReview).
   const [reviewedHash, setReviewedHash] = useState<string | null>(null);
@@ -1734,6 +1736,7 @@ export function RateCardForm(props: RateCardFormProps) {
       reviewRunHashRef.current = cached.hash;
       setAiSummary(cached.summary || '');
       setAiAdjustments(Array.isArray(cached.adjustments) ? cached.adjustments : []);
+      setAiDecisions(cached.decisions || {});
       if (cached.open) setAiModalOpen(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1749,10 +1752,11 @@ export function RateCardForm(props: RateCardFormProps) {
         summary: aiSummary,
         adjustments: aiAdjustments,
         open: aiModalOpen,
+        decisions: aiDecisions,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiAdjustments, aiSummary, aiModalOpen, aiLoading]);
+  }, [aiAdjustments, aiSummary, aiModalOpen, aiDecisions, aiLoading]);
 
   const runAiReview = useCallback(async () => {
     reviewRunHashRef.current = scopeHash(linesBySectionRef.current);
@@ -1762,6 +1766,7 @@ export function RateCardForm(props: RateCardFormProps) {
     setAiStreaming(false);
     setAiSummary('');
     setAiAdjustments([]);
+    setAiDecisions({});
     try {
       // Flush pending edits so the server reviews what the inspector sees.
       try { await commitAndWait(); } catch { /* proceed with client state */ }
@@ -1989,6 +1994,7 @@ export function RateCardForm(props: RateCardFormProps) {
       clearReviewCache(props.inspectionRecordId); // review consumed
       setAiAdjustments([]);
       setAiSummary('');
+      setAiDecisions({});
       refreshPending();
       setAiModalOpen(false);
     } catch (e: any) {
@@ -2759,6 +2765,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               mobile={isMobile}
                               startInEditMode
                               autoSfQuantity={/whole\s*house/i.test(s.label) && props.squareFootage ? props.squareFootage : null}
+                              tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
                               onSave={(created) => handleSaveLineForSection(s.id, created)}
                               onDelete={() => handleDiscardNew(s.id)}  /* unused for new rows (no view-mode), kept for typing */
                               onDiscardNew={() => handleDiscardNew(s.id)}
@@ -2849,6 +2856,8 @@ export function RateCardForm(props: RateCardFormProps) {
         previewTenantDollars={previewTenantDollars}
         onAddPhoto={addPhotoForAdjustment}
         onIgnore={(a) => { if (a.lineExternalId) addIgnoredPhotoLine(props.inspectionRecordId, a.lineExternalId); }}
+        initialDecisions={aiDecisions}
+        onDecisionsChange={setAiDecisions}
       />
       {/* Hidden input for the review popup's "Add photo" action (attaches the
           damage photo to the room + the flagged line). */}
@@ -2946,6 +2955,7 @@ export function RateCardForm(props: RateCardFormProps) {
                   disabled={dataLoading}
                   currentLines={linesBySection[voiceSectionId] || []}
                   catalog={catalog}
+                  tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
                   onAddLine={(line) => { const p = handleSaveLineForSection(voiceSectionId, line); if (!cameraOpen) revealSection(voiceSectionId, line.externalId); return p; }}
                   onRemoveLine={(externalId) => handleDeleteLine(voiceSectionId, externalId)}
                   onAddLineTo={(sectionId, line) => { const p = handleSaveLineForSection(sectionId, line); if (!cameraOpen) revealSection(sectionId, line.externalId); return p; }}

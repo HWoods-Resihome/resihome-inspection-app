@@ -24,6 +24,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { fetchRateCardCatalog } from '@/lib/hubspot';
 import { matchCatalog, getCatalogEmbeddings } from '@/lib/voiceCatalogMatch';
 import { aliasFor } from '@/lib/voiceAliases';
+import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
 import { calculateLine } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { VENDORS } from '@/lib/vendors';
@@ -58,6 +59,7 @@ interface BodyShape {
   currentLines?: CurrentLine[];
   rooms?: { id: string; name: string }[];
   currentRoom?: string;
+  tenantMonths?: number;
 }
 
 function anthropicKey(): string {
@@ -191,6 +193,7 @@ function systemPrompt(
     `Defaults (apply silently unless the inspector says otherwise):`,
     `  - Vendor: "Vendor 1".  - Tenant chargeback: 100%.  - Size/level: standard / regular.`,
     `Never ask about vendor or tenant percent. Only use a different value if the inspector states one (e.g. "assign to PPW", "50 percent tenant").`,
+    `TENANT % for PAINT and FLOORING items: do NOT set tenantBillBackPercent on propose_line for paint or flooring lines unless the inspector explicitly states a percent — the app auto-applies the depreciation schedule for those. For all other items, omit it too (defaults to 100). Only pass tenantBillBackPercent when the inspector actually says a number.`,
     `STYLE: flat and terse. The app announces every add/edit and speaks it, so you almost never need to speak. When you must, it is ONE short question — no greetings, no "Great"/"Got it", no recapping what you did. Just the question.`,
     ``,
     `ADDING a line:`,
@@ -375,6 +378,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const byCode = new Map(catalog.map((c) => [c.lineItemCode, c]));
     const regions = await getCachedRegions().catch(() => [] as RegionRate[]);
     const region = body.region || '';
+    const tenantMonthsRaw = Number(body?.tenantMonths);
+    const tenantMonths = Number.isFinite(tenantMonthsRaw) && tenantMonthsRaw >= 0 ? tenantMonthsRaw : 12;
     const currentLines: CurrentLine[] = Array.isArray(body?.currentLines) ? body.currentLines : [];
     const linesByExternalId = new Map(currentLines.map((l) => [l.externalId, l]));
 
@@ -591,8 +596,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const qty = Number(tu.input?.quantity);
           let vendor = tu.input?.vendor ? String(tu.input.vendor) : 'Vendor 1';
           if (!VENDORS.includes(vendor)) vendor = 'Vendor 1';
-          let pct = tu.input?.tenantBillBackPercent != null ? Number(tu.input.tenantBillBackPercent) : 100;
-          if (!isFinite(pct)) pct = 100;
+          // Tenant %: if the inspector stated one, use it. Otherwise, for
+          // PAINT/FLOORING items apply the depreciation schedule (by tenant
+          // months in home); all other items default to 100%.
+          const depKind = depKindForCategory(item.category);
+          let pct: number;
+          if (tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent))) {
+            pct = Number(tu.input.tenantBillBackPercent);
+          } else if (depKind) {
+            pct = depreciationTenantPct(depKind, tenantMonths);
+          } else {
+            pct = 100;
+          }
           pct = Math.max(0, Math.min(100, Math.round(pct / 5) * 5));
           if (!isFinite(qty) || qty < 0) {
             toolResults.push({

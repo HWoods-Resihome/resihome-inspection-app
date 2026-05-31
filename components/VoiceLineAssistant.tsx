@@ -44,6 +44,8 @@ interface Props {
   currentLines?: RateCardLineInput[];
   // Catalog for resolving codes -> descriptions in edit summaries.
   catalog?: RateCardLineItem[];
+  // Tenant months in home — paint/flooring depreciation default for voice adds.
+  tenantMonths?: number;
   disabled?: boolean;
   // Reports when the conversation panel opens/closes (engaged) so the parent can
   // keep the mic visible over other screens only while a conversation is active.
@@ -237,7 +239,7 @@ function speak(
   }
 }
 
-export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, linesBySection, currentLines, catalog, disabled, onEngagedChange }: Props) {
+export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, linesBySection, currentLines, catalog, tenantMonths = 12, disabled, onEngagedChange }: Props) {
   // The room the assistant is working on right now.
   const currentSection = useMemo(
     () => sections.find((s) => s.id === currentSectionId) || sections[0],
@@ -363,6 +365,8 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
             section,
             location,
             region,
+            // Tenant months in home → drives paint/flooring depreciation default.
+            tenantMonths,
             // Room context so the agent can navigate ("go to Bedroom 2").
             currentRoom: currentRoomName,
             rooms: sections.map((s) => ({ id: s.id, name: s.displayName || s.label })),
@@ -555,7 +559,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         setBusy(false);
       }
     },
-    [section, location, region, currentLines, onAddLine, onAddLineTo, sections, onNavigate, currentRoomName, currentSection, currentSectionId]
+    [section, location, region, tenantMonths, currentLines, onAddLine, onAddLineTo, sections, onNavigate, currentRoomName, currentSection, currentSectionId]
   );
 
   const submitUtterance = useCallback(
