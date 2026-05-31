@@ -27,6 +27,11 @@ const RULES: { test: RegExp; alias: QueryAlias }[] = [
     test: /\bmis(s|t)?\s*-?\s*match(ed)?\b/i,
     alias: { query: 'mist match paint', categoryHint: 'Painting' },
   },
+  // Appliance cleaning (was mis-matching to "tub clean").
+  {
+    test: /\b(appliances?\s*clean(ing)?|clean\s*(the\s*)?appliances?)\b/i,
+    alias: { query: 'appliances clean per unit', categoryHint: 'Cleaning' },
+  },
 ];
 
 /** Return the alias for a phrase, or null if no rule matches. */

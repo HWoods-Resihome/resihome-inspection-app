@@ -832,8 +832,6 @@ export function CameraCapture({
 
   const uploadingCount = items.filter((it) => it.status === 'uploading').length;
   const failedCount = items.filter((it) => it.status === 'failed').length;
-  // Most-recent photo, shown as the gallery button's thumbnail (native-camera style).
-  const lastThumbUrl = [...items].reverse().find((p) => p.kind !== 'video')?.blobUrl;
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col select-none animate-fadeIn">
@@ -1234,17 +1232,12 @@ export function CameraCapture({
           aria-label="Choose photos from your gallery"
           title="Upload photos from your gallery"
         >
-          <span className="w-11 h-11 rounded-full bg-white/15 flex items-center justify-center overflow-hidden">
-            {lastThumbUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={lastThumbUrl} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <polyline points="21 15 16 10 5 21" />
-              </svg>
-            )}
+          <span className="w-11 h-11 rounded-full bg-white/15 flex items-center justify-center">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <polyline points="21 15 16 10 5 21" />
+            </svg>
           </span>
           <span className="text-[10px] font-heading">Gallery</span>
         </button>

@@ -50,6 +50,9 @@ interface Props {
   // Section context (used when saving a new row)
   section: string;
   location: string;
+  // When set (Whole House sections), a newly-picked SF-measured item defaults
+  // its quantity to this (the property square footage) instead of 1.
+  autoSfQuantity?: number | null;
   // Behavior
   readOnly?: boolean;
   startInEditMode?: boolean;            // true for new rows
@@ -99,7 +102,7 @@ export function EditableLineRow(props: Props) {
   const {
     line, catalog, regions, inspectionRegion,
     section, location, readOnly, startInEditMode, mobile,
-    onSave, onDelete, onDiscardNew,
+    onSave, onDelete, onDiscardNew, autoSfQuantity,
   } = props;
 
   // -------------------------------------------------------------------
@@ -191,6 +194,18 @@ export function EditableLineRow(props: Props) {
     if (!lineItemCode) return null;
     return catalog.find((c) => c.lineItemCode === lineItemCode) || null;
   }, [catalog, lineItemCode]);
+
+  // Whole House + SF item on a NEW row: default the quantity to the property
+  // square footage (instead of 1) so the inspector doesn't have to type it.
+  // Only when the quantity is still the untouched default.
+  useEffect(() => {
+    if (line) return; // existing rows keep their saved quantity
+    if (!selectedItem) return;
+    if (!autoSfQuantity || autoSfQuantity <= 0) return;
+    if (!/^sf$/i.test((selectedItem.laborMeas || '').trim())) return;
+    setQuantity((q) => (q === '1' || q.trim() === '' ? String(autoSfQuantity) : q));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedItem, autoSfQuantity]);
 
   // -------------------------------------------------------------------
   // Live calculation

@@ -2710,6 +2710,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               readOnly={props.readOnly}
                               mobile={isMobile}
                               startInEditMode
+                              autoSfQuantity={/whole\s*house/i.test(s.label) && props.squareFootage ? props.squareFootage : null}
                               onSave={(created) => handleSaveLineForSection(s.id, created)}
                               onDelete={() => handleDiscardNew(s.id)}  /* unused for new rows (no view-mode), kept for typing */
                               onDiscardNew={() => handleDiscardNew(s.id)}
