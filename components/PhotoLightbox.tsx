@@ -173,11 +173,11 @@ export function PhotoLightbox({
         </div>
 
         {index > 0 && (
-          <button type="button" onClick={prev} aria-label="Previous"
+          <button type="button" onClick={prev} onPointerDown={(e) => e.stopPropagation()} aria-label="Previous"
             className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 text-white text-2xl leading-none flex items-center justify-center">‹</button>
         )}
         {index < photos.length - 1 && (
-          <button type="button" onClick={next} aria-label="Next"
+          <button type="button" onClick={next} onPointerDown={(e) => e.stopPropagation()} aria-label="Next"
             className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 text-white text-2xl leading-none flex items-center justify-center">›</button>
         )}
 
