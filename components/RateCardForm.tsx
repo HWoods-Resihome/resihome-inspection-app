@@ -1968,47 +1968,51 @@ export function RateCardForm(props: RateCardFormProps) {
 
       let partialFailures: string | null = null;
       if (upserts.length || archives.length) {
-        await enqueueSave(async () => {
-          const endpoint = `/api/inspections/${props.inspectionRecordId}/rate-card-lines`;
-          const body = JSON.stringify({ upserts: upserts.map((u) => ({ recordId: u.recordId, line: u.line })), archives, bumpStatusToInProgress: true });
-          try {
-            let r: Response | null = null; let lastErr = '';
-            for (let attempt = 0; attempt < 3; attempt++) {
-              if (attempt > 0) await new Promise((res) => setTimeout(res, 600 * attempt));
-              try { r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }); }
-              catch (ne: any) { lastErr = String(ne?.message || ne); r = null; continue; }
-              if (r.ok) break;
-              if (r.status >= 400 && r.status < 500 && r.status !== 429) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0, 200)}`); }
-              { const t = await r.text().catch(() => ''); lastErr = `HTTP ${r.status}${t ? `: ${t.slice(0, 200)}` : ''}`; }
-            }
-            if (!r || !r.ok) throw new Error(lastErr || 'save failed after retries');
-            const data = await r.json();
-            for (const res of (data.results || [])) {
-              if (res?.recordId && res?.answerIdExternal) setRecordIdsByExternalId((cur) => ({ ...cur, [res.answerIdExternal]: res.recordId }));
-            }
-            // Endpoint saved the good lines but reported per-item failures — keep
-            // them visible (don't mark the review passed) and name what failed.
-            if (Array.isArray(data.failures) && data.failures.length) {
-              partialFailures = data.failures.map((f: any) => `• ${f.code}: ${f.error}`).join('\n');
-            }
-            setSaveStatus({ kind: 'saved', at: Date.now() });
-          } catch (e: any) {
-            // Offline / transient: queue each change so it syncs later (the
-            // "Syncing…" banner then reflects it). Otherwise surface the error.
-            if (isOfflineError(e)) {
-              for (const u of upserts) {
-                outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint, method: 'POST', body: { upserts: [{ recordId: u.recordId, line: u.line }], archives: [], bumpStatusToInProgress: true }, kind: 'line', meta: { sectionId: u.sectionId, line: u.line, externalId: u.line.externalId } });
-              }
-              for (const rid of archives) {
-                outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint, method: 'POST', body: { upserts: [], archives: [rid] }, kind: 'lineArchive' });
-              }
-              setSaveStatus({ kind: 'saved', at: Date.now() });
-            } else {
-              setSaveStatus({ kind: 'error', message: String(e?.message || e) });
-              throw e;
-            }
+        // Direct, timeout-bounded save (NOT via the serial save chain) so a
+        // wedged prior save can't leave the apply hanging on "Saving…" forever.
+        const endpoint = `/api/inspections/${props.inspectionRecordId}/rate-card-lines`;
+        const body = JSON.stringify({ upserts: upserts.map((u) => ({ recordId: u.recordId, line: u.line })), archives, bumpStatusToInProgress: true });
+        try {
+          let r: Response | null = null; let lastErr = '';
+          for (let attempt = 0; attempt < 3; attempt++) {
+            if (attempt > 0) await new Promise((res) => setTimeout(res, 600 * attempt));
+            const ctrl = new AbortController();
+            const to = setTimeout(() => ctrl.abort(), 30000); // never hang indefinitely
+            try { r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: ctrl.signal }); }
+            catch (ne: any) { lastErr = String(ne?.message || ne); r = null; clearTimeout(to); continue; }
+            clearTimeout(to);
+            if (r.ok) break;
+            if (r.status >= 400 && r.status < 500 && r.status !== 429) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0, 200)}`); }
+            { const t = await r.text().catch(() => ''); lastErr = `HTTP ${r.status}${t ? `: ${t.slice(0, 200)}` : ''}`; }
           }
-        });
+          if (!r || !r.ok) throw new Error(lastErr || 'save failed after retries');
+          const data = await r.json();
+          for (const res of (data.results || [])) {
+            if (res?.recordId && res?.answerIdExternal) setRecordIdsByExternalId((cur) => ({ ...cur, [res.answerIdExternal]: res.recordId }));
+          }
+          // Endpoint saved the good lines but reported per-item failures — keep
+          // them visible (don't mark the review passed) and name what failed.
+          if (Array.isArray(data.failures) && data.failures.length) {
+            partialFailures = data.failures.map((f: any) => `• ${f.code}: ${f.error}`).join('\n');
+          }
+          setSaveStatus({ kind: 'saved', at: Date.now() });
+        } catch (e: any) {
+          // Offline / transient: queue each change so it syncs later (the
+          // "Syncing…" banner then reflects it). Otherwise surface the error.
+          if (isOfflineError(e)) {
+            for (const u of upserts) {
+              outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint, method: 'POST', body: { upserts: [{ recordId: u.recordId, line: u.line }], archives: [], bumpStatusToInProgress: true }, kind: 'line', meta: { sectionId: u.sectionId, line: u.line, externalId: u.line.externalId } });
+            }
+            for (const rid of archives) {
+              outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint, method: 'POST', body: { upserts: [], archives: [rid] }, kind: 'lineArchive' });
+            }
+            refreshPending();
+            setSaveStatus({ kind: 'saved', at: Date.now() });
+          } else {
+            setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+            throw e;
+          }
+        }
       }
 
       // If some changes couldn't save, keep the review open and show exactly
@@ -2035,6 +2039,9 @@ export function RateCardForm(props: RateCardFormProps) {
       setAiError(`Could not apply all changes: ${e?.message || e}`);
     } finally {
       setAiApplying(false);
+      // Never leave the header pinned on "Saving…" (which would also keep submit
+      // disabled). If nothing resolved it, clear to saved.
+      setSaveStatus((s) => (s.kind === 'saving' ? { kind: 'saved', at: Date.now() } : s));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, props.inspectionRecordId, refreshPending]);
@@ -2857,24 +2864,6 @@ export function RateCardForm(props: RateCardFormProps) {
           The voice assistant lives in the CENTER of this footer: a mic icon that
           expands upward into the conversation panel when pressed. */}
       <div ref={footerRef} className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
-        {/* AI review status / trigger — Scope rate cards must pass review for the
-            current scope before submit; re-runs after any edit. */}
-        {isScopeTemplate && !props.readOnly && props.inspectionStatus !== 'pending_approval' && (
-          <div className={`max-w-7xl mx-auto px-3 sm:px-4 py-1.5 flex items-center justify-between gap-2 text-xs font-heading border-b ${reviewValid ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-amber-50 border-amber-100 text-amber-800'}`}>
-            <span className="flex items-center gap-1.5 min-w-0">
-              <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${reviewValid ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-              <span className="truncate">{reviewValid ? 'AI Review complete for this scope' : 'AI Review required before submit'}</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => runAiReview()}
-              disabled={aiLoading}
-              className="shrink-0 inline-flex items-center gap-1 font-semibold px-2.5 py-1 rounded-md bg-brand text-white hover:bg-brand-dark disabled:opacity-50"
-            >
-              <span aria-hidden>✦</span> {reviewValid ? 'Re-run AI Review' : 'Run AI Review'}
-            </button>
-          </div>
-        )}
         <div ref={actionRowRef} className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-2">
           <div className="flex-1 min-w-0">
             <TerminalActions
@@ -2886,6 +2875,24 @@ export function RateCardForm(props: RateCardFormProps) {
               onCancelInspection={handleCancelInspectionClick}
               onSaveAndClose={handleSaveAndClose}
               onSubmit={handleSubmitOrFinalize}
+              aiSlot={isScopeTemplate && !props.readOnly && props.inspectionStatus !== 'pending_approval' ? (
+                <button
+                  type="button"
+                  onClick={() => { if (aiAdjustments.length > 0 && !aiModalOpen) setAiModalOpen(true); else void runAiReview(); }}
+                  disabled={aiLoading}
+                  title={reviewValid ? 'AI Review complete — tap to re-run' : aiAdjustments.length > 0 ? 'AI Review in progress — tap to resume' : 'Run AI Review (required before submit)'}
+                  aria-label="AI Review"
+                  className={`relative shrink-0 w-10 h-10 rounded-full flex items-center justify-center border-2 transition disabled:opacity-50 ${reviewValid ? 'border-emerald-400 text-emerald-600 bg-emerald-50' : 'border-brand text-brand bg-brand/5 hover:bg-brand/10'}`}
+                >
+                  <span className="text-base leading-none" aria-hidden>✦</span>
+                  {/* Kicker: green check when reviewed for the current scope; amber pulse when pending. */}
+                  <span className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-white ${reviewValid ? 'bg-emerald-500 text-white' : 'bg-amber-500'}`}>
+                    {reviewValid
+                      ? <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                      : <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
+                  </span>
+                </button>
+              ) : undefined}
             />
           </div>
         </div>
@@ -3283,6 +3290,7 @@ function TerminalActions(props: {
   onSaveAndClose: () => void;
   onSubmit: () => void;
   voiceSlot?: React.ReactNode;
+  aiSlot?: React.ReactNode;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -3299,8 +3307,9 @@ function TerminalActions(props: {
       {/* Center: voice assistant mic — dead center because the left and right
           flex containers are equal-weight. */}
       <div className="shrink-0 flex justify-center">{props.voiceSlot}</div>
-      {/* Right: Submit / Finalize */}
-      <div className="flex-1 flex justify-end min-w-0">
+      {/* Right: AI Review icon (with status kicker) + Submit / Finalize */}
+      <div className="flex-1 flex justify-end items-center gap-2 min-w-0">
+        {props.aiSlot}
         <button
           type="button"
           onClick={props.onSubmit}

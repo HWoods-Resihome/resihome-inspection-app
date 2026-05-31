@@ -159,7 +159,11 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
 
           {!loading && !error && (
             <>
-              {summary && <p className="text-sm text-gray-700 mb-3 leading-relaxed">{summary}</p>}
+              {/* (Summary moved to the bottom — see below — so streaming
+                  suggestions stay anchored at the top.) */}
+              {adjustments.length === 0 && summary && !streaming && (
+                <p className="text-sm text-gray-700 mb-3 leading-relaxed">{summary}</p>
+              )}
 
               {adjustments.length === 0 ? (
                 streaming ? (
@@ -345,6 +349,11 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                     </div>
                   )}
                 </>
+              )}
+              {/* Summary renders LAST/at the bottom so it can't shift the
+                  streamed suggestions (and your clicks) as it arrives. */}
+              {summary && !streaming && adjustments.length > 0 && (
+                <p className="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-100 leading-relaxed">{summary}</p>
               )}
             </>
           )}
