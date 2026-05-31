@@ -288,6 +288,14 @@ function pickBedBathFromProps(p: Record<string, any>): { bedrooms?: number | nul
   return { bedrooms, bathrooms };
 }
 
+// Property statuses that should never be selectable for a new inspection.
+// Overridable via env (comma-separated) without a code change; the field that
+// holds the status is also overridable. Defaults match the production portal.
+const PROPERTY_STATUS_PROPERTY = (process.env.PROPERTY_STATUS_PROPERTY || 'status').trim();
+const PROPERTY_EXCLUDE_STATUSES = (process.env.PROPERTY_EXCLUDE_STATUSES ||
+  'Not Managed,Property Sold,PM Denied')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
 export async function fetchProperties(): Promise<Property[]> {
   const { property: typeId } = typeIds();
   // Standard HubSpot fields + your confirmed bedrooms/bathrooms field names.
@@ -299,17 +307,51 @@ export async function fetchProperties(): Promise<Property[]> {
     // their address snapshot. Mirror the PDF-header logic in fetchInspection*.
     'address', 'city', 'state', 'zip', 'zip_code',
     'bedrooms', 'bathrooms',
+    PROPERTY_STATUS_PROPERTY,
   ];
+
+  // Exclude inactive properties server-side. This enforces the business rule
+  // AND keeps the result set under HubSpot Search's hard 10,000-record paging
+  // cap (paging past 10k returns a 400 — the "Upstream request failed (400)"
+  // we were seeing once pointed at the full production portal). NOT_IN keeps
+  // records whose status is empty/null, so unstatused properties stay visible.
+  const statusFilter = PROPERTY_EXCLUDE_STATUSES.length
+    ? [{ filters: [{ propertyName: PROPERTY_STATUS_PROPERTY, operator: 'NOT_IN', values: PROPERTY_EXCLUDE_STATUSES }] }]
+    : [];
+
+  // A stable sort makes deep pagination deterministic (HubSpot's default order
+  // is unspecified, which can drop/duplicate rows across pages).
+  const sorts = [{ propertyName: 'hs_object_id', direction: 'ASCENDING' }];
 
   const out: Property[] = [];
   let after: string | undefined = undefined;
+  let useStatusFilter = statusFilter.length > 0;
+  const MAX_PAGES = 100; // 100 * 100 = 10,000 safety ceiling
+  let page = 0;
   do {
-    const body: any = { filterGroups: [], properties: candidateProps, limit: 100 };
+    const body: any = {
+      filterGroups: useStatusFilter ? statusFilter : [],
+      properties: candidateProps,
+      sorts,
+      limit: 100,
+    };
     if (after) body.after = after;
-    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
+    let resp: any;
+    try {
+      resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    } catch (e: any) {
+      // If the status filter itself is rejected (e.g. the field was renamed in
+      // HubSpot), don't break the picker — warn and retry this page unfiltered.
+      if (useStatusFilter && e?.status === 400) {
+        console.warn(`[fetchProperties] status filter on "${PROPERTY_STATUS_PROPERTY}" rejected (400); retrying without it. Check PROPERTY_STATUS_PROPERTY / PROPERTY_EXCLUDE_STATUSES.`);
+        useStatusFilter = false;
+        continue;
+      }
+      throw e;
+    }
     for (const r of resp.results || []) {
       const p = r.properties || {};
       const address = p.address || '';
@@ -332,6 +374,11 @@ export async function fetchProperties(): Promise<Property[]> {
       });
     }
     after = resp.paging?.next?.after;
+    page += 1;
+    if (page >= MAX_PAGES) {
+      console.warn(`[fetchProperties] hit ${MAX_PAGES}-page ceiling (~${MAX_PAGES * 100} properties); remaining are not loaded. Narrow with PROPERTY_EXCLUDE_STATUSES or add server-side search.`);
+      break;
+    }
   } while (after);
 
   out.sort((a, b) => a.name.localeCompare(b.name));
