@@ -2055,76 +2055,73 @@ export function RateCardForm(props: RateCardFormProps) {
 
       {/* Totals drill-down: category roll-up → line items, same $ columns. */}
       {overviewExpanded && (
-        <div className="mb-3 rounded-lg border border-gray-200 bg-white overflow-x-auto">
-          <div className="min-w-[360px]">
-            {/* Column header */}
-            <div className="flex items-center px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-[10px] uppercase tracking-wide text-gray-400">
-              <div className="flex-1 min-w-0">Category</div>
-              <div className="w-[66px] text-right">Vendor</div>
-              <div className="w-[66px] text-right">Client</div>
-              <div className="w-[66px] text-right">Tenant</div>
-              <div className="w-[66px] text-right">Net Turn</div>
-            </div>
-
-            {categoryBreakdown.length === 0 && (
-              <div className="px-3 py-4 text-center text-sm text-gray-400">No line items yet.</div>
-            )}
-
-            {categoryBreakdown.map((g) => {
-              const open = !!expandedCats[g.category];
-              return (
-                <div key={g.category} className="border-b border-gray-100 last:border-b-0">
-                  <button
-                    type="button"
-                    onClick={() => setExpandedCats((m) => ({ ...m, [g.category]: !m[g.category] }))}
-                    aria-expanded={open}
-                    className="w-full flex items-center px-3 py-2 text-left hover:bg-gray-50"
-                  >
-                    <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                           className={`shrink-0 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}>
-                        <polyline points="9 18 15 12 9 6" />
-                      </svg>
-                      <span className="text-sm font-medium text-gray-800 truncate">{g.category}</span>
-                      <span className="shrink-0 text-[10px] text-gray-400 tabular-nums">({g.count})</span>
-                    </div>
-                    <div className="w-[66px] text-right text-sm tabular-nums text-gray-700">${formatMoney(roundMoney(g.vendor))}</div>
-                    <div className="w-[66px] text-right text-sm tabular-nums text-gray-700">${formatMoney(roundMoney(g.client))}</div>
-                    <div className="w-[66px] text-right text-sm tabular-nums text-brand">${formatMoney(roundMoney(g.tenant))}</div>
-                    <div className="w-[66px] text-right text-sm tabular-nums text-emerald-700">${formatMoney(roundMoney(g.client - g.tenant))}</div>
-                  </button>
-
-                  {open && (
-                    <div className="bg-gray-50/60">
-                      {g.lines.map((ln) => (
-                        <div key={ln.key} className="flex items-center pl-7 pr-3 py-1.5 border-t border-gray-100">
-                          <div className="flex-1 min-w-0">
-                            <div className="text-[13px] text-gray-700 truncate">{ln.label}</div>
-                            <div className="text-[10px] text-gray-400 truncate">{ln.section}</div>
-                          </div>
-                          <div className="w-[66px] text-right text-[13px] tabular-nums text-gray-600">${formatMoney(ln.vendor)}</div>
-                          <div className="w-[66px] text-right text-[13px] tabular-nums text-gray-600">${formatMoney(ln.client)}</div>
-                          <div className="w-[66px] text-right text-[13px] tabular-nums text-brand/90">${formatMoney(ln.tenant)}</div>
-                          <div className="w-[66px] text-right text-[13px] tabular-nums text-emerald-700/90">${formatMoney(roundMoney(ln.client - ln.tenant))}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* Grand-total footer row — mirrors the header pill. */}
-            {categoryBreakdown.length > 0 && (
-              <div className="flex items-center px-3 py-2 bg-gray-50 border-t border-gray-200">
-                <div className="flex-1 min-w-0 text-sm font-semibold text-gray-800">Total ({grandTotals.count})</div>
-                <div className="w-[66px] text-right text-sm font-semibold tabular-nums text-gray-800">${formatMoney(roundMoney(grandTotals.vendor))}</div>
-                <div className="w-[66px] text-right text-sm font-semibold tabular-nums text-gray-800">${formatMoney(roundMoney(grandTotals.client))}</div>
-                <div className="w-[66px] text-right text-sm font-semibold tabular-nums text-brand">${formatMoney(roundMoney(grandTotals.tenant))}</div>
-                <div className="w-[66px] text-right text-sm font-semibold tabular-nums text-emerald-700">${formatMoney(roundMoney(grandTotals.client - grandTotals.tenant))}</div>
-              </div>
-            )}
+        <div className="mb-3 rounded-lg border border-gray-200 bg-white overflow-hidden">
+          {/* Column header */}
+          <div className="flex items-end gap-1 px-2.5 py-1.5 bg-gray-50 border-b border-gray-200 text-[9px] sm:text-[10px] uppercase tracking-wide text-gray-400">
+            <div className="flex-1 min-w-0">Category</div>
+            <div className="w-[52px] sm:w-[68px] text-right">Vendor</div>
+            <div className="w-[52px] sm:w-[68px] text-right">Client</div>
+            <div className="w-[52px] sm:w-[68px] text-right">Tenant</div>
+            <div className="w-[52px] sm:w-[68px] text-right">Net</div>
           </div>
+
+          {categoryBreakdown.length === 0 && (
+            <div className="px-3 py-4 text-center text-sm text-gray-400">No line items yet.</div>
+          )}
+
+          {categoryBreakdown.map((g) => {
+            const open = !!expandedCats[g.category];
+            return (
+              <div key={g.category} className="border-b border-gray-100 last:border-b-0">
+                <button
+                  type="button"
+                  onClick={() => setExpandedCats((m) => ({ ...m, [g.category]: !m[g.category] }))}
+                  aria-expanded={open}
+                  className="w-full flex items-center gap-1 px-2.5 py-2 text-left hover:bg-gray-50"
+                >
+                  <div className="flex-1 min-w-0 flex items-start gap-1.5">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                         className={`shrink-0 mt-0.5 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}>
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                    <span className="text-[13px] font-medium text-gray-800 leading-tight break-words">{g.category} <span className="text-[10px] font-normal text-gray-400 tabular-nums">({g.count})</span></span>
+                  </div>
+                  <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[13px] tabular-nums whitespace-nowrap text-gray-700">${formatMoney(roundMoney(g.vendor))}</div>
+                  <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[13px] tabular-nums whitespace-nowrap text-gray-700">${formatMoney(roundMoney(g.client))}</div>
+                  <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[13px] tabular-nums whitespace-nowrap text-brand">${formatMoney(roundMoney(g.tenant))}</div>
+                  <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[13px] tabular-nums whitespace-nowrap text-emerald-700">${formatMoney(roundMoney(g.client - g.tenant))}</div>
+                </button>
+
+                {open && (
+                  <div className="bg-gray-50/60">
+                    {g.lines.map((ln) => (
+                      <div key={ln.key} className="flex items-start gap-1 pl-6 pr-2.5 py-1.5 border-t border-gray-100">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[12px] text-gray-700 leading-snug break-words">{ln.label}</div>
+                          <div className="text-[10px] text-gray-400 break-words">{ln.section}</div>
+                        </div>
+                        <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[12px] tabular-nums whitespace-nowrap text-gray-600">${formatMoney(ln.vendor)}</div>
+                        <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[12px] tabular-nums whitespace-nowrap text-gray-600">${formatMoney(ln.client)}</div>
+                        <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[12px] tabular-nums whitespace-nowrap text-brand/90">${formatMoney(ln.tenant)}</div>
+                        <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[12px] tabular-nums whitespace-nowrap text-emerald-700/90">${formatMoney(roundMoney(ln.client - ln.tenant))}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Grand-total footer row — mirrors the header pill. */}
+          {categoryBreakdown.length > 0 && (
+            <div className="flex items-center gap-1 px-2.5 py-2 bg-gray-50 border-t border-gray-200">
+              <div className="flex-1 min-w-0 text-[13px] font-semibold text-gray-800">Total ({grandTotals.count})</div>
+              <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[13px] font-semibold tabular-nums whitespace-nowrap text-gray-800">${formatMoney(roundMoney(grandTotals.vendor))}</div>
+              <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[13px] font-semibold tabular-nums whitespace-nowrap text-gray-800">${formatMoney(roundMoney(grandTotals.client))}</div>
+              <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[13px] font-semibold tabular-nums whitespace-nowrap text-brand">${formatMoney(roundMoney(grandTotals.tenant))}</div>
+              <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[13px] font-semibold tabular-nums whitespace-nowrap text-emerald-700">${formatMoney(roundMoney(grandTotals.client - grandTotals.tenant))}</div>
+            </div>
+          )}
         </div>
       )}
 
