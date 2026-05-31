@@ -44,6 +44,23 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [edits, setEdits] = useState<Record<string, Edit>>({});
 
+  // Friendly, cycling status shown the instant the review opens (before the
+  // first suggestion streams in) so the inspector gets immediate feedback.
+  const PHASES = [
+    'Analyzing scope and photos…',
+    'Checking depreciation & duplicates…',
+    'Reviewing tenant responsibility…',
+    'Cross-checking paint & cleaning totals…',
+  ];
+  const [phase, setPhase] = useState(0);
+  const waitingForFirst = !error && (loading || (streaming && adjustments.length === 0));
+  useEffect(() => {
+    if (!open || !waitingForFirst) { setPhase(0); return; }
+    const t = setInterval(() => setPhase((p) => (p + 1) % PHASES.length), 2200);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, waitingForFirst]);
+
   // Reset decisions/edits whenever a new set of adjustments arrives.
   useEffect(() => { setDecisions({}); setEdits({}); }, [adjustments]);
 
@@ -107,8 +124,8 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
           {loading && (
             <div className="py-10 text-center">
               <div className="inline-block w-7 h-7 border-2 border-brand border-t-transparent rounded-full animate-spin mb-3" />
-              <div className="text-sm text-gray-600">Reviewing the scope against the turn standard…</div>
-              <div className="text-xs text-gray-400 mt-1">Checking depreciation, duplicates, tenant responsibility and photos.</div>
+              <div className="text-sm text-gray-700 font-heading transition-opacity">{PHASES[phase]}</div>
+              <div className="text-xs text-gray-400 mt-1">Reviewing against the investment-property turn standard.</div>
             </div>
           )}
 
@@ -127,7 +144,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                 streaming ? (
                   <div className="py-8 text-center">
                     <div className="inline-block w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin mb-2" />
-                    <div className="text-sm text-gray-600">Reviewing the scope…</div>
+                    <div className="text-sm text-gray-700 font-heading">{PHASES[phase]}</div>
                   </div>
                 ) : (
                   <div className="py-6 text-center text-sm text-emerald-700 font-heading font-semibold">
