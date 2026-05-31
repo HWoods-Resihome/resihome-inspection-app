@@ -22,6 +22,11 @@ WHOLE-HOUSE CLEAN — there should be exactly ONE whole-house clean line (a Sale
 DEPRECIATION / USEFUL-LIFE CAPS — these are NOT general caps on all items. Apply caps ONLY to the specific depreciable scopes listed below. Tenant time in home (provided in House Details; assume ~12 months if unspecified) governs how much to depreciate the tenant's charge-back on cap-eligible items like paint and carpet.
   Do NOT apply caps to: tenant-caused damage, missing items, removals, replacements like blinds, sticker removal, TV-mount removal/patch, hardware, fixtures, bulbs, or cleaning due to tenant filth.
 
+  TUB / SHOWER REFINISH (reglaze / resurface) is billed under Painting but is NOT wall paint — do NOT apply the paint depreciation cap to it; it stays 100% tenant. Never treat a tub/shower refinish like room/wall paint.
+
+  CARPET REDUNDANCY: never shampoo/clean OR stretch carpet in the SAME room where the carpet is being replaced or patched — that work is wasted. If a room has a carpet replacement/patch AND a carpet cleaning/shampoo or carpet stretch line, flag the cleaning/stretch line for REMOVAL.
+  CARPET / FLOORING QUANTITY SANITY: flooring square footage must be realistic for the room. Never accept a tiny/nonsensical SF (e.g. 1 SF, or 0) for a carpet/flooring replacement — flag it for the inspector to correct the square footage (raise an edit with needsPhoto false; the inspector enters the real SF).
+
   FLOORING cap applies ONLY to: carpet cleaning, carpet replacement/patch, pad, carpet stain treatment, tile cleaning, grout cleaning, LVP/LVT/vinyl/laminate/hardwood flooring replacement/repair/patch. If it is not clearly flooring MATERIAL work, do NOT apply the flooring cap. Cleaning lines like 'Sales Clean' are NOT flooring-like.
 
   PAINT cap applies ONLY to: whole-house painting, mist-match painting Level 1 / Level 2, 1-wall paint / whole-room paint touchups that are normal-wear related. Do NOT apply the paint cap to patch/repair from tenant damage (e.g. TV-mount holes) unless PM treats it as standard paint depreciation.

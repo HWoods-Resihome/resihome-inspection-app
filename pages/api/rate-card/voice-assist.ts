@@ -599,7 +599,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           // Tenant %: if the inspector stated one, use it. Otherwise, for
           // PAINT/FLOORING items apply the depreciation schedule (by tenant
           // months in home); all other items default to 100%.
-          const depKind = depKindForCategory(item.category);
+          const depKind = depKindForCategory(item.category, item.laborShortDescription);
           let pct: number;
           if (tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent))) {
             pct = Number(tu.input.tenantBillBackPercent);

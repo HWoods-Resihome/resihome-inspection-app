@@ -48,12 +48,17 @@ export function depreciationTenantPct(kind: DepKind, months: number): number {
 }
 
 /**
- * Classify a catalog category as paint/flooring (depreciable) or null. This is
- * the coarse auto-apply signal; the AI review still applies the finer
- * cap-eligibility rules (e.g. tenant-damage paint patches are NOT capped).
+ * Classify a catalog item as paint/flooring (depreciable) or null. This is the
+ * coarse auto-apply signal; the AI review still applies the finer
+ * cap-eligibility rules. Pass the description so exceptions can be excluded —
+ * notably TUB/SHOWER REFINISH (reglaze/resurface), which is billed under
+ * Painting but is NOT wall paint and must stay full tenant responsibility.
  */
-export function depKindForCategory(category: string | undefined | null): DepKind | null {
+export function depKindForCategory(category: string | undefined | null, description?: string | null): DepKind | null {
   const c = (category || '').toLowerCase();
+  const d = (description || '').toLowerCase();
+  // Tub/shower refinish is not wall paint → no depreciation (stays 100%).
+  if (/refinish|reglaze|resurface/.test(d) && /tub|shower|surround|bath/.test(d)) return null;
   if (c.includes('paint')) return 'paint';
   if (c.includes('floor')) return 'flooring';
   return null;

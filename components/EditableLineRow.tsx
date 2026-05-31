@@ -219,7 +219,7 @@ export function EditableLineRow(props: Props) {
     if (line) return;                 // existing rows keep their saved %
     if (tenantTouchedRef.current) return;
     if (!selectedItem) return;
-    const kind = depKindForCategory(selectedItem.category);
+    const kind = depKindForCategory(selectedItem.category, selectedItem.laborShortDescription);
     if (!kind) return;
     setTenantPct(depreciationTenantPct(kind, typeof tenantMonths === 'number' ? tenantMonths : 12));
     // eslint-disable-next-line react-hooks/exhaustive-deps

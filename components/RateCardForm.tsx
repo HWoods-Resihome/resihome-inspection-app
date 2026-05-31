@@ -210,6 +210,9 @@ export function RateCardForm(props: RateCardFormProps) {
   // in edit mode (waiting to be filled out + saved). Only one pending new row
   // per section at a time; clicking + Add again while one is pending is a no-op.
   const [pendingNewBySection, setPendingNewBySection] = useState<Record<string, true>>({});
+  // Bumped each time a fresh "new line" editor is opened in a section, so the
+  // editor remounts clean (used in its React key) when chaining rows.
+  const [newRowNonce, setNewRowNonce] = useState<Record<string, number>>({});
 
   // Mobile detection — drives the full-screen stacked line editor instead of
   // the inline table row, which is unusable on a phone.
@@ -819,6 +822,12 @@ export function RateCardForm(props: RateCardFormProps) {
   // photos when persisting a synced annotation replacement.
   const linesBySectionRef = useRef<Record<string, RateCardLineInput[]>>({});
   useEffect(() => { linesBySectionRef.current = linesBySection; }, [linesBySection]);
+  // Live mirror of the externalId→HubSpot recordId map. The AI-apply runs in a
+  // memoized callback whose closure would otherwise capture a STALE (empty) map,
+  // sending edits without a recordId → HubSpot tries to CREATE and collides on
+  // the unique answer_id_external (lost edits). Reading the ref keeps it current.
+  const recordIdsByExternalIdRef = useRef<Record<string, string>>({});
+  useEffect(() => { recordIdsByExternalIdRef.current = recordIdsByExternalId; }, [recordIdsByExternalId]);
   // Last section-layout JSON we know the server has, for optimistic-concurrency
   // (compare-and-swap) on section edits so two tabs/devices don't clobber each
   // other's room changes.
@@ -846,6 +855,15 @@ export function RateCardForm(props: RateCardFormProps) {
     const ok = await ensureDataLoaded();
     if (!ok) return;
     setExpanded((e) => ({ ...e, [section.id]: true }));
+    // If a new row is already open, commit it first (saves it if complete,
+    // discards if empty) so the inspector can keep adding rows back-to-back
+    // without manually hitting Save each time.
+    if (pendingNewBySection[section.id]) {
+      window.dispatchEvent(new CustomEvent('ratecard:commit-all'));
+    }
+    // Bump the nonce so the re-opened editor is a FRESH instance (clears the
+    // prior row's typed values) rather than reusing the same component state.
+    setNewRowNonce((n) => ({ ...n, [section.id]: (n[section.id] || 0) + 1 }));
     setPendingNewBySection((p) => ({ ...p, [section.id]: true }));
   }
 
@@ -1921,7 +1939,7 @@ export function RateCardForm(props: RateCardFormProps) {
             projected[a.sectionId] = (projected[a.sectionId] || []).filter((l) => l.externalId !== a.lineExternalId);
             const moved = { ...line, section: toSec.label, location: toSec.location || '' };
             projected[toSec.id] = [...(projected[toSec.id] || []), moved];
-            upserts.push({ recordId: recordIdsByExternalId[line.externalId], line: moved, sectionId: toSec.id });
+            upserts.push({ recordId: recordIdsByExternalIdRef.current[line.externalId], line: moved, sectionId: toSec.id });
           }
           continue;
         }
@@ -1929,7 +1947,7 @@ export function RateCardForm(props: RateCardFormProps) {
         const effType = a.needsPhoto ? 'remove' : a.type;
         if (effType === 'remove' && a.lineExternalId) {
           projected[a.sectionId] = (projected[a.sectionId] || []).filter((l) => l.externalId !== a.lineExternalId);
-          const rid = recordIdsByExternalId[a.lineExternalId];
+          const rid = recordIdsByExternalIdRef.current[a.lineExternalId];
           if (rid) archives.push(rid);
         } else if (effType === 'edit' && a.lineExternalId) {
           const existing = (projected[a.sectionId] || []).find((l) => l.externalId === a.lineExternalId);
@@ -1944,7 +1962,7 @@ export function RateCardForm(props: RateCardFormProps) {
             ...(sec ? { section: sec.label, location: sec.location || '' } : {}),
           };
           projected[a.sectionId] = (projected[a.sectionId] || []).map((l) => (l.externalId === a.lineExternalId ? next : l));
-          upserts.push({ recordId: recordIdsByExternalId[next.externalId], line: next, sectionId: a.sectionId });
+          upserts.push({ recordId: recordIdsByExternalIdRef.current[next.externalId], line: next, sectionId: a.sectionId });
         } else if (effType === 'add' && a.suggested?.lineItemCode && sec) {
           const line: RateCardLineInput = {
             externalId: `ai_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
@@ -2050,37 +2068,34 @@ export function RateCardForm(props: RateCardFormProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, props.inspectionRecordId, refreshPending]);
 
-  // Photo evidence gap (needsPhoto suggestion): capture/upload a photo and
-  // attach it to the room AND tag it onto the flagged line. Returns true on add.
-  const aiPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  // Photo evidence gap (needsPhoto suggestion): open the in-app camera (same as
+  // the "Take" button) for that room, then attach the captured photo(s) to the
+  // room AND tag them onto the flagged line. Returns true once a photo is added.
   const aiPhotoTargetRef = useRef<{ sectionId: string; lineExternalId?: string; resolve: (ok: boolean) => void } | null>(null);
+  const [aiCameraTarget, setAiCameraTarget] = useState<{ sectionId: string; lineExternalId?: string } | null>(null);
   const addPhotoForAdjustment = useCallback((a: AiAdjustment): Promise<boolean> => {
     return new Promise<boolean>((resolve) => {
       aiPhotoTargetRef.current = { sectionId: a.sectionId, lineExternalId: a.lineExternalId, resolve };
-      const el = aiPhotoInputRef.current;
-      if (!el) { resolve(false); return; }
-      el.value = '';
-      el.click();
+      setAiCameraTarget({ sectionId: a.sectionId, lineExternalId: a.lineExternalId });
     });
   }, []);
-  const handleAiPhotoPicked = useCallback(async (files: FileList | null) => {
+  const handleAiCameraComplete = useCallback(async (urls: string[]) => {
     const target = aiPhotoTargetRef.current;
     aiPhotoTargetRef.current = null;
+    setAiCameraTarget(null);
     if (!target) return;
-    const file = files && files[0];
-    if (!file) { target.resolve(false); return; }
+    if (!urls || urls.length === 0) { target.resolve(false); return; }
     try {
-      const url = await uploadPhotoOrQueue(file, props.inspectionRecordId, target.sectionId);
       // Attach to the room's photo strip.
       const base = photosBySectionRef.current[target.sectionId] || [];
-      const nextPhotos = Array.from(new Set([...base, url]));
+      const nextPhotos = Array.from(new Set([...base, ...urls]));
       setPhotosBySection((m) => ({ ...m, [target.sectionId]: nextPhotos }));
       await savePhotosForSection(target.sectionId, nextPhotos.filter((u) => !u.startsWith('blob:')));
-      // Tag it onto the flagged line.
+      // Tag onto the flagged line.
       if (target.lineExternalId) {
         const line = (linesBySectionRef.current[target.sectionId] || []).find((l) => l.externalId === target.lineExternalId);
         if (line) {
-          const updated = { ...line, photoUrls: Array.from(new Set([...(line.photoUrls || []), url])) };
+          const updated = { ...line, photoUrls: Array.from(new Set([...(line.photoUrls || []), ...urls])) };
           setLinesBySection((m) => ({ ...m, [target.sectionId]: (m[target.sectionId] || []).map((l) => (l.externalId === target.lineExternalId ? updated : l)) }));
           await handleSaveLineForSection(target.sectionId, updated);
         }
@@ -2090,7 +2105,13 @@ export function RateCardForm(props: RateCardFormProps) {
     } catch {
       target.resolve(false);
     }
-  }, [props.inspectionRecordId, refreshPending]);
+  }, [refreshPending]);
+  const handleAiCameraClose = useCallback(() => {
+    const target = aiPhotoTargetRef.current;
+    aiPhotoTargetRef.current = null;
+    setAiCameraTarget(null);
+    target?.resolve(false);
+  }, []);
 
   // ----- Terminal action handlers (shared between inline + floating footers) ----
   // Extracted so the desktop floating footer and the mobile inline footer can
@@ -2579,7 +2600,7 @@ export function RateCardForm(props: RateCardFormProps) {
                   type="button"
                   onClick={() => setExpandedCats((m) => ({ ...m, [g.category]: !m[g.category] }))}
                   aria-expanded={open}
-                  className="w-full flex items-center gap-1 px-2.5 py-2 text-left hover:bg-gray-50"
+                  className="w-full flex items-center gap-1 px-2.5 py-2 text-left bg-gray-100 hover:bg-gray-200/70 border-b border-gray-200"
                 >
                   <div className="flex-1 min-w-0 flex items-start gap-1.5">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
@@ -2832,7 +2853,7 @@ export function RateCardForm(props: RateCardFormProps) {
                           ))}
                           {pendingNewBySection[s.id] && (
                             <EditableLineRow
-                              key={`__new__${s.id}`}
+                              key={`__new__${s.id}_${newRowNonce[s.id] || 0}`}
                               line={null}
                               catalog={catalog}
                               regions={regions}
@@ -2861,10 +2882,10 @@ export function RateCardForm(props: RateCardFormProps) {
                       <button
                         type="button"
                         onClick={() => handleAddLine(s)}
-                        disabled={dataLoading || pendingNewBySection[s.id]}
+                        disabled={dataLoading}
                         className="px-3 py-1.5 text-sm bg-brand text-white rounded hover:bg-brand-dark disabled:bg-gray-300"
                       >
-                        {dataLoading ? 'Loading...' : pendingNewBySection[s.id] ? 'Finish current row first' : '+ Add Line Item'}
+                        {dataLoading ? 'Loading...' : '+ Add Line Item'}
                       </button>
                     </div>
                   )}
@@ -2937,18 +2958,24 @@ export function RateCardForm(props: RateCardFormProps) {
         initialDecisions={aiDecisions}
         onDecisionsChange={setAiDecisions}
         rooms={sections.map((s) => ({ id: s.id, name: s.displayName || s.label }))}
+        cameraOpen={!!aiCameraTarget}
       />
-      {/* Hidden input for the review popup's "Add photo" action — no `capture`,
-          so the OS offers BOTH the camera (snap a quick photo) and the photo
-          library (add from gallery). The picked photo is attached to the room +
-          tagged onto the flagged line. */}
-      <input
-        ref={aiPhotoInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => { void handleAiPhotoPicked(e.target.files); e.currentTarget.value = ''; }}
-      />
+      {/* In-app camera for the review popup's "Add photo" (same as the Take
+          button): single room, captured photo auto-attaches to the room + tags
+          the flagged line. The review modal hides while this is open. */}
+      {aiCameraTarget && (
+        <CameraCapture
+          isOpen
+          addressSnapshot={props.propertyName}
+          propertyRecordId={props.propertyRecordId}
+          onComplete={(urls) => { void handleAiCameraComplete(urls); }}
+          onClose={handleAiCameraClose}
+          uploadPhoto={(file) => uploadPhotoOrQueue(file, props.inspectionRecordId, aiCameraTarget.sectionId)}
+          uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, props.inspectionRecordId, aiCameraTarget.sectionId)}
+          rooms={(() => { const s = sections.find((x) => x.id === aiCameraTarget.sectionId); return [{ id: aiCameraTarget.sectionId, name: s?.displayName || s?.label || 'Room', photoCount: (photosBySection[aiCameraTarget.sectionId] || []).length, needsPhotos: false }]; })()}
+          currentRoomId={aiCameraTarget.sectionId}
+        />
+      )}
 
       {cameraSectionId !== null && (
         <CameraCapture
