@@ -465,7 +465,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       messages.push({ role: 'assistant', content });
       const toolResults: any[] = [];
 
-      for (const tu of toolUses) {
+      // Process switch_room BEFORE search/propose/edit so navigation and the
+      // active room are set first — regardless of the order the model emitted the
+      // tool calls. Otherwise a propose_line emitted before switch_room would
+      // land the line in the previous room.
+      const orderedToolUses = [...toolUses].sort(
+        (a, b) => (a.name === 'switch_room' ? -1 : 0) - (b.name === 'switch_room' ? -1 : 0)
+      );
+
+      for (const tu of orderedToolUses) {
         if (tu.name === 'search_catalog') {
           usedSearchThisTurn = true;
           const hint = tu.input?.categoryHint ? String(tu.input.categoryHint) : undefined;

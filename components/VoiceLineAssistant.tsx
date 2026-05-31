@@ -388,7 +388,11 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               const action = data.action === 'edit' ? 'edit' : 'add';
               const spokenLabel = data.spokenSummary || data.summary;
               const verb = action === 'edit' ? 'Updated' : 'Added';
-              const targetId = streamSectionRef.current;
+              // Route to the stream's current room — but guard against a stale/empty
+              // ref by falling back to the focused section so a line is never lost
+              // to a non-existent group.
+              const refId = streamSectionRef.current;
+              const targetId = (refId && sections.some((s) => s.id === refId)) ? refId : currentSectionId;
               try {
                 if (onAddLineTo) onAddLineTo(targetId, line);
                 else onAddLine(line);
