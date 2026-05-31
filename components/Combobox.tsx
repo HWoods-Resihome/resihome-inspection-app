@@ -290,7 +290,7 @@ export function Combobox({
                 return groups.map((grp) => (
                   <li key={grp.name || '__ungrouped'} role="presentation">
                     {grp.name && (
-                      <div className="px-3 pt-2 pb-1 text-[10px] font-heading font-bold uppercase tracking-wider text-gray-400 bg-gray-50/60 sticky top-0">
+                      <div className="px-3 py-1.5 text-[11px] font-heading font-bold uppercase tracking-wider text-gray-600 bg-gray-100 border-y border-gray-200 sticky top-0 z-10">
                         {grp.name}
                       </div>
                     )}

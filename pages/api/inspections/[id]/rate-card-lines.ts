@@ -226,16 +226,39 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
-    // Persist
-    const upsertResults = answerUpserts.length > 0
-      ? await upsertAnswers(inspectionRecordId, answerUpserts)
-      : [];
+    // Persist (resilient). Try the fast batch first; if HubSpot rejects it
+    // (e.g. one bad line 400s the whole batch), fall back to per-item so the
+    // good lines still save and we can name + surface the one that failed,
+    // instead of failing the entire apply with a 500.
+    let upsertResults: Array<{ recordId: string; answerIdExternal: string }> = [];
+    const failures: { code: string; error: string }[] = [];
+    if (answerUpserts.length > 0) {
+      try {
+        upsertResults = await upsertAnswers(inspectionRecordId, answerUpserts);
+      } catch (batchErr: any) {
+        console.warn(`[rate-card-lines] batch upsert failed (${answerUpserts.length} items) — retrying per-item:`, (batchErr?.detail || batchErr?.message || batchErr));
+        for (const u of answerUpserts) {
+          try {
+            const r = await upsertAnswers(inspectionRecordId, [u]);
+            upsertResults.push(...r);
+          } catch (itemErr: any) {
+            failures.push({
+              code: String(u.answerProps?.rate_card_line_item_code || u.answerProps?.answer_id_external || 'line'),
+              error: String(itemErr?.detail || itemErr?.message || itemErr).slice(0, 200),
+            });
+          }
+        }
+      }
+    }
 
-    if (archives.length > 0) {
-      await archiveAnswers(archives);
+    // Archives one-at-a-time so a single stale/already-archived id can't fail
+    // the batch (HubSpot 400s the whole batch otherwise).
+    for (const rid of archives) {
+      try { await archiveAnswers([rid]); }
+      catch (e: any) { failures.push({ code: `archive ${rid}`, error: String(e?.detail || e?.message || e).slice(0, 160) }); }
     }
     // Stamp "last edited" so the list can sort by most-recently-touched.
-    await touchInspection(inspectionRecordId);
+    await touchInspection(inspectionRecordId).catch(() => { /* non-fatal */ });
 
     // Stitch the math result back to each saved record so the client can update
     // its UI without re-fetching.
@@ -263,9 +286,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.warn(`[rate-card-lines] slow save: ${elapsed}ms, upserts=${upserts.length}`);
     }
 
-    return res.status(200).json({ success: true, results, elapsedMs: elapsed });
+    // 200 even with partial failures (the good lines saved); the client surfaces
+    // `failures` so the inspector knows exactly which line + why.
+    return res.status(200).json({ success: failures.length === 0, results, failures, elapsedMs: elapsed });
   } catch (e: any) {
     console.error(`POST /api/inspections/${inspectionRecordId}/rate-card-lines failed:`, e);
-    return res.status(500).json({ error: String(e?.message || e) });
+    // Include the upstream detail (HubSpot's actual validation message) so field
+    // sync failures can be diagnosed instead of guessed.
+    const detail = (e as any)?.detail;
+    return res.status(500).json({ error: String(e?.message || e), detail: detail ? String(detail).slice(0, 400) : undefined });
   }
 }

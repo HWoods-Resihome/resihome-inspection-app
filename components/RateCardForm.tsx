@@ -1966,6 +1966,7 @@ export function RateCardForm(props: RateCardFormProps) {
       // Optimistic UI: show the new scope immediately.
       setLinesBySection(projected);
 
+      let partialFailures: string | null = null;
       if (upserts.length || archives.length) {
         await enqueueSave(async () => {
           const endpoint = `/api/inspections/${props.inspectionRecordId}/rate-card-lines`;
@@ -1985,6 +1986,11 @@ export function RateCardForm(props: RateCardFormProps) {
             for (const res of (data.results || [])) {
               if (res?.recordId && res?.answerIdExternal) setRecordIdsByExternalId((cur) => ({ ...cur, [res.answerIdExternal]: res.recordId }));
             }
+            // Endpoint saved the good lines but reported per-item failures — keep
+            // them visible (don't mark the review passed) and name what failed.
+            if (Array.isArray(data.failures) && data.failures.length) {
+              partialFailures = data.failures.map((f: any) => `• ${f.code}: ${f.error}`).join('\n');
+            }
             setSaveStatus({ kind: 'saved', at: Date.now() });
           } catch (e: any) {
             // Offline / transient: queue each change so it syncs later (the
@@ -2003,6 +2009,14 @@ export function RateCardForm(props: RateCardFormProps) {
             }
           }
         });
+      }
+
+      // If some changes couldn't save, keep the review open and show exactly
+      // which line + why — don't mark it passed (submit stays gated).
+      if (partialFailures) {
+        setAiError(`Some changes couldn’t save and were not applied:\n\n${partialFailures}\n\nFix or decline those, then apply again.`);
+        refreshPending();
+        return;
       }
 
       const newHash = scopeHash(projected);
