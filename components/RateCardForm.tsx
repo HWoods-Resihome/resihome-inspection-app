@@ -2231,9 +2231,9 @@ export function RateCardForm(props: RateCardFormProps) {
                           <button
                             type="button"
                             onClick={() => setCameraSectionId(s.id)}
-                            disabled={isUploadingHere || !hasMediaDevices}
-                            className="inline-flex items-center gap-1 text-xs bg-brand text-white font-semibold py-1 px-2 rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
-                            title={hasMediaDevices ? 'In-app camera' : 'Camera not supported in this browser'}
+                            disabled={isUploadingHere}
+                            className="inline-flex items-center gap-1 text-xs bg-brand text-white font-semibold py-1 px-2.5 rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
+                            title="Take or upload photos"
                           >
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
@@ -2241,24 +2241,6 @@ export function RateCardForm(props: RateCardFormProps) {
                             </svg>
                             Take
                           </button>
-                          <label className={`inline-flex items-center gap-1 text-xs bg-brand/10 text-brand font-semibold py-1 px-2 rounded hover:bg-brand/20 ${
-                            isUploadingHere ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                          }`}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                              <polyline points="17 8 12 3 7 8" />
-                              <line x1="12" y1="3" x2="12" y2="15" />
-                            </svg>
-                            Upload
-                            <input
-                              type="file"
-                              accept="image/*"
-                              multiple
-                              onChange={(e) => handlePhotoFiles(s.id, e.target.files)}
-                              disabled={isUploadingHere}
-                              className="hidden"
-                            />
-                          </label>
                         </div>
                       )}
                     </div>

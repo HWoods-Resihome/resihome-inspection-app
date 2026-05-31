@@ -456,7 +456,7 @@ export function CameraCapture({
     const videoTrack = stream?.getVideoTracks?.()[0];
     if (!video || !videoTrack) return;
     const mime = pickClipMime();
-    if (!mime) { void dialog.alert('Video recording isn’t supported in this browser. Use "Phone Cam" to record with your phone’s camera app.'); return; }
+    if (!mime) { void dialog.alert('Video recording isn’t supported in this browser. Use the phone-camera button (top right) to record with your phone’s camera app.'); return; }
     if (items.length >= maxPhotos) { void dialog.alert(`You can capture up to ${maxPhotos} items per session. Tap Done to finish.`); return; }
 
     // Best-effort audio narration; fall back to a silent clip if the mic is denied.
@@ -566,6 +566,13 @@ export function CameraCapture({
   const nativeInputRef = useRef<HTMLInputElement | null>(null);
   const openNativeCamera = useCallback(() => {
     nativeInputRef.current?.click();
+  }, []);
+  // Gallery picker — opens the device photo library (no `capture`, so it does
+  // NOT launch the camera) for selecting one or more existing photos. This is
+  // the in-camera "Upload" path; selected files flow through the same pipeline.
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const openGallery = useCallback(() => {
+    galleryInputRef.current?.click();
   }, []);
   const handleNativeFiles = useCallback((files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -814,7 +821,7 @@ export function CameraCapture({
         console.warn('[CameraCapture] torch toggle failed:', e2);
         setTorchSupported(false);
         setTorchOn(false);
-        setTorchError('Flash isn\u2019t available in-app on this device/lens. Use "Phone Cam" below to record with your phone\u2019s camera (it has its own flash).');
+        setTorchError('Flash isn\u2019t available in-app on this device/lens. Use the phone-camera button (top right) to capture with your phone\u2019s camera (it has its own flash).');
       }
     }
   }, [torchOn]);
@@ -825,6 +832,8 @@ export function CameraCapture({
 
   const uploadingCount = items.filter((it) => it.status === 'uploading').length;
   const failedCount = items.filter((it) => it.status === 'failed').length;
+  // Most-recent photo, shown as the gallery button's thumbnail (native-camera style).
+  const lastThumbUrl = [...items].reverse().find((p) => p.kind !== 'video')?.blobUrl;
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col select-none animate-fadeIn">
@@ -1092,41 +1101,58 @@ export function CameraCapture({
                 </div>
               </>
             )}
-            {/* Flip camera button (top right of viewport) */}
-            <button
-              type="button"
-              onClick={flipCamera}
-              className="absolute top-3 right-3 w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center"
-              aria-label="Flip camera"
-              title="Switch front/back camera"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-                <polyline points="21 3 21 8 16 8" />
-                <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-                <polyline points="3 21 3 16 8 16" />
-              </svg>
-            </button>
-            {/* Flash / torch toggle — only shown when the device supports it */}
-            {torchSupported && (
+            {/* Top-right control cluster: phone-camera fallback, flash, flip. */}
+            <div className="absolute top-3 right-3 flex items-center gap-2">
+              {/* Phone camera fallback (moved here from the shutter row). Gives
+                  iOS users a flash-capable camera and a universal backup. */}
               <button
                 type="button"
-                onClick={toggleTorch}
-                className={
-                  'absolute top-3 right-16 w-10 h-10 rounded-full flex items-center justify-center transition ' +
-                  (torchOn ? 'bg-amber-400 text-black' : 'bg-black/50 text-white')
-                }
-                aria-label={torchOn ? 'Turn flash off' : 'Turn flash on'}
-                aria-pressed={torchOn}
-                title={torchOn ? 'Flash on (tap to turn off)' : 'Flash off (tap to turn on)'}
+                onClick={openNativeCamera}
+                className="w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center"
+                aria-label="Use phone camera (with flash)"
+                title="Open your phone's camera (has its own flash)"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill={torchOn ? 'currentColor' : 'none'}
-                     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                  <circle cx="12" cy="13" r="4" />
                 </svg>
               </button>
-            )}
+              {/* Flash / torch toggle — only shown when the device supports it */}
+              {torchSupported && (
+                <button
+                  type="button"
+                  onClick={toggleTorch}
+                  className={
+                    'w-10 h-10 rounded-full flex items-center justify-center transition ' +
+                    (torchOn ? 'bg-amber-400 text-black' : 'bg-black/50 text-white')
+                  }
+                  aria-label={torchOn ? 'Turn flash off' : 'Turn flash on'}
+                  aria-pressed={torchOn}
+                  title={torchOn ? 'Flash on (tap to turn off)' : 'Flash off (tap to turn on)'}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill={torchOn ? 'currentColor' : 'none'}
+                       stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                  </svg>
+                </button>
+              )}
+              {/* Flip camera */}
+              <button
+                type="button"
+                onClick={flipCamera}
+                className="w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center"
+                aria-label="Flip camera"
+                title="Switch front/back camera"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                  <polyline points="21 3 21 8 16 8" />
+                  <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                  <polyline points="3 21 3 16 8 16" />
+                </svg>
+              </button>
+            </div>
           </>
         )}
       </div>
@@ -1210,23 +1236,29 @@ export function CameraCapture({
       {/* Shutter row. `relative` so the voice assistant's pop-up panel (anchored
           bottom-full to the mic) floats above this bar and stays on-screen. */}
       <div className="relative bg-black px-4 py-4 flex items-center justify-center gap-8">
-        {/* Phone camera fallback (left of shutter). Always available: gives iOS
-            users a flash-capable camera, and is a universal backup if the live
-            camera struggles. */}
+        {/* Gallery — pick one or more existing photos from the device (replaces
+            the separate "Upload" button that used to live on the form). */}
         <button
           type="button"
-          onClick={openNativeCamera}
-          className="flex flex-col items-center gap-1 text-white/90"
-          aria-label="Use phone camera (with flash)"
-          title="Open your phone's camera (has its own flash)"
+          onClick={openGallery}
+          disabled={busy}
+          className="flex flex-col items-center gap-1 text-white/90 disabled:opacity-40"
+          aria-label="Choose photos from your gallery"
+          title="Upload photos from your gallery"
         >
-          <span className="w-11 h-11 rounded-full bg-white/15 flex items-center justify-center">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-              <circle cx="12" cy="13" r="4" />
-            </svg>
+          <span className="w-11 h-11 rounded-full bg-white/15 flex items-center justify-center overflow-hidden">
+            {lastThumbUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={lastThumbUrl} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            )}
           </span>
-          <span className="text-[10px] font-heading">Phone Cam</span>
+          <span className="text-[10px] font-heading">Gallery</span>
         </button>
 
         <button
@@ -1289,6 +1321,16 @@ export function CameraCapture({
         type="file"
         accept="image/*"
         capture="environment"
+        multiple
+        className="hidden"
+        onChange={(e) => { handleNativeFiles(e.target.files); e.currentTarget.value = ''; }}
+      />
+      {/* Hidden gallery input — NO capture attr, so it opens the photo library
+          for multi-select rather than the camera. */}
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
         multiple
         className="hidden"
         onChange={(e) => { handleNativeFiles(e.target.files); e.currentTarget.value = ''; }}
