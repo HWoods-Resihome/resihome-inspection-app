@@ -13,6 +13,8 @@ import { EditableLineRow } from '@/components/EditableLineRow';
 import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
+import { AiReviewModal } from '@/components/AiReviewModal';
+import { scopeHash, getPassedReviewHash, setPassedReviewHash, type AiAdjustment } from '@/lib/aiReview';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError } from '@/lib/offlineOutbox';
@@ -201,6 +203,16 @@ export function RateCardForm(props: RateCardFormProps) {
 
   // Camera modal (for in-app capture). When non-null, captures append to this section.
   const [cameraSectionId, setCameraSectionId] = useState<string | null>(null);
+  // ----- AI scope review -----
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiApplying, setAiApplying] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiSummary, setAiSummary] = useState('');
+  const [aiAdjustments, setAiAdjustments] = useState<AiAdjustment[]>([]);
+  // The scope hash that last passed review (null = never reviewed this scope).
+  // Persisted per inspection so it survives a reload (see lib/aiReview).
+  const [reviewedHash, setReviewedHash] = useState<string | null>(null);
   // Upload progress (per section)
   const [uploadingSection, setUploadingSection] = useState<{
     sectionId: string;
@@ -1651,6 +1663,131 @@ export function RateCardForm(props: RateCardFormProps) {
 
   const toggle = (id: string) => setExpanded((m) => ({ ...m, [id]: !m[id] }));
 
+  // ----- AI scope review: hashing, gating, run, apply -----
+  const isScopeTemplate = props.templateType === 'pm_scope_rate_card';
+  // Fingerprint of the current priced scope; flips whenever a line changes.
+  const currentScopeHash = useMemo(() => scopeHash(linesBySection), [linesBySection]);
+  // Review is valid only while the scope it passed against is unchanged.
+  const reviewValid = reviewedHash !== null && reviewedHash === currentScopeHash;
+  // Load any persisted "passed" marker for this inspection on mount.
+  useEffect(() => {
+    setReviewedHash(getPassedReviewHash(props.inspectionRecordId));
+  }, [props.inspectionRecordId]);
+
+  const runAiReview = useCallback(async () => {
+    setAiModalOpen(true);
+    setAiError(null);
+    setAiLoading(true);
+    setAiSummary('');
+    setAiAdjustments([]);
+    try {
+      // Flush pending edits so the server reviews what the inspector sees.
+      try { await commitAndWait(); } catch { /* proceed with client state */ }
+      const flatLines = sections.flatMap((s) =>
+        (linesBySectionRef.current[s.id] || []).map((l) => ({
+          sectionId: s.id,
+          externalId: l.externalId,
+          lineItemCode: l.lineItemCode,
+          quantity: l.quantity,
+          tenantBillBackPercent: l.tenantBillBackPercent,
+          assignedTo: l.assignedTo,
+          note: l.note,
+          customVendorCost: l.customVendorCost ?? null,
+          customLaborRate: l.customLaborRate ?? null,
+          customAdjustedMaterialCost: l.customAdjustedMaterialCost ?? null,
+        }))
+      );
+      const photosBySectionPayload: Record<string, string[]> = {};
+      for (const s of sections) {
+        const urls = (photosBySectionRef.current[s.id] || []).filter((u) => !u.startsWith('blob:'));
+        if (urls.length) photosBySectionPayload[s.id] = urls;
+      }
+      const res = await fetch(`/api/inspections/${props.inspectionRecordId}/ai-review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sections: sections.map((s) => ({ id: s.id, name: s.displayName || s.label, location: s.location })),
+          lines: flatLines,
+          photosBySection: photosBySectionPayload,
+          property: { bedrooms: props.bedrooms, bathrooms: props.bathrooms, squareFootage: props.squareFootage, tenantMonths: 12 },
+          region: inspectionRegion,
+        }),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`Review failed (${res.status}). ${txt.slice(0, 160)}`);
+      }
+      const data = await res.json();
+      setAiSummary(String(data.summary || ''));
+      setAiAdjustments(Array.isArray(data.adjustments) ? data.adjustments : []);
+    } catch (e: any) {
+      setAiError(String(e?.message || e));
+    } finally {
+      setAiLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sections, props.inspectionRecordId, props.bedrooms, props.bathrooms, props.squareFootage, inspectionRegion]);
+
+  // Apply the approved adjustments, then mark the review passed for the
+  // resulting scope (so submit unlocks). Declined items are left untouched.
+  const applyApproved = useCallback(async (approved: AiAdjustment[]) => {
+    setAiApplying(true);
+    try {
+      // Project the resulting scope deterministically as we apply, so the
+      // "passed" hash matches the UI state even though linesBySectionRef only
+      // catches up on the next render.
+      const projected: Record<string, RateCardLineInput[]> = {};
+      for (const [sid, arr] of Object.entries(linesBySectionRef.current)) projected[sid] = [...arr];
+
+      for (const a of approved) {
+        if (a.type === 'remove' && a.lineExternalId) {
+          projected[a.sectionId] = (projected[a.sectionId] || []).filter((l) => l.externalId !== a.lineExternalId);
+          await handleDeleteLine(a.sectionId, a.lineExternalId);
+        } else if (a.type === 'edit' && a.lineExternalId) {
+          const existing = (projected[a.sectionId] || []).find((l) => l.externalId === a.lineExternalId);
+          if (!existing) continue;
+          const next: RateCardLineInput = {
+            ...existing,
+            lineItemCode: a.suggested?.lineItemCode || existing.lineItemCode,
+            quantity: a.suggested?.quantity ?? existing.quantity,
+            tenantBillBackPercent: a.suggested?.tenantBillBackPercent ?? existing.tenantBillBackPercent,
+            assignedTo: a.suggested?.assignedTo || existing.assignedTo,
+            customVendorCost: a.suggested?.customVendorCost ?? existing.customVendorCost,
+          };
+          projected[a.sectionId] = (projected[a.sectionId] || []).map((l) => (l.externalId === a.lineExternalId ? next : l));
+          await handleSaveLineForSection(a.sectionId, next);
+        } else if (a.type === 'add' && a.suggested?.lineItemCode) {
+          const sec = sections.find((s) => s.id === a.sectionId);
+          if (!sec) continue;
+          const line: RateCardLineInput = {
+            externalId: `ai_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+            section: sec.label,
+            location: sec.location || '',
+            lineItemCode: a.suggested.lineItemCode,
+            quantity: a.suggested.quantity ?? 1,
+            tenantBillBackPercent: a.suggested.tenantBillBackPercent ?? 100,
+            assignedTo: a.suggested.assignedTo || 'Vendor 1',
+            note: '',
+            customVendorCost: a.suggested.customVendorCost ?? null,
+            photoUrls: [],
+          };
+          projected[a.sectionId] = [...(projected[a.sectionId] || []), line];
+          await handleSaveLineForSection(a.sectionId, line);
+        }
+      }
+      // Mark the review passed for the scope as it now stands (projected).
+      const newHash = scopeHash(projected);
+      setReviewedHash(newHash);
+      setPassedReviewHash(props.inspectionRecordId, newHash);
+      setAiModalOpen(false);
+    } catch (e: any) {
+      setAiError(`Could not apply all changes: ${e?.message || e}`);
+    } finally {
+      setAiApplying(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sections, props.inspectionRecordId]);
+
   // ----- Terminal action handlers (shared between inline + floating footers) ----
   // Extracted so the desktop floating footer and the mobile inline footer can
   // both call the same logic without duplicating ~80 lines of JSX.
@@ -1738,6 +1875,17 @@ export function RateCardForm(props: RateCardFormProps) {
     if (totalLines === 0) {
       const ok = await dialog.confirm('No line items have been added. Submit anyway?', { confirmLabel: 'Submit' });
       if (!ok) return;
+    }
+    // AI review gate — a Scope rate card must pass AI review for the CURRENT
+    // scope before it can be submitted for approval. Any edit since the last
+    // review invalidates it (see reviewValid), so this re-prompts after changes.
+    if (props.templateType === 'pm_scope_rate_card' && props.inspectionStatus !== 'pending_approval' && !reviewValid) {
+      const ok = await dialog.confirm(
+        'AI review must be completed before submitting for approval.\n\nIt checks the scope against the turn standard (depreciation, duplicates, tenant responsibility) and suggests adjustments to approve or decline.',
+        { confirmLabel: 'Run AI Review', cancelLabel: 'Not now' }
+      );
+      if (ok) void runAiReview();
+      return;
     }
     // Flush pending edits to make sure HubSpot has everything before the submit.
     try {
@@ -2379,6 +2527,24 @@ export function RateCardForm(props: RateCardFormProps) {
           The voice assistant lives in the CENTER of this footer: a mic icon that
           expands upward into the conversation panel when pressed. */}
       <div ref={footerRef} className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
+        {/* AI review status / trigger — Scope rate cards must pass review for the
+            current scope before submit; re-runs after any edit. */}
+        {isScopeTemplate && !props.readOnly && props.inspectionStatus !== 'pending_approval' && (
+          <div className={`max-w-7xl mx-auto px-3 sm:px-4 py-1.5 flex items-center justify-between gap-2 text-xs font-heading border-b ${reviewValid ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-amber-50 border-amber-100 text-amber-800'}`}>
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${reviewValid ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              <span className="truncate">{reviewValid ? 'AI review complete for this scope' : 'AI review required before submit'}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => runAiReview()}
+              disabled={aiLoading}
+              className="shrink-0 inline-flex items-center gap-1 font-semibold px-2.5 py-1 rounded-md bg-brand text-white hover:bg-brand-dark disabled:opacity-50"
+            >
+              <span aria-hidden>✦</span> {reviewValid ? 'Re-run AI review' : 'Run AI review'}
+            </button>
+          </div>
+        )}
         <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-2">
           <div className="flex-1 min-w-0">
             <TerminalActions
@@ -2394,6 +2560,18 @@ export function RateCardForm(props: RateCardFormProps) {
           </div>
         </div>
       </div>
+
+      <AiReviewModal
+        open={aiModalOpen}
+        loading={aiLoading}
+        applying={aiApplying}
+        error={aiError}
+        summary={aiSummary}
+        adjustments={aiAdjustments}
+        onClose={() => setAiModalOpen(false)}
+        onRetry={() => runAiReview()}
+        onApply={(approved) => applyApproved(approved)}
+      />
 
       {cameraSectionId !== null && (
         <CameraCapture
