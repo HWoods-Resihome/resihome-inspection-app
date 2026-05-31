@@ -26,6 +26,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         propertyRecordId: data.propertyIdRef,
         propertySquareFootage: data.propertySquareFootage,
         propertyZip: data.propertyZip,
+        propertyLastTenantMonths: data.propertyLastTenantMonths,
         answers,
       });
     } catch (e: any) {

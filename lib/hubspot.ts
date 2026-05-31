@@ -1010,6 +1010,10 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   propertyEntityId: string | null;
   /** Tenant full name. Used as Primary Tenant First and Last Name in xlsx. */
   propertyLastPrimaryTenant: string | null;
+  /** Months the last tenant occupied the home — drives AI-review depreciation.
+   *  null when the property has no value (or the field doesn't exist yet);
+   *  callers default to 12. */
+  propertyLastTenantMonths: number | null;
 } | null> {
   const { inspection: typeId, property: propertyTypeId } = typeIds();
   const properties = [
@@ -1048,7 +1052,23 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     let propertyStateCode: string | null = null;
     let propertyEntityId: string | null = null;
     let propertyLastPrimaryTenant: string | null = null;
+    let propertyLastTenantMonths: number | null = null;
     if (propertyIdRef) {
+      // ISOLATED fetch for the (possibly not-yet-created) tenant-occupancy field.
+      // Kept separate from the extras batch below so that, if HubSpot 400s on an
+      // unknown property, it can't wipe out square_footage/zip/etc. On any
+      // error or empty value this stays null and callers default to 12 months.
+      try {
+        const tQs = `properties=${encodeURIComponent('last_tenant_time_in_home_months')}`;
+        const tResp = await hubspotFetch(`/crm/v3/objects/${propertyTypeId}/${propertyIdRef}?${tQs}`);
+        const raw = tResp.properties?.last_tenant_time_in_home_months;
+        if (raw != null && raw !== '') {
+          const n = Number(raw);
+          if (Number.isFinite(n) && n >= 0) propertyLastTenantMonths = n;
+        }
+      } catch (e: any) {
+        console.warn(`[fetchInspectionWithPropertyRef] last_tenant_time_in_home_months unavailable for ${propertyIdRef} (defaulting to 12):`, String(e).slice(0, 160));
+      }
       try {
         const propProps = [
           'square_footage', 'zip', 'zip_code',
@@ -1119,6 +1139,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       propertyStateCode,
       propertyEntityId,
       propertyLastPrimaryTenant,
+      propertyLastTenantMonths,
     };
   } catch (e: any) {
     if (String(e).includes('404')) return null;

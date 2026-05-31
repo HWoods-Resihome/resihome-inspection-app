@@ -38,6 +38,7 @@ export default function ExistingInspection() {
   const [propertyRecordId, setPropertyRecordId] = useState<string>('');
   const [propertySquareFootage, setPropertySquareFootage] = useState<number | null>(null);
   const [propertyZip, setPropertyZip] = useState<string | null>(null);
+  const [propertyLastTenantMonths, setPropertyLastTenantMonths] = useState<number | null>(null);
   const [existingAnswers, setExistingAnswers] = useState<SavedAnswer[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [submitResultUrl, setSubmitResultUrl] = useState<string>('');
@@ -59,6 +60,9 @@ export default function ExistingInspection() {
           typeof data.propertySquareFootage === 'number' ? data.propertySquareFootage : null
         );
         setPropertyZip(typeof data.propertyZip === 'string' ? data.propertyZip : null);
+        setPropertyLastTenantMonths(
+          typeof data.propertyLastTenantMonths === 'number' ? data.propertyLastTenantMonths : null
+        );
         setExistingAnswers(data.answers || []);
 
         // Now load the template questions
@@ -330,6 +334,7 @@ export default function ExistingInspection() {
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
+          lastTenantMonths={propertyLastTenantMonths}
           inspectionStatus={inspection.status}
           inspectionRegion={inspection.regionSnapshot || ''}
           sectionListJson={inspection.sectionListJson}

@@ -154,7 +154,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const sections = Array.isArray(body?.sections) ? body.sections : [];
     const lines = Array.isArray(body?.lines) ? body.lines : [];
     const region = body?.region || '';
-    const tenantMonths = body?.property?.tenantMonths ?? 12;
+    // Default to 12 months whenever the property field is missing, null, or invalid.
+    const rawMonths = Number(body?.property?.tenantMonths);
+    const tenantMonths = Number.isFinite(rawMonths) && rawMonths >= 0 ? rawMonths : 12;
 
     const catalog = await fetchRateCardCatalog();
     const byCode = new Map(catalog.map((c) => [c.lineItemCode, c]));

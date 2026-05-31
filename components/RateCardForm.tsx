@@ -47,6 +47,10 @@ interface RateCardFormProps {
   /** Property's square footage (from `square_footage` on the property object).
    *  Optional — shown in the header next to bed/bath if present. */
   squareFootage?: number | null;
+  /** Months the last tenant occupied the home (from
+   *  `last_tenant_time_in_home_months` on the property). Drives AI-review
+   *  depreciation. null/absent → AI review defaults to 12. */
+  lastTenantMonths?: number | null;
   /** Current HubSpot status value, e.g. 'scheduled' | 'in_progress' |
    *  'pending_approval' | 'completed' | 'cancelled'. Controls which terminal
    *  button is shown at the bottom of the form:
@@ -1709,7 +1713,13 @@ export function RateCardForm(props: RateCardFormProps) {
           sections: sections.map((s) => ({ id: s.id, name: s.displayName || s.label, location: s.location })),
           lines: flatLines,
           photosBySection: photosBySectionPayload,
-          property: { bedrooms: props.bedrooms, bathrooms: props.bathrooms, squareFootage: props.squareFootage, tenantMonths: 12 },
+          property: {
+            bedrooms: props.bedrooms,
+            bathrooms: props.bathrooms,
+            squareFootage: props.squareFootage,
+            // Real value when present; the endpoint defaults null/invalid to 12.
+            tenantMonths: (typeof props.lastTenantMonths === 'number' && props.lastTenantMonths >= 0) ? props.lastTenantMonths : null,
+          },
           region: inspectionRegion,
         }),
       });
