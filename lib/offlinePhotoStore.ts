@@ -241,8 +241,9 @@ export async function rehydrateQueuedPhotos(
 export async function flushQueuedPhotos(
   inspectionRecordId: string,
   onSynced: (info: { localId: string; sectionId: string; oldUrl: string; newUrl: string; replacesUrl?: string; lineExternalId?: string }) => void,
-): Promise<{ synced: number; remaining: number }> {
+): Promise<{ synced: number; remaining: number; lastError?: string }> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
+  let lastError: string | undefined;
   // Only flush THIS inspection's photos — the mounted form is what persists the
   // section answer record after upload, so another inspection's photos must wait
   // until that inspection is open (otherwise they'd upload but never attach).
@@ -275,9 +276,10 @@ export async function flushQueuedPhotos(
       } else {
         newUrl = await uploadJpegBlob(rec.blob, rec.filename);
       }
-    } catch (e) {
+    } catch (e: any) {
+      lastError = `Photo upload failed (${String(e?.message || e).slice(0, 90)}).`;
       // Genuinely offline → keep everything and stop.
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) { lastError = 'Device is offline — photos will upload when back online.'; break; }
       if (isOfflineErr(e)) {
         // Online but the upload failed in a network-ish way (HubSpot hiccup,
         // oversized blob, etc.). Count the attempt; after too many, drop+skip
@@ -307,5 +309,5 @@ export async function flushQueuedPhotos(
     synced++;
   }
   const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
-  return { synced, remaining };
+  return { synced, remaining, lastError };
 }

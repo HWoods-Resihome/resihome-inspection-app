@@ -178,6 +178,8 @@ export function RateCardForm(props: RateCardFormProps) {
   // True while a flush/retry is actively running (drives the Retry button's
   // "Retrying…" feedback so it's clear something is happening).
   const [flushing, setFlushing] = useState(false);
+  // Last sync failure reason, surfaced via the banner's "Details" for field troubleshooting.
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
   // Start high so the first tick can't falsely flag "stuck" before a sync round.
   const lastPendingRef = useRef(Number.POSITIVE_INFINITY);
   const [online, setOnline] = useState(true);
@@ -598,7 +600,7 @@ export function RateCardForm(props: RateCardFormProps) {
   const runFlush = useCallback(async () => {
     setFlushing(true);
     try {
-    const { synced } = await flushOutbox((entry, data) => {
+    const outboxRes = await flushOutbox((entry, data) => {
       // Stitch results back so the in-memory state stays correct without a reload.
       if (entry.kind === 'line') {
         const result = data?.results?.[0];
@@ -674,7 +676,12 @@ export function RateCardForm(props: RateCardFormProps) {
     }
 
     refreshPending();
-    if (synced > 0 || (photoRes && photoRes.synced > 0)) setSaveStatus({ kind: 'saved', at: Date.now() });
+    if (outboxRes.synced > 0 || (photoRes && photoRes.synced > 0)) setSaveStatus({ kind: 'saved', at: Date.now() });
+    // Capture the last failure reason for the banner's "Details"; clear it once
+    // everything has drained.
+    const stillPending = (outboxRes.remaining || 0) > 0 || (photoRes && (photoRes as any).remaining > 0);
+    const err = outboxRes.lastError || (photoRes && (photoRes as any).lastError) || null;
+    setLastSyncError(stillPending ? (err || null) : null);
     } finally {
       setFlushing(false);
     }
@@ -2410,7 +2417,16 @@ export function RateCardForm(props: RateCardFormProps) {
               {flushing ? 'Retrying…' : 'Retry'}
             </button>
             {syncStuck && !flushing && (
-              <button type="button" onClick={() => void clearStuckQueue()} className="underline hover:no-underline">Clear</button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => void dialog.alert(`Last sync error:\n\n${lastSyncError || 'No error captured — the server may be slow. Tap Retry, or Clear to discard the stuck items.'}`)}
+                  className="underline hover:no-underline"
+                >
+                  Details
+                </button>
+                <button type="button" onClick={() => void clearStuckQueue()} className="underline hover:no-underline">Clear</button>
+              </>
             )}
           </div>
         );
@@ -2638,12 +2654,15 @@ export function RateCardForm(props: RateCardFormProps) {
                       the right on every state, like the "added" state). */}
                   <div className={`px-3 py-1.5 ${photosMissing ? 'bg-amber-50' : 'bg-gray-50'} border-b border-gray-100`}>
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-baseline gap-2 min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => setPhotosCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))}
-                          className="flex items-baseline gap-1.5 min-w-0"
-                        >
+                      {/* Whole left area is the collapse toggle — clicking the
+                          empty white space (up to the Take button) toggles too. */}
+                      <button
+                        type="button"
+                        onClick={() => setPhotosCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))}
+                        aria-expanded={!photosCollapsed[s.id]}
+                        className="flex-1 flex items-baseline gap-2 min-w-0 text-left py-0.5"
+                      >
+                        <span className="flex items-baseline gap-1.5 min-w-0">
                           <span className={`text-gray-400 text-[10px] self-center transition-transform ${photosCollapsed[s.id] ? '' : 'rotate-90'}`}>&#9654;</span>
                           <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap">
                             Photos
@@ -2651,7 +2670,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               ? <span className="text-brand ml-1">*</span>
                               : <span className="text-gray-400 normal-case font-normal ml-1">(opt)</span>}
                           </span>
-                        </button>
+                        </span>
                         {photosMissing && !isUploadingHere && (
                           <span className="text-xs text-amber-800 font-semibold whitespace-nowrap">&ge;1 req</span>
                         )}
@@ -2663,7 +2682,7 @@ export function RateCardForm(props: RateCardFormProps) {
                         {photos.length > 0 && !photosMissing && !isUploadingHere && (
                           <span className="text-xs text-gray-500 whitespace-nowrap">{photos.length} added</span>
                         )}
-                      </div>
+                      </button>
                       {!props.readOnly && (
                         <div className="flex gap-2 items-center shrink-0">
                           <button

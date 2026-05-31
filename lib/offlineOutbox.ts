@@ -88,12 +88,13 @@ export function remove(id: string): void {
  */
 export async function flushOutbox(
   onSynced?: (entry: OutboxEntry, responseData: any) => void
-): Promise<{ synced: number; remaining: number; failedPermanently: number }> {
+): Promise<{ synced: number; remaining: number; failedPermanently: number; lastError?: string }> {
   const list = read();
   if (list.length === 0) return { synced: 0, remaining: 0, failedPermanently: 0 };
 
   let synced = 0;
   let failedPermanently = 0;
+  let lastError: string | undefined;
   list.sort((a, b) => a.createdAt - b.createdAt);
 
   for (const entry of list) {
@@ -104,12 +105,13 @@ export async function flushOutbox(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entry.body),
       });
-    } catch {
+    } catch (e: any) {
       // If the device is genuinely offline, keep everything and stop.
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) { lastError = 'Device is offline — will retry when back online.'; break; }
       // Online but the request failed (DNS/CORS/transient). Count the attempt;
       // drop+skip a wedged entry after too many so it can't block the queue
       // forever, otherwise stop and retry in order next time.
+      lastError = `Network error reaching the server (${String(e?.message || e).slice(0, 80)}).`;
       if (bumpAttempts(entry.id) >= MAX_ATTEMPTS) {
         console.error(`[outbox] dropping entry ${entry.id} after ${MAX_ATTEMPTS} failed attempts (network)`);
         remove(entry.id); failedPermanently++; continue;
@@ -126,16 +128,20 @@ export async function flushOutbox(
       // Session expired / not authorized — NOT a poison entry. Keep it (and
       // everything after) so re-logging in replays the queue intact. The
       // session guard surfaces a re-login prompt to the inspector.
+      lastError = `Not authorized (HTTP ${res.status}) — your session may have expired. Sign in again to sync.`;
       break;
     } else if (res.status >= 400 && res.status < 500 && res.status !== 429) {
       // Permanently bad request — dropping it prevents a poison entry from
       // wedging the queue. (Logged so it isn't silent.)
-      console.error(`[outbox] dropping entry ${entry.id} after ${res.status}`);
+      const body = await res.text().catch(() => '');
+      lastError = `Server rejected a change (HTTP ${res.status})${body ? `: ${body.slice(0, 120)}` : ''}. It was dropped.`;
+      console.error(`[outbox] dropping entry ${entry.id} after ${res.status}: ${body.slice(0, 200)}`);
       remove(entry.id);
       failedPermanently++;
     } else {
       // 429 / 5xx — transient server error. Count the attempt; after too many,
       // drop+skip so one bad entry can't wedge the queue indefinitely.
+      lastError = `Server error (HTTP ${res.status}) — retrying.`;
       if (bumpAttempts(entry.id) >= MAX_ATTEMPTS) {
         console.error(`[outbox] dropping entry ${entry.id} after ${MAX_ATTEMPTS} failed attempts (HTTP ${res.status})`);
         remove(entry.id); failedPermanently++; continue;
@@ -143,7 +149,7 @@ export async function flushOutbox(
       break;
     }
   }
-  return { synced, remaining: read().length, failedPermanently };
+  return { synced, remaining: read().length, failedPermanently, lastError };
 }
 
 /** Drop every queued entry for an inspection (manual "clear stuck items"). */
