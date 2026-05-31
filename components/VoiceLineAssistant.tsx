@@ -436,11 +436,13 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               const action = data.action === 'edit' ? 'edit' : 'add';
               const spokenLabel = data.spokenSummary || data.summary;
               const verb = action === 'edit' ? 'Updated' : 'Added';
-              // Route to the stream's current room — but guard against a stale/empty
-              // ref by falling back to the focused section so a line is never lost
-              // to a non-existent group.
+              // Route order: (1) a per-line room the server resolved for THIS
+              // proposal (multi-room asks); (2) the stream's current room (after
+              // any navigate); (3) the focused section, so a line is never lost.
               const refId = streamSectionRef.current;
-              const targetId = (refId && sections.some((s) => s.id === refId)) ? refId : currentSectionId;
+              const targetId = (data.sectionId && sections.some((s) => s.id === data.sectionId))
+                ? data.sectionId
+                : (refId && sections.some((s) => s.id === refId)) ? refId : currentSectionId;
               try {
                 const ret = onAddLineTo ? onAddLineTo(targetId, line) : onAddLine(line);
                 // The parent now returns a promise that resolves once the SAVE

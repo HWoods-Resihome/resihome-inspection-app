@@ -23,6 +23,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { fetchRateCardCatalog } from '@/lib/hubspot';
 import { matchCatalog, getCatalogEmbeddings } from '@/lib/voiceCatalogMatch';
+import { aliasFor } from '@/lib/voiceAliases';
 import { calculateLine } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { VENDORS } from '@/lib/vendors';
@@ -211,6 +212,8 @@ function systemPrompt(
     ``,
     `The inspector may ask for SEVERAL things in one breath — e.g. "I'm back in the kitchen, replace the black microwave" (switch room + add a line), "add a new water heater and replace the kitchen faucet" (two lines), or "the yard needs leaves raked and a gutter cleaning, 50 linear feet, two story" (TWO separate items: a leaf-raking line + a gutter-clean line). Treat each thing joined by "and" / "also" / commas as a SEPARATE line item and process EVERY one. EFFICIENT FLOW for multiple items: (1) switch_room first if a room change was mentioned; (2) call search_catalog ONCE with the \`queries\` array containing every item (e.g. queries: ["leaves raked", "gutter cleaning 2 story"]) — this searches them all together; (3) propose_line for every item you have BOTH a confident match AND a quantity for — you can emit multiple propose_line calls in a single step. For a single item just use \`query\`.`,
     ``,
+    `MULTIPLE ROOMS in one request: the inspector can name a different room per item — e.g. "add two light bulbs in the kitchen and a drywall repair in the hallway". Handle this WITHOUT switch_room: call propose_line once per item and set its \`room\` to that item's named room (room:"Kitchen" for the bulbs, room:"Hallway" for the drywall). Match each phrase's room to the closest name in the rooms list. Only use switch_room when the inspector is clearly moving themselves ("let's go to the kitchen"), not when merely attributing a line to a room.`,
+    ``,
     `PARTIAL multi-item requests (CRITICAL — this is the #1 place mistakes happen): when a request has some items ready (confident match + quantity) and one or more still missing a quantity, you MUST, in the SAME turn: (a) call propose_line for every ready item right away, AND (b) ask ONE short question for the item(s) still missing a quantity. NEVER withhold a ready item just because a different item needs a question. And NEVER say you "have" / "got" / "have the X at N" about an item unless you have actually called propose_line for it — if you truly have it, propose it; if you are only asking about it, do not claim to have it. Example: "yard needs leaves raked and a gutter cleaning, 50 linear feet, two story" → propose_line the gutter clean (you have 50 LF) NOW, and in the same turn ask only "How many bags for the leaves?".`,
     ``,
     `ANSWERING YOUR OWN QUESTION: when you asked a quantity/clarifying question and the inspector replies (e.g. you asked "how many bags for the leaves rake?" and they say "three bags"), that reply is the missing value FOR THE ITEM YOU ASKED ABOUT. Immediately call propose_line for THAT item with the given value. Do NOT substitute a different item, and do NOT re-propose items you already added on a previous turn — scan the conversation above; anything you already proposed is done. After proposing the deferred item, re-read the inspector's ORIGINAL sentence and make sure every distinct item is now in, then give one short wrap-up.`,
@@ -259,6 +262,7 @@ function tools(rooms: { id: string; name: string }[] = []) {
           vendor: { type: 'string', description: `Assigned vendor; one of: ${VENDORS.join(', ')}. Omit to use the default "Vendor 1".` },
           tenantBillBackPercent: { type: 'number', description: 'Tenant chargeback percent, 0-100 in steps of 5. Omit to use the default 100.' },
           note: { type: 'string', description: 'Optional short note for the line.' },
+          room: { type: 'string', description: 'Room/area this line belongs to (a name from the rooms list). Omit to use the current room. SET THIS to add lines to DIFFERENT rooms in one request — e.g. "two bulbs in the kitchen and drywall repair in the hallway" → propose_line(...bulbs, room:"Kitchen") AND propose_line(...drywall, room:"Hallway"). With a per-line room you do NOT need switch_room.' },
         },
         required: ['code', 'quantity'],
       },
@@ -423,7 +427,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           .slice(0, 5);
         const queries = phrases.length ? phrases : [utter];
         const matches = await Promise.all(
-          queries.map((q) => matchCatalog(q, catalog, { topK: 5, sectionName: activeSection || body.section || '' }).then((r) => ({ q, r })).catch(() => null))
+          queries.map((q) => {
+            const alias = aliasFor(q);
+            return matchCatalog(alias ? alias.query : q, catalog, { topK: 5, categoryHint: alias?.categoryHint, sectionName: activeSection || body.section || '' }).then((r) => ({ q, r })).catch(() => null);
+          })
         );
         const blocks: string[] = [];
         for (const m of matches) {
@@ -523,7 +530,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             : [String(tu.input?.query || '')].filter(Boolean);
 
           const runOne = async (q: string) => {
-            const result = await matchCatalog(q, catalog, { topK: 8, categoryHint: hint, sectionName });
+            // Normalize known phrasings (e.g. "sales clean" → "whole house sales
+            // clean") so the matcher reliably finds the right line.
+            const alias = aliasFor(q);
+            const effQuery = alias ? alias.query : q;
+            const effHint = hint || alias?.categoryHint;
+            const result = await matchCatalog(effQuery, catalog, { topK: 8, categoryHint: effHint, sectionName });
             return {
               query: q,
               confident: result.confident,
@@ -607,11 +619,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             continue;
           }
 
+          // Per-line room: if the model named a room for THIS line, resolve it
+          // (so "bulbs in the kitchen and drywall in the hallway" lands each in
+          // the right room without switch_room). Otherwise use the active room.
+          let lineSection = activeSection;
+          let lineLocation = activeLocation;
+          let lineSectionId: string | undefined;
+          if (tu.input?.room) {
+            const want = String(tu.input.room).trim().toLowerCase();
+            const r = rooms.find((rm) => rm.id === String(tu.input.room))
+              || rooms.find((rm) => rm.name.toLowerCase() === want)
+              || rooms.find((rm) => rm.name.toLowerCase().includes(want) || want.includes(rm.name.toLowerCase()));
+            if (r) { lineSection = r.name; lineLocation = r.name; lineSectionId = r.id; }
+          }
           const externalId = `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
           const line: RateCardLineInput = {
             externalId,
-            section: activeSection,
-            location: activeLocation,
+            section: lineSection,
+            location: lineLocation,
             lineItemCode: code,
             quantity: qty,
             tenantBillBackPercent: pct,
@@ -619,11 +644,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             note: tu.input?.note ? String(tu.input.note) : '',
             photoUrls: [],
           };
-          // Emit the line; the client auto-saves it to the active room. Then keep
-          // the loop going so the agent can add MORE items in the same turn.
+          // Emit the line; the client auto-saves it to the resolved room (or the
+          // active room). Then keep the loop going for MORE items in this turn.
           sse(res, 'proposal', {
             action: 'add',
             line,
+            sectionId: lineSectionId,
             summary: lineToSummary(item, qty, vendor, pct, region, regions),
             spokenSummary: item.laborShortDescription,
             awaitingReply: false,
