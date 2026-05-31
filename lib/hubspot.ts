@@ -49,11 +49,21 @@ function token(): string {
   return trimmed;
 }
 
+// Custom-object type IDs are always "2-<digits>". It's an easy slip to paste
+// just the digits into an env var (e.g. "10767494" instead of "2-10767494"),
+// which makes HubSpot reject the request with "Unable to infer object type
+// from: <digits>". Restore the prefix so a bare numeric id still works.
+function normalizeTypeId(v?: string): string | undefined {
+  const s = (v || '').trim();
+  if (!s) return undefined;
+  return /^\d+$/.test(s) ? `2-${s}` : s;
+}
+
 function typeIds() {
-  const inspection = process.env.HUBSPOT_INSPECTION_TYPE_ID;
-  const question = process.env.HUBSPOT_INSPECTION_QUESTION_TYPE_ID;
-  const answer = process.env.HUBSPOT_INSPECTION_ANSWER_TYPE_ID;
-  const property = process.env.HUBSPOT_PROPERTY_TYPE_ID;
+  const inspection = normalizeTypeId(process.env.HUBSPOT_INSPECTION_TYPE_ID);
+  const question = normalizeTypeId(process.env.HUBSPOT_INSPECTION_QUESTION_TYPE_ID);
+  const answer = normalizeTypeId(process.env.HUBSPOT_INSPECTION_ANSWER_TYPE_ID);
+  const property = normalizeTypeId(process.env.HUBSPOT_PROPERTY_TYPE_ID);
   if (!inspection || !question || !answer || !property) {
     throw new Error('One or more HUBSPOT_*_TYPE_ID env vars are missing. Check .env.local.');
   }
@@ -68,8 +78,8 @@ async function rateCardTypeIds(): Promise<{ lineItem: string; regionRate: string
   if (_rateCardTypeIds) return _rateCardTypeIds;
 
   // 1) Prefer env vars (production-safe; explicit; avoids the schema lookup call).
-  const envLineItem = process.env.HUBSPOT_RATE_CARD_LINE_ITEM_TYPE_ID;
-  const envRegionRate = process.env.HUBSPOT_REGION_RATE_TYPE_ID;
+  const envLineItem = normalizeTypeId(process.env.HUBSPOT_RATE_CARD_LINE_ITEM_TYPE_ID);
+  const envRegionRate = normalizeTypeId(process.env.HUBSPOT_REGION_RATE_TYPE_ID);
   if (envLineItem && envRegionRate) {
     _rateCardTypeIds = { lineItem: envLineItem, regionRate: envRegionRate };
     return _rateCardTypeIds;
