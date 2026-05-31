@@ -138,6 +138,10 @@ export function RateCardForm(props: RateCardFormProps) {
   // ----- Lines + photos in state ---------------------------------------
   const [linesBySection, setLinesBySection] = useState<Record<string, RateCardLineInput[]>>({});
   const [photosBySection, setPhotosBySection] = useState<Record<string, string[]>>({});
+  // Live mirror of photosBySection so async save paths persist the LATEST merged
+  // list (optimistic per-photo adds land in state) instead of a stale closure
+  // snapshot captured when a long upload/camera session started.
+  const photosBySectionRef = useRef<Record<string, string[]>>({});
 
   // HubSpot record IDs for upsert tracking. Updated after each successful save.
   // externalId -> HubSpot inspection_answer record id
@@ -493,6 +497,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // bumps inspection status + touches the record), so lines that the UI showed
   // as "Added" vanished on reload. Chaining them guarantees one-at-a-time,
   // ordered persistence.
+  useEffect(() => { photosBySectionRef.current = photosBySection; }, [photosBySection]);
   const saveChainRef = useRef<Promise<void>>(Promise.resolve());
   function enqueueSave<T>(work: () => Promise<T>): Promise<T> {
     const next = saveChainRef.current.catch(() => { /* isolate prior failures */ }).then(work);
@@ -688,6 +693,12 @@ export function RateCardForm(props: RateCardFormProps) {
   }
 
   async function handleDeleteLine(sectionId: string, externalId: string) {
+    // Remember the line (and its position) so we can restore it if the archive
+    // fails — otherwise the row vanishes from the UI but still exists in HubSpot
+    // and reappears on reload.
+    const prevLines = linesBySection[sectionId] || [];
+    const removedIdx = prevLines.findIndex((l) => l.externalId === externalId);
+    const removed = removedIdx >= 0 ? prevLines[removedIdx] : null;
     setLinesBySection((m) => {
       const existing = m[sectionId] || [];
       return { ...m, [sectionId]: existing.filter((l) => l.externalId !== externalId) };
@@ -696,28 +707,40 @@ export function RateCardForm(props: RateCardFormProps) {
     if (!recordId || !linesHydrated || props.readOnly) return;
     saveInFlightRef.current++;
     setSaveStatus({ kind: 'saving' });
-    try {
-      const r = await fetch(`/api/inspections/${props.inspectionRecordId}/rate-card-lines`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upserts: [], archives: [recordId] }),
-      });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(`HTTP ${r.status}: ${text.slice(0, 400)}`);
+    await enqueueSave(async () => {
+      try {
+        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/rate-card-lines`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ upserts: [], archives: [recordId] }),
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error(`HTTP ${r.status}: ${text.slice(0, 400)}`);
+        }
+        setRecordIdsByExternalId((cur) => {
+          const next = { ...cur };
+          delete next[externalId];
+          return next;
+        });
+        setSaveStatus({ kind: 'saved', at: Date.now() });
+      } catch (e: any) {
+        console.error('[RateCardForm] line delete failed:', e);
+        // Restore the line at its original spot so the UI matches reality.
+        if (removed) {
+          setLinesBySection((m) => {
+            const existing = m[sectionId] || [];
+            if (existing.some((l) => l.externalId === externalId)) return m;
+            const next = [...existing];
+            next.splice(Math.min(removedIdx, next.length), 0, removed);
+            return { ...m, [sectionId]: next };
+          });
+        }
+        setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+      } finally {
+        saveInFlightRef.current--;
       }
-      setRecordIdsByExternalId((cur) => {
-        const next = { ...cur };
-        delete next[externalId];
-        return next;
-      });
-      setSaveStatus({ kind: 'saved', at: Date.now() });
-    } catch (e: any) {
-      console.error('[RateCardForm] line delete failed:', e);
-      setSaveStatus({ kind: 'error', message: String(e?.message || e) });
-    } finally {
-      saveInFlightRef.current--;
-    }
+    });
   }
 
   // ----- Section list mutators ----------------------------------------
@@ -971,6 +994,10 @@ export function RateCardForm(props: RateCardFormProps) {
 
     saveInFlightRef.current++;
     setSaveStatus({ kind: 'saving' });
+    // Serialize photo writes with line writes (same inspection record) so rapid
+    // remove + camera-complete, or multi-room camera saves, don't race each
+    // other at HubSpot and lose/duplicate the section_photo record.
+    await enqueueSave(async () => {
     try {
       if (urls.length === 0) {
         // No photos and no existing record: nothing to do.
@@ -1031,6 +1058,7 @@ export function RateCardForm(props: RateCardFormProps) {
     } finally {
       saveInFlightRef.current--;
     }
+    });
   }
 
   async function handlePhotoFiles(sectionId: string, files: FileList | null) {
@@ -1054,8 +1082,11 @@ export function RateCardForm(props: RateCardFormProps) {
         const reason = errors[0] ? `\n\nReason: ${errors[0]}` : '';
         void dialog.alert(`${failed} of ${fileArr.length} photo${fileArr.length === 1 ? '' : 's'} failed to upload. Successful uploads were saved.${reason}`);
       }
-      // Save with the resulting full list (existing + new)
-      const allUrls = [...(photosBySection[sectionId] || []), ...newUrls];
+      // Save with the resulting full list. Read the LIVE list (optimistic adds
+      // already landed there) and union in newUrls so a photo added by another
+      // path mid-upload isn't dropped from the persisted record.
+      const base = photosBySectionRef.current[sectionId] || [];
+      const allUrls = Array.from(new Set([...base, ...newUrls]));
       await savePhotosForSection(sectionId, allUrls);
     } catch (e: any) {
       void dialog.alert(`Photo upload failed: ${e.message || e}`);
@@ -1188,8 +1219,8 @@ export function RateCardForm(props: RateCardFormProps) {
   function handleCameraComplete(hubspotUrls: string[]) {
     if (!cameraSectionId) return;
     if (hubspotUrls.length) {
-      const current = photosBySection[cameraSectionId] || [];
-      const next = [...current, ...hubspotUrls];
+      const current = photosBySectionRef.current[cameraSectionId] || [];
+      const next = Array.from(new Set([...current, ...hubspotUrls]));
       setPhotosBySection((prev) => ({ ...prev, [cameraSectionId]: next }));
       savePhotosForSection(cameraSectionId, next);
     }
@@ -1201,8 +1232,8 @@ export function RateCardForm(props: RateCardFormProps) {
   // camera's active room. This lets them shoot the whole house in one session.
   function handleCameraRoomChange(leavingRoomId: string, capturedUrls: string[], enteringRoomId: string) {
     if (capturedUrls.length) {
-      const current = photosBySection[leavingRoomId] || [];
-      const next = [...current, ...capturedUrls];
+      const current = photosBySectionRef.current[leavingRoomId] || [];
+      const next = Array.from(new Set([...current, ...capturedUrls]));
       setPhotosBySection((prev) => ({ ...prev, [leavingRoomId]: next }));
       savePhotosForSection(leavingRoomId, next);
     }
@@ -1220,6 +1251,7 @@ export function RateCardForm(props: RateCardFormProps) {
         tenantBillBackPercent: line.tenantBillBackPercent,
         customLaborRate: line.customLaborRate ?? null,
         customAdjustedMaterialCost: line.customAdjustedMaterialCost ?? null,
+        customVendorCost: line.customVendorCost ?? null,
       });
     } catch {
       return null;

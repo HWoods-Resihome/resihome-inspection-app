@@ -155,16 +155,24 @@ export function PhotoLightbox({
               {/* Only render media near the current index to keep it light. */}
               {Math.abs(i - index) <= 1 ? (
                 isVideoEntry(p) ? (
-                  <video
-                    src={getVideoUrl(p)}
-                    poster={displayImageSrc(p)}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    className="max-w-full max-h-full"
-                    // No stopPropagation: a horizontal swipe navigates like a photo;
-                    // a tap still hits the native play/pause control.
-                  />
+                  // Mount the playable <video> ONLY for the current slide so a
+                  // clip you swiped past stops instead of playing audio
+                  // off-screen; neighbors show the poster image.
+                  i === index ? (
+                    <video
+                      src={getVideoUrl(p)}
+                      poster={displayImageSrc(p)}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      className="max-w-full max-h-full"
+                      // No stopPropagation: a horizontal swipe navigates like a photo;
+                      // a tap still hits the native play/pause control.
+                    />
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={displayImageSrc(p)} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
+                  )
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={displayImageSrc(p)} alt="" className="max-w-full max-h-full object-contain" draggable={false} />

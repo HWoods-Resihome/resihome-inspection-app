@@ -39,7 +39,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!props || typeof props !== 'object') {
         return res.status(400).json({ error: 'Missing properties' });
       }
-      await updateInspection(id, props);
+      // Allowlist: this general PATCH endpoint may only set fields the client is
+      // expected to send here (currently the section layout). Status/verdict and
+      // other lifecycle fields have dedicated, guarded routes — don't let an
+      // arbitrary property write through this surface.
+      const ALLOWED_PATCH_FIELDS = new Set(['section_list_json']);
+      const filtered: Record<string, any> = {};
+      for (const k of Object.keys(props)) {
+        if (ALLOWED_PATCH_FIELDS.has(k)) filtered[k] = props[k];
+      }
+      if (Object.keys(filtered).length === 0) {
+        return res.status(400).json({ error: 'No editable properties in request' });
+      }
+      await updateInspection(id, filtered);
       return res.status(200).json({ success: true });
     } catch (e: any) {
       console.error(`PATCH /api/inspections/${id} failed:`, e);

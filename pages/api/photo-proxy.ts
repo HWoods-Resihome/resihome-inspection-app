@@ -22,7 +22,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(403).json({ error: 'Host not allowed' });
   }
   try {
-    const upstream = await fetch(u.toString());
+    // SSRF hardening: don't auto-follow redirects to an unvalidated host, and
+    // cap the upstream fetch so a slow origin can't tie up the function.
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 15000);
+    let upstream: Response;
+    try {
+      upstream = await fetch(u.toString(), { redirect: 'manual', signal: ctrl.signal });
+    } finally {
+      clearTimeout(to);
+    }
+    if (upstream.status >= 300 && upstream.status < 400) {
+      return res.status(502).json({ error: 'Upstream redirect not allowed' });
+    }
     if (!upstream.ok) return res.status(upstream.status).json({ error: `Upstream ${upstream.status}` });
     const ct = (upstream.headers.get('content-type') || '').toLowerCase();
     const buf = Buffer.from(await upstream.arrayBuffer());

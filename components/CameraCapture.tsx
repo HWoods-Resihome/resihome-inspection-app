@@ -395,6 +395,13 @@ export function CameraCapture({
     if (recordRafRef.current != null) { cancelAnimationFrame(recordRafRef.current); recordRafRef.current = null; }
     if (canvasStreamRef.current) { canvasStreamRef.current.getTracks().forEach((t) => t.stop()); canvasStreamRef.current = null; }
     recordCanvasRef.current = null;
+    // Also release the mic so a recorder-setup failure (early returns in
+    // startRecording) never leaves the microphone live with the in-use
+    // indicator stuck on.
+    if (recordAudioStreamRef.current) {
+      recordAudioStreamRef.current.getTracks().forEach((t) => t.stop());
+      recordAudioStreamRef.current = null;
+    }
   }
 
   function stopRecording() {

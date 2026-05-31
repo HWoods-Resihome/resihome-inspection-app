@@ -1044,7 +1044,7 @@ export function QuestionForm({
                     {sectionPhotoUrls.length > 0 && !photosCollapsed[inst.instanceKey] && (
                       <div className="flex gap-1.5 overflow-x-auto pb-1 mt-2 -mx-0.5 px-0.5">
                         {sectionPhotoUrls.map((url, idx) => (
-                          <div key={idx} className="relative shrink-0">
+                          <div key={`${url}-${idx}`} className="relative shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={displayImageSrc(url)}

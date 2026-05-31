@@ -147,6 +147,13 @@ function sse(res: NextApiResponse, event: string, data: any) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+// SSE comment heartbeat — keeps proxies/LTE intermediaries from dropping an
+// idle stream during long gaps between model round-trips (catalog search +
+// two model calls), which would otherwise hang the client in "Thinking…".
+function sseHeartbeat(res: NextApiResponse) {
+  try { res.write(': keep-alive\n\n'); } catch { /* stream closed */ }
+}
+
 function describeLines(catalogByCode: Map<string, RateCardLineItem>, lines: CurrentLine[]): string {
   if (!lines.length) return 'There are no line items in this area yet.';
   const rows = lines.map((l, i) => {
@@ -445,6 +452,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let nudgedToAct = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      sseHeartbeat(res); // keep the stream warm before each (possibly slow) round
       // Round 0 always uses the smart model. After that, the smart model is only
       // needed if a fresh catalog search happened (interpreting candidates).
       const model = round === 0 || usedSearchThisTurn ? MODEL_SMART : MODEL_FAST;
@@ -495,9 +503,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // active room are set first — regardless of the order the model emitted the
       // tool calls. Otherwise a propose_line emitted before switch_room would
       // land the line in the previous room.
-      const orderedToolUses = [...toolUses].sort(
-        (a, b) => (a.name === 'switch_room' ? -1 : 0) - (b.name === 'switch_room' ? -1 : 0)
-      );
+      // Explicit partition (clearer and order-guaranteed): every switch_room
+      // first, then the rest in their original relative order.
+      const orderedToolUses = [
+        ...toolUses.filter((t) => t.name === 'switch_room'),
+        ...toolUses.filter((t) => t.name !== 'switch_room'),
+      ];
 
       for (const tu of orderedToolUses) {
         if (tu.name === 'search_catalog') {
@@ -651,8 +662,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           // Re-save with the SAME externalId so the existing record is updated.
           const line: RateCardLineInput = {
             externalId,
-            section: body.section || '',
-            location: body.location || '',
+            // Use the ACTIVE room (a mid-turn switch_room may have changed it),
+            // matching propose_line — not the request's original room.
+            section: activeSection,
+            location: activeLocation,
             lineItemCode: existing.lineItemCode,
             quantity: qty,
             tenantBillBackPercent: pct,

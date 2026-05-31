@@ -122,7 +122,7 @@ export function EditableLineRow(props: Props) {
   const [lineItemCode, setLineItemCode] = useState<string>(line?.lineItemCode || '');
   const [category, setCategory] = useState<string>('');
   const [subcategory, setSubcategory] = useState<string>('');
-  const [quantity, setQuantity] = useState<string>(line?.quantity ? String(line.quantity) : '1');
+  const [quantity, setQuantity] = useState<string>(line?.quantity != null ? String(line.quantity) : '1');
   const [tenantPct, setTenantPct] = useState<number>(line?.tenantBillBackPercent ?? DEFAULT_TENANT_PCT);
   const [vendor, setVendor] = useState<string>(line?.assignedTo || DEFAULT_VENDOR);
   const [customVendorCost, setCustomVendorCost] = useState<string>(

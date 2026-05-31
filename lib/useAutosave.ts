@@ -248,7 +248,25 @@ export function useAutosave(opts: Options) {
     const id = setInterval(() => {
       void flushRef.current(false);
     }, CHECK_INTERVAL_MS);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      // Flush any still-pending edits on unmount (route change, remount) so a
+      // value typed within the debounce window isn't lost on navigation.
+      void flushRef.current(true);
+    };
+  }, [disabled]);
+
+  // Best-effort flush when the tab is hidden/closed (mobile app-switch, refresh).
+  useEffect(() => {
+    if (disabled) return;
+    const onLeave = () => { void flushRef.current(true); };
+    window.addEventListener('beforeunload', onLeave);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') onLeave();
+    });
+    return () => {
+      window.removeEventListener('beforeunload', onLeave);
+    };
   }, [disabled]);
 
   // Queue an Answer record for archival (when inspector clears a previously-saved field)

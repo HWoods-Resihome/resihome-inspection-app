@@ -303,7 +303,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             {answer.photoUrls.length > 0 && (
               <div className="grid grid-cols-4 gap-2 mt-2">
                 {answer.photoUrls.map((url, idx) => (
-                  <div key={idx} className="relative">
+                  <div key={`${url}-${idx}`} className="relative">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={displayImageSrc(url)}

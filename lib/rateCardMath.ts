@@ -262,7 +262,9 @@ export function calculateLine(
   const laborTotal = catalogItem.laborHours * effectiveLaborRate * qty;
 
   let materialTotal = 0;
-  if (!catalogItem.isLaborOnly) {
+  if (!catalogItem.isLaborOnly && qty > 0) {
+    // Floor at 1 unit for a fractional quantity, but a quantity of 0 must cost
+    // nothing — don't charge a phantom unit on a deliberately zeroed line.
     const materialUnits = Math.max(1, catalogItem.materialQty * qty);
     materialTotal = catalogItem.materialRate * materialUnits * effectiveAdjustedMaterialCost;
   }

@@ -170,7 +170,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // Rate card line metadata
         rate_card_line_item_code: line.lineItemCode,
         quantity_decimal: line.quantity,
-        tenant_bill_back_percent: String(Math.round(line.tenantBillBackPercent)),
+        // Coerce defensively: a missing percent must not persist the string "NaN".
+        tenant_bill_back_percent: String(Math.round(Number(line.tenantBillBackPercent) || 0)),
         is_custom_priced: calc.isCustomPriced ? 'true' : 'false',
 
         // Snapshots

@@ -383,11 +383,16 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           for (const chunk of chunks) {
             const lines = chunk.split('\n');
             let ev = 'message';
-            let dataStr = '';
+            const dataParts: string[] = [];
             for (const l of lines) {
+              if (l.startsWith(':')) continue; // SSE comment / heartbeat
               if (l.startsWith('event:')) ev = l.slice(6).trim();
-              else if (l.startsWith('data:')) dataStr += l.slice(5).trim();
+              // Per the SSE spec, multiple data: lines join with a newline and
+              // only ONE leading space is stripped — don't trim() (it would
+              // corrupt multi-line payloads and any meaningful whitespace).
+              else if (l.startsWith('data:')) dataParts.push(l.slice(5).replace(/^ /, ''));
             }
+            const dataStr = dataParts.join('\n');
             if (!dataStr) continue;
             let data: any;
             try { data = JSON.parse(dataStr); } catch { continue; }
@@ -738,10 +743,21 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, streamingText, pending]);
 
-  // Stop any in-progress speech if the panel unmounts.
+  // Stop any in-progress speech, recognition, and network on unmount so a
+  // navigation away mid-conversation never leaves the mic hot (Android Web
+  // Speech) or an SSE fetch dangling.
   useEffect(() => () => {
     try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    try {
+      if (recogRef.current) {
+        recogRef.current.onresult = null;
+        recogRef.current.onerror = null;
+        recogRef.current.onend = null;
+        recogRef.current.abort?.();
+      }
+    } catch { /* noop */ }
+    try { abortRef.current?.abort(); } catch { /* noop */ }
   }, []);
 
   function reset() {

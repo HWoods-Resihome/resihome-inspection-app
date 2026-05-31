@@ -86,9 +86,17 @@ export function Combobox({
     reposition();
     window.addEventListener('scroll', reposition, true);   // capture phase to catch scrollable ancestors
     window.addEventListener('resize', reposition);
+    // iOS soft keyboard show/hide moves the input but fires neither a window
+    // resize nor a scroll — track the visual viewport so the fixed panel stays
+    // attached to the input.
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    vv?.addEventListener('resize', reposition);
+    vv?.addEventListener('scroll', reposition);
     return () => {
       window.removeEventListener('scroll', reposition, true);
       window.removeEventListener('resize', reposition);
+      vv?.removeEventListener('resize', reposition);
+      vv?.removeEventListener('scroll', reposition);
     };
   }, [open]);
 

@@ -32,24 +32,32 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
 
   const alert = useCallback((message: string, opts?: { confirmLabel?: string }) => {
     return new Promise<void>((resolve) => {
-      setDialogRef.current({
-        kind: 'alert',
-        message,
-        confirmLabel: opts?.confirmLabel || 'OK',
-        cancelLabel: '',
-        resolve: () => resolve(),
+      setDialogRef.current((prev) => {
+        // If a dialog is already up, resolve its awaiter (as a cancel) so the
+        // replaced promise never hangs forever.
+        try { prev?.resolve(false); } catch { /* noop */ }
+        return {
+          kind: 'alert',
+          message,
+          confirmLabel: opts?.confirmLabel || 'OK',
+          cancelLabel: '',
+          resolve: () => resolve(),
+        };
       });
     });
   }, []);
 
   const confirm = useCallback((message: string, opts?: { confirmLabel?: string; cancelLabel?: string }) => {
     return new Promise<boolean>((resolve) => {
-      setDialogRef.current({
-        kind: 'confirm',
-        message,
-        confirmLabel: opts?.confirmLabel || 'OK',
-        cancelLabel: opts?.cancelLabel || 'Cancel',
-        resolve,
+      setDialogRef.current((prev) => {
+        try { prev?.resolve(false); } catch { /* noop */ }
+        return {
+          kind: 'confirm',
+          message,
+          confirmLabel: opts?.confirmLabel || 'OK',
+          cancelLabel: opts?.cancelLabel || 'Cancel',
+          resolve,
+        };
       });
     });
   }, []);
