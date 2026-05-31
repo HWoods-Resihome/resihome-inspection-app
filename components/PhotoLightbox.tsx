@@ -218,28 +218,40 @@ export function PhotoLightbox({
           const cur = currentTagsFor ? currentTagsFor(groupId, index) : [];
           const curIds = new Set(cur.map((t) => t.externalId));
           return (
-            <select
-              value=""
-              onChange={(e) => {
-                const id = e.target.value;
-                if (!id) return;
-                const lbl = tagLines.find((l) => l.externalId === id)?.label || 'line';
-                if (curIds.has(id)) { onUntagFromLine?.(groupId, index, id); showToast(`Removed from ${lbl}`); }
-                else { onTagToLine?.(groupId, index, id); showToast(`Tagged to ${lbl}`); }
-                e.currentTarget.value = '';
-              }}
-              className="flex-1 min-w-0 h-11 bg-white/10 text-white text-sm font-heading rounded-lg px-3"
-              aria-label="Tag or untag this photo"
-            >
-              <option value="" className="text-black">
-                {cur.length ? `Tagged: ${cur.map((t) => t.label).join(', ')}` : 'Tag to a line item…'}
-              </option>
-              {tagLines.map((l) => (
-                <option key={l.externalId} value={l.externalId} className="text-black">
-                  {curIds.has(l.externalId) ? `✓ ${l.label} — Remove Tag` : l.label}
+            <div className="flex-1 min-w-0 flex items-center gap-2">
+              <select
+                value=""
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (!id) return;
+                  const lbl = tagLines.find((l) => l.externalId === id)?.label || 'line';
+                  onTagToLine?.(groupId, index, id);
+                  showToast(`Tagged to ${lbl}`);
+                  e.currentTarget.value = '';
+                }}
+                className="flex-1 min-w-0 h-11 bg-white/10 text-white text-sm font-heading rounded-lg px-3"
+                aria-label="Tag this photo to a line item"
+              >
+                <option value="" className="text-black">
+                  {cur.length ? `Tagged: ${cur.map((t) => t.label).join(', ')}` : 'Tag to a line item…'}
                 </option>
-              ))}
-            </select>
+                {tagLines.map((l) => (
+                  <option key={l.externalId} value={l.externalId} className="text-black">
+                    {curIds.has(l.externalId) ? `✓ ${l.label}` : l.label}
+                  </option>
+                ))}
+              </select>
+              {cur.length > 0 && onUntagFromLine && (
+                <button
+                  type="button"
+                  onClick={() => { cur.forEach((t) => onUntagFromLine(groupId, index, t.externalId)); showToast('Tag removed'); }}
+                  className="shrink-0 h-11 px-3 rounded-lg bg-red-600 text-white font-heading font-semibold text-sm border-2 border-red-300 active:bg-red-700"
+                  title="Remove this photo's line tag"
+                >
+                  Untag
+                </button>
+              )}
+            </div>
           );
         })() : (
           <div className="flex-1" />

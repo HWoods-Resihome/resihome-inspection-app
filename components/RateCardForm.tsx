@@ -1885,8 +1885,9 @@ export function RateCardForm(props: RateCardFormProps) {
             className="fixed inset-x-0 z-[60] pointer-events-none"
             style={{
               // In the form, center the 44px mic on the footer button row; in the
-              // camera, sit just above the shutter row.
-              bottom: cameraOpen ? 96 : Math.max(6, Math.round(footerH / 2 - 22)),
+              // camera, sit ON the shutter-control line, vertically level with the
+              // Phone Cam / Mark icons (bottom-right).
+              bottom: cameraOpen ? 34 : Math.max(6, Math.round(footerH / 2 - 22)),
               display: hidden ? 'none' : undefined,
             }}
           >

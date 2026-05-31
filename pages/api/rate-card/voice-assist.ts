@@ -33,11 +33,11 @@ import type { RateCardLineItem, RateCardLineInput, RegionRate } from '@/lib/type
 export const config = { maxDuration: 60, api: { bodyParser: { sizeLimit: '1mb' } } };
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-// Two-model split: the smart model is used when the agent must reason about
-// catalog matching (a turn that calls search_catalog); the fast model handles
-// simple clarify turns (e.g. "how many linear feet?"). This keeps the common,
-// chatty turns snappy without sacrificing match quality.
-const MODEL_SMART = 'claude-opus-4-8';
+// Two-model split. The heavy semantic matching is done by Voyage embeddings
+// (pre-search), so the model's job each turn is light: pick the right candidate,
+// pull the quantity, and emit the tool call. Sonnet handles that well and is far
+// faster than Opus — the main latency lever. Haiku handles trivial clarify turns.
+const MODEL_SMART = 'claude-sonnet-4-6';
 const MODEL_FAST = 'claude-haiku-4-5-20251001';
 const MAX_TOOL_ROUNDS = 8; // safety cap on tool loops per turn (compound requests: switch + multiple items)
 
@@ -438,7 +438,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       // Stream this model call; forward text deltas live to the client.
       const { content } = await streamAnthropic(
-        { model, max_tokens: 1024, system: systemWithHints, tools: roomTools, messages },
+        { model, max_tokens: 768, system: systemWithHints, tools: roomTools, messages },
         (chunk) => sse(res, 'delta', { text: chunk })
       );
 
