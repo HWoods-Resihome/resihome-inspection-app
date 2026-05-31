@@ -44,6 +44,7 @@ export interface Property {
   city?: string;
   state?: string;
   zip?: string;
+  status?: string;
   bedrooms?: number | null;
   bathrooms?: number | null;
 }

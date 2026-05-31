@@ -24,6 +24,13 @@ interface Props {
   // the dropdown is visible above the on-screen keyboard; on blur it scrolls the
   // modal back to the top. Only meaningful inside a `[data-modal-scroll]` sheet.
   scrollIntoViewOnFocus?: boolean;
+  // Server-search mode: when provided, the parent owns matching. The combobox
+  // calls this (debounced) as the user types so the parent can refetch
+  // `options` from the API — used for datasets too large to pre-load (e.g.
+  // 15k+ properties). In this mode the local filter only *ranks* the supplied
+  // options; it never hides them (the server already narrowed the set, possibly
+  // matching on a field that isn't displayed, like zip).
+  onQueryChange?: (query: string) => void;
 }
 
 /**
@@ -47,7 +54,9 @@ export function Combobox({
   id,
   compact = false,
   scrollIntoViewOnFocus = false,
+  onQueryChange,
 }: Props) {
+  const serverMode = typeof onQueryChange === 'function';
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -72,14 +81,16 @@ export function Combobox({
       const label = (o.label || '').toLowerCase();
       const sub = (o.sublabel || '').toLowerCase();
       const hay = `${label} ${sub}`;
-      if (!tokens.every((t) => hay.includes(t))) continue;
+      // In server mode the parent already filtered; keep every option and only
+      // rank. In client mode require all tokens to appear (hides non-matches).
+      if (!serverMode && !tokens.every((t) => hay.includes(t))) continue;
       let s = 0;
       if (label.includes(q)) s += 100;            // whole query contiguous in the label
       if (label.startsWith(tokens[0])) s += 40;   // label starts with the first token
       for (const t of tokens) {
         const li = label.indexOf(t);
         if (li >= 0) { s += 12; if (li === 0 || label[li - 1] === ' ') s += 6; } // token in label (word-start bonus)
-        else s += 3;                              // token only in the sublabel
+        else if (hay.includes(t)) s += 3;         // token only in the sublabel
       }
       s += Math.max(0, 24 - label.length) / 4;    // nudge shorter / more specific labels up
       scored.push({ o, s });
@@ -87,6 +98,13 @@ export function Combobox({
     scored.sort((a, b) => b.s - a.s);
     return scored.map((x) => x.o);
   })();
+
+  // Server-search mode: tell the parent to refetch (debounced) as the user types.
+  useEffect(() => {
+    if (!serverMode) return;
+    const handle = setTimeout(() => onQueryChange!(query.trim()), 250);
+    return () => clearTimeout(handle);
+  }, [query, serverMode, onQueryChange]);
 
   // Position the floating panel beneath the input. Re-run on open + on scroll/resize.
   useLayoutEffect(() => {

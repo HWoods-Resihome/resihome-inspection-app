@@ -37,8 +37,16 @@ export default function NewInspection() {
   const dialog = useAppDialog();
   const router = useRouter();
 
-  // Setup stage state
+  // Setup stage state. Properties are searched server-side (the portal can hold
+  // 15k+, far past what we can pre-load), so `properties` holds only the current
+  // result page. `propertyQuery` is the debounced search term from the picker,
+  // and `selectedProp` pins the chosen property so its label/bed/bath survive
+  // even after the result list changes under it.
   const [properties, setProperties] = useState<Property[]>([]);
+  const [propertyQuery, setPropertyQuery] = useState('');
+  const [selectedProp, setSelectedProp] = useState<Property | null>(null);
+  // True only until the first results land — drives the picker's disabled
+  // "Loading…" state. Per-keystroke refetches must NOT disable the input.
   const [propertiesLoading, setPropertiesLoading] = useState(true);
   const [propertiesError, setPropertiesError] = useState<string | null>(null);
 
@@ -74,17 +82,27 @@ export default function NewInspection() {
   const [stage, setStage] = useState<Stage>('setup');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Load properties + session in parallel
+  // Search properties server-side as the (debounced) query changes. Runs once on
+  // mount with an empty term for the default page, then again per search. We
+  // don't toggle `propertiesLoading` on refetch so the picker input stays usable
+  // while typing; only the initial load shows the disabled "Loading…" state.
   useEffect(() => {
-    fetch('/api/properties')
+    let cancelled = false;
+    const url = '/api/properties' + (propertyQuery ? `?q=${encodeURIComponent(propertyQuery)}` : '');
+    fetch(url)
       .then((r) => r.json())
       .then((data) => {
+        if (cancelled) return;
         if (data.error) setPropertiesError(data.error);
-        else setProperties(data.properties || []);
+        else { setPropertiesError(null); setProperties(data.properties || []); }
       })
-      .catch((e) => setPropertiesError(String(e.message || e)))
-      .finally(() => setPropertiesLoading(false));
+      .catch((e) => { if (!cancelled) setPropertiesError(String(e.message || e)); })
+      .finally(() => { if (!cancelled) setPropertiesLoading(false); });
+    return () => { cancelled = true; };
+  }, [propertyQuery]);
 
+  // Session (inspector identity) — loaded once.
+  useEffect(() => {
     fetch('/api/auth/me')
       .then((r) => r.json())
       .then((data) => {
@@ -94,24 +112,28 @@ export default function NewInspection() {
       .finally(() => setSessionLoading(false));
   }, []);
 
-  // Dependent bed/bath: when property changes, reset/populate from property data
+  // Pin the chosen property the moment it appears in a result page, so it
+  // survives later searches that no longer include it (server returns only the
+  // current match page). This keeps the selected label, bed/bath, and address
+  // snapshot stable.
   useEffect(() => {
-    if (!selectedPropertyId) {
+    if (!selectedPropertyId) { setSelectedProp(null); return; }
+    const p = properties.find((x) => x.recordId === selectedPropertyId);
+    if (p) setSelectedProp(p);
+  }, [selectedPropertyId, properties]);
+
+  // Dependent bed/bath: populate from the pinned property when it changes.
+  useEffect(() => {
+    if (!selectedProp) {
       setBedrooms(null);
       setBathrooms(null);
       return;
     }
-    const p = properties.find((x) => x.recordId === selectedPropertyId);
-    if (p) {
-      setBedrooms(p.bedrooms ?? null);
-      setBathrooms(p.bathrooms ?? null);
-    }
-  }, [selectedPropertyId, properties]);
+    setBedrooms(selectedProp.bedrooms ?? null);
+    setBathrooms(selectedProp.bathrooms ?? null);
+  }, [selectedProp]);
 
-  const selectedProperty = useMemo(
-    () => properties.find((p) => p.recordId === selectedPropertyId),
-    [properties, selectedPropertyId]
-  );
+  const selectedProperty = selectedProp || undefined;
 
   // Build the address snapshot stored on the inspection. We compose it from
   // the property's structured fields (street, city, state, zip) so the zip is
@@ -128,14 +150,21 @@ export default function NewInspection() {
     return composed || p.name || `(Property ${selectedPropertyId})`;
   }, [selectedProperty, selectedPropertyId]);
 
-  const propertyOptions = useMemo(
-    () => properties.map((p) => ({
-      value: p.recordId,
-      label: p.name,
-      sublabel: [p.city, p.state].filter(Boolean).join(', ') || undefined,
-    })),
-    [properties]
-  );
+  const propertyOptions = useMemo(() => {
+    // Always include the pinned selection so its label renders even when it's
+    // not in the current search page.
+    const list = [...properties];
+    if (selectedProp && !list.some((p) => p.recordId === selectedProp.recordId)) {
+      list.unshift(selectedProp);
+    }
+    return list.map((p) => {
+      const loc = [p.city, p.state].filter(Boolean).join(', ');
+      // Show status as subtext so the inspector can confirm they picked the
+      // right property (e.g. "Austin, TX • Active").
+      const sublabel = [loc, p.status].filter(Boolean).join(' • ') || undefined;
+      return { value: p.recordId, label: p.name, sublabel };
+    });
+  }, [properties, selectedProp]);
 
   // When QC template + a property are selected, load that property's
   // submitted/completed Scope Rate Card inspections for the dependent
@@ -357,10 +386,11 @@ export default function NewInspection() {
                   options={propertyOptions}
                   value={selectedPropertyId}
                   onChange={setSelectedPropertyId}
-                  placeholder={propertiesLoading ? 'Loading properties...' : 'Search and select a property'}
+                  onQueryChange={setPropertyQuery}
+                  placeholder={propertiesLoading ? 'Loading properties...' : 'Search by address, name, or zip'}
                   loading={propertiesLoading}
                   error={propertiesError}
-                  emptyLabel="No properties match your search"
+                  emptyLabel={propertyQuery ? 'No matching properties' : 'Type to search properties'}
                 />
               </div>
 

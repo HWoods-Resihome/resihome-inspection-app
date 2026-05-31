@@ -13,7 +13,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: 'Method not allowed' });
   }
   try {
-    const properties = await fetchProperties();
+    const q = req.query.q;
+    const search = Array.isArray(q) ? q[0] : q;
+    const properties = await fetchProperties({ search });
     return res.status(200).json({ properties });
   } catch (e: any) {
     console.error('GET /api/properties failed:', e);

@@ -296,10 +296,26 @@ const PROPERTY_EXCLUDE_STATUSES = (process.env.PROPERTY_EXCLUDE_STATUSES ||
   'Not Managed,Property Sold,PM Denied')
   .split(',').map((s) => s.trim()).filter(Boolean);
 
-export async function fetchProperties(): Promise<Property[]> {
+/**
+ * Search the Property object server-side for the new-inspection picker.
+ *
+ * Portals can hold 15k+ properties — far past HubSpot Search's hard
+ * 10,000-record paging cap (paging past it returns the "Upstream request
+ * failed (400)" we hit on the full production portal), and far too many to
+ * pre-load into the browser. So this does NOT page the whole object: it runs a
+ * single capped query. With no term it returns a small alphabetical default
+ * page (so the dropdown has content on first open); with a term it matches
+ * server-side across address / name / city / zip. Inactive statuses are always
+ * excluded. The client (Combobox) then fuzzy-ranks whatever comes back.
+ */
+export async function fetchProperties(
+  opts: { search?: string; limit?: number } = {}
+): Promise<Property[]> {
   const { property: typeId } = typeIds();
-  // Standard HubSpot fields + your confirmed bedrooms/bathrooms field names.
-  // Anything not on your object is silently ignored by HubSpot.
+  const term = (opts.search || '').trim();
+  // Keep payloads small; a type-ahead only needs a handful of best matches.
+  const limit = Math.min(Math.max(opts.limit || (term ? 50 : 25), 1), 100);
+
   const candidateProps = [
     'hs_object_id', 'name',
     // The postal field is `zip_code` on this object (with legacy `zip` as a
@@ -310,78 +326,77 @@ export async function fetchProperties(): Promise<Property[]> {
     PROPERTY_STATUS_PROPERTY,
   ];
 
-  // Exclude inactive properties server-side. This enforces the business rule
-  // AND keeps the result set under HubSpot Search's hard 10,000-record paging
-  // cap (paging past 10k returns a 400 — the "Upstream request failed (400)"
-  // we were seeing once pointed at the full production portal). NOT_IN keeps
-  // records whose status is empty/null, so unstatused properties stay visible.
-  const statusFilter = PROPERTY_EXCLUDE_STATUSES.length
-    ? [{ filters: [{ propertyName: PROPERTY_STATUS_PROPERTY, operator: 'NOT_IN', values: PROPERTY_EXCLUDE_STATUSES }] }]
-    : [];
+  // Inactive properties are never selectable. NOT_IN keeps records whose status
+  // is empty/null visible. This filter is AND-ed into every search group below.
+  const statusFilter = { propertyName: PROPERTY_STATUS_PROPERTY, operator: 'NOT_IN', values: PROPERTY_EXCLUDE_STATUSES };
+  const excludeOn = PROPERTY_EXCLUDE_STATUSES.length > 0;
 
-  // A stable sort makes deep pagination deterministic (HubSpot's default order
-  // is unspecified, which can drop/duplicate rows across pages).
-  const sorts = [{ propertyName: 'hs_object_id', direction: 'ASCENDING' }];
+  function buildBody(withStatus: boolean): any {
+    const base = withStatus ? [statusFilter] : [];
+    let filterGroups: any[];
+    if (term) {
+      // OR across fields (each its own group); CONTAINS_TOKEN supports the
+      // wildcard so partial street numbers / names match. The status filter is
+      // repeated in each group because groups are OR-ed (filters within a group
+      // are AND-ed).
+      const wild = `*${term}*`;
+      filterGroups = ['address', 'name', 'city', 'zip_code'].map((f) => ({
+        filters: [...base, { propertyName: f, operator: 'CONTAINS_TOKEN', value: wild }],
+      }));
+    } else {
+      filterGroups = withStatus ? [{ filters: base }] : [];
+    }
+    const body: any = { filterGroups, properties: candidateProps, limit };
+    // Alphabetical default page when not searching; for a search, let match
+    // order stand and let the client rank it.
+    if (!term) body.sorts = [{ propertyName: 'name', direction: 'ASCENDING' }];
+    return body;
+  }
 
-  const out: Property[] = [];
-  let after: string | undefined = undefined;
-  let useStatusFilter = statusFilter.length > 0;
-  const MAX_PAGES = 100; // 100 * 100 = 10,000 safety ceiling
-  let page = 0;
-  do {
-    const body: any = {
-      filterGroups: useStatusFilter ? statusFilter : [],
-      properties: candidateProps,
-      sorts,
-      limit: 100,
-    };
-    if (after) body.after = after;
-    let resp: any;
-    try {
+  let resp: any;
+  try {
+    resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+      method: 'POST',
+      body: JSON.stringify(buildBody(excludeOn)),
+    });
+  } catch (e: any) {
+    // If the status field was renamed/removed in HubSpot the filter 400s — don't
+    // break the picker, just run without the status exclusion and warn.
+    if (excludeOn && e?.status === 400) {
+      console.warn(`[fetchProperties] status filter on "${PROPERTY_STATUS_PROPERTY}" rejected (400); retrying without it. Check PROPERTY_STATUS_PROPERTY / PROPERTY_EXCLUDE_STATUSES.`);
       resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify(buildBody(false)),
       });
-    } catch (e: any) {
-      // If the status filter itself is rejected (e.g. the field was renamed in
-      // HubSpot), don't break the picker — warn and retry this page unfiltered.
-      if (useStatusFilter && e?.status === 400) {
-        console.warn(`[fetchProperties] status filter on "${PROPERTY_STATUS_PROPERTY}" rejected (400); retrying without it. Check PROPERTY_STATUS_PROPERTY / PROPERTY_EXCLUDE_STATUSES.`);
-        useStatusFilter = false;
-        continue;
-      }
+    } else {
       throw e;
     }
-    for (const r of resp.results || []) {
-      const p = r.properties || {};
-      const address = p.address || '';
-      const city = p.city || '';
-      const state = p.state || '';
-      const zip = (p.zip_code || p.zip || '').toString().trim();
-      let name = p.name || '';
-      if (!name) name = [address, city, state, zip].filter(Boolean).join(', ');
-      if (!name) name = `(Property ${r.id})`;
-      const { bedrooms, bathrooms } = pickBedBathFromProps(p);
-      out.push({
-        recordId: r.id,
-        name,
-        address: address || undefined,
-        city: city || undefined,
-        state: state || undefined,
-        zip: zip || undefined,
-        bedrooms,
-        bathrooms,
-      });
-    }
-    after = resp.paging?.next?.after;
-    page += 1;
-    if (page >= MAX_PAGES) {
-      console.warn(`[fetchProperties] hit ${MAX_PAGES}-page ceiling (~${MAX_PAGES * 100} properties); remaining are not loaded. Narrow with PROPERTY_EXCLUDE_STATUSES or add server-side search.`);
-      break;
-    }
-  } while (after);
+  }
 
-  out.sort((a, b) => a.name.localeCompare(b.name));
+  const out: Property[] = [];
+  for (const r of resp.results || []) {
+    const p = r.properties || {};
+    const address = p.address || '';
+    const city = p.city || '';
+    const state = p.state || '';
+    const zip = (p.zip_code || p.zip || '').toString().trim();
+    let name = p.name || '';
+    if (!name) name = [address, city, state, zip].filter(Boolean).join(', ');
+    if (!name) name = `(Property ${r.id})`;
+    const { bedrooms, bathrooms } = pickBedBathFromProps(p);
+    out.push({
+      recordId: r.id,
+      name,
+      address: address || undefined,
+      city: city || undefined,
+      state: state || undefined,
+      zip: zip || undefined,
+      status: (p[PROPERTY_STATUS_PROPERTY] || '').toString().trim() || undefined,
+      bedrooms,
+      bathrooms,
+    });
+  }
+  if (!term) out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
 }
 
