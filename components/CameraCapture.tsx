@@ -129,7 +129,7 @@ const JPEG_QUALITY = 0.88;
 // Press-and-hold video clips: hold the shutter > HOLD_MS to start recording;
 // clips auto-stop at MAX_CLIP_MS. Bitrate-capped so a 10s clip stays small.
 const HOLD_MS = 260;
-const MAX_CLIP_MS = 60000; // clips upload direct-to-Blob, so the old ~10s base64 wall is gone
+const MAX_CLIP_MS = 20000; // cap clips at 20s to keep upload sizes/durations sane
 const CLIP_BITRATE = 2_500_000;
 // Digital zoom while recording: drag the thumb up to zoom in, down to zoom out.
 // (Done in-canvas so it works on iOS Safari, which doesn't support the hardware
@@ -1101,41 +1101,29 @@ export function CameraCapture({
                 </div>
               </>
             )}
-            {/* Top-right control cluster: phone-camera fallback, flash, flip. */}
+            {/* Top-right control cluster: phone-camera fallback + flip. */}
             <div className="absolute top-3 right-3 flex items-center gap-2">
-              {/* Phone camera fallback (moved here from the shutter row). Gives
-                  iOS users a flash-capable camera and a universal backup. */}
+              {/* Phone camera fallback. The OS camera has its own working flash,
+                  so we badge this with a lightning bolt — tapping it is how you
+                  get a flash-capable shot (the in-app live flash is unreliable). */}
               <button
                 type="button"
                 onClick={openNativeCamera}
-                className="w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center"
-                aria-label="Use phone camera (with flash)"
-                title="Open your phone's camera (has its own flash)"
+                className="relative w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center"
+                aria-label="Use phone camera (has flash)"
+                title="Open your phone's camera — it has a working flash"
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                   <circle cx="12" cy="13" r="4" />
                 </svg>
-              </button>
-              {/* Flash / torch toggle — only shown when the device supports it */}
-              {torchSupported && (
-                <button
-                  type="button"
-                  onClick={toggleTorch}
-                  className={
-                    'w-10 h-10 rounded-full flex items-center justify-center transition ' +
-                    (torchOn ? 'bg-amber-400 text-black' : 'bg-black/50 text-white')
-                  }
-                  aria-label={torchOn ? 'Turn flash off' : 'Turn flash on'}
-                  aria-pressed={torchOn}
-                  title={torchOn ? 'Flash on (tap to turn off)' : 'Flash off (tap to turn on)'}
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill={torchOn ? 'currentColor' : 'none'}
-                       stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                {/* Lightning-bolt badge (bottom-right) — signals "flash here". */}
+                <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-amber-400 text-black flex items-center justify-center ring-1 ring-black/40">
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" stroke="none">
                     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
                   </svg>
-                </button>
-              )}
+                </span>
+              </button>
               {/* Flip camera */}
               <button
                 type="button"
