@@ -38,15 +38,19 @@ cd scripts\prod_migration
 python clone_to_prod.py export
 ```
 
-This writes (and prints a summary of):
-- `scripts/prod_migration/export/schemas.json` — all custom objects, their
-  custom properties, and associations.
+It exports **only the inspection app's own objects** (it ignores your other
+portal objects like hoas/listing/agents/properties), and writes:
+- `scripts/prod_migration/export/schemas.json` — the 5 app objects
+  (`inspection`, `inspection_question`, `inspection_answer`, `rate_card_line_item`,
+  `region_rate`) with their custom properties and the associations *between them*,
+  plus a `ref_object` block listing the app's required fields on your existing
+  **Property** object (which is referenced, not recreated).
 - `scripts/prod_migration/export/questions.json` — all inspection_question records.
 
-**Review `schemas.json`** — confirm you see `inspection`, `inspection_question`,
-`inspection_answer`, `property`, `rate_card_line_item`, `region_rate`, each with
-its property list (e.g. `last_tenant_time_in_home_months`, `finalize_in_progress`,
-the `*_snapshot` fields, `pdf_*`, `section_list_json`, `qc_*`).
+**Review `schemas.json`** — confirm the 5 objects are present with their property
+lists (e.g. `last_tenant_time_in_home_months` under the Property ref_object,
+`finalize_in_progress` + `*_snapshot` + `pdf_*` + `section_list_json` + `qc_*`
+under inspection/inspection_answer).
 
 ---
 

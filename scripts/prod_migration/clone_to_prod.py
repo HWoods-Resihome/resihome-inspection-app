@@ -59,6 +59,20 @@ QUESTIONS_FILE = os.path.join(EXPORT_DIR, "questions.json")
 PROP_KEEP = ("name", "label", "type", "fieldType", "groupName", "description", "hasUniqueValue", "displayOrder")
 OPT_KEEP = ("label", "value", "displayOrder", "hidden", "description")
 
+# ── Scope: ONLY the custom objects this inspection app created. Everything else
+# in the portal (hoas, listing, agents, properties, …) is left untouched. ──
+OURS = ["inspection", "inspection_question", "inspection_answer", "rate_card_line_item", "region_rate"]
+
+# The existing real-estate "Property" object the app READS but did NOT create.
+# We don't recreate it — we only (a) print its production id for
+# HUBSPOT_PROPERTY_TYPE_ID and (b) ensure the app's required fields exist on it
+# (so e.g. last_tenant_time_in_home_months is added without recreating 394 props).
+REF_OBJECT_CANDIDATES = ["properties", "property"]
+REF_FIELDS = [
+    "last_tenant_time_in_home_months", "square_footage", "state_code",
+    "entity_id", "last_primary_tenant", "region", "zip", "zip_code", "address", "city",
+]
+
 
 def token() -> str:
     for var in ("HUBSPOT_TOKEN", "HUBSPOT_SANDBOX_TOKEN", "HUBSPOT_PRIVATE_APP_TOKEN"):
@@ -102,22 +116,46 @@ def all_schemas():
 # ---------------------------------------------------------------- export -----
 def cmd_export():
     pid = connected_portal()
-    print(f"Connected to portal {pid}. Exporting custom-object schemas (read-only)…")
+    print(f"Connected to portal {pid}. Exporting ONLY the inspection app's objects (read-only)…")
     os.makedirs(EXPORT_DIR, exist_ok=True)
     out = []
     name_by_type = {}
-    for s in all_schemas():
+    ref_object = None
+    schemas = all_schemas()
+    for s in schemas:
+        name_by_type[s.get("objectTypeId")] = s.get("name")  # full map (for association naming)
+    for s in schemas:
         name = s.get("name")
         type_id = s.get("objectTypeId")
-        name_by_type[type_id] = name
+        # Capture the reference Property object's required fields only (not the whole object).
+        if name in REF_OBJECT_CANDIDATES and ref_object is None:
+            by = {p["name"]: p for p in s.get("properties", [])}
+            fields = []
+            for fn in REF_FIELDS:
+                p = by.get(fn)
+                if not p:
+                    continue
+                cp = {k: p[k] for k in PROP_KEEP if k in p and p[k] is not None}
+                if p.get("options"):
+                    cp["options"] = [{k: o[k] for k in OPT_KEEP if k in o and o[k] is not None} for o in p["options"]]
+                fields.append(cp)
+            ref_object = {"name": name, "fields": fields}
+            print(f"  ⌁ reference object {name}: ensuring {len(fields)}/{len(REF_FIELDS)} app fields (not recreating it)")
+            continue
+        if name not in OURS:
+            continue  # someone else's object — skip entirely
         props = []
         for p in s.get("properties", []):
-            if p.get("hubspotDefined"):  # skip stock/managed properties
+            if p.get("hubspotDefined"):
                 continue
             cp = {k: p[k] for k in PROP_KEEP if k in p and p[k] is not None}
             if p.get("options"):
                 cp["options"] = [{k: o[k] for k in OPT_KEEP if k in o and o[k] is not None} for o in p["options"]]
             props.append(cp)
+        # Keep only associations BETWEEN our own objects (drop links to contacts,
+        # listings, hoas, etc. that don't apply to the inspection app).
+        assoc = [a for a in s.get("associations", [])
+                 if name_by_type.get(a.get("fromObjectTypeId")) in OURS and name_by_type.get(a.get("toObjectTypeId")) in OURS]
         out.append({
             "name": name,
             "objectTypeId_source": type_id,
@@ -127,11 +165,13 @@ def cmd_export():
             "requiredProperties": s.get("requiredProperties", []),
             "searchableProperties": s.get("searchableProperties", []),
             "properties": props,
-            "associations": s.get("associations", []),
+            "associations": assoc,
         })
-        print(f"  • {name}: {len(props)} custom properties, {len(s.get('associations', []))} associations")
+        print(f"  • {name}: {len(props)} custom properties, {len(assoc)} app associations")
+    if not out:
+        print("WARNING: none of the expected objects were found. Check OURS names match this portal.")
     with open(SCHEMAS_FILE, "w", encoding="utf-8") as f:
-        json.dump({"sourcePortal": pid, "name_by_type": name_by_type, "objects": out}, f, indent=2)
+        json.dump({"sourcePortal": pid, "name_by_type": name_by_type, "objects": out, "ref_object": ref_object}, f, indent=2)
     print(f"\nWrote {SCHEMAS_FILE}")
     print("Review it, then run the import against production.")
 
@@ -193,13 +233,13 @@ def cmd_import(portal_arg: str, live: bool):
                 hs("POST", f"/crm/v3/properties/{type_id}", p)
                 print(f"    + property {p['name']}")
 
-    # Associations (after all objects exist) — map by source name -> prod typeId.
+    # Associations (after all objects exist) — only BETWEEN our own objects.
     name_by_type = data.get("name_by_type", {})
     for obj in data["objects"]:
         for a in obj.get("associations", []):
             from_name = name_by_type.get(a.get("fromObjectTypeId"))
             to_name = name_by_type.get(a.get("toObjectTypeId"))
-            if not from_name or not to_name:
+            if from_name not in OURS or to_name not in OURS:
                 continue
             from_id = prod.get(from_name); to_id = prod.get(to_name)
             if not from_id or not to_id or from_id == "(dry-run)":
@@ -212,9 +252,39 @@ def cmd_import(portal_arg: str, live: bool):
             except SystemExit as e:
                 print(f"ASSOC {from_name}->{to_name}: {e} (may already exist — ok)")
 
+    # Ensure the app's fields exist on the EXISTING Property object (don't recreate it).
+    ref = data.get("ref_object")
+    ref_type = None; ref_name = None
+    if ref:
+        for cand in REF_OBJECT_CANDIDATES:
+            if cand in prod:
+                ref_type, ref_name = prod[cand], cand; break
+        if not ref_type:
+            print(f"\nNOTE: Property object {REF_OBJECT_CANDIDATES} not found in this portal — set HUBSPOT_PROPERTY_TYPE_ID manually.")
+        else:
+            print(f"\nREFERENCE object {ref_name}: {ref_type} (existing — only ensuring app fields)")
+            if live:
+                have = existing_prop_names(ref_type)
+                for p in ref["fields"]:
+                    if p["name"] in have:
+                        continue
+                    hs("POST", f"/crm/v3/properties/{ref_type}", p)
+                    print(f"    + property {p['name']} on {ref_name}")
+            else:
+                print(f"    would ensure: {', '.join(p['name'] for p in ref['fields'])} (creates only the missing ones)")
+
     print("\n=== Production objectTypeIds (set these in Vercel) ===")
+    env_map = {
+        "inspection": "HUBSPOT_INSPECTION_TYPE_ID",
+        "inspection_question": "HUBSPOT_INSPECTION_QUESTION_TYPE_ID",
+        "inspection_answer": "HUBSPOT_INSPECTION_ANSWER_TYPE_ID",
+        "rate_card_line_item": "HUBSPOT_RATE_CARD_LINE_ITEM_TYPE_ID",
+        "region_rate": "HUBSPOT_REGION_RATE_TYPE_ID",
+    }
     for name, tid in new_ids.items():
-        print(f"  {name}: {tid}")
+        print(f"  {env_map.get(name, name)} = {tid}")
+    if ref_type:
+        print(f"  HUBSPOT_PROPERTY_TYPE_ID = {ref_type}")
     if not live:
         print("\nDRY-RUN only. Re-run with --live to apply.")
 
