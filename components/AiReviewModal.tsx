@@ -40,12 +40,6 @@ const SEV: Record<string, string> = {
   low: 'bg-gray-400',
 };
 
-const TYPE_LABEL: Record<string, string> = {
-  edit: 'Edit',
-  remove: 'Remove',
-  add: 'Add',
-};
-
 export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars, onAddPhoto, onIgnore }: Props) {
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [edits, setEdits] = useState<Record<string, Edit>>({});
@@ -69,8 +63,10 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, waitingForFirst]);
 
-  // Reset decisions/edits whenever a new set of adjustments arrives.
-  useEffect(() => { setDecisions({}); setEdits({}); setPhotoAdded({}); }, [adjustments]);
+  // Reset decisions/edits only when a NEW review run begins (loading flips
+  // true) — NOT on every streamed append, which previously wiped a decision the
+  // inspector made mid-stream (the "had to tap Decline twice" glitch).
+  useEffect(() => { if (loading) { setDecisions({}); setEdits({}); setPhotoAdded({}); } }, [loading]);
 
   const allDecided = adjustments.every((a) => decisions[a.id]);
   const approvedCount = adjustments.filter((a) => decisions[a.id] === 'approve').length;
@@ -170,15 +166,16 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                       const d = decisions[a.id];
                       return (
                         <div key={a.id} className={`rounded-xl border p-3 ${d === 'approve' ? 'border-brand bg-brand/5' : d === 'decline' ? 'border-gray-200 bg-gray-50 opacity-70' : 'border-gray-200'}`}>
-                          <div className="flex items-start gap-2">
-                            <span className={`mt-1 w-2 h-2 rounded-full shrink-0 ${SEV[a.severity || 'medium']}`} />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="text-[10px] uppercase tracking-wide font-heading font-bold text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">{TYPE_LABEL[a.type]}</span>
-                                {a.sectionName && <span className="text-[11px] text-gray-400">{a.sectionName}</span>}
+                          <div>
+                            <div className="flex items-start gap-2">
+                              <span className={`mt-[5px] w-2.5 h-2.5 rounded-full shrink-0 ${SEV[a.severity || 'medium']}`} />
+                              <div className="text-sm font-semibold text-ink leading-snug min-w-0 flex-1">
+                                {a.title}
+                                {a.sectionName && <span className="ml-1.5 text-[11px] font-normal text-gray-400">· {a.sectionName}</span>}
                               </div>
-                              <div className="text-sm font-semibold text-ink mt-1 leading-snug">{a.title}</div>
-                              <div className="text-xs text-gray-600 mt-0.5 leading-snug">{a.rationale}</div>
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs text-gray-600 mt-1 leading-snug">{a.rationale}</div>
 
                               {a.needsPhoto ? (
                                 /* Photo evidence gap: add a photo of the damage (attaches to
@@ -218,6 +215,18 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                     </div>
                                   )}
                                 </>
+                              ) : (a.wrongRoom && a.suggested?.moveToSectionId) ? (
+                                /* Wrong room: move the line to the correct room (don't delete it). */
+                                <div className="flex gap-2 mt-2 items-center">
+                                  <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'approve' }))}
+                                    className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'approve' ? 'bg-brand text-white border-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`}>
+                                    Move to {a.suggested.moveToRoomName}
+                                  </button>
+                                  <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'decline' }))}
+                                    className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'decline' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
+                                    Decline
+                                  </button>
+                                </div>
                               ) : (
                                 <>
                                   {/* before → after + editable fields */}

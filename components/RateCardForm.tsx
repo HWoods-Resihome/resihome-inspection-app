@@ -14,7 +14,7 @@ import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { AiReviewModal } from '@/components/AiReviewModal';
-import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, type AiAdjustment } from '@/lib/aiReview';
+import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, saveReviewCache, loadReviewCache, clearReviewCache, type AiAdjustment } from '@/lib/aiReview';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
@@ -1722,7 +1722,40 @@ export function RateCardForm(props: RateCardFormProps) {
     setReviewedHash(getPassedReviewHash(props.inspectionRecordId));
   }, [props.inspectionRecordId]);
 
+  // The scope hash a review ran against (so the cache is tagged to the right
+  // scope), and one-time restore of a cached in-progress review.
+  const reviewRunHashRef = useRef('');
+  const aiRestoredRef = useRef(false);
+  useEffect(() => {
+    if (aiRestoredRef.current || !linesHydrated) return;
+    aiRestoredRef.current = true;
+    const cached = loadReviewCache(props.inspectionRecordId);
+    if (cached && cached.hash === currentScopeHash) {
+      reviewRunHashRef.current = cached.hash;
+      setAiSummary(cached.summary || '');
+      setAiAdjustments(Array.isArray(cached.adjustments) ? cached.adjustments : []);
+      if (cached.open) setAiModalOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linesHydrated, currentScopeHash, props.inspectionRecordId]);
+
+  // Persist the in-progress / completed review so it survives backgrounding the
+  // app, a reload, or a dead zone — tagged to the scope it ran against.
+  useEffect(() => {
+    if (aiLoading) return; // don't cache the empty starting state
+    if (aiAdjustments.length > 0 || aiModalOpen || aiSummary) {
+      saveReviewCache(props.inspectionRecordId, {
+        hash: reviewRunHashRef.current || currentScopeHash,
+        summary: aiSummary,
+        adjustments: aiAdjustments,
+        open: aiModalOpen,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiAdjustments, aiSummary, aiModalOpen, aiLoading]);
+
   const runAiReview = useCallback(async () => {
+    reviewRunHashRef.current = scopeHash(linesBySectionRef.current);
     setAiModalOpen(true);
     setAiError(null);
     setAiLoading(true);
@@ -1858,6 +1891,18 @@ export function RateCardForm(props: RateCardFormProps) {
 
       for (const a of approved) {
         const sec = sections.find((s) => s.id === a.sectionId);
+        // Wrong-room: MOVE the line to the correct room (keep the same record).
+        if (a.wrongRoom && a.suggested?.moveToSectionId && a.lineExternalId) {
+          const toSec = sections.find((s) => s.id === a.suggested!.moveToSectionId);
+          const line = (projected[a.sectionId] || []).find((l) => l.externalId === a.lineExternalId);
+          if (toSec && line) {
+            projected[a.sectionId] = (projected[a.sectionId] || []).filter((l) => l.externalId !== a.lineExternalId);
+            const moved = { ...line, section: toSec.label, location: toSec.location || '' };
+            projected[toSec.id] = [...(projected[toSec.id] || []), moved];
+            upserts.push({ recordId: recordIdsByExternalId[line.externalId], line: moved, sectionId: toSec.id });
+          }
+          continue;
+        }
         // A needsPhoto item approved = "Remove line" regardless of the AI's type.
         const effType = a.needsPhoto ? 'remove' : a.type;
         if (effType === 'remove' && a.lineExternalId) {
@@ -1941,6 +1986,9 @@ export function RateCardForm(props: RateCardFormProps) {
       const newHash = scopeHash(projected);
       setReviewedHash(newHash);
       setPassedReviewHash(props.inspectionRecordId, newHash);
+      clearReviewCache(props.inspectionRecordId); // review consumed
+      setAiAdjustments([]);
+      setAiSummary('');
       refreshPending();
       setAiModalOpen(false);
     } catch (e: any) {

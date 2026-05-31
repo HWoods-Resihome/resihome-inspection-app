@@ -161,10 +161,12 @@ function tools() {
           type: { type: 'string', enum: ['edit', 'remove', 'add'], description: 'edit = change an existing line; remove = delete one; add = propose a missing line.' },
           sectionId: { type: 'string', description: 'The room/section id this applies to.' },
           lineExternalId: { type: 'string', description: 'For edit/remove: the externalId of the target line (from the scope listing).' },
-          title: { type: 'string', description: 'Short headline of the suggestion.' },
-          rationale: { type: 'string', description: 'Why, citing the relevant rule (depreciation cap, duplicate, beyond safe/clean/functional, tenant responsibility, etc.).' },
+          title: { type: 'string', description: 'A SHORT imperative action, max ~6 words, saying what happens if approved — e.g. "Remove duplicate appliance clean", "Lower tenant to 50%", "Add blind replacement", "Move to Bathroom". No internal ids or line codes.' },
+          rationale: { type: 'string', description: 'ONE short plain-language sentence (~15-20 words). NEVER include internal ids (voice_*, RCLINE-*, "id=..."), line codes, or raw dollar-math dumps — just the reason.' },
           severity: { type: 'string', enum: ['high', 'medium', 'low'] },
           needsPhoto: { type: 'boolean', description: 'Set true when a damage / tenant-responsibility line is NOT supported by a photo. Use type "remove" with needsPhoto true so the inspector can either add a photo of the damage or remove the line.' },
+          wrongRoom: { type: 'boolean', description: 'Set true when a line is simply in the WRONG room (e.g. a tub clean filed under Kitchen). Also set suggestedRoom to the correct room. Use type "edit" — the inspector will MOVE it, not delete it.' },
+          suggestedRoom: { type: 'string', description: 'For wrongRoom: the correct room name (from the scope listing).' },
           suggestedLineItemCode: { type: 'string', description: 'For add (or an item swap): a real catalog code from search_catalog.' },
           suggestedQuantity: { type: 'number' },
           suggestedTenantBillBackPercent: { type: 'number', description: 'Suggested tenant % (0-100, steps of 5).' },
@@ -313,6 +315,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       } catch { /* keep model estimate */ }
 
+      // Wrong-room: resolve the suggested target room so the inspector can MOVE
+      // the line instead of deleting it.
+      const wrongRoom = a?.wrongRoom === true;
+      if (wrongRoom && a?.suggestedRoom) {
+        const want = String(a.suggestedRoom).trim().toLowerCase();
+        const target = sections.find((s) => s.name.toLowerCase() === want)
+          || sections.find((s) => s.name.toLowerCase().includes(want) || want.includes(s.name.toLowerCase()));
+        if (target && target.id !== sectionId) { suggested.moveToSectionId = target.id; suggested.moveToRoomName = target.name; }
+      }
+
       const norm = {
         id: `aiadj_${adjIdx++}_${Math.random().toString(36).slice(2, 7)}`,
         type, sectionId, sectionName: section?.name, lineExternalId,
@@ -320,6 +332,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         rationale: String(a?.rationale || ''),
         severity: ['high', 'medium', 'low'].includes(a?.severity) ? a.severity : 'medium',
         needsPhoto: a?.needsPhoto === true,
+        wrongRoom: wrongRoom && !!suggested.moveToSectionId,
         current,
         suggested: Object.keys(suggested).length ? suggested : undefined,
         suggestedTenantDollars: suggestedTenantDollars != null && isFinite(suggestedTenantDollars) ? suggestedTenantDollars : undefined,

@@ -28,6 +28,9 @@ export interface AiAdjustment {
    *  should either add a photo of the damage (attaches to the room + line) or
    *  remove the line — not a plain approve/decline. */
   needsPhoto?: boolean;
+  /** The line is in the wrong room. With a resolved target, the inspector can
+   *  move it instead of removing it. */
+  wrongRoom?: boolean;
   /** Snapshot of the line as it is now (for display on edit/remove). */
   current?: {
     description?: string;
@@ -47,6 +50,9 @@ export interface AiAdjustment {
     customVendorCost?: number | null;
     assignedTo?: string;
     unit?: string;
+    /** Target room for a wrongRoom move. */
+    moveToSectionId?: string;
+    moveToRoomName?: string;
   };
   /** Estimated tenant $ after the change (display aid). */
   suggestedTenantDollars?: number;
@@ -151,4 +157,44 @@ export function addIgnoredPhotoLine(inspectionId: string, lineExternalId: string
     all[inspectionId] = list;
     window.localStorage.setItem(IGNORE_KEY, JSON.stringify(all));
   } catch { /* storage disabled */ }
+}
+
+// ----- Cached review results (per inspection) -----------------------------
+// So the in-progress review survives backgrounding the app / a reload / a dead
+// zone. Keyed by inspection; only restored when the scope still matches the
+// hash the review ran against.
+const CACHE_KEY = 'resiwalk_ai_review_cache_v1';
+
+export interface CachedReview {
+  hash: string;
+  summary: string;
+  adjustments: AiAdjustment[];
+  open: boolean;
+  decisions?: Record<string, 'approve' | 'decline'>;
+}
+
+export function saveReviewCache(inspectionId: string, data: CachedReview): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const all = JSON.parse(window.localStorage.getItem(CACHE_KEY) || '{}') || {};
+    all[inspectionId] = data;
+    window.localStorage.setItem(CACHE_KEY, JSON.stringify(all));
+  } catch { /* quota / disabled */ }
+}
+
+export function loadReviewCache(inspectionId: string): CachedReview | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const all = JSON.parse(window.localStorage.getItem(CACHE_KEY) || '{}') || {};
+    return all[inspectionId] || null;
+  } catch { return null; }
+}
+
+export function clearReviewCache(inspectionId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const all = JSON.parse(window.localStorage.getItem(CACHE_KEY) || '{}') || {};
+    delete all[inspectionId];
+    window.localStorage.setItem(CACHE_KEY, JSON.stringify(all));
+  } catch { /* noop */ }
 }
