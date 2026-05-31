@@ -480,6 +480,39 @@ export function RateCardForm(props: RateCardFormProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.inspectionRecordId]);
 
+  // Hydration runs before the (large) catalog finishes loading, so a stored
+  // description that simply equals the catalog's text gets mis-flagged as a
+  // custom override (and then stops tracking catalog edits). Once the catalog
+  // is available, reconcile once: clear customLaborFullDescription on lines
+  // where it matches the catalog short/preferred text — leaving only genuine
+  // inspector overrides.
+  const descReconciledRef = useRef(false);
+  useEffect(() => {
+    if (descReconciledRef.current) return;
+    if (!linesHydrated || catalog.length === 0) return;
+    descReconciledRef.current = true;
+    setLinesBySection((bySection) => {
+      let changed = false;
+      const next: Record<string, RateCardLineInput[]> = {};
+      for (const [sid, lines] of Object.entries(bySection)) {
+        next[sid] = lines.map((l) => {
+          if (!l.customLaborFullDescription) return l;
+          const item = catalog.find((c) => c.lineItemCode === l.lineItemCode);
+          if (!item) return l;
+          const short = item.laborShortDescription || '';
+          const preferred = (item.laborSubtext && item.laborSubtext.trim()) || item.laborFullDescription || '';
+          if (l.customLaborFullDescription === short || l.customLaborFullDescription === preferred) {
+            changed = true;
+            const { customLaborFullDescription, ...rest } = l;
+            return rest as RateCardLineInput;
+          }
+          return l;
+        });
+      }
+      return changed ? next : bySection;
+    });
+  }, [linesHydrated, catalog]);
+
   /**
    * Used by Save & Close / Submit / Cancel Inspection to ensure any open
    * inline edits get committed (pushing their state into linesBySection,

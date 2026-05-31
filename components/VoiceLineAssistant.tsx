@@ -73,6 +73,11 @@ type Pending = { line: RateCardLineInput; summary: string; spoken: string; actio
 // "add <noun>" is a NEW request, so "add" only counts alone or as "add it/that".
 const AFFIRMATIVE = /^((yes|yep|yeah|yup|sure|okay|ok|correct|confirm|perfect|go ahead|looks good|that'?s right|do it)\b|add(\s+(it|that))?\s*$)/i;
 
+// STRICT: the WHOLE utterance is just an acknowledgement (no other content).
+// Used to swallow a stray "yes"/"perfect" after an auto-add instead of sending
+// it to the agent as an empty request.
+const STRICT_AFFIRMATIVE = /^(yes|yep|yeah|yup|sure|okay|ok|cool|great|perfect|thanks|thank you|got it|sounds good|looks good|that'?s right|correct|nope|no)[.!]*$/i;
+
 // Undo phrases that remove the most recently added line.
 const UNDO = /\b(undo|scratch that|(remove|delete|cancel|drop)\b.{0,12}\b(line|one|item|that|last)|take that (off|out)|never ?mind that)\b/i;
 
@@ -583,9 +588,24 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         commitPendingRef.current();
         return;
       }
-      const next: ChatMsg[] = [...messages, { role: 'user', content: t }];
-      setMessages(next);
-      void sendToAgent(next);
+      // Lines auto-add now, so a bare "yes"/"ok"/"perfect" after an add isn't
+      // confirming anything — don't forward it to the agent (which would treat
+      // it as a fresh, contentless request). Acknowledge locally and reopen the
+      // mic. STRICT match (whole utterance only) so "yes, add a microwave" still
+      // goes through to the agent.
+      if (!pendingRef.current && STRICT_AFFIRMATIVE.test(t.trim())) {
+        setMessages((m) => [...m, { role: 'user', content: t }, { role: 'assistant', content: 'What else would you like to add?' }]);
+        speakThenListenRef.current('What else would you like to add?');
+        return;
+      }
+      // Cap the history we send to the agent: keep the most recent turns for
+      // context without re-sending (and re-billing) an entire room walkthrough
+      // every turn.
+      const full: ChatMsg[] = [...messages, { role: 'user', content: t }];
+      setMessages(full);
+      const MAX_TURNS = 16;
+      const trimmed = full.length > MAX_TURNS ? full.slice(-MAX_TURNS) : full;
+      void sendToAgent(trimmed);
     },
     [messages, sendToAgent, onRemoveLine]
   );
