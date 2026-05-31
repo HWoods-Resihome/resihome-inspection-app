@@ -487,6 +487,18 @@ export function RateCardForm(props: RateCardFormProps) {
    * issues a POST. We then poll briefly for saveStatus !== 'saving'.
    */
   const saveInFlightRef = useRef(0);
+  // Serializes line-save POSTs. Voice can emit several proposals in one breath
+  // ("clean the carpet, paint one wall, fix nail holes" → 3 lines); firing
+  // those POSTs concurrently let HubSpot drop/reject some writes (each also
+  // bumps inspection status + touches the record), so lines that the UI showed
+  // as "Added" vanished on reload. Chaining them guarantees one-at-a-time,
+  // ordered persistence.
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+  function enqueueSave(work: () => Promise<void>): Promise<void> {
+    const next = saveChainRef.current.catch(() => { /* isolate prior failures */ }).then(work);
+    saveChainRef.current = next.catch(() => { /* keep the chain alive */ });
+    return next;
+  }
   async function commitAndWait(): Promise<void> {
     window.dispatchEvent(new CustomEvent('ratecard:commit-all'));
     // Wait two animation frames so the commit events have triggered the
@@ -572,37 +584,42 @@ export function RateCardForm(props: RateCardFormProps) {
 
     saveInFlightRef.current++;
     setSaveStatus({ kind: 'saving' });
-    try {
-      const recordId = recordIdsByExternalId[line.externalId];
-      const r = await fetch(`/api/inspections/${props.inspectionRecordId}/rate-card-lines`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          upserts: [{ recordId, line }],
-          archives: [],
-          bumpStatusToInProgress: true,
-        }),
-      });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(`HTTP ${r.status}: ${text.slice(0, 200)}`);
+    // Run through the serial queue so concurrent voice adds don't race each
+    // other (and the inspection record) at HubSpot. recordId is read at
+    // execution time so a create that just stitched back its id is reused.
+    await enqueueSave(async () => {
+      try {
+        const recordId = recordIdsByExternalId[line.externalId];
+        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/rate-card-lines`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            upserts: [{ recordId, line }],
+            archives: [],
+            bumpStatusToInProgress: true,
+          }),
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error(`HTTP ${r.status}: ${text.slice(0, 200)}`);
+        }
+        const data = await r.json();
+        // Stitch the new record id back if this was a fresh create
+        const result = data.results?.[0];
+        if (result?.recordId && result?.answerIdExternal) {
+          setRecordIdsByExternalId((cur) => ({
+            ...cur,
+            [result.answerIdExternal]: result.recordId,
+          }));
+        }
+        setSaveStatus({ kind: 'saved', at: Date.now() });
+      } catch (e: any) {
+        console.error('[RateCardForm] line save failed:', e);
+        setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+      } finally {
+        saveInFlightRef.current--;
       }
-      const data = await r.json();
-      // Stitch the new record id back if this was a fresh create
-      const result = data.results?.[0];
-      if (result?.recordId && result?.answerIdExternal) {
-        setRecordIdsByExternalId((cur) => ({
-          ...cur,
-          [result.answerIdExternal]: result.recordId,
-        }));
-      }
-      setSaveStatus({ kind: 'saved', at: Date.now() });
-    } catch (e: any) {
-      console.error('[RateCardForm] line save failed:', e);
-      setSaveStatus({ kind: 'error', message: String(e?.message || e) });
-    } finally {
-      saveInFlightRef.current--;
-    }
+    });
   }
 
   // The pending new row was discarded (user pressed Esc or blurred with empty fields).

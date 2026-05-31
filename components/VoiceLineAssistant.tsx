@@ -428,12 +428,16 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               return s ? (s.displayName || s.label) : null;
             })
             .filter(Boolean) as string[];
-          const what = addedThisTurn === 1 ? 'that' : `${addedThisTurn} lines`;
+          // Speak ONLY a short one-sentence summary — never read each line's
+          // full detail aloud (those are shown on screen, not spoken).
+          const what = `Added ${addedThisTurn} item${addedThisTurn === 1 ? '' : 's'}`;
           let where: string;
           if (roomNames.length === 1) where = ` in ${roomNames[0]}`;
           else if (roomNames.length > 1) where = ` across ${roomNames.length} rooms`;
           else where = '';
-          const spoken = `Done — ${what}${where}. Anything else?`;
+          const spoken = `${what}${where}. Anything else?`;
+          // On-screen we keep the per-line detail (already appended above); the
+          // closing chat line is the same short summary we speak.
           setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
           speakThenListenRef.current(spoken);
         } else if (finalType === 'question') {
