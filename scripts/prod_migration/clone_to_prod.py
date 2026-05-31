@@ -358,9 +358,16 @@ def cmd_import_questions(portal_arg: str, live: bool):
     print(f"{len(data['records'])} source questions, {len(existing)} already in prod, {len(todo)} to create — {'LIVE' if live else 'DRY-RUN'}")
     if not live:
         return
+
+    def writable(props):
+        # Drop HubSpot-managed/read-only system properties (hs_createdate,
+        # hs_lastmodifieddate, hs_object_id, …). The hs_ prefix is reserved by
+        # HubSpot, so none of the app's own properties are affected.
+        return {k: v for k, v in props.items() if not k.startswith("hs_")}
+
     for i in range(0, len(todo), 100):
         chunk = todo[i:i+100]
-        hs("POST", f"/crm/v3/objects/{qtype}/batch/create", {"inputs": [{"properties": r["properties"]} for r in chunk]})
+        hs("POST", f"/crm/v3/objects/{qtype}/batch/create", {"inputs": [{"properties": writable(r["properties"])} for r in chunk]})
         print(f"  created {min(i+100, len(todo))}/{len(todo)}")
     print("Done.")
 
