@@ -60,16 +60,33 @@ export function Combobox({
   // Find the label for the currently selected value
   const selectedLabel = options.find((o) => o.value === value)?.label || '';
 
-  // Filter options by query
-  const filtered = query.trim()
-    ? options.filter((o) => {
-        const q = query.toLowerCase();
-        return (
-          o.label.toLowerCase().includes(q) ||
-          (o.sublabel || '').toLowerCase().includes(q)
-        );
-      })
-    : options;
+  // Fuzzy, ranked filtering: split the query into tokens; an option matches when
+  // EVERY token appears in its label/sublabel (in any order), so "paint wall"
+  // finds "Paint 1 Wall". Results are sorted best-match-first.
+  const filtered = (() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    const tokens = q.split(/\s+/).filter(Boolean);
+    const scored: { o: ComboboxOption; s: number }[] = [];
+    for (const o of options) {
+      const label = (o.label || '').toLowerCase();
+      const sub = (o.sublabel || '').toLowerCase();
+      const hay = `${label} ${sub}`;
+      if (!tokens.every((t) => hay.includes(t))) continue;
+      let s = 0;
+      if (label.includes(q)) s += 100;            // whole query contiguous in the label
+      if (label.startsWith(tokens[0])) s += 40;   // label starts with the first token
+      for (const t of tokens) {
+        const li = label.indexOf(t);
+        if (li >= 0) { s += 12; if (li === 0 || label[li - 1] === ' ') s += 6; } // token in label (word-start bonus)
+        else s += 3;                              // token only in the sublabel
+      }
+      s += Math.max(0, 24 - label.length) / 4;    // nudge shorter / more specific labels up
+      scored.push({ o, s });
+    }
+    scored.sort((a, b) => b.s - a.s);
+    return scored.map((x) => x.o);
+  })();
 
   // Position the floating panel beneath the input. Re-run on open + on scroll/resize.
   useLayoutEffect(() => {

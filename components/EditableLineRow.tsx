@@ -225,6 +225,18 @@ export function EditableLineRow(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedItem, tenantMonths]);
 
+  // Editable description: prefill with the catalog default (as real, clearable
+  // text) when an item is picked, unless the inspector has edited it or the line
+  // already carries a saved override. This makes delete-and-retype work — the
+  // field is no longer pinned to the catalog text via a display fallback.
+  const descTouchedRef = useRef(!!(line?.customLaborFullDescription));
+  useEffect(() => {
+    if (descTouchedRef.current) return;
+    if (!selectedItem) return;
+    setCustomDescription(catalogDescription(selectedItem));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedItem]);
+
   // -------------------------------------------------------------------
   // Live calculation
   // -------------------------------------------------------------------
@@ -300,7 +312,13 @@ export function EditableLineRow(props: Props) {
       customAdjustedMaterialCost: line?.customAdjustedMaterialCost ?? null,
       customVendorCost: customVendorCost.trim() === '' ? null : Number(customVendorCost),
       photoUrls: line?.photoUrls || [],
-      customLaborFullDescription: customDescription.trim() || undefined,
+      // Store an override only when it's non-empty AND differs from the catalog
+      // default (so an unedited prefill isn't persisted as a custom override).
+      customLaborFullDescription: (() => {
+        const d = customDescription.trim();
+        if (!d) return undefined;
+        return d === catalogDescription(selectedItem).trim() ? undefined : d;
+      })(),
     };
     onSave(next);
     setIsEditing(false);
@@ -496,11 +514,11 @@ export function EditableLineRow(props: Props) {
                   />
                   {selectedItem && (
                     <textarea
-                      value={customDescription || catalogDescription(selectedItem)}
-                      onChange={(e) => setCustomDescription(e.target.value)}
+                      value={customDescription}
+                      onChange={(e) => { descTouchedRef.current = true; setCustomDescription(e.target.value); }}
                       rows={2}
                       className="w-full mt-2 text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-700 bg-white"
-                      placeholder="Edit description (optional)…"
+                      placeholder={catalogDescription(selectedItem) || 'Edit description (optional)…'}
                     />
                   )}
                 </div>
@@ -654,11 +672,11 @@ export function EditableLineRow(props: Props) {
         />
         {selectedItem && (
           <textarea
-            value={customDescription || catalogDescription(selectedItem)}
-            onChange={(e) => setCustomDescription(e.target.value)}
+            value={customDescription}
+            onChange={(e) => { descTouchedRef.current = true; setCustomDescription(e.target.value); }}
             rows={2}
             className="w-full mt-1.5 text-xs border border-gray-300 rounded px-2 py-1 text-gray-700 bg-white"
-            placeholder="Edit description (optional)..."
+            placeholder={catalogDescription(selectedItem) || 'Edit description (optional)...'}
             title="Edit the full labor description for this line"
           />
         )}

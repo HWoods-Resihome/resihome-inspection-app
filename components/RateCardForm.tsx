@@ -2909,13 +2909,14 @@ export function RateCardForm(props: RateCardFormProps) {
         onDecisionsChange={setAiDecisions}
         rooms={sections.map((s) => ({ id: s.id, name: s.displayName || s.label }))}
       />
-      {/* Hidden input for the review popup's "Add photo" action (attaches the
-          damage photo to the room + the flagged line). */}
+      {/* Hidden input for the review popup's "Add photo" action — no `capture`,
+          so the OS offers BOTH the camera (snap a quick photo) and the photo
+          library (add from gallery). The picked photo is attached to the room +
+          tagged onto the flagged line. */}
       <input
         ref={aiPhotoInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         className="hidden"
         onChange={(e) => { void handleAiPhotoPicked(e.target.files); e.currentTarget.value = ''; }}
       />

@@ -32,7 +32,7 @@ interface Props {
 
 // Per-suggestion inspector edits — raw input strings so the field can be
 // cleared / retyped freely (parsed to numbers only on apply).
-type Edit = { tenantPct?: string; quantity?: string; moveToSectionId?: string };
+type Edit = { tenantPct?: string; quantity?: string; moveToSectionId?: string; removeInstead?: boolean };
 
 // Capitalize the first letter of every word (preserves existing caps/acronyms
 // like SS, EA, QC). Used to clean up the AI's suggestion titles.
@@ -89,8 +89,9 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
   const approved = useMemo(() => adjustments
     .filter((a) => decisions[a.id] === 'approve')
     .map((a) => {
-      // Wrong-room: apply the inspector's chosen target room (dropdown).
+      // Wrong-room: either move to the chosen room, or remove the line entirely.
       if (a.wrongRoom) {
+        if (edits[a.id]?.removeInstead) return { ...a, wrongRoom: false, type: 'remove' as const };
         const sel = edits[a.id]?.moveToSectionId ?? a.suggested?.moveToSectionId ?? a.sectionId;
         return { ...a, suggested: { ...(a.suggested || {}), moveToSectionId: sel, moveToRoomName: rooms?.find((r) => r.id === sel)?.name || a.suggested?.moveToRoomName } };
       }
@@ -249,10 +250,14 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                       ))}
                                     </select>
                                   </div>
-                                  <div className="flex gap-2">
-                                    <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'approve' }))}
-                                      className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'approve' ? 'bg-brand text-white border-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`}>
+                                  <div className="flex gap-2 flex-wrap">
+                                    <button type="button" onClick={() => { setEdit(a.id, { removeInstead: false }); setDecisions((m) => ({ ...m, [a.id]: 'approve' })); }}
+                                      className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'approve' && !edits[a.id]?.removeInstead ? 'bg-brand text-white border-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`}>
                                       Move
+                                    </button>
+                                    <button type="button" onClick={() => { setEdit(a.id, { removeInstead: true }); setDecisions((m) => ({ ...m, [a.id]: 'approve' })); }}
+                                      className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'approve' && edits[a.id]?.removeInstead ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
+                                      Remove line
                                     </button>
                                     <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'decline' }))}
                                       className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'decline' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>

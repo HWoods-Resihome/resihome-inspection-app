@@ -5,6 +5,7 @@ import {
   updateInspection,
   touchInspection,
   fetchInspectionById,
+  fetchAnswersForInspection,
   type AnswerUpsert,
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -224,6 +225,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // Rate card lines don't associate to a Question (no question record).
         questionHubspotRecordId: null,
       });
+    }
+
+    // Resolve any missing recordIds against the inspection's existing answers,
+    // so a line we already saved UPDATEs (by record id) instead of attempting a
+    // CREATE that collides on the unique answer_id_external (HubSpot 400). This
+    // happens when an edit/move arrives without a mapped recordId (e.g. after a
+    // reload, or an AI-applied change to a line saved in a prior session).
+    if (answerUpserts.some((u) => !u.recordId)) {
+      try {
+        const existing = await fetchAnswersForInspection(inspectionRecordId);
+        const byExt = new Map(existing.map((a) => [a.answerIdExternal, a.recordId]));
+        for (const u of answerUpserts) {
+          if (!u.recordId) {
+            const rid = byExt.get(u.answerProps.answer_id_external as string);
+            if (rid) u.recordId = rid;
+          }
+        }
+      } catch (e) {
+        console.warn('[rate-card-lines] could not resolve existing recordIds:', e);
+      }
     }
 
     // Persist (resilient). Try the fast batch first; if HubSpot rejects it
