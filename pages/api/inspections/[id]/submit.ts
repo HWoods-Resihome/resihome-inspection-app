@@ -59,7 +59,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       inspectionRecordId: id,
       inspection,
       routedToPendingApproval: isRateCard,
-      hubspotUrl: `https://app.hubspot.com/contacts/51415639/record/${process.env.HUBSPOT_INSPECTION_TYPE_ID}/${id}`,
+      hubspotUrl: `https://app.hubspot.com/contacts/${process.env.HUBSPOT_PORTAL_ID || '51415639'}/record/${process.env.HUBSPOT_INSPECTION_TYPE_ID}/${id}`,
     });
   } catch (e: any) {
     console.error(`POST /api/inspections/${id}/submit failed:`, e);

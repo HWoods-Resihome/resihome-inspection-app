@@ -369,7 +369,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
                 <View style={styles.metaCol}>
                   <Text style={styles.metaLabel}>HubSpot Record</Text>
                   <Link
-                    src={`https://app.hubspot.com/contacts/51415639/record/${process.env.HUBSPOT_INSPECTION_TYPE_ID || '2-63142762'}/${data.hubspotRecordId}`}
+                    src={`https://app.hubspot.com/contacts/${process.env.HUBSPOT_PORTAL_ID || '51415639'}/record/${process.env.HUBSPOT_INSPECTION_TYPE_ID || '2-63142762'}/${data.hubspotRecordId}`}
                     style={styles.metaValueLink}
                   >
                     Open in HubSpot

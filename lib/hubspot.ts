@@ -21,11 +21,13 @@ const assocLabelsUrl = (fromType: string, toType: string) =>
   `/crm/associations/${HUBSPOT_API_VERSION}/${fromType}/${toType}/labels`;
 
 function token(): string {
-  const raw = process.env.HUBSPOT_SANDBOX_TOKEN;
+  // Prefer HUBSPOT_TOKEN (production-friendly name); fall back to the original
+  // HUBSPOT_SANDBOX_TOKEN so existing sandbox envs keep working unchanged.
+  const raw = process.env.HUBSPOT_TOKEN || process.env.HUBSPOT_SANDBOX_TOKEN;
   if (!raw) {
     throw new Error(
-      'HUBSPOT_SANDBOX_TOKEN is not set. Check .env.local exists in the project root ' +
-      'and contains the line HUBSPOT_SANDBOX_TOKEN=pat-na1-... then restart `npm run dev`.'
+      'HUBSPOT_TOKEN (or HUBSPOT_SANDBOX_TOKEN) is not set. Add it to the environment ' +
+      '(e.g. HUBSPOT_TOKEN=pat-na1-...) and restart.'
     );
   }
   const trimmed = raw.trim();

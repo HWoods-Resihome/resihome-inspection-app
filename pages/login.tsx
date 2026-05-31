@@ -123,7 +123,7 @@ export default function LoginPage() {
           </form>
 
           <p className="text-xs text-gray-400 text-center mt-6">
-            Sandbox build &middot; ResiTest Portal 51415639
+            ResiHome Inspections{process.env.NEXT_PUBLIC_APP_VERSION ? ` · v${process.env.NEXT_PUBLIC_APP_VERSION}` : ''}
           </p>
         </div>
       </main>
