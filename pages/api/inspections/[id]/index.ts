@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
+  fetchInspectionById,
   updateInspection,
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -51,11 +52,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (Object.keys(filtered).length === 0) {
         return res.status(400).json({ error: 'No editable properties in request' });
       }
+      // Compare-and-swap for the section layout: if the client tells us the
+      // value it believes is current (baseSectionListJson) and that no longer
+      // matches what's stored, another tab/device changed it first — reject so
+      // we don't clobber their edit (last-writer-wins data loss). The client
+      // reloads on 409. Only enforced when the client opts in by sending a base.
+      if ('section_list_json' in filtered && typeof req.body?.baseSectionListJson === 'string') {
+        try {
+          const current = await fetchInspectionById(id);
+          const currentJson = current?.sectionListJson || '';
+          if (currentJson !== req.body.baseSectionListJson) {
+            return res.status(409).json({ error: 'conflict', currentSectionListJson: currentJson });
+          }
+        } catch (e) {
+          // Fail-open: if we can't read the current value, proceed rather than
+          // block a legitimate save.
+          console.warn(`PATCH /api/inspections/${id} CAS read failed (continuing):`, e);
+        }
+      }
       await updateInspection(id, filtered);
       return res.status(200).json({ success: true });
     } catch (e: any) {
       console.error(`PATCH /api/inspections/${id} failed:`, e);
-      return res.status(500).json({ error: String(e.message || e) });
+      return res.status(500).json({ error: 'Could not save changes. Please try again.' });
     }
   }
 

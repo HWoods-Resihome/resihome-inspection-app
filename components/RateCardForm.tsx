@@ -531,6 +531,10 @@ export function RateCardForm(props: RateCardFormProps) {
   // as "Added" vanished on reload. Chaining them guarantees one-at-a-time,
   // ordered persistence.
   useEffect(() => { photosBySectionRef.current = photosBySection; }, [photosBySection]);
+  // Last section-layout JSON we know the server has, for optimistic-concurrency
+  // (compare-and-swap) on section edits so two tabs/devices don't clobber each
+  // other's room changes.
+  const lastSavedSectionJsonRef = useRef<string>(props.sectionListJson || '');
   const saveChainRef = useRef<Promise<void>>(Promise.resolve());
   function enqueueSave<T>(work: () => Promise<T>): Promise<T> {
     const next = saveChainRef.current.catch(() => { /* isolate prior failures */ }).then(work);
@@ -785,11 +789,26 @@ export function RateCardForm(props: RateCardFormProps) {
   async function persistSectionList(next: SectionInstance[]): Promise<void> {
     const json = serializeSectionList(next);
     try {
-      await fetch(`/api/inspections/${props.inspectionRecordId}`, {
+      const r = await fetch(`/api/inspections/${props.inspectionRecordId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ section_list_json: json }),
+        // Send the base we believe is current so the server can reject a write
+        // that would clobber a change made elsewhere.
+        body: JSON.stringify({ section_list_json: json, baseSectionListJson: lastSavedSectionJsonRef.current }),
       });
+      if (r.status === 409) {
+        const data = await r.json().catch(() => ({}));
+        const serverJson = String(data.currentSectionListJson || '');
+        lastSavedSectionJsonRef.current = serverJson;
+        try { setSections(resolveSections(serverJson, props.bedrooms, props.bathrooms)); } catch { /* keep current */ }
+        void dialog.alert('The room layout was changed on another device, so it was reloaded here. Please re-apply your change.');
+        return;
+      }
+      if (r.ok) {
+        lastSavedSectionJsonRef.current = json;
+      } else {
+        console.error('[RateCardForm] section_list_json save failed:', r.status);
+      }
     } catch (e) {
       console.error('[RateCardForm] section_list_json save failed:', e);
     }

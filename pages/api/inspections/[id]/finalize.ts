@@ -17,6 +17,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
+  readInspectionProps,
   uploadFileWithId,
   attachFilesToInspectionRecord,
   updateInspection,
@@ -42,10 +43,21 @@ export const config = {
   },
 };
 
-// In-flight finalize lock. Prevents a double-tap / slow-network retry from
-// kicking off two concurrent PDF-generation passes for the same inspection
-// (per server instance). Cleared in the finally block.
-const inFlightFinalize = new Set<string>();
+// In-flight finalize lock (per server instance). Prevents a double-tap /
+// slow-network retry from kicking off two concurrent PDF-generation passes for
+// the same inspection. A Map with a start timestamp so a crashed/abandoned
+// finalize can't wedge the lock forever — entries older than the window are
+// treated as stale and overwritten.
+const inFlightFinalize = new Map<string, number>();
+const FINALIZE_LOCK_MS = 5 * 60 * 1000;
+
+// Optional durable cross-instance lock. Serverless instances don't share the
+// Map above, so set FINALIZE_LOCK_PROPERTY to a HubSpot datetime/text property
+// name to enable a best-effort durable guard (and email-dedupe) across
+// instances. Fail-safe: if unset or the property is missing, finalize behaves
+// exactly as before. (HubSpot has no conditional write, so this is best-effort,
+// but it closes the common concurrent-double-finalize window.)
+const FINALIZE_LOCK_PROP = process.env.FINALIZE_LOCK_PROPERTY || '';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -56,10 +68,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const id = String(req.query.id || '');
   if (!id) return res.status(400).json({ error: 'Missing inspection id' });
 
-  if (inFlightFinalize.has(id)) {
+  const lockNow = Date.now();
+  const localStartedAt = inFlightFinalize.get(id);
+  if (localStartedAt && lockNow - localStartedAt < FINALIZE_LOCK_MS) {
     return res.status(409).json({ error: 'This inspection is already being finalized. Please wait.' });
   }
-  inFlightFinalize.add(id);
+  inFlightFinalize.set(id, lockNow);
+
+  // Best-effort durable lock across instances (opt-in via env). Fail-safe: any
+  // error (property missing, read failure) just skips the durable check.
+  let durableLockHeld = false;
+  if (FINALIZE_LOCK_PROP) {
+    try {
+      const props = await readInspectionProps(id, [FINALIZE_LOCK_PROP]);
+      const prev = props?.[FINALIZE_LOCK_PROP];
+      const prevMs = prev ? Date.parse(String(prev)) || Number(prev) || 0 : 0;
+      if (prevMs && lockNow - prevMs < FINALIZE_LOCK_MS) {
+        inFlightFinalize.delete(id);
+        return res.status(409).json({ error: 'This inspection is already being finalized on another device. Please wait.' });
+      }
+      await updateInspection(id, { [FINALIZE_LOCK_PROP]: new Date(lockNow).toISOString() });
+      durableLockHeld = true;
+    } catch (e) {
+      console.warn('[finalize] durable lock unavailable (continuing without it):', e);
+    }
+  }
 
   const t0 = Date.now();
   try {
@@ -473,8 +506,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch (e: any) {
     const elapsed = Date.now() - t0;
     console.error(`[finalize] failed after ${elapsed}ms:`, e);
-    return res.status(500).json({ error: String(e?.message || e), elapsedMs: elapsed });
+    return res.status(500).json({ error: 'Finalize failed. Please try again.', elapsedMs: elapsed });
   } finally {
     inFlightFinalize.delete(id);
+    // Release the durable lock so a legitimate re-finalize isn't blocked.
+    if (durableLockHeld) {
+      try { await updateInspection(id, { [FINALIZE_LOCK_PROP]: '' }); } catch { /* non-fatal */ }
+    }
   }
 }

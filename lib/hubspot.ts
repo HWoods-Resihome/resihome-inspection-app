@@ -916,6 +916,26 @@ export async function attachPdfUrlToInspection(inspectionRecordId: string, pdfUr
 /**
  * Fetch a single Inspection record by HubSpot record ID.
  */
+/**
+ * Read an arbitrary set of properties off one inspection record. Returns null
+ * on 404. Used for lightweight checks (e.g. the finalize lock) without pulling
+ * a full InspectionSummary.
+ */
+export async function readInspectionProps(
+  recordId: string,
+  props: string[]
+): Promise<Record<string, any> | null> {
+  const { inspection: typeId } = typeIds();
+  try {
+    const qs = props.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/${recordId}?${qs}`);
+    return resp.properties || {};
+  } catch (e: any) {
+    if (String(e).includes('404')) return null;
+    throw e;
+  }
+}
+
 export async function fetchInspectionById(recordId: string): Promise<InspectionSummary | null> {
   const { inspection: typeId } = typeIds();
   const properties = [
