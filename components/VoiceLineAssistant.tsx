@@ -158,6 +158,14 @@ function naturalizeForSpeech(text: string): string {
     .replace(/\bEA\b/g, 'each')
     .replace(/\bHR\b/g, 'hours')
     .replace(/\bSY\b/g, 'square yards');
+  // Strip UI glyphs that screen readers/TTS verbalize awkwardly. The "→ Room"
+  // navigation marker must never be read as "right arrow" — turn it into a
+  // natural phrase, and drop any other stray arrows/symbols.
+  t = t
+    .replace(/^\s*→\s*/, 'Navigating to ')   // leading marker → spoken phrase
+    .replace(/[→←↑↓➜▶►•·]/g, ' ')            // any remaining arrows/bullets
+    .replace(/\s{2,}/g, ' ')
+    .trim();
   return t;
 }
 

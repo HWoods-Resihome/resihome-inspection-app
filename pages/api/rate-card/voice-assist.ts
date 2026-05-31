@@ -394,6 +394,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // fresh user turn (last message is the user's), and skip it for obvious
     // edits ("make that 50%") where no catalog lookup is needed.
     let preSearchBlock = '';
+    // How many of the inspector's phrases got a CONFIDENT pre-search match. Used
+    // as a guardrail: if the model tries to end the turn with a question without
+    // having proposed any of these ready items, we nudge it to act first.
+    let preSearchConfidentCount = 0;
     try {
       const lastMsg = clientMessages[clientMessages.length - 1];
       const utter = lastMsg && lastMsg.role === 'user' ? String(lastMsg.content || '') : '';
@@ -419,6 +423,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           ).join('; ');
           blocks.push(`"${m.q}" → ${top}`);
         }
+        preSearchConfidentCount = blocks.length;
         if (blocks.length) {
           preSearchBlock = [
             ``,
@@ -433,6 +438,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const systemWithHints = preSearchBlock ? `${system}\n${preSearchBlock}` : system;
 
+    // One-time guardrail: if the model asks a question without first proposing
+    // the items pre-search already matched confidently, we nudge it once to
+    // propose those before it's allowed to end the turn.
+    let nudgedToAct = false;
+
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       // Round 0 always uses the smart model. After that, the smart model is only
       // needed if a fresh catalog search happened (interpreting candidates).
@@ -440,7 +450,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       // Stream this model call; forward text deltas live to the client.
       const { content } = await streamAnthropic(
-        { model, max_tokens: 768, system: systemWithHints, tools: roomTools, messages },
+        { model, max_tokens: 1200, system: systemWithHints, tools: roomTools, messages },
         (chunk) => sse(res, 'delta', { text: chunk })
       );
 
@@ -449,6 +459,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       // No more tool calls -> the agent is done for this turn.
       if (toolUses.length === 0) {
+        // GUARDRAIL: the model is trying to end the turn with a question, but it
+        // never proposed the items pre-search matched confidently. This is the
+        // #1 multi-item failure — it asks about the one item needing a measured
+        // quantity and silently drops the ready ones. Force a round to propose
+        // them first, then it can ask. Only do this once per turn.
+        if (!didAct && preSearchConfidentCount > 0 && !nudgedToAct && round < MAX_TOOL_ROUNDS - 1) {
+          nudgedToAct = true;
+          messages.push({ role: 'assistant', content: textBlocks || '…' });
+          messages.push({
+            role: 'user',
+            content:
+              'You have not added any lines yet. For EVERY pre-searched match you are confident about, call propose_line NOW — count/EA items default to quantity 1, so do not ask about those. Emit all those propose_line calls in this step. Only AFTER proposing them may you ask ONE short question, and only for an item that genuinely needs a measured quantity (LF/SF). Do not reply with text alone.',
+          });
+          continue;
+        }
         if (didAct) {
           // It acted (and may add a brief wrap-up). The client synthesizes the
           // spoken summary of what changed; pass any text along as a message.
