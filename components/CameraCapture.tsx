@@ -38,6 +38,10 @@ interface Props {
   // Reuses the parent's upload helper (compression + HubSpot Files API).
   // Returning the HubSpot URL on success.
   uploadPhoto: (file: File) => Promise<string>;
+  // Optional queue-aware video uploader: uploads poster + clip and returns the
+  // composite `poster#v=video` entry (offline -> a local-draft composite). When
+  // omitted, falls back to the direct uploadPhoto(poster) + uploadVideo(clip).
+  uploadVideoEntry?: (videoFile: File, posterFile: File) => Promise<string>;
   // Optional cap on number of photos in a single session
   maxPhotos?: number;
   // --- Multi-room mode (optional) -----------------------------------------
@@ -149,7 +153,7 @@ function pickClipMime(): string {
 }
 
 export function CameraCapture({
-  isOpen, onClose, onComplete, uploadPhoto, maxPhotos = 30,
+  isOpen, onClose, onComplete, uploadPhoto, uploadVideoEntry, maxPhotos = 30,
   rooms, currentRoomId, onRoomChange, onRenameRoom, onDeleteRoom, onAddRoom,
   addressSnapshot, voiceSlot, tagLines, onTagPhotoToLine, onOverlayChange,
 }: Props) {
@@ -379,17 +383,21 @@ export function CameraCapture({
     const posterFile = new File([posterBlob], `clip_${id}_poster.jpg`, { type: 'image/jpeg' });
     const item: CaptureItem = { id, blobUrl: posterUrl, file: videoFile, status: 'uploading', abortController, kind: 'video' };
     setItems((prev) => [...prev, item]);
-    Promise.all([uploadPhoto(posterFile), uploadVideo(videoFile)])
-      .then(([pUrl, vUrl]) => {
+    // Prefer the queue-aware combined uploader (offline-capable); fall back to
+    // the direct poster + clip uploads when not provided.
+    const entryPromise = uploadVideoEntry
+      ? uploadVideoEntry(videoFile, posterFile)
+      : Promise.all([uploadPhoto(posterFile), uploadVideo(videoFile)]).then(([pUrl, vUrl]) => makeVideoEntry(pUrl, vUrl));
+    entryPromise
+      .then((entry) => {
         if (abortController.signal.aborted) return;
-        const entry = makeVideoEntry(pUrl, vUrl);
         setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'uploaded', hubspotUrl: entry } : it)));
       })
       .catch((err) => {
         if (abortController.signal.aborted) return;
         setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'failed', error: err?.message || String(err) } : it)));
       });
-  }, [uploadPhoto]);
+  }, [uploadPhoto, uploadVideoEntry]);
 
   function teardownCanvasPipeline() {
     if (recordRafRef.current != null) { cancelAnimationFrame(recordRafRef.current); recordRafRef.current = null; }
@@ -689,6 +697,7 @@ export function CameraCapture({
         (async () => {
           const posterBlob = await fetch(target.blobUrl).then((r) => r.blob());
           const posterFile = new File([posterBlob], `clip_${id}_poster.jpg`, { type: 'image/jpeg' });
+          if (uploadVideoEntry) return uploadVideoEntry(target.file, posterFile);
           const [pUrl, vUrl] = await Promise.all([uploadPhoto(posterFile), uploadVideo(target.file)]);
           return makeVideoEntry(pUrl, vUrl);
         })().then(onOk).catch(onErr);
@@ -697,7 +706,7 @@ export function CameraCapture({
       }
       return next;
     });
-  }, [uploadPhoto]);
+  }, [uploadPhoto, uploadVideoEntry]);
 
   // ----- Done / Cancel -----
 

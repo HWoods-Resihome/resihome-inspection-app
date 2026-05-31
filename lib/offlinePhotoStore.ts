@@ -14,14 +14,18 @@
  * regenerated (rehydrate) and the map rebuilt, so syncing still works.
  */
 
-import { compressToJpeg, uploadJpegBlob, toJpegName } from '@/lib/photoUpload';
+import { compressToJpeg, uploadJpegBlob, uploadVideo, toJpegName } from '@/lib/photoUpload';
+import { makeVideoEntry } from '@/lib/media';
 
 export type QueuedPhoto = {
   localId: string;
   inspectionRecordId: string;
   sectionId: string;
-  blob: Blob;
+  kind: 'photo' | 'video';
+  blob: Blob;            // photo: the jpeg; video: the poster jpeg
   filename: string;
+  videoBlob?: Blob;      // video only
+  videoType?: string;    // video only
   createdAt: number;
 };
 
@@ -29,8 +33,10 @@ const DB_NAME = 'resiwalk_photos';
 const STORE = 'queue';
 const DB_VERSION = 1;
 
-// localId -> live object URL (session-scoped; not persisted).
-const objectUrlByLocalId = new Map<string, string>();
+// localId -> live display URL + the raw object URLs to revoke (session-scoped;
+// not persisted). For a video the display URL is the composite poster#v=video
+// entry, and revokables holds both underlying object URLs.
+const urlByLocalId = new Map<string, { displayUrl: string; revokables: string[] }>();
 
 function idbAvailable(): boolean {
   return typeof window !== 'undefined' && 'indexedDB' in window;
@@ -102,10 +108,41 @@ export async function uploadPhotoOrQueue(
   } catch (e) {
     if (!isOfflineErr(e) || !idbAvailable()) throw e;
     const localId = `idbph_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    await putRecord({ localId, inspectionRecordId, sectionId, blob, filename, createdAt: Date.now() });
+    await putRecord({ localId, inspectionRecordId, sectionId, kind: 'photo', blob, filename, createdAt: Date.now() });
     const url = URL.createObjectURL(blob);
-    objectUrlByLocalId.set(localId, url);
+    urlByLocalId.set(localId, { displayUrl: url, revokables: [url] });
     return url;
+  }
+}
+
+/**
+ * Like uploadPhotoOrQueue but for a video clip: uploads the poster + video and
+ * returns the composite `poster#v=video` entry. Offline, both blobs are queued
+ * and a composite of local object URLs is returned for immediate playback.
+ */
+export async function uploadVideoEntryOrQueue(
+  videoFile: File,
+  posterBlob: Blob,
+  inspectionRecordId: string,
+  sectionId: string,
+): Promise<string> {
+  const filename = `clip_${Date.now()}_poster.jpg`;
+  try {
+    const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename), uploadVideo(videoFile)]);
+    return makeVideoEntry(pUrl, vUrl);
+  } catch (e) {
+    if (!isOfflineErr(e) || !idbAvailable()) throw e;
+    const localId = `idbvid_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    await putRecord({
+      localId, inspectionRecordId, sectionId, kind: 'video',
+      blob: posterBlob, filename, videoBlob: videoFile, videoType: videoFile.type || 'video/mp4',
+      createdAt: Date.now(),
+    });
+    const pObj = URL.createObjectURL(posterBlob);
+    const vObj = URL.createObjectURL(videoFile);
+    const entry = makeVideoEntry(pObj, vObj);
+    urlByLocalId.set(localId, { displayUrl: entry, revokables: [pObj, vObj] });
+    return entry;
   }
 }
 
@@ -126,9 +163,19 @@ export async function rehydrateQueuedPhotos(
   const out: { localId: string; sectionId: string; url: string }[] = [];
   for (const r of all) {
     if (r.inspectionRecordId !== inspectionRecordId) continue;
-    let url = objectUrlByLocalId.get(r.localId);
-    if (!url) { url = URL.createObjectURL(r.blob); objectUrlByLocalId.set(r.localId, url); }
-    out.push({ localId: r.localId, sectionId: r.sectionId, url });
+    let entry = urlByLocalId.get(r.localId);
+    if (!entry) {
+      if (r.kind === 'video' && r.videoBlob) {
+        const pObj = URL.createObjectURL(r.blob);
+        const vObj = URL.createObjectURL(r.videoBlob);
+        entry = { displayUrl: makeVideoEntry(pObj, vObj), revokables: [pObj, vObj] };
+      } else {
+        const url = URL.createObjectURL(r.blob);
+        entry = { displayUrl: url, revokables: [url] };
+      }
+      urlByLocalId.set(r.localId, entry);
+    }
+    out.push({ localId: r.localId, sectionId: r.sectionId, url: entry.displayUrl });
   }
   return out;
 }
@@ -153,7 +200,13 @@ export async function flushQueuedPhotos(
   for (const rec of all) {
     let newUrl: string;
     try {
-      newUrl = await uploadJpegBlob(rec.blob, rec.filename);
+      if (rec.kind === 'video' && rec.videoBlob) {
+        const vFile = new File([rec.videoBlob], `clip.${/(webm)/i.test(rec.videoType || '') ? 'webm' : /(quicktime|mov)/i.test(rec.videoType || '') ? 'mov' : 'mp4'}`, { type: rec.videoType || 'video/mp4' });
+        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(rec.blob, rec.filename), uploadVideo(vFile)]);
+        newUrl = makeVideoEntry(pUrl, vUrl);
+      } else {
+        newUrl = await uploadJpegBlob(rec.blob, rec.filename);
+      }
     } catch (e) {
       if (isOfflineErr(e)) break; // still offline — keep the rest queued
       // Permanent failure: drop so it can't wedge the queue.
@@ -161,10 +214,14 @@ export async function flushQueuedPhotos(
       await deleteRecord(rec.localId);
       continue;
     }
-    const oldUrl = objectUrlByLocalId.get(rec.localId) || '';
+    const entry = urlByLocalId.get(rec.localId);
+    const oldUrl = entry?.displayUrl || '';
     await deleteRecord(rec.localId);
     onSynced({ localId: rec.localId, sectionId: rec.sectionId, oldUrl, newUrl });
-    if (oldUrl) { try { URL.revokeObjectURL(oldUrl); } catch { /* noop */ } objectUrlByLocalId.delete(rec.localId); }
+    if (entry) {
+      for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
+      urlByLocalId.delete(rec.localId);
+    }
     synced++;
   }
   const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;

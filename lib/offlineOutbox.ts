@@ -17,7 +17,7 @@ export type OutboxEntry = {
   endpoint: string;
   method: 'POST' | 'PATCH';
   body: any;
-  kind: 'line' | 'lineArchive' | 'sectionList';
+  kind: 'line' | 'lineArchive' | 'sectionList' | 'sectionPhoto';
   // For 'line': the section id + line so the UI can re-show it after a reload
   // that happened before the entry synced.
   meta?: { sectionId?: string; line?: any; externalId?: string };

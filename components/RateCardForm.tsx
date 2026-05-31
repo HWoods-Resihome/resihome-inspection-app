@@ -16,7 +16,7 @@ import { CameraCapture } from '@/components/CameraCapture';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError } from '@/lib/offlineOutbox';
-import { uploadPhotoOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { useAppDialog } from '@/components/AppDialog';
 import {
   type SectionInstance,
@@ -542,6 +542,9 @@ export function RateCardForm(props: RateCardFormProps) {
         }
       } else if (entry.kind === 'sectionList' && entry.body?.section_list_json) {
         lastSavedSectionJsonRef.current = entry.body.section_list_json;
+      } else if (entry.kind === 'sectionPhoto' && entry.meta?.sectionId) {
+        const rid = data?.results?.[0]?.recordId;
+        if (rid) setSectionPhotoRecordIds((cur) => ({ ...cur, [entry.meta!.sectionId as string]: rid }));
       }
     });
 
@@ -1214,34 +1217,18 @@ export function RateCardForm(props: RateCardFormProps) {
     // remove + camera-complete, or multi-room camera saves, don't race each
     // other at HubSpot and lose/duplicate the section_photo record.
     await enqueueSave(async () => {
-    try {
-      if (urls.length === 0) {
-        // No photos and no existing record: nothing to do.
-        if (!existingRecordId) {
-          setSaveStatus({ kind: 'saved', at: Date.now() });
-          return;
-        }
-        // Archive the photo record
-        const ar = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ upserts: [], archives: [existingRecordId] }),
-        });
-        if (!ar.ok) {
-          const text = await ar.text();
-          throw new Error(`HTTP ${ar.status}: ${text.slice(0, 400)}`);
-        }
-        setSectionPhotoRecordIds((cur) => {
-          const next = { ...cur };
-          delete next[sectionId];
-          return next;
-        });
-      } else {
-        // Upsert the photo record
-        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+      // Build the request body once: archive when no real photos remain, else
+      // upsert the section_photo answer with the current real URLs.
+      const isArchive = urls.length === 0;
+      if (isArchive && !existingRecordId) {
+        // Nothing persisted and nothing to persist.
+        setSaveStatus({ kind: 'saved', at: Date.now() });
+        saveInFlightRef.current--;
+        return;
+      }
+      const body = isArchive
+        ? { upserts: [], archives: [existingRecordId] }
+        : {
             upserts: [{
               recordId: existingRecordId,
               answerProps: buildSectionPhotoAnswerProps({
@@ -1255,25 +1242,46 @@ export function RateCardForm(props: RateCardFormProps) {
               questionHubspotRecordId: null,
             }],
             archives: [],
-          }),
+          };
+      try {
+        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
         });
         if (!r.ok) {
           const text = await r.text();
           throw new Error(`HTTP ${r.status}: ${text.slice(0, 400)}`);
         }
-        const data = await r.json();
-        const newRecordId = data.results?.[0]?.recordId;
-        if (newRecordId) {
-          setSectionPhotoRecordIds((cur) => ({ ...cur, [sectionId]: newRecordId }));
+        if (isArchive) {
+          setSectionPhotoRecordIds((cur) => { const next = { ...cur }; delete next[sectionId]; return next; });
+        } else {
+          const data = await r.json();
+          const newRecordId = data.results?.[0]?.recordId;
+          if (newRecordId) setSectionPhotoRecordIds((cur) => ({ ...cur, [sectionId]: newRecordId }));
         }
+        setSaveStatus({ kind: 'saved', at: Date.now() });
+      } catch (e: any) {
+        console.error('[RateCardForm] photo save failed:', e);
+        // Offline: queue the section-photo record change (delete / list update)
+        // so it persists when back online.
+        if (isOfflineError(e)) {
+          outboxEnqueue({
+            inspectionRecordId: props.inspectionRecordId,
+            endpoint: `/api/inspections/${props.inspectionRecordId}/answers`,
+            method: 'POST',
+            body,
+            kind: 'sectionPhoto',
+            meta: { sectionId },
+          });
+          setPendingSync(outboxCountFor(props.inspectionRecordId));
+          setSaveStatus({ kind: 'saved', at: Date.now() });
+        } else {
+          setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+        }
+      } finally {
+        saveInFlightRef.current--;
       }
-      setSaveStatus({ kind: 'saved', at: Date.now() });
-    } catch (e: any) {
-      console.error('[RateCardForm] photo save failed:', e);
-      setSaveStatus({ kind: 'error', message: String(e?.message || e) });
-    } finally {
-      saveInFlightRef.current--;
-    }
     });
   }
 
@@ -1829,7 +1837,7 @@ export function RateCardForm(props: RateCardFormProps) {
             <span className={`inline-block w-2 h-2 rounded-full ${!online ? 'bg-amber-500' : 'bg-blue-500 animate-pulse'}`} />
             {!online
               ? (totalPending > 0
-                  ? `Offline — ${totalPending} ${noun} (incl. ${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'}) saved here, will sync when you're back online`
+                  ? `Offline — ${totalPending} ${noun}${pendingPhotos > 0 ? ` (incl. ${pendingPhotos} photo/video)` : ''} saved here, will sync when you're back online`
                   : `Offline — your changes are saved on this device and will sync automatically`)
               : `Syncing ${totalPending} ${noun}…`}
           </div>
@@ -2186,6 +2194,7 @@ export function RateCardForm(props: RateCardFormProps) {
           // Queue-aware: offline captures become local drafts and sync later.
           // Targets the camera's active room so a queued blob is attributed right.
           uploadPhoto={(file) => uploadPhotoOrQueue(file, props.inspectionRecordId, cameraSectionId || currentSectionId)}
+          uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, props.inspectionRecordId, cameraSectionId || currentSectionId)}
           rooms={sections.map((s) => {
             const count = (photosBySection[s.id] || []).length;
             return {
