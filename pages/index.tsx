@@ -392,25 +392,31 @@ export default function Home() {
             />
           </div>
 
-          {/* Status filter chips — compact and centered, wrapping neatly into
-              their own section on narrow screens (never horizontal-scroll). */}
-          <div className="flex flex-wrap justify-center gap-1.5 mb-3">
-            <FilterChip label={`All (${counts.all})`} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
-            <FilterChip label={`Scheduled (${counts.scheduled})`} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter('scheduled')} />
-            <FilterChip label={`In Progress (${counts.in_progress})`} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter('in_progress')} />
-            <FilterChip label={`Pending Approval (${counts.pending_approval})`} active={statusFilter === 'pending_approval'} onClick={() => setStatusFilter('pending_approval')} />
-            <FilterChip label={`Completed (${counts.completed})`} active={statusFilter === 'completed'} onClick={() => setStatusFilter('completed')} />
+          {/* Status filter chips — two full-width rows; each chip stretches to
+              fill its row so the section reads as a structured block (no
+              horizontal scroll on mobile). */}
+          <div className="space-y-1.5 mb-3">
+            <div className="flex gap-1.5">
+              <FilterChip className="flex-1" label={`All (${counts.all})`} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
+              <FilterChip className="flex-1" label={`Scheduled (${counts.scheduled})`} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter('scheduled')} />
+              <FilterChip className="flex-1" label={`In Progress (${counts.in_progress})`} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter('in_progress')} />
+            </div>
+            <div className="flex gap-1.5">
+              <FilterChip className="flex-1" label={`Pending Approval (${counts.pending_approval})`} active={statusFilter === 'pending_approval'} onClick={() => setStatusFilter('pending_approval')} />
+              <FilterChip className="flex-1" label={`Completed (${counts.completed})`} active={statusFilter === 'completed'} onClick={() => setStatusFilter('completed')} />
+            </div>
           </div>
 
-          {/* Filter controls: inspector | template | date sort — centered and
-              wrapping (no horizontal scroll on mobile). */}
-          <div className="flex flex-wrap justify-center items-center gap-2 mb-2 pb-1">
+          {/* Filter controls: inspector | template | date sort — all on one row.
+              The dropdowns shrink (truncating) so Updated + sort fit to their
+              right without wrapping or horizontal-scrolling on mobile. */}
+          <div className="flex items-center gap-2 mb-2 pb-1">
             {/* Inspector filter */}
-            <div className="relative shrink-0">
+            <div className="relative flex-1 min-w-0 max-w-[160px]">
               <select
                 value={inspectorFilter}
                 onChange={(e) => setInspectorFilter(e.target.value)}
-                className={`appearance-none text-xs font-heading font-semibold pl-3 pr-7 py-1.5 border rounded-md bg-white cursor-pointer whitespace-nowrap ${
+                className={`appearance-none w-full truncate text-xs font-heading font-semibold pl-2.5 pr-6 py-1.5 border rounded-md bg-white cursor-pointer ${
                   inspectorFilter !== 'all'
                     ? 'border-brand text-brand'
                     : 'border-gray-300 text-gray-700 hover:border-brand/50'
@@ -434,11 +440,11 @@ export default function Home() {
             </div>
 
             {/* Template filter */}
-            <div className="relative shrink-0">
+            <div className="relative flex-1 min-w-0 max-w-[160px]">
               <select
                 value={templateFilter}
                 onChange={(e) => setTemplateFilter(e.target.value)}
-                className={`appearance-none text-xs font-heading font-semibold pl-3 pr-7 py-1.5 border rounded-md bg-white cursor-pointer whitespace-nowrap ${
+                className={`appearance-none w-full truncate text-xs font-heading font-semibold pl-2.5 pr-6 py-1.5 border rounded-md bg-white cursor-pointer ${
                   templateFilter !== 'all'
                     ? 'border-brand text-brand'
                     : 'border-gray-300 text-gray-700 hover:border-brand/50'
@@ -603,14 +609,15 @@ interface ChipProps {
   label: string;
   active: boolean;
   onClick: () => void;
+  className?: string;
 }
 
-function FilterChip({ label, active, onClick }: ChipProps) {
+function FilterChip({ label, active, onClick, className = '' }: ChipProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`shrink-0 text-[11px] font-heading font-semibold px-2.5 py-1 rounded-full border transition whitespace-nowrap ${
+      className={`text-[11px] font-heading font-semibold px-2 py-1 rounded-full border transition whitespace-nowrap text-center ${className} ${
         active
           ? 'bg-brand text-white border-brand'
           : 'bg-white text-ink border-gray-300 hover:border-brand/50'
