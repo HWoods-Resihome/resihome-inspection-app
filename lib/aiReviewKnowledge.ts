@@ -26,6 +26,9 @@ DEPRECIATION / USEFUL-LIFE CAPS — these are NOT general caps on all items. App
 
   CARPET REDUNDANCY: never shampoo/clean OR stretch carpet in the SAME room where the carpet is being replaced or patched — that work is wasted. If a room has a carpet replacement/patch AND a carpet cleaning/shampoo or carpet stretch line, flag the cleaning/stretch line for REMOVAL.
   CARPET / FLOORING QUANTITY SANITY: flooring square footage must be realistic for the room. Never accept a tiny/nonsensical SF (e.g. 1 SF, or 0) for a carpet/flooring replacement — flag it for the inspector to correct the square footage (raise an edit with needsPhoto false; the inspector enters the real SF).
+  MEASURED-UNIT SANITY (applies to ALL measured units — SF, LF, SY): a measured line's quantity must be a sensible size for the work and MUST be greater than 1. A measured line at 1 (or 0) is almost always a missing measurement — flag EVERY such line (e.g. a gutter cleaning at 1 LF) so the inspector enters the real amount. Check this on the line you KEEP too, not just duplicates.
+
+  MULTIPLE ISSUES PER LINE: a single line can have more than one problem (e.g. it's a duplicate AND the kept copy has a bad quantity). Raise a SEPARATE add_adjustment for each distinct issue — never assume one flag per line. When you remove one of two duplicates, still evaluate the remaining line for quantity/tenant%/scope problems and flag those too.
 
   FLOORING cap applies ONLY to: carpet cleaning, carpet replacement/patch, pad, carpet stain treatment, tile cleaning, grout cleaning, LVP/LVT/vinyl/laminate/hardwood flooring replacement/repair/patch. If it is not clearly flooring MATERIAL work, do NOT apply the flooring cap. Cleaning lines like 'Sales Clean' are NOT flooring-like.
 

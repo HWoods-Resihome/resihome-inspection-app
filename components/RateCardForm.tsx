@@ -202,6 +202,16 @@ export function RateCardForm(props: RateCardFormProps) {
     | { kind: 'saved'; at: number }
     | { kind: 'error'; message: string };
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: 'idle' });
+  // Live status for the header badge: mirrors the prop but flips Scheduled →
+  // In Progress the moment the first edit saves (the server bumps it too), so
+  // the pill doesn't keep showing "Scheduled" after edits.
+  const [liveStatus, setLiveStatus] = useState<string | undefined>(props.inspectionStatus);
+  useEffect(() => { setLiveStatus(props.inspectionStatus); }, [props.inspectionStatus]);
+  useEffect(() => {
+    if ((saveStatus.kind === 'saving' || saveStatus.kind === 'saved') && liveStatus === 'scheduled') {
+      setLiveStatus('in_progress');
+    }
+  }, [saveStatus, liveStatus]);
   /** When true, show the error-detail modal with the last save failure text.
    *  Click "⚠ Save failed — click for details" in the sticky header to open. */
   const [showSaveErrorDetail, setShowSaveErrorDetail] = useState(false);
@@ -2315,7 +2325,7 @@ export function RateCardForm(props: RateCardFormProps) {
     if (stillLoading) {
       return { label: 'Loading…', color: 'bg-gray-100 text-gray-500 border-gray-200 animate-pulse' };
     }
-    switch (props.inspectionStatus) {
+    switch (liveStatus) {
       case 'scheduled': return { label: 'Scheduled', color: 'bg-blue-100 text-blue-800 border-blue-200' };
       case 'in_progress': return { label: 'In Progress', color: 'bg-amber-100 text-amber-800 border-amber-200' };
       case 'pending_approval': return { label: 'Pending Approval', color: 'bg-purple-100 text-purple-800 border-purple-200' };
@@ -3037,7 +3047,9 @@ export function RateCardForm(props: RateCardFormProps) {
           || finalizeResult !== null
           || showSaveErrorDetail
           || openEditors.size > 0
-          || cameraOverlayOpen;
+          || cameraOverlayOpen
+          || aiModalOpen          // AI review popup
+          || aiCameraTarget !== null; // AI review's in-app camera
         const hidden = overlayOpen && !voiceEngaged;
         return (
           <div
@@ -3267,8 +3279,9 @@ export function RateCardForm(props: RateCardFormProps) {
                     const items: Array<{ name: string; url: string }> = [];
                     items.push(finalizeResult.pdfs.master);
                     if (finalizeResult.pdfs.chargeback) items.push(finalizeResult.pdfs.chargeback);
-                    if (finalizeResult.pdfs.chargebackXlsx) items.push(finalizeResult.pdfs.chargebackXlsx);
                     for (const v of finalizeResult.pdfs.vendors) items.push({ name: v.name, url: v.url });
+                    // xlsx import file listed LAST.
+                    if (finalizeResult.pdfs.chargebackXlsx) items.push(finalizeResult.pdfs.chargebackXlsx);
                     // Sequential awaits — each download finishes before the
                     // next starts. Avoids browser rate limiting / "too many
                     // downloads" blocks that fire when we trigger them all
@@ -3290,9 +3303,6 @@ export function RateCardForm(props: RateCardFormProps) {
               {finalizeResult.pdfs.chargeback && (
                 <DownloadLink label="Tenant Chargeback (PDF)" filename={finalizeResult.pdfs.chargeback.name} url={finalizeResult.pdfs.chargeback.url} />
               )}
-              {finalizeResult.pdfs.chargebackXlsx && (
-                <DownloadLink label="Tenant Chargeback Import (xlsx)" filename={finalizeResult.pdfs.chargebackXlsx.name} url={finalizeResult.pdfs.chargebackXlsx.url} />
-              )}
               {finalizeResult.pdfs.vendors.map((v) => (
                 <DownloadLink
                   key={v.vendor}
@@ -3301,6 +3311,10 @@ export function RateCardForm(props: RateCardFormProps) {
                   url={v.url}
                 />
               ))}
+              {/* xlsx import file listed LAST. */}
+              {finalizeResult.pdfs.chargebackXlsx && (
+                <DownloadLink label="Tenant Chargeback Import (xlsx)" filename={finalizeResult.pdfs.chargebackXlsx.name} url={finalizeResult.pdfs.chargebackXlsx.url} />
+              )}
             </div>
             <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-2">
               <button

@@ -85,9 +85,11 @@ function fnv1a(str: string): string {
 }
 
 /**
- * Deterministic fingerprint of the priced scope (lines across all rooms). Two
- * scopes that price identically hash identically; any add/remove/qty/tenant%/
- * vendor-cost/vendor change flips it, which is exactly when a re-review is due.
+ * Deterministic fingerprint of the priced SCOPE (lines across all rooms). Two
+ * scopes that price identically hash identically; an add/remove/qty/tenant%/
+ * vendor-cost change flips it (a re-review is due). Deliberately EXCLUDES vendor
+ * assignment and photos — reassigning a vendor or editing photos doesn't change
+ * the scope the AI reviewed, so those keep the review finalized.
  */
 export function scopeHash(linesBySection: Record<string, HashableLine[]>): string {
   const rows: string[] = [];
@@ -99,7 +101,6 @@ export function scopeHash(linesBySection: Record<string, HashableLine[]>): strin
         Number(l.quantity) || 0,
         Number(l.tenantBillBackPercent) || 0,
         l.customVendorCost == null ? '' : Number(l.customVendorCost),
-        l.assignedTo || '',
       ].join('|'));
     }
   }
