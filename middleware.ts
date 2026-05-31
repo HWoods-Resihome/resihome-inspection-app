@@ -10,6 +10,12 @@ const PUBLIC_PATHS = new Set<string>([
   // flow checks the session itself).
   '/api/auth/google-login',
   '/api/auth/gmail/callback',
+  // Client error telemetry must accept reports even before/without a session
+  // (e.g. a crash on the login page) — it stores no sensitive data.
+  '/api/telemetry/error',
+  // Version check for the update prompt — must work even when the session has
+  // gone stale (so we can still tell the inspector to reload).
+  '/api/version',
 ]);
 
 function isStaticAsset(pathname: string): boolean {

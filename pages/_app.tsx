@@ -1,10 +1,23 @@
+import { useEffect } from 'react';
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AppDialogProvider } from '@/components/AppDialog';
+import { FieldStatusOverlays } from '@/components/FieldStatusOverlays';
+import { initErrorReporting } from '@/lib/clientErrorReporter';
+import { installSessionGuard } from '@/lib/sessionGuard';
+import { registerServiceWorker } from '@/lib/useAppUpdate';
 import '../styles/globals.css';
 
 export default function App({ Component, pageProps }: AppProps) {
+  useEffect(() => {
+    // Field reliability: capture crashes/silent failures, catch session
+    // expiry, and install the offline-shell service worker.
+    initErrorReporting();
+    installSessionGuard();
+    registerServiceWorker();
+  }, []);
+
   return (
     <ErrorBoundary>
       <Head>
@@ -13,6 +26,7 @@ export default function App({ Component, pageProps }: AppProps) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
       <AppDialogProvider>
+        <FieldStatusOverlays />
         <Component {...pageProps} />
       </AppDialogProvider>
     </ErrorBoundary>

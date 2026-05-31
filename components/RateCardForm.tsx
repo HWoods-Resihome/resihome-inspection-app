@@ -17,6 +17,8 @@ import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError } from '@/lib/offlineOutbox';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { useStorageQuota, formatMB } from '@/lib/storageQuota';
+import { setErrorContext } from '@/lib/clientErrorReporter';
 import { useAppDialog } from '@/components/AppDialog';
 import {
   type SectionInstance,
@@ -156,6 +158,11 @@ export function RateCardForm(props: RateCardFormProps) {
   const [pendingSync, setPendingSync] = useState(0);
   const [pendingPhotos, setPendingPhotos] = useState(0);
   const [online, setOnline] = useState(true);
+  // Device storage: photos/video queue in IndexedDB until they sync. Warn the
+  // inspector before they run out of room (otherwise captures silently fail).
+  const storage = useStorageQuota();
+  // Tag error reports with the open inspection so field crashes are diagnosable.
+  useEffect(() => { setErrorContext({ inspectionRecordId: props.inspectionRecordId }); }, [props.inspectionRecordId]);
 
   // Tracks whether existing data has been loaded so we don't trigger autosave
   // during the initial hydration.
@@ -1935,6 +1942,17 @@ export function RateCardForm(props: RateCardFormProps) {
           </div>
         );
       })()}
+
+      {/* Device-storage warning. Photos/video sit in local storage until they
+          sync; if the device fills up, new captures fail. Warn early. */}
+      {storage.nearFull && (
+        <div className={`-mx-4 px-4 py-1.5 mb-2 text-xs font-heading font-semibold flex items-center justify-center gap-2 ${storage.critical ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
+          <span className={`inline-block w-2 h-2 rounded-full ${storage.critical ? 'bg-red-500' : 'bg-amber-500'}`} />
+          {storage.critical
+            ? `Device storage almost full (${formatMB(storage.usageBytes)} of ${formatMB(storage.quotaBytes)}). Sync or free up space soon — new photos may fail to save.`
+            : `Device storage is filling up (${Math.round(storage.pct * 100)}% used). Reconnect to sync photos/video and free up space.`}
+        </div>
+      )}
 
       <div id="sticky-totals-header" className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
         <div className="sm:flex sm:items-center sm:justify-between sm:gap-4">

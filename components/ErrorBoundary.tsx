@@ -1,4 +1,5 @@
 import React from 'react';
+import { reportError } from '@/lib/clientErrorReporter';
 
 interface State {
   hasError: boolean;
@@ -20,9 +21,10 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // Log for diagnostics; in production this surfaces in the browser console
-    // and (if wired) any error reporting.
+    // Log for diagnostics and ship to the telemetry sink so field crashes are
+    // visible server-side, not just in the inspector's console.
     console.error('[ErrorBoundary] caught:', error, info?.componentStack);
+    reportError(error, { kind: 'react-render', componentStack: (info?.componentStack || '').slice(0, 2000) });
   }
 
   handleReload = () => {

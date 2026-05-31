@@ -16,6 +16,7 @@
 
 import { compressToJpeg, uploadJpegBlob, uploadVideo, toJpegName } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
+import { isQuotaError, StorageFullError } from '@/lib/storageQuota';
 
 export type QueuedPhoto = {
   localId: string;
@@ -80,7 +81,14 @@ async function getAllRecords(): Promise<QueuedPhoto[]> {
 }
 
 async function putRecord(rec: QueuedPhoto): Promise<void> {
-  await tx('readwrite', (s) => s.put(rec));
+  try {
+    await tx('readwrite', (s) => s.put(rec));
+  } catch (e) {
+    // Out of device storage — surface a clear, actionable error instead of
+    // letting the capture silently vanish.
+    if (isQuotaError(e)) throw new StorageFullError();
+    throw e;
+  }
 }
 
 async function deleteRecord(localId: string): Promise<void> {

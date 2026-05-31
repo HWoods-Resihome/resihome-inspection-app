@@ -100,6 +100,11 @@ export async function flushOutbox(
       remove(entry.id);
       synced++;
       try { onSynced?.(entry, data); } catch { /* non-fatal */ }
+    } else if (res.status === 401 || res.status === 403) {
+      // Session expired / not authorized — NOT a poison entry. Keep it (and
+      // everything after) so re-logging in replays the queue intact. The
+      // session guard surfaces a re-login prompt to the inspector.
+      break;
     } else if (res.status >= 400 && res.status < 500 && res.status !== 429) {
       // Permanently bad request — dropping it prevents a poison entry from
       // wedging the queue. (Logged so it isn't silent.)
