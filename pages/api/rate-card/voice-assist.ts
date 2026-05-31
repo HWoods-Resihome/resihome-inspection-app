@@ -191,7 +191,7 @@ function systemPrompt(
     `2. Only ask a clarifying question if genuinely ambiguous (e.g. which of two distinct items). One short question, then proceed.`,
     `3. QUANTITY & UNIT — use the matched item's unit of measure (the "unit" field from search_catalog); never guess a unit:`,
     `   - EACH / count units (EA, "each", per-fixture): default the quantity to 1 and propose immediately. Do NOT ask "how many" — e.g. "snake the toilet" is 1 EA, just add it.`,
-    `   - MEASURED units (LF linear feet, SF square feet, SY, etc.): if the inspector gave a number use it; otherwise ask ONCE, naming the item's ACTUAL unit (e.g. "How many linear feet?"). NEVER ask for a unit the item doesn't use (never ask linear feet for an EA item).`,
+    `   - MEASURED units (LF linear feet, SF square feet, SY, etc.): NEVER guess or default the quantity. If the inspector gave a number, use it and set quantityConfirmed: true. If they did NOT give a number, you MUST ask ONCE, naming the item's ACTUAL unit (e.g. "How many square feet for the carpet?") — do not propose it until they answer. NEVER ask for a unit the item doesn't use (never ask linear feet for an EA item). Example: "replace the carpet" with no size → ask "How many square feet?" before proposing.`,
     `   - Whole House SF items: auto-filled with the property square footage — never ask; just propose (quantity 1 is fine, the app substitutes the SF).`,
     `SIZE / TIER variants: many items come in size or level variants. ALWAYS default to the lowest / standard tier and propose it — for CLEANS ("sales clean", "turn clean") that means LEVEL 1 (never Level 2 unless the inspector says "level 2"); for rooms, the standard / regular size. Do NOT ask the inspector to choose a size or level — only use a higher tier when they explicitly say so ("level 2", "large room", "deep").`,
     `4. When you have a code and quantity AND the match is confident, call propose_line. The app adds the line automatically and announces it — you do NOT need the inspector to say yes first, and you must NOT claim you added it in your own words. If the match is not confident (see step 1), ask first instead of proposing.`,
@@ -246,6 +246,7 @@ function tools(rooms: { id: string; name: string }[] = []) {
         properties: {
           code: { type: 'string', description: 'Catalog line item code (from search_catalog).' },
           quantity: { type: 'number', description: 'Quantity in the item\'s unit of measure.' },
+          quantityConfirmed: { type: 'boolean', description: 'Set true ONLY when the inspector actually stated/confirmed the measured amount (e.g. they said "200 square feet"). For measured-unit items (SF/LF/SY) you MUST NOT guess or default the quantity — leave this false (or omit) and ask the inspector for the measurement first. Count/EA items don\'t need this.' },
           vendor: { type: 'string', description: `Assigned vendor; one of: ${VENDORS.join(', ')}. Omit to use the default "Vendor 1".` },
           tenantBillBackPercent: { type: 'number', description: 'Tenant chargeback percent, 0-100 in steps of 5. Omit to use the default 100.' },
           note: { type: 'string', description: 'Optional short note for the line.' },
@@ -470,7 +471,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           messages.push({
             role: 'user',
             content:
-              'You have not added any lines yet. For EVERY pre-searched match you are confident about, call propose_line NOW — count/EA items default to quantity 1, so do not ask about those. Emit all those propose_line calls in this step. Only AFTER proposing them may you ask ONE short question, and only for an item that genuinely needs a measured quantity (LF/SF). Do not reply with text alone.',
+              'You have not added any lines yet. For EVERY pre-searched match that is a count/EA item, call propose_line NOW (those default to quantity 1 — do not ask about them). Emit all those propose_line calls in this step. For any MEASURED item (SF/LF/SY) whose amount the inspector did NOT state, do NOT propose it — ask ONE short question for its measurement instead (e.g. "How many square feet for the carpet?"). Do not reply with text alone unless the only thing left is such a question.',
           });
           continue;
         }
@@ -566,6 +567,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             toolResults.push({
               type: 'tool_result', tool_use_id: tu.id, is_error: true,
               content: JSON.stringify({ error: 'Quantity must be a non-negative number. Ask the inspector.' }),
+            });
+            continue;
+          }
+
+          // GUARDRAIL: measured-unit items (SF/LF/SY) must have a quantity the
+          // inspector actually gave — never a guessed/defaulted one. Whole House
+          // SF items are exempt (the app fills the property square footage). If
+          // the model tries to add a measured item without confirming the
+          // measurement, bounce it back so it ASKS first. This is the "always
+          // confirm the SF on carpet replacement" rule.
+          const unit = (item.laborMeas || '').trim().toUpperCase();
+          const isMeasured = unit === 'SF' || unit === 'LF' || unit === 'SY';
+          const isWholeHouse = /whole\s*house/i.test(activeSection || body.section || '');
+          const confirmed = tu.input?.quantityConfirmed === true;
+          if (isMeasured && !isWholeHouse && !confirmed) {
+            const unitWord = unit === 'SF' ? 'square feet' : unit === 'LF' ? 'linear feet' : 'square yards';
+            toolResults.push({
+              type: 'tool_result', tool_use_id: tu.id, is_error: true,
+              content: JSON.stringify({
+                error: `"${item.laborShortDescription}" is measured in ${unitWord}. Do not guess the amount. Ask the inspector to confirm the ${unitWord} (e.g. "How many ${unitWord} for the carpet?"), then call propose_line again with the stated quantity and quantityConfirmed: true.`,
+                needsQuantity: true,
+                unit,
+              }),
             });
             continue;
           }
