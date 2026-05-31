@@ -22,16 +22,16 @@ const RETRY_BASE_DELAY_MS = 800;
 const TARGET_MAX_SIZE_MB = 0.6;     // aim for ~600KB output
 const TARGET_MAX_DIMENSION = 1280;  // 1280px on the long edge
 
-export async function uploadPhoto(file: File): Promise<string> {
+/**
+ * Compress any image File to a screen-sized JPEG Blob (client-side; works
+ * offline). Exposed separately from uploadPhoto so the offline path can queue
+ * the already-compressed blob (small, ~600KB) rather than the raw file.
+ */
+export async function compressToJpeg(file: File): Promise<Blob> {
   // HEIC/HEIF (the default iPhone format) does NOT render in <img> tags in most
   // browsers, nor in the PDF renderer — so we must always end up with a JPEG.
   const isHeic = /image\/(heic|heif)/i.test(file.type) || /\.(heic|heif)$/i.test(file.name || '');
 
-  // Step 1: compress to JPEG. `fileType: 'image/jpeg'` forces JPEG output even
-  // when the source is HEIC/PNG. On browsers that can't decode HEIC the library
-  // throws — we then try the canvas path (which decodes via <img>, working on
-  // Safari/iOS where HEIC photos originate). We only accept the library result
-  // if it's actually a JPEG.
   let compressed: Blob | null = null;
   try {
     const result = await imageCompression(file, {
@@ -46,16 +46,10 @@ export async function uploadPhoto(file: File): Promise<string> {
     console.warn('[uploadPhoto] library compression failed, will try canvas:', e?.message || e);
   }
 
-  // Canvas path: run it whenever we don't yet have a confirmed JPEG, or the JPEG
-  // is still too big (> ~2 MB → base64 could exceed the 10MB API body limit).
-  // This is also what converts HEIC → JPEG on Safari/iOS.
   if (!compressed || compressed.size > 2 * 1024 * 1024) {
     try {
       compressed = await canvasDownscale(file, TARGET_MAX_DIMENSION, 0.72);
     } catch (e: any) {
-      // Couldn't decode/resize. For HEIC this means the browser can't decode it
-      // (non-Safari) — give actionable guidance instead of uploading a file that
-      // won't render anywhere.
       if (isHeic) {
         throw new Error('This HEIC photo couldn’t be converted in this browser. On iPhone, set Settings → Camera → Formats to "Most Compatible", or use the in-app camera, then re-upload.');
       }
@@ -63,21 +57,16 @@ export async function uploadPhoto(file: File): Promise<string> {
     }
   }
 
-  // Hard cap: refuse to even try uploading > 6 MB raw (which is ~8 MB base64,
-  // already very close to the 10 MB body limit). This shouldn't trigger after
-  // the canvas fallback, but it's a safety net.
   if (compressed.size > 6 * 1024 * 1024) {
     throw new Error(`Image too large after compression (${formatBytes(compressed.size)}). Use a lower-resolution photo.`);
   }
+  return compressed;
+}
 
-  const base64 = await fileToBase64(compressed);
-  // Always upload as .jpg / image/jpeg — never trust the original name/type
-  // (which could be .heic), so HubSpot stores a renderable file.
-  const payload = JSON.stringify({
-    filename: toJpegName(file.name),
-    contentType: 'image/jpeg',
-    base64,
-  });
+/** Upload an already-compressed JPEG blob to HubSpot Files. Retries transient. */
+export async function uploadJpegBlob(blob: Blob, filename: string): Promise<string> {
+  const base64 = await fileToBase64(blob);
+  const payload = JSON.stringify({ filename, contentType: 'image/jpeg', base64 });
 
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
@@ -97,12 +86,18 @@ export async function uploadPhoto(file: File): Promise<string> {
     } catch (e: any) {
       lastError = e instanceof Error ? e : new Error(String(e));
       if (attempt < MAX_UPLOAD_ATTEMPTS) {
-        // Exponential backoff: 0.8s, 1.6s
         await new Promise((r) => setTimeout(r, RETRY_BASE_DELAY_MS * attempt));
       }
     }
   }
   throw lastError || new Error('Upload failed for unknown reason');
+}
+
+export async function uploadPhoto(file: File): Promise<string> {
+  const compressed = await compressToJpeg(file);
+  // Always upload as .jpg / image/jpeg — never trust the original name/type
+  // (which could be .heic), so HubSpot stores a renderable file.
+  return uploadJpegBlob(compressed, toJpegName(file.name));
 }
 
 /**
@@ -192,7 +187,8 @@ async function uploadVideoBase64(file: File, filename: string, contentType: stri
 export async function uploadFilesBatch(
   files: File[],
   onUploaded: (url: string) => void,
-  onProgress?: (completed: number, total: number) => void
+  onProgress?: (completed: number, total: number) => void,
+  uploader: (file: File) => Promise<string> = uploadPhoto,
 ): Promise<{ failed: number; errors: string[] }> {
   const CONCURRENCY = 2;  // lowered from 3 to be gentler on flaky cell networks
   let next = 0;
@@ -204,7 +200,7 @@ export async function uploadFilesBatch(
     while (next < files.length) {
       const idx = next++;
       try {
-        const url = await uploadPhoto(files[idx]);
+        const url = await uploader(files[idx]);
         onUploaded(url);
       } catch (e: any) {
         const msg = `${files[idx]?.name || `photo ${idx + 1}`}: ${e?.message || e}`;
@@ -297,7 +293,7 @@ function canvasDownscale(file: File, maxDimension: number, quality: number): Pro
 }
 
 /** Force a .jpg extension on the upload filename (input may be .heic/.png/etc). */
-function toJpegName(name: string): string {
+export function toJpegName(name: string): string {
   const base = (name || 'photo').replace(/\.[^.]+$/, '').trim();
   return `${base || 'photo'}.jpg`;
 }

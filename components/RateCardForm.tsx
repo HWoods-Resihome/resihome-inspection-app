@@ -16,6 +16,7 @@ import { CameraCapture } from '@/components/CameraCapture';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError } from '@/lib/offlineOutbox';
+import { uploadPhotoOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { useAppDialog } from '@/components/AppDialog';
 import {
   type SectionInstance,
@@ -153,6 +154,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // Offline outbox: number of saves queued for this inspection (waiting to sync)
   // and whether the browser currently reports being online.
   const [pendingSync, setPendingSync] = useState(0);
+  const [pendingPhotos, setPendingPhotos] = useState(0);
   const [online, setOnline] = useState(true);
 
   // Tracks whether existing data has been loaded so we don't trigger autosave
@@ -522,7 +524,13 @@ export function RateCardForm(props: RateCardFormProps) {
   // ----- Offline outbox: replay queued saves when back online ----------
   const refreshPending = useCallback(() => {
     setPendingSync(outboxCountFor(props.inspectionRecordId));
+    void countQueuedPhotos(props.inspectionRecordId).then(setPendingPhotos).catch(() => {});
   }, [props.inspectionRecordId]);
+
+  // Live handle to savePhotosForSection so the memoized flusher always calls
+  // the latest closure (current sectionPhotoRecordIds / sections), not a stale one.
+  const savePhotosRef = useRef<(sectionId: string, urls: string[]) => Promise<void>>(async () => {});
+  savePhotosRef.current = savePhotosForSection;
 
   const runFlush = useCallback(async () => {
     const { synced } = await flushOutbox((entry, data) => {
@@ -536,9 +544,32 @@ export function RateCardForm(props: RateCardFormProps) {
         lastSavedSectionJsonRef.current = entry.body.section_list_json;
       }
     });
+
+    // Upload queued offline photos: swap the local draft URL for the real
+    // HubSpot URL wherever it appears, then persist that section's photo list.
+    const touchedSections = new Set<string>();
+    const photoRes = await flushQueuedPhotos(props.inspectionRecordId, ({ oldUrl, newUrl }) => {
+      if (!oldUrl) return;
+      setPhotosBySection((m) => {
+        const next = { ...m };
+        for (const [sid, urls] of Object.entries(m)) {
+          if (urls.includes(oldUrl)) {
+            next[sid] = urls.map((u) => (u === oldUrl ? newUrl : u));
+            touchedSections.add(sid);
+          }
+        }
+        return next;
+      });
+    }).catch(() => ({ synced: 0 } as any));
+    // Persist each section whose photos changed (uses the live ref, real URLs only).
+    for (const sid of touchedSections) {
+      const urls = (photosBySectionRef.current[sid] || []).filter((u) => !u.startsWith('blob:'));
+      void savePhotosRef.current(sid, urls);
+    }
+
     refreshPending();
-    if (synced > 0) setSaveStatus({ kind: 'saved', at: Date.now() });
-  }, [refreshPending]);
+    if (synced > 0 || (photoRes && photoRes.synced > 0)) setSaveStatus({ kind: 'saved', at: Date.now() });
+  }, [refreshPending, props.inspectionRecordId]);
 
   useEffect(() => {
     if (typeof navigator !== 'undefined') setOnline(navigator.onLine !== false);
@@ -580,6 +611,26 @@ export function RateCardForm(props: RateCardFormProps) {
       }
       return next;
     });
+  }, [linesHydrated, props.inspectionRecordId]);
+
+  // Re-show photos still queued offline (drafts from a prior session) so the
+  // inspector's captures aren't lost from view before they upload.
+  const photoMergedRef = useRef(false);
+  useEffect(() => {
+    if (photoMergedRef.current || !linesHydrated) return;
+    photoMergedRef.current = true;
+    void rehydrateQueuedPhotos(props.inspectionRecordId).then((drafts) => {
+      if (drafts.length === 0) return;
+      setPhotosBySection((m) => {
+        const next = { ...m };
+        for (const d of drafts) {
+          const arr = next[d.sectionId] ? [...next[d.sectionId]] : [];
+          if (!arr.includes(d.url)) { arr.push(d.url); next[d.sectionId] = arr; }
+        }
+        return next;
+      });
+      setPendingPhotos((n) => Math.max(n, drafts.length));
+    }).catch(() => {});
   }, [linesHydrated, props.inspectionRecordId]);
 
   /**
@@ -1142,10 +1193,14 @@ export function RateCardForm(props: RateCardFormProps) {
    * Save the current photo URLs for a section to HubSpot immediately.
    * Replaces the autosave-based 'markPhotosDirty' flow.
    */
-  async function savePhotosForSection(sectionId: string, urls: string[]) {
+  async function savePhotosForSection(sectionId: string, urlsIn: string[]) {
     if (!linesHydrated || props.readOnly) return;
     const section = sections.find((s) => s.id === sectionId);
     if (!section) return;
+    // Never persist offline draft URLs (local object URLs) to HubSpot — they're
+    // device-local and meaningless server-side. They're replaced with the real
+    // URL once the queued photo uploads, then this is called again.
+    const urls = urlsIn.filter((u) => !u.startsWith('blob:'));
     const existingRecordId = sectionPhotoRecordIds[sectionId];
     // External ID must be globally unique across ALL inspection_answer records
     // in HubSpot (it's a unique-constraint property). Scoping by inspection
@@ -1237,7 +1292,10 @@ export function RateCardForm(props: RateCardFormProps) {
             [sectionId]: [...(prev[sectionId] || []), url],
           }));
         },
-        (current, total) => setUploadingSection({ sectionId, current, total })
+        (current, total) => setUploadingSection({ sectionId, current, total }),
+        // Queue-aware uploader: offline captures are stored locally (as drafts)
+        // and returned as a blob: URL for immediate display; they sync later.
+        (file) => uploadPhotoOrQueue(file, props.inspectionRecordId, sectionId),
       );
       if (failed > 0) {
         const reason = errors[0] ? `\n\nReason: ${errors[0]}` : '';
@@ -1245,10 +1303,12 @@ export function RateCardForm(props: RateCardFormProps) {
       }
       // Save with the resulting full list. Read the LIVE list (optimistic adds
       // already landed there) and union in newUrls so a photo added by another
-      // path mid-upload isn't dropped from the persisted record.
+      // path mid-upload isn't dropped from the persisted record. savePhotosForSection
+      // filters out offline draft (blob:) URLs — those persist after they sync.
       const base = photosBySectionRef.current[sectionId] || [];
       const allUrls = Array.from(new Set([...base, ...newUrls]));
       await savePhotosForSection(sectionId, allUrls);
+      refreshPending();
     } catch (e: any) {
       void dialog.alert(`Photo upload failed: ${e.message || e}`);
     } finally {
@@ -1384,6 +1444,7 @@ export function RateCardForm(props: RateCardFormProps) {
       const next = Array.from(new Set([...current, ...hubspotUrls]));
       setPhotosBySection((prev) => ({ ...prev, [cameraSectionId]: next }));
       savePhotosForSection(cameraSectionId, next);
+      refreshPending();
     }
     setCameraSectionId(null);
   }
@@ -1397,6 +1458,7 @@ export function RateCardForm(props: RateCardFormProps) {
       const next = Array.from(new Set([...current, ...capturedUrls]));
       setPhotosBySection((prev) => ({ ...prev, [leavingRoomId]: next }));
       savePhotosForSection(leavingRoomId, next);
+      refreshPending();
     }
     setCameraSectionId(enteringRoomId);
   }
@@ -1758,16 +1820,21 @@ export function RateCardForm(props: RateCardFormProps) {
       {/* Offline / pending-sync banner. Saves are queued locally and replay
           automatically when the connection returns, so work is never lost in a
           dead zone. */}
-      {(!online || pendingSync > 0) && (
-        <div className={`-mx-4 px-4 py-1.5 mb-2 text-xs font-heading font-semibold flex items-center justify-center gap-2 ${!online ? 'bg-amber-100 text-amber-800' : 'bg-blue-50 text-blue-700'}`}>
-          <span className={`inline-block w-2 h-2 rounded-full ${!online ? 'bg-amber-500' : 'bg-blue-500 animate-pulse'}`} />
-          {!online
-            ? (pendingSync > 0
-                ? `Offline — ${pendingSync} change${pendingSync === 1 ? '' : 's'} saved here, will sync when you're back online`
-                : `Offline — your changes are saved here and will sync automatically`)
-            : `Syncing ${pendingSync} change${pendingSync === 1 ? '' : 's'}…`}
-        </div>
-      )}
+      {(() => {
+        const totalPending = pendingSync + pendingPhotos;
+        if (online && totalPending === 0) return null;
+        const noun = totalPending === 1 ? 'change' : 'changes';
+        return (
+          <div className={`-mx-4 px-4 py-1.5 mb-2 text-xs font-heading font-semibold flex items-center justify-center gap-2 ${!online ? 'bg-amber-100 text-amber-800' : 'bg-blue-50 text-blue-700'}`}>
+            <span className={`inline-block w-2 h-2 rounded-full ${!online ? 'bg-amber-500' : 'bg-blue-500 animate-pulse'}`} />
+            {!online
+              ? (totalPending > 0
+                  ? `Offline — ${totalPending} ${noun} (incl. ${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'}) saved here, will sync when you're back online`
+                  : `Offline — your changes are saved on this device and will sync automatically`)
+              : `Syncing ${totalPending} ${noun}…`}
+          </div>
+        );
+      })()}
 
       <div id="sticky-totals-header" className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
         <div className="sm:flex sm:items-center sm:justify-between sm:gap-4">
@@ -2116,7 +2183,9 @@ export function RateCardForm(props: RateCardFormProps) {
           propertyRecordId={props.propertyRecordId}
           onComplete={handleCameraComplete}
           onClose={() => setCameraSectionId(null)}
-          uploadPhoto={uploadPhoto}
+          // Queue-aware: offline captures become local drafts and sync later.
+          // Targets the camera's active room so a queued blob is attributed right.
+          uploadPhoto={(file) => uploadPhotoOrQueue(file, props.inspectionRecordId, cameraSectionId || currentSectionId)}
           rooms={sections.map((s) => {
             const count = (photosBySection[s.id] || []).length;
             return {

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 // A small in-app replacement for window.alert / window.confirm so dialogs are
 // branded "ResiHome Inspections" instead of showing the browser origin
@@ -66,6 +66,47 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
     if (dialog) dialog.resolve(result);
     setDialog(null);
   };
+  // Stable handle to the latest close() for the keydown listener.
+  const closeRef = useRef(close);
+  closeRef.current = close;
+
+  // Accessibility: trap Tab focus within the dialog, close on Escape, and
+  // restore focus to whatever was focused before it opened.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const lastFocusedRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!dialog) return;
+    lastFocusedRef.current = (typeof document !== 'undefined' ? (document.activeElement as HTMLElement) : null);
+    const getFocusable = (): HTMLElement[] => {
+      const node = panelRef.current;
+      if (!node) return [];
+      return Array.from(
+        node.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+      ).filter((el) => !el.hasAttribute('disabled'));
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeRef.current(false);
+        return;
+      }
+      if (e.key === 'Tab') {
+        const items = getFocusable();
+        if (items.length === 0) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        const active = document.activeElement as HTMLElement;
+        if (!panelRef.current?.contains(active)) { e.preventDefault(); first.focus(); return; }
+        if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      try { lastFocusedRef.current?.focus?.(); } catch { /* element gone */ }
+    };
+  }, [dialog]);
 
   return (
     <AppDialogContext.Provider value={{ alert, confirm }}>
@@ -76,9 +117,10 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
           onClick={() => close(false)}
         >
           <div
+            ref={panelRef}
             className="bg-white rounded-2xl shadow-2xl ring-1 ring-black/5 w-full max-w-sm overflow-hidden animate-popIn"
             onClick={(e) => e.stopPropagation()}
-            role="dialog"
+            role={dialog.kind === 'confirm' ? 'alertdialog' : 'dialog'}
             aria-modal="true"
           >
             <div className="px-5 pt-4 pb-2 border-b border-gray-100">
