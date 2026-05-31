@@ -102,6 +102,20 @@ export function RateCardForm(props: RateCardFormProps) {
       return next;
     });
   }, []);
+  // Measured footer height, so the floating mic vertically centers on the
+  // Save & Close / Submit row (exact regardless of device safe-area padding).
+  const footerRef = useRef<HTMLDivElement | null>(null);
+  const [footerH, setFooterH] = useState(60);
+  useEffect(() => {
+    const el = footerRef.current;
+    if (!el) return;
+    const update = () => setFooterH(el.offsetHeight || 60);
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   // Photo lightbox (tap a photo to view/swipe/mark-up/tag/delete). Either a
   // room's section photos or a single line item's photos.
   type LightboxState =
@@ -1793,7 +1807,7 @@ export function RateCardForm(props: RateCardFormProps) {
           the viewport so the inspector can save/submit/cancel from anywhere.
           The voice assistant lives in the CENTER of this footer: a mic icon that
           expands upward into the conversation panel when pressed. */}
-      <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
+      <div ref={footerRef} className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-2">
           <div className="flex-1 min-w-0">
             <TerminalActions
@@ -1869,7 +1883,12 @@ export function RateCardForm(props: RateCardFormProps) {
         return (
           <div
             className="fixed inset-x-0 z-[60] pointer-events-none"
-            style={{ bottom: cameraOpen ? 96 : 14, display: hidden ? 'none' : undefined }}
+            style={{
+              // In the form, center the 44px mic on the footer button row; in the
+              // camera, sit just above the shutter row.
+              bottom: cameraOpen ? 96 : Math.max(6, Math.round(footerH / 2 - 22)),
+              display: hidden ? 'none' : undefined,
+            }}
           >
             <div
               className="relative max-w-7xl mx-auto px-4 flex pointer-events-none"
