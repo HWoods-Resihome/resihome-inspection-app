@@ -26,11 +26,13 @@ interface Props {
   // Persisted approve/decline decisions (restored across reload) + change report.
   initialDecisions?: Record<string, Decision>;
   onDecisionsChange?: (d: Record<string, Decision>) => void;
+  // All rooms, so a wrong-room suggestion can offer a target-room dropdown.
+  rooms?: { id: string; name: string }[];
 }
 
 // Per-suggestion inspector edits — raw input strings so the field can be
 // cleared / retyped freely (parsed to numbers only on apply).
-type Edit = { tenantPct?: string; quantity?: string };
+type Edit = { tenantPct?: string; quantity?: string; moveToSectionId?: string };
 
 function money(n: number | undefined): string {
   if (n == null || !isFinite(n)) return '';
@@ -43,7 +45,7 @@ const SEV: Record<string, string> = {
   low: 'bg-gray-400',
 };
 
-export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars, onAddPhoto, onIgnore, initialDecisions, onDecisionsChange }: Props) {
+export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars, onAddPhoto, onIgnore, initialDecisions, onDecisionsChange, rooms }: Props) {
   const [decisions, setDecisions] = useState<Record<string, Decision>>(() => initialDecisions || {});
   // Report decision changes up so they can be persisted across reload.
   useEffect(() => { onDecisionsChange?.(decisions); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [decisions]);
@@ -81,6 +83,12 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
   const approved = useMemo(() => adjustments
     .filter((a) => decisions[a.id] === 'approve')
     .map((a) => {
+      // Wrong-room: apply the inspector's chosen target room (dropdown).
+      if (a.wrongRoom) {
+        const sel = edits[a.id]?.moveToSectionId;
+        if (sel && a.suggested) return { ...a, suggested: { ...a.suggested, moveToSectionId: sel, moveToRoomName: rooms?.find((r) => r.id === sel)?.name || a.suggested.moveToRoomName } };
+        return a;
+      }
       if (a.type === 'remove') return a; // remove ignores field edits
       const e = edits[a.id];
       const tp = e?.tenantPct != null && e.tenantPct !== '' ? Number(e.tenantPct) : undefined;
@@ -187,7 +195,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                    the room + this line) OR remove the line — not approve/decline. */
                                 <>
                                   <div className="text-xs mt-1.5 text-gray-700">
-                                    {a.current?.description}{a.current?.tenantDollars != null && <span className="text-gray-400"> · tenant {money(a.current.tenantDollars)}</span>}
+                                    {a.current?.description}{a.current?.tenantDollars != null && <span className="text-gray-400"> · Tenant {money(a.current.tenantDollars)}</span>}
                                   </div>
                                   {photoAdded[a.id] ? (
                                     <div className="text-xs text-emerald-700 font-heading font-semibold mt-2">✓ Photo added — line kept</div>
@@ -221,23 +229,38 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                   )}
                                 </>
                               ) : (a.wrongRoom && a.suggested?.moveToSectionId) ? (
-                                /* Wrong room: move the line to the correct room (don't delete it). */
-                                <div className="flex gap-2 mt-2 items-center">
-                                  <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'approve' }))}
-                                    className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'approve' ? 'bg-brand text-white border-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`}>
-                                    Move to {a.suggested.moveToRoomName}
-                                  </button>
-                                  <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'decline' }))}
-                                    className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'decline' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
-                                    Decline
-                                  </button>
+                                /* Wrong room: pick the correct room (dropdown) and move the line there
+                                   (keeps it — doesn't delete). */
+                                <div className="mt-2">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="text-[11px] text-gray-500">Move to</span>
+                                    <select
+                                      value={edits[a.id]?.moveToSectionId ?? a.suggested.moveToSectionId}
+                                      onChange={(e) => setEdit(a.id, { moveToSectionId: e.target.value })}
+                                      className="text-sm border border-gray-300 rounded px-2 py-1 bg-white max-w-[170px]"
+                                    >
+                                      {(rooms && rooms.length ? rooms : [{ id: a.suggested.moveToSectionId!, name: a.suggested.moveToRoomName || 'room' }]).map((r) => (
+                                        <option key={r.id} value={r.id}>{r.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'approve' }))}
+                                      className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'approve' ? 'bg-brand text-white border-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`}>
+                                      Move
+                                    </button>
+                                    <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'decline' }))}
+                                      className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'decline' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
+                                      Decline
+                                    </button>
+                                  </div>
                                 </div>
                               ) : (
                                 <>
                                   {/* before → after + editable fields */}
                                   {a.type === 'remove' ? (
                                     <div className="text-xs mt-1.5 text-gray-700">
-                                      {a.current?.description}{a.current?.tenantDollars != null && <span className="text-gray-400"> · tenant {money(a.current.tenantDollars)}</span>}
+                                      {a.current?.description}{a.current?.tenantDollars != null && <span className="text-gray-400"> · Tenant {money(a.current.tenantDollars)}</span>}
                                     </div>
                                   ) : (() => {
                                     const unit = a.suggested?.unit || a.current?.unit;
@@ -255,7 +278,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                           ? <div className="text-xs text-emerald-700 mb-1">+ {a.suggested?.description || a.suggested?.lineItemCode}</div>
                                           : a.current && (
                                             <div className="text-[11px] text-gray-400 mb-1">
-                                              now: {a.current.tenantBillBackPercent != null && `${a.current.tenantBillBackPercent}% tenant`}{a.current.tenantDollars != null && ` (${money(a.current.tenantDollars)})`}{a.current.quantity != null && ` · qty ${a.current.quantity}${unit ? ` ${unit}` : ''}`}
+                                              now: {a.current.tenantBillBackPercent != null && `${a.current.tenantBillBackPercent}% Tenant`}{a.current.tenantDollars != null && ` (${money(a.current.tenantDollars)})`}{a.current.quantity != null && ` · qty ${a.current.quantity}${unit ? ` ${unit}` : ''}`}
                                             </div>
                                           )}
                                         <div className="flex items-end gap-2 flex-wrap">
@@ -279,7 +302,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                             />
                                           </label>
                                           <div className="text-xs text-brand font-semibold pb-1.5 ml-auto">
-                                            {dollars != null ? `tenant ${money(dollars)}` : ''}
+                                            {dollars != null ? `Tenant ${money(dollars)}` : ''}
                                           </div>
                                         </div>
                                       </div>

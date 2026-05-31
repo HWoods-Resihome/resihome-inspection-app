@@ -38,7 +38,9 @@ const SCHEDULE: Row[] = [
 
 /** Tenant chargeback % for a paint/flooring scope at the given tenant months. */
 export function depreciationTenantPct(kind: DepKind, months: number): number {
-  const m = Number.isFinite(months) ? months : 12;
+  // null / 0 / missing / invalid → backfill to 12 months. (A genuine 1-5 month
+  // tenancy still resolves to 100% below; only absent/zero data backfills.)
+  const m = Number.isFinite(months) && months > 0 ? months : 12;
   if (m < 6) return 100; // less than 6 months in home → full tenant responsibility
   let row = SCHEDULE[0];
   for (const r of SCHEDULE) if (r.months <= m) row = r;

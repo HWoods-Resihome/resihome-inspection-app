@@ -379,7 +379,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const regions = await getCachedRegions().catch(() => [] as RegionRate[]);
     const region = body.region || '';
     const tenantMonthsRaw = Number(body?.tenantMonths);
-    const tenantMonths = Number.isFinite(tenantMonthsRaw) && tenantMonthsRaw >= 0 ? tenantMonthsRaw : 12;
+    const tenantMonths = Number.isFinite(tenantMonthsRaw) && tenantMonthsRaw > 0 ? tenantMonthsRaw : 12;
     const currentLines: CurrentLine[] = Array.isArray(body?.currentLines) ? body.currentLines : [];
     const linesByExternalId = new Map(currentLines.map((l) => [l.externalId, l]));
 

@@ -202,7 +202,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const lines = Array.isArray(body?.lines) ? body.lines : [];
     const region = body?.region || '';
     const rawMonths = Number(body?.property?.tenantMonths);
-    const tenantMonths = Number.isFinite(rawMonths) && rawMonths >= 0 ? rawMonths : 12;
+    const tenantMonths = Number.isFinite(rawMonths) && rawMonths > 0 ? rawMonths : 12;
     const ignoredLineIds: string[] = Array.isArray(body?.ignoredLineIds) ? body.ignoredLineIds.map(String) : [];
 
     const catalog = await fetchRateCardCatalog();

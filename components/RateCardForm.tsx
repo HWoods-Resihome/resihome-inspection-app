@@ -175,6 +175,9 @@ export function RateCardForm(props: RateCardFormProps) {
   // True when queued items have stopped draining (no progress across ticks) so
   // the banner can offer Retry / Clear instead of an endless "Syncing…".
   const [syncStuck, setSyncStuck] = useState(false);
+  // True while a flush/retry is actively running (drives the Retry button's
+  // "Retrying…" feedback so it's clear something is happening).
+  const [flushing, setFlushing] = useState(false);
   // Start high so the first tick can't falsely flag "stuck" before a sync round.
   const lastPendingRef = useRef(Number.POSITIVE_INFINITY);
   const [online, setOnline] = useState(true);
@@ -593,6 +596,8 @@ export function RateCardForm(props: RateCardFormProps) {
   savePhotosRef.current = savePhotosForSection;
 
   const runFlush = useCallback(async () => {
+    setFlushing(true);
+    try {
     const { synced } = await flushOutbox((entry, data) => {
       // Stitch results back so the in-memory state stays correct without a reload.
       if (entry.kind === 'line') {
@@ -670,6 +675,9 @@ export function RateCardForm(props: RateCardFormProps) {
 
     refreshPending();
     if (synced > 0 || (photoRes && photoRes.synced > 0)) setSaveStatus({ kind: 'saved', at: Date.now() });
+    } finally {
+      setFlushing(false);
+    }
   }, [refreshPending, props.inspectionRecordId]);
 
   useEffect(() => {
@@ -2149,7 +2157,7 @@ export function RateCardForm(props: RateCardFormProps) {
     // review invalidates it (see reviewValid), so this re-prompts after changes.
     if (props.templateType === 'pm_scope_rate_card' && props.inspectionStatus !== 'pending_approval' && !reviewValid) {
       const ok = await dialog.confirm(
-        'AI review must be completed before submitting for approval.\n\nIt checks the scope against the turn standard (depreciation, duplicates, tenant responsibility) and suggests adjustments to approve or decline.',
+        'AI Review must be completed before submitting for approval.\n\nIt checks the scope against the turn standard (depreciation, duplicates, tenant responsibility) and suggests adjustments to approve or decline.',
         { confirmLabel: 'Run AI Review', cancelLabel: 'Not now' }
       );
       if (ok) void runAiReview();
@@ -2394,11 +2402,14 @@ export function RateCardForm(props: RateCardFormProps) {
         }
         // Online with a non-empty queue: actively syncing, or stuck (offer Retry/Clear).
         return (
-          <div className={`-mx-4 px-4 py-1.5 mb-2 text-xs font-heading font-semibold flex items-center justify-center gap-2 ${syncStuck ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
-            <span className={`inline-block w-2 h-2 rounded-full ${syncStuck ? 'bg-red-500' : 'bg-blue-500 animate-pulse'}`} />
-            <span>{syncStuck ? `${totalPending} ${noun} haven’t synced` : `Syncing ${totalPending} ${noun}…`}</span>
-            <button type="button" onClick={() => void runFlush()} className="underline hover:no-underline">Retry</button>
-            {syncStuck && (
+          <div className={`-mx-4 px-4 py-1.5 mb-2 text-xs font-heading font-semibold flex items-center justify-center gap-2 ${flushing ? 'bg-blue-50 text-blue-700' : syncStuck ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
+            <span className={`inline-block w-2 h-2 rounded-full ${flushing ? 'bg-blue-500 animate-pulse' : syncStuck ? 'bg-red-500' : 'bg-blue-500 animate-pulse'}`} />
+            <span>{flushing ? `Syncing ${totalPending} ${noun}…` : syncStuck ? `${totalPending} ${noun} haven’t synced` : `Syncing ${totalPending} ${noun}…`}</span>
+            <button type="button" onClick={() => void runFlush()} disabled={flushing} className="inline-flex items-center gap-1 underline hover:no-underline disabled:opacity-60 disabled:no-underline">
+              {flushing && <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />}
+              {flushing ? 'Retrying…' : 'Retry'}
+            </button>
+            {syncStuck && !flushing && (
               <button type="button" onClick={() => void clearStuckQueue()} className="underline hover:no-underline">Clear</button>
             )}
           </div>
@@ -2814,7 +2825,7 @@ export function RateCardForm(props: RateCardFormProps) {
           <div className={`max-w-7xl mx-auto px-3 sm:px-4 py-1.5 flex items-center justify-between gap-2 text-xs font-heading border-b ${reviewValid ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-amber-50 border-amber-100 text-amber-800'}`}>
             <span className="flex items-center gap-1.5 min-w-0">
               <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${reviewValid ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-              <span className="truncate">{reviewValid ? 'AI review complete for this scope' : 'AI review required before submit'}</span>
+              <span className="truncate">{reviewValid ? 'AI Review complete for this scope' : 'AI Review required before submit'}</span>
             </span>
             <button
               type="button"
@@ -2822,7 +2833,7 @@ export function RateCardForm(props: RateCardFormProps) {
               disabled={aiLoading}
               className="shrink-0 inline-flex items-center gap-1 font-semibold px-2.5 py-1 rounded-md bg-brand text-white hover:bg-brand-dark disabled:opacity-50"
             >
-              <span aria-hidden>✦</span> {reviewValid ? 'Re-run AI review' : 'Run AI review'}
+              <span aria-hidden>✦</span> {reviewValid ? 'Re-run AI Review' : 'Run AI Review'}
             </button>
           </div>
         )}
@@ -2858,6 +2869,7 @@ export function RateCardForm(props: RateCardFormProps) {
         onIgnore={(a) => { if (a.lineExternalId) addIgnoredPhotoLine(props.inspectionRecordId, a.lineExternalId); }}
         initialDecisions={aiDecisions}
         onDecisionsChange={setAiDecisions}
+        rooms={sections.map((s) => ({ id: s.id, name: s.displayName || s.label }))}
       />
       {/* Hidden input for the review popup's "Add photo" action (attaches the
           damage photo to the room + the flagged line). */}

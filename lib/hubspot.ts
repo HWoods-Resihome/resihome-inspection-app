@@ -1064,7 +1064,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         const raw = tResp.properties?.last_tenant_time_in_home_months;
         if (raw != null && raw !== '') {
           const n = Number(raw);
-          if (Number.isFinite(n) && n >= 0) propertyLastTenantMonths = n;
+          if (Number.isFinite(n) && n > 0) propertyLastTenantMonths = n;
         }
       } catch (e: any) {
         console.warn(`[fetchInspectionWithPropertyRef] last_tenant_time_in_home_months unavailable for ${propertyIdRef} (defaulting to 12):`, String(e).slice(0, 160));
