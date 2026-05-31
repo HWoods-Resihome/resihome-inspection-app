@@ -316,22 +316,32 @@ export async function fetchProperties(
   // Keep payloads small; a type-ahead only needs a handful of best matches.
   const limit = Math.min(Math.max(opts.limit || (term ? 50 : 25), 1), 100);
 
+  // Projection is forgiving — HubSpot silently ignores names that don't exist on
+  // the object — so we can list every variant we might display. (`state_code` is
+  // the real field on the production object; `state` is a sandbox alias.)
   const candidateProps = [
     'hs_object_id', 'name',
-    // The postal field is `zip_code` on this object (with legacy `zip` as a
-    // fallback). Requesting only `zip` is why new inspections lost the zip in
-    // their address snapshot. Mirror the PDF-header logic in fetchInspection*.
-    'address', 'city', 'state', 'zip', 'zip_code',
+    'address', 'city', 'state', 'state_code', 'zip', 'zip_code',
     'bedrooms', 'bathrooms',
     PROPERTY_STATUS_PROPERTY,
   ];
+
+  // CRITICAL: unlike the projection, an unknown property name in a `filters` or
+  // `sorts` position is a hard 400 ("Upstream request failed (400)"). So we only
+  // ever filter/sort on fields confirmed to exist on the object. The production
+  // Property object has address/city/zip_code/state_code and the `status`
+  // enum — but NO `name` field, which is what was 400-ing the picker.
+  const SEARCH_FIELDS = ['address', 'city', 'zip_code'];
+  // Sort by a guaranteed system property so the default page can't 400 on a
+  // missing custom field. Most-recently-modified first is a sensible default.
+  const DEFAULT_SORT = [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }];
 
   // Inactive properties are never selectable. NOT_IN keeps records whose status
   // is empty/null visible. This filter is AND-ed into every search group below.
   const statusFilter = { propertyName: PROPERTY_STATUS_PROPERTY, operator: 'NOT_IN', values: PROPERTY_EXCLUDE_STATUSES };
   const excludeOn = PROPERTY_EXCLUDE_STATUSES.length > 0;
 
-  function buildBody(withStatus: boolean): any {
+  function buildBody(withStatus: boolean, withSort: boolean): any {
     const base = withStatus ? [statusFilter] : [];
     let filterGroups: any[];
     if (term) {
@@ -340,36 +350,38 @@ export async function fetchProperties(
       // repeated in each group because groups are OR-ed (filters within a group
       // are AND-ed).
       const wild = `*${term}*`;
-      filterGroups = ['address', 'name', 'city', 'zip_code'].map((f) => ({
+      filterGroups = SEARCH_FIELDS.map((f) => ({
         filters: [...base, { propertyName: f, operator: 'CONTAINS_TOKEN', value: wild }],
       }));
     } else {
       filterGroups = withStatus ? [{ filters: base }] : [];
     }
     const body: any = { filterGroups, properties: candidateProps, limit };
-    // Alphabetical default page when not searching; for a search, let match
-    // order stand and let the client rank it.
-    if (!term) body.sorts = [{ propertyName: 'name', direction: 'ASCENDING' }];
+    if (!term && withSort) body.sorts = DEFAULT_SORT;
     return body;
   }
 
+  async function search(withStatus: boolean, withSort: boolean) {
+    return hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+      method: 'POST',
+      body: JSON.stringify(buildBody(withStatus, withSort)),
+    });
+  }
+
+  // Try the full query, then degrade on a 400 so a single misconfigured field
+  // can never hard-break the picker: first drop the status filter, then the sort.
   let resp: any;
   try {
-    resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
-      method: 'POST',
-      body: JSON.stringify(buildBody(excludeOn)),
-    });
-  } catch (e: any) {
-    // If the status field was renamed/removed in HubSpot the filter 400s — don't
-    // break the picker, just run without the status exclusion and warn.
-    if (excludeOn && e?.status === 400) {
-      console.warn(`[fetchProperties] status filter on "${PROPERTY_STATUS_PROPERTY}" rejected (400); retrying without it. Check PROPERTY_STATUS_PROPERTY / PROPERTY_EXCLUDE_STATUSES.`);
-      resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
-        method: 'POST',
-        body: JSON.stringify(buildBody(false)),
-      });
-    } else {
-      throw e;
+    resp = await search(excludeOn, true);
+  } catch (e1: any) {
+    if (e1?.status !== 400) throw e1;
+    console.warn('[fetchProperties] search 400; retrying without status filter. Check PROPERTY_STATUS_PROPERTY / PROPERTY_EXCLUDE_STATUSES.');
+    try {
+      resp = await search(false, true);
+    } catch (e2: any) {
+      if (e2?.status !== 400) throw e2;
+      console.warn('[fetchProperties] still 400; retrying without sort.');
+      resp = await search(false, false);
     }
   }
 
@@ -378,7 +390,7 @@ export async function fetchProperties(
     const p = r.properties || {};
     const address = p.address || '';
     const city = p.city || '';
-    const state = p.state || '';
+    const state = p.state_code || p.state || '';
     const zip = (p.zip_code || p.zip || '').toString().trim();
     let name = p.name || '';
     if (!name) name = [address, city, state, zip].filter(Boolean).join(', ');
