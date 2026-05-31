@@ -125,9 +125,24 @@ async function hubspotFetch(path: string, init: RequestInit = {}): Promise<any> 
       await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
       continue;
     }
+    // Retry transient upstream errors (gateway/unavailable/timeout) too — a
+    // brief HubSpot blip shouldn't fail an inspector's save outright.
+    if ((res.status === 502 || res.status === 503 || res.status === 504) && attempt < BACKOFFS_MS.length) {
+      await res.text().catch(() => '');
+      console.warn(`[hubspotFetch] ${res.status} on ${method} ${path}, retrying in ${BACKOFFS_MS[attempt]}ms (attempt ${attempt + 1}/${BACKOFFS_MS.length})`);
+      await new Promise((resolve) => setTimeout(resolve, BACKOFFS_MS[attempt]));
+      continue;
+    }
     if (!res.ok) {
       const text = await res.text();
-      lastError = new Error(`HubSpot ${method} ${path} failed ${res.status}: ${text.slice(0, 500)}`);
+      // Log the FULL upstream detail server-side for debugging...
+      console.error(`[hubspotFetch] ${method} ${path} failed ${res.status}: ${text.slice(0, 1000)}`);
+      // ...but throw a sanitized error so routes that surface e.message to the
+      // browser don't leak HubSpot internals (object type ids, property names,
+      // validation specifics).
+      lastError = new Error(`Upstream request failed (${res.status})`);
+      (lastError as any).status = res.status;
+      (lastError as any).detail = text.slice(0, 500);
       throw lastError;
     }
     if (res.status === 204) return null;
@@ -135,7 +150,7 @@ async function hubspotFetch(path: string, init: RequestInit = {}): Promise<any> 
   }
 
   // All retries exhausted on 429
-  throw lastError || new Error(`HubSpot ${method} ${path} failed after retries (429)`);
+  throw lastError || new Error('Upstream request failed after retries (rate limited)');
 }
 
 export async function fetchQuestionsForTemplate(
@@ -354,8 +369,12 @@ export async function fetchPropertyCoords(recordId: string): Promise<{ lat: numb
  *
  * Sort priority: scheduled_date if set, else completed_at, else createdate (HubSpot built-in).
  */
-export async function fetchInspections(): Promise<InspectionSummary[]> {
+export async function fetchInspections(opts: { search?: string } = {}): Promise<InspectionSummary[]> {
   const { inspection: typeId } = typeIds();
+  // A search term lets the user reach inspections beyond the recent-500 window
+  // (address / name / inspector substring match), so old records aren't
+  // unreachable from the list.
+  const search = (opts.search || '').trim();
   const properties = [
     'inspection_id_external', 'inspection_name', 'template_type', 'status',
     'property_address_snapshot', 'inspector_name', 'inspector_email',
@@ -370,9 +389,19 @@ export async function fetchInspections(): Promise<InspectionSummary[]> {
   const out: InspectionSummary[] = [];
   let after: string | undefined = undefined;
   let pages = 0;
+  // When searching, OR across address / name / inspector via separate filter
+  // groups (HubSpot ANDs within a group, ORs between groups).
+  const searchGroups = search
+    ? [
+        { filters: [{ propertyName: 'property_address_snapshot', operator: 'CONTAINS_TOKEN', value: `*${search}*` }] },
+        { filters: [{ propertyName: 'inspection_name', operator: 'CONTAINS_TOKEN', value: `*${search}*` }] },
+        { filters: [{ propertyName: 'inspector_name', operator: 'CONTAINS_TOKEN', value: `*${search}*` }] },
+      ]
+    : [];
+  const maxPages = search ? 3 : 5;
   do {
     const body: any = {
-      filterGroups: [],
+      filterGroups: searchGroups,
       properties,
       limit: 100,
       sorts: [{ propertyName: 'hs_createdate', direction: 'DESCENDING' }],
@@ -424,8 +453,9 @@ export async function fetchInspections(): Promise<InspectionSummary[]> {
     }
     after = resp.paging?.next?.after;
     pages++;
-    // Cap at 5 pages = 500 inspections for now. Above this we'd need pagination/infinite scroll.
-    if (pages >= 5) break;
+    // Cap the default (no-search) list at 500; a search narrows server-side so
+    // older records remain reachable by address/name/inspector.
+    if (pages >= maxPages) break;
   } while (after);
 
   return out;
@@ -1118,21 +1148,25 @@ export interface SavedAnswer {
 
 export async function fetchAnswersForInspection(inspectionRecordId: string): Promise<SavedAnswer[]> {
   const tids = typeIds();
-  // Step 1: read the associations to find linked Answer record IDs
-  const assocResp = await hubspotFetch(
-    `/crm/associations/${HUBSPOT_API_VERSION}/${tids.inspection}/${tids.answer}/batch/read`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ inputs: [{ id: inspectionRecordId }] }),
-    }
-  );
+  // Step 1: read the associations to find linked Answer record IDs. Use the
+  // paginated v4 single-object endpoint (limit 500, follow paging.next.after)
+  // so inspections with >100 answers — a Rate Card with many line items plus
+  // section photos easily exceeds that — don't silently drop records, which
+  // would corrupt finalize totals, PDFs, reopen, and QC copy.
   const answerIds: string[] = [];
-  for (const r of assocResp.results || []) {
-    for (const t of r.to || []) {
-      if (t.toObjectId) answerIds.push(String(t.toObjectId));
-      else if (t.id) answerIds.push(String(t.id));
+  let after: string | undefined;
+  do {
+    const qs = new URLSearchParams({ limit: '500' });
+    if (after) qs.set('after', after);
+    const assocResp = await hubspotFetch(
+      `/crm/v4/objects/${tids.inspection}/${inspectionRecordId}/associations/${tids.answer}?${qs.toString()}`
+    );
+    for (const r of assocResp.results || []) {
+      const id = r.toObjectId ?? r.id;
+      if (id != null) answerIds.push(String(id));
     }
-  }
+    after = assocResp.paging?.next?.after;
+  } while (after);
   if (answerIds.length === 0) return [];
 
   // Step 2: batch-read answer properties. HubSpot batch read limit is 100.

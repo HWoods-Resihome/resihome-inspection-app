@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import Head from 'next/head';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppDialog } from '@/components/AppDialog';
 import { useRouter } from 'next/router';
 import type { InspectionSummary } from '@/lib/types';
@@ -50,10 +50,19 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
-  // Wrapped in useCallback so we can call it from multiple places.
+  // Keep the latest search term in a ref so refetch-on-focus / post-action
+  // reloads honor the active search instead of resetting to the default list.
+  const searchRef = useRef('');
+  searchRef.current = search;
+
+  // Wrapped in useCallback so we can call it from multiple places. When a
+  // search term is active, it's sent to the server so inspections beyond the
+  // recent-500 window are reachable (address / name / inspector match).
   const fetchInspections = useCallback(async () => {
     try {
-      const r = await fetch('/api/inspections', { cache: 'no-store' });
+      const term = searchRef.current.trim();
+      const qs = term ? `?search=${encodeURIComponent(term)}` : '';
+      const r = await fetch(`/api/inspections${qs}`, { cache: 'no-store' });
       const data = await r.json();
       if (data.error) {
         setError(data.error);
@@ -94,6 +103,16 @@ export default function Home() {
     };
   }, [fetchInspections]);
 
+  // Debounced server-side search: re-query when the term changes so older
+  // inspections (past the recent-500 default) surface. Skips the initial mount
+  // (the mount effect already loaded the default list).
+  const didMountSearch = useRef(false);
+  useEffect(() => {
+    if (!didMountSearch.current) { didMountSearch.current = true; return; }
+    const t = setTimeout(() => { setLoading(true); fetchInspections(); }, 400);
+    return () => clearTimeout(t);
+  }, [search, fetchInspections]);
+
   async function handleLogout() {
     try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
     router.replace('/login');
@@ -111,8 +130,12 @@ export default function Home() {
       const statusLower = (i.status || '').trim().toLowerCase();
       if (statusLower === 'cancelled' || statusLower === 'canceled') return false;
 
-      // Search filter (matches against property address)
-      if (q && !i.propertyAddressSnapshot.toLowerCase().includes(q)) return false;
+      // Search filter — match address, name, OR inspector so a server result
+      // that matched by name/inspector isn't hidden by a narrower client filter.
+      if (q) {
+        const hay = `${i.propertyAddressSnapshot} ${i.inspectionName} ${i.inspectorName}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       // Status filter
       if (wantStatus !== 'all') {
         const s = statusLower;
@@ -354,7 +377,7 @@ export default function Home() {
             </svg>
             <input
               type="text"
-              placeholder="Search by address..."
+              placeholder="Search address, name, or inspector…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="focus-brand w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg bg-white"
