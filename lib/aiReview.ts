@@ -24,6 +24,10 @@ export interface AiAdjustment {
   title: string;        // short headline, e.g. "Reduce tenant % on carpet (depreciation cap)"
   rationale: string;    // why, in the inspector's terms
   severity?: 'high' | 'medium' | 'low';
+  /** The line's damage/tenant claim isn't supported by a photo. The inspector
+   *  should either add a photo of the damage (attaches to the room + line) or
+   *  remove the line — not a plain approve/decline. */
+  needsPhoto?: boolean;
   /** Snapshot of the line as it is now (for display on edit/remove). */
   current?: {
     description?: string;

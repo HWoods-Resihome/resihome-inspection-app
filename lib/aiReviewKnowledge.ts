@@ -36,6 +36,7 @@ DUPLICATES & SCOPE INTEGRITY — check for and flag:
 PAINT TOTAL CHECK: the total cost of all paint line items must not exceed what a whole-house mist-match Level 1 or Level 2 would cost. If individual room paint items sum to more than a full-house paint job, flag it as a red flag (suggest consolidating to a whole-house paint line).
 
 PHOTOS: if inspection photos are provided, use them to confirm scope and tenant responsibility. Photos should support the damage claims and the assigned tenant percentage. If a photo contradicts a line (e.g. no visible damage, or clearly normal wear), call it out.
+  PHOTO EVIDENCE GAP: when a line claims tenant-caused damage / missing items / misuse but there is NO photo in that room supporting it, raise an adjustment with type "remove" AND needsPhoto: true. This tells the inspector to either add a photo of the damage or remove the line. Use needsPhoto ONLY for this evidence-gap case (not for normal edits).
 
 OUTPUT RULES:
   - Provide adjustments_needed with a suggested tenant % AND a suggested tenant $ when possible.

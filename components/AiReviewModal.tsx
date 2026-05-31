@@ -18,10 +18,14 @@ interface Props {
   onApply: (approved: AiAdjustment[]) => void;
   // Live tenant-$ preview as the inspector edits % / qty on a suggestion.
   previewTenantDollars?: (a: AiAdjustment, o: { tenantPct?: number; quantity?: number }) => number | undefined;
+  // For needsPhoto suggestions: capture a photo of the damage and attach it to
+  // the room + line. Resolves true if a photo was added.
+  onAddPhoto?: (a: AiAdjustment) => Promise<boolean>;
 }
 
-// Per-suggestion inspector edits (override the AI's suggested values before applying).
-type Edit = { tenantPct?: number; quantity?: number };
+// Per-suggestion inspector edits — raw input strings so the field can be
+// cleared / retyped freely (parsed to numbers only on apply).
+type Edit = { tenantPct?: string; quantity?: string };
 
 function money(n: number | undefined): string {
   if (n == null || !isFinite(n)) return '';
@@ -40,9 +44,11 @@ const TYPE_LABEL: Record<string, string> = {
   add: 'Add',
 };
 
-export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars }: Props) {
+export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars, onAddPhoto }: Props) {
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [edits, setEdits] = useState<Record<string, Edit>>({});
+  const [photoAdded, setPhotoAdded] = useState<Record<string, boolean>>({});
+  const [addingPhoto, setAddingPhoto] = useState<string | null>(null);
 
   // Friendly, cycling status shown the instant the review opens (before the
   // first suggestion streams in) so the inspector gets immediate feedback.
@@ -62,7 +68,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
   }, [open, waitingForFirst]);
 
   // Reset decisions/edits whenever a new set of adjustments arrives.
-  useEffect(() => { setDecisions({}); setEdits({}); }, [adjustments]);
+  useEffect(() => { setDecisions({}); setEdits({}); setPhotoAdded({}); }, [adjustments]);
 
   const allDecided = adjustments.every((a) => decisions[a.id]);
   const approvedCount = adjustments.filter((a) => decisions[a.id] === 'approve').length;
@@ -72,14 +78,17 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
   const approved = useMemo(() => adjustments
     .filter((a) => decisions[a.id] === 'approve')
     .map((a) => {
+      if (a.type === 'remove') return a; // remove ignores field edits
       const e = edits[a.id];
-      if (!e || a.type === 'remove') return a;
+      const tp = e?.tenantPct != null && e.tenantPct !== '' ? Number(e.tenantPct) : undefined;
+      const q = e?.quantity != null && e.quantity !== '' ? Number(e.quantity) : undefined;
+      if (tp == null && q == null) return a;
       return {
         ...a,
         suggested: {
           ...(a.suggested || {}),
-          ...(e.tenantPct != null ? { tenantBillBackPercent: e.tenantPct } : {}),
-          ...(e.quantity != null ? { quantity: e.quantity } : {}),
+          ...(tp != null && isFinite(tp) ? { tenantBillBackPercent: Math.max(0, Math.min(100, tp)) } : {}),
+          ...(q != null && isFinite(q) ? { quantity: q } : {}),
         },
       };
     }), [adjustments, decisions, edits]);
@@ -87,11 +96,6 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
   if (!open) return null;
 
   const setEdit = (id: string, patch: Edit) => setEdits((m) => ({ ...m, [id]: { ...m[id], ...patch } }));
-  const num = (v: string): number | undefined => {
-    if (v.trim() === '') return undefined;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : undefined;
-  };
 
   const setAll = (d: Decision) => {
     const next: Record<string, Decision> = {};
@@ -174,67 +178,105 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                               <div className="text-sm font-semibold text-ink mt-1 leading-snug">{a.title}</div>
                               <div className="text-xs text-gray-600 mt-0.5 leading-snug">{a.rationale}</div>
 
-                              {/* before → after + editable fields */}
-                              {a.type === 'remove' ? (
-                                <div className="text-xs mt-1.5 text-gray-700">
-                                  {a.current?.description}{a.current?.tenantDollars != null && <span className="text-gray-400"> · tenant {money(a.current.tenantDollars)}</span>}
-                                </div>
-                              ) : (() => {
-                                const unit = a.suggested?.unit || a.current?.unit;
-                                const tenantVal = edits[a.id]?.tenantPct ?? a.suggested?.tenantBillBackPercent ?? a.current?.tenantBillBackPercent;
-                                const qtyVal = edits[a.id]?.quantity ?? a.suggested?.quantity ?? a.current?.quantity;
-                                const previewDollars = previewTenantDollars
-                                  ? previewTenantDollars(a, { tenantPct: tenantVal, quantity: qtyVal })
-                                  : (edits[a.id] ? undefined : a.suggestedTenantDollars);
-                                const dollars = previewDollars ?? a.suggestedTenantDollars;
-                                return (
-                                  <div className="mt-1.5">
-                                    {a.type === 'add'
-                                      ? <div className="text-xs text-emerald-700 mb-1">+ {a.suggested?.description || a.suggested?.lineItemCode}</div>
-                                      : a.current && (
-                                        <div className="text-[11px] text-gray-400 mb-1">
-                                          now: {a.current.tenantBillBackPercent != null && `${a.current.tenantBillBackPercent}% tenant`}{a.current.tenantDollars != null && ` (${money(a.current.tenantDollars)})`}{a.current.quantity != null && ` · qty ${a.current.quantity}${unit ? ` ${unit}` : ''}`}
-                                        </div>
-                                      )}
-                                    <div className="flex items-end gap-2 flex-wrap">
-                                      <label className="text-[11px] text-gray-500">
-                                        Tenant %
-                                        <input
-                                          type="number" min={0} max={100} step={5} inputMode="numeric"
-                                          value={tenantVal ?? ''}
-                                          onChange={(e) => setEdit(a.id, { tenantPct: num(e.target.value) })}
-                                          className="block w-16 mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded tabular-nums"
-                                        />
-                                      </label>
-                                      <label className="text-[11px] text-gray-500">
-                                        Qty{unit ? ` (${unit})` : ''}
-                                        <input
-                                          type="number" min={0} step="any" inputMode="decimal"
-                                          value={qtyVal ?? ''}
-                                          placeholder={/^(SF|LF|SY)$/i.test(unit || '') ? 'enter' : ''}
-                                          onChange={(e) => setEdit(a.id, { quantity: num(e.target.value) })}
-                                          className="block w-20 mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded tabular-nums"
-                                        />
-                                      </label>
-                                      <div className="text-xs text-brand font-semibold pb-1.5 ml-auto">
-                                        {dollars != null ? `tenant ${money(dollars)}` : ''}
-                                      </div>
-                                    </div>
+                              {a.needsPhoto ? (
+                                /* Photo evidence gap: add a photo of the damage (attaches to
+                                   the room + this line) OR remove the line — not approve/decline. */
+                                <>
+                                  <div className="text-xs mt-1.5 text-gray-700">
+                                    {a.current?.description}{a.current?.tenantDollars != null && <span className="text-gray-400"> · tenant {money(a.current.tenantDollars)}</span>}
                                   </div>
-                                );
-                              })()}
+                                  {photoAdded[a.id] ? (
+                                    <div className="text-xs text-emerald-700 font-heading font-semibold mt-2">✓ Photo added — line kept</div>
+                                  ) : (
+                                    <div className="flex gap-2 mt-2">
+                                      <button
+                                        type="button"
+                                        disabled={addingPhoto === a.id}
+                                        onClick={async () => {
+                                          if (!onAddPhoto) return;
+                                          setAddingPhoto(a.id);
+                                          const ok = await onAddPhoto(a).catch(() => false);
+                                          setAddingPhoto(null);
+                                          if (ok) { setPhotoAdded((m) => ({ ...m, [a.id]: true })); setDecisions((m) => ({ ...m, [a.id]: 'decline' })); }
+                                        }}
+                                        className="px-3 py-1 text-xs font-heading font-semibold rounded-md bg-brand text-white hover:bg-brand-dark disabled:opacity-50 inline-flex items-center gap-1"
+                                      >
+                                        {addingPhoto === a.id ? 'Adding…' : '📷 Add photo'}
+                                      </button>
+                                      <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'approve' }))}
+                                        className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'approve' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
+                                        Remove line
+                                      </button>
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  {/* before → after + editable fields */}
+                                  {a.type === 'remove' ? (
+                                    <div className="text-xs mt-1.5 text-gray-700">
+                                      {a.current?.description}{a.current?.tenantDollars != null && <span className="text-gray-400"> · tenant {money(a.current.tenantDollars)}</span>}
+                                    </div>
+                                  ) : (() => {
+                                    const unit = a.suggested?.unit || a.current?.unit;
+                                    const tenantStr = edits[a.id]?.tenantPct ?? String(a.suggested?.tenantBillBackPercent ?? a.current?.tenantBillBackPercent ?? '');
+                                    const qtyStr = edits[a.id]?.quantity ?? String(a.suggested?.quantity ?? a.current?.quantity ?? '');
+                                    const tenantNum = tenantStr === '' ? undefined : Number(tenantStr);
+                                    const qtyNum = qtyStr === '' ? undefined : Number(qtyStr);
+                                    const previewDollars = previewTenantDollars
+                                      ? previewTenantDollars(a, { tenantPct: tenantNum, quantity: qtyNum })
+                                      : a.suggestedTenantDollars;
+                                    const dollars = previewDollars ?? a.suggestedTenantDollars;
+                                    return (
+                                      <div className="mt-1.5">
+                                        {a.type === 'add'
+                                          ? <div className="text-xs text-emerald-700 mb-1">+ {a.suggested?.description || a.suggested?.lineItemCode}</div>
+                                          : a.current && (
+                                            <div className="text-[11px] text-gray-400 mb-1">
+                                              now: {a.current.tenantBillBackPercent != null && `${a.current.tenantBillBackPercent}% tenant`}{a.current.tenantDollars != null && ` (${money(a.current.tenantDollars)})`}{a.current.quantity != null && ` · qty ${a.current.quantity}${unit ? ` ${unit}` : ''}`}
+                                            </div>
+                                          )}
+                                        <div className="flex items-end gap-2 flex-wrap">
+                                          <label className="text-[11px] text-gray-500">
+                                            Tenant %
+                                            <input
+                                              type="number" min={0} max={100} step={5} inputMode="numeric"
+                                              value={tenantStr}
+                                              onChange={(e) => setEdit(a.id, { tenantPct: e.target.value })}
+                                              className="block w-16 mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded tabular-nums"
+                                            />
+                                          </label>
+                                          <label className="text-[11px] text-gray-500">
+                                            Qty{unit ? ` (${unit})` : ''}
+                                            <input
+                                              type="number" min={0} step="any" inputMode="decimal"
+                                              value={qtyStr}
+                                              placeholder={/^(SF|LF|SY)$/i.test(unit || '') ? 'enter' : ''}
+                                              onChange={(e) => setEdit(a.id, { quantity: e.target.value })}
+                                              className="block w-20 mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded tabular-nums"
+                                            />
+                                          </label>
+                                          <div className="text-xs text-brand font-semibold pb-1.5 ml-auto">
+                                            {dollars != null ? `tenant ${money(dollars)}` : ''}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
 
-                              {/* approve / decline */}
-                              <div className="flex gap-2 mt-2">
-                                <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'approve' }))}
-                                  className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'approve' ? 'bg-brand text-white border-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`}>
-                                  Approve
-                                </button>
-                                <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'decline' }))}
-                                  className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'decline' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
-                                  Decline
-                                </button>
-                              </div>
+                                  {/* approve / decline */}
+                                  <div className="flex gap-2 mt-2">
+                                    <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'approve' }))}
+                                      className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'approve' ? 'bg-brand text-white border-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`}>
+                                      Approve
+                                    </button>
+                                    <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'decline' }))}
+                                      className={`px-3 py-1 text-xs font-heading font-semibold rounded-md border ${d === 'decline' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
+                                      Decline
+                                    </button>
+                                  </div>
+                                </>
+                              )}
                             </div>
                           </div>
                         </div>

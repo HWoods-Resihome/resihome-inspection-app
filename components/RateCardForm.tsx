@@ -1839,22 +1839,29 @@ export function RateCardForm(props: RateCardFormProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog, regions, inspectionRegion]);
 
-  // Apply the approved adjustments, then mark the review passed for the
+  // Apply the approved adjustments in ONE batched save (fast + fewer failure
+  // points than a per-line round-trip), then mark the review passed for the
   // resulting scope (so submit unlocks). Declined items are left untouched.
   const applyApproved = useCallback(async (approved: AiAdjustment[]) => {
     setAiApplying(true);
+    setSaveStatus({ kind: 'saving' });
     try {
-      // Project the resulting scope deterministically as we apply, so the
-      // "passed" hash matches the UI state even though linesBySectionRef only
-      // catches up on the next render.
+      // Project the resulting scope deterministically, and collect a single
+      // batch of upserts/archives for the rate-card-lines endpoint.
       const projected: Record<string, RateCardLineInput[]> = {};
       for (const [sid, arr] of Object.entries(linesBySectionRef.current)) projected[sid] = [...arr];
+      const upserts: { recordId?: string; line: RateCardLineInput; sectionId: string }[] = [];
+      const archives: string[] = [];
 
       for (const a of approved) {
-        if (a.type === 'remove' && a.lineExternalId) {
+        const sec = sections.find((s) => s.id === a.sectionId);
+        // A needsPhoto item approved = "Remove line" regardless of the AI's type.
+        const effType = a.needsPhoto ? 'remove' : a.type;
+        if (effType === 'remove' && a.lineExternalId) {
           projected[a.sectionId] = (projected[a.sectionId] || []).filter((l) => l.externalId !== a.lineExternalId);
-          await handleDeleteLine(a.sectionId, a.lineExternalId);
-        } else if (a.type === 'edit' && a.lineExternalId) {
+          const rid = recordIdsByExternalId[a.lineExternalId];
+          if (rid) archives.push(rid);
+        } else if (effType === 'edit' && a.lineExternalId) {
           const existing = (projected[a.sectionId] || []).find((l) => l.externalId === a.lineExternalId);
           if (!existing) continue;
           const next: RateCardLineInput = {
@@ -1864,12 +1871,11 @@ export function RateCardForm(props: RateCardFormProps) {
             tenantBillBackPercent: a.suggested?.tenantBillBackPercent ?? existing.tenantBillBackPercent,
             assignedTo: a.suggested?.assignedTo || existing.assignedTo,
             customVendorCost: a.suggested?.customVendorCost ?? existing.customVendorCost,
+            ...(sec ? { section: sec.label, location: sec.location || '' } : {}),
           };
           projected[a.sectionId] = (projected[a.sectionId] || []).map((l) => (l.externalId === a.lineExternalId ? next : l));
-          await handleSaveLineForSection(a.sectionId, next);
-        } else if (a.type === 'add' && a.suggested?.lineItemCode) {
-          const sec = sections.find((s) => s.id === a.sectionId);
-          if (!sec) continue;
+          upserts.push({ recordId: recordIdsByExternalId[next.externalId], line: next, sectionId: a.sectionId });
+        } else if (effType === 'add' && a.suggested?.lineItemCode && sec) {
           const line: RateCardLineInput = {
             externalId: `ai_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
             section: sec.label,
@@ -1883,13 +1889,56 @@ export function RateCardForm(props: RateCardFormProps) {
             photoUrls: [],
           };
           projected[a.sectionId] = [...(projected[a.sectionId] || []), line];
-          await handleSaveLineForSection(a.sectionId, line);
+          upserts.push({ line, sectionId: a.sectionId });
         }
       }
-      // Mark the review passed for the scope as it now stands (projected).
+
+      // Optimistic UI: show the new scope immediately.
+      setLinesBySection(projected);
+
+      if (upserts.length || archives.length) {
+        await enqueueSave(async () => {
+          const endpoint = `/api/inspections/${props.inspectionRecordId}/rate-card-lines`;
+          const body = JSON.stringify({ upserts: upserts.map((u) => ({ recordId: u.recordId, line: u.line })), archives, bumpStatusToInProgress: true });
+          try {
+            let r: Response | null = null; let lastErr = '';
+            for (let attempt = 0; attempt < 3; attempt++) {
+              if (attempt > 0) await new Promise((res) => setTimeout(res, 600 * attempt));
+              try { r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }); }
+              catch (ne: any) { lastErr = String(ne?.message || ne); r = null; continue; }
+              if (r.ok) break;
+              if (r.status >= 400 && r.status < 500 && r.status !== 429) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0, 200)}`); }
+              lastErr = `HTTP ${r.status}`;
+            }
+            if (!r || !r.ok) throw new Error(lastErr || 'save failed after retries');
+            const data = await r.json();
+            for (const res of (data.results || [])) {
+              if (res?.recordId && res?.answerIdExternal) setRecordIdsByExternalId((cur) => ({ ...cur, [res.answerIdExternal]: res.recordId }));
+            }
+            setSaveStatus({ kind: 'saved', at: Date.now() });
+          } catch (e: any) {
+            // Offline / transient: queue each change so it syncs later (the
+            // "Syncing…" banner then reflects it). Otherwise surface the error.
+            if (isOfflineError(e)) {
+              for (const u of upserts) {
+                outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint, method: 'POST', body: { upserts: [{ recordId: u.recordId, line: u.line }], archives: [], bumpStatusToInProgress: true }, kind: 'line', meta: { sectionId: u.sectionId, line: u.line, externalId: u.line.externalId } });
+              }
+              for (const rid of archives) {
+                outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint, method: 'POST', body: { upserts: [], archives: [rid] }, kind: 'lineArchive' });
+              }
+              setSaveStatus({ kind: 'saved', at: Date.now() });
+            } else {
+              setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+              throw e;
+            }
+          }
+        });
+      }
+
       const newHash = scopeHash(projected);
       setReviewedHash(newHash);
       setPassedReviewHash(props.inspectionRecordId, newHash);
+      refreshPending();
       setAiModalOpen(false);
     } catch (e: any) {
       setAiError(`Could not apply all changes: ${e?.message || e}`);
@@ -1897,7 +1946,49 @@ export function RateCardForm(props: RateCardFormProps) {
       setAiApplying(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sections, props.inspectionRecordId]);
+  }, [sections, props.inspectionRecordId, refreshPending]);
+
+  // Photo evidence gap (needsPhoto suggestion): capture/upload a photo and
+  // attach it to the room AND tag it onto the flagged line. Returns true on add.
+  const aiPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const aiPhotoTargetRef = useRef<{ sectionId: string; lineExternalId?: string; resolve: (ok: boolean) => void } | null>(null);
+  const addPhotoForAdjustment = useCallback((a: AiAdjustment): Promise<boolean> => {
+    return new Promise<boolean>((resolve) => {
+      aiPhotoTargetRef.current = { sectionId: a.sectionId, lineExternalId: a.lineExternalId, resolve };
+      const el = aiPhotoInputRef.current;
+      if (!el) { resolve(false); return; }
+      el.value = '';
+      el.click();
+    });
+  }, []);
+  const handleAiPhotoPicked = useCallback(async (files: FileList | null) => {
+    const target = aiPhotoTargetRef.current;
+    aiPhotoTargetRef.current = null;
+    if (!target) return;
+    const file = files && files[0];
+    if (!file) { target.resolve(false); return; }
+    try {
+      const url = await uploadPhotoOrQueue(file, props.inspectionRecordId, target.sectionId);
+      // Attach to the room's photo strip.
+      const base = photosBySectionRef.current[target.sectionId] || [];
+      const nextPhotos = Array.from(new Set([...base, url]));
+      setPhotosBySection((m) => ({ ...m, [target.sectionId]: nextPhotos }));
+      await savePhotosForSection(target.sectionId, nextPhotos.filter((u) => !u.startsWith('blob:')));
+      // Tag it onto the flagged line.
+      if (target.lineExternalId) {
+        const line = (linesBySectionRef.current[target.sectionId] || []).find((l) => l.externalId === target.lineExternalId);
+        if (line) {
+          const updated = { ...line, photoUrls: Array.from(new Set([...(line.photoUrls || []), url])) };
+          setLinesBySection((m) => ({ ...m, [target.sectionId]: (m[target.sectionId] || []).map((l) => (l.externalId === target.lineExternalId ? updated : l)) }));
+          await handleSaveLineForSection(target.sectionId, updated);
+        }
+      }
+      refreshPending();
+      target.resolve(true);
+    } catch {
+      target.resolve(false);
+    }
+  }, [props.inspectionRecordId, refreshPending]);
 
   // ----- Terminal action handlers (shared between inline + floating footers) ----
   // Extracted so the desktop floating footer and the mobile inline footer can
@@ -2704,6 +2795,17 @@ export function RateCardForm(props: RateCardFormProps) {
         onRetry={() => runAiReview()}
         onApply={(approved) => applyApproved(approved)}
         previewTenantDollars={previewTenantDollars}
+        onAddPhoto={addPhotoForAdjustment}
+      />
+      {/* Hidden input for the review popup's "Add photo" action (attaches the
+          damage photo to the room + the flagged line). */}
+      <input
+        ref={aiPhotoInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => { void handleAiPhotoPicked(e.target.files); e.currentTarget.value = ''; }}
       />
 
       {cameraSectionId !== null && (
