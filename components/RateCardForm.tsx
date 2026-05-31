@@ -530,19 +530,43 @@ export function RateCardForm(props: RateCardFormProps) {
   // we eliminate that window entirely. The trade-off is slightly more network
   // chatter (one save per row edit instead of per 2s burst) but for an
   // inspector typing maybe 20-30 lines per inspection that's fine.
-  async function handleSaveLineForSection(sectionId: string, line: RateCardLineInput): Promise<{ ok: boolean; error?: string }> {
+  async function handleSaveLineForSection(sectionId: string, line: RateCardLineInput): Promise<{ ok: boolean; error?: string; requested?: string; routedTo?: string; reRouted?: boolean; recordId?: string; skippedSave?: boolean }> {
     // Stamp the line's section/location from the TARGET section. Voice proposals
     // may have been generated for a different room earlier in the same turn
     // (e.g. "go to the kitchen and add a microwave"); routing is by sectionId, so
     // the section/location written to the record must match that section — not
     // whatever the proposal happened to carry.
-    const targetSection = sections.find((s) => s.id === sectionId);
+    // Resolve the target to a REAL, currently-rendered section. The id is
+    // normally valid, but a voice turn can hand us a stale/phantom id (e.g. the
+    // rooms list changed mid-conversation, or the section_list_json reconciled
+    // to different ids). If we appended to a phantom key the line would SAVE but
+    // be invisible in the form — the exact "it said Added but the card is empty"
+    // bug. Fall back: match by the line's section/location (the server stamps
+    // the room name onto the proposal), then by display name, then to the
+    // focused section, so a line is NEVER lost to a non-rendered group.
+    let targetSection = sections.find((s) => s.id === sectionId);
+    if (!targetSection && (line.section || line.location)) {
+      const sec = (line.section || '').trim().toLowerCase();
+      const loc = (line.location || '').trim().toLowerCase();
+      const want = (line.location || line.section || '').trim().toLowerCase();
+      targetSection = sections.find((s) => (s.label || '').toLowerCase() === sec && (s.location || '').toLowerCase() === loc)
+        || sections.find((s) => (s.displayName || s.label || '').toLowerCase() === want)
+        || sections.find((s) => (s.label || '').toLowerCase() === want);
+    }
+    if (!targetSection && currentSectionId) {
+      targetSection = sections.find((s) => s.id === currentSectionId);
+    }
+    // The id we actually key the line under, everywhere below.
+    const effSectionId = targetSection ? targetSection.id : sectionId;
     if (targetSection) {
       line = { ...line, section: targetSection.label, location: targetSection.location };
     }
+    if (effSectionId !== sectionId) {
+      console.warn(`[RateCardForm] voice add re-routed: requested "${sectionId}" not a current section; using "${effSectionId}" (${targetSection?.displayName || targetSection?.label || '??'}).`);
+    }
     // Is this a brand-new line or an edit of an existing one? Used to gate the
     // Whole House auto-fill so a deliberate quantity edit isn't overwritten.
-    const isNewLine = !((linesBySection[sectionId] || []).some((l) => l.externalId === line.externalId));
+    const isNewLine = !((linesBySection[effSectionId] || []).some((l) => l.externalId === line.externalId));
     // Whole House + SF unit: default the quantity to the property's square
     // footage — but ONLY when first adding the line (not on a later edit), and
     // only when the quantity is still the default (1/empty), so a deliberate
@@ -563,27 +587,32 @@ export function RateCardForm(props: RateCardFormProps) {
     // Optimistic update — push into local state immediately so the UI reflects
     // the change even before the network round-trip.
     setLinesBySection((m) => {
-      const existing = m[sectionId] || [];
+      const existing = m[effSectionId] || [];
       const found = existing.findIndex((l) => l.externalId === line.externalId);
       const next = [...existing];
       if (found >= 0) next[found] = line;
       else next.push(line);
-      return { ...m, [sectionId]: next };
+      return { ...m, [effSectionId]: next };
     });
     setPendingNewBySection((p) => {
-      if (!p[sectionId]) return p;
+      if (!p[effSectionId]) return p;
       const next = { ...p };
-      delete next[sectionId];
+      delete next[effSectionId];
       return next;
     });
+    // Make sure the room the line landed in is expanded so it's actually visible.
+    setExpanded((e) => (e[effSectionId] ? e : { ...e, [effSectionId]: true }));
 
     // Skip the network call if we're not yet ready to save (still hydrating).
     // The line is now in linesBySection; once linesHydrated flips true the
     // useEffect below will catch up any pending dirty lines.
     // Not ready to persist yet (still hydrating) or read-only: the line is in
     // local state; treat as a non-failure so the assistant doesn't cry wolf.
-    if (!linesHydrated || props.readOnly) return { ok: true };
+    if (!linesHydrated || props.readOnly) {
+      return { ok: true, requested: sectionId, routedTo: effSectionId, reRouted: effSectionId !== sectionId, skippedSave: true };
+    }
 
+    const routing = { requested: sectionId, routedTo: effSectionId, reRouted: effSectionId !== sectionId };
     saveInFlightRef.current++;
     setSaveStatus({ kind: 'saving' });
     // Run through the serial queue so concurrent voice adds don't race each
@@ -636,12 +665,12 @@ export function RateCardForm(props: RateCardFormProps) {
           }));
         }
         setSaveStatus({ kind: 'saved', at: Date.now() });
-        return { ok: true };
+        return { ok: true, ...routing, recordId: result?.recordId };
       } catch (e: any) {
         console.error('[RateCardForm] line save failed:', e);
         const error = String(e?.message || e);
         setSaveStatus({ kind: 'error', message: error });
-        return { ok: false, error };
+        return { ok: false, error, ...routing };
       } finally {
         saveInFlightRef.current--;
       }

@@ -53,8 +53,18 @@ interface Props {
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
 
 // Result of a line save round-trip, so the assistant can report the truth
-// (and the actual error) instead of optimistically claiming success.
-export type SaveResult = { ok: boolean; error?: string };
+// (and the actual error) instead of optimistically claiming success. The
+// routing/record fields let the assistant flag the rare "saved but didn't show
+// where expected" case with concrete facts instead of a vague claim.
+export type SaveResult = {
+  ok: boolean;
+  error?: string;
+  requested?: string;   // section id the assistant asked for
+  routedTo?: string;    // section id the line actually landed in
+  reRouted?: boolean;   // true if requested !== routedTo
+  recordId?: string;    // HubSpot record id (present only once persisted)
+  skippedSave?: boolean; // true if the network save was skipped (e.g. still loading)
+};
 
 type Pending = { line: RateCardLineInput; summary: string; spoken: string; action: 'add' | 'edit' };
 
@@ -448,6 +458,19 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           const results = await Promise.all(savePromises);
           const failed = results.filter((r) => !r.ok);
           const savedCount = addedThisTurn - failed.length;
+          // Surface a concise diagnostic ONLY when something looks off — a save
+          // was skipped, the line got re-routed to a different section, or it
+          // persisted without a record id. In the clean case this stays silent.
+          const odd = results.filter((r) => r.skippedSave || r.reRouted || (r.ok && !r.recordId && !r.skippedSave));
+          if (odd.length > 0) {
+            const diag = odd.map((r) => {
+              const route = r.reRouted ? `${r.requested}→${r.routedTo}` : (r.routedTo || r.requested || '?');
+              const flags = [r.skippedSave ? 'not-saved(loading)' : '', r.reRouted ? 're-routed' : '', (r.ok && !r.recordId && !r.skippedSave) ? 'no-record-id' : '']
+                .filter(Boolean).join(',');
+              return `${route}${flags ? ` [${flags}]` : ''}`;
+            }).join('; ');
+            setMessages((m) => [...m, { role: 'assistant', content: `diag: ${diag}` }]);
+          }
           // Name the room(s) the lines ACTUALLY landed in (from the stream), not
           // React state, which lags during the stream and would name the wrong room.
           const roomNames = Array.from(addedRoomIds)
