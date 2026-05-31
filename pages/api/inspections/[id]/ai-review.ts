@@ -3,11 +3,11 @@
 // AI review of a Scope rate card against the investment-property standard
 // (SAFE / CLEAN / FUNCTIONAL) and the depreciation/tenant-responsibility rules.
 //
-// One POST per review. The client sends the current scope (all rooms + lines)
-// and the room photos (as URLs). The server prices each line authoritatively
-// (calculateLine), fetches+downsizes the photos, and runs Claude with two
-// tools: search_catalog (to propose real catalog codes for ADD suggestions)
-// and submit_review (the structured result). It returns { summary, adjustments }.
+// STREAMING: the server runs Claude with three tools — search_catalog (to find
+// real codes for ADD suggestions), add_adjustment (one call per issue), and
+// finish_review (the closing summary). As each add_adjustment tool block
+// finishes generating it is normalized and pushed to the client over SSE, so
+// the popup fills in suggestion-by-suggestion instead of all-at-once.
 // Nothing is saved — the client applies approved adjustments via the normal
 // rate-card-line + answers endpoints.
 
@@ -19,7 +19,7 @@ import { matchCatalog } from '@/lib/voiceCatalogMatch';
 import { calculateLine } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { AI_REVIEW_KNOWLEDGE } from '@/lib/aiReviewKnowledge';
-import type { RateCardLineItem, RegionRate } from '@/lib/types';
+import type { RegionRate } from '@/lib/types';
 
 export const config = { maxDuration: 120, api: { bodyParser: { sizeLimit: '2mb' } } };
 
@@ -63,31 +63,77 @@ function money(n: number): string {
   return `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-async function callAnthropic(payload: any): Promise<{ content: any[]; stopReason: string | null }> {
-  const resp = await fetch(ANTHROPIC_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': anthropicKey(),
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify(payload),
-  });
-  if (!resp.ok) {
-    const t = await resp.text().catch(() => '');
-    throw new Error(`AI review call failed ${resp.status}: ${t.slice(0, 300)}`);
-  }
-  const data = await resp.json();
-  return { content: data.content || [], stopReason: data.stop_reason || null };
+// SSE helpers.
+function sse(res: NextApiResponse, event: string, data: any) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+function sseHeartbeat(res: NextApiResponse) {
+  try { res.write(': keep-alive\n\n'); } catch { /* closed */ }
 }
 
-// Fetch a photo URL and return a small base64 JPEG for the model, or null if it
-// can't be fetched/decoded (offline drafts, dead links, videos w/o poster).
+// Stream one Anthropic turn. Assembles content blocks; fires onToolComplete the
+// moment a tool_use block finishes (so add_adjustment can be emitted live).
+async function streamTurn(
+  payload: any,
+  onToolComplete: (block: any) => void,
+): Promise<{ content: any[]; stopReason: string | null }> {
+  const resp = await fetch(ANTHROPIC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey(), 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ ...payload, stream: true }),
+  });
+  if (!resp.ok || !resp.body) {
+    const t = await resp.text().catch(() => '');
+    throw new Error(`AI review call failed ${resp.status}: ${t.slice(0, 200)}`);
+  }
+  const blocks: any[] = [];
+  let stopReason: string | null = null;
+  const toolJson: Record<number, string> = {};
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const json = trimmed.slice(5).trim();
+      if (!json || json === '[DONE]') continue;
+      let ev: any;
+      try { ev = JSON.parse(json); } catch { continue; }
+      if (ev.type === 'content_block_start') {
+        const cb = ev.content_block;
+        if (cb?.type === 'text') blocks[ev.index] = { type: 'text', text: '' };
+        else if (cb?.type === 'tool_use') { blocks[ev.index] = { type: 'tool_use', id: cb.id, name: cb.name, input: {} }; toolJson[ev.index] = ''; }
+      } else if (ev.type === 'content_block_delta') {
+        const d = ev.delta;
+        if (d?.type === 'text_delta' && blocks[ev.index]) blocks[ev.index].text += d.text;
+        else if (d?.type === 'input_json_delta') toolJson[ev.index] = (toolJson[ev.index] || '') + (d.partial_json || '');
+      } else if (ev.type === 'content_block_stop') {
+        const b = blocks[ev.index];
+        if (b?.type === 'tool_use') {
+          try { b.input = JSON.parse(toolJson[ev.index] || '{}'); } catch { b.input = {}; }
+          try { onToolComplete(b); } catch { /* non-fatal */ }
+        }
+      } else if (ev.type === 'message_delta') {
+        if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
+      }
+    }
+  }
+  return { content: blocks.filter(Boolean), stopReason };
+}
+
+// Fetch a photo URL → small base64 JPEG (or null if it can't be fetched/decoded).
 async function fetchPhotoBlock(url: string): Promise<any | null> {
   try {
-    // Video entries are "poster#v=video"; use the poster image.
-    const clean = url.split('#')[0];
-    if (!/^https?:\/\//i.test(clean)) return null; // blob: drafts can't be fetched server-side
+    const clean = url.split('#')[0]; // video entries are "poster#v=video"
+    if (!/^https?:\/\//i.test(clean)) return null;
     const r = await fetch(clean);
     if (!r.ok) return null;
     const buf = Buffer.from(await r.arrayBuffer());
@@ -103,43 +149,34 @@ function tools() {
     {
       name: 'search_catalog',
       description: 'Semantic search of the rate-card catalog. Use ONLY when proposing an ADD adjustment, to find the real line item code for a missing scope. Returns candidate codes with unit + category.',
-      input_schema: {
-        type: 'object',
-        properties: { query: { type: 'string', description: 'What to find, e.g. "blind replacement" or "sales clean".' } },
-        required: ['query'],
-      },
+      input_schema: { type: 'object', properties: { query: { type: 'string', description: 'What to find, e.g. "blind replacement".' } }, required: ['query'] },
     },
     {
-      name: 'submit_review',
-      description: 'Return your FINAL review. Call this exactly once when analysis is complete. If the scope is already compliant, return an empty adjustments array and a one-line summary saying so.',
+      name: 'add_adjustment',
+      description: 'Report ONE suggested adjustment. Call this once per issue you find, as you find it (do not batch them). For an ADD, first call search_catalog and use a real code here.',
       input_schema: {
         type: 'object',
         properties: {
-          summary: { type: 'string', description: 'One or two sentences summarizing the review outcome.' },
-          adjustments: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                type: { type: 'string', enum: ['edit', 'remove', 'add'], description: 'edit = change an existing line; remove = delete one; add = propose a missing line.' },
-                sectionId: { type: 'string', description: 'The room/section id this applies to.' },
-                lineExternalId: { type: 'string', description: 'For edit/remove: the externalId of the target line (from the scope listing).' },
-                title: { type: 'string', description: 'Short headline of the suggestion.' },
-                rationale: { type: 'string', description: 'Why, citing the relevant rule (depreciation cap, duplicate, beyond safe/clean/functional, tenant responsibility, etc.).' },
-                severity: { type: 'string', enum: ['high', 'medium', 'low'] },
-                suggestedLineItemCode: { type: 'string', description: 'For add (or an item swap): a real catalog code from search_catalog.' },
-                suggestedQuantity: { type: 'number' },
-                suggestedTenantBillBackPercent: { type: 'number', description: 'Suggested tenant % (0-100, steps of 5).' },
-                suggestedVendorCost: { type: 'number', description: 'Suggested vendor cost override, if proposing a specific dollar amount.' },
-                suggestedAssignedTo: { type: 'string' },
-                suggestedTenantDollars: { type: 'number', description: 'Resulting tenant $ after the change, if you can estimate it.' },
-              },
-              required: ['type', 'sectionId', 'title', 'rationale'],
-            },
-          },
+          type: { type: 'string', enum: ['edit', 'remove', 'add'], description: 'edit = change an existing line; remove = delete one; add = propose a missing line.' },
+          sectionId: { type: 'string', description: 'The room/section id this applies to.' },
+          lineExternalId: { type: 'string', description: 'For edit/remove: the externalId of the target line (from the scope listing).' },
+          title: { type: 'string', description: 'Short headline of the suggestion.' },
+          rationale: { type: 'string', description: 'Why, citing the relevant rule (depreciation cap, duplicate, beyond safe/clean/functional, tenant responsibility, etc.).' },
+          severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+          suggestedLineItemCode: { type: 'string', description: 'For add (or an item swap): a real catalog code from search_catalog.' },
+          suggestedQuantity: { type: 'number' },
+          suggestedTenantBillBackPercent: { type: 'number', description: 'Suggested tenant % (0-100, steps of 5).' },
+          suggestedVendorCost: { type: 'number', description: 'Suggested vendor cost override, if proposing a specific dollar amount.' },
+          suggestedAssignedTo: { type: 'string' },
+          suggestedTenantDollars: { type: 'number', description: 'Resulting tenant $ after the change, if you can estimate it.' },
         },
-        required: ['summary', 'adjustments'],
+        required: ['type', 'sectionId', 'title', 'rationale'],
       },
+    },
+    {
+      name: 'finish_review',
+      description: 'Call this LAST, exactly once, after all add_adjustment calls, with a one or two sentence summary of the outcome. If the scope is already compliant, call this with no prior add_adjustment calls and a summary saying it looks compliant.',
+      input_schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] },
     },
   ];
 }
@@ -149,12 +186,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
   try {
     const body = req.body as BodyShape;
     const sections = Array.isArray(body?.sections) ? body.sections : [];
     const lines = Array.isArray(body?.lines) ? body.lines : [];
     const region = body?.region || '';
-    // Default to 12 months whenever the property field is missing, null, or invalid.
     const rawMonths = Number(body?.property?.tenantMonths);
     const tenantMonths = Number.isFinite(rawMonths) && rawMonths >= 0 ? rawMonths : 12;
 
@@ -163,14 +204,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const regions = await getCachedRegions().catch(() => [] as RegionRate[]);
     const sectionById = new Map(sections.map((s) => [s.id, s]));
 
-    // ---- Build the scope listing (priced authoritatively) ----
+    // ---- Scope listing (priced authoritatively) ----
     const linesBySection = new Map<string, InLine[]>();
-    for (const l of lines) {
-      const arr = linesBySection.get(l.sectionId) || [];
-      arr.push(l);
-      linesBySection.set(l.sectionId, arr);
-    }
-
+    for (const l of lines) { const a = linesBySection.get(l.sectionId) || []; a.push(l); linesBySection.set(l.sectionId, a); }
     const scopeBlocks: string[] = [];
     let paintTotal = 0;
     for (const s of sections) {
@@ -184,26 +220,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         let tenantStr = `${l.tenantBillBackPercent}% tenant`;
         try {
           const c = calculateLine(item, region, regions, {
-            quantity: l.quantity,
-            tenantBillBackPercent: l.tenantBillBackPercent,
-            customLaborRate: l.customLaborRate ?? null,
-            customAdjustedMaterialCost: l.customAdjustedMaterialCost ?? null,
-            customVendorCost: l.customVendorCost ?? null,
+            quantity: l.quantity, tenantBillBackPercent: l.tenantBillBackPercent,
+            customLaborRate: l.customLaborRate ?? null, customAdjustedMaterialCost: l.customAdjustedMaterialCost ?? null, customVendorCost: l.customVendorCost ?? null,
           });
           costStr = `vendor ${money(c.vendorCost)}, client ${money(c.clientCost)}, tenant ${money(c.tenantCost)}`;
           tenantStr = `${l.tenantBillBackPercent}% tenant = ${money(c.tenantCost)}`;
           if (/paint/i.test(item.category)) paintTotal += c.clientCost;
-        } catch { /* keep going without cost */ }
-        rows.push(
-          `    - id=${l.externalId} | ${item.laborShortDescription} [${item.category}/${item.subcategory}, ${item.laborMeas}] | qty ${l.quantity} | ${tenantStr} | ${costStr} | vendor: ${l.assignedTo || 'Vendor 1'}${l.note ? ` | note: ${l.note}` : ''}`
-        );
+        } catch { /* noop */ }
+        rows.push(`    - id=${l.externalId} | ${item.laborShortDescription} [${item.category}/${item.subcategory}, ${item.laborMeas}] | qty ${l.quantity} | ${tenantStr} | ${costStr} | vendor: ${l.assignedTo || 'Vendor 1'}${l.note ? ` | note: ${l.note}` : ''}`);
       }
-      if (rows.length) {
-        scopeBlocks.push(`  Room "${s.name}" (id=${s.id}):\n${rows.join('\n')}`);
-      }
+      if (rows.length) scopeBlocks.push(`  Room "${s.name}" (id=${s.id}):\n${rows.join('\n')}`);
     }
 
-    // ---- House details block ----
     const houseDetails = [
       `Bedrooms: ${body?.property?.bedrooms ?? '?'}, Bathrooms: ${body?.property?.bathrooms ?? '?'}, Square footage: ${body?.property?.squareFootage ?? '?'}`,
       `Region: ${region || 'unknown'}`,
@@ -211,18 +239,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       `Sum of all PAINT line client costs so far: ${money(paintTotal)} (compare against a whole-house mist-match Level 1/2).`,
     ].join('\n');
 
-    // ---- Photos (downsized), grouped by room, capped ----
-    // Build the capped pick list first, then fetch+downsize ALL of them in
-    // parallel (the slow part), then group — much faster than awaiting per room.
+    // ---- Photos (downsized), all fetched in parallel, grouped by room ----
     const photosBySection = body?.photosBySection || {};
     const picks: { sectionId: string; sectionName: string; url: string }[] = [];
     for (const s of sections) {
       if (picks.length >= MAX_PHOTOS_TOTAL) break;
       const urls = (photosBySection[s.id] || []).filter((u) => /^https?:\/\//i.test(u.split('#')[0]));
-      for (const url of urls.slice(-MAX_PHOTOS_PER_ROOM)) {
-        if (picks.length >= MAX_PHOTOS_TOTAL) break;
-        picks.push({ sectionId: s.id, sectionName: s.name, url });
-      }
+      for (const url of urls.slice(-MAX_PHOTOS_PER_ROOM)) { if (picks.length >= MAX_PHOTOS_TOTAL) break; picks.push({ sectionId: s.id, sectionName: s.name, url }); }
     }
     const fetched = await Promise.all(picks.map((p) => fetchPhotoBlock(p.url)));
     const photoContent: any[] = [];
@@ -230,26 +253,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     for (let i = 0; i < picks.length; i++) {
       const block = fetched[i];
       if (!block) continue;
-      if (picks[i].sectionId !== lastSection) {
-        photoContent.push({ type: 'text', text: `Photos for room "${picks[i].sectionName}" (id=${picks[i].sectionId}):` });
-        lastSection = picks[i].sectionId;
-      }
+      if (picks[i].sectionId !== lastSection) { photoContent.push({ type: 'text', text: `Photos for room "${picks[i].sectionName}" (id=${picks[i].sectionId}):` }); lastSection = picks[i].sectionId; }
       photoContent.push(block);
     }
 
-    const scopeText = scopeBlocks.length
-      ? scopeBlocks.join('\n\n')
-      : '(No line items have been added yet.)';
-
+    const scopeText = scopeBlocks.length ? scopeBlocks.join('\n\n') : '(No line items have been added yet.)';
     const userContent: any[] = [
       {
         type: 'text',
         text:
           `Review this Scope rate card.\n\nHOUSE DETAILS:\n${houseDetails}\n\nSCOPE (all rooms and their line items, priced):\n${scopeText}\n\n` +
-          (photoContent.length
-            ? `Inspection photos for the rooms follow — use them to confirm scope and tenant responsibility.`
-            : `No usable inspection photos were available; review on the scope data.`) +
-          `\n\nAnalyze against the standard and rules in the system prompt. Then call submit_review with every adjustment (type edit/remove/add). For ADD suggestions, first call search_catalog to get a real line item code. Provide suggested tenant % AND suggested tenant $ where possible. If the scope is already compliant, submit an empty adjustments list.`,
+          (photoContent.length ? `Inspection photos for the rooms follow — use them to confirm scope and tenant responsibility.` : `No usable inspection photos were available; review on the scope data.`) +
+          `\n\nAnalyze against the standard and rules in the system prompt. Call add_adjustment once per issue as you find it (for ADDs, search_catalog first for a real code). Provide suggested tenant % AND $ where possible. When finished, call finish_review with a short summary. If the scope is already compliant, just call finish_review.`,
       },
       ...photoContent,
     ];
@@ -257,105 +272,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const messages: any[] = [{ role: 'user', content: userContent }];
     const reviewTools = tools();
 
-    let result: { summary: string; adjustments: any[] } | null = null;
-
-    for (let round = 0; round < MAX_TOOL_ROUNDS && !result; round++) {
-      const { content } = await callAnthropic({
-        model: MODEL,
-        max_tokens: 4000,
-        system: AI_REVIEW_KNOWLEDGE,
-        tools: reviewTools,
-        tool_choice: round === MAX_TOOL_ROUNDS - 1 ? { type: 'tool', name: 'submit_review' } : { type: 'auto' },
-        messages,
-      });
-      const toolUses = content.filter((c: any) => c.type === 'tool_use');
-      if (toolUses.length === 0) break; // model replied with text only; stop
-
-      messages.push({ role: 'assistant', content });
-      const toolResults: any[] = [];
-      for (const tu of toolUses) {
-        if (tu.name === 'submit_review') {
-          result = { summary: String(tu.input?.summary || ''), adjustments: Array.isArray(tu.input?.adjustments) ? tu.input.adjustments : [] };
-          toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: 'received' });
-        } else if (tu.name === 'search_catalog') {
-          const q = String(tu.input?.query || '');
-          const m = await matchCatalog(q, catalog, { topK: 6 }).catch(() => null);
-          const payload = m
-            ? { confident: m.confident, candidates: m.candidates.map((c) => ({ code: c.item.lineItemCode, description: c.item.laborShortDescription, category: c.item.category, unit: c.item.laborMeas })) }
-            : { confident: false, candidates: [] };
-          toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(payload) });
-        } else {
-          toolResults.push({ type: 'tool_result', tool_use_id: tu.id, is_error: true, content: 'Unknown tool' });
-        }
-      }
-      messages.push({ role: 'user', content: toolResults });
-    }
-
-    if (!result) {
-      return res.status(200).json({ summary: 'The review could not be completed automatically. Please review the scope manually.', adjustments: [] });
-    }
-
-    // ---- Normalize into AiAdjustment[] (enrich from catalog + priced current) ----
-    const normalize = (a: any, idx: number) => {
+    // Normalize a model add_adjustment into the client AiAdjustment shape,
+    // enriching from the catalog and pricing current/suggested values.
+    let adjIdx = 0;
+    const normalize = (a: any) => {
       const type = a?.type === 'remove' ? 'remove' : a?.type === 'add' ? 'add' : 'edit';
       const sectionId = String(a?.sectionId || '');
       const section = sectionById.get(sectionId);
       const lineExternalId = a?.lineExternalId ? String(a.lineExternalId) : undefined;
       const cur = lineExternalId ? lines.find((l) => l.externalId === lineExternalId) : undefined;
 
-      // current snapshot (edit/remove)
       let current: any = undefined;
       if (cur) {
         const item = byCode.get(cur.lineItemCode);
-        let tenantDollars: number | undefined;
-        let vendorCost: number | undefined;
-        try {
-          if (item) {
-            const c = calculateLine(item, region, regions, { quantity: cur.quantity, tenantBillBackPercent: cur.tenantBillBackPercent, customVendorCost: cur.customVendorCost ?? null });
-            tenantDollars = c.tenantCost; vendorCost = c.vendorCost;
-          }
-        } catch { /* noop */ }
-        current = {
-          description: item?.laborShortDescription || cur.lineItemCode,
-          quantity: cur.quantity,
-          tenantBillBackPercent: cur.tenantBillBackPercent,
-          tenantDollars,
-          vendorCost,
-          unit: item?.laborMeas,
-          lineItemCode: cur.lineItemCode,
-        };
+        let tenantDollars: number | undefined; let vendorCost: number | undefined;
+        try { if (item) { const c = calculateLine(item, region, regions, { quantity: cur.quantity, tenantBillBackPercent: cur.tenantBillBackPercent, customVendorCost: cur.customVendorCost ?? null }); tenantDollars = c.tenantCost; vendorCost = c.vendorCost; } } catch { /* noop */ }
+        current = { description: item?.laborShortDescription || cur.lineItemCode, quantity: cur.quantity, tenantBillBackPercent: cur.tenantBillBackPercent, tenantDollars, vendorCost, unit: item?.laborMeas, lineItemCode: cur.lineItemCode };
       }
 
-      // suggested
       const sCode = a?.suggestedLineItemCode ? String(a.suggestedLineItemCode) : undefined;
       const sItem = sCode ? byCode.get(sCode) : (cur ? byCode.get(cur.lineItemCode) : undefined);
       const suggested: any = {};
       if (sCode && byCode.has(sCode)) { suggested.lineItemCode = sCode; suggested.description = sItem?.laborShortDescription; suggested.unit = sItem?.laborMeas; }
       if (a?.suggestedQuantity != null && isFinite(Number(a.suggestedQuantity))) suggested.quantity = Number(a.suggestedQuantity);
-      if (a?.suggestedTenantBillBackPercent != null && isFinite(Number(a.suggestedTenantBillBackPercent))) {
-        suggested.tenantBillBackPercent = Math.max(0, Math.min(100, Math.round(Number(a.suggestedTenantBillBackPercent) / 5) * 5));
-      }
+      if (a?.suggestedTenantBillBackPercent != null && isFinite(Number(a.suggestedTenantBillBackPercent))) suggested.tenantBillBackPercent = Math.max(0, Math.min(100, Math.round(Number(a.suggestedTenantBillBackPercent) / 5) * 5));
       if (a?.suggestedVendorCost != null && isFinite(Number(a.suggestedVendorCost))) suggested.customVendorCost = Number(a.suggestedVendorCost);
       if (a?.suggestedAssignedTo) suggested.assignedTo = String(a.suggestedAssignedTo);
 
-      // Estimate resulting tenant $ when we can.
       let suggestedTenantDollars: number | undefined = a?.suggestedTenantDollars != null ? Number(a.suggestedTenantDollars) : undefined;
       try {
-        const baseItem = sItem;
-        if (type !== 'remove' && baseItem) {
+        if (type !== 'remove' && sItem) {
           const qty = suggested.quantity ?? cur?.quantity ?? 1;
           const pct = suggested.tenantBillBackPercent ?? cur?.tenantBillBackPercent ?? 100;
-          const c = calculateLine(baseItem, region, regions, { quantity: qty, tenantBillBackPercent: pct, customVendorCost: suggested.customVendorCost ?? cur?.customVendorCost ?? null });
+          const c = calculateLine(sItem, region, regions, { quantity: qty, tenantBillBackPercent: pct, customVendorCost: suggested.customVendorCost ?? cur?.customVendorCost ?? null });
           suggestedTenantDollars = c.tenantCost;
         }
-      } catch { /* keep model's estimate */ }
+      } catch { /* keep model estimate */ }
 
-      return {
-        id: `aiadj_${idx}_${Math.random().toString(36).slice(2, 7)}`,
-        type,
-        sectionId,
-        sectionName: section?.name,
-        lineExternalId,
+      const norm = {
+        id: `aiadj_${adjIdx++}_${Math.random().toString(36).slice(2, 7)}`,
+        type, sectionId, sectionName: section?.name, lineExternalId,
         title: String(a?.title || 'Suggested adjustment'),
         rationale: String(a?.rationale || ''),
         severity: ['high', 'medium', 'low'].includes(a?.severity) ? a.severity : 'medium',
@@ -363,19 +319,61 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         suggested: Object.keys(suggested).length ? suggested : undefined,
         suggestedTenantDollars: suggestedTenantDollars != null && isFinite(suggestedTenantDollars) ? suggestedTenantDollars : undefined,
       };
+      // Validity: edit/remove need a resolvable target; add needs a real code.
+      const valid = norm.type === 'add' ? !!norm.suggested?.lineItemCode : (!!norm.lineExternalId && lines.some((l) => l.externalId === norm.lineExternalId));
+      return valid ? norm : null;
     };
 
-    // Drop invalid ones (edit/remove without a resolvable target, add without a valid code).
-    const adjustments = result.adjustments
-      .map(normalize)
-      .filter((a) => {
-        if (a.type === 'add') return !!a.suggested?.lineItemCode;
-        return !!a.lineExternalId && lines.some((l) => l.externalId === a.lineExternalId);
-      });
+    let finished = false;
 
-    return res.status(200).json({ summary: result.summary, adjustments });
+    for (let round = 0; round < MAX_TOOL_ROUNDS && !finished; round++) {
+      sseHeartbeat(res);
+      const { content } = await streamTurn(
+        {
+          model: MODEL, max_tokens: 4000, system: AI_REVIEW_KNOWLEDGE, tools: reviewTools,
+          tool_choice: round === MAX_TOOL_ROUNDS - 1 ? { type: 'tool', name: 'finish_review' } : { type: 'auto' },
+          messages,
+        },
+        // Emit each adjustment / the summary the instant its tool block completes.
+        (block) => {
+          if (block?.name === 'add_adjustment') {
+            const n = normalize(block.input);
+            if (n) sse(res, 'adjustment', n);
+          } else if (block?.name === 'finish_review') {
+            sse(res, 'summary', { summary: String(block.input?.summary || '') });
+            finished = true;
+          }
+        },
+      );
+
+      const toolUses = content.filter((c: any) => c.type === 'tool_use');
+      if (toolUses.length === 0) { finished = true; break; }
+      if (finished) break; // finish_review seen — we have everything
+
+      // Otherwise we must answer the tool calls to continue (e.g. search_catalog).
+      messages.push({ role: 'assistant', content });
+      const toolResults: any[] = [];
+      for (const tu of toolUses) {
+        if (tu.name === 'search_catalog') {
+          const q = String(tu.input?.query || '');
+          const m = await matchCatalog(q, catalog, { topK: 6 }).catch(() => null);
+          const payload = m
+            ? { confident: m.confident, candidates: m.candidates.map((c) => ({ code: c.item.lineItemCode, description: c.item.laborShortDescription, category: c.item.category, unit: c.item.laborMeas })) }
+            : { confident: false, candidates: [] };
+          toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(payload) });
+        } else {
+          // add_adjustment already streamed — just acknowledge so the model can continue.
+          toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: 'recorded' });
+        }
+      }
+      messages.push({ role: 'user', content: toolResults });
+    }
+
+    sse(res, 'done', {});
+    return res.end();
   } catch (e: any) {
     console.error('POST /api/inspections/[id]/ai-review failed:', e);
-    return res.status(500).json({ error: String(e?.message || e) });
+    try { sse(res, 'error', { error: String(e?.message || e) }); sse(res, 'done', {}); return res.end(); }
+    catch { return res.status(500).json({ error: String(e?.message || e) }); }
   }
 }

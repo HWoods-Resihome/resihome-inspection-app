@@ -5,7 +5,8 @@ type Decision = 'approve' | 'decline';
 
 interface Props {
   open: boolean;
-  loading: boolean;
+  loading: boolean;        // true until the first result arrives
+  streaming: boolean;      // true while results are still arriving
   applying: boolean;
   error: string | null;
   summary: string;
@@ -39,7 +40,7 @@ const TYPE_LABEL: Record<string, string> = {
   add: 'Add',
 };
 
-export function AiReviewModal({ open, loading, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars }: Props) {
+export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars }: Props) {
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [edits, setEdits] = useState<Record<string, Edit>>({});
 
@@ -92,7 +93,9 @@ export function AiReviewModal({ open, loading, applying, error, summary, adjustm
             </div>
             {!loading && !error && (
               <div className="text-xs text-gray-500 mt-0.5">
-                {adjustments.length === 0 ? 'No changes suggested' : `${adjustments.length} suggestion${adjustments.length === 1 ? '' : 's'}`}
+                {streaming
+                  ? `Reviewing… ${adjustments.length} found so far`
+                  : adjustments.length === 0 ? 'No changes suggested' : `${adjustments.length} suggestion${adjustments.length === 1 ? '' : 's'}`}
               </div>
             )}
           </div>
@@ -121,15 +124,24 @@ export function AiReviewModal({ open, loading, applying, error, summary, adjustm
               {summary && <p className="text-sm text-gray-700 mb-3 leading-relaxed">{summary}</p>}
 
               {adjustments.length === 0 ? (
-                <div className="py-6 text-center text-sm text-emerald-700 font-heading font-semibold">
-                  ✓ Scope looks compliant with the turn standard.
-                </div>
+                streaming ? (
+                  <div className="py-8 text-center">
+                    <div className="inline-block w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin mb-2" />
+                    <div className="text-sm text-gray-600">Reviewing the scope…</div>
+                  </div>
+                ) : (
+                  <div className="py-6 text-center text-sm text-emerald-700 font-heading font-semibold">
+                    ✓ Scope looks compliant with the turn standard.
+                  </div>
+                )
               ) : (
                 <>
-                  <div className="flex items-center justify-end gap-3 mb-2 text-xs">
-                    <button type="button" onClick={() => setAll('approve')} className="text-brand font-heading font-semibold hover:underline">Approve all</button>
-                    <button type="button" onClick={() => setAll('decline')} className="text-gray-500 font-heading font-semibold hover:underline">Decline all</button>
-                  </div>
+                  {!streaming && (
+                    <div className="flex items-center justify-end gap-3 mb-2 text-xs">
+                      <button type="button" onClick={() => setAll('approve')} className="text-brand font-heading font-semibold hover:underline">Approve all</button>
+                      <button type="button" onClick={() => setAll('decline')} className="text-gray-500 font-heading font-semibold hover:underline">Decline all</button>
+                    </div>
+                  )}
                   <div className="space-y-2.5">
                     {adjustments.map((a) => {
                       const d = decisions[a.id];
@@ -212,6 +224,12 @@ export function AiReviewModal({ open, loading, applying, error, summary, adjustm
                       );
                     })}
                   </div>
+                  {streaming && (
+                    <div className="flex items-center gap-2 mt-3 text-xs text-gray-500">
+                      <span className="inline-block w-3.5 h-3.5 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                      Finding more…
+                    </div>
+                  )}
                 </>
               )}
             </>
@@ -222,12 +240,12 @@ export function AiReviewModal({ open, loading, applying, error, summary, adjustm
         {!loading && !error && (
           <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-3">
             <div className="text-xs text-gray-500">
-              {adjustments.length > 0 && `${approvedCount} approved · ${declinedCount} declined${allDecided ? '' : ` · ${adjustments.length - approvedCount - declinedCount} pending`}`}
+              {streaming ? 'Waiting for the review to finish…' : adjustments.length > 0 ? `${approvedCount} approved · ${declinedCount} declined${allDecided ? '' : ` · ${adjustments.length - approvedCount - declinedCount} pending`}` : ''}
             </div>
             <button
               type="button"
               onClick={() => onApply(approved)}
-              disabled={applying || (adjustments.length > 0 && !allDecided)}
+              disabled={applying || streaming || (adjustments.length > 0 && !allDecided)}
               className="px-4 py-2 text-sm rounded-lg bg-brand text-white font-heading font-semibold hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {applying && <span className="inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}

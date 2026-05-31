@@ -219,6 +219,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // ----- AI scope review -----
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiStreaming, setAiStreaming] = useState(false);
   const [aiApplying, setAiApplying] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiSummary, setAiSummary] = useState('');
@@ -1691,6 +1692,7 @@ export function RateCardForm(props: RateCardFormProps) {
     setAiModalOpen(true);
     setAiError(null);
     setAiLoading(true);
+    setAiStreaming(false);
     setAiSummary('');
     setAiAdjustments([]);
     try {
@@ -1732,20 +1734,51 @@ export function RateCardForm(props: RateCardFormProps) {
           region: inspectionRegion,
         }),
       });
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         const txt = await res.text().catch(() => '');
         throw new Error(`Review failed (${res.status}). ${txt.slice(0, 160)}`);
       }
-      const data = await res.json();
-      setAiSummary(String(data.summary || ''));
-      setAiAdjustments(Array.isArray(data.adjustments) ? data.adjustments : []);
+      // Stream the SSE response, appending each suggestion to the popup as it
+      // arrives so the inspector sees results fill in instead of one long wait.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let event = '';
+      let streamErr: string | null = null;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n');
+        buffer = parts.pop() || '';
+        for (const raw of parts) {
+          const line = raw.trim();
+          if (line.startsWith('event:')) { event = line.slice(6).trim(); continue; }
+          if (!line.startsWith('data:')) continue;
+          let data: any;
+          try { data = JSON.parse(line.slice(5).trim()); } catch { continue; }
+          if (event === 'adjustment') {
+            setAiLoading(false);
+            setAiStreaming(true);
+            setAiAdjustments((prev) => [...prev, data]);
+          } else if (event === 'summary') {
+            setAiLoading(false);
+            setAiSummary(String(data.summary || ''));
+          } else if (event === 'error') {
+            streamErr = String(data.error || 'Review failed');
+          }
+        }
+      }
+      if (streamErr) setAiError(streamErr);
     } catch (e: any) {
       setAiError(String(e?.message || e));
     } finally {
       setAiLoading(false);
+      setAiStreaming(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sections, props.inspectionRecordId, props.bedrooms, props.bathrooms, props.squareFootage, inspectionRegion]);
+  }, [sections, props.inspectionRecordId, props.bedrooms, props.bathrooms, props.squareFootage, props.lastTenantMonths, inspectionRegion]);
 
   // Live tenant-$ preview for the review popup as the inspector edits the
   // tenant % / quantity on a suggestion (uses the same authoritative math).
@@ -2608,6 +2641,7 @@ export function RateCardForm(props: RateCardFormProps) {
       <AiReviewModal
         open={aiModalOpen}
         loading={aiLoading}
+        streaming={aiStreaming}
         applying={aiApplying}
         error={aiError}
         summary={aiSummary}
