@@ -661,11 +661,22 @@ export function RateCardForm(props: RateCardFormProps) {
     // upload+attach flow (it has the form context the SW lacks).
     const onSwMessage = (e: MessageEvent) => { if (e.data?.type === 'resiwalk-flush') void runFlush(); };
     navigator.serviceWorker?.addEventListener?.('message', onSwMessage);
-    // Periodic retry while anything is queued (covers flaky/intermittent signal
-    // where the 'online' event doesn't fire).
+    // Periodic retry + reconcile while anything is queued (covers flaky signal
+    // where 'online' never fires, AND queued PHOTOS — not just the outbox — so
+    // the "Syncing…" banner can't get stuck after the queue has actually
+    // drained or after a background-sync upload.
     const iv = setInterval(() => {
-      if (outboxCountFor(props.inspectionRecordId) > 0) void runFlush();
-    }, 20000);
+      const outbox = outboxCountFor(props.inspectionRecordId);
+      void countQueuedPhotos(props.inspectionRecordId).then((photos) => {
+        // Reconcile the displayed counts (clears a stale banner).
+        setPendingSync(outbox);
+        setPendingPhotos(photos);
+        // Retry the flush only when there's something to send and we're online.
+        if ((outbox > 0 || photos > 0) && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+          void runFlush();
+        }
+      }).catch(() => {});
+    }, 15000);
     void runFlush(); // attempt anything left from a previous session
     return () => {
       window.removeEventListener('online', onOnline);
