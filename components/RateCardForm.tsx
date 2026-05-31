@@ -261,6 +261,11 @@ export function RateCardForm(props: RateCardFormProps) {
     !!window.navigator?.mediaDevices?.getUserMedia;
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Totals-header drill-down: tap the totals to reveal a by-category breakdown,
+  // then tap a category to reveal its individual line items — all in the same
+  // table, with the $ figures shown at every level.
+  const [overviewExpanded, setOverviewExpanded] = useState(false);
+  const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({});
 
   // The room the floating voice assistant is currently working on. Changing it
   // (manually or by voice) expands + scrolls to that section.
@@ -1619,6 +1624,31 @@ export function RateCardForm(props: RateCardFormProps) {
     return { count: n, vendor: v, client: c, tenant: t };
   }, [sections, sectionTotals]);
 
+  // Cross-section roll-up of every line by catalog category, each carrying its
+  // own line items, so the totals header can drill down category → line item.
+  type CatLine = { key: string; label: string; section: string; vendor: number; client: number; tenant: number };
+  type CatGroup = { category: string; count: number; vendor: number; client: number; tenant: number; lines: CatLine[] };
+  const categoryBreakdown = useMemo<CatGroup[]>(() => {
+    const map = new Map<string, CatGroup>();
+    for (const s of sections) {
+      for (const line of (linesBySection[s.id] || [])) {
+        const item = catalog.find((c) => c.lineItemCode === line.lineItemCode);
+        const category = (item?.category || '').trim() || 'Uncategorized';
+        const calc = totalsFor(line);
+        const v = calc ? roundMoney(calc.vendorCost) : 0;
+        const c = calc ? roundMoney(calc.clientCost) : 0;
+        const t = calc ? roundMoney(calc.tenantCost) : 0;
+        let g = map.get(category);
+        if (!g) { g = { category, count: 0, vendor: 0, client: 0, tenant: 0, lines: [] }; map.set(category, g); }
+        g.count++; g.vendor += v; g.client += c; g.tenant += t;
+        g.lines.push({ key: `${s.id}:${line.externalId || line.lineItemCode}`, label: lineLabel(line), section: s.displayName, vendor: v, client: c, tenant: t });
+      }
+    }
+    // Biggest client cost first — that's what the eye looks for in a scope review.
+    return Array.from(map.values()).sort((a, b) => b.client - a.client);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sections, linesBySection, catalog, regions, inspectionRegion]);
+
   const toggle = (id: string) => setExpanded((m) => ({ ...m, [id]: !m[id] }));
 
   // ----- Terminal action handlers (shared between inline + floating footers) ----
@@ -1985,7 +2015,13 @@ export function RateCardForm(props: RateCardFormProps) {
             </div>
           </div>
           <div className="flex justify-center sm:justify-end shrink-0">
-            <div className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setOverviewExpanded((v) => !v)}
+              aria-expanded={overviewExpanded}
+              title={overviewExpanded ? 'Hide breakdown' : 'Tap to see the breakdown by category'}
+              className="flex items-stretch text-xs rounded-md bg-white border border-gray-200 overflow-hidden hover:border-gray-300 hover:shadow-sm transition-shadow"
+            >
               <div className="text-center px-2 py-1 w-[58px] sm:w-[84px]">
                 <div className="text-gray-400 text-[10px] uppercase tracking-wide">Lines</div>
                 <div className="font-semibold text-gray-700 tabular-nums mt-0.5">{grandTotals.count}</div>
@@ -2006,10 +2042,91 @@ export function RateCardForm(props: RateCardFormProps) {
                 <div className="text-emerald-600/70 text-[10px] uppercase tracking-wide">Net Turn</div>
                 <div className="font-semibold text-emerald-700 tabular-nums mt-0.5">${formatMoney(roundMoney(grandTotals.client - grandTotals.tenant))}</div>
               </div>
-            </div>
+              <div className="flex items-center px-1.5 border-l border-gray-200/70 text-gray-400">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                     className={`transition-transform ${overviewExpanded ? 'rotate-180' : ''}`}>
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </div>
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Totals drill-down: category roll-up → line items, same $ columns. */}
+      {overviewExpanded && (
+        <div className="mb-3 rounded-lg border border-gray-200 bg-white overflow-x-auto">
+          <div className="min-w-[360px]">
+            {/* Column header */}
+            <div className="flex items-center px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-[10px] uppercase tracking-wide text-gray-400">
+              <div className="flex-1 min-w-0">Category</div>
+              <div className="w-[66px] text-right">Vendor</div>
+              <div className="w-[66px] text-right">Client</div>
+              <div className="w-[66px] text-right">Tenant</div>
+              <div className="w-[66px] text-right">Net Turn</div>
+            </div>
+
+            {categoryBreakdown.length === 0 && (
+              <div className="px-3 py-4 text-center text-sm text-gray-400">No line items yet.</div>
+            )}
+
+            {categoryBreakdown.map((g) => {
+              const open = !!expandedCats[g.category];
+              return (
+                <div key={g.category} className="border-b border-gray-100 last:border-b-0">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedCats((m) => ({ ...m, [g.category]: !m[g.category] }))}
+                    aria-expanded={open}
+                    className="w-full flex items-center px-3 py-2 text-left hover:bg-gray-50"
+                  >
+                    <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                           className={`shrink-0 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}>
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                      <span className="text-sm font-medium text-gray-800 truncate">{g.category}</span>
+                      <span className="shrink-0 text-[10px] text-gray-400 tabular-nums">({g.count})</span>
+                    </div>
+                    <div className="w-[66px] text-right text-sm tabular-nums text-gray-700">${formatMoney(roundMoney(g.vendor))}</div>
+                    <div className="w-[66px] text-right text-sm tabular-nums text-gray-700">${formatMoney(roundMoney(g.client))}</div>
+                    <div className="w-[66px] text-right text-sm tabular-nums text-brand">${formatMoney(roundMoney(g.tenant))}</div>
+                    <div className="w-[66px] text-right text-sm tabular-nums text-emerald-700">${formatMoney(roundMoney(g.client - g.tenant))}</div>
+                  </button>
+
+                  {open && (
+                    <div className="bg-gray-50/60">
+                      {g.lines.map((ln) => (
+                        <div key={ln.key} className="flex items-center pl-7 pr-3 py-1.5 border-t border-gray-100">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[13px] text-gray-700 truncate">{ln.label}</div>
+                            <div className="text-[10px] text-gray-400 truncate">{ln.section}</div>
+                          </div>
+                          <div className="w-[66px] text-right text-[13px] tabular-nums text-gray-600">${formatMoney(ln.vendor)}</div>
+                          <div className="w-[66px] text-right text-[13px] tabular-nums text-gray-600">${formatMoney(ln.client)}</div>
+                          <div className="w-[66px] text-right text-[13px] tabular-nums text-brand/90">${formatMoney(ln.tenant)}</div>
+                          <div className="w-[66px] text-right text-[13px] tabular-nums text-emerald-700/90">${formatMoney(roundMoney(ln.client - ln.tenant))}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Grand-total footer row — mirrors the header pill. */}
+            {categoryBreakdown.length > 0 && (
+              <div className="flex items-center px-3 py-2 bg-gray-50 border-t border-gray-200">
+                <div className="flex-1 min-w-0 text-sm font-semibold text-gray-800">Total ({grandTotals.count})</div>
+                <div className="w-[66px] text-right text-sm font-semibold tabular-nums text-gray-800">${formatMoney(roundMoney(grandTotals.vendor))}</div>
+                <div className="w-[66px] text-right text-sm font-semibold tabular-nums text-gray-800">${formatMoney(roundMoney(grandTotals.client))}</div>
+                <div className="w-[66px] text-right text-sm font-semibold tabular-nums text-brand">${formatMoney(roundMoney(grandTotals.tenant))}</div>
+                <div className="w-[66px] text-right text-sm font-semibold tabular-nums text-emerald-700">${formatMoney(roundMoney(grandTotals.client - grandTotals.tenant))}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {dataError && (
         <div className="mb-3 p-3 bg-red-50 border border-red-300 rounded text-sm text-red-800">
