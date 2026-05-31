@@ -257,6 +257,17 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [pending, setPending] = useState<Pending | null>(null);
   const [warming, setWarming] = useState(false);
+  // Voice needs the network (cloud STT + the reasoning agent), so it can't run
+  // offline. Track connectivity to degrade gracefully and auto-reactivate.
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    if (typeof navigator !== 'undefined') setOnline(navigator.onLine !== false);
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState('');
   const [typed, setTyped] = useState('');
@@ -529,7 +540,9 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         }
       } catch (e: any) {
         setStreamingText('');
-        if (e?.name === 'AbortError') {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          setError('Lost connection — voice paused. Add line items by tapping a section; they save and sync automatically.');
+        } else if (e?.name === 'AbortError') {
           setError('That took too long — check your connection and try again, or add the line manually.');
         } else {
           setError(String(e?.message || e));
@@ -549,6 +562,11 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       // ("change change to change to the…") before doing anything with it.
       const t = dedupeTranscript(text);
       if (!t) return;
+      // Voice/typed requests both hit the cloud agent; offline, don't try.
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setError('Voice needs a connection. You can still add line items by tapping a section — they save and sync automatically.');
+        return;
+      }
       // "No" / "close" / "that's it" / "stop" — the inspector is done. Stop
       // listening, acknowledge briefly, and DON'T call the agent (so it can't
       // get confused trying to interpret "no" as a request). Checked first so a
@@ -866,7 +884,8 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         type="button"
         onClick={() => {
           setOpen(true);
-          if (!pushToTalk) setTimeout(() => { startListeningRef.current(); }, 0);
+          // Don't auto-start listening offline — voice can't reach STT/the agent.
+          if (!pushToTalk && online) setTimeout(() => { startListeningRef.current(); }, 0);
         }}
         disabled={disabled}
         aria-label="Talk to the Voice Assistant"
@@ -892,7 +911,14 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               </button>
             </div>
 
-      {pushToTalk && (
+      {!online && (
+        <div className="rounded-md bg-amber-100 text-amber-800 text-xs font-heading font-semibold px-2.5 py-1.5 mb-2 flex items-center gap-2">
+          <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
+          Voice needs a connection. You can still add line items by tapping a section — they save here and sync automatically.
+        </div>
+      )}
+
+      {pushToTalk && online && (
         <p className="text-xs text-gray-500 mb-2">
           {recordingAudio
             ? 'Listening… release the mic when you’re done.'
@@ -967,7 +993,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               : (warming || busy)
                 ? <SpinnerIcon className="w-4 h-4 animate-spin" />
                 : <MicIcon className="w-4 h-4" />}
-            {listening ? 'Listening…' : warming ? 'Getting ready…' : busy ? 'Thinking…' : 'Tap the mic below'}
+            {!online ? 'Offline — voice unavailable' : listening ? 'Listening…' : warming ? 'Getting ready…' : busy ? 'Thinking…' : 'Tap the mic below'}
           </div>
         )}
         {/* Typed fallback (also handy when STT mishears) */}
@@ -976,8 +1002,8 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { submitUtterance(typed); setTyped(''); } }}
-          placeholder="…or type a request"
-          disabled={busy || disabled}
+          placeholder={online ? '…or type a request' : 'Offline — reconnect to use voice'}
+          disabled={busy || disabled || !online}
           className="flex-1 min-w-0 text-sm border border-gray-300 rounded px-2 py-1.5 bg-white"
         />
         {busy && (
@@ -1012,11 +1038,11 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           // transcribe via /api/transcribe, then run the normal line flow.
           <button
             type="button"
-            onPointerDown={(e) => { e.preventDefault(); try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* noop */ } void startAudioCapture(); }}
+            onPointerDown={(e) => { if (!online) return; e.preventDefault(); try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* noop */ } void startAudioCapture(); }}
             onPointerUp={(e) => { e.preventDefault(); stopAudioCapture(); }}
             onPointerCancel={() => stopAudioCapture()}
             onContextMenu={(e) => e.preventDefault()}
-            disabled={transcribing || disabled}
+            disabled={transcribing || disabled || !online}
             style={{ touchAction: 'none' }}
             aria-label={recordingAudio ? 'Release to send' : 'Hold to talk'}
             className={`relative inline-flex items-center justify-center w-11 h-11 rounded-full text-white shadow disabled:opacity-50 transition-transform select-none ${recordingAudio ? 'bg-red-600 scale-110' : 'bg-brand hover:bg-brand-dark ring-2 ring-brand/40'}`}
@@ -1027,13 +1053,14 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           <button
             type="button"
             onClick={() => {
+              if (!online) return;
               if (listening) { stopListening(); return; }
               // Barge-in: cut off any ongoing TTS so the inspector can speak now.
               try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
               speakingRef.current = false;
               startListeningRef.current();
             }}
-            disabled={(busy || warming) && !listening ? true : disabled}
+            disabled={!online ? true : ((busy || warming) && !listening ? true : disabled)}
             aria-label={listening ? 'Stop listening' : 'Talk to the Voice Assistant'}
             className={`relative inline-flex items-center justify-center w-11 h-11 rounded-full text-white shadow disabled:opacity-50 transition-transform ${listening ? 'bg-red-600 scale-110 animate-pulse' : 'bg-brand hover:bg-brand-dark ring-2 ring-brand/40'}`}
           >
