@@ -14,7 +14,7 @@ import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
-import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
+import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError } from '@/lib/offlineOutbox';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { useAppDialog } from '@/components/AppDialog';
@@ -548,26 +548,64 @@ export function RateCardForm(props: RateCardFormProps) {
       }
     });
 
-    // Upload queued offline photos: swap the local draft URL for the real
-    // HubSpot URL wherever it appears, then persist that section's photo list.
-    const touchedSections = new Set<string>();
-    const photoRes = await flushQueuedPhotos(props.inspectionRecordId, ({ oldUrl, newUrl }) => {
-      if (!oldUrl) return;
-      setPhotosBySection((m) => {
-        const next = { ...m };
-        for (const [sid, urls] of Object.entries(m)) {
-          if (urls.includes(oldUrl)) {
-            next[sid] = urls.map((u) => (u === oldUrl ? newUrl : u));
-            touchedSections.add(sid);
-          }
-        }
-        return next;
-      });
+    // Upload queued offline photos/videos. Accumulate the URL swaps (draft -> real,
+    // and for annotations the replaced original -> real) and apply them ONCE after
+    // the loop, computing the new lists from the committed refs (reliable) rather
+    // than reading state straight after setState (which hasn't applied yet).
+    const sectionUrlMap = new Map<string, string>();   // url-to-replace -> real url (in section strips)
+    const lineUrlMap = new Map<string, string>();      // url-to-replace -> real url (on line photos)
+    const photoRes = await flushQueuedPhotos(props.inspectionRecordId, ({ oldUrl, newUrl, replacesUrl, lineExternalId }) => {
+      if (lineExternalId) {
+        // Line-photo annotation: the draft (oldUrl) and the original (replacesUrl)
+        // both map to the real URL on that line.
+        if (oldUrl) lineUrlMap.set(oldUrl, newUrl);
+        if (replacesUrl) lineUrlMap.set(replacesUrl, newUrl);
+      } else {
+        if (oldUrl) sectionUrlMap.set(oldUrl, newUrl);
+        // Section-photo annotation: keep any line tagged with the original in sync.
+        if (replacesUrl) lineUrlMap.set(replacesUrl, newUrl);
+      }
     }).catch(() => ({ synced: 0 } as any));
-    // Persist each section whose photos changed (uses the live ref, real URLs only).
-    for (const sid of touchedSections) {
-      const urls = (photosBySectionRef.current[sid] || []).filter((u) => !u.startsWith('blob:'));
-      void savePhotosRef.current(sid, urls);
+
+    if (sectionUrlMap.size > 0) {
+      const cur = photosBySectionRef.current;
+      const nextPhotos: Record<string, string[]> = { ...cur };
+      const touched = new Set<string>();
+      for (const [sid, urls] of Object.entries(cur)) {
+        let changed = false;
+        const swapped = urls.map((u) => { const real = sectionUrlMap.get(u); if (real) { changed = true; touched.add(sid); return real; } return u; });
+        if (changed) nextPhotos[sid] = swapped;
+      }
+      if (touched.size > 0) {
+        setPhotosBySection(nextPhotos);
+        for (const sid of touched) {
+          void savePhotosRef.current(sid, (nextPhotos[sid] || []).filter((u) => !u.startsWith('blob:')));
+        }
+      }
+    }
+
+    if (lineUrlMap.size > 0) {
+      const cur = linesBySectionRef.current;
+      const toPersist: { sectionId: string; line: RateCardLineInput }[] = [];
+      const nextLines: Record<string, RateCardLineInput[]> = { ...cur };
+      for (const [sid, lines] of Object.entries(cur)) {
+        let sectionChanged = false;
+        const updatedLines = lines.map((l) => {
+          const photos = l.photoUrls || [];
+          let lineChanged = false;
+          const swapped = photos.map((u) => { const real = lineUrlMap.get(u); if (real) { lineChanged = true; return real; } return u; });
+          if (!lineChanged) return l;
+          sectionChanged = true;
+          const updated = { ...l, photoUrls: swapped };
+          toPersist.push({ sectionId: sid, line: updated });
+          return updated;
+        });
+        if (sectionChanged) nextLines[sid] = updatedLines;
+      }
+      if (toPersist.length > 0) {
+        setLinesBySection(nextLines);
+        for (const u of toPersist) void handleSaveLineForSection(u.sectionId, u.line);
+      }
     }
 
     refreshPending();
@@ -624,14 +662,43 @@ export function RateCardForm(props: RateCardFormProps) {
     photoMergedRef.current = true;
     void rehydrateQueuedPhotos(props.inspectionRecordId).then((drafts) => {
       if (drafts.length === 0) return;
-      setPhotosBySection((m) => {
-        const next = { ...m };
-        for (const d of drafts) {
-          const arr = next[d.sectionId] ? [...next[d.sectionId]] : [];
-          if (!arr.includes(d.url)) { arr.push(d.url); next[d.sectionId] = arr; }
-        }
-        return next;
-      });
+      // Section drafts: append new captures, or swap the replaced original for
+      // an annotation draft. Line-photo annotation drafts are merged into the
+      // line instead of the section strip.
+      const sectionDrafts = drafts.filter((d) => !d.lineExternalId);
+      const lineDrafts = drafts.filter((d) => d.lineExternalId);
+      if (sectionDrafts.length > 0) {
+        setPhotosBySection((m) => {
+          const next = { ...m };
+          for (const d of sectionDrafts) {
+            const arr = next[d.sectionId] ? [...next[d.sectionId]] : [];
+            if (d.replacesUrl && arr.includes(d.replacesUrl)) {
+              next[d.sectionId] = arr.map((u) => (u === d.replacesUrl ? d.url : u));
+            } else if (!arr.includes(d.url)) {
+              arr.push(d.url); next[d.sectionId] = arr;
+            }
+          }
+          return next;
+        });
+      }
+      if (lineDrafts.length > 0) {
+        setLinesBySection((m) => {
+          const next = { ...m };
+          for (const d of lineDrafts) {
+            const lines = next[d.sectionId];
+            if (!lines) continue;
+            next[d.sectionId] = lines.map((l) => {
+              if (l.externalId !== d.lineExternalId) return l;
+              const photos = l.photoUrls || [];
+              if (d.replacesUrl && photos.includes(d.replacesUrl)) {
+                return { ...l, photoUrls: photos.map((u) => (u === d.replacesUrl ? d.url : u)) };
+              }
+              return l;
+            });
+          }
+          return next;
+        });
+      }
       setPendingPhotos((n) => Math.max(n, drafts.length));
     }).catch(() => {});
   }, [linesHydrated, props.inspectionRecordId]);
@@ -654,6 +721,10 @@ export function RateCardForm(props: RateCardFormProps) {
   // as "Added" vanished on reload. Chaining them guarantees one-at-a-time,
   // ordered persistence.
   useEffect(() => { photosBySectionRef.current = photosBySection; }, [photosBySection]);
+  // Live mirror of linesBySection so the offline flusher can read current line
+  // photos when persisting a synced annotation replacement.
+  const linesBySectionRef = useRef<Record<string, RateCardLineInput[]>>({});
+  useEffect(() => { linesBySectionRef.current = linesBySection; }, [linesBySection]);
   // Last section-layout JSON we know the server has, for optimistic-concurrency
   // (compare-and-swap) on section edits so two tabs/devices don't clobber each
   // other's room changes.
@@ -1345,22 +1416,32 @@ export function RateCardForm(props: RateCardFormProps) {
   // upload the marked-up file, swap the URL in place, and persist.
   async function replaceSectionPhoto(sectionId: string, idx: number, file: File) {
     if (props.readOnly) return;
+    const current = [...(photosBySection[sectionId] || [])];
+    if (idx < 0 || idx >= current.length) return;
+    const oldUrl = current[idx];
     try {
-      const url = await uploadPhoto(file);
-      const current = [...(photosBySection[sectionId] || [])];
-      if (idx < 0 || idx >= current.length) return;
-      const oldUrl = current[idx];
+      // Queue-aware: offline, this returns a local-draft blob URL (the annotated
+      // image queued with replacesUrl=oldUrl) and syncs later.
+      const url = await uploadPhotoOrQueue(file, props.inspectionRecordId, sectionId, { replacesUrl: oldUrl });
       current[idx] = url;
       setPhotosBySection((m) => ({ ...m, [sectionId]: current }));
-      await savePhotosForSection(sectionId, current);
-      // Keep line tags in sync: swap the old URL for the marked-up one on any
-      // line it was tagged to (otherwise the line keeps the un-marked photo).
-      if (oldUrl && oldUrl !== url) {
-        for (const line of (linesBySection[sectionId] || [])) {
-          if ((line.photoUrls || []).includes(oldUrl)) {
-            handleSaveLineForSection(sectionId, { ...line, photoUrls: line.photoUrls.map((u) => (u === oldUrl ? url : u)) });
+      const isDraft = url.startsWith('blob:');
+      if (!isDraft) {
+        await savePhotosForSection(sectionId, current);
+        // Keep line tags in sync: swap the old URL for the marked-up one on any
+        // line it was tagged to (otherwise the line keeps the un-marked photo).
+        if (oldUrl && oldUrl !== url) {
+          for (const line of (linesBySection[sectionId] || [])) {
+            if ((line.photoUrls || []).includes(oldUrl)) {
+              handleSaveLineForSection(sectionId, { ...line, photoUrls: line.photoUrls.map((u) => (u === oldUrl ? url : u)) });
+            }
           }
         }
+      } else {
+        // Draft: don't persist yet (the blob would be filtered out, dropping the
+        // photo). The flusher swaps draft->real + persists section AND lines on
+        // reconnect. Lines keep the original URL until then.
+        refreshPending();
       }
     } catch (e) {
       console.error('[RateCardForm] annotate replace failed:', e);
@@ -1434,12 +1515,23 @@ export function RateCardForm(props: RateCardFormProps) {
     if (props.readOnly) return;
     const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
     if (!line) return;
+    const arr = [...(line.photoUrls || [])];
+    if (index < 0 || index >= arr.length) return;
+    const oldUrl = arr[index];
     try {
-      const url = await uploadPhoto(file);
-      const arr = [...(line.photoUrls || [])];
-      if (index < 0 || index >= arr.length) return;
+      const url = await uploadPhotoOrQueue(file, props.inspectionRecordId, sectionId, { replacesUrl: oldUrl, lineExternalId: externalId });
       arr[index] = url;
-      handleSaveLineForSection(sectionId, { ...line, photoUrls: arr });
+      if (!url.startsWith('blob:')) {
+        handleSaveLineForSection(sectionId, { ...line, photoUrls: arr });
+      } else {
+        // Draft: update the line locally only (don't persist a blob URL to the
+        // server). The flusher persists the real URL on reconnect.
+        setLinesBySection((m) => {
+          const lines = m[sectionId] || [];
+          return { ...m, [sectionId]: lines.map((l) => (l.externalId === externalId ? { ...l, photoUrls: arr } : l)) };
+        });
+        refreshPending();
+      }
     } catch (e) {
       console.error('[RateCardForm] line photo replace failed:', e);
     }

@@ -26,6 +26,11 @@ export type QueuedPhoto = {
   filename: string;
   videoBlob?: Blob;      // video only
   videoType?: string;    // video only
+  // Annotation/markup: this draft REPLACES an existing URL (in the section
+  // strip and, if lineExternalId is set, on that line's photos) rather than
+  // being a brand-new add.
+  replacesUrl?: string;
+  lineExternalId?: string;
   createdAt: number;
 };
 
@@ -100,6 +105,7 @@ export async function uploadPhotoOrQueue(
   file: File,
   inspectionRecordId: string,
   sectionId: string,
+  opts?: { replacesUrl?: string; lineExternalId?: string },
 ): Promise<string> {
   const blob = await compressToJpeg(file);
   const filename = toJpegName(file.name);
@@ -108,7 +114,10 @@ export async function uploadPhotoOrQueue(
   } catch (e) {
     if (!isOfflineErr(e) || !idbAvailable()) throw e;
     const localId = `idbph_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    await putRecord({ localId, inspectionRecordId, sectionId, kind: 'photo', blob, filename, createdAt: Date.now() });
+    await putRecord({
+      localId, inspectionRecordId, sectionId, kind: 'photo', blob, filename,
+      replacesUrl: opts?.replacesUrl, lineExternalId: opts?.lineExternalId, createdAt: Date.now(),
+    });
     const url = URL.createObjectURL(blob);
     urlByLocalId.set(localId, { displayUrl: url, revokables: [url] });
     return url;
@@ -158,9 +167,9 @@ export async function countQueuedPhotos(inspectionRecordId: string): Promise<num
  */
 export async function rehydrateQueuedPhotos(
   inspectionRecordId: string,
-): Promise<{ localId: string; sectionId: string; url: string }[]> {
+): Promise<{ localId: string; sectionId: string; url: string; replacesUrl?: string; lineExternalId?: string }[]> {
   const all = await getAllRecords();
-  const out: { localId: string; sectionId: string; url: string }[] = [];
+  const out: { localId: string; sectionId: string; url: string; replacesUrl?: string; lineExternalId?: string }[] = [];
   for (const r of all) {
     if (r.inspectionRecordId !== inspectionRecordId) continue;
     let entry = urlByLocalId.get(r.localId);
@@ -175,7 +184,7 @@ export async function rehydrateQueuedPhotos(
       }
       urlByLocalId.set(r.localId, entry);
     }
-    out.push({ localId: r.localId, sectionId: r.sectionId, url: entry.displayUrl });
+    out.push({ localId: r.localId, sectionId: r.sectionId, url: entry.displayUrl, replacesUrl: r.replacesUrl, lineExternalId: r.lineExternalId });
   }
   return out;
 }
@@ -187,7 +196,7 @@ export async function rehydrateQueuedPhotos(
  */
 export async function flushQueuedPhotos(
   inspectionRecordId: string,
-  onSynced: (info: { localId: string; sectionId: string; oldUrl: string; newUrl: string }) => void,
+  onSynced: (info: { localId: string; sectionId: string; oldUrl: string; newUrl: string; replacesUrl?: string; lineExternalId?: string }) => void,
 ): Promise<{ synced: number; remaining: number }> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
   // Only flush THIS inspection's photos — the mounted form is what persists the
@@ -217,7 +226,7 @@ export async function flushQueuedPhotos(
     const entry = urlByLocalId.get(rec.localId);
     const oldUrl = entry?.displayUrl || '';
     await deleteRecord(rec.localId);
-    onSynced({ localId: rec.localId, sectionId: rec.sectionId, oldUrl, newUrl });
+    onSynced({ localId: rec.localId, sectionId: rec.sectionId, oldUrl, newUrl, replacesUrl: rec.replacesUrl, lineExternalId: rec.lineExternalId });
     if (entry) {
       for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
       urlByLocalId.delete(rec.localId);
