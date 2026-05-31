@@ -1966,6 +1966,15 @@ export function RateCardForm(props: RateCardFormProps) {
   }
 
   async function handleSubmitOrFinalize() {
+    // Don't submit/finalize until the AI-applied (and any other) changes have
+    // actually synced to the server — otherwise approval would run on a stale
+    // or partial scope. The Submit button is also disabled in this state.
+    if (aiApplying || (pendingSync + pendingPhotos) > 0) {
+      await dialog.alert(
+        `Your latest changes are still saving (${pendingSync + pendingPhotos} pending). Please wait for "Synced" before submitting.\n\nIf it stays stuck, use Retry or Clear on the sync banner.`
+      );
+      return;
+    }
     // Pre-flight: required section photos present?
     const missingSections: string[] = [];
     for (const s of sections) {
@@ -2674,7 +2683,7 @@ export function RateCardForm(props: RateCardFormProps) {
               showCancelInspection={!!props.onCancelInspection}
               submitLabel={submitLabel}
               submitLabelShort={submitLabelShort}
-              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing}
+              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || aiApplying || (pendingSync + pendingPhotos) > 0}
               onCancelInspection={handleCancelInspectionClick}
               onSaveAndClose={handleSaveAndClose}
               onSubmit={handleSubmitOrFinalize}
