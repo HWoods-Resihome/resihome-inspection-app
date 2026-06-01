@@ -346,6 +346,33 @@ export function CameraCapture({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, facing]);
 
+  // Resume after backgrounding. When the tab is hidden (user switches apps /
+  // locks the phone / changes tabs), the browser stops the camera tracks, so on
+  // return the <video> is frozen and won't capture. Re-acquire the stream (or
+  // just replay a merely-paused video) when the page becomes visible again.
+  useEffect(() => {
+    if (!isOpen) return;
+    const resume = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (recordingRef.current) return; // don't clobber an in-progress recording
+      const track = streamRef.current?.getVideoTracks?.()[0];
+      const dead = !streamRef.current || !track || track.readyState === 'ended';
+      if (dead) {
+        startStream();
+      } else if (videoRef.current?.paused) {
+        videoRef.current.play().catch(() => { /* autoplay rejection is non-fatal */ });
+      }
+    };
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('focus', resume);
+    window.addEventListener('pageshow', resume);
+    return () => {
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('pageshow', resume);
+    };
+  }, [isOpen, startStream]);
+
   // While the camera is open, keep a fresh GPS fix so each shot can be stamped.
   // Best-effort: if the user denies location or it's unavailable, we just stamp
   // address + time without coordinates.
@@ -1241,9 +1268,6 @@ export function CameraCapture({
                     <span className="tabular-nums">
                       {proximity.status === 'ok' ? 'At property' : 'Off-site'} · {fmtDistance(proximity.distance)}
                     </span>
-                    {/* Which reference the verdict used: "property" = the
-                        object's stored lat/long; otherwise a geocoded address. */}
-                    <span className="opacity-70 font-normal border-l border-white/40 pl-1.5">{proximity.source}</span>
                   </button>
                 ) : proximity.status === 'locating' ? (
                   <div className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading bg-black/55 text-white/90 pointer-events-none">
