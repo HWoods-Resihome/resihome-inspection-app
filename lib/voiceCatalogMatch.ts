@@ -131,12 +131,20 @@ async function embedCatalog(items: RateCardLineItem[]): Promise<Map<string, numb
 }
 
 function catalogVersion(items: RateCardLineItem[]): string {
-  // Prefer the explicit catalog_version if present; else derive a cheap
-  // fingerprint from count + a sample of codes so a changed catalog re-embeds.
-  const v = (items[0] as any)?.catalogVersion;
-  const base = v ? String(v) : `n${items.length}_${items.slice(0, 3).map((i) => i.lineItemCode).join('-')}`;
-  // Prefix the embed-schema version so changing what we embed re-embeds.
-  return `${EMBED_SCHEMA}_${base}`;
+  // Content fingerprint over EVERY line's code + the exact text we embed. Any
+  // added/removed line OR edited description changes this, so updating the
+  // rate-card matrix in HubSpot auto-re-embeds with no manual catalog_version
+  // bump or script. FNV-1a (fast, dependency-free; we only need change detection).
+  let h = 0x811c9dc5;
+  for (const it of items) {
+    const s = `${it.lineItemCode}${catalogItemEmbedText(it)}`;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+  }
+  // Prefix the embed-schema version so changing WHAT we embed also re-embeds.
+  return `${EMBED_SCHEMA}_${(h >>> 0).toString(36)}_${items.length}`;
 }
 
 // Get (or build) the catalog embeddings for the given items. Layered cache:
