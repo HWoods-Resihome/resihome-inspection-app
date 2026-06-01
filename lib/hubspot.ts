@@ -1283,6 +1283,9 @@ export interface SavedAnswer {
   quantity: number | null;
   assignedTo: string;
   photoUrls: string[];
+  // AFTER photos for Internal Resolution rate-card lines (proof the in-house
+  // work was done). Stored in the `after_photo_urls` property; empty otherwise.
+  afterPhotoUrls: string[];
   // QC Turn Re-Inspect: per-line result ('pass'|'fail'|'') and photo phase
   // ('after' for QC after-photos). Empty/absent on non-QC answers.
   passFail?: 'pass' | 'fail' | '';
@@ -1303,6 +1306,25 @@ export interface SavedAnswer {
     clientCost: number | null;
     tenantCost: number | null;
   };
+}
+
+// Whether the `after_photo_urls` property exists on the Answer object yet.
+// Cached for the life of the server instance. Used to (a) avoid requesting an
+// unknown property in batch reads (HubSpot 400s on those), (b) gate the
+// after-photo requirement so the feature is dormant until the migration that
+// adds the property has run. Returns false on any uncertainty (fail-safe).
+let _afterPhotoPropCache: boolean | null = null;
+export async function answerHasAfterPhotoProperty(): Promise<boolean> {
+  if (_afterPhotoPropCache !== null) return _afterPhotoPropCache;
+  try {
+    const { answer } = typeIds();
+    await hubspotFetch(`/crm/v3/properties/${answer}/after_photo_urls`);
+    _afterPhotoPropCache = true;
+  } catch {
+    // 404 (not created yet) or any other error → treat as absent.
+    _afterPhotoPropCache = false;
+  }
+  return _afterPhotoPropCache;
 }
 
 export async function fetchAnswersForInspection(inspectionRecordId: string): Promise<SavedAnswer[]> {
@@ -1344,6 +1366,9 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
     // QC Turn Re-Inspect
     'pass_fail', 'photo_phase',
   ];
+  // Only request after_photo_urls once the property exists — HubSpot batch read
+  // 400s on an unknown property, which would break this (widely-used) fetch.
+  if (await answerHasAfterPhotoProperty()) properties.push('after_photo_urls');
   const out: SavedAnswer[] = [];
   for (let i = 0; i < answerIds.length; i += 100) {
     const chunk = answerIds.slice(i, i + 100);
@@ -1371,6 +1396,7 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
         // photo_urls is stored comma-separated by rate-card-lines.ts and
         // semicolon-separated by some Scope code paths. Handle both.
         photoUrls: (p.photo_urls || '').split(/[,;]/).map((s: string) => s.trim()).filter(Boolean),
+        afterPhotoUrls: (p.after_photo_urls || '').split(/[,;]/).map((s: string) => s.trim()).filter(Boolean),
         passFail: (p.pass_fail === 'pass' || p.pass_fail === 'fail') ? p.pass_fail : '',
         photoPhase: p.photo_phase || '',
       };

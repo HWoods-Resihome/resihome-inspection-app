@@ -4,6 +4,7 @@ import {
   fetchAnswersForInspection,
   fetchInspectionById,
   updateInspection,
+  answerHasAfterPhotoProperty,
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 
@@ -28,6 +29,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         propertyZip: data.propertyZip,
         propertyLastTenantMonths: data.propertyLastTenantMonths,
         answers,
+        // The Internal Resolution after-photo requirement is live only once the
+        // after_photo_urls property exists (migration run). The client uses this
+        // to gate its finalize block so it can't deadlock before the migration.
+        afterPhotosEnabled: await answerHasAfterPhotoProperty(),
       });
     } catch (e: any) {
       console.error(`GET /api/inspections/${id} failed:`, e);

@@ -258,6 +258,10 @@ export interface RateCardLineInput {
   customVendorCost?: number | null;
   // Optional photos (same pattern as AnswerInput.photoUrls)
   photoUrls: string[];
+  // AFTER photos — proof the in-house work was completed. Required (and only
+  // shown) when assignedTo is Internal Resolution. Stored in their own
+  // `after_photo_urls` field, separate from the line's regular photoUrls.
+  afterPhotoUrls?: string[];
   // Custom description override (inspector may edit the catalog's full description per Q-J)
   customLaborFullDescription?: string;
 }

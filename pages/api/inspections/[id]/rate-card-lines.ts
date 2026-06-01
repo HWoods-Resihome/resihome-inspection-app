@@ -218,6 +218,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (line.customVendorCost != null) {
         props.custom_vendor_cost = line.customVendorCost;
       }
+      // After photos (Internal Resolution proof-of-work). Only include when the
+      // line actually has some, so saves stay resilient if the after_photo_urls
+      // property hasn't been created yet (the per-item fallback then surfaces
+      // just that line instead of failing the whole batch). Empty/absent => the
+      // field is simply not written.
+      if (Array.isArray(line.afterPhotoUrls) && line.afterPhotoUrls.length > 0) {
+        props.after_photo_urls = line.afterPhotoUrls.join(',');
+      }
 
       answerUpserts.push({
         recordId: u.recordId,

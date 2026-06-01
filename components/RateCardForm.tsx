@@ -13,6 +13,7 @@ import { EditableLineRow } from '@/components/EditableLineRow';
 import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
+import { isInternalResolution } from '@/lib/vendors';
 import { AiReviewModal } from '@/components/AiReviewModal';
 import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, saveReviewCache, loadReviewCache, clearReviewCache, type AiAdjustment } from '@/lib/aiReview';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
@@ -155,6 +156,11 @@ export function RateCardForm(props: RateCardFormProps) {
   const [dataLoaded, setDataLoaded] = useState(false);
 
   // ----- Lines + photos in state ---------------------------------------
+  // Internal Resolution after-photo requirement is active only once the
+  // after_photo_urls property exists in HubSpot (migration run). The GET
+  // response reports it; we gate the finalize block on it so it can't deadlock
+  // before the migration (you couldn't save after-photos to satisfy it).
+  const [afterPhotosEnabled, setAfterPhotosEnabled] = useState(false);
   const [linesBySection, setLinesBySection] = useState<Record<string, RateCardLineInput[]>>({});
   const [photosBySection, setPhotosBySection] = useState<Record<string, string[]>>({});
   // Live mirror of photosBySection so async save paths persist the LATEST merged
@@ -475,6 +481,7 @@ export function RateCardForm(props: RateCardFormProps) {
         const data = await r.json();
         if (cancelled) return;
 
+        setAfterPhotosEnabled(data.afterPhotosEnabled === true);
         const answers = data.answers || [];
 
         // Build a lookup: "label||location" -> sectionId
@@ -521,6 +528,7 @@ export function RateCardForm(props: RateCardFormProps) {
               customVendorCost: rc.customVendorCost,
               customLaborFullDescription: customDesc,
               photoUrls: ans.photoUrls || [],
+              afterPhotoUrls: ans.afterPhotoUrls || [],
             };
             if (!linesAcc[sectionId]) linesAcc[sectionId] = [];
             linesAcc[sectionId].push(line);
@@ -2238,6 +2246,28 @@ export function RateCardForm(props: RateCardFormProps) {
       );
       return;
     }
+    // Pre-flight: every Internal Resolution line needs at least one AFTER photo
+    // (proof the in-house work was done). Gated on afterPhotosEnabled so this
+    // can't block before the migration that lets after-photos be saved.
+    if (afterPhotosEnabled) {
+      const missingAfter: string[] = [];
+      for (const s of sections) {
+        for (const line of (linesBySection[s.id] || [])) {
+          if (isInternalResolution(line.assignedTo) && (line.afterPhotoUrls?.length ?? 0) === 0) {
+            const desc = catalog.find((c) => c.lineItemCode === line.lineItemCode)?.laborShortDescription || line.lineItemCode;
+            missingAfter.push(`${s.displayName}: ${desc}`);
+          }
+        }
+      }
+      if (missingAfter.length > 0) {
+        await dialog.alert(
+          'After photos are required on every Internal Resolution line before finalizing. Add an After Photo to:\n\n' +
+          missingAfter.slice(0, 10).map((n) => `  • ${n}`).join('\n') +
+          (missingAfter.length > 10 ? `\n  ...and ${missingAfter.length - 10} more` : '')
+        );
+        return;
+      }
+    }
     // No lines at all? Probably a mistake.
     const totalLines = Object.values(linesBySection).reduce((s, arr) => s + arr.length, 0);
     if (totalLines === 0) {
@@ -2878,6 +2908,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               readOnly={props.readOnly}
                               mobile={isMobile}
                               tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
+                              afterPhotosEnabled={afterPhotosEnabled}
                               onSave={(updated) => handleSaveLineForSection(s.id, updated)}
                               onDelete={() => handleDeleteLine(s.id, line.externalId)}
                               onOpenPhoto={(index) => {
@@ -2907,6 +2938,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               startInEditMode
                               autoSfQuantity={/whole\s*house/i.test(s.label) && props.squareFootage ? props.squareFootage : null}
                               tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
+                              afterPhotosEnabled={afterPhotosEnabled}
                               onSave={(created) => handleSaveLineForSection(s.id, created)}
                               onDelete={() => handleDiscardNew(s.id)}  /* unused for new rows (no view-mode), kept for typing */
                               onDiscardNew={() => handleDiscardNew(s.id)}

@@ -24,6 +24,15 @@ export const VENDORS: string[] = [
   'Eviction Vendor (Past)',
 ];
 
+// The in-house vendor. Lines assigned here are work ResiHome resolves itself,
+// so they REQUIRE after-photos (proof the work was completed) before finalize.
+export const INTERNAL_RESOLUTION_VENDOR = 'Internal Resolution';
+
+/** True when a line's vendor is the in-house Internal Resolution team. */
+export function isInternalResolution(vendor: string | null | undefined): boolean {
+  return (vendor || '').trim().toLowerCase() === 'internal resolution';
+}
+
 // Vendors that should NOT get their own per-vendor PDF at finalize. Their lines
 // still appear on the Master and Tenant Chargeback PDFs — they just don't get a
 // standalone vendor packet. Matched case-insensitively and tolerant of the older

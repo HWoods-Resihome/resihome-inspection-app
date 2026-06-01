@@ -10,6 +10,7 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionHeader,
+  PdfSectionPhotos,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
@@ -102,19 +103,29 @@ function VendorSection(props: { section: PdfSectionGroup }) {
       </View>
 
       {s.lines.map((line) => (
-        <View key={line.externalId} style={pdfStyles.tableRow} wrap={false}>
-          <Text style={[pdfStyles.tableCellCentered, { width: COL.category }]}>{line.category}</Text>
-          <Text style={[pdfStyles.tableCellCentered, { width: COL.subcategory }]}>{line.subcategory}</Text>
-          <View style={{ width: COL.description }}>
-            <Text style={pdfStyles.tableCell}>{line.laborShortDescription}</Text>
-            {line.laborFullDescription && line.laborFullDescription !== line.laborShortDescription && (
-              <Text style={pdfStyles.tableCellDescription}>{line.laborFullDescription}</Text>
-            )}
+        <React.Fragment key={line.externalId}>
+          <View style={pdfStyles.tableRow} wrap={false}>
+            <Text style={[pdfStyles.tableCellCentered, { width: COL.category }]}>{line.category}</Text>
+            <Text style={[pdfStyles.tableCellCentered, { width: COL.subcategory }]}>{line.subcategory}</Text>
+            <View style={{ width: COL.description }}>
+              <Text style={pdfStyles.tableCell}>{line.laborShortDescription}</Text>
+              {line.laborFullDescription && line.laborFullDescription !== line.laborShortDescription && (
+                <Text style={pdfStyles.tableCellDescription}>{line.laborFullDescription}</Text>
+              )}
+            </View>
+            <Text style={[pdfStyles.tableCellCentered, { width: COL.qty }]}>{formatQtyPdf(line.quantity)}</Text>
+            <Text style={[pdfStyles.tableCellCentered, { width: COL.unit }]}>{line.laborMeas}</Text>
+            <Text style={[pdfStyles.tableCellNumeric, { width: COL.vendorCost }]}>${formatMoneyPdf(line.vendorCost)}</Text>
           </View>
-          <Text style={[pdfStyles.tableCellCentered, { width: COL.qty }]}>{formatQtyPdf(line.quantity)}</Text>
-          <Text style={[pdfStyles.tableCellCentered, { width: COL.unit }]}>{line.laborMeas}</Text>
-          <Text style={[pdfStyles.tableCellNumeric, { width: COL.vendorCost }]}>${formatMoneyPdf(line.vendorCost)}</Text>
-        </View>
+          {(line.afterPhotoUrls?.length ?? 0) > 0 && (
+            <View style={{ marginTop: 2, marginBottom: 5, paddingLeft: 8 }} wrap={false}>
+              <Text style={{ fontSize: 8, color: '#6b7280', marginBottom: 2 }}>
+                After Photos — {line.laborShortDescription}
+              </Text>
+              <PdfSectionPhotos photoUrls={line.afterPhotoUrls!} />
+            </View>
+          )}
+        </React.Fragment>
       ))}
 
       <View style={pdfStyles.subtotalRow} wrap={false}>

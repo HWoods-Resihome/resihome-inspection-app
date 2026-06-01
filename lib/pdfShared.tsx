@@ -433,6 +433,9 @@ export interface PdfLineRow {
   clientCost: number;
   tenantBillBackPercent: number;
   tenantCost: number;
+  // After photos (Internal Resolution proof-of-work). Rendered on the Internal
+  // Resolution vendor PDF only; empty for all other lines.
+  afterPhotoUrls?: string[];
 }
 
 export interface PdfSectionGroup {

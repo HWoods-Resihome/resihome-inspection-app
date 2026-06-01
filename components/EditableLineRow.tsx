@@ -26,10 +26,10 @@ import { Combobox } from '@/components/Combobox';
 import { WheelPicker } from '@/components/WheelPicker';
 import { ListPicker } from '@/components/ListPicker';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
-import { formatMoney } from '@/lib/photoUpload';
+import { formatMoney, uploadFilesBatch } from '@/lib/photoUpload';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
-import { VENDORS, vendorPillStyle } from '@/lib/vendors';
+import { VENDORS, vendorPillStyle, isInternalResolution } from '@/lib/vendors';
 import type {
   RateCardLineItem,
   RegionRate,
@@ -59,6 +59,10 @@ interface Props {
   // Tenant's months in the home — auto-sets the tenant % on paint/flooring lines
   // per the depreciation schedule (new rows only, until manually changed).
   tenantMonths?: number | null;
+  // Whether the Internal Resolution "After Photos" feature is active (the
+  // after_photo_urls property exists in HubSpot). When false the panel is hidden
+  // so nothing tries to save after-photos before the migration has run.
+  afterPhotosEnabled?: boolean;
   // Behavior
   readOnly?: boolean;
   startInEditMode?: boolean;            // true for new rows
@@ -180,11 +184,101 @@ function OverCapAlert({
   );
 }
 
+/**
+ * "After Photos" block for Internal Resolution lines — proof the in-house work
+ * was completed. Captures straight from the device camera (dedicated input,
+ * separate from the section photo pool), shows thumbnails, supports delete, and
+ * flags "Required" while empty. Self-contained: it uploads and reports the new
+ * URL list up via onChange (the parent persists it on the line).
+ */
+function AfterPhotosPanel({
+  urls, onChange, readOnly,
+}: {
+  urls: string[];
+  onChange: (urls: string[]) => void;
+  readOnly?: boolean;
+}) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const urlsRef = useRef(urls);
+  urlsRef.current = urls;
+
+  const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ''; // let the same file be re-picked later
+    if (files.length === 0) return;
+    setErr('');
+    setBusy(true);
+    const collected: string[] = [];
+    try {
+      const { failed } = await uploadFilesBatch(files, (url) => { collected.push(url); });
+      if (collected.length > 0) onChange([...(urlsRef.current || []), ...collected]);
+      if (failed > 0) setErr(`${failed} photo${failed === 1 ? '' : 's'} didn't upload — tap + to retry.`);
+    } catch (e: any) {
+      setErr(String(e?.message || e).slice(0, 140));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeAt = (i: number) => onChange((urlsRef.current || []).filter((_, idx) => idx !== i));
+
+  return (
+    <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500">After Photos</span>
+        {urls.length === 0
+          ? <span className="text-[10px] font-semibold text-amber-600">Required</span>
+          : <span className="text-[10px] text-emerald-600">&#10003; {urls.length}</span>}
+      </div>
+      <div className="flex gap-1.5 flex-wrap items-center">
+        {urls.map((u, i) => (
+          <span key={`${u}-${i}`} className="relative inline-block">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={displayImageSrc(u)} alt="" className="w-12 h-12 object-cover rounded border border-gray-200" />
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); removeAt(i); }}
+                aria-label="Remove after photo"
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-500 hover:text-red-600 hover:border-red-300 shadow-sm text-xs leading-none"
+              >×</button>
+            )}
+          </span>
+        ))}
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
+            disabled={busy}
+            className="w-12 h-12 rounded border-2 border-dashed border-amber-300 text-amber-500 hover:border-amber-400 hover:text-amber-600 flex items-center justify-center disabled:opacity-50"
+            title="Add an after photo"
+            aria-label="Add after photo"
+          >
+            {busy ? <span className="text-[10px] font-semibold">…</span> : <span className="text-xl leading-none">+</span>}
+          </button>
+        )}
+      </div>
+      {err && <div className="text-[10px] text-red-600 mt-1">{err}</div>}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        multiple
+        className="hidden"
+        onChange={onPick}
+      />
+    </div>
+  );
+}
+
 export function EditableLineRow(props: Props) {
   const {
     line, catalog, regions, inspectionRegion,
     section, location, readOnly, startInEditMode, mobile,
-    onSave, onDelete, onDiscardNew, autoSfQuantity, tenantMonths,
+    onSave, onDelete, onDiscardNew, autoSfQuantity, tenantMonths, afterPhotosEnabled,
   } = props;
 
   // -------------------------------------------------------------------
@@ -219,6 +313,9 @@ export function EditableLineRow(props: Props) {
   const [customDescription, setCustomDescription] = useState<string>(
     line?.customLaborFullDescription || ''
   );
+  // After photos (Internal Resolution proof-of-work). Local mirror while editing;
+  // persisted on save. In view mode the panel persists directly via onSave.
+  const [afterPhotoUrls, setAfterPhotoUrls] = useState<string[]>(line?.afterPhotoUrls || []);
   // True while the Line Item search input is focused (keyboard open). Grows the
   // card with bottom white space so the field can scroll up and the dropdown
   // options clear the on-screen keyboard.
@@ -410,6 +507,9 @@ export function EditableLineRow(props: Props) {
       customAdjustedMaterialCost: line?.customAdjustedMaterialCost ?? null,
       customVendorCost: customVendorCost.trim() === '' ? null : Number(customVendorCost),
       photoUrls: line?.photoUrls || [],
+      // Keep after photos only while the line is Internal Resolution; switching
+      // vendor away clears them (they're proof-of-work for in-house lines only).
+      afterPhotoUrls: isInternalResolution(vendor) ? afterPhotoUrls : [],
       // Store an override only when it's non-empty AND differs from the catalog
       // default (so an unedited prefill isn't persisted as a custom override).
       customLaborFullDescription: (() => {
@@ -434,6 +534,7 @@ export function EditableLineRow(props: Props) {
     setVendor(line?.assignedTo || DEFAULT_VENDOR);
     setCustomVendorCost(line?.customVendorCost != null ? String(line.customVendorCost) : '');
     setCustomDescription(line?.customLaborFullDescription || '');
+    setAfterPhotoUrls(line?.afterPhotoUrls || []);
     // Keep the description-reset effect from wiping the restored override.
     lastDescItemRef.current = line?.lineItemCode || null;
     descTouchedRef.current = !!line?.customLaborFullDescription;
@@ -530,6 +631,7 @@ export function EditableLineRow(props: Props) {
         readOnly={readOnly}
         mobile={mobile}
         tenantMonths={tenantMonths}
+        afterPhotosEnabled={afterPhotosEnabled}
         onEnterEdit={() => !readOnly && setIsEditing(true)}
         onDelete={onDelete}
         onOpenPhoto={props.onOpenPhoto}
@@ -542,6 +644,7 @@ export function EditableLineRow(props: Props) {
             customLaborFullDescription: text.length > 0 ? text : undefined,
           });
         }}
+        onSaveAfterPhotos={(urls) => onSave({ ...line, afterPhotoUrls: urls })}
       />
     );
   }
@@ -723,6 +826,14 @@ export function EditableLineRow(props: Props) {
                   </div>
                 </div>
 
+                {/* After Photos — only for Internal Resolution lines (proof the
+                    in-house work was completed; required before finalize). */}
+                {afterPhotosEnabled && isInternalResolution(vendor) && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50/40 px-3 py-2">
+                    <AfterPhotosPanel urls={afterPhotoUrls} onChange={setAfterPhotoUrls} />
+                  </div>
+                )}
+
                 {/* While the line-item search keyboard is open, grow the card so
                     it can scroll the field WAY up and the dropdown clears the
                     keyboard; collapses when the keyboard closes. */}
@@ -804,6 +915,9 @@ export function EditableLineRow(props: Props) {
             placeholder={catalogDescription(selectedItem) || 'Edit description (optional)...'}
             title="Edit the full labor description for this line"
           />
+        )}
+        {afterPhotosEnabled && isInternalResolution(vendor) && (
+          <AfterPhotosPanel urls={afterPhotoUrls} onChange={setAfterPhotoUrls} />
         )}
       </td>
       {/* Qty (center-aligned, no spinner) */}
@@ -943,13 +1057,15 @@ interface ViewRowProps {
   readOnly?: boolean;
   mobile?: boolean;
   tenantMonths?: number | null;
+  afterPhotosEnabled?: boolean;
   onEnterEdit: () => void;
   onDelete: () => void;
   onOpenPhoto?: (index: number) => void;
   onSaveDescription: (text: string) => void;
+  onSaveAfterPhotos: (urls: string[]) => void;
 }
 
-function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, onEnterEdit, onDelete, onOpenPhoto, onSaveDescription }: ViewRowProps) {
+function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotosEnabled, onEnterEdit, onDelete, onOpenPhoto, onSaveDescription, onSaveAfterPhotos }: ViewRowProps) {
   const [showFull, setShowFull] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState('');
@@ -1049,6 +1165,13 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, onEnterEdit
                 {line.note && <span className="text-[11px] italic text-gray-600 truncate">📝 {line.note}</span>}
                 {calc?.isCustomPriced && <span className="text-[11px] font-semibold text-yellow-700">⚡ Custom</span>}
               </div>
+              {afterPhotosEnabled && isInternalResolution(line.assignedTo) && (
+                <AfterPhotosPanel
+                  urls={line.afterPhotoUrls || []}
+                  onChange={onSaveAfterPhotos}
+                  readOnly={readOnly}
+                />
+              )}
               {(line.photoUrls?.length ?? 0) > 0 && (
                 <div className="mt-1.5 flex gap-1 flex-wrap">
                   {line.photoUrls.map((u, i) => (
@@ -1169,6 +1292,13 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, onEnterEdit
         )}
         {line.note && <div className="text-xs italic text-gray-600 mt-1">📝 {line.note}</div>}
         {calc?.isCustomPriced && <div className="text-xs font-semibold text-yellow-700 mt-1">⚡ Custom Priced</div>}
+        {afterPhotosEnabled && isInternalResolution(line.assignedTo) && (
+          <AfterPhotosPanel
+            urls={line.afterPhotoUrls || []}
+            onChange={onSaveAfterPhotos}
+            readOnly={readOnly}
+          />
+        )}
         {(line.photoUrls?.length ?? 0) > 0 && (
           <div className="mt-1.5 flex gap-1 flex-wrap">
             {line.photoUrls.map((u, i) => (

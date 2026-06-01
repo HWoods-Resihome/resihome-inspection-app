@@ -21,7 +21,9 @@ import {
   uploadFileWithId,
   attachFilesToInspectionRecord,
   updateInspection,
+  answerHasAfterPhotoProperty,
 } from '@/lib/hubspot';
+import { isInternalResolution } from '@/lib/vendors';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { bustInspectionsCache } from '@/pages/api/inspections';
@@ -226,6 +228,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           clientCost: calc.clientCost,
           tenantBillBackPercent: rc.tenantBillBackPercent,
           tenantCost: calc.tenantCost,
+          afterPhotoUrls: ans.afterPhotoUrls || [],
         };
 
         group.lines.push(line);
@@ -259,6 +262,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({
         error: 'Cannot finalize: no line items have been added to this inspection.',
       });
+    }
+
+    // Internal Resolution lines REQUIRE after-photos (in-house proof of work).
+    // Gated on the property existing so this can't block before the migration
+    // (a first re-finalize is exempt — it's a regeneration, not a fresh submit).
+    if (!isRefinalize && await answerHasAfterPhotoProperty()) {
+      const missingAfter: string[] = [];
+      for (const g of sectionGroups.values()) {
+        for (const line of g.lines) {
+          if (isInternalResolution(line.vendor) && (line.afterPhotoUrls?.length ?? 0) === 0) {
+            missingAfter.push(`${g.displayName}: ${line.laborShortDescription}`);
+          }
+        }
+      }
+      if (missingAfter.length > 0) {
+        return res.status(400).json({
+          error: 'After photos are required on every Internal Resolution line before finalizing.',
+          missingAfterPhotos: missingAfter,
+        });
+      }
     }
 
     // Clean, parenthesis-free template name for cover headers and filenames —
