@@ -454,6 +454,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           zipCode: inspectionData.propertyZip || '',
         },
         links: { appUrl, hubspotUrl },
+        // CC the inspector (from the HubSpot inspection record) on the finalize
+        // email so they get a copy of the scope report they completed.
+        inspectorEmail: inspection.inspectorEmail,
         attachments: {
           masterPdf: { name: masterFilename, url: masterUrl },
           chargebackPdf: chargebackBuf && chargebackUrl ? { name: chargebackFilename, url: chargebackUrl } : null,

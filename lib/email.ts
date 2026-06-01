@@ -320,7 +320,9 @@ function escapeAttr(s: string): string {
  *
  * Recipient resolution:
  *   to: soda@resihome.com (always)
- *   cc: team{STATE}@resihome.com (only if property has a 2-letter state code)
+ *   cc: team{STATE}@resihome.com (only if property has a 2-letter state code),
+ *       plus the inspector's HubSpot email (when present) so they get a copy
+ *       of the scope report they completed.
  *
  * State code missing is not an error — the email still goes out, just without
  * the regional team on copy.
@@ -330,14 +332,26 @@ export function composeInspectionEmail(args: {
   prop: PropertyContact;
   links: InspectionLinks;
   attachments: InspectionAttachments;
+  /** Inspector's email from the HubSpot inspection record. Added to CC when
+   *  it's a valid address that isn't already a recipient. */
+  inspectorEmail?: string | null;
 }): InspectionEmailPayload {
-  const { ctx, prop, links, attachments } = args;
+  const { ctx, prop, links, attachments, inspectorEmail } = args;
 
   // Recipients
   const to = [SODA_EMAIL];
   const cc: string[] = [];
   const teamEmail = buildTeamEmail(prop.stateCode);
   if (teamEmail) cc.push(teamEmail);
+
+  // CC the inspector (from HubSpot) so they receive a copy of their own
+  // completed scope. Validate + dedupe (case-insensitive) against existing
+  // recipients so we never double-send or add a malformed address.
+  const inspector = (inspectorEmail || '').trim();
+  if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(inspector)) {
+    const already = new Set([...to, ...cc].map((e) => e.toLowerCase()));
+    if (!already.has(inspector.toLowerCase())) cc.push(inspector);
+  }
 
   // Vendor breakdown
   const vendorBreakdown = buildVendorBreakdown(ctx);
