@@ -351,19 +351,20 @@ export async function fetchProperties(
   const statusFilter = { propertyName: PROPERTY_STATUS_PROPERTY, operator: 'NOT_IN', values: PROPERTY_EXCLUDE_STATUSES };
   const excludeOn = PROPERTY_EXCLUDE_STATUSES.length > 0;
 
-  function buildBody(withStatus: boolean, withSort: boolean): any {
+  // Word tokens of the search term (capped so a filter group stays within
+  // HubSpot's per-group limit). Each is matched with a single TRAILING wildcard
+  // — `meek*` — which is HubSpot's supported CONTAINS_TOKEN form. A leading or
+  // double wildcard (`*meek*`) and multi-word values are what 400 the request.
+  const tokens = term ? term.split(/\s+/).filter(Boolean).slice(0, 5) : [];
+
+  function buildBody(withStatus: boolean, withSort: boolean, fields: string[]): any {
     const base = withStatus ? [statusFilter] : [];
     let filterGroups: any[];
     if (term) {
-      // Split the term into word tokens and require EACH token in a field
-      // (AND within the group), OR-ing across fields. This matches "97 meek" →
-      // an address containing both "97" and "meek". CONTAINS_TOKEN values must
-      // be single tokens with no spaces — passing the whole "97 meek" as one
-      // wildcard value is what HubSpot 400s on. Cap tokens so a group stays
-      // within HubSpot's per-group filter limit (status + up to 5 tokens).
-      const tokens = term.split(/\s+/).filter(Boolean).slice(0, 5);
-      filterGroups = SEARCH_FIELDS.map((f) => ({
-        filters: [...base, ...tokens.map((t) => ({ propertyName: f, operator: 'CONTAINS_TOKEN', value: `*${t}*` }))],
+      // Require EACH token in a field (AND within the group), OR-ing across the
+      // given fields. "97 meek" → an address containing both "97" and "meek".
+      filterGroups = fields.map((f) => ({
+        filters: [...base, ...tokens.map((t) => ({ propertyName: f, operator: 'CONTAINS_TOKEN', value: `${t}*` }))],
       }));
     } else {
       filterGroups = withStatus ? [{ filters: base }] : [];
@@ -373,27 +374,34 @@ export async function fetchProperties(
     return body;
   }
 
-  async function search(withStatus: boolean, withSort: boolean) {
+  async function search(withStatus: boolean, withSort: boolean, fields: string[] = SEARCH_FIELDS) {
     return hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
       method: 'POST',
-      body: JSON.stringify(buildBody(withStatus, withSort)),
+      body: JSON.stringify(buildBody(withStatus, withSort, fields)),
     });
   }
 
   // Try the full query, then degrade on a 400 so a single misconfigured field
-  // can never hard-break the picker: first drop the status filter, then the sort.
+  // can never hard-break the picker: drop the status filter, then (when
+  // searching) narrow to address-only in case a field like a numeric zip can't
+  // take CONTAINS_TOKEN, then drop the sort.
   let resp: any;
   try {
     resp = await search(excludeOn, true);
   } catch (e1: any) {
     if (e1?.status !== 400) throw e1;
-    console.warn('[fetchProperties] search 400; retrying without status filter. Check PROPERTY_STATUS_PROPERTY / PROPERTY_EXCLUDE_STATUSES.');
+    console.warn('[fetchProperties] search 400; retrying without status filter.');
     try {
       resp = await search(false, true);
     } catch (e2: any) {
       if (e2?.status !== 400) throw e2;
-      console.warn('[fetchProperties] still 400; retrying without sort.');
-      resp = await search(false, false);
+      if (term) {
+        console.warn('[fetchProperties] still 400; retrying search on address only.');
+        resp = await search(false, true, ['address']);
+      } else {
+        console.warn('[fetchProperties] still 400; retrying without sort.');
+        resp = await search(false, false);
+      }
     }
   }
 
