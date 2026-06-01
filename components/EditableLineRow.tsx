@@ -23,6 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
 import { Combobox } from '@/components/Combobox';
+import { WheelPicker } from '@/components/WheelPicker';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { formatMoney } from '@/lib/photoUpload';
 import { displayImageSrc } from '@/lib/photoDisplay';
@@ -560,13 +561,12 @@ export function EditableLineRow(props: Props) {
                   <label className="block text-xs font-heading font-bold text-gray-700 mb-1">
                     Tenant % <span className="text-brand">*</span>
                   </label>
-                  <select
+                  <WheelPicker
                     value={String(tenantPct)}
-                    onChange={(e) => { tenantTouchedRef.current = true; setTenantPct(Number(e.target.value)); }}
-                    className="h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white"
-                  >
-                    {TENANT_PCT_OPTIONS.map((p) => <option key={p} value={String(p)}>{p}%</option>)}
-                  </select>
+                    options={TENANT_PCT_OPTIONS.map((p) => ({ value: String(p), label: `${p}%` }))}
+                    onChange={(v) => { tenantTouchedRef.current = true; setTenantPct(Number(v)); }}
+                    ariaLabel="Tenant %"
+                  />
                 </div>
 
                 {/* Totals row: Vendor $ (editable, with pencil) · Client $ · Tenant $.
