@@ -65,6 +65,7 @@ export function depKindForCategory(category: string | undefined | null, descript
   // conflicts with the tag, the text wins. The AI review enforces the same list.
   //   - tub / shower refinish / reglaze / resurface / strip (billed under
   //     Painting but NOT wall paint)
+  //   - cabinetry / cabinet paint (billed under Painting but NOT wall paint)
   //   - caulk / re-caulk
   //   - ceiling tile
   //   - transition / threshold strips
@@ -74,6 +75,7 @@ export function depKindForCategory(category: string | undefined | null, descript
   //   - screens / spline
   if (
     (/refinish|reglaze|resurface|strip/.test(d) && /tub|shower|surround|bath/.test(d)) ||
+    /cabinet/.test(d) ||
     /caulk/.test(d) ||
     /ceiling tile/.test(d) ||
     /transition|threshold/.test(d) ||
