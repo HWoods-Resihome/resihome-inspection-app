@@ -349,8 +349,18 @@ export function CameraCapture({
   // While the camera is open, keep a fresh GPS fix so each shot can be stamped.
   // Best-effort: if the user denies location or it's unavailable, we just stamp
   // address + time without coordinates.
-  useEffect(() => {
-    if (!isOpen || typeof navigator === 'undefined' || !navigator.geolocation) return;
+  //
+  // (Re)acquire a GPS fix: requests a one-shot position (this triggers the OS
+  // permission prompt when allowed) and (re)starts the watch. Safe to call
+  // repeatedly — it clears any prior watch first — so it doubles as the recovery
+  // path when the user turns location back on, and as the manual "re-check"
+  // action behind the badge.
+  const startWatch = useCallback(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+    if (geoWatchRef.current != null) {
+      try { navigator.geolocation.clearWatch(geoWatchRef.current); } catch { /* noop */ }
+      geoWatchRef.current = null;
+    }
     const onPos = (pos: GeolocationPosition) => {
       geoRef.current = pos;
       geoTsRef.current = Date.now();
@@ -366,16 +376,29 @@ export function CameraCapture({
       geoRef.current = null;
       setGeoError(true);
     };
+    // maximumAge:0 forces a current reading, so recovery doesn't return a
+    // cached "off" result.
     navigator.geolocation.getCurrentPosition(onPos, onErr, {
-      enableHighAccuracy: true, timeout: 8000, maximumAge: 30000,
+      enableHighAccuracy: true, timeout: 8000, maximumAge: 0,
     });
     try {
       geoWatchRef.current = navigator.geolocation.watchPosition(onPos, onErr, {
         enableHighAccuracy: true, timeout: 20000, maximumAge: 15000,
       });
     } catch { /* watchPosition unsupported — getCurrentPosition fix still applies */ }
-    // Re-evaluate staleness on a timer (no GPS events fire once location is off).
-    const tick = setInterval(() => setGeoTick((t) => t + 1), 3000);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen || typeof navigator === 'undefined' || !navigator.geolocation) return;
+    startWatch();
+    // Re-evaluate staleness on a timer (no GPS events fire once location is
+    // off). While in a bad state, also re-attempt acquisition so the verdict
+    // recovers automatically when the user turns location back on.
+    const tick = setInterval(() => {
+      setGeoTick((t) => t + 1);
+      const bad = geoErrorRef.current || !geoRef.current || Date.now() - geoTsRef.current > FIX_TTL_MS;
+      if (bad) startWatch();
+    }, 3000);
     return () => {
       if (geoWatchRef.current != null) {
         try { navigator.geolocation.clearWatch(geoWatchRef.current); } catch { /* noop */ }
@@ -388,7 +411,7 @@ export function CameraCapture({
       setGeoFix(null);
       setGeoError(false);
     };
-  }, [isOpen]);
+  }, [isOpen, startWatch]);
 
   // Resolve the property's reference coordinates once per open, so each shot can
   // be checked for proximity. Prefers the property's stored lat/long (via
@@ -1203,11 +1226,17 @@ export function CameraCapture({
                 photo). Top-left; shifts down while recording so it clears the
                 REC indicator (also top-left). */}
             {(propertyRecordId || addressSnapshot) && permissionState === 'granted' && (
-              <div className={`absolute left-3 z-10 pointer-events-none ${recording ? 'top-16' : 'top-3'}`}>
+              <div className={`absolute left-3 z-10 ${recording ? 'top-16' : 'top-3'}`}>
                 {proximity.status === 'ok' || proximity.status === 'far' ? (
-                  <div className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading font-semibold ${
-                    proximity.status === 'ok' ? 'bg-emerald-600/85 text-white' : 'bg-red-600/85 text-white'
-                  }`}>
+                  // Tappable so the inspector can force a fresh fix on demand.
+                  <button
+                    type="button"
+                    onClick={startWatch}
+                    title="Tap to re-check location"
+                    className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading font-semibold ${
+                      proximity.status === 'ok' ? 'bg-emerald-600/85 text-white' : 'bg-red-600/85 text-white'
+                    }`}
+                  >
                     <span className="text-sm leading-none">{proximity.status === 'ok' ? '✓' : '✗'}</span>
                     <span className="tabular-nums">
                       {proximity.status === 'ok' ? 'At property' : 'Off-site'} · {fmtDistance(proximity.distance)}
@@ -1215,17 +1244,25 @@ export function CameraCapture({
                     {/* Which reference the verdict used: "property" = the
                         object's stored lat/long; otherwise a geocoded address. */}
                     <span className="opacity-70 font-normal border-l border-white/40 pl-1.5">{proximity.source}</span>
-                  </div>
+                  </button>
                 ) : proximity.status === 'locating' ? (
-                  <div className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading bg-black/55 text-white/90">
+                  <div className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading bg-black/55 text-white/90 pointer-events-none">
                     <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
                     Locating…
                   </div>
                 ) : (
-                  <div className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading font-semibold bg-amber-500/90 text-black">
+                  // Tap to retry — re-requests location and re-prompts for
+                  // permission if the OS allows it.
+                  <button
+                    type="button"
+                    onClick={startWatch}
+                    title="Tap to enable / re-check location"
+                    className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading font-semibold bg-amber-500/90 text-black"
+                  >
                     <span className="text-sm leading-none">⚠</span>
-                    Can’t verify · {proximity.reason}
-                  </div>
+                    <span>Can’t verify · {proximity.reason}</span>
+                    <span className="font-normal border-l border-black/30 pl-1.5">Tap to retry</span>
+                  </button>
                 )}
               </div>
             )}
