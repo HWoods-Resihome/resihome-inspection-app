@@ -321,6 +321,10 @@ export function RateCardForm(props: RateCardFormProps) {
   // The room the floating voice assistant is currently working on. Changing it
   // (manually or by voice) expands + scrolls to that section.
   const [currentSectionId, setCurrentSectionId] = useState<string>('');
+  // The bottom spacer is small by default (no wasted white space). It expands to
+  // ~a viewport only while we're scrolling to the LAST section, so a line added
+  // there can still rise to the top; it collapses again when we move elsewhere.
+  const [expandTailSpace, setExpandTailSpace] = useState(false);
   // sectionId -> the section's DOM node, for scroll-into-view on room change.
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
 
@@ -349,7 +353,9 @@ export function RateCardForm(props: RateCardFormProps) {
   const navigateToSection = useCallback((sectionId: string) => {
     setCurrentSectionId(sectionId);
     setExpanded((e) => ({ ...e, [sectionId]: true }));
-    // Defer so the expand has applied before we measure/scroll.
+    // Only grow the tail spacer when heading to the very last section.
+    setExpandTailSpace(sections.length > 1 && sectionId === sections[sections.length - 1]?.id);
+    // Defer so the expand (and any spacer growth) has applied before we scroll.
     setTimeout(() => {
       const el = sectionRefs.current[sectionId];
       if (!el) return;
@@ -357,7 +363,7 @@ export function RateCardForm(props: RateCardFormProps) {
       const top = window.scrollY + rect.top - stickyOffset();
       window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }, 60);
-  }, []);
+  }, [sections]);
 
   // After a voice add/edit, bring the affected LINE (preferred) or section up
   // to just below the sticky header so the change is easy to see. Same behavior
@@ -365,6 +371,9 @@ export function RateCardForm(props: RateCardFormProps) {
   // the last line to the top.
   const revealSection = useCallback((sectionId: string, lineExternalId?: string) => {
     setExpanded((e) => ({ ...e, [sectionId]: true }));
+    // Grow the tail spacer only when the changed line is in the last section, so
+    // it can rise to the top; otherwise keep the spacer small.
+    setExpandTailSpace(sections.length > 1 && sectionId === sections[sections.length - 1]?.id);
     setTimeout(() => {
       // Prefer the specific line element so the changed card lands at the top.
       let el: Element | null = null;
@@ -377,7 +386,7 @@ export function RateCardForm(props: RateCardFormProps) {
       const top = window.scrollY + rect.top - stickyOffset();
       window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }, 120);
-  }, []);
+  }, [sections]);
   // form mounts, so the FIRST "add line item" click is instant instead of
   // waiting on the (large) catalog fetch. Fire-and-forget; ensureDataLoaded
   // guards against double-loading, and the hydration effect below will reuse
@@ -2906,10 +2915,11 @@ export function RateCardForm(props: RateCardFormProps) {
         })}
       </div>
 
-      {/* Spacer so the floating footer doesn't cover the last section — just the
-          footer's measured height plus a small cushion, so the last category
-          scrolls to sit right above the footer with no extra white space. */}
-      <div style={{ height: footerH + 16 }} />
+      {/* Spacer below the last section. Small by default (footer height + a
+          cushion) so there's no wasted white space; grows to ~a viewport only
+          while we're scrolling to the last section, so a line added there can
+          still rise to the top. Collapses back when we navigate elsewhere. */}
+      <div style={{ height: expandTailSpace ? '85vh' : footerH + 16 }} />
 
       {/* Floating footer — visible on all screen sizes, pinned to the bottom of
           the viewport so the inspector can save/submit/cancel from anywhere.
