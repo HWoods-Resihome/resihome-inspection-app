@@ -355,13 +355,15 @@ export async function fetchProperties(
     const base = withStatus ? [statusFilter] : [];
     let filterGroups: any[];
     if (term) {
-      // OR across fields (each its own group); CONTAINS_TOKEN supports the
-      // wildcard so partial street numbers / names match. The status filter is
-      // repeated in each group because groups are OR-ed (filters within a group
-      // are AND-ed).
-      const wild = `*${term}*`;
+      // Split the term into word tokens and require EACH token in a field
+      // (AND within the group), OR-ing across fields. This matches "97 meek" →
+      // an address containing both "97" and "meek". CONTAINS_TOKEN values must
+      // be single tokens with no spaces — passing the whole "97 meek" as one
+      // wildcard value is what HubSpot 400s on. Cap tokens so a group stays
+      // within HubSpot's per-group filter limit (status + up to 5 tokens).
+      const tokens = term.split(/\s+/).filter(Boolean).slice(0, 5);
       filterGroups = SEARCH_FIELDS.map((f) => ({
-        filters: [...base, { propertyName: f, operator: 'CONTAINS_TOKEN', value: wild }],
+        filters: [...base, ...tokens.map((t) => ({ propertyName: f, operator: 'CONTAINS_TOKEN', value: `*${t}*` }))],
       }));
     } else {
       filterGroups = withStatus ? [{ filters: base }] : [];
