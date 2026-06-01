@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- ResiWalk house mark: brand-pink silhouette on a transparent background,
+       sized to fill the tab. Door is cut out (evenodd) so it reads at 16px. -->
+  <path fill="#ff0060" fill-rule="evenodd" d="
+    M16 2.5
+    L30 16
+    L25.5 16
+    L25.5 29.5
+    L6.5 29.5
+    L6.5 16
+    L2 16
+    Z
+    M13 29.5
+    L13 20.5
+    L19 20.5
+    L19 29.5
+    Z
+  "/>
+</svg>
