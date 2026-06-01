@@ -2877,6 +2877,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               location={s.location}
                               readOnly={props.readOnly}
                               mobile={isMobile}
+                              tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
                               onSave={(updated) => handleSaveLineForSection(s.id, updated)}
                               onDelete={() => handleDeleteLine(s.id, line.externalId)}
                               onOpenPhoto={(index) => {

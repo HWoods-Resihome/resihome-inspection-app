@@ -14,8 +14,8 @@ export type DepKind = 'paint' | 'flooring';
 interface Row { months: number; paint: number; flooring: number }
 
 const SCHEDULE: Row[] = [
-  { months: 6, paint: 85, flooring: 95 },
-  { months: 12, paint: 75, flooring: 95 },
+  { months: 6, paint: 85, flooring: 90 },
+  { months: 12, paint: 75, flooring: 90 },
   { months: 18, paint: 65, flooring: 90 },
   { months: 24, paint: 50, flooring: 85 },
   { months: 30, paint: 35, flooring: 80 },
@@ -102,4 +102,28 @@ export function depKindForCategory(category: string | undefined | null, descript
 /** Both rates at a given month count — handy for prompts / display. */
 export function depreciationRates(months: number): { paint: number; flooring: number } {
   return { paint: depreciationTenantPct('paint', months), flooring: depreciationTenantPct('flooring', months) };
+}
+
+/**
+ * For a cap-eligible (paint/flooring) line, report whether the current tenant %
+ * sits ABOVE the depreciation-schedule cap for the tenant's time in home.
+ *
+ * Used to surface a small alert next to a tenant % that an inspector manually
+ * raised past the cap. Returns null for non-cap-eligible lines (no alert). Since
+ * the auto-set value always EQUALS the cap, `over` is true only when the value
+ * was manually pushed higher — and drops back to false the moment it's lowered
+ * to the cap or below.
+ */
+export interface CapStatus { kind: DepKind; cap: number; months: number; over: boolean }
+export function tenantPctCapStatus(
+  category: string | undefined | null,
+  description: string | undefined | null,
+  tenantPct: number,
+  months: number | null | undefined,
+): CapStatus | null {
+  const kind = depKindForCategory(category, description);
+  if (!kind) return null;
+  const m = typeof months === 'number' && months > 0 ? months : 12;
+  const cap = depreciationTenantPct(kind, m);
+  return { kind, cap, months: m, over: tenantPct > cap };
 }

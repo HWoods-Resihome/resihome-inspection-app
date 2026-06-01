@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
+import { depKindForCategory, depreciationTenantPct, tenantPctCapStatus } from '@/lib/depreciation';
 import { Combobox } from '@/components/Combobox';
 import { WheelPicker } from '@/components/WheelPicker';
 import { ListPicker } from '@/components/ListPicker';
@@ -107,6 +107,40 @@ function genExternalId(): string {
  */
 function catalogDescription(item: { laborSubtext?: string; laborFullDescription: string }): string {
   return (item.laborSubtext && item.laborSubtext.trim()) || item.laborFullDescription || '';
+}
+
+/**
+ * Amber warning triangle shown next to a tenant % that has been manually raised
+ * ABOVE the paint/flooring depreciation cap for the tenant's time in home.
+ * Renders nothing for non-cap-eligible lines or when the % is at/below the cap.
+ * Hover (title) explains it concisely.
+ */
+function OverCapAlert({
+  category, description, tenantPct, months, className,
+}: {
+  category: string | undefined | null;
+  description: string | undefined | null;
+  tenantPct: number;
+  months: number | null | undefined;
+  className?: string;
+}) {
+  const status = tenantPctCapStatus(category, description, tenantPct, months);
+  if (!status || !status.over) return null;
+  const title = `Above the ${status.cap}% ${status.kind} cap for ${status.months} mo in home (depreciation schedule).`;
+  return (
+    <span
+      className={`inline-flex text-amber-500 ${className || ''}`}
+      title={title}
+      aria-label={title}
+      role="img"
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+        <line x1="12" y1="9" x2="12" y2="13" />
+        <line x1="12" y1="17" x2="12.01" y2="17" />
+      </svg>
+    </span>
+  );
 }
 
 export function EditableLineRow(props: Props) {
@@ -458,6 +492,7 @@ export function EditableLineRow(props: Props) {
         calc={calc}
         readOnly={readOnly}
         mobile={mobile}
+        tenantMonths={tenantMonths}
         onEnterEdit={() => !readOnly && setIsEditing(true)}
         onDelete={onDelete}
         onOpenPhoto={props.onOpenPhoto}
@@ -599,6 +634,13 @@ export function EditableLineRow(props: Props) {
                 <div>
                   <label className="block text-xs font-heading font-bold text-gray-700 mb-1">
                     Tenant % <span className="text-brand">*</span>
+                    <OverCapAlert
+                      category={selectedItem?.category}
+                      description={selectedItem?.laborShortDescription}
+                      tenantPct={tenantPct}
+                      months={tenantMonths}
+                      className="ml-1 align-middle"
+                    />
                   </label>
                   <WheelPicker
                     value={String(tenantPct)}
@@ -778,16 +820,22 @@ export function EditableLineRow(props: Props) {
           the OS picker with the fixed 0–100% list, no keyboard. Fixed-width so
           the column doesn't bloat (values are at most 4 chars, "100%"). */}
       <td className="px-2 py-1.5 text-center align-middle">
-        <div className="w-[72px] mx-auto">
+        <div className="w-[72px] mx-auto flex items-center justify-center gap-1">
           <select
             value={String(tenantPct)}
-            onChange={(e) => setTenantPct(Number(e.target.value))}
+            onChange={(e) => { tenantTouchedRef.current = true; setTenantPct(Number(e.target.value)); }}
             className="h-9 w-full border border-gray-300 rounded px-1 text-sm bg-white text-center"
           >
             {TENANT_PCT_OPTIONS.map((p) => (
               <option key={p} value={String(p)}>{p}%</option>
             ))}
           </select>
+          <OverCapAlert
+            category={selectedItem?.category}
+            description={selectedItem?.laborShortDescription}
+            tenantPct={tenantPct}
+            months={tenantMonths}
+          />
         </div>
       </td>
       {/* Tenant $ — computed display */}
@@ -857,13 +905,14 @@ interface ViewRowProps {
   calc: ReturnType<typeof calculateLine> | null;
   readOnly?: boolean;
   mobile?: boolean;
+  tenantMonths?: number | null;
   onEnterEdit: () => void;
   onDelete: () => void;
   onOpenPhoto?: (index: number) => void;
   onSaveDescription: (text: string) => void;
 }
 
-function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, onOpenPhoto, onSaveDescription }: ViewRowProps) {
+function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, onEnterEdit, onDelete, onOpenPhoto, onSaveDescription }: ViewRowProps) {
   const [showFull, setShowFull] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState('');
@@ -1003,7 +1052,15 @@ function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, on
                 <div className="text-[10px] uppercase tracking-wide text-gray-400">Tenant</div>
                 <div className="text-[12px] font-semibold text-brand mt-0.5 tabular-nums whitespace-nowrap">{calc ? money2(calc.tenantCost) : '…'}</div>
                 {/* Tenant % in parens under the tenant $ — same pink as the $ */}
-                <div className="text-[10px] text-brand tabular-nums">({line.tenantBillBackPercent}%)</div>
+                <div className="text-[10px] text-brand tabular-nums inline-flex items-center justify-end gap-0.5 w-full">
+                  ({line.tenantBillBackPercent}%)
+                  <OverCapAlert
+                    category={item.category}
+                    description={item.laborShortDescription}
+                    tenantPct={line.tenantBillBackPercent}
+                    months={tenantMonths}
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -1115,7 +1172,17 @@ function ViewRow({ line, item, calc, readOnly, mobile, onEnterEdit, onDelete, on
       <td className="px-3 py-2 text-right text-sm text-gray-900 whitespace-nowrap">
         {calc ? `$${formatMoney(roundMoney(calc.clientCost))}` : '…'}
       </td>
-      <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{line.tenantBillBackPercent}%</td>
+      <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">
+        <span className="inline-flex items-center justify-center gap-1">
+          {line.tenantBillBackPercent}%
+          <OverCapAlert
+            category={item.category}
+            description={item.laborShortDescription}
+            tenantPct={line.tenantBillBackPercent}
+            months={tenantMonths}
+          />
+        </span>
+      </td>
       <td className="px-3 py-2 text-right text-sm font-semibold text-brand whitespace-nowrap">
         {calc ? `$${formatMoney(roundMoney(calc.tenantCost))}` : '…'}
       </td>
