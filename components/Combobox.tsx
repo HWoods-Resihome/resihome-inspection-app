@@ -31,6 +31,9 @@ interface Props {
   // the on-screen keyboard doesn't pop up — the user can scroll options first
   // and only gets the keyboard when they tap the field again to type.
   deferKeyboard?: boolean;
+  // Fired when the text input gains/loses focus (i.e. the keyboard opens/closes).
+  // Lets a parent grow extra scroll room so the dropdown clears the keyboard.
+  onFocusChange?: (focused: boolean) => void;
   // Server-search mode: when provided, the parent owns matching. The combobox
   // calls this (debounced) as the user types so the parent can refetch
   // `options` from the API — used for datasets too large to pre-load (e.g.
@@ -64,6 +67,7 @@ export function Combobox({
   onQueryChange,
   filled = false,
   deferKeyboard = false,
+  onFocusChange,
 }: Props) {
   const serverMode = typeof onQueryChange === 'function';
   const [open, setOpen] = useState(false);
@@ -275,6 +279,7 @@ export function Combobox({
           }}
           onFocus={() => {
             setOpen(true);
+            onFocusChange?.(true);
             if (scrollIntoViewOnFocus) {
               // Wait for the keyboard to push up, then scroll the sheet (only the
               // sheet — never the page) so the field sits just under the sticky
@@ -291,6 +296,7 @@ export function Combobox({
             }
           }}
           onBlur={() => {
+            onFocusChange?.(false);
             if (scrollIntoViewOnFocus) {
               setTimeout(() => {
                 const scroller = containerRef.current?.closest('[data-modal-scroll]') as HTMLElement | null;

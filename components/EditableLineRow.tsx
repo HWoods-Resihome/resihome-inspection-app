@@ -148,6 +148,10 @@ export function EditableLineRow(props: Props) {
   const [customDescription, setCustomDescription] = useState<string>(
     line?.customLaborFullDescription || ''
   );
+  // True while the Line Item search input is focused (keyboard open). Grows the
+  // card with bottom white space so the field can scroll up and the dropdown
+  // options clear the on-screen keyboard.
+  const [searchFocused, setSearchFocused] = useState(false);
 
   // Initialize category/subcategory from catalog lookup when entering edit mode
   // or on first mount of an existing line.
@@ -539,6 +543,7 @@ export function EditableLineRow(props: Props) {
                     scrollIntoViewOnFocus
                     filled
                     deferKeyboard
+                    onFocusChange={setSearchFocused}
                   />
                   {selectedItem && (
                     <textarea
@@ -557,10 +562,13 @@ export function EditableLineRow(props: Props) {
                       Quantity <span className="text-brand">*</span>
                     </label>
                     <input
-                      type="number" step="0.01" min="0" inputMode="decimal"
-                      enterKeyHint="done"
+                      // type=text + inputMode=decimal (not type=number): Android
+                      // honors enterKeyHint="done" and fires a real Enter keydown
+                      // here, so the keyboard's action CLOSES instead of jumping
+                      // focus to the next field (the vendor cost).
+                      type="text" inputMode="decimal" enterKeyHint="done"
                       value={quantity}
-                      onChange={(e) => setQuantity(e.target.value)}
+                      onChange={(e) => setQuantity(e.target.value.replace(/[^0-9.]/g, ''))}
                       onFocus={onQtyFocus}
                       onBlur={onQtyBlur}
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
@@ -615,10 +623,9 @@ export function EditableLineRow(props: Props) {
                     <div className="inline-flex items-baseline justify-center">
                       <span className="text-base font-semibold text-gray-800">$</span>
                       <input
-                        type="number" step="0.01" min="0" inputMode="decimal"
-                        enterKeyHint="done"
+                        type="text" inputMode="decimal" enterKeyHint="done"
                         value={customVendorCost}
-                        onChange={(e) => setCustomVendorCost(e.target.value)}
+                        onChange={(e) => setCustomVendorCost(e.target.value.replace(/[^0-9.]/g, ''))}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
                         placeholder={calc && !calc.isCustomPriced ? formatMoney(roundMoney(calc.vendorCost)) : '0.00'}
                         className="no-spinner bg-transparent border-0 focus:ring-0 p-0 text-base font-semibold text-gray-800 text-center w-16"
@@ -636,6 +643,11 @@ export function EditableLineRow(props: Props) {
                     <div className="text-base font-semibold text-brand">{calc ? `$${formatMoney(roundMoney(calc.tenantCost))}` : '—'}</div>
                   </div>
                 </div>
+
+                {/* While the line-item search keyboard is open, grow the card so
+                    it can scroll the field up and the dropdown clears the
+                    keyboard; collapses when the keyboard closes. */}
+                {searchFocused && <div style={{ height: '50vh' }} aria-hidden />}
               </div>
 
               {/* Sticky footer action */}
