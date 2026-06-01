@@ -69,6 +69,9 @@ export function Combobox({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(-1);
+  // The option value just tapped — held briefly so its pink band is visible
+  // before the panel closes.
+  const [picked, setPicked] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -166,12 +169,18 @@ export function Combobox({
   }, [query, filtered.length]);
 
   function handleSelect(opt: ComboboxOption) {
-    onChange(opt.value);
-    setOpen(false);
-    setQuery('');
-    // Dismiss the on-screen keyboard on mobile after a selection — otherwise
-    // the search input stays focused and the keyboard covers the form.
-    inputRef.current?.blur();
+    // Briefly show the pink selection band on the tapped row before closing
+    // (matches the ListPicker), so the choice is visible before the panel goes.
+    setPicked(opt.value);
+    window.setTimeout(() => {
+      onChange(opt.value);
+      setOpen(false);
+      setQuery('');
+      setPicked(null);
+      // Dismiss the on-screen keyboard on mobile after a selection — otherwise
+      // the search input stays focused and the keyboard covers the form.
+      inputRef.current?.blur();
+    }, 160);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -220,8 +229,8 @@ export function Combobox({
         aria-expanded={open}
         aria-haspopup="listbox"
         className={`${inputBoxClasses} ${
-          open ? 'border-brand ring-2 ring-brand/20'
-            : filled ? 'border-transparent' : 'border-gray-300 hover:border-gray-400'
+          filled ? 'border-transparent'
+            : open ? 'border-brand ring-2 ring-brand/20' : 'border-gray-300 hover:border-gray-400'
         } ${disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
         onClick={() => {
           if (!disabled) {
@@ -299,7 +308,10 @@ export function Combobox({
           type="button"
           aria-label="Toggle dropdown"
           onMouseDown={(e) => e.preventDefault()}
-          onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); inputRef.current?.focus(); }}
+          // The chevron is purely a toggle: open/close the panel and never focus
+          // the input (so it can't pop the keyboard). In deferKeyboard mode the
+          // only way to type is tapping the text field while the panel is open.
+          onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); if (!deferKeyboard) inputRef.current?.focus(); }}
           disabled={disabled}
           className={`flex-shrink-0 ${compact ? 'ml-0.5 text-gray-600 hover:text-gray-900' : 'ml-2 text-gray-400 hover:text-gray-700'}`}
         >
@@ -354,6 +366,10 @@ export function Combobox({
                       {grp.items.map(({ opt, idx }) => {
                         const isActive = idx === activeIndex;
                         const isSelected = opt.value === value;
+                        // The just-tapped row gets the pink band + top/bottom
+                        // border (same as the wheel / list pickers); keyboard/hover
+                        // highlight stays a lighter tint.
+                        const isPicked = picked === opt.value;
                         return (
                           <li
                             key={opt.value}
@@ -362,7 +378,7 @@ export function Combobox({
                             onMouseDown={(e) => { e.preventDefault(); handleSelect(opt); }}
                             onMouseEnter={() => setActiveIndex(idx)}
                             title={opt.sublabel ? `${opt.label}\n\n${opt.sublabel}` : opt.label}
-                            className={`px-3 py-2 cursor-pointer text-sm ${isActive ? 'bg-brand/10' : ''} ${isSelected ? 'font-semibold' : ''}`}
+                            className={`px-3 py-2 cursor-pointer text-sm border-y-2 ${isPicked ? 'bg-brand/10 border-brand' : isActive ? 'bg-brand/5 border-transparent' : 'border-transparent'} ${isSelected ? 'font-semibold' : ''}`}
                           >
                             <div className="text-ink">{opt.label}</div>
                             {opt.sublabel && (
