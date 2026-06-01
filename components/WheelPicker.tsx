@@ -106,10 +106,10 @@ function WheelSheet({
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
-        className="relative w-full sm:w-72 bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-3"
+        className="relative w-72 max-w-[88vw] bg-white rounded-2xl shadow-xl p-3"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-1">
