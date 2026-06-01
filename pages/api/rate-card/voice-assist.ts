@@ -430,6 +430,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       : [];
     const currentRoom = String(body?.currentRoom || body?.location || body?.section || '');
     const roomTools = tools(rooms);
+    // Prompt caching: mark the (large, per-session-stable) tool definitions as a
+    // cached prefix. Anthropic reuses them across every tool-loop round and
+    // across turns within the 5-min window, cutting time-to-first-token and
+    // input cost — meaningful when ~100 inspectors are dictating at once.
+    if (roomTools.length) (roomTools[roomTools.length - 1] as any).cache_control = { type: 'ephemeral' };
     const system = systemPrompt(body.section || '', body.location || '', describeLines(byCode, currentLines), currentRoom, rooms);
 
     // The room a newly-proposed line belongs to. switch_room updates these so a
@@ -504,7 +509,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     } catch { /* pre-search is best-effort; the model can still search */ }
 
-    const systemWithHints = preSearchBlock ? `${system}\n${preSearchBlock}` : system;
+    // Send the system prompt as a cached block too: it's identical across every
+    // round of this turn's tool loop, so rounds 2+ skip re-processing it.
+    const systemText = preSearchBlock ? `${system}\n${preSearchBlock}` : system;
+    const systemWithHints = [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }];
 
     // One-time guardrail: if the model asks a question without first proposing
     // the items pre-search already matched confidently, we nudge it once to
