@@ -341,7 +341,7 @@ export async function fetchProperties(
   // ever filter/sort on fields confirmed to exist on the object. The production
   // Property object has address/city/zip_code/state_code and the `status`
   // enum — but NO `name` field, which is what was 400-ing the picker.
-  const SEARCH_FIELDS = ['address', 'city', 'zip_code'];
+  const SEARCH_FIELDS = ['address', 'city'];
   // Sort by a guaranteed system property so the default page can't 400 on a
   // missing custom field. Most-recently-modified first is a sensible default.
   const DEFAULT_SORT = [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }];
@@ -362,10 +362,17 @@ export async function fetchProperties(
     let filterGroups: any[];
     if (term) {
       // Require EACH token in a field (AND within the group), OR-ing across the
-      // given fields. "97 meek" → an address containing both "97" and "meek".
+      // given text fields. "97 meek" → an address containing both "97" and "meek".
       filterGroups = fields.map((f) => ({
         filters: [...base, ...tokens.map((t) => ({ propertyName: f, operator: 'CONTAINS_TOKEN', value: `${t}*` }))],
       }));
+      // ZIP search: a 5-digit term matches zip_code exactly. EQ works whether
+      // zip_code is a string or a number property (CONTAINS_TOKEN can't run on
+      // a numeric field), so typing a zip lists every address in it.
+      const zip = term.replace(/\s+/g, '');
+      if (/^\d{5}$/.test(zip)) {
+        filterGroups.push({ filters: [...base, { propertyName: 'zip_code', operator: 'EQ', value: zip }] });
+      }
     } else {
       filterGroups = withStatus ? [{ filters: base }] : [];
     }
