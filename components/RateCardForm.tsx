@@ -3147,7 +3147,8 @@ export function RateCardForm(props: RateCardFormProps) {
           || openEditors.size > 0
           || cameraOverlayOpen
           || aiModalOpen          // AI review popup
-          || aiCameraTarget !== null; // AI review's in-app camera
+          || aiCameraTarget !== null // AI review's in-app camera
+          || afterCameraTarget !== null; // Internal Resolution after-photo camera
         const hidden = overlayOpen && !voiceEngaged;
         return (
           <div
