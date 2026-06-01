@@ -558,10 +558,12 @@ export function EditableLineRow(props: Props) {
                     </label>
                     <input
                       type="number" step="0.01" min="0" inputMode="decimal"
+                      enterKeyHint="done"
                       value={quantity}
                       onChange={(e) => setQuantity(e.target.value)}
                       onFocus={onQtyFocus}
                       onBlur={onQtyBlur}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
                       className={`no-spinner ${INPUT_CLS}`}
                     />
                   </div>
@@ -614,8 +616,10 @@ export function EditableLineRow(props: Props) {
                       <span className="text-base font-semibold text-gray-800">$</span>
                       <input
                         type="number" step="0.01" min="0" inputMode="decimal"
+                        enterKeyHint="done"
                         value={customVendorCost}
                         onChange={(e) => setCustomVendorCost(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
                         placeholder={calc && !calc.isCustomPriced ? formatMoney(roundMoney(calc.vendorCost)) : '0.00'}
                         className="no-spinner bg-transparent border-0 focus:ring-0 p-0 text-base font-semibold text-gray-800 text-center w-16"
                         title="Leave blank to use the formula; type a number to override"
@@ -717,9 +721,11 @@ export function EditableLineRow(props: Props) {
           type="number"
           step="0.01"
           min="0"
+          enterKeyHint="done"
           value={quantity}
           onChange={(e) => setQuantity(e.target.value)}
           onFocus={(e) => e.target.select()}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
           className="no-spinner h-9 w-14 border border-gray-300 rounded px-1 text-sm text-center bg-white mx-auto"
         />
       </td>
