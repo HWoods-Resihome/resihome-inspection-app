@@ -909,7 +909,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         {/* While priming, a ring spins around the (faded) mic icon and stops the
             moment warm-up completes. The mic itself stays visible throughout. */}
         {online && !warmedUp && (
-          <span className="absolute -inset-0.5 rounded-full border-2 border-white/25 border-t-white animate-spin pointer-events-none" />
+          <span className="absolute -inset-1 rounded-full border-2 border-brand/20 border-t-brand animate-spin pointer-events-none" />
         )}
         <button
           type="button"
