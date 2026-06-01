@@ -295,7 +295,7 @@ export function Combobox({
                 if (!scroller || !field) return;
                 const fRect = field.getBoundingClientRect();
                 const sRect = scroller.getBoundingClientRect();
-                const HEADROOM = 80; // clears the ~50px sticky header so the field stays visible
+                const HEADROOM = 130; // sit well below the sticky header so the input stays fully visible
                 scroller.scrollTo({ top: scroller.scrollTop + (fRect.top - sRect.top) - HEADROOM, behavior: 'smooth' });
               };
               setTimeout(lift, 300);
