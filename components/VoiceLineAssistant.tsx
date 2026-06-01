@@ -905,30 +905,37 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   // the conversation panel above and (where supported) starts listening.
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => {
-          setOpen(true);
-          // Pre-warm TTS on this user gesture (a silent utterance; some engines
-          // block speech before a gesture), then — since the pipeline is already
-          // primed — open the mic immediately.
-          try {
-            if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-              const u = new SpeechSynthesisUtterance(' '); u.volume = 0;
-              window.speechSynthesis.speak(u);
-            }
-          } catch { /* noop */ }
-          if (supported && online) setTimeout(() => { startListeningRef.current(); }, 0);
-        }}
-        // Disabled (with a spinner) until warm-up completes, so the inspector
-        // never talks into a cold pipeline. Stays enabled offline so they can
-        // still open the panel to type / see the offline notice.
-        disabled={disabled || (online && !warmedUp)}
-        aria-label={online && !warmedUp ? 'Voice Assistant — getting ready…' : 'Talk to the Voice Assistant'}
-        className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-brand text-white hover:bg-brand-dark disabled:opacity-50 shadow"
-      >
-        {online && !warmedUp ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <MicIcon className="w-5 h-5" />}
-      </button>
+      <span className="relative inline-flex shrink-0">
+        {/* While priming, a ring spins around the (faded) mic icon and stops the
+            moment warm-up completes. The mic itself stays visible throughout. */}
+        {online && !warmedUp && (
+          <span className="absolute -inset-0.5 rounded-full border-2 border-white/25 border-t-white animate-spin pointer-events-none" />
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(true);
+            // Pre-warm TTS on this user gesture (a silent utterance; some engines
+            // block speech before a gesture), then — since the pipeline is already
+            // primed — open the mic immediately.
+            try {
+              if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                const u = new SpeechSynthesisUtterance(' '); u.volume = 0;
+                window.speechSynthesis.speak(u);
+              }
+            } catch { /* noop */ }
+            if (supported && online) setTimeout(() => { startListeningRef.current(); }, 0);
+          }}
+          // Disabled until warm-up completes, so the inspector never talks into a
+          // cold pipeline. Stays enabled offline so they can still open the panel
+          // to type / see the offline notice.
+          disabled={disabled || (online && !warmedUp)}
+          aria-label={online && !warmedUp ? 'Voice Assistant — getting ready…' : 'Talk to the Voice Assistant'}
+          className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-brand text-white hover:bg-brand-dark shadow disabled:opacity-50 transition-opacity"
+        >
+          <MicIcon className="w-5 h-5" />
+        </button>
+      </span>
     );
   }
 
