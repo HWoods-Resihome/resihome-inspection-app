@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { useRef } from 'react';
 import type { InspectionSummary } from '@/lib/types';
 import { StatusBadge } from './StatusBadge';
+import { templateLabel } from '@/lib/templateLabels';
 
 interface Props {
   inspection: InspectionSummary;
@@ -52,43 +53,10 @@ function splitAddress(snapshot: string): { street: string; locality: string } {
   };
 }
 
-// Pretty template type: "pm_scope_inspection" -> "PM Scope"
-// Known templates use a canonical short label; unknown ones fall back to the
-// generated form. Keeps acronyms (QC) and hyphenation (Re-Inspect) correct.
-const SHORT_LABELS: Record<string, string> = {
-  pm_scope_rate_card: 'Scope Rate Card',
-  pm_turn_reinspect_qc: 'Turn Re-Inspect QC',
-  pm_community_inspection: 'Community',
-  pm_vacancy_occupancy_check: 'Vacancy / Occupancy Check',
-  qc_new_construction_rrqc: 'QC New Construction',
-  leasing_agent_1099_property_inspection: 'Leasing Agent 1099 Property',
-  // Legacy template types — retired from the app but kept here so historical
-  // records created under them still show a clean label (not auto-generated).
-  pm_scope_inspection: 'Scope',
-  pm_turn_inspection: 'Turn',
-};
-const ACRONYMS = new Set(['QC', 'PM', 'RRQC', '1099']);
-function prettyTemplate(t: string): string {
-  if (!t) return '';
-  if (SHORT_LABELS[t]) return SHORT_LABELS[t];
-  return t
-    .replace(/^pm_/, '')
-    .replace(/^qc_/, 'QC ')
-    .replace(/_inspection$/, '')
-    .replace(/_/g, ' ')
-    .split(' ')
-    .map((w) => {
-      const up = w.toUpperCase();
-      if (ACRONYMS.has(up)) return up;
-      return w.split('-').map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join('-');
-    })
-    .join(' ');
-}
-
 export function InspectionCard({ inspection: i, selectMode, selected, selectable, onToggleSelect, onLongPress }: Props) {
   const date = effectiveDate(i);
   const updated = fmtDate(i.updatedAt);
-  const tmpl = prettyTemplate(i.templateType);
+  const tmpl = templateLabel(i.templateType);
 
   // Progress: only show if we have data (Completed inspections always have it;
   // Scheduled inspections don't).

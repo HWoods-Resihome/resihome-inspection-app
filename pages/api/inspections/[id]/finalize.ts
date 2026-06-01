@@ -25,6 +25,7 @@ import {
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { bustInspectionsCache } from '@/pages/api/inspections';
+import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 import { resolveSections, resolveStateCode, type SectionInstance } from '@/lib/sections';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { renderMasterPdf } from '@/lib/pdfMaster';
@@ -260,20 +261,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
-    // Strip "(PM) "/"(QC) " prefixes from the template label to get a clean
-    // template name for cover headers and filenames. Map from internal
-    // template type to a display name (same map as TEMPLATE_LABELS in the UI).
-    const TEMPLATE_DISPLAY: Record<string, string> = {
-      pm_scope_inspection: 'Scope',
-      pm_scope_rate_card: 'Scope Rate Card',
-      pm_turn_inspection: 'Turn',
-      pm_community_inspection: 'Community',
-      pm_property_visit_inspection: 'Property Visit',
-      qc_completed_unit_inspection: 'QC Completed Unit',
-      preleasing_property_inspection: 'Pre-leasing Property',
-      leasing_agent_1099_property_inspection: '1099 Leasing Agent Property',
-    };
-    const templateLabel = TEMPLATE_DISPLAY[inspection.templateType] || 'Rate Card';
+    // Clean, parenthesis-free template name for cover headers and filenames —
+    // the same short label shown in the selector and on the cards.
+    const templateLabel = templateLabelFor(inspection.templateType) || 'Rate Card';
 
     const ctx: PdfBuildContext = {
       inspectionRecordId: id,

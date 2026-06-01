@@ -22,6 +22,7 @@ import {
 } from '@/lib/hubspot';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { bustInspectionsCache } from '@/pages/api/inspections';
+import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
 
@@ -164,7 +165,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const ctx: QcPdfContext = {
-      templateLabel: '(PM) Turn Re-Inspect QC',
+      templateLabel: templateLabelFor(inspection.templateType) || 'Turn Re-Inspect QC',
       propertyName: inspection.propertyAddressSnapshot || `Property ${data.propertyIdRef}`,
       inspectorName: inspection.inspectorName || '(Unknown inspector)',
       bedrooms: inspection.bedroomsAtInspection || 0,

@@ -9,19 +9,7 @@ import type { SavedAnswer } from '@/lib/hubspot';
 import { QuestionForm } from '@/components/QuestionForm';
 import { RateCardForm } from '@/components/RateCardForm';
 import { QcReinspectForm } from '@/components/QcReinspectForm';
-
-const TEMPLATE_LABELS: Record<string, string> = {
-  pm_scope_rate_card: '(PM) Scope Rate Card',
-  pm_turn_reinspect_qc: '(PM) Turn Re-Inspect QC',
-  pm_community_inspection: '(PM) Community / Visit Inspection',
-  pm_vacancy_occupancy_check: '(PM) Vacancy / Occupancy Check',
-  qc_new_construction_rrqc: '(QC) New Construction RRQC',
-  leasing_agent_1099_property_inspection: '(1099) Leasing Agent Property Inspection',
-  // Legacy templates — retired from new inspections (replaced by Rate Card),
-  // but kept here so historical completed records still show a friendly label.
-  pm_scope_inspection: '(PM) Scope Inspection',
-  pm_turn_inspection: '(PM) Turn Inspection',
-};
+import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 
 type Stage = 'loading' | 'loading_questions' | 'form' | 'submitting' | 'generating_pdf' | 'done' | 'error';
 
@@ -125,7 +113,7 @@ export default function ExistingInspection() {
         const pdfReq = {
           inspectionRecordId: inspectionId,
           externalId: inspection.inspectionIdExternal,
-          templateLabel: TEMPLATE_LABELS[inspection.templateType] || inspection.templateType,
+          templateLabel: templateLabelFor(inspection.templateType) || inspection.templateType,
           inspectionName: inspection.inspectionName,
           propertyAddress: inspection.propertyAddressSnapshot,
           inspectorName: inspection.inspectorName,
@@ -261,7 +249,7 @@ export default function ExistingInspection() {
   const isCompleted = (inspection.status || '').toLowerCase() === 'completed';
   const isCancelled = (inspection.status || '').toLowerCase() === 'cancelled';
   const readOnly = isCompleted || isCancelled;
-  const templateLabel = TEMPLATE_LABELS[inspection.templateType] || inspection.templateType;
+  const templateLabel = templateLabelFor(inspection.templateType) || inspection.templateType;
 
   // Compose the display address: append the property's zip code if we have
   // one and the address doesn't already include it. This handles both cases
