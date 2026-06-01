@@ -9,7 +9,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { fetchUsers } from '@/lib/hubspot';
-import { getGmailOAuthConfig, buildGmailConsentUrl, LOGIN_SCOPES } from '@/lib/gmailAuth';
+import { getGmailOAuthConfig, buildGmailConsentUrl, LOGIN_SCOPES, GMAIL_TOKEN_COOKIE } from '@/lib/gmailAuth';
 import { randomBytes } from 'crypto';
 import { serialize } from 'cookie';
 
@@ -58,10 +58,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }));
 
   // Request identity + Gmail-send scopes. login_hint pre-fills the account.
+  // Only FORCE the consent screen when we don't already hold a Gmail refresh
+  // token (first login, or after it expired). Returning users who already
+  // granted it just pick their account — no repeated "Allow" on every sign-in.
+  // (The refresh token persists in its cookie, so email send still works.)
+  const hasGmailToken = !!req.cookies?.[GMAIL_TOKEN_COOKIE];
   const url = buildGmailConsentUrl(cfg, {
     state,
     loginHint: email,
     scope: LOGIN_SCOPES,
+    prompt: hasGmailToken ? 'select_account' : 'consent',
   });
   res.redirect(302, url);
 }

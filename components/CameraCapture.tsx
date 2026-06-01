@@ -150,7 +150,9 @@ function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number)
 
 // Human-friendly distance: "42 m" / "1.3 km".
 function fmtDistance(m: number): string {
-  return m < 950 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+  // Imperial units: feet up close, miles farther out.
+  const ft = m * 3.28084;
+  return ft < 1000 ? `${Math.round(ft)} ft` : `${(m / 1609.344).toFixed(1)} mi`;
 }
 
 // Press-and-hold video clips: hold the shutter > HOLD_MS to start recording;

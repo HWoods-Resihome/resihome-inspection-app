@@ -123,6 +123,10 @@ export function buildGmailConsentUrl(cfg: GmailOAuthConfig, opts: {
   loginHint?: string;
   scope?: string;
   includeHd?: boolean;
+  // OAuth prompt behavior. Default 'consent' (forces a refresh token). Pass
+  // 'select_account' for returning logins that already hold a refresh token, so
+  // Google doesn't re-show the consent screen on every sign-in.
+  prompt?: 'consent' | 'select_account' | 'none';
 }): string {
   const params = new URLSearchParams({
     client_id: cfg.clientId,
@@ -130,7 +134,7 @@ export function buildGmailConsentUrl(cfg: GmailOAuthConfig, opts: {
     response_type: 'code',
     scope: opts.scope || GMAIL_SEND_SCOPE,
     access_type: 'offline',
-    prompt: 'consent',
+    prompt: opts.prompt || 'consent',
     state: opts.state,
   });
   // Workspace-domain hint is helpful for internal users but would block valid
