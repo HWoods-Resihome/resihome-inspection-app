@@ -109,11 +109,20 @@ async function voyageEmbed(texts: string[], inputType: 'document' | 'query'): Pr
 }
 
 // Embed the full catalog (batched). Called once per version on a cache miss.
+// Batches run IN PARALLEL so a cold instance (which must re-embed all ~850
+// rows before the first voice request can match) finishes in roughly one
+// round-trip instead of seven sequential ones — the main cause of the slow
+// "first request".
 async function embedCatalog(items: RateCardLineItem[]): Promise<Map<string, number[]>> {
   const byCode = new Map<string, number[]>();
-  for (let i = 0; i < items.length; i += EMBED_BATCH) {
-    const chunk = items.slice(i, i + EMBED_BATCH);
-    const vectors = await voyageEmbed(chunk.map(catalogItemEmbedText), 'document');
+  const chunks: RateCardLineItem[][] = [];
+  for (let i = 0; i < items.length; i += EMBED_BATCH) chunks.push(items.slice(i, i + EMBED_BATCH));
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      voyageEmbed(chunk.map(catalogItemEmbedText), 'document').then((vectors) => ({ chunk, vectors }))
+    )
+  );
+  for (const { chunk, vectors } of results) {
     chunk.forEach((item, j) => {
       if (vectors[j]) byCode.set(item.lineItemCode, vectors[j]);
     });

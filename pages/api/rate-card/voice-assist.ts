@@ -169,6 +169,29 @@ async function streamAnthropic(
   return { content: blocks.filter(Boolean), stopReason };
 }
 
+// Warm-up ping to Anthropic: opens the TLS connection and WRITES the cached
+// SYSTEM_RULES prompt block (server-side cache at Anthropic), so the first real
+// voice turn hits a warm connection + cache instead of paying cold-start. Tiny
+// (max_tokens 1); failures are ignored.
+async function primeAnthropic(model: string): Promise<void> {
+  try {
+    await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicKey(),
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 1,
+        system: [{ type: 'text', text: SYSTEM_RULES, cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: 'ok' }],
+      }),
+    });
+  } catch { /* non-fatal warm-up */ }
+}
+
 // SSE write helpers.
 function sse(res: NextApiResponse, event: string, data: any) {
   res.write(`event: ${event}\n`);
@@ -215,6 +238,8 @@ const SYSTEM_RULES = [
   `3. QUANTITY & UNIT — use the matched item's unit of measure (the "unit" field from search_catalog); never guess a unit:`,
   `   - EACH / count units (EA, "each", per-fixture): default the quantity to 1 and propose immediately. Do NOT ask "how many" — e.g. "snake the toilet" is 1 EA, just add it.`,
   `   - MEASURED units (LF linear feet, SF square feet, SY, etc.): NEVER guess or default the quantity. If the inspector gave a number, use it and set quantityConfirmed: true. If they did NOT give a number, you MUST ask ONCE, naming the item's ACTUAL unit (e.g. "How many square feet for the carpet?") — do not propose it until they answer. NEVER ask for a unit the item doesn't use (never ask linear feet for an EA item). Example: "replace the carpet" with no size → ask "How many square feet?" before proposing.`,
+  `   - LINEAR-FEET (LF) items (gutters, fascia, trim, fencing, baseboard, etc.): ALWAYS confirm the linear feet. If the inspector didn't say a number, ask "How many linear feet?" and do not propose until they answer — never assume a length.`,
+  `NUMBERS: every number the inspector says is a WHOLE-NUMBER quantity or measurement — NEVER a time or duration. Voice transcription sometimes renders a spoken number as a clock time (e.g. "two fifty" → "2:50", "fifty" → "0:50", "one thirty" → "1:30"). Always read these as the plain number: "2:50" = 250, "0:50" = 50, "1:30" = 130. Strip any colon and treat it as the digits. There are no times in this workflow.`,
   `   - Whole House SF items: auto-filled with the property square footage — never ask; just propose (quantity 1 is fine, the app substitutes the SF).`,
   `   - STAIRS: carpet/tread/runner on stairs is priced PER STAIR (even though the unit reads "each"), so the quantity is the NUMBER OF STAIRS. If the inspector didn't say how many, ask "How many stairs?" before proposing — never default it to 1.`,
   `SIZE / TIER variants: many items come in size or level variants. ALWAYS default to the lowest / standard tier and propose it — for CLEANS ("sales clean", "turn clean") that means LEVEL 1 (never Level 2 unless the inspector says "level 2"); for rooms, the standard / regular size. Do NOT ask the inspector to choose a size or level — only use a higher tier when they explicitly say so ("level 2", "large room", "deep").`,
@@ -398,10 +423,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const catalog = await getCachedCatalog();
       await getCatalogEmbeddings(catalog); // builds/loads the vector cache
       // Also warm the Voyage QUERY path + region cache so the first real
-      // utterance doesn't pay cold-start latency on either.
+      // utterance doesn't pay cold-start latency on either, AND prime Anthropic
+      // (warms the TLS connection + writes the cached SYSTEM_RULES prompt block,
+      // which is server-side at Anthropic so it benefits the first real call
+      // even on a different instance).
       await Promise.allSettled([
         matchCatalog('warmup', catalog, { topK: 1 }),
         getCachedRegions(),
+        primeAnthropic(MODEL_SMART),
+        primeAnthropic(MODEL_FAST),
       ]);
       return res.status(200).json({ warm: true, items: catalog.length });
     } catch (e: any) {

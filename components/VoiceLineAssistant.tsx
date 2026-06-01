@@ -882,7 +882,8 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   // Bias Whisper toward inspection/construction vocabulary so domain terms
   // (e.g. "mist match") aren't "corrected" to plausible everyday words.
   function buildVocabPrompt(): string {
-    const base = 'Property inspection scope notes. Construction terms: mist match, LVP, vinyl plank, '
+    const base = 'Property inspection scope notes. Quantities are whole numbers like 50, 120, 250 — never clock times. '
+      + 'Construction terms: mist match, LVP, vinyl plank, '
       + 'linear feet, square feet, drywall, baseboard, casing, J-channel, GFCI, caulk, grout, fascia, soffit.';
     const extras = (catalog || []).slice(0, 40).map((c) => c.laborShortDescription).filter(Boolean).join(', ');
     return (extras ? `${base} Catalog items: ${extras}` : base).slice(0, 780);
