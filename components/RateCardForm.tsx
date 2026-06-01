@@ -2537,9 +2537,9 @@ export function RateCardForm(props: RateCardFormProps) {
               {props.squareFootage != null && props.squareFootage > 0 && (
                 <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
               )}
-              {typeof props.lastTenantMonths === 'number' && props.lastTenantMonths > 0 && (
-                <span> &middot; {props.lastTenantMonths} month</span>
-              )}
+              {/* Months in home (depreciation field); falls back to 12 like the
+                  schedule does, so it always shows. */}
+              <span> &middot; {(typeof props.lastTenantMonths === 'number' && props.lastTenantMonths > 0) ? props.lastTenantMonths : 12} months</span>
               {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
               {!inspectionRegion && <span className="text-yellow-700"> &middot; fallback (GA: Atlanta)</span>}
               {saveStatus.kind === 'saving' && <span className="text-brand font-semibold"> &middot; Saving...</span>}
@@ -2555,10 +2555,9 @@ export function RateCardForm(props: RateCardFormProps) {
                 </button>
               )}
             </div>
-            {/* Total client $ billed to lines assigned to Internal Resolution. */}
+            {/* Total client $ across lines assigned to Internal Resolution. */}
             <div className="text-[11px] text-gray-600 truncate">
-              Internal Resolution billed:{' '}
-              <span className="font-semibold text-ink">${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              Internal Resolution: ${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
           </div>
           <div className="flex justify-center sm:justify-end shrink-0">
