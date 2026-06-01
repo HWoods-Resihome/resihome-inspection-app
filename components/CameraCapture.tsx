@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppDialog } from '@/components/AppDialog';
 import { PhotoAnnotator } from '@/components/PhotoAnnotator';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
@@ -126,6 +126,28 @@ const CAPTURE_HEIGHT = 1440;
 // JPEG quality (0..1). 0.88 is a good balance of file size vs visual quality.
 const JPEG_QUALITY = 0.88;
 
+// Photo geostamp proximity check: how close (meters) the device GPS must be to
+// the property's reference location to stamp a ✓ rather than a ✗. Generous by
+// default to absorb GPS drift and rooftop-vs-parcel geocode offset; overridable.
+const PROXIMITY_THRESHOLD_M = Number(process.env.NEXT_PUBLIC_PROXIMITY_THRESHOLD_M) || 250;
+
+// Great-circle distance between two lat/lng points, in meters.
+function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+// Human-friendly distance: "42 m" / "1.3 km".
+function fmtDistance(m: number): string {
+  return m < 950 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+}
+
 // Press-and-hold video clips: hold the shutter > HOLD_MS to start recording;
 // clips auto-stop at MAX_CLIP_MS. Bitrate-capped so a 10s clip stays small.
 const HOLD_MS = 260;
@@ -155,15 +177,19 @@ function pickClipMime(): string {
 export function CameraCapture({
   isOpen, onClose, onComplete, uploadPhoto, uploadVideoEntry, maxPhotos = 30,
   rooms, currentRoomId, onRoomChange, onRenameRoom, onDeleteRoom, onAddRoom,
-  addressSnapshot, voiceSlot, tagLines, onTagPhotoToLine, onOverlayChange,
+  addressSnapshot, propertyRecordId, voiceSlot, tagLines, onTagPhotoToLine, onOverlayChange,
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  // Latest GPS fix, kept fresh while the camera is open, burned into captures
-  // (coordinates only — address-match verification was removed).
+  // Latest GPS fix, kept fresh while the camera is open, burned into captures.
   const geoRef = useRef<GeolocationPosition | null>(null);
   const geoWatchRef = useRef<number | null>(null);
+  // Property reference location + the latest fix as state, so the live
+  // proximity badge re-renders and captures can stamp a ✓/✗ verdict.
+  const [refCoords, setRefCoords] = useState<{ lat: number; lng: number; source: string } | null>(null);
+  const [geoFix, setGeoFix] = useState<{ lat: number; lng: number; acc: number } | null>(null);
+  const refCoordsRef = useRef<typeof refCoords>(null);
 
   // ----- Video clip recording (press-and-hold the shutter) -----
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -314,7 +340,11 @@ export function CameraCapture({
   // address + time without coordinates.
   useEffect(() => {
     if (!isOpen || typeof navigator === 'undefined' || !navigator.geolocation) return;
-    const onPos = (pos: GeolocationPosition) => { geoRef.current = pos; };
+    const onPos = (pos: GeolocationPosition) => {
+      geoRef.current = pos;
+      const { latitude, longitude, accuracy } = pos.coords;
+      setGeoFix({ lat: latitude, lng: longitude, acc: accuracy });
+    };
     const onErr = () => { /* denied/unavailable — stamp without coordinates */ };
     navigator.geolocation.getCurrentPosition(onPos, onErr, {
       enableHighAccuracy: true, timeout: 8000, maximumAge: 30000,
@@ -330,8 +360,41 @@ export function CameraCapture({
         geoWatchRef.current = null;
       }
       geoRef.current = null;
+      setGeoFix(null);
     };
   }, [isOpen]);
+
+  // Resolve the property's reference coordinates once per open, so each shot can
+  // be checked for proximity. Prefers the property's stored lat/long (via
+  // propertyRecordId), falling back to geocoding the address — see /api/geocode.
+  useEffect(() => {
+    if (!isOpen) { setRefCoords(null); refCoordsRef.current = null; return; }
+    if (!propertyRecordId && !addressSnapshot) return;
+    let cancelled = false;
+    const params = new URLSearchParams();
+    if (propertyRecordId) params.set('propertyId', propertyRecordId);
+    if (addressSnapshot) params.set('address', addressSnapshot);
+    fetch(`/api/geocode?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d || !isFinite(Number(d.lat)) || !isFinite(Number(d.lng))) return;
+        const c = { lat: Number(d.lat), lng: Number(d.lng), source: String(d.source || 'unknown') };
+        setRefCoords(c);
+        refCoordsRef.current = c;
+      })
+      .catch(() => { /* no reference — captures stamp coords without a verdict */ });
+    return () => { cancelled = true; };
+  }, [isOpen, propertyRecordId, addressSnapshot]);
+
+  // Live proximity verdict for the badge + the burned-in stamp. `within` is true
+  // when the closest the device could plausibly be (distance minus its own GPS
+  // accuracy) is inside the threshold.
+  const proximity = useMemo(() => {
+    if (!refCoords || !geoFix) return null;
+    const distance = haversineMeters(geoFix.lat, geoFix.lng, refCoords.lat, refCoords.lng);
+    const within = distance - (geoFix.acc || 0) <= PROXIMITY_THRESHOLD_M;
+    return { distance, within, source: refCoords.source };
+  }, [refCoords, geoFix]);
 
   // ----- Capture -----
 
@@ -369,6 +432,17 @@ export function CameraCapture({
     const stampLines: StampLine[] = [];
     if (addressSnapshot) stampLines.push({ text: addressSnapshot });
     stampLines.push({ text: new Date().toLocaleString() });
+    const pos = geoRef.current;
+    if (pos) {
+      const { latitude, longitude, accuracy } = pos.coords;
+      stampLines.push({ text: `${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)` });
+      const ref = refCoordsRef.current;
+      if (ref) {
+        const dist = haversineMeters(latitude, longitude, ref.lat, ref.lng);
+        const within = dist - accuracy <= PROXIMITY_THRESHOLD_M;
+        stampLines.push({ text: `${within ? 'At property' : 'Off-site'} · ${fmtDistance(dist)}`, mark: within ? 'ok' : 'bad' });
+      }
+    }
     drawEvidenceStamp(ctx, vw, vh, stampLines);
     return await new Promise((res) => canvas.toBlob((b) => res(b), 'image/jpeg', JPEG_QUALITY));
   }, [addressSnapshot]);
@@ -621,6 +695,16 @@ export function CameraCapture({
       if (pos) {
         const { latitude, longitude, accuracy } = pos.coords;
         stampLines.push({ text: `${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)` });
+        // Proximity verdict against the property's reference location.
+        const ref = refCoordsRef.current;
+        if (ref) {
+          const dist = haversineMeters(latitude, longitude, ref.lat, ref.lng);
+          const within = dist - accuracy <= PROXIMITY_THRESHOLD_M;
+          stampLines.push({
+            text: `${within ? 'At property' : 'Off-site'} · ${fmtDistance(dist)}`,
+            mark: within ? 'ok' : 'bad',
+          });
+        }
       }
       drawEvidenceStamp(ctx, vw, vh, stampLines);
       // Convert to JPEG blob
@@ -1078,6 +1162,32 @@ export function CameraCapture({
             {permissionState === 'pending' && (
               <div className="absolute inset-0 flex items-center justify-center text-white">
                 <div className="text-sm font-heading">Starting camera&hellip;</div>
+              </div>
+            )}
+            {/* Live proximity badge — confirms the device is at the selected
+                property before shooting (the same verdict is burned into each
+                photo). Shows "locating" until both a GPS fix and a property
+                reference are available. */}
+            {(propertyRecordId || addressSnapshot) && permissionState === 'granted' && (
+              <div className="absolute top-3 right-3 z-10 pointer-events-none">
+                {proximity ? (
+                  <div className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading font-semibold ${
+                    proximity.within ? 'bg-emerald-600/85 text-white' : 'bg-red-600/85 text-white'
+                  }`}>
+                    <span className="text-sm leading-none">{proximity.within ? '✓' : '✗'}</span>
+                    <span className="tabular-nums">
+                      {proximity.within ? 'At property' : 'Off-site'} · {fmtDistance(proximity.distance)}
+                    </span>
+                    {/* Which reference the verdict used: "property" = the
+                        object's stored lat/long; otherwise a geocoded address. */}
+                    <span className="opacity-70 font-normal border-l border-white/40 pl-1.5">{proximity.source}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading bg-black/55 text-white/90">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                    {refCoords ? 'Locating…' : 'No property location'}
+                  </div>
+                )}
               </div>
             )}
             {/* Recording indicator + live zoom */}

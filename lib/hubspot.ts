@@ -434,17 +434,31 @@ export async function fetchProperties(
  */
 export async function fetchPropertyCoords(recordId: string): Promise<{ lat: number; lng: number } | null> {
   const { property: typeId } = typeIds();
+  // Field names vary by portal. Try the configured names first (if set), then a
+  // broad set of common variants. The projection silently ignores names that
+  // don't exist, so listing extras is harmless.
+  const latEnv = (process.env.HUBSPOT_PROPERTY_LAT_PROPERTY || '').trim();
+  const lngEnv = (process.env.HUBSPOT_PROPERTY_LNG_PROPERTY || '').trim();
+  const latNames = [latEnv, 'latitude', 'lat', 'geo_latitude', 'hs_latitude', 'property_latitude', 'y_coordinate'].filter(Boolean);
+  const lngNames = [lngEnv, 'longitude', 'lng', 'lon', 'geo_longitude', 'hs_longitude', 'property_longitude', 'x_coordinate'].filter(Boolean);
   const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
     method: 'POST',
     body: JSON.stringify({
       filterGroups: [{ filters: [{ propertyName: 'hs_object_id', operator: 'EQ', value: recordId }] }],
-      properties: ['latitude', 'longitude', 'lat', 'lng', 'lon'],
+      properties: [...latNames, ...lngNames],
       limit: 1,
     }),
   });
   const p = resp.results?.[0]?.properties || {};
-  const lat = Number(p.latitude ?? p.lat);
-  const lng = Number(p.longitude ?? p.lng ?? p.lon);
+  const firstNum = (names: string[]): number => {
+    for (const n of names) {
+      const v = Number(p[n]);
+      if (isFinite(v) && v !== 0) return v;
+    }
+    return NaN;
+  };
+  const lat = firstNum(latNames);
+  const lng = firstNum(lngNames);
   // Treat 0,0 (the null island) as "not set" — it's never a real US property.
   if (isFinite(lat) && isFinite(lng) && (lat !== 0 || lng !== 0)) return { lat, lng };
   return null;
