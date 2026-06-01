@@ -5,6 +5,7 @@ import { useAppDialog } from '@/components/AppDialog';
 import { useRouter } from 'next/router';
 import type { InspectionSummary } from '@/lib/types';
 import { InspectionCard } from '@/components/InspectionCard';
+import { ListPicker } from '@/components/ListPicker';
 
 interface MeUser { userId: string; email: string; name: string; }
 
@@ -411,60 +412,30 @@ export default function Home() {
               The dropdowns shrink (truncating) so Updated + sort fit to their
               right without wrapping or horizontal-scrolling on mobile. */}
           <div className="flex items-center gap-2 mb-2 pb-1">
-            {/* Inspector filter */}
-            <div className="relative flex-1 min-w-0 max-w-[160px]">
-              <select
+            {/* Inspector filter — branded tap-to-select pop-up (no OS dropdown) */}
+            <div className="flex-1 min-w-0 max-w-[160px]">
+              <ListPicker
                 value={inspectorFilter}
-                onChange={(e) => setInspectorFilter(e.target.value)}
-                className={`appearance-none w-full truncate text-xs font-heading font-semibold pl-2.5 pr-6 py-1.5 border rounded-md bg-white cursor-pointer ${
-                  inspectorFilter !== 'all'
-                    ? 'border-brand text-brand'
-                    : 'border-gray-300 text-gray-700 hover:border-brand/50'
+                options={[{ value: 'all', label: 'All Inspectors' }, ...inspectorOptions.map((o) => ({ value: o.value, label: o.label }))]}
+                onChange={setInspectorFilter}
+                ariaLabel="Filter by inspector"
+                className={`w-full truncate text-xs font-heading font-semibold pl-2.5 pr-2 py-1.5 border rounded-md bg-white flex items-center justify-between ${
+                  inspectorFilter !== 'all' ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'
                 }`}
-                title="Filter by inspector"
-              >
-                <option value="all">All Inspectors</option>
-                {inspectorOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <svg
-                className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500"
-                width="10" height="10" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
+              />
             </div>
 
-            {/* Template filter */}
-            <div className="relative flex-1 min-w-0 max-w-[160px]">
-              <select
+            {/* Template filter — branded tap-to-select pop-up (no OS dropdown) */}
+            <div className="flex-1 min-w-0 max-w-[160px]">
+              <ListPicker
                 value={templateFilter}
-                onChange={(e) => setTemplateFilter(e.target.value)}
-                className={`appearance-none w-full truncate text-xs font-heading font-semibold pl-2.5 pr-6 py-1.5 border rounded-md bg-white cursor-pointer ${
-                  templateFilter !== 'all'
-                    ? 'border-brand text-brand'
-                    : 'border-gray-300 text-gray-700 hover:border-brand/50'
+                options={[{ value: 'all', label: 'All Templates' }, ...templateOptions.map((o) => ({ value: o.value, label: o.label }))]}
+                onChange={setTemplateFilter}
+                ariaLabel="Filter by template"
+                className={`w-full truncate text-xs font-heading font-semibold pl-2.5 pr-2 py-1.5 border rounded-md bg-white flex items-center justify-between ${
+                  templateFilter !== 'all' ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'
                 }`}
-                title="Filter by template"
-              >
-                <option value="all">All Templates</option>
-                {templateOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <svg
-                className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500"
-                width="10" height="10" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
+              />
             </div>
 
             {/* Sort field toggle (Updated / Scheduled) */}

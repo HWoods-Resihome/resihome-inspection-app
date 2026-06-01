@@ -373,6 +373,8 @@ export default function NewInspection() {
                   onChange={(v) => setSelectedTemplate(v as TemplateType)}
                   placeholder="Select template"
                   emptyLabel="No template matches"
+                  filled
+                  deferKeyboard
                 />
               </div>
 
@@ -391,6 +393,8 @@ export default function NewInspection() {
                   loading={propertiesLoading}
                   error={propertiesError}
                   emptyLabel={propertyQuery ? 'No matching properties' : 'Type to search properties'}
+                  filled
+                  deferKeyboard
                 />
               </div>
 
