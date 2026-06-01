@@ -1285,7 +1285,6 @@ export function CameraCapture({
                   >
                     <span className="text-sm leading-none">⚠</span>
                     <span>Can’t verify · {proximity.reason}</span>
-                    <span className="font-normal border-l border-black/30 pl-1.5">Tap to retry</span>
                   </button>
                 )}
               </div>
