@@ -647,7 +647,7 @@ export function EditableLineRow(props: Props) {
                 {/* While the line-item search keyboard is open, grow the card so
                     it can scroll the field WAY up and the dropdown clears the
                     keyboard; collapses when the keyboard closes. */}
-                {searchFocused && <div style={{ height: '150vh' }} aria-hidden />}
+                {searchFocused && <div style={{ height: '200vh' }} aria-hidden />}
               </div>
 
               {/* Sticky footer action */}

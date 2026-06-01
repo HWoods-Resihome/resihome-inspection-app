@@ -281,18 +281,21 @@ export function Combobox({
             setOpen(true);
             onFocusChange?.(true);
             if (scrollIntoViewOnFocus) {
-              // Wait for the keyboard to push up, then scroll the sheet (only the
-              // sheet — never the page) so the field sits just under the sticky
-              // header with the dropdown visible below it.
-              setTimeout(() => {
+              // Lift the field up near the top of the sheet so the dropdown has
+              // room above the keyboard. Re-fire a few times because the on-screen
+              // keyboard animates in over a few hundred ms and shifts the layout
+              // after a single early scroll would have run.
+              const lift = () => {
                 const scroller = containerRef.current?.closest('[data-modal-scroll]') as HTMLElement | null;
                 const field = containerRef.current;
                 if (!scroller || !field) return;
                 const fRect = field.getBoundingClientRect();
                 const sRect = scroller.getBoundingClientRect();
-                const HEADROOM = 64; // clears the sticky modal header
+                const HEADROOM = 12; // pin the field near the very top of the sheet
                 scroller.scrollTo({ top: scroller.scrollTop + (fRect.top - sRect.top) - HEADROOM, behavior: 'smooth' });
-              }, 300);
+              };
+              setTimeout(lift, 300);
+              setTimeout(lift, 650);
             }
           }}
           onBlur={() => {
