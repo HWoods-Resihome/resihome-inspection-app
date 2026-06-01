@@ -102,7 +102,7 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
       <div className="flex items-start justify-between gap-3 mb-1.5">
         <div className="flex-1 min-w-0">
           {tmpl && (
-            <p className="text-xs font-heading font-bold uppercase tracking-wide text-gray-700 mb-0.5 truncate">
+            <p className="text-[11px] font-heading font-semibold uppercase tracking-wide text-brand mb-0.5 truncate">
               {tmpl}
             </p>
           )}
@@ -119,17 +119,13 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
           <StatusBadge status={i.status} />
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
-        {date && <span>{date}</span>}
-        {date && i.inspectorName && <span>&middot;</span>}
-        {i.inspectorName && <span>{i.inspectorName}</span>}
+      {/* One meta row: date · inspector on the left, Updated pushed to the right. */}
+      <div className="flex items-center gap-x-2 text-xs text-gray-500 mt-0.5">
+        {date && <span className="shrink-0">{date}</span>}
+        {date && i.inspectorName && <span className="shrink-0">&middot;</span>}
+        {i.inspectorName && <span className="truncate">{i.inspectorName}</span>}
+        {updated && <span className="text-gray-400 ml-auto shrink-0 whitespace-nowrap">Updated {updated}</span>}
       </div>
-      {/* Last-updated tag (template type now shown as the kicker above the address). */}
-      {updated && (
-        <div className="flex items-center text-xs mt-1">
-          <span className="text-gray-400 ml-auto">Updated {updated}</span>
-        </div>
-      )}
       {hasProgress && (
         <div className="mt-2">
           <div className="text-xs text-gray-500 font-heading">
