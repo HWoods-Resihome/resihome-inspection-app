@@ -87,7 +87,7 @@ const UNDO = /\b(undo|scratch that|(remove|delete|cancel|drop)\b.{0,12}\b(line|o
 // don't reply. Covers a bare "no", "nope", "that's it", "I'm done", "close",
 // "stop", "nothing", "all set", etc. Kept tight so it doesn't swallow real
 // requests (e.g. "no, make it 50 percent" still goes to the agent).
-const DONE = /^(no|nope|nah|no thanks?|that'?s (it|all)|i'?m (done|good|all set)|all set|all done|done|close|stop|cancel|nothing( else)?|that'?ll do|we'?re good|good for now)[.!]?$/i;
+const DONE = /^(no|nope|nah|no thanks?|no more|nothing more|that'?s enough|that'?s (it|all)|i'?m (done|good|all set)|all set|all done|(we'?re|were) done|done|close|close (it|out|the mic)|stop|cancel|nothing( else)?|that'?ll do|we'?re good|good for now)[.!]?$/i;
 
 // Minimal typing for the vendor-prefixed SpeechRecognition (webkit on most
 // mobile webviews). We feature-detect at runtime.
@@ -259,6 +259,9 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [pending, setPending] = useState<Pending | null>(null);
   const [warming, setWarming] = useState(false);
+  // True only once warm-up has fully COMPLETED (distinct from "not warming",
+  // which is also the pre-open state) — drives auto-start + the mic gating.
+  const [warmedUp, setWarmedUp] = useState(false);
   // Voice needs the network (cloud STT + the reasoning agent), so it can't run
   // offline. Track connectivity to degrade gracefully and auto-reactivate.
   const [online, setOnline] = useState(true);
@@ -318,17 +321,21 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   }, []);
 
   // Warm-up: when the panel opens, ping the endpoint (GET) so the catalog +
-  // embeddings cold-start work happens BEFORE the first spoken line. We surface
-  // a "getting ready" state on the mic so the inspector knows it's priming.
+  // embeddings cold-start work happens BEFORE the first spoken line. The mic is
+  // shown loading + disabled until this finishes, so the inspector can't talk
+  // into a cold pipeline (which made the first response feel slow). `warmedUp`
+  // flips true only on COMPLETION (not merely "not warming"), so the auto-start
+  // effect can't fire on the first render before warm-up has even begun.
   useEffect(() => {
-    if (!open) return;
+    if (!open) { setWarmedUp(false); return; }
     let cancelled = false;
     setWarming(true);
+    setWarmedUp(false);
     (async () => {
       try {
         await fetch('/api/rate-card/voice-assist', { method: 'GET' });
       } catch { /* non-fatal */ }
-      if (!cancelled) setWarming(false);
+      if (!cancelled) { setWarming(false); setWarmedUp(true); }
     })();
     // Pre-warm TTS: the browser's speechSynthesis engine is slow to start the
     // FIRST utterance (voice list loads lazily; some engines spin up on first
@@ -344,6 +351,17 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     } catch { /* non-fatal */ }
     return () => { cancelled = true; };
   }, [open]);
+
+  // Once warm-up completes, auto-open the mic so listening begins right after
+  // the ramp-up (and only then). Gated to online + Web-Speech devices; runs
+  // once per panel-open.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!open) { autoStartedRef.current = false; return; }
+    if (!warmedUp || !supported || !online || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    startListeningRef.current();
+  }, [open, warmedUp, supported, online]);
 
   const sendToAgent = useCallback(
     async (history: ChatMsg[]) => {
@@ -598,10 +616,11 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       if (DONE.test(t)) {
         stopListeningRef.current();
         setMessages((m) => [...m, { role: 'user', content: t }]);
-        // A short, final acknowledgment. No mic restart.
+        // A short, final acknowledgment, then auto-close the whole panel — "close"
+        // / "no more" / "that's it" means the inspector is finished with voice.
         const msg = 'Okay.';
         setMessages((m) => [...m, { role: 'assistant', content: msg }]);
-        speak(msg, () => { /* no restart — we're done */ }, 0, (sp) => { speakingRef.current = sp; });
+        speak(msg, () => { closePanelRef.current(); }, 0, (sp) => { speakingRef.current = sp; });
         return;
       }
       // "Undo" / "remove that last line" — remove the most recent voice-added
@@ -771,6 +790,11 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   const speakThenListenRef = useRef(speakThenListen);
   useEffect(() => { speakThenListenRef.current = speakThenListen; }, [speakThenListen]);
 
+  // Fresh ref to close the whole panel (used by the spoken "close / no more"
+  // command from inside submitUtterance without stale-closure issues).
+  const closePanelRef = useRef<() => void>(() => {});
+  useEffect(() => { closePanelRef.current = () => { reset(); setOpen(false); }; });
+
   // Commit the pending proposal: save it (the CLIENT announces success only
   // after the save), then prompt for the next line and reopen the mic.
   const commitPending = useCallback(() => {
@@ -905,15 +929,13 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     return (
       <button
         type="button"
-        onClick={() => {
-          setOpen(true);
-          // Don't auto-start listening offline — voice can't reach STT/the agent.
-          if (!pushToTalk && online) setTimeout(() => { startListeningRef.current(); }, 0);
-        }}
+        onClick={() => setOpen(true)}
         disabled={disabled}
         aria-label="Talk to the Voice Assistant"
         className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-brand text-white hover:bg-brand-dark disabled:opacity-50 shadow"
       >
+        {/* Opening warms the pipeline (catalog/embeddings); the auto-start effect
+            opens the mic once that completes, so we don't talk into a cold start. */}
         <MicIcon className="w-5 h-5" />
       </button>
     );
@@ -1084,10 +1106,12 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               startListeningRef.current();
             }}
             disabled={!online ? true : ((busy || warming) && !listening ? true : disabled)}
-            aria-label={listening ? 'Stop listening' : 'Talk to the Voice Assistant'}
+            aria-label={listening ? 'Stop listening' : warming ? 'Getting ready…' : 'Talk to the Voice Assistant'}
             className={`relative inline-flex items-center justify-center w-11 h-11 rounded-full text-white shadow disabled:opacity-50 transition-transform ${listening ? 'bg-red-600 scale-110 animate-pulse' : 'bg-brand hover:bg-brand-dark ring-2 ring-brand/40'}`}
           >
-            <MicIcon className="w-5 h-5" />
+            {/* Loading spinner while warming/thinking so the mic visibly ramps
+                up; it's also disabled until warm-up completes. */}
+            {(warming || busy) && !listening ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <MicIcon className="w-5 h-5" />}
           </button>
         )}
       </span>
