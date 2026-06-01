@@ -136,23 +136,31 @@ function OverCapAlert({
   const kindLabel = status.kind.charAt(0).toUpperCase() + status.kind.slice(1);
   const label = `Above ${status.cap}% ${kindLabel} Cap`;
 
-  const showFlash = (e: React.MouseEvent) => {
-    e.stopPropagation();      // don't enter edit mode / change the field
+  // Toggle the message: click shows it (and it auto-hides after a moment);
+  // click again closes it immediately. stopPropagation keeps the tap on the
+  // icon itself — it never opens the line editor / changes the field, so it's
+  // usable directly on a saved line without entering the add/edit popup.
+  const toggleFlash = (e: React.MouseEvent) => {
+    e.stopPropagation();
     e.preventDefault();
-    setFlash(true);
-    if (flashTimer.current) clearTimeout(flashTimer.current);
-    flashTimer.current = setTimeout(() => setFlash(false), 2200);
+    if (flashTimer.current) { clearTimeout(flashTimer.current); flashTimer.current = null; }
+    setFlash((prev) => {
+      const next = !prev;
+      if (next) flashTimer.current = setTimeout(() => setFlash(false), 2500);
+      return next;
+    });
   };
 
   return (
     <span className={`relative inline-flex ${className || ''}`}>
       <button
         type="button"
-        onClick={showFlash}
+        onClick={toggleFlash}
         onMouseDown={(e) => e.preventDefault()}  // don't blur the row mid-edit
         className="inline-flex text-amber-500 hover:text-amber-600"
         title={label}
         aria-label={label}
+        aria-expanded={flash}
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
