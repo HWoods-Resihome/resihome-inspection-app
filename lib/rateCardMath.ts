@@ -15,8 +15,8 @@
  *                           * (1 + region.material_tax_adjustment)
  *
  *   labor_total    = labor_hours * effective_labor_rate * quantity
- *   material_units = MAX(1, material_qty * quantity)
- *   material_total = 0 if is_labor_only else (material_rate * material_units * adjusted_material_cost)
+ *   material_units = MAX(1, material_rate * material_qty * quantity)   // floor the FULL consumption at 1 unit
+ *   material_total = 0 if (is_labor_only OR material_rate == 0) else (material_units * adjusted_material_cost)
  *
  *   vendor_cost = labor_total + material_total
  *   client_cost = vendor_cost * 1.20            (markup is hard-coded 20%)
@@ -262,11 +262,21 @@ export function calculateLine(
   const laborTotal = catalogItem.laborHours * effectiveLaborRate * qty;
 
   let materialTotal = 0;
-  if (!catalogItem.isLaborOnly && qty > 0) {
-    // Floor at 1 unit for a fractional quantity, but a quantity of 0 must cost
-    // nothing — don't charge a phantom unit on a deliberately zeroed line.
-    const materialUnits = Math.max(1, catalogItem.materialQty * qty);
-    materialTotal = catalogItem.materialRate * materialUnits * effectiveAdjustedMaterialCost;
+  // Material consumption = material_rate × material_qty × quantity (the number of
+  // material "units" the job uses). Floor it at 1 WHOLE unit: you can't buy a
+  // fraction of a unit, and the intent of this floor has always been "charge at
+  // least one unit of material." The floor MUST wrap the FULL consumption —
+  // including material_rate. Flooring only (material_qty × quantity), as the
+  // formula originally did, let a tiny per-unit rate (e.g. 0.0001 on the per-SF
+  // Sales Clean lines) silently crush the material toward $0, so the intended
+  // $100 / $150 flat material never materialized. Guards:
+  //   - quantity 0  → $0 (a deliberately zeroed line costs nothing)
+  //   - material_rate 0 → $0 (the item carries no material; unchanged — it was
+  //     always $0 because rate multiplied the whole term).
+  if (!catalogItem.isLaborOnly && qty > 0 && catalogItem.materialRate > 0) {
+    const consumption = catalogItem.materialRate * catalogItem.materialQty * qty;
+    const materialUnits = Math.max(1, consumption);
+    materialTotal = materialUnits * effectiveAdjustedMaterialCost;
   }
 
   // Vendor cost: direct override (if set) wins over formula. We keep

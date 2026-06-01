@@ -117,9 +117,9 @@ adjusted_material_cost  = material_cost
                         × (1 + material_tax_adjustment)
 
 labor_total    = labor_hours × effective_labor_rate × quantity
-material_units = MAX(1, material_qty × quantity)
-material_total = 0 if is_labor_only else
-                 material_rate × material_units × adjusted_material_cost
+material_units = MAX(1, material_rate × material_qty × quantity)   # floor the FULL consumption at 1 whole unit
+material_total = 0 if (is_labor_only OR material_rate == 0) else
+                 material_units × adjusted_material_cost
 
 vendor_cost = labor_total + material_total
 client_cost = vendor_cost × 1.20            # markup hardcoded 20%
