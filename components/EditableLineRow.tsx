@@ -75,18 +75,12 @@ interface Props {
   onEditingChange?: (editing: boolean) => void;
 }
 
-// Brand-styled native <select> (pink border + chevron + focus ring) used for
-// Category / Sub-category / Vendor on the mobile editor. appearance-none hides
-// the OS arrow so our pink chevron shows; pr-9 leaves room for it.
-const BRAND_SELECT_CLS = 'appearance-none h-11 w-full border-2 border-brand/40 focus:border-brand focus:ring-2 focus:ring-brand/20 rounded-lg pl-3 pr-9 text-base bg-white text-ink outline-none transition-colors';
-
-function SelectChevron() {
-  return (
-    <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-brand" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-    </svg>
-  );
-}
+// Shared trigger styling for the WheelPicker pop-up fields (Category,
+// Sub-category, Vendor, Tenant %) on the mobile editor — pink border to match
+// the rest of the branded inputs.
+const BRAND_TRIGGER_CLS = 'h-11 w-full border-2 border-brand/40 rounded-lg px-3 text-base bg-white text-ink flex items-center justify-between disabled:bg-gray-100';
+// Pink border for plain text/number inputs in the editor.
+const BRAND_INPUT_CLS = 'h-11 w-full border-2 border-brand/40 focus:border-brand focus:ring-2 focus:ring-brand/20 rounded-lg px-3 text-base bg-white text-ink outline-none transition-colors';
 
 const TENANT_PCT_OPTIONS = Array.from({ length: 21 }, (_, i) => i * 5);
 // Default vendor selection when a new line is created. The VENDORS list itself
@@ -494,32 +488,24 @@ export function EditableLineRow(props: Props) {
               <div className="px-4 py-4 space-y-4">
                 <div>
                   <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Category</label>
-                  <div className="relative">
-                    <select
-                      value={category}
-                      onChange={(e) => handleCategoryChange(e.target.value)}
-                      className={BRAND_SELECT_CLS}
-                    >
-                      <option value="">Select category…</option>
-                      {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <SelectChevron />
-                  </div>
+                  <WheelPicker
+                    value={category}
+                    options={[{ value: '', label: 'Select category…' }, ...categories.map((c) => ({ value: c, label: c }))]}
+                    onChange={handleCategoryChange}
+                    ariaLabel="Category"
+                    className={BRAND_TRIGGER_CLS}
+                  />
                 </div>
 
                 <div>
                   <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Sub-category</label>
-                  <div className="relative">
-                    <select
-                      value={subcategory}
-                      onChange={(e) => handleSubcategoryChange(e.target.value)}
-                      className={BRAND_SELECT_CLS}
-                    >
-                      <option value="">Select sub-category…</option>
-                      {subcategories.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    <SelectChevron />
-                  </div>
+                  <WheelPicker
+                    value={subcategory}
+                    options={[{ value: '', label: 'Select sub-category…' }, ...subcategories.map((s) => ({ value: s, label: s }))]}
+                    onChange={handleSubcategoryChange}
+                    ariaLabel="Sub-category"
+                    className={BRAND_TRIGGER_CLS}
+                  />
                 </div>
 
                 <div>
@@ -531,13 +517,14 @@ export function EditableLineRow(props: Props) {
                     placeholder="Type to search items…"
                     emptyLabel={category ? 'No items in this category' : 'No matching items'}
                     scrollIntoViewOnFocus
+                    brand
                   />
                   {selectedItem && (
                     <textarea
                       value={customDescription}
                       onChange={(e) => { descTouchedRef.current = true; setCustomDescription(e.target.value); }}
                       rows={2}
-                      className="w-full mt-2 text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-700 bg-white"
+                      className="w-full mt-2 text-sm border-2 border-brand/40 focus:border-brand focus:ring-2 focus:ring-brand/20 rounded-lg px-3 py-2 text-gray-700 bg-white outline-none transition-colors"
                       placeholder={catalogDescription(selectedItem) || 'Edit description (optional)…'}
                     />
                   )}
@@ -552,7 +539,7 @@ export function EditableLineRow(props: Props) {
                       type="number" step="0.01" min="0" inputMode="decimal"
                       value={quantity}
                       onChange={(e) => setQuantity(e.target.value)}
-                      className="no-spinner h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white"
+                      className={`no-spinner ${BRAND_INPUT_CLS}`}
                     />
                   </div>
                   <div>
@@ -567,16 +554,13 @@ export function EditableLineRow(props: Props) {
                   <label className="block text-xs font-heading font-bold text-gray-700 mb-1">
                     Vendor <span className="text-brand">*</span>
                   </label>
-                  <div className="relative">
-                    <select
-                      value={vendor}
-                      onChange={(e) => setVendor(e.target.value)}
-                      className={BRAND_SELECT_CLS}
-                    >
-                      {VENDORS.map((v) => <option key={v} value={v}>{v}</option>)}
-                    </select>
-                    <SelectChevron />
-                  </div>
+                  <WheelPicker
+                    value={vendor}
+                    options={VENDORS.map((v) => ({ value: v, label: v }))}
+                    onChange={setVendor}
+                    ariaLabel="Vendor"
+                    className={BRAND_TRIGGER_CLS}
+                  />
                 </div>
 
                 <div>
@@ -588,7 +572,7 @@ export function EditableLineRow(props: Props) {
                     options={TENANT_PCT_OPTIONS.map((p) => ({ value: String(p), label: `${p}%` }))}
                     onChange={(v) => { tenantTouchedRef.current = true; setTenantPct(Number(v)); }}
                     ariaLabel="Tenant %"
-                    className="h-11 w-full border-2 border-brand/40 rounded-lg px-3 text-base bg-white text-ink flex items-center justify-between"
+                    className={BRAND_TRIGGER_CLS}
                   />
                 </div>
 

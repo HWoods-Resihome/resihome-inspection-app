@@ -24,6 +24,9 @@ interface Props {
   // the dropdown is visible above the on-screen keyboard; on blur it scrolls the
   // modal back to the top. Only meaningful inside a `[data-modal-scroll]` sheet.
   scrollIntoViewOnFocus?: boolean;
+  // Brand styling: pink border in the closed state to match the rest of the
+  // branded line-editor fields (default keeps the neutral grey border).
+  brand?: boolean;
   // Server-search mode: when provided, the parent owns matching. The combobox
   // calls this (debounced) as the user types so the parent can refetch
   // `options` from the API — used for datasets too large to pre-load (e.g.
@@ -55,6 +58,7 @@ export function Combobox({
   compact = false,
   scrollIntoViewOnFocus = false,
   onQueryChange,
+  brand = false,
 }: Props) {
   const serverMode = typeof onQueryChange === 'function';
   const [open, setOpen] = useState(false);
@@ -210,7 +214,8 @@ export function Combobox({
         aria-expanded={open}
         aria-haspopup="listbox"
         className={`${inputBoxClasses} ${
-          open ? 'border-brand ring-2 ring-brand/20' : 'border-gray-300 hover:border-gray-400'
+          open ? 'border-brand ring-2 ring-brand/20'
+            : brand ? 'border-2 border-brand/40 hover:border-brand' : 'border-gray-300 hover:border-gray-400'
         } ${disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
         onClick={() => {
           if (!disabled) {

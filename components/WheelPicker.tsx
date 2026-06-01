@@ -139,7 +139,7 @@ function WheelSheet({
                 // Tap a non-centered row to spin it to the middle; tap the row
                 // that's already centered to confirm (Done).
                 onClick={() => { if (i === pendingIdx) onPick(o.value); else pickIndex(i); }}
-                className={`flex items-center justify-center cursor-pointer select-none transition-colors ${i === pendingIdx ? 'text-ink font-bold text-xl' : 'text-gray-400 text-base'}`}
+                className={`flex items-center justify-center text-center px-3 leading-tight cursor-pointer select-none transition-colors ${i === pendingIdx ? 'text-ink font-bold text-lg' : 'text-gray-400 text-base'}`}
                 style={{ height: ITEM_H, scrollSnapAlign: 'center' }}
               >
                 {o.label}
