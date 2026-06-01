@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
+import { bustInspectionsCache } from '@/pages/api/inspections';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -160,6 +161,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    bustInspectionsCache(); // show the new inspection in the list immediately
     return res.status(200).json({ success: true, inspectionId, externalId, inspectionName, copiedLines });
   } catch (e: any) {
     console.error('POST /api/inspections/create failed:', e);

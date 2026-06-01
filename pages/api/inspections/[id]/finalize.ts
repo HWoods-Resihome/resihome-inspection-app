@@ -24,6 +24,7 @@ import {
 } from '@/lib/hubspot';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
+import { bustInspectionsCache } from '@/pages/api/inspections';
 import { resolveSections, resolveStateCode, type SectionInstance } from '@/lib/sections';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { renderMasterPdf } from '@/lib/pdfMaster';
@@ -484,6 +485,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     }
 
+    bustInspectionsCache(); // status → completed; reflect in the list at once
     const elapsed = Date.now() - t0;
     return res.status(200).json({
       success: true,

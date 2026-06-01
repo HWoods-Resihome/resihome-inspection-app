@@ -21,6 +21,7 @@ import {
   updateInspection,
 } from '@/lib/hubspot';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
+import { bustInspectionsCache } from '@/pages/api/inspections';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
 
@@ -232,6 +233,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    bustInspectionsCache(); // status → completed; reflect in the list at once
     res.status(200).json({
       success: true,
       elapsedMs: Date.now() - t0,
