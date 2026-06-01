@@ -27,6 +27,10 @@ interface Props {
   // Filled, borderless styling (light grey fill) to match the de-bordered
   // line-editor fields (default keeps the neutral grey-bordered white look).
   filled?: boolean;
+  // When true, the first tap OPENS the list without focusing the text input, so
+  // the on-screen keyboard doesn't pop up — the user can scroll options first
+  // and only gets the keyboard when they tap the field again to type.
+  deferKeyboard?: boolean;
   // Server-search mode: when provided, the parent owns matching. The combobox
   // calls this (debounced) as the user types so the parent can refetch
   // `options` from the API — used for datasets too large to pre-load (e.g.
@@ -59,6 +63,7 @@ export function Combobox({
   scrollIntoViewOnFocus = false,
   onQueryChange,
   filled = false,
+  deferKeyboard = false,
 }: Props) {
   const serverMode = typeof onQueryChange === 'function';
   const [open, setOpen] = useState(false);
@@ -221,7 +226,9 @@ export function Combobox({
         onClick={() => {
           if (!disabled) {
             setOpen(true);
-            inputRef.current?.focus();
+            // In deferKeyboard mode, don't focus the input on the opening tap —
+            // that's what pops the keyboard. The user taps the field again to type.
+            if (!deferKeyboard) inputRef.current?.focus();
           }
         }}
       >
@@ -244,6 +251,14 @@ export function Combobox({
           enterKeyHint="search"
           data-1p-ignore="true"
           data-lpignore="true"
+          onMouseDown={(e) => {
+            // deferKeyboard: block focus on the OPENING tap so no keyboard pops
+            // (the wrapper onClick opens the list). Once open, taps focus normally
+            // so the user can type. readOnly while closed is the cross-browser way
+            // to keep the keyboard down without losing the tap.
+            if (deferKeyboard && !open) { e.preventDefault(); setOpen(true); }
+          }}
+          readOnly={deferKeyboard && !open}
           value={open ? query : selectedLabel}
           onChange={(e) => {
             setQuery(e.target.value);

@@ -63,10 +63,18 @@ function ListSheet({
   onPick: (value: string) => void;
 }) {
   const selectedRef = useRef<HTMLButtonElement>(null);
+  // The row the user just tapped — held briefly so the pink selection band is
+  // visible before the sheet closes.
+  const [picked, setPicked] = useState<string | null>(null);
   // Bring the current selection into view when the list opens.
   useEffect(() => {
     selectedRef.current?.scrollIntoView({ block: 'center' });
   }, []);
+
+  const choose = (v: string) => {
+    setPicked(v);
+    window.setTimeout(() => onPick(v), 160);
+  };
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
@@ -81,17 +89,23 @@ function ListSheet({
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto py-1">
           {options.map((o) => {
-            const isSel = o.value === value;
+            // Highlight the row being tapped (and the current value) with the
+            // same pink band + top/bottom border as the wheel picker.
+            const isActive = picked != null ? picked === o.value : o.value === value;
             return (
               <button
                 key={o.value}
-                ref={isSel ? selectedRef : undefined}
+                ref={o.value === value ? selectedRef : undefined}
                 type="button"
-                onClick={() => onPick(o.value)}
-                className={`w-full text-left px-4 py-3 text-base flex items-center justify-between gap-2 ${isSel ? 'bg-brand/5 text-ink font-semibold' : 'text-ink hover:bg-gray-50'}`}
+                onClick={() => choose(o.value)}
+                className={`w-full text-left px-4 py-3 text-base flex items-center justify-between gap-2 transition-colors ${
+                  isActive
+                    ? 'bg-brand/10 border-y-2 border-brand text-ink font-semibold'
+                    : 'text-ink border-y-2 border-transparent hover:bg-gray-50 active:bg-brand/10'
+                }`}
               >
                 <span className="truncate">{o.label}</span>
-                {isSel && (
+                {isActive && (
                   <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" className="shrink-0 text-brand">
                     <path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 011.4-1.4l2.8 2.79 6.8-6.79a1 1 0 011.4 0z" clipRule="evenodd" />
                   </svg>

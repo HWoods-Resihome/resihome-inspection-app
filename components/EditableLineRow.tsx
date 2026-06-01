@@ -237,6 +237,12 @@ export function EditableLineRow(props: Props) {
   // already carries a saved override. This makes delete-and-retype work — the
   // field is no longer pinned to the catalog text via a display fallback.
   const descTouchedRef = useRef(!!(line?.customLaborFullDescription));
+  // Quantity edit UX: clear the field on focus so the inspector types fresh
+  // (no need to delete the existing value); if they leave without entering
+  // anything, restore the prior value so it still saves.
+  const qtyBeforeFocusRef = useRef('');
+  const onQtyFocus = () => { qtyBeforeFocusRef.current = quantity; setQuantity(''); };
+  const onQtyBlur = () => { if (quantity.trim() === '') setQuantity(qtyBeforeFocusRef.current); };
   useEffect(() => {
     if (descTouchedRef.current) return;
     if (!selectedItem) return;
@@ -519,6 +525,7 @@ export function EditableLineRow(props: Props) {
                     emptyLabel={category ? 'No items in this category' : 'No matching items'}
                     scrollIntoViewOnFocus
                     filled
+                    deferKeyboard
                   />
                   {selectedItem && (
                     <textarea
@@ -540,7 +547,8 @@ export function EditableLineRow(props: Props) {
                       type="number" step="0.01" min="0" inputMode="decimal"
                       value={quantity}
                       onChange={(e) => setQuantity(e.target.value)}
-                      onFocus={(e) => e.target.select()}
+                      onFocus={onQtyFocus}
+                      onBlur={onQtyBlur}
                       className={`no-spinner ${INPUT_CLS}`}
                     />
                   </div>
@@ -556,7 +564,7 @@ export function EditableLineRow(props: Props) {
                   <label className="block text-xs font-heading font-bold text-gray-700 mb-1">
                     Vendor <span className="text-brand">*</span>
                   </label>
-                  <WheelPicker
+                  <ListPicker
                     value={vendor}
                     options={VENDORS.map((v) => ({ value: v, label: v }))}
                     onChange={setVendor}
@@ -580,7 +588,7 @@ export function EditableLineRow(props: Props) {
 
                 {/* Totals row: Vendor $ (editable, with pencil) · Client $ · Tenant $.
                     Vendor $ is blank to use the formula; type to override. */}
-                <div className="grid grid-cols-3 gap-3 bg-gray-50 rounded-lg p-3 text-center">
+                <div className="grid grid-cols-3 gap-3 bg-gray-50 rounded-lg p-3 text-center border-2 border-brand/40">
                   <div className="flex flex-col items-center">
                     <div className="text-xs font-bold text-gray-700 flex items-center justify-center gap-1 mb-1">
                       Vendor $
