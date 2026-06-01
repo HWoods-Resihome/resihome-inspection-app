@@ -592,12 +592,34 @@ export function EditableLineRow(props: Props) {
   // -------------------------------------------------------------------
   if (!isEditing) {
     if (!line || !selectedItem) {
-      // Defensive: a saved row should always have a line+catalog match. If catalog
-      // hasn't loaded yet, show a placeholder.
+      // A saved row whose catalog item can't be resolved. Two cases:
+      //   - catalog still loading (catalog.length === 0) → transient; just wait.
+      //   - catalog loaded but this code isn't in it → the item was removed/
+      //     renamed in HubSpot, leaving an orphan line. Let the inspector delete
+      //     it so it can be cleared from the scope/report.
+      const catalogLoaded = catalog.length > 0;
+      const isOrphan = catalogLoaded && !!line;
       return (
         <tr className="border-b border-gray-100 bg-yellow-50">
           <td colSpan={11} className="px-3 py-2 text-sm text-yellow-800">
-            Catalog item not loaded yet for {line?.lineItemCode || '(unknown)'}.
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                {isOrphan
+                  ? `Line item "${line?.lineItemCode}" is no longer in the catalog (removed or renamed). Delete it to clear it from the report.`
+                  : `Catalog item not loaded yet for ${line?.lineItemCode || '(unknown)'}.`}
+              </span>
+              {isOrphan && !readOnly && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-md bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-700"
+                  title="Delete this orphaned line"
+                  aria-label="Delete orphaned line"
+                >
+                  × Delete line
+                </button>
+              )}
+            </div>
           </td>
         </tr>
       );
