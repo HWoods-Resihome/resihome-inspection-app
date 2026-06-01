@@ -131,6 +131,11 @@ const JPEG_QUALITY = 0.88;
 // default to absorb GPS drift and rooftop-vs-parcel geocode offset; overridable.
 const PROXIMITY_THRESHOLD_M = Number(process.env.NEXT_PUBLIC_PROXIMITY_THRESHOLD_M) || 250;
 
+// A GPS fix older than this (ms) is treated as stale, so killing location (or a
+// silent watch stall) flips the verdict to "unverified" instead of freezing the
+// last distance.
+const FIX_TTL_MS = 15000;
+
 // Great-circle distance between two lat/lng points, in meters.
 function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const R = 6371000;
@@ -188,8 +193,14 @@ export function CameraCapture({
   // Property reference location + the latest fix as state, so the live
   // proximity badge re-renders and captures can stamp a ✓/✗ verdict.
   const [refCoords, setRefCoords] = useState<{ lat: number; lng: number; source: string } | null>(null);
-  const [geoFix, setGeoFix] = useState<{ lat: number; lng: number; acc: number } | null>(null);
+  const [geoFix, setGeoFix] = useState<{ lat: number; lng: number; acc: number; ts: number } | null>(null);
+  const [geoError, setGeoError] = useState(false);
+  // Ticks every few seconds while open so the proximity verdict re-evaluates
+  // staleness even when no new GPS events arrive (e.g. location switched off).
+  const [geoTick, setGeoTick] = useState(0);
   const refCoordsRef = useRef<typeof refCoords>(null);
+  const geoTsRef = useRef(0);
+  const geoErrorRef = useRef(false);
 
   // ----- Video clip recording (press-and-hold the shutter) -----
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -342,10 +353,19 @@ export function CameraCapture({
     if (!isOpen || typeof navigator === 'undefined' || !navigator.geolocation) return;
     const onPos = (pos: GeolocationPosition) => {
       geoRef.current = pos;
+      geoTsRef.current = Date.now();
+      geoErrorRef.current = false;
       const { latitude, longitude, accuracy } = pos.coords;
-      setGeoFix({ lat: latitude, lng: longitude, acc: accuracy });
+      setGeoFix({ lat: latitude, lng: longitude, acc: accuracy, ts: geoTsRef.current });
+      setGeoError(false);
     };
-    const onErr = () => { /* denied/unavailable — stamp without coordinates */ };
+    const onErr = () => {
+      // Denied / location services off / position unavailable: drop the stale
+      // fix so the verdict can't keep showing a frozen distance.
+      geoErrorRef.current = true;
+      geoRef.current = null;
+      setGeoError(true);
+    };
     navigator.geolocation.getCurrentPosition(onPos, onErr, {
       enableHighAccuracy: true, timeout: 8000, maximumAge: 30000,
     });
@@ -354,13 +374,19 @@ export function CameraCapture({
         enableHighAccuracy: true, timeout: 20000, maximumAge: 15000,
       });
     } catch { /* watchPosition unsupported — getCurrentPosition fix still applies */ }
+    // Re-evaluate staleness on a timer (no GPS events fire once location is off).
+    const tick = setInterval(() => setGeoTick((t) => t + 1), 3000);
     return () => {
       if (geoWatchRef.current != null) {
         try { navigator.geolocation.clearWatch(geoWatchRef.current); } catch { /* noop */ }
         geoWatchRef.current = null;
       }
+      clearInterval(tick);
       geoRef.current = null;
+      geoTsRef.current = 0;
+      geoErrorRef.current = false;
       setGeoFix(null);
+      setGeoError(false);
     };
   }, [isOpen]);
 
@@ -386,15 +412,47 @@ export function CameraCapture({
     return () => { cancelled = true; };
   }, [isOpen, propertyRecordId, addressSnapshot]);
 
-  // Live proximity verdict for the badge + the burned-in stamp. `within` is true
-  // when the closest the device could plausibly be (distance minus its own GPS
-  // accuracy) is inside the threshold.
+  // Live proximity verdict for the badge + the burned-in stamp.
+  //   ok/far      → have a property reference AND a fresh GPS fix
+  //   locating    → have a reference, still acquiring the first fix
+  //   unverified  → can't validate (location off/denied, fix went stale, or no
+  //                 property reference) — generic so any failure surfaces clearly
+  // `within` credits the device's own GPS accuracy.
   const proximity = useMemo(() => {
-    if (!refCoords || !geoFix) return null;
+    void geoTick; // re-run on the staleness timer
+    if (!refCoords) return { status: 'unverified' as const, reason: 'No property location on file' };
+    const stale = !geoFix || geoError || (Date.now() - geoFix.ts > FIX_TTL_MS);
+    if (stale) {
+      if (!geoFix && !geoError) return { status: 'locating' as const };
+      return { status: 'unverified' as const, reason: 'Location unavailable' };
+    }
     const distance = haversineMeters(geoFix.lat, geoFix.lng, refCoords.lat, refCoords.lng);
     const within = distance - (geoFix.acc || 0) <= PROXIMITY_THRESHOLD_M;
-    return { distance, within, source: refCoords.source };
-  }, [refCoords, geoFix]);
+    return { status: within ? ('ok' as const) : ('far' as const), distance, source: refCoords.source };
+  }, [refCoords, geoFix, geoError, geoTick]);
+
+  // Build the GPS + proximity portion of the evidence stamp at capture time.
+  // Only stamps coordinates/verdict when the fix is fresh; otherwise records
+  // "Location unverified" so a photo never carries a stale or false ✓.
+  const buildGeoStampLines = useCallback((): StampLine[] => {
+    const lines: StampLine[] = [];
+    const pos = geoRef.current;
+    const fresh = !!pos && !geoErrorRef.current && Date.now() - geoTsRef.current <= FIX_TTL_MS;
+    if (fresh && pos) {
+      const { latitude, longitude, accuracy } = pos.coords;
+      lines.push({ text: `${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)` });
+      const ref = refCoordsRef.current;
+      if (ref) {
+        const dist = haversineMeters(latitude, longitude, ref.lat, ref.lng);
+        const within = dist - accuracy <= PROXIMITY_THRESHOLD_M;
+        lines.push({ text: `${within ? 'At property' : 'Off-site'} · ${fmtDistance(dist)}`, mark: within ? 'ok' : 'bad' });
+      }
+    } else if (refCoordsRef.current) {
+      // We expected to validate location but couldn't get a usable fix.
+      lines.push({ text: 'Location unverified' });
+    }
+    return lines;
+  }, []);
 
   // ----- Capture -----
 
@@ -432,20 +490,10 @@ export function CameraCapture({
     const stampLines: StampLine[] = [];
     if (addressSnapshot) stampLines.push({ text: addressSnapshot });
     stampLines.push({ text: new Date().toLocaleString() });
-    const pos = geoRef.current;
-    if (pos) {
-      const { latitude, longitude, accuracy } = pos.coords;
-      stampLines.push({ text: `${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)` });
-      const ref = refCoordsRef.current;
-      if (ref) {
-        const dist = haversineMeters(latitude, longitude, ref.lat, ref.lng);
-        const within = dist - accuracy <= PROXIMITY_THRESHOLD_M;
-        stampLines.push({ text: `${within ? 'At property' : 'Off-site'} · ${fmtDistance(dist)}`, mark: within ? 'ok' : 'bad' });
-      }
-    }
+    stampLines.push(...buildGeoStampLines());
     drawEvidenceStamp(ctx, vw, vh, stampLines);
     return await new Promise((res) => canvas.toBlob((b) => res(b), 'image/jpeg', JPEG_QUALITY));
-  }, [addressSnapshot]);
+  }, [addressSnapshot, buildGeoStampLines]);
 
   // Upload the poster + video together and store them as one encoded photo_urls
   // entry (poster#v=video) so the clip rides the normal photo persistence.
@@ -691,21 +739,7 @@ export function CameraCapture({
       const stampLines: StampLine[] = [];
       if (addressSnapshot) stampLines.push({ text: addressSnapshot });
       stampLines.push({ text: new Date().toLocaleString() });
-      const pos = geoRef.current;
-      if (pos) {
-        const { latitude, longitude, accuracy } = pos.coords;
-        stampLines.push({ text: `${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)` });
-        // Proximity verdict against the property's reference location.
-        const ref = refCoordsRef.current;
-        if (ref) {
-          const dist = haversineMeters(latitude, longitude, ref.lat, ref.lng);
-          const within = dist - accuracy <= PROXIMITY_THRESHOLD_M;
-          stampLines.push({
-            text: `${within ? 'At property' : 'Off-site'} · ${fmtDistance(dist)}`,
-            mark: within ? 'ok' : 'bad',
-          });
-        }
-      }
+      stampLines.push(...buildGeoStampLines());
       drawEvidenceStamp(ctx, vw, vh, stampLines);
       // Convert to JPEG blob
       const blob: Blob | null = await new Promise((resolve) => {
@@ -723,7 +757,7 @@ export function CameraCapture({
     } finally {
       setBusy(false);
     }
-  }, [busy, items.length, maxPhotos, enqueueFile, addressSnapshot]);
+  }, [busy, items.length, maxPhotos, enqueueFile, addressSnapshot, buildGeoStampLines]);
 
   // ----- Per-photo retake/delete -----
 
@@ -1166,26 +1200,31 @@ export function CameraCapture({
             )}
             {/* Live proximity badge — confirms the device is at the selected
                 property before shooting (the same verdict is burned into each
-                photo). Shows "locating" until both a GPS fix and a property
-                reference are available. */}
+                photo). Sits below the top-right control buttons so it doesn't
+                cover them. */}
             {(propertyRecordId || addressSnapshot) && permissionState === 'granted' && (
-              <div className="absolute top-3 right-3 z-10 pointer-events-none">
-                {proximity ? (
+              <div className="absolute top-16 right-3 z-10 pointer-events-none">
+                {proximity.status === 'ok' || proximity.status === 'far' ? (
                   <div className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading font-semibold ${
-                    proximity.within ? 'bg-emerald-600/85 text-white' : 'bg-red-600/85 text-white'
+                    proximity.status === 'ok' ? 'bg-emerald-600/85 text-white' : 'bg-red-600/85 text-white'
                   }`}>
-                    <span className="text-sm leading-none">{proximity.within ? '✓' : '✗'}</span>
+                    <span className="text-sm leading-none">{proximity.status === 'ok' ? '✓' : '✗'}</span>
                     <span className="tabular-nums">
-                      {proximity.within ? 'At property' : 'Off-site'} · {fmtDistance(proximity.distance)}
+                      {proximity.status === 'ok' ? 'At property' : 'Off-site'} · {fmtDistance(proximity.distance)}
                     </span>
                     {/* Which reference the verdict used: "property" = the
                         object's stored lat/long; otherwise a geocoded address. */}
                     <span className="opacity-70 font-normal border-l border-white/40 pl-1.5">{proximity.source}</span>
                   </div>
-                ) : (
+                ) : proximity.status === 'locating' ? (
                   <div className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading bg-black/55 text-white/90">
                     <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                    {refCoords ? 'Locating…' : 'No property location'}
+                    Locating…
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading font-semibold bg-amber-500/90 text-black">
+                    <span className="text-sm leading-none">⚠</span>
+                    Can’t verify · {proximity.reason}
                   </div>
                 )}
               </div>
