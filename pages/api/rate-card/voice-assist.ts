@@ -95,7 +95,11 @@ function anthropicKey(): string {
 // `onTextDelta` is called with each text chunk; returns { content, stopReason }.
 async function streamAnthropic(
   payload: any,
-  onTextDelta: (chunk: string) => void
+  onTextDelta: (chunk: string) => void,
+  // Called the instant a tool_use block finishes streaming (its input JSON is
+  // complete). Lets the caller act on a tool — e.g. emit a proposal — before the
+  // whole response finishes, so on a multi-item turn the lines pop in one-by-one.
+  onToolComplete?: (block: any) => void
 ): Promise<{ content: any[]; stopReason: string | null }> {
   const resp = await fetch(ANTHROPIC_URL, {
     method: 'POST',
@@ -154,6 +158,7 @@ async function streamAnthropic(
         if (toolJsonByIndex[ev.index] != null && blocks[ev.index]?.type === 'tool_use') {
           try { blocks[ev.index].input = JSON.parse(toolJsonByIndex[ev.index] || '{}'); }
           catch { blocks[ev.index].input = {}; }
+          try { onToolComplete?.(blocks[ev.index]); } catch { /* non-fatal */ }
         }
       } else if (ev.type === 'message_delta') {
         if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
@@ -553,10 +558,131 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ? (simpleConfidentAdd && !usedSearchThisTurn ? MODEL_FAST : MODEL_SMART)
         : (usedSearchThisTurn ? MODEL_SMART : MODEL_FAST);
 
+      // Build the proposal + tool_result for ONE add tool (propose_line /
+      // propose_bid_item). Used both incrementally (as the tool finishes
+      // streaming) and from the post-round loop. Memoized by tool id so it runs
+      // exactly once per tool — the early call emits the proposal SSE, the
+      // post-round call just reuses the cached tool_result. Reads the live
+      // activeSection/activeLocation, so a switch_room processed first still
+      // routes correctly.
+      const builtResults = new Map<string, any>();
+      const emitAdd = (tu: any): any => {
+        const cached = builtResults.get(tu.id);
+        if (cached) return cached;
+        let result: any;
+        if (tu.name === 'propose_bid_item') {
+          const description = String(tu.input?.description || '').trim();
+          const price = Number(tu.input?.price);
+          if (!description) {
+            result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: 'A bid item needs a work description (what the vendor will see). Ask the inspector what the work is.' }) };
+          } else if (!isFinite(price) || price < 0) {
+            result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: 'A bid item needs a price. Do not add it yet — ask the inspector what price to use (you may propose one): "Does $X work for this bid item?", then call propose_bid_item with that price.', needsPrice: true }) };
+          } else {
+            const bid = resolveBidItem(catalog, tu.input?.categoryHint ? String(tu.input.categoryHint) : undefined);
+            if (!bid) {
+              result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: 'No bid-item line exists in the catalog, so a bid item cannot be added by voice.' }) };
+            } else {
+              let bidVendor = tu.input?.vendor ? String(tu.input.vendor) : 'Vendor 1';
+              if (!VENDORS.includes(bidVendor)) bidVendor = 'Vendor 1';
+              let bidPct = 100;
+              if (tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent))) {
+                bidPct = Math.max(0, Math.min(100, Math.round(Number(tu.input.tenantBillBackPercent) / 5) * 5));
+              }
+              let bidSection = activeSection;
+              let bidLocation = activeLocation;
+              let bidSectionId: string | undefined;
+              if (tu.input?.room) {
+                const want = String(tu.input.room).trim().toLowerCase();
+                const r = rooms.find((rm) => rm.id === String(tu.input.room))
+                  || rooms.find((rm) => rm.name.toLowerCase() === want)
+                  || rooms.find((rm) => rm.name.toLowerCase().includes(want) || want.includes(rm.name.toLowerCase()));
+                if (r) { bidSection = r.name; bidLocation = r.name; bidSectionId = r.id; }
+              }
+              const bidPrice = Math.round(price * 100) / 100;
+              const line: RateCardLineInput = {
+                externalId: `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+                section: bidSection, location: bidLocation, lineItemCode: bid.lineItemCode,
+                quantity: 1, tenantBillBackPercent: bidPct, assignedTo: bidVendor,
+                note: description, customVendorCost: bidPrice, customLaborFullDescription: description, photoUrls: [],
+              };
+              sse(res, 'proposal', { action: 'add', line, sectionId: bidSectionId, summary: `Bid item: ${description} — $${bidPrice.toFixed(2)} (${bidVendor}, ${bidPct}% Tenant)`, spokenSummary: 'bid item', awaitingReply: false });
+              didAct = true;
+              result = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ ok: true, addedBidItem: description, price: bidPrice, note: 'Bid item added. Briefly tell the inspector the price you used so they can change it.' }) };
+            }
+          }
+        } else {
+          // propose_line
+          const code = String(tu.input?.code || '');
+          const item = byCode.get(code);
+          if (!item) {
+            result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: `No catalog item with code ${code}. Use search_catalog first.` }) };
+          } else {
+            const qty = Number(tu.input?.quantity);
+            let vendor = tu.input?.vendor ? String(tu.input.vendor) : 'Vendor 1';
+            if (!VENDORS.includes(vendor)) vendor = 'Vendor 1';
+            const depKind = depKindForCategory(item.category, item.laborShortDescription);
+            let pct: number;
+            if (tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent))) pct = Number(tu.input.tenantBillBackPercent);
+            else if (depKind) pct = depreciationTenantPct(depKind, tenantMonths);
+            else pct = 100;
+            pct = Math.max(0, Math.min(100, Math.round(pct / 5) * 5));
+            const unit = (item.laborMeas || '').trim().toUpperCase();
+            const isMeasured = unit === 'SF' || unit === 'LF' || unit === 'SY';
+            const isWholeHouse = /whole\s*house/i.test(activeSection || body.section || '');
+            const confirmed = tu.input?.quantityConfirmed === true;
+            if (!isFinite(qty) || qty < 0) {
+              result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: 'Quantity must be a non-negative number. Ask the inspector.' }) };
+            } else if (isMeasured && !isWholeHouse && !confirmed) {
+              const unitWord = unit === 'SF' ? 'square feet' : unit === 'LF' ? 'linear feet' : 'square yards';
+              result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: `"${item.laborShortDescription}" is measured in ${unitWord}. Do not guess the amount. Ask the inspector to confirm the ${unitWord} (e.g. "How many ${unitWord} for the carpet?"), then call propose_line again with the stated quantity and quantityConfirmed: true.`, needsQuantity: true, unit }) };
+            } else {
+              let lineSection = activeSection;
+              let lineLocation = activeLocation;
+              let lineSectionId: string | undefined;
+              if (tu.input?.room) {
+                const want = String(tu.input.room).trim().toLowerCase();
+                const r = rooms.find((rm) => rm.id === String(tu.input.room))
+                  || rooms.find((rm) => rm.name.toLowerCase() === want)
+                  || rooms.find((rm) => rm.name.toLowerCase().includes(want) || want.includes(rm.name.toLowerCase()));
+                if (r) { lineSection = r.name; lineLocation = r.name; lineSectionId = r.id; }
+              }
+              const line: RateCardLineInput = {
+                externalId: `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+                section: lineSection, location: lineLocation, lineItemCode: code,
+                quantity: qty, tenantBillBackPercent: pct, assignedTo: vendor,
+                note: tu.input?.note ? String(tu.input.note) : '', photoUrls: [],
+              };
+              sse(res, 'proposal', { action: 'add', line, sectionId: lineSectionId, summary: lineToSummary(item, qty, vendor, pct, region, regions), spokenSummary: item.laborShortDescription, awaitingReply: false });
+              didAct = true;
+              result = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ ok: true, added: item.laborShortDescription, note: 'Line added. If the inspector listed more items, continue; otherwise stop.' }) };
+            }
+          }
+        }
+        builtResults.set(tu.id, result);
+        return result;
+      };
+
+      // Incremental streaming: emit add proposals the instant the model finishes
+      // each tool call, so multi-item turns ("add X and Y and Z") pop in one by
+      // one. We do this ONLY for responses with no switch_room — when a switch
+      // is present, room ordering matters, so we fall back to the post-round
+      // pass (which processes switch_room first). search_catalog/edit are also
+      // left to the post-round pass (they need results/ordering).
+      let sawSwitchInResponse = false;
+      const onToolComplete = (block: any) => {
+        if (!block || block.type !== 'tool_use') return;
+        if (block.name === 'switch_room') { sawSwitchInResponse = true; return; }
+        if (sawSwitchInResponse) return;
+        if (block.name === 'propose_line' || block.name === 'propose_bid_item') {
+          try { emitAdd(block); } catch { /* fall back to the post-round pass */ }
+        }
+      };
+
       // Stream this model call; forward text deltas live to the client.
       const { content } = await streamAnthropic(
         { model, max_tokens: 1200, system: systemWithHints, tools: roomTools, messages },
-        (chunk) => sse(res, 'delta', { text: chunk })
+        (chunk) => sse(res, 'delta', { text: chunk }),
+        onToolComplete
       );
 
       const toolUses = content.filter((c) => c.type === 'tool_use');
@@ -659,176 +785,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               ? JSON.stringify({ code, description: item.laborShortDescription, unit: item.laborMeas, category: item.category })
               : JSON.stringify({ error: `No catalog item with code ${code}` }),
           });
-        } else if (tu.name === 'propose_line') {
-          const code = String(tu.input?.code || '');
-          const item = byCode.get(code);
-          if (!item) {
-            toolResults.push({
-              type: 'tool_result', tool_use_id: tu.id, is_error: true,
-              content: JSON.stringify({ error: `No catalog item with code ${code}. Use search_catalog first.` }),
-            });
-            continue;
-          }
-          const qty = Number(tu.input?.quantity);
-          let vendor = tu.input?.vendor ? String(tu.input.vendor) : 'Vendor 1';
-          if (!VENDORS.includes(vendor)) vendor = 'Vendor 1';
-          // Tenant %: if the inspector stated one, use it. Otherwise, for
-          // PAINT/FLOORING items apply the depreciation schedule (by tenant
-          // months in home); all other items default to 100%.
-          const depKind = depKindForCategory(item.category, item.laborShortDescription);
-          let pct: number;
-          if (tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent))) {
-            pct = Number(tu.input.tenantBillBackPercent);
-          } else if (depKind) {
-            pct = depreciationTenantPct(depKind, tenantMonths);
-          } else {
-            pct = 100;
-          }
-          pct = Math.max(0, Math.min(100, Math.round(pct / 5) * 5));
-          if (!isFinite(qty) || qty < 0) {
-            toolResults.push({
-              type: 'tool_result', tool_use_id: tu.id, is_error: true,
-              content: JSON.stringify({ error: 'Quantity must be a non-negative number. Ask the inspector.' }),
-            });
-            continue;
-          }
-
-          // GUARDRAIL: measured-unit items (SF/LF/SY) must have a quantity the
-          // inspector actually gave — never a guessed/defaulted one. Whole House
-          // SF items are exempt (the app fills the property square footage). If
-          // the model tries to add a measured item without confirming the
-          // measurement, bounce it back so it ASKS first. This is the "always
-          // confirm the SF on carpet replacement" rule.
-          const unit = (item.laborMeas || '').trim().toUpperCase();
-          const isMeasured = unit === 'SF' || unit === 'LF' || unit === 'SY';
-          const isWholeHouse = /whole\s*house/i.test(activeSection || body.section || '');
-          const confirmed = tu.input?.quantityConfirmed === true;
-          if (isMeasured && !isWholeHouse && !confirmed) {
-            const unitWord = unit === 'SF' ? 'square feet' : unit === 'LF' ? 'linear feet' : 'square yards';
-            toolResults.push({
-              type: 'tool_result', tool_use_id: tu.id, is_error: true,
-              content: JSON.stringify({
-                error: `"${item.laborShortDescription}" is measured in ${unitWord}. Do not guess the amount. Ask the inspector to confirm the ${unitWord} (e.g. "How many ${unitWord} for the carpet?"), then call propose_line again with the stated quantity and quantityConfirmed: true.`,
-                needsQuantity: true,
-                unit,
-              }),
-            });
-            continue;
-          }
-
-          // Per-line room: if the model named a room for THIS line, resolve it
-          // (so "bulbs in the kitchen and drywall in the hallway" lands each in
-          // the right room without switch_room). Otherwise use the active room.
-          let lineSection = activeSection;
-          let lineLocation = activeLocation;
-          let lineSectionId: string | undefined;
-          if (tu.input?.room) {
-            const want = String(tu.input.room).trim().toLowerCase();
-            const r = rooms.find((rm) => rm.id === String(tu.input.room))
-              || rooms.find((rm) => rm.name.toLowerCase() === want)
-              || rooms.find((rm) => rm.name.toLowerCase().includes(want) || want.includes(rm.name.toLowerCase()));
-            if (r) { lineSection = r.name; lineLocation = r.name; lineSectionId = r.id; }
-          }
-          const externalId = `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-          const line: RateCardLineInput = {
-            externalId,
-            section: lineSection,
-            location: lineLocation,
-            lineItemCode: code,
-            quantity: qty,
-            tenantBillBackPercent: pct,
-            assignedTo: vendor,
-            note: tu.input?.note ? String(tu.input.note) : '',
-            photoUrls: [],
-          };
-          // Emit the line; the client auto-saves it to the resolved room (or the
-          // active room). Then keep the loop going for MORE items in this turn.
-          sse(res, 'proposal', {
-            action: 'add',
-            line,
-            sectionId: lineSectionId,
-            summary: lineToSummary(item, qty, vendor, pct, region, regions),
-            spokenSummary: item.laborShortDescription,
-            awaitingReply: false,
-          });
-          didAct = true;
-          toolResults.push({
-            type: 'tool_result', tool_use_id: tu.id,
-            content: JSON.stringify({ ok: true, added: item.laborShortDescription, note: 'Line added. If the inspector listed more items, continue; otherwise stop.' }),
-          });
-          continue;
-        } else if (tu.name === 'propose_bid_item') {
-          const description = String(tu.input?.description || '').trim();
-          const price = Number(tu.input?.price);
-          if (!description) {
-            toolResults.push({
-              type: 'tool_result', tool_use_id: tu.id, is_error: true,
-              content: JSON.stringify({ error: 'A bid item needs a work description (what the vendor will see). Ask the inspector what the work is.' }),
-            });
-            continue;
-          }
-          if (!isFinite(price) || price < 0) {
-            toolResults.push({
-              type: 'tool_result', tool_use_id: tu.id, is_error: true,
-              content: JSON.stringify({ error: 'A bid item needs a price. Do not add it yet — ask the inspector what price to use (you may propose one): "Does $X work for this bid item?", then call propose_bid_item with that price.', needsPrice: true }),
-            });
-            continue;
-          }
-          const bid = resolveBidItem(catalog, tu.input?.categoryHint ? String(tu.input.categoryHint) : undefined);
-          if (!bid) {
-            toolResults.push({
-              type: 'tool_result', tool_use_id: tu.id, is_error: true,
-              content: JSON.stringify({ error: 'No bid-item line exists in the catalog, so a bid item cannot be added by voice.' }),
-            });
-            continue;
-          }
-          let bidVendor = tu.input?.vendor ? String(tu.input.vendor) : 'Vendor 1';
-          if (!VENDORS.includes(bidVendor)) bidVendor = 'Vendor 1';
-          let bidPct = 100;
-          if (tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent))) {
-            bidPct = Math.max(0, Math.min(100, Math.round(Number(tu.input.tenantBillBackPercent) / 5) * 5));
-          }
-          // Per-line room resolution (same as propose_line).
-          let bidSection = activeSection;
-          let bidLocation = activeLocation;
-          let bidSectionId: string | undefined;
-          if (tu.input?.room) {
-            const want = String(tu.input.room).trim().toLowerCase();
-            const r = rooms.find((rm) => rm.id === String(tu.input.room))
-              || rooms.find((rm) => rm.name.toLowerCase() === want)
-              || rooms.find((rm) => rm.name.toLowerCase().includes(want) || want.includes(rm.name.toLowerCase()));
-            if (r) { bidSection = r.name; bidLocation = r.name; bidSectionId = r.id; }
-          }
-          const bidPrice = Math.round(price * 100) / 100;
-          const bidExternalId = `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-          const line: RateCardLineInput = {
-            externalId: bidExternalId,
-            section: bidSection,
-            location: bidLocation,
-            lineItemCode: bid.lineItemCode,
-            quantity: 1,
-            tenantBillBackPercent: bidPct,
-            assignedTo: bidVendor,
-            // The inspector's words drive what the vendor sees (note +
-            // full-description override), and the price sets the vendor cost.
-            note: description,
-            customVendorCost: bidPrice,
-            customLaborFullDescription: description,
-            photoUrls: [],
-          };
-          sse(res, 'proposal', {
-            action: 'add',
-            line,
-            sectionId: bidSectionId,
-            summary: `Bid item: ${description} — $${bidPrice.toFixed(2)} (${bidVendor}, ${bidPct}% Tenant)`,
-            spokenSummary: 'bid item',
-            awaitingReply: false,
-          });
-          didAct = true;
-          toolResults.push({
-            type: 'tool_result', tool_use_id: tu.id,
-            content: JSON.stringify({ ok: true, addedBidItem: description, price: bidPrice, note: 'Bid item added. Briefly tell the inspector the price you used so they can change it.' }),
-          });
+        } else if (tu.name === 'propose_line' || tu.name === 'propose_bid_item') {
+          // Build + emit (or reuse the already-streamed emit) and record the
+          // tool_result in order. emitAdd is memoized by tool id, so a proposal
+          // streamed incrementally above is not emitted again here.
+          toolResults.push(emitAdd(tu));
           continue;
         } else if (tu.name === 'edit_line') {
           const externalId = String(tu.input?.externalId || '');
