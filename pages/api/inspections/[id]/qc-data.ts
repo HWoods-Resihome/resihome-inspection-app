@@ -15,8 +15,8 @@ import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
   fetchSourceSectionPhotos,
-  fetchRateCardCatalog,
 } from '@/lib/hubspot';
+import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -45,7 +45,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let catByCode: Record<string, { category: string; subcategory: string; unit: string; shortDescription: string; subtext: string }> = {};
     if (lineAnswers.length > 0) {
       try {
-        const catalog = await fetchRateCardCatalog();
+        const catalog = await getCachedCatalog();
         for (const c of catalog) {
           catByCode[c.lineItemCode] = {
             category: c.category || '',

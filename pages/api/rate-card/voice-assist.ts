@@ -21,12 +21,12 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { fetchRateCardCatalog } from '@/lib/hubspot';
 import { matchCatalog, getCatalogEmbeddings } from '@/lib/voiceCatalogMatch';
 import { aliasFor } from '@/lib/voiceAliases';
 import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
 import { calculateLine } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
+import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { VENDORS } from '@/lib/vendors';
 import type { RateCardLineItem, RateCardLineInput, RegionRate } from '@/lib/types';
 
@@ -380,7 +380,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // call, so it's cheap. The client fires this when the voice panel opens.
   if (req.method === 'GET') {
     try {
-      const catalog = await fetchRateCardCatalog();
+      const catalog = await getCachedCatalog();
       await getCatalogEmbeddings(catalog); // builds/loads the vector cache
       // Also warm the Voyage QUERY path + region cache so the first real
       // utterance doesn't pay cold-start latency on either.
@@ -414,7 +414,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.end();
     }
 
-    const catalog = await fetchRateCardCatalog();
+    const catalog = await getCachedCatalog();
     const byCode = new Map(catalog.map((c) => [c.lineItemCode, c]));
     const regions = await getCachedRegions().catch(() => [] as RegionRate[]);
     const region = body.region || '';

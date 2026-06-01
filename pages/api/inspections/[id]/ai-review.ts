@@ -14,10 +14,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import sharp from 'sharp';
 import { getSessionFromRequest } from '@/lib/auth';
-import { fetchRateCardCatalog } from '@/lib/hubspot';
 import { matchCatalog } from '@/lib/voiceCatalogMatch';
 import { calculateLine } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
+import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { AI_REVIEW_KNOWLEDGE } from '@/lib/aiReviewKnowledge';
 import { depreciationRates } from '@/lib/depreciation';
 import type { RegionRate } from '@/lib/types';
@@ -205,7 +205,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const tenantMonths = Number.isFinite(rawMonths) && rawMonths > 0 ? rawMonths : 12;
     const ignoredLineIds: string[] = Array.isArray(body?.ignoredLineIds) ? body.ignoredLineIds.map(String) : [];
 
-    const catalog = await fetchRateCardCatalog();
+    const catalog = await getCachedCatalog();
     const byCode = new Map(catalog.map((c) => [c.lineItemCode, c]));
     const regions = await getCachedRegions().catch(() => [] as RegionRate[]);
     const sectionById = new Map(sections.map((s) => [s.id, s]));
