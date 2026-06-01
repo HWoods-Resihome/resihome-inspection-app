@@ -1,6 +1,8 @@
 // HubSpot API client. SERVER-SIDE ONLY -- never import in client code.
 
 import type { Question, Property, HubSpotUser, InspectionSummary } from './types';
+import { isInternalResolution } from './vendors';
+import { buildSectionPhotoAnswerProps, joinPhotoUrls } from './answerProps';
 
 const API_BASE = 'https://api.hubapi.com';
 
@@ -1508,9 +1510,21 @@ export async function copyRateCardLinesToQc(args: {
   const lineAnswers = sourceAnswers.filter((a) => a.answerType === 'rate_card_line' && a.rateCardLine);
   if (lineAnswers.length === 0) return 0;
 
-  const upserts: AnswerUpsert[] = lineAnswers.map((a) => {
+  const genId = (prefix: string) =>
+    `${prefix}-${args.qcInspectionId}-${(typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2, 12)}`;
+
+  const upserts: AnswerUpsert[] = [];
+  // Internal Resolution after-photos captured on the SCOPE carry over to the QC
+  // re-inspect: tagged onto the matching QC line AND seeded into the QC's
+  // per-section "after" photo pool, so they load already attached when the
+  // re-inspect is opened (the inspector validates the in-house work against the
+  // photos rather than re-shooting them).
+  const afterBySection = new Map<string, { section: string; location: string; urls: string[] }>();
+
+  for (const a of lineAnswers) {
     const rc = a.rateCardLine!;
-    const externalId = `QCLINE-${args.qcInspectionId}-${(typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2, 12)}`;
+    const externalId = genId('QCLINE');
+    const carriedAfter = isInternalResolution(a.assignedTo) ? (a.afterPhotoUrls || []) : [];
     const props: Record<string, any> = {
       answer_id_external: externalId,
       answer_type: 'rate_card_line',
@@ -1534,11 +1548,39 @@ export async function copyRateCardLinesToQc(args: {
       // QC-specific: starts unmarked
       pass_fail: '',
     };
-    return { answerProps: props, questionHubspotRecordId: null };
-  });
+    // Pre-tag the carried-over after-photos onto this QC line.
+    if (carriedAfter.length > 0) props.photo_urls = joinPhotoUrls(carriedAfter);
+    upserts.push({ answerProps: props, questionHubspotRecordId: null });
+
+    if (carriedAfter.length > 0) {
+      const key = `${a.section || ''}||${a.location || ''}`;
+      const entry = afterBySection.get(key) || { section: a.section || '', location: a.location || '', urls: [] };
+      for (const u of carriedAfter) if (!entry.urls.includes(u)) entry.urls.push(u);
+      afterBySection.set(key, entry);
+    }
+  }
+
+  // Number of lines copied (reported to the caller — excludes the seeded
+  // section-photo records appended below).
+  const lineCount = upserts.length;
+
+  // Seed the QC's per-section "after" photo pools from the carried-over photos.
+  for (const entry of afterBySection.values()) {
+    upserts.push({
+      answerProps: buildSectionPhotoAnswerProps({
+        answerIdExternal: genId('QCAFTER'),
+        summaryLabel: entry.location || entry.section || 'Section',
+        section: entry.section,
+        location: entry.location,
+        photoUrls: entry.urls,
+        photoPhase: 'after',
+      }),
+      questionHubspotRecordId: null,
+    });
+  }
 
   await upsertAnswers(args.qcInspectionId, upserts);
-  return upserts.length;
+  return lineCount;
 }
 
 /**
