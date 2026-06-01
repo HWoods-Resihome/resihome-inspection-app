@@ -57,8 +57,43 @@ export function depreciationTenantPct(kind: DepKind, months: number): number {
 export function depKindForCategory(category: string | undefined | null, description?: string | null): DepKind | null {
   const c = (category || '').toLowerCase();
   const d = (description || '').toLowerCase();
-  // Tub/shower refinish is not wall paint → no depreciation (stays 100%).
-  if (/refinish|reglaze|resurface/.test(d) && /tub|shower|surround|bath/.test(d)) return null;
+
+  // NEVER cap-eligible, regardless of category or is_flooring_like/is_paint_like
+  // tags. These are billed under Painting/Flooring/Tile but are damage,
+  // replacement, or non-wear scopes that stay full tenant responsibility — so
+  // the automated tenant % must NOT auto-depreciate them. When the scope text
+  // conflicts with the tag, the text wins. The AI review enforces the same list.
+  //   - tub / shower refinish / reglaze / resurface / strip (billed under
+  //     Painting but NOT wall paint)
+  //   - caulk / re-caulk
+  //   - ceiling tile
+  //   - transition / threshold strips
+  //   - countertops
+  //   - shower surrounds / wall tile
+  //   - baseboards / trim
+  //   - screens / spline
+  if (
+    (/refinish|reglaze|resurface|strip/.test(d) && /tub|shower|surround|bath/.test(d)) ||
+    /caulk/.test(d) ||
+    /ceiling tile/.test(d) ||
+    /transition|threshold/.test(d) ||
+    /countertop|counter top/.test(d) ||
+    /shower surround|wall tile/.test(d) ||
+    /baseboard|\btrim\b/.test(d) ||
+    /\bscreen\b|spline/.test(d)
+  ) {
+    return null;
+  }
+
+  // Flooring-MATERIAL cleaning is cap-eligible even when tenant filth or pets
+  // are the cause — carpet cleaning is the single most common cap-miss. Detect
+  // it by description so it's capped even when filed under a Cleaning category.
+  // (Non-flooring cleaning — sales clean, wall cleaner, appliance cleaning — is
+  // NOT flooring and is handled by the category checks below = no cap.)
+  if (/(carpet|tile|grout)/.test(d) && /(clean|shampoo|stain|odor|odour|pet)/.test(d)) {
+    return 'flooring';
+  }
+
   if (c.includes('paint')) return 'paint';
   if (c.includes('floor')) return 'flooring';
   return null;

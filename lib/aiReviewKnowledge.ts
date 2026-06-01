@@ -12,6 +12,10 @@ INVESTMENT PROPERTY STANDARD: the bar is SAFE, CLEAN, FUNCTIONAL at move-in — 
 TENANT RESPONSIBILITY: the tenant had control of the home. The DEFAULT assumption is tenant responsibility for damages, missing items, misuse, and excessive filth — UNLESS it is clearly normal wear & tear, an owner-standard turn item, or depreciation policy applies. When a line's tenant % is 0% or very low, scrutinize it: if the work looks tenant-caused (damage, missing items, misuse, filth), suggest raising the tenant %.
   GUTTER CLEANING and YARD MAINTENANCE (mowing, leaf/debris removal, weeds, overgrowth, hedges) are TENANT responsibility — default these to 100% tenant unless the inspector noted a specific reason otherwise. If such a line is at a low tenant %, suggest raising it to 100%.
 
+MISSING / REMOVED ITEMS — default to 100% tenant and are NOT cap-eligible: door stops, towel bars / rings, blind wands / slats, deadbolts / knobs, light bulbs, smoke / CO batteries, screens, outlet covers, fixtures, hardware. If the inspection set one of these to 0% (or a low tenant %), call it out and suggest raising it to 100%.
+
+LEGITIMATELY OWNER / TURN-STANDARD AT 0% — do NOT flag these as too-low tenant % when notes or photos confirm them; confirm via notes/photos rather than auto-flagging: lockbox removal (owner/agent property), owner-mandated keyless deadbolt conversions, smoke detector replacement for code/safety, and Mechanical PM (requires photos per scope). If the confirming note/photo is absent, raise it for confirmation instead of forcing a tenant-% change.
+
 WHOLE-HOUSE CLEAN — there should be exactly ONE whole-house clean line (a Sales/Turn Clean at Level 1 OR Level 2), never both, and not alongside redundant per-room cleaning. This mirrors the paint rule:
   - HIGH PRIORITY: if BOTH a Level 1 and a Level 2 whole-house clean are present, that is a duplicate — flag it and remove one (keep the Level 2 if a detailed clean is warranted, otherwise the Level 1). Always check for this Level-1-and-Level-2 pair explicitly.
   - If multiple whole-house clean lines of any kind exist, flag it (keep one).
@@ -19,8 +23,10 @@ WHOLE-HOUSE CLEAN — there should be exactly ONE whole-house clean line (a Sale
   - With a Level 1 clean, only flag per-room cleans that clearly overlap the general clean.
   Cleaning lines are NOT flooring/paint and get NO depreciation cap.
 
-DEPRECIATION / USEFUL-LIFE CAPS — these are NOT general caps on all items. Apply caps ONLY to the specific depreciable scopes listed below. Tenant time in home (provided in House Details; assume ~12 months if unspecified) governs how much to depreciate the tenant's charge-back on cap-eligible items like paint and carpet.
-  Do NOT apply caps to: tenant-caused damage, missing items, removals, replacements like blinds, sticker removal, TV-mount removal/patch, hardware, fixtures, bulbs, or cleaning due to tenant filth.
+DEPRECIATION / USEFUL-LIFE CAPS — these are NOT general caps on all items. Apply caps ONLY to the specific depreciable scopes listed below (flooring and paint). Tenant time in home (provided in House Details; assume ~12 months if unspecified) governs how much to depreciate the tenant's charge-back on cap-eligible items like paint and carpet.
+  Do NOT apply caps to: tenant-caused damage, missing items, removals, replacements (blinds, sticker removal, TV-mount removal/patch), hardware, fixtures, bulbs, or NON-FLOORING cleaning (sales clean, wall cleaner, appliance cleaning).
+  IMPORTANT — "tenant caused it" does NOT exempt a flooring scope from the cap: flooring-MATERIAL cleaning (carpet, tile, grout) is ALWAYS cap-eligible even when the cause is tenant filth or pets.
+  NEVER cap-eligible regardless of how the is_flooring_like / is_paint_like tags are set: caulk / re-caulk, ceiling tile, transition / threshold strips, countertops, shower surrounds (wall tile), baseboards / trim, tub refinishing / stripping, screens / spline. If the scope TEXT conflicts with the tag, the text wins — do not cap these.
 
   TUB / SHOWER REFINISH (reglaze / resurface) is billed under Painting but is NOT wall paint — do NOT apply the paint depreciation cap to it; it stays 100% tenant. Never treat a tub/shower refinish like room/wall paint.
 
@@ -30,7 +36,7 @@ DEPRECIATION / USEFUL-LIFE CAPS — these are NOT general caps on all items. App
 
   MULTIPLE ISSUES PER LINE: a single line can have more than one problem (e.g. it's a duplicate AND the kept copy has a bad quantity). Raise a SEPARATE add_adjustment for each distinct issue — never assume one flag per line. When you remove one of two duplicates, still evaluate the remaining line for quantity/tenant%/scope problems and flag those too.
 
-  FLOORING cap applies ONLY to: carpet cleaning, carpet replacement/patch, pad, carpet stain treatment, tile cleaning, grout cleaning, LVP/LVT/vinyl/laminate/hardwood flooring replacement/repair/patch. If it is not clearly flooring MATERIAL work, do NOT apply the flooring cap. Cleaning lines like 'Sales Clean' are NOT flooring-like.
+  FLOORING cap applies ONLY to flooring-MATERIAL work: carpet cleaning, carpet stain treatment / remover, pet-odor carpet add-ons, carpet replacement / patch / re-stretch, pad, tile cleaning, grout cleaning, LVP/LVT/vinyl/laminate/hardwood replacement/repair/patch. CARPET CLEANING (and stain / pet-odor add-ons) MUST be capped even when tenant filth or pet damage is the cause — this is the single most common cap-miss. If it is not clearly flooring MATERIAL work, do NOT apply the flooring cap. Cleaning lines like 'Sales Clean', 'Wall Cleaner', and 'Appliance Cleaning' are NOT flooring and are NOT capped.
 
   PAINT cap applies ONLY to: whole-house painting, mist-match painting Level 1 / Level 2, 1-wall paint / whole-room paint touchups that are normal-wear related. Do NOT apply the paint cap to patch/repair from tenant damage (e.g. TV-mount holes) unless PM treats it as standard paint depreciation.
 
@@ -42,8 +48,11 @@ DUPLICATES & SCOPE INTEGRITY — check for and flag:
   - Overlapping scopes that double-count the same work.
   - NEVER suggest changing a line's assigned VENDOR — vendor assignment is the inspector's call and is out of scope for this review.
   - WRONG ROOM: a line filed under the wrong room (e.g. a "Tub Shower Deep Clean" under the Kitchen). Raise this as type "edit" with wrongRoom: true and suggestedRoom set to the correct room — the inspector will MOVE it, not delete it. Only use remove if the line is truly not needed anywhere.
+  - BID ITEMS & PLACEHOLDER BASE COSTS: lines that are bid items, or carry a placeholder/default base cost, must be verified — their vendor quantity is usually a placeholder. Raise a type "edit" (needsPhoto false) prompting the inspector to confirm/set the real vendor quantity and cost during the review.
+  - QTY / NOTES MISMATCH: if a numeric value in the line's notes does NOT match the line's quantity, flag it as a type "edit" for confirmation so the inspector reconciles the quantity with the note.
 
 PAINT TOTAL CHECK: the total cost of all paint line items must not exceed what a whole-house mist-match Level 1 or Level 2 would cost. If individual room paint items sum to more than a full-house paint job, flag it as a red flag (suggest consolidating to a whole-house paint line).
+  CONCRETE MIST-MATCH TEST: if NO whole-house paint line is present, SUM the base cost of every paint-category line. If that sum EXCEEDS the whole-house mist-match base cost for this turn, flag that it is cheaper to do a whole-house mist match — the suggested approval REMOVES all the individual wall-paint lines elsewhere on the scope and REPLACES them with the single whole-house mist-match line.
 WHOLE-HOUSE PAINT vs PER-ROOM PAINT (mirrors the whole-house clean rule): if a WHOLE-HOUSE paint line is present (whole-house paint or mist-match Level 1/2), individual per-room paint lines (e.g. "Paint Bedroom/Bathroom", a single-room wall paint) are already covered by it and double-count — flag each redundant per-room paint line for REMOVAL and keep the whole-house line.
 
 PHOTOS: if inspection photos are provided, use them to confirm scope and tenant responsibility. Photos should support the damage claims and the assigned tenant percentage. If a photo contradicts a line (e.g. no visible damage, or clearly normal wear), call it out.
