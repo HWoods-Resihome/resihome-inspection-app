@@ -222,9 +222,11 @@ export function Combobox({
   const inputBoxClasses = compact
     ? `flex items-center w-full border rounded h-9 pl-2 pr-1 text-sm cursor-pointer transition ${fieldBg}`
     : `flex items-center w-full border rounded-lg px-3 py-2.5 text-base cursor-text transition ${fieldBg}`;
+  // Hide the native search-clear (×) that type="search" adds in WebKit/Chrome.
+  const noSearchUi = '[&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none';
   const inputClasses = compact
-    ? 'flex-1 bg-transparent outline-none text-sm text-ink placeholder-gray-400 min-w-0 cursor-pointer'
-    : 'flex-1 bg-transparent outline-none text-ink placeholder-gray-400 min-w-0';
+    ? `flex-1 bg-transparent outline-none text-sm text-ink placeholder-gray-400 min-w-0 cursor-pointer ${noSearchUi}`
+    : `flex-1 bg-transparent outline-none text-ink placeholder-gray-400 min-w-0 ${noSearchUi}`;
 
   return (
     <div ref={containerRef} className="relative">
@@ -248,10 +250,11 @@ export function Combobox({
         <input
           ref={inputRef}
           id={id}
-          type="text"
-          // Mark as a custom combobox + opt out of every autofill/keyboard
-          // helper, so Android Chrome stops showing its password/card/address
-          // autofill bar over this search field.
+          // type="search" (not "text"): Android Chrome does NOT offer its
+          // address / payment-card / location autofill bar on a search field,
+          // so this field behaves like a plain search box — no extra autofill
+          // line above the keyboard (unlike a generic text input).
+          type="search"
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={open}
@@ -264,6 +267,7 @@ export function Combobox({
           enterKeyHint="search"
           data-1p-ignore="true"
           data-lpignore="true"
+          data-form-type="other"
           onMouseDown={(e) => {
             // deferKeyboard: block focus on the OPENING tap so no keyboard pops
             // (the wrapper onClick opens the list). Once open, taps focus normally
