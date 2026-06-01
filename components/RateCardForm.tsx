@@ -2556,7 +2556,7 @@ export function RateCardForm(props: RateCardFormProps) {
               )}
             </div>
             {/* Total client $ across lines assigned to Internal Resolution. */}
-            <div className="text-[11px] text-gray-600 truncate">
+            <div className="text-[11px] text-gray-500 truncate">
               Internal Resolution: ${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
           </div>
