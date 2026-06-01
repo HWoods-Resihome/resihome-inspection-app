@@ -101,6 +101,11 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
     <>
       <div className="flex items-start justify-between gap-3 mb-1.5">
         <div className="flex-1 min-w-0">
+          {tmpl && (
+            <p className="text-xs font-heading font-bold uppercase tracking-wide text-gray-700 mb-0.5 truncate">
+              {tmpl}
+            </p>
+          )}
           <h3 className="font-heading font-bold text-base text-ink break-words leading-snug">
             {street}
           </h3>
@@ -119,11 +124,10 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
         {date && i.inspectorName && <span>&middot;</span>}
         {i.inspectorName && <span>{i.inspectorName}</span>}
       </div>
-      {/* Bottom row: template on the left, last-updated tag pushed to the right. */}
-      {(tmpl || updated) && (
-        <div className="flex items-center gap-2 text-xs mt-1">
-          {tmpl && <span className="text-gray-500 min-w-0 truncate">{tmpl}</span>}
-          {updated && <span className="text-gray-400 shrink-0 ml-auto">Updated {updated}</span>}
+      {/* Last-updated tag (template type now shown as the kicker above the address). */}
+      {updated && (
+        <div className="flex items-center text-xs mt-1">
+          <span className="text-gray-400 ml-auto">Updated {updated}</span>
         </div>
       )}
       {hasProgress && (
