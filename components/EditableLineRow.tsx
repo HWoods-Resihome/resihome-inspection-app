@@ -237,6 +237,12 @@ export function EditableLineRow(props: Props) {
   // already carries a saved override. This makes delete-and-retype work — the
   // field is no longer pinned to the catalog text via a display fallback.
   const descTouchedRef = useRef(!!(line?.customLaborFullDescription));
+  // Tracks which line item the current description belongs to. Initialized to
+  // the saved line's item so its override survives mount; when the SELECTED
+  // ITEM changes (new short labor description, or cleared via a category swap)
+  // we reset the subtext to the new item's default — a manual edit only sticks
+  // while the same item stays selected.
+  const lastDescItemRef = useRef<string | null>(line?.lineItemCode || null);
   // Quantity edit UX: clear the field on focus so the inspector types fresh
   // (no need to delete the existing value); if they leave without entering
   // anything, restore the prior value so it still saves.
@@ -244,9 +250,13 @@ export function EditableLineRow(props: Props) {
   const onQtyFocus = () => { qtyBeforeFocusRef.current = quantity; setQuantity(''); };
   const onQtyBlur = () => { if (quantity.trim() === '') setQuantity(qtyBeforeFocusRef.current); };
   useEffect(() => {
-    if (descTouchedRef.current) return;
-    if (!selectedItem) return;
-    setCustomDescription(catalogDescription(selectedItem));
+    const code = selectedItem?.lineItemCode || '';
+    if (code === (lastDescItemRef.current || '')) return; // same item — keep any edit
+    // Different item selected (or cleared): always reset the subtext to the new
+    // item's default description and forget the prior manual edit.
+    lastDescItemRef.current = code || null;
+    descTouchedRef.current = false;
+    setCustomDescription(selectedItem ? catalogDescription(selectedItem) : '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedItem]);
 
@@ -349,6 +359,9 @@ export function EditableLineRow(props: Props) {
     setVendor(line?.assignedTo || DEFAULT_VENDOR);
     setCustomVendorCost(line?.customVendorCost != null ? String(line.customVendorCost) : '');
     setCustomDescription(line?.customLaborFullDescription || '');
+    // Keep the description-reset effect from wiping the restored override.
+    lastDescItemRef.current = line?.lineItemCode || null;
+    descTouchedRef.current = !!line?.customLaborFullDescription;
     const item = line?.lineItemCode ? catalog.find((c) => c.lineItemCode === line.lineItemCode) : null;
     setCategory(item?.category || '');
     setSubcategory(item?.subcategory || '');
