@@ -320,48 +320,26 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     setSupported(getRecognition() !== null);
   }, []);
 
-  // Warm-up: when the panel opens, ping the endpoint (GET) so the catalog +
-  // embeddings cold-start work happens BEFORE the first spoken line. The mic is
-  // shown loading + disabled until this finishes, so the inspector can't talk
-  // into a cold pipeline (which made the first response feel slow). `warmedUp`
-  // flips true only on COMPLETION (not merely "not warming"), so the auto-start
-  // effect can't fire on the first render before warm-up has even begun.
+  // Warm-up runs as soon as the INSPECTION loads (not when the mic is tapped),
+  // so the catalog + embeddings cold-start work is already done by the time the
+  // inspector wants to talk. The mic button stays loading + disabled until this
+  // finishes (`warmedUp`), then a tap opens and listens instantly with no
+  // ramp-up. Runs once, when first online (offline defers it until reconnect).
+  // `warmedUp` is set true even if the GET fails, so the mic can't get stuck.
+  const warmStartedRef = useRef(false);
   useEffect(() => {
-    if (!open) { setWarmedUp(false); return; }
+    if (warmStartedRef.current || !online) return;
+    warmStartedRef.current = true;
     let cancelled = false;
     setWarming(true);
-    setWarmedUp(false);
     (async () => {
-      try {
-        await fetch('/api/rate-card/voice-assist', { method: 'GET' });
-      } catch { /* non-fatal */ }
+      try { await fetch('/api/rate-card/voice-assist', { method: 'GET' }); } catch { /* non-fatal */ }
+      // Load the TTS voice list now too (cheap, no audio).
+      try { if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.getVoices(); } catch { /* noop */ }
       if (!cancelled) { setWarming(false); setWarmedUp(true); }
     })();
-    // Pre-warm TTS: the browser's speechSynthesis engine is slow to start the
-    // FIRST utterance (voice list loads lazily; some engines spin up on first
-    // speak). Nudge it now with a near-silent utterance and force the voice
-    // list to load, so the first real spoken reply comes back instantly.
-    try {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.getVoices(); // triggers async voice load
-        const u = new SpeechSynthesisUtterance(' ');
-        u.volume = 0; // inaudible warm-up
-        window.speechSynthesis.speak(u);
-      }
-    } catch { /* non-fatal */ }
     return () => { cancelled = true; };
-  }, [open]);
-
-  // Once warm-up completes, auto-open the mic so listening begins right after
-  // the ramp-up (and only then). Gated to online + Web-Speech devices; runs
-  // once per panel-open.
-  const autoStartedRef = useRef(false);
-  useEffect(() => {
-    if (!open) { autoStartedRef.current = false; return; }
-    if (!warmedUp || !supported || !online || autoStartedRef.current) return;
-    autoStartedRef.current = true;
-    startListeningRef.current();
-  }, [open, warmedUp, supported, online]);
+  }, [online]);
 
   const sendToAgent = useCallback(
     async (history: ChatMsg[]) => {
@@ -929,14 +907,27 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     return (
       <button
         type="button"
-        onClick={() => setOpen(true)}
-        disabled={disabled}
-        aria-label="Talk to the Voice Assistant"
+        onClick={() => {
+          setOpen(true);
+          // Pre-warm TTS on this user gesture (a silent utterance; some engines
+          // block speech before a gesture), then — since the pipeline is already
+          // primed — open the mic immediately.
+          try {
+            if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+              const u = new SpeechSynthesisUtterance(' '); u.volume = 0;
+              window.speechSynthesis.speak(u);
+            }
+          } catch { /* noop */ }
+          if (supported && online) setTimeout(() => { startListeningRef.current(); }, 0);
+        }}
+        // Disabled (with a spinner) until warm-up completes, so the inspector
+        // never talks into a cold pipeline. Stays enabled offline so they can
+        // still open the panel to type / see the offline notice.
+        disabled={disabled || (online && !warmedUp)}
+        aria-label={online && !warmedUp ? 'Voice Assistant — getting ready…' : 'Talk to the Voice Assistant'}
         className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-brand text-white hover:bg-brand-dark disabled:opacity-50 shadow"
       >
-        {/* Opening warms the pipeline (catalog/embeddings); the auto-start effect
-            opens the mic once that completes, so we don't talk into a cold start. */}
-        <MicIcon className="w-5 h-5" />
+        {online && !warmedUp ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <MicIcon className="w-5 h-5" />}
       </button>
     );
   }
