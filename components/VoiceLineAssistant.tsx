@@ -376,6 +376,11 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               quantity: l.quantity,
               assignedTo: l.assignedTo,
               tenantBillBackPercent: l.tenantBillBackPercent,
+              // Carry bid-item fields so an edit_line (e.g. change qty/vendor)
+              // doesn't wipe the custom price/description.
+              customVendorCost: l.customVendorCost ?? null,
+              customLaborFullDescription: l.customLaborFullDescription ?? null,
+              note: l.note || '',
             })),
           }),
         });

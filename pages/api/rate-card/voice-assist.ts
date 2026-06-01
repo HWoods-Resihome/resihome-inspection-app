@@ -50,6 +50,10 @@ interface CurrentLine {
   quantity: number;
   assignedTo: string;
   tenantBillBackPercent: number;
+  // Bid-item fields, carried so edits preserve them.
+  customVendorCost?: number | null;
+  customLaborFullDescription?: string | null;
+  note?: string;
 }
 interface BodyShape {
   messages: ClientMessage[];
@@ -60,6 +64,22 @@ interface BodyShape {
   rooms?: { id: string; name: string }[];
   currentRoom?: string;
   tenantMonths?: number;
+}
+
+// Pick the catalog's bid-item line to use for a voice bid item. Prefers a code
+// whose category/subcategory matches the inspector's trade hint, else a generic
+// one, else the first active bid item. Returns null if the catalog has none.
+function resolveBidItem(catalog: RateCardLineItem[], categoryHint?: string): RateCardLineItem | null {
+  const bids = catalog.filter((c) => c.isBidItem && c.isActive !== false);
+  if (!bids.length) return null;
+  const hint = (categoryHint || '').trim().toLowerCase();
+  if (hint) {
+    const match = bids.find((c) => (c.category || '').toLowerCase() === hint)
+      || bids.find((c) => (c.category || '').toLowerCase().includes(hint) || hint.includes((c.category || '').toLowerCase()));
+    if (match) return match;
+  }
+  const generic = bids.find((c) => /general|misc|other/i.test(`${c.category} ${c.subcategory}`));
+  return generic || bids[0];
 }
 
 function anthropicKey(): string {
@@ -229,6 +249,8 @@ function systemPrompt(
     ``,
     `When you call propose_line, edit_line, or switch_room, do not write any sentence at all — the app shows/speaks the result itself. NEVER narrate what you are about to do or just did (no "I'll search for that", no "Let me add that", no "Added X"); narration after acting is confusing because the app already announced it. Only produce text when you genuinely need to ask the inspector a question. Keep questions very short and spoken-friendly. Never invent a code; only use codes from search_catalog.`,
     ``,
+    `BID ITEMS (important): when the inspector says "bid item" or "bid" — e.g. "bid item in the kitchen to replace the garbage disposal and re-caulk the sink" — this is NOT a catalog search. Use the propose_bid_item tool. The words after "to"/"for" are the WORK DESCRIPTION that the vendor will see, so pass them as \`description\` exactly as said (clean up only filler words). Two rules: (1) a bid item ALWAYS needs a price — if the inspector did not state one, do NOT add the line yet; instead ask, proposing a reasonable figure for the described work: "Does $150 work for this bid item?". When they answer with a number (or "yes"), THEN call propose_bid_item with that price. If they DID state a price ("...for two fifty"), call propose_bid_item right away with it. (2) This is the ONE case where, right after adding, you SHOULD briefly speak the price you used so they can change it — e.g. "Added the kitchen bid item at $250 — tell me if you want a different price." To change a bid item's price or description later, use edit_line with \`price\` / \`description\`.`,
+    ``,
     `Domain term: "mist match" (often misheard/transcribed as "mismatch", "mismatched", or "missed match") is a PAINT blending line item. When you hear any of those, search the catalog for "mist match" paint — never interpret it as something being mismatched.`,
     ``,
     `WHOLE-HOUSE CLEAN: "sales clean", "turn clean", "full house clean", "whole house clean", "house clean", or "clean the whole house" = ONE whole-house cleaning line. Default to LEVEL 1 unless the inspector explicitly says "level 2". It belongs in the WHOLE HOUSE room/section if the inspection has one — switch_room there first, then add the single line. search_catalog for the whole-house "Sales Clean" / "Turn Clean" line and propose that ONE line. NEVER break a whole-house/full-house clean into multiple per-room cleaning items (e.g. "Cleaning of Entry", "Appliances Clean Per Unit") — that is wrong; it is a single whole-house line.`
@@ -277,8 +299,24 @@ function tools(rooms: { id: string; name: string }[] = []) {
       },
     },
     {
+      name: 'propose_bid_item',
+      description: 'Add a BID ITEM: a custom-priced line for work that is quoted/bid rather than priced from the catalog. Use this whenever the inspector says "bid item" / "bid" (e.g. "bid item in the kitchen to replace the disposal and re-caulk the sink"). The words the inspector says describing the work become the vendor-visible line description, so capture them verbatim. You MUST have a price before calling this: if the inspector did not state one, DO NOT call this yet — first ask them, proposing a figure, e.g. "Does $150 work for this bid item?". Call this only once you have a price the inspector gave or agreed to.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          description: { type: 'string', description: 'The work description in the inspector\'s own words (what they said after "to"/"for"). This is shown to the vendor, so keep it complete and specific. Required.' },
+          price: { type: 'number', description: 'The bid price in dollars (the vendor cost for this line). Required — get the inspector to state or agree to a number first.' },
+          room: { type: 'string', description: 'Room/area this bid item belongs to (a name from the rooms list). Omit to use the current room.' },
+          vendor: { type: 'string', description: `Assigned vendor; one of: ${VENDORS.join(', ')}. Omit to use the default "Vendor 1".` },
+          tenantBillBackPercent: { type: 'number', description: 'Tenant chargeback percent 0-100 step 5. Omit to default to 100.' },
+          categoryHint: { type: 'string', description: 'Optional trade for the bid item, e.g. "Plumbing", "Electrical", "General", to pick the closest bid-item category.' },
+        },
+        required: ['description', 'price'],
+      },
+    },
+    {
       name: 'edit_line',
-      description: 'Edit an EXISTING line item in this area (change its vendor, tenant percent, and/or quantity). Use the externalId from the existing-lines list. The app saves the change and announces it.',
+      description: 'Edit an EXISTING line item in this area (change its vendor, tenant percent, quantity, and — for bid items — its price or description). Use the externalId from the existing-lines list. The app saves the change and announces it.',
       input_schema: {
         type: 'object',
         properties: {
@@ -286,6 +324,8 @@ function tools(rooms: { id: string; name: string }[] = []) {
           quantity: { type: 'number', description: 'New quantity (omit to keep current).' },
           vendor: { type: 'string', description: `New vendor, one of: ${VENDORS.join(', ')} (omit to keep current).` },
           tenantBillBackPercent: { type: 'number', description: 'New tenant percent, 0-100 step 5 (omit to keep current).' },
+          price: { type: 'number', description: 'New bid price in dollars (bid items only; omit to keep current).' },
+          description: { type: 'string', description: 'New vendor-visible description (bid items only; omit to keep current).' },
         },
         required: ['externalId'],
       },
@@ -681,6 +721,79 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             content: JSON.stringify({ ok: true, added: item.laborShortDescription, note: 'Line added. If the inspector listed more items, continue; otherwise stop.' }),
           });
           continue;
+        } else if (tu.name === 'propose_bid_item') {
+          const description = String(tu.input?.description || '').trim();
+          const price = Number(tu.input?.price);
+          if (!description) {
+            toolResults.push({
+              type: 'tool_result', tool_use_id: tu.id, is_error: true,
+              content: JSON.stringify({ error: 'A bid item needs a work description (what the vendor will see). Ask the inspector what the work is.' }),
+            });
+            continue;
+          }
+          if (!isFinite(price) || price < 0) {
+            toolResults.push({
+              type: 'tool_result', tool_use_id: tu.id, is_error: true,
+              content: JSON.stringify({ error: 'A bid item needs a price. Do not add it yet — ask the inspector what price to use (you may propose one): "Does $X work for this bid item?", then call propose_bid_item with that price.', needsPrice: true }),
+            });
+            continue;
+          }
+          const bid = resolveBidItem(catalog, tu.input?.categoryHint ? String(tu.input.categoryHint) : undefined);
+          if (!bid) {
+            toolResults.push({
+              type: 'tool_result', tool_use_id: tu.id, is_error: true,
+              content: JSON.stringify({ error: 'No bid-item line exists in the catalog, so a bid item cannot be added by voice.' }),
+            });
+            continue;
+          }
+          let bidVendor = tu.input?.vendor ? String(tu.input.vendor) : 'Vendor 1';
+          if (!VENDORS.includes(bidVendor)) bidVendor = 'Vendor 1';
+          let bidPct = 100;
+          if (tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent))) {
+            bidPct = Math.max(0, Math.min(100, Math.round(Number(tu.input.tenantBillBackPercent) / 5) * 5));
+          }
+          // Per-line room resolution (same as propose_line).
+          let bidSection = activeSection;
+          let bidLocation = activeLocation;
+          let bidSectionId: string | undefined;
+          if (tu.input?.room) {
+            const want = String(tu.input.room).trim().toLowerCase();
+            const r = rooms.find((rm) => rm.id === String(tu.input.room))
+              || rooms.find((rm) => rm.name.toLowerCase() === want)
+              || rooms.find((rm) => rm.name.toLowerCase().includes(want) || want.includes(rm.name.toLowerCase()));
+            if (r) { bidSection = r.name; bidLocation = r.name; bidSectionId = r.id; }
+          }
+          const bidPrice = Math.round(price * 100) / 100;
+          const bidExternalId = `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+          const line: RateCardLineInput = {
+            externalId: bidExternalId,
+            section: bidSection,
+            location: bidLocation,
+            lineItemCode: bid.lineItemCode,
+            quantity: 1,
+            tenantBillBackPercent: bidPct,
+            assignedTo: bidVendor,
+            // The inspector's words drive what the vendor sees (note +
+            // full-description override), and the price sets the vendor cost.
+            note: description,
+            customVendorCost: bidPrice,
+            customLaborFullDescription: description,
+            photoUrls: [],
+          };
+          sse(res, 'proposal', {
+            action: 'add',
+            line,
+            sectionId: bidSectionId,
+            summary: `Bid item: ${description} — $${bidPrice.toFixed(2)} (${bidVendor}, ${bidPct}% Tenant)`,
+            spokenSummary: 'bid item',
+            awaitingReply: false,
+          });
+          didAct = true;
+          toolResults.push({
+            type: 'tool_result', tool_use_id: tu.id,
+            content: JSON.stringify({ ok: true, addedBidItem: description, price: bidPrice, note: 'Bid item added. Briefly tell the inspector the price you used so they can change it.' }),
+          });
+          continue;
         } else if (tu.name === 'edit_line') {
           const externalId = String(tu.input?.externalId || '');
           const existing = linesByExternalId.get(externalId);
@@ -708,6 +821,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             let p = Number(tu.input.tenantBillBackPercent);
             if (isFinite(p)) pct = Math.max(0, Math.min(100, Math.round(p / 5) * 5));
           }
+          // Preserve existing bid-item fields; allow changing the price and/or
+          // the vendor-visible description when provided.
+          let bidCost = existing.customVendorCost ?? null;
+          if (tu.input?.price != null) {
+            const pc = Number(tu.input.price);
+            if (isFinite(pc) && pc >= 0) bidCost = Math.round(pc * 100) / 100;
+          }
+          let bidDesc = existing.customLaborFullDescription ?? null;
+          let bidNote = existing.note || '';
+          if (tu.input?.description != null && String(tu.input.description).trim()) {
+            bidDesc = String(tu.input.description).trim();
+            bidNote = bidDesc;
+          }
           // Re-save with the SAME externalId so the existing record is updated.
           const line: RateCardLineInput = {
             externalId,
@@ -719,13 +845,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             quantity: qty,
             tenantBillBackPercent: pct,
             assignedTo: vendor,
-            note: '',
+            note: bidNote,
+            customVendorCost: bidCost,
+            customLaborFullDescription: bidDesc ?? undefined,
             photoUrls: [],
           };
+          const editSummary = bidCost != null
+            ? `Bid item: ${bidDesc || (item ? item.laborShortDescription : existing.lineItemCode)} — $${bidCost.toFixed(2)} (${vendor}, ${pct}% Tenant)`
+            : item ? lineToSummary(item, qty, vendor, pct, region, regions) : `${existing.lineItemCode} — ${qty}, ${vendor}, ${pct}% Tenant`;
           sse(res, 'proposal', {
             action: 'edit',
             line,
-            summary: item ? lineToSummary(item, qty, vendor, pct, region, regions) : `${existing.lineItemCode} — ${qty}, ${vendor}, ${pct}% Tenant`,
+            summary: editSummary,
             spokenSummary: item ? item.laborShortDescription : existing.lineItemCode,
             awaitingReply: false,
           });
