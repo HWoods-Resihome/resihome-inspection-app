@@ -113,7 +113,9 @@ function catalogDescription(item: { laborSubtext?: string; laborFullDescription:
  * Amber warning triangle shown next to a tenant % that has been manually raised
  * ABOVE the paint/flooring depreciation cap for the tenant's time in home.
  * Renders nothing for non-cap-eligible lines or when the % is at/below the cap.
- * Hover (title) explains it concisely.
+ *
+ * Tappable on mobile + desktop: clicking flashes a short message that auto-
+ * dismisses after a moment (mobile has no hover, so a tap is the affordance).
  */
 function OverCapAlert({
   category, description, tenantPct, months, className,
@@ -124,21 +126,48 @@ function OverCapAlert({
   months: number | null | undefined;
   className?: string;
 }) {
+  const [flash, setFlash] = useState(false);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
+
   const status = tenantPctCapStatus(category, description, tenantPct, months);
   if (!status || !status.over) return null;
-  const title = `Above the ${status.cap}% ${status.kind} cap for ${status.months} mo in home (depreciation schedule).`;
+
+  const kindLabel = status.kind.charAt(0).toUpperCase() + status.kind.slice(1);
+  const label = `Above ${status.cap}% ${kindLabel} Cap`;
+
+  const showFlash = (e: React.MouseEvent) => {
+    e.stopPropagation();      // don't enter edit mode / change the field
+    e.preventDefault();
+    setFlash(true);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlash(false), 2200);
+  };
+
   return (
-    <span
-      className={`inline-flex text-amber-500 ${className || ''}`}
-      title={title}
-      aria-label={title}
-      role="img"
-    >
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
-        <line x1="12" y1="9" x2="12" y2="13" />
-        <line x1="12" y1="17" x2="12.01" y2="17" />
-      </svg>
+    <span className={`relative inline-flex ${className || ''}`}>
+      <button
+        type="button"
+        onClick={showFlash}
+        onMouseDown={(e) => e.preventDefault()}  // don't blur the row mid-edit
+        className="inline-flex text-amber-500 hover:text-amber-600"
+        title={label}
+        aria-label={label}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+      </button>
+      {flash && (
+        <span
+          role="status"
+          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-0.5 rounded bg-amber-500 text-white text-[10px] font-semibold whitespace-nowrap shadow z-50 pointer-events-none"
+        >
+          {label}
+        </span>
+      )}
     </span>
   );
 }
