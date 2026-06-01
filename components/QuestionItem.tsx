@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Question, AnswerInput } from '@/lib/types';
 import { CameraCapture } from './CameraCapture';
+import { ListPicker } from '@/components/ListPicker';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { useAppDialog } from '@/components/AppDialog';
 import { displayImageSrc } from '@/lib/photoDisplay';
@@ -217,25 +218,13 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                 <label className="block text-xs font-heading font-semibold text-amber-900 mb-1">
                   Assigned to <span className="text-brand">(required)</span>
                 </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {cleanedOptions.map((opt) => {
-                    const selected = (answer.assignedTo || 'Vendor 1') === opt;
-                    return (
-                      <button
-                        type="button"
-                        key={opt}
-                        onClick={() => onUpdate({ assignedTo: opt })}
-                        className={`text-xs font-heading font-semibold px-3 py-1.5 rounded-full border-2 transition whitespace-nowrap ${
-                          selected
-                            ? 'bg-brand text-white border-brand shadow-sm'
-                            : 'bg-white text-ink border-amber-300 hover:border-brand/50'
-                        }`}
-                      >
-                        {opt}
-                      </button>
-                    );
-                  })}
-                </div>
+                <ListPicker
+                  value={answer.assignedTo || 'Vendor 1'}
+                  options={cleanedOptions.map((o) => ({ value: o, label: o }))}
+                  onChange={(v) => onUpdate({ assignedTo: v })}
+                  ariaLabel="Assigned to"
+                  className="w-full sm:w-72 bg-white rounded-lg px-3 py-2.5 text-sm text-ink flex items-center justify-between border-2 border-amber-300"
+                />
               </div>
             );
           })()}
@@ -350,16 +339,29 @@ function renderInput(
   a: AnswerInput,
   onUpdate: (patch: Partial<AnswerInput>) => void
 ) {
-  // BUTTON-PILL FOR ALL PICKLIST-TYPE INPUTS (single_select, boolean) regardless of count.
-  // Long picklists (Closet, Drywall etc.) wrap freely.
-  if (q.responseType === 'single_select' || q.responseType === 'boolean') {
-    const opts = q.responseOptions.length > 0
-      ? q.responseOptions
-      : (q.responseType === 'boolean' ? ['Yes', 'No'] : []);
+  // SINGLE-SELECT picklists use the branded ListPicker pop-up (tap-to-select),
+  // consistent with the rest of the app's dropdowns.
+  if (q.responseType === 'single_select') {
+    const opts = q.responseOptions;
     if (opts.length === 0) {
       return <div className="text-xs text-brand">(no options defined)</div>;
     }
-    // Compact pill style. Same size regardless of option count for consistent look.
+    return (
+      <ListPicker
+        value={a.answerValue}
+        options={opts.map((o) => ({ value: o, label: o }))}
+        onChange={(v) => onUpdate({ answerValue: v })}
+        ariaLabel="Select an answer"
+        placeholder="Select…"
+        className="w-full sm:w-72 bg-gray-100 rounded-lg px-3 py-2.5 text-sm text-ink flex items-center justify-between"
+      />
+    );
+  }
+
+  // BOOLEAN stays a quick two-button (Yes/No) toggle — a pop-up for a binary
+  // choice would be slower, not faster.
+  if (q.responseType === 'boolean') {
+    const opts = q.responseOptions.length > 0 ? q.responseOptions : ['Yes', 'No'];
     return (
       <div className="flex flex-wrap gap-1.5">
         {opts.map((opt) => {
