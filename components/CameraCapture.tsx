@@ -1200,10 +1200,10 @@ export function CameraCapture({
             )}
             {/* Live proximity badge — confirms the device is at the selected
                 property before shooting (the same verdict is burned into each
-                photo). Sits below the top-right control buttons so it doesn't
-                cover them. */}
+                photo). Top-left; shifts down while recording so it clears the
+                REC indicator (also top-left). */}
             {(propertyRecordId || addressSnapshot) && permissionState === 'granted' && (
-              <div className="absolute top-16 right-3 z-10 pointer-events-none">
+              <div className={`absolute left-3 z-10 pointer-events-none ${recording ? 'top-16' : 'top-3'}`}>
                 {proximity.status === 'ok' || proximity.status === 'far' ? (
                   <div className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading font-semibold ${
                     proximity.status === 'ok' ? 'bg-emerald-600/85 text-white' : 'bg-red-600/85 text-white'
