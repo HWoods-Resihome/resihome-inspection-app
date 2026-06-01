@@ -24,9 +24,9 @@ interface Props {
   // the dropdown is visible above the on-screen keyboard; on blur it scrolls the
   // modal back to the top. Only meaningful inside a `[data-modal-scroll]` sheet.
   scrollIntoViewOnFocus?: boolean;
-  // Brand styling: pink border in the closed state to match the rest of the
-  // branded line-editor fields (default keeps the neutral grey border).
-  brand?: boolean;
+  // Filled, borderless styling (light grey fill) to match the de-bordered
+  // line-editor fields (default keeps the neutral grey-bordered white look).
+  filled?: boolean;
   // Server-search mode: when provided, the parent owns matching. The combobox
   // calls this (debounced) as the user types so the parent can refetch
   // `options` from the API — used for datasets too large to pre-load (e.g.
@@ -58,7 +58,7 @@ export function Combobox({
   compact = false,
   scrollIntoViewOnFocus = false,
   onQueryChange,
-  brand = false,
+  filled = false,
 }: Props) {
   const serverMode = typeof onQueryChange === 'function';
   const [open, setOpen] = useState(false);
@@ -200,9 +200,10 @@ export function Combobox({
   // dark chevron on the right. When opened, the input behaves as a search field.
   // Compact uses asymmetric padding (pl-2 pr-1) and a tight chevron margin
   // (ml-0.5) so a 4-character value like "100%" fits inside ~72px.
+  const fieldBg = filled ? 'bg-gray-100' : 'bg-white';
   const inputBoxClasses = compact
-    ? 'flex items-center w-full border rounded h-9 pl-2 pr-1 text-sm bg-white cursor-pointer transition'
-    : 'flex items-center w-full border rounded-lg px-3 py-2.5 text-base bg-white cursor-text transition';
+    ? `flex items-center w-full border rounded h-9 pl-2 pr-1 text-sm cursor-pointer transition ${fieldBg}`
+    : `flex items-center w-full border rounded-lg px-3 py-2.5 text-base cursor-text transition ${fieldBg}`;
   const inputClasses = compact
     ? 'flex-1 bg-transparent outline-none text-sm text-ink placeholder-gray-400 min-w-0 cursor-pointer'
     : 'flex-1 bg-transparent outline-none text-ink placeholder-gray-400 min-w-0';
@@ -215,7 +216,7 @@ export function Combobox({
         aria-haspopup="listbox"
         className={`${inputBoxClasses} ${
           open ? 'border-brand ring-2 ring-brand/20'
-            : brand ? 'border-2 border-brand/40 hover:border-brand' : 'border-gray-300 hover:border-gray-400'
+            : filled ? 'border-transparent' : 'border-gray-300 hover:border-gray-400'
         } ${disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
         onClick={() => {
           if (!disabled) {

@@ -24,6 +24,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
 import { Combobox } from '@/components/Combobox';
 import { WheelPicker } from '@/components/WheelPicker';
+import { ListPicker } from '@/components/ListPicker';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { formatMoney } from '@/lib/photoUpload';
 import { displayImageSrc } from '@/lib/photoDisplay';
@@ -75,12 +76,10 @@ interface Props {
   onEditingChange?: (editing: boolean) => void;
 }
 
-// Shared trigger styling for the WheelPicker pop-up fields (Category,
-// Sub-category, Vendor, Tenant %) on the mobile editor — pink border to match
-// the rest of the branded inputs.
-const BRAND_TRIGGER_CLS = 'h-11 w-full border-2 border-brand/40 rounded-lg px-3 text-base bg-white text-ink flex items-center justify-between disabled:bg-gray-100';
-// Pink border for plain text/number inputs in the editor.
-const BRAND_INPUT_CLS = 'h-11 w-full border-2 border-brand/40 focus:border-brand focus:ring-2 focus:ring-brand/20 rounded-lg px-3 text-base bg-white text-ink outline-none transition-colors';
+// Borderless, filled field styling for the mobile editor (no heavy border — a
+// light grey fill reads cleaner). Shared by the pop-up triggers and plain inputs.
+const TRIGGER_CLS = 'h-11 w-full bg-gray-100 rounded-lg px-3 text-base text-ink flex items-center justify-between disabled:opacity-60';
+const INPUT_CLS = 'h-11 w-full bg-gray-100 rounded-lg px-3 text-base text-ink outline-none focus:ring-2 focus:ring-brand/20';
 
 const TENANT_PCT_OPTIONS = Array.from({ length: 21 }, (_, i) => i * 5);
 // Default vendor selection when a new line is created. The VENDORS list itself
@@ -488,23 +487,25 @@ export function EditableLineRow(props: Props) {
               <div className="px-4 py-4 space-y-4">
                 <div>
                   <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Category</label>
-                  <WheelPicker
+                  <ListPicker
                     value={category}
-                    options={[{ value: '', label: 'Select category…' }, ...categories.map((c) => ({ value: c, label: c }))]}
+                    options={categories.map((c) => ({ value: c, label: c }))}
                     onChange={handleCategoryChange}
                     ariaLabel="Category"
-                    className={BRAND_TRIGGER_CLS}
+                    placeholder="Select category…"
+                    className={TRIGGER_CLS}
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Sub-category</label>
-                  <WheelPicker
+                  <ListPicker
                     value={subcategory}
-                    options={[{ value: '', label: 'Select sub-category…' }, ...subcategories.map((s) => ({ value: s, label: s }))]}
+                    options={subcategories.map((s) => ({ value: s, label: s }))}
                     onChange={handleSubcategoryChange}
                     ariaLabel="Sub-category"
-                    className={BRAND_TRIGGER_CLS}
+                    placeholder="Select sub-category…"
+                    className={TRIGGER_CLS}
                   />
                 </div>
 
@@ -517,14 +518,14 @@ export function EditableLineRow(props: Props) {
                     placeholder="Type to search items…"
                     emptyLabel={category ? 'No items in this category' : 'No matching items'}
                     scrollIntoViewOnFocus
-                    brand
+                    filled
                   />
                   {selectedItem && (
                     <textarea
                       value={customDescription}
                       onChange={(e) => { descTouchedRef.current = true; setCustomDescription(e.target.value); }}
                       rows={2}
-                      className="w-full mt-2 text-sm border-2 border-brand/40 focus:border-brand focus:ring-2 focus:ring-brand/20 rounded-lg px-3 py-2 text-gray-700 bg-white outline-none transition-colors"
+                      className="w-full mt-2 text-sm bg-gray-100 rounded-lg px-3 py-2 text-gray-700 outline-none focus:ring-2 focus:ring-brand/20"
                       placeholder={catalogDescription(selectedItem) || 'Edit description (optional)…'}
                     />
                   )}
@@ -539,7 +540,8 @@ export function EditableLineRow(props: Props) {
                       type="number" step="0.01" min="0" inputMode="decimal"
                       value={quantity}
                       onChange={(e) => setQuantity(e.target.value)}
-                      className={`no-spinner ${BRAND_INPUT_CLS}`}
+                      onFocus={(e) => e.target.select()}
+                      className={`no-spinner ${INPUT_CLS}`}
                     />
                   </div>
                   <div>
@@ -559,7 +561,7 @@ export function EditableLineRow(props: Props) {
                     options={VENDORS.map((v) => ({ value: v, label: v }))}
                     onChange={setVendor}
                     ariaLabel="Vendor"
-                    className={BRAND_TRIGGER_CLS}
+                    className={TRIGGER_CLS}
                   />
                 </div>
 
@@ -572,7 +574,7 @@ export function EditableLineRow(props: Props) {
                     options={TENANT_PCT_OPTIONS.map((p) => ({ value: String(p), label: `${p}%` }))}
                     onChange={(v) => { tenantTouchedRef.current = true; setTenantPct(Number(v)); }}
                     ariaLabel="Tenant %"
-                    className={BRAND_TRIGGER_CLS}
+                    className={TRIGGER_CLS}
                   />
                 </div>
 
@@ -696,6 +698,7 @@ export function EditableLineRow(props: Props) {
           min="0"
           value={quantity}
           onChange={(e) => setQuantity(e.target.value)}
+          onFocus={(e) => e.target.select()}
           className="no-spinner h-9 w-14 border border-gray-300 rounded px-1 text-sm text-center bg-white mx-auto"
         />
       </td>
