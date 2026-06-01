@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ResiWALK</string>
+    <string name="title_activity_main">ResiWALK</string>
+    <string name="package_name">com.resihome.resiwalk</string>
+    <string name="custom_url_scheme">com.resihome.resiwalk</string>
+</resources>
