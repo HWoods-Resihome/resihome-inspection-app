@@ -36,7 +36,7 @@ export function WheelPicker({ value, options, onChange, ariaLabel, disabled, cla
         className={className || 'h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white flex items-center justify-between disabled:bg-gray-100'}
       >
         <span className="truncate">{selected?.label ?? value}</span>
-        <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" className="ml-2 shrink-0 text-gray-400">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" className="ml-2 shrink-0 text-brand">
           <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
         </svg>
       </button>

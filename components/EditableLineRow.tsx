@@ -75,6 +75,19 @@ interface Props {
   onEditingChange?: (editing: boolean) => void;
 }
 
+// Brand-styled native <select> (pink border + chevron + focus ring) used for
+// Category / Sub-category / Vendor on the mobile editor. appearance-none hides
+// the OS arrow so our pink chevron shows; pr-9 leaves room for it.
+const BRAND_SELECT_CLS = 'appearance-none h-11 w-full border-2 border-brand/40 focus:border-brand focus:ring-2 focus:ring-brand/20 rounded-lg pl-3 pr-9 text-base bg-white text-ink outline-none transition-colors';
+
+function SelectChevron() {
+  return (
+    <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-brand" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
 const TENANT_PCT_OPTIONS = Array.from({ length: 21 }, (_, i) => i * 5);
 // Default vendor selection when a new line is created. The VENDORS list itself
 // is ordered with "Internal Resolution" first (it's the most common selection
@@ -481,26 +494,32 @@ export function EditableLineRow(props: Props) {
               <div className="px-4 py-4 space-y-4">
                 <div>
                   <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Category</label>
-                  <select
-                    value={category}
-                    onChange={(e) => handleCategoryChange(e.target.value)}
-                    className="h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white"
-                  >
-                    <option value="">Select category…</option>
-                    {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={category}
+                      onChange={(e) => handleCategoryChange(e.target.value)}
+                      className={BRAND_SELECT_CLS}
+                    >
+                      <option value="">Select category…</option>
+                      {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <SelectChevron />
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Sub-category</label>
-                  <select
-                    value={subcategory}
-                    onChange={(e) => handleSubcategoryChange(e.target.value)}
-                    className="h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white"
-                  >
-                    <option value="">Select sub-category…</option>
-                    {subcategories.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={subcategory}
+                      onChange={(e) => handleSubcategoryChange(e.target.value)}
+                      className={BRAND_SELECT_CLS}
+                    >
+                      <option value="">Select sub-category…</option>
+                      {subcategories.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                    <SelectChevron />
+                  </div>
                 </div>
 
                 <div>
@@ -548,13 +567,16 @@ export function EditableLineRow(props: Props) {
                   <label className="block text-xs font-heading font-bold text-gray-700 mb-1">
                     Vendor <span className="text-brand">*</span>
                   </label>
-                  <select
-                    value={vendor}
-                    onChange={(e) => setVendor(e.target.value)}
-                    className="h-11 w-full border border-gray-300 rounded-lg px-3 text-base bg-white"
-                  >
-                    {VENDORS.map((v) => <option key={v} value={v}>{v}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={vendor}
+                      onChange={(e) => setVendor(e.target.value)}
+                      className={BRAND_SELECT_CLS}
+                    >
+                      {VENDORS.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                    <SelectChevron />
+                  </div>
                 </div>
 
                 <div>
@@ -566,6 +588,7 @@ export function EditableLineRow(props: Props) {
                     options={TENANT_PCT_OPTIONS.map((p) => ({ value: String(p), label: `${p}%` }))}
                     onChange={(v) => { tenantTouchedRef.current = true; setTenantPct(Number(v)); }}
                     ariaLabel="Tenant %"
+                    className="h-11 w-full border-2 border-brand/40 rounded-lg px-3 text-base bg-white text-ink flex items-center justify-between"
                   />
                 </div>
 
