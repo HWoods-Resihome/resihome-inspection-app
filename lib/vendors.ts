@@ -21,8 +21,16 @@ export const VENDORS: string[] = [
   'PPW',
   'GE Appliances',
   'CapEx Vendor',
-  'Eviction Vendor',
+  'Eviction Vendor (Past)',
 ];
+
+// Vendors that should NOT get their own per-vendor PDF at finalize. Their lines
+// still appear on the Master and Tenant Chargeback PDFs — they just don't get a
+// standalone vendor packet. Matched case-insensitively and tolerant of the older
+// "Eviction Vendor" label on historical lines.
+export function vendorGetsOwnPdf(vendor: string): boolean {
+  return !/eviction vendor/i.test(vendor || '');
+}
 
 /**
  * Tailwind classes for each vendor pill. bgColor + textColor combined produce
@@ -44,7 +52,8 @@ export const VENDOR_COLORS: Record<string, VendorPillStyle> = {
   'PPW':                 { bg: 'bg-emerald-500', text: 'text-white' },     // emerald green
   'GE Appliances':       { bg: 'bg-violet-500',  text: 'text-white' },     // violet
   'CapEx Vendor':        { bg: 'bg-amber-500',   text: 'text-white' },     // amber/gold
-  'Eviction Vendor':     { bg: 'bg-rose-600',    text: 'text-white' },     // rose (distinguishable from brand pink)
+  'Eviction Vendor (Past)': { bg: 'bg-rose-600', text: 'text-white' },       // rose (distinguishable from brand pink)
+  'Eviction Vendor':        { bg: 'bg-rose-600', text: 'text-white' },       // legacy label on historical lines
 };
 
 /** Get pill styling for a vendor; falls back to neutral gray if not in the map. */

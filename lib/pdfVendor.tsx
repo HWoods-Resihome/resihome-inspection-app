@@ -16,6 +16,7 @@ import {
   type PdfBuildContext,
   type PdfSectionGroup,
 } from './pdfShared';
+import { vendorGetsOwnPdf } from './vendors';
 
 // Vendor column layout (Vendor-focused, no Client/Tenant):
 //   Cat 12 | Sub 12 | Description 55 | Qty 6 | Unit 5 | Ven$ 10
@@ -166,6 +167,9 @@ export async function renderVendorPdfs(ctx: PdfBuildContext): Promise<Map<string
   const result = new Map<string, Buffer>();
   for (const [vendor, sections] of byVendor.entries()) {
     if (sections.length === 0) continue;
+    // Some vendors (e.g. Eviction Vendor (Past)) don't get their own packet —
+    // their lines still ride the Master + Tenant Chargeback PDFs.
+    if (!vendorGetsOwnPdf(vendor)) continue;
     const buf = await renderToBuffer(
       <VendorDoc
         ctx={ctx}

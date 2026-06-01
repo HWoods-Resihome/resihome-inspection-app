@@ -1738,6 +1738,21 @@ export function RateCardForm(props: RateCardFormProps) {
     return { count: n, vendor: v, client: c, tenant: t };
   }, [sections, sectionTotals]);
 
+  // Total CLIENT $ billed across the whole inspection for lines assigned to the
+  // Internal Resolution vendor (shown in the header so it's visible at a glance).
+  const internalResolutionClient = useMemo(() => {
+    let c = 0;
+    for (const s of sections) {
+      for (const line of (linesBySection[s.id] || [])) {
+        if ((line.assignedTo || '').trim().toLowerCase() !== 'internal resolution') continue;
+        const calc = totalsFor(line);
+        if (calc) c += roundMoney(calc.clientCost);
+      }
+    }
+    return c;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sections, linesBySection, catalog, regions, inspectionRegion]);
+
   // Cross-section roll-up of every line by catalog category, each carrying its
   // own line items, so the totals header can drill down category → line item.
   type CatLine = { key: string; label: string; section: string; vendor: number; client: number; tenant: number };
@@ -2522,6 +2537,9 @@ export function RateCardForm(props: RateCardFormProps) {
               {props.squareFootage != null && props.squareFootage > 0 && (
                 <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
               )}
+              {typeof props.lastTenantMonths === 'number' && props.lastTenantMonths > 0 && (
+                <span> &middot; {props.lastTenantMonths} month</span>
+              )}
               {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
               {!inspectionRegion && <span className="text-yellow-700"> &middot; fallback (GA: Atlanta)</span>}
               {saveStatus.kind === 'saving' && <span className="text-brand font-semibold"> &middot; Saving...</span>}
@@ -2536,6 +2554,11 @@ export function RateCardForm(props: RateCardFormProps) {
                   &middot; Save failed
                 </button>
               )}
+            </div>
+            {/* Total client $ billed to lines assigned to Internal Resolution. */}
+            <div className="text-[11px] text-gray-600 truncate">
+              Internal Resolution billed:{' '}
+              <span className="font-semibold text-ink">${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           </div>
           <div className="flex justify-center sm:justify-end shrink-0">
