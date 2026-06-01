@@ -2906,11 +2906,10 @@ export function RateCardForm(props: RateCardFormProps) {
         })}
       </div>
 
-      {/* Spacer so the floating footer doesn't cover the last section AND so
-          the last section can always scroll up to the top of the viewport when
-          the assistant auto-navigates to it (otherwise a line added to the very
-          bottom section stays pinned near the footer). Roughly a viewport tall. */}
-      <div className="h-[85vh]" />
+      {/* Spacer so the floating footer doesn't cover the last section — just the
+          footer's measured height plus a small cushion, so the last category
+          scrolls to sit right above the footer with no extra white space. */}
+      <div style={{ height: footerH + 16 }} />
 
       {/* Floating footer — visible on all screen sizes, pinned to the bottom of
           the viewport so the inspector can save/submit/cancel from anywhere.
