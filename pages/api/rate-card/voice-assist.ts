@@ -630,7 +630,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             pct = Math.max(0, Math.min(100, Math.round(pct / 5) * 5));
             const unit = (item.laborMeas || '').trim().toUpperCase();
             const isMeasured = unit === 'SF' || unit === 'LF' || unit === 'SY';
-            const isWholeHouse = /whole\s*house/i.test(activeSection || body.section || '');
+            // Whole-house SF items never need a measurement — the app fills the
+            // property's square footage. Exempt them whether identified by the
+            // section/room OR the item description itself (e.g. a "Whole House
+            // ... SF" line proposed from any room).
+            const isWholeHouse = /whole\s*house/i.test(activeSection || body.section || '')
+              || /\b(whole|full)\s*house\b/i.test(item.laborShortDescription || '')
+              || /\b(whole|full)\s*house\b/i.test(String(tu.input?.room || ''));
             const confirmed = tu.input?.quantityConfirmed === true;
             // Stair items (carpet/tread/runner on stairs) are priced PER STAIR
             // even though the unit reads EACH, so a defaulted qty of 1 is almost

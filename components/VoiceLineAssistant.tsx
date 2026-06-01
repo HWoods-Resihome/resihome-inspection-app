@@ -263,6 +263,12 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   const currentRoomName = currentSection?.displayName || currentSection?.label || 'this room';
 
   const [open, setOpen] = useState(false);
+  // Live mirror of `open` so async callbacks (TTS onend, in-flight stream) can
+  // tell whether the panel is still open. When it closes we HARD-STOP everything
+  // — TTS, the agent stream, recognition, timers — so nothing keeps talking or
+  // re-opens the mic in the background.
+  const openRef = useRef(false);
+  openRef.current = open;
   const onEngagedRef = useRef(onEngagedChange);
   onEngagedRef.current = onEngagedChange;
   useEffect(() => { onEngagedRef.current?.(open); }, [open]);
@@ -503,6 +509,9 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         // Finalize: navigate + proposals were applied inline as they streamed.
         // Now produce ONE spoken closing line.
         setStreamingText('');
+        // If the inspector closed the panel (or stopped) while this turn was in
+        // flight, do NOT speak or reopen the mic — the conversation is over.
+        if (!openRef.current) { return; }
         if (finalType === 'error') {
           setError(finalData?.error || 'Something went wrong.');
         } else if (addedThisTurn > 0) {
@@ -663,6 +672,9 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   );
 
   const startListening = useCallback(() => {
+    // Never (re)open the mic if the panel has been closed — e.g. a TTS-onend
+    // restart firing after the inspector hit Close.
+    if (!openRef.current) return;
     setError(null);
     // NOTE: do NOT cancel speech here. Opening the mic early shouldn't cut off
     // the assistant's reply — only the inspector actually speaking should
@@ -836,6 +848,25 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     } catch { /* noop */ }
     try { abortRef.current?.abort(); } catch { /* noop */ }
   }, []);
+
+  // Hard-stop everything the moment the panel closes (Close button, the spoken
+  // "no more"/"close" command, or any setOpen(false)): silence TTS, abort the
+  // in-flight agent stream, stop the mic, and clear timers. Without this, an
+  // ongoing reply kept talking / the mic kept listening after close.
+  useEffect(() => {
+    if (open) return;
+    try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
+    speakingRef.current = false;
+    try { abortRef.current?.abort(); } catch { /* noop */ }
+    abortRef.current = null;
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    try { recogRef.current?.abort?.(); } catch { /* noop */ }
+    listeningRef.current = false;
+    startingRef.current = false;
+    setListening(false);
+    setBusy(false);
+    setStreamingText('');
+  }, [open]);
 
   function reset() {
     stopListening();
