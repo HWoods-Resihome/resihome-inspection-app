@@ -91,6 +91,19 @@ const DONE = /^(no|nope|nah|no thanks?|no more|nothing more|that'?s enough|that'
 
 // Minimal typing for the vendor-prefixed SpeechRecognition (webkit on most
 // mobile webviews). We feature-detect at runtime.
+// iOS and desktop Safari expose webkitSpeechRecognition, but it's unreliable
+// (flaky start/stop, extra mic-permission prompts, frequent errors). On those we
+// prefer the push-to-talk path (MediaRecorder → /api/transcribe via Whisper),
+// which is solid. Detects iOS (incl. iPadOS reporting as Mac) and Safari.
+function preferWhisper(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const iOS = /iP(hone|ad|od)/.test(ua)
+    || (/Macintosh/.test(ua) && typeof document !== 'undefined' && 'ontouchend' in document);
+  const isSafari = /^((?!chrome|crios|android|fxios|edg|opr).)*safari/i.test(ua);
+  return iOS || isSafari;
+}
+
 function getRecognition(): any | null {
   if (typeof window === 'undefined') return null;
   const Ctor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -317,7 +330,8 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   const streamSectionRef = useRef<string>(currentSectionId);
 
   useEffect(() => {
-    setSupported(getRecognition() !== null);
+    // Force push-to-talk on iOS/Safari (their Web Speech is unreliable).
+    setSupported(!preferWhisper() && getRecognition() !== null);
   }, []);
 
   // Warm-up runs as soon as the INSPECTION loads (not when the mic is tapped),

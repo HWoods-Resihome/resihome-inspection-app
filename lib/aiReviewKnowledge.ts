@@ -39,8 +39,8 @@ DEPRECIATION / USEFUL-LIFE CAPS — these are NOT general caps on all items. App
 DUPLICATES & SCOPE INTEGRITY — check for and flag:
   - Duplicate rows or the same item appearing twice in the same room.
   - Unrealistic quantities (too high/low for the room/house size).
-  - Wrong trade/category assignments.
   - Overlapping scopes that double-count the same work.
+  - NEVER suggest changing a line's assigned VENDOR — vendor assignment is the inspector's call and is out of scope for this review.
   - WRONG ROOM: a line filed under the wrong room (e.g. a "Tub Shower Deep Clean" under the Kitchen). Raise this as type "edit" with wrongRoom: true and suggestedRoom set to the correct room — the inspector will MOVE it, not delete it. Only use remove if the line is truly not needed anywhere.
 
 PAINT TOTAL CHECK: the total cost of all paint line items must not exceed what a whole-house mist-match Level 1 or Level 2 would cost. If individual room paint items sum to more than a full-house paint job, flag it as a red flag (suggest consolidating to a whole-house paint line).
@@ -52,6 +52,6 @@ PHOTOS: if inspection photos are provided, use them to confirm scope and tenant 
 OUTPUT RULES:
   - Titles are SHORT imperative actions (≤ ~6 words) the inspector reads at a glance: "Remove duplicate appliance clean", "Lower tenant to 50%", "Move to Bathroom". Rationales are ONE short plain sentence. NEVER put internal line ids (voice_*, RCLINE-*, "id=...") or raw dollar-math dumps in titles or rationales — those ids are for lineExternalId only.
   - Provide adjustments_needed with a suggested tenant % AND a suggested tenant $ when possible.
-  - For each adjustment choose the right type: 'edit' (change qty / tenant % / vendor cost / vendor on an existing line — reference its id), 'remove' (delete a line — duplicates, beyond safe/clean/functional, double-counts), or 'add' (a clearly-missing safe/clean/functional scope — first search the catalog for a real code).
+  - For each adjustment choose the right type: 'edit' (change qty / tenant % / vendor cost on an existing line — reference its id; do NOT change the assigned vendor), 'remove' (delete a line — duplicates, beyond safe/clean/functional, double-counts), or 'add' (a clearly-missing safe/clean/functional scope — first search the catalog for a real code).
   - Be conservative: only suggest changes you can justify with a rule above. If the scope is already compliant, return an empty adjustments list.
   - Keep titles short and rationales concrete (name the rule and the dollar/percent effect).`;

@@ -172,7 +172,6 @@ function tools() {
           suggestedQuantity: { type: 'number' },
           suggestedTenantBillBackPercent: { type: 'number', description: 'Suggested tenant % (0-100, steps of 5).' },
           suggestedVendorCost: { type: 'number', description: 'Suggested vendor cost override, if proposing a specific dollar amount.' },
-          suggestedAssignedTo: { type: 'string' },
           suggestedTenantDollars: { type: 'number', description: 'Resulting tenant $ after the change, if you can estimate it.' },
         },
         required: ['type', 'sectionId', 'title', 'rationale'],
@@ -305,7 +304,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (a?.suggestedQuantity != null && isFinite(Number(a.suggestedQuantity))) suggested.quantity = Number(a.suggestedQuantity);
       if (a?.suggestedTenantBillBackPercent != null && isFinite(Number(a.suggestedTenantBillBackPercent))) suggested.tenantBillBackPercent = Math.max(0, Math.min(100, Math.round(Number(a.suggestedTenantBillBackPercent) / 5) * 5));
       if (a?.suggestedVendorCost != null && isFinite(Number(a.suggestedVendorCost))) suggested.customVendorCost = Number(a.suggestedVendorCost);
-      if (a?.suggestedAssignedTo) suggested.assignedTo = String(a.suggestedAssignedTo);
+      // NOTE: vendor reassignment intentionally NOT applied — the AI review must
+      // never change a line's assigned vendor (keep the inspector's choice).
 
       let suggestedTenantDollars: number | undefined = a?.suggestedTenantDollars != null ? Number(a.suggestedTenantDollars) : undefined;
       try {
