@@ -10,6 +10,9 @@ const PUBLIC_PATHS = new Set<string>([
   // flow checks the session itself).
   '/api/auth/google-login',
   '/api/auth/gmail/callback',
+  // Native OAuth return: validates a short-TTL token and sets the session in the
+  // app webview's cookie jar. Must be reachable pre-session, like the callbacks.
+  '/api/auth/exchange',
   // Client error telemetry must accept reports even before/without a session
   // (e.g. a crash on the login page) — it stores no sensitive data.
   '/api/telemetry/error',

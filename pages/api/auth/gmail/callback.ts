@@ -10,7 +10,7 @@
 //      is connecting/repairing Gmail send. Requires a session. (Legacy behavior.)
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { getSessionFromRequest, createSessionCookie } from '@/lib/auth';
+import { getSessionFromRequest, createSessionCookie, createOAuthExchangeToken } from '@/lib/auth';
 import {
   getGmailOAuthConfig,
   exchangeCodeForRefreshToken,
@@ -56,9 +56,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!code || !state) return fail('google_missing_code');
 
     const expectedCsrf = cookies[LOGIN_STATE_COOKIE];
-    const dot = state.indexOf('.');
-    const csrf = dot >= 0 ? state.slice(0, dot) : state;
-    const claimedEmail = dot >= 0 ? decodeURIComponent(state.slice(dot + 1)).toLowerCase() : '';
+    // The native marker (if present) is appended as a trailing ".native".
+    // Strip it FIRST so the csrf/email parse below is byte-for-byte identical to
+    // the original (emails contain dots, so we must not split on them naively).
+    let stateCore = state;
+    let isNativeClient = false;
+    if (stateCore.endsWith('.native')) {
+      isNativeClient = true;
+      stateCore = stateCore.slice(0, -'.native'.length);
+    }
+    const dot = stateCore.indexOf('.');
+    const csrf = dot >= 0 ? stateCore.slice(0, dot) : stateCore;
+    const claimedEmail = dot >= 0 ? decodeURIComponent(stateCore.slice(dot + 1)).toLowerCase() : '';
     if (!expectedCsrf || expectedCsrf !== csrf) return fail('google_state_mismatch');
     if (!claimedEmail) return fail('google_state_mismatch');
 
@@ -106,6 +115,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const setCookies: string[] = [sessionCookie, clearCookie(LOGIN_STATE_COOKIE)];
     if (refreshToken) setCookies.push(gmailTokenCookie(refreshToken));
     res.setHeader('Set-Cookie', setCookies);
+
+    // NATIVE return path (gated by the state marker): the session cookie just
+    // set lands in the system BROWSER's cookie jar, which the app's webview
+    // can't read on Android. Hand the app a short-TTL token via the resiwalk://
+    // deep link; the app loads /api/auth/exchange?t=... in its own webview to
+    // set the session cookie in the webview jar. Browser users never hit this.
+    if (isNativeClient) {
+      const exchangeToken = await createOAuthExchangeToken({
+        userId: match.id,
+        email: match.email,
+        name: match.fullName,
+      });
+      res.redirect(302, `resiwalk://auth-callback?t=${encodeURIComponent(exchangeToken)}`);
+      return;
+    }
 
     res.redirect(302, '/');
     return;

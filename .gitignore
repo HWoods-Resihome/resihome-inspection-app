@@ -8,4 +8,5 @@ _FILL_IN_YOUR_VALUES_*
 .DS_Store
 .vercel
 next-env.d.ts
+*.tsbuildinfo
 __pycache__/

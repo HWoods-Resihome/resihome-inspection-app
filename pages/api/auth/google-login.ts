@@ -46,8 +46,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   // Pack a CSRF token + the claimed email into state so the callback can both
   // verify the request wasn't forged and know which email to match against.
+  // For native (Capacitor) logins we also carry a `client=native` marker so the
+  // callback knows to return via the resiwalk:// deep link instead of 302->/.
+  // The marker rides in `state` (not a cookie/query) because only `state`
+  // reliably survives the Google round-trip back into the system browser.
+  // Format: csrf.<urlencoded-email>[.native]. The callback splits csrf off the
+  // FRONT (first dot) and the optional marker off the END, leaving the email.
   const csrf = randomBytes(16).toString('hex');
-  const state = `${csrf}.${encodeURIComponent(email)}`;
+  const isNative = req.query.client === 'native';
+  let state = `${csrf}.${encodeURIComponent(email)}`;
+  if (isNative) state += '.native';
 
   res.setHeader('Set-Cookie', serialize(STATE_COOKIE, csrf, {
     httpOnly: true,

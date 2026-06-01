@@ -7,6 +7,7 @@ import { FieldStatusOverlays } from '@/components/FieldStatusOverlays';
 import { initErrorReporting } from '@/lib/clientErrorReporter';
 import { installSessionGuard } from '@/lib/sessionGuard';
 import { registerServiceWorker } from '@/lib/useAppUpdate';
+import { installOAuthBridge } from '@/lib/nativeBridge';
 import '../styles/globals.css';
 
 export default function App({ Component, pageProps }: AppProps) {
@@ -16,6 +17,10 @@ export default function App({ Component, pageProps }: AppProps) {
     initErrorReporting();
     installSessionGuard();
     registerServiceWorker();
+    // Native-only OAuth bridge. No-op in browsers (checks
+    // Capacitor.isNativePlatform() internally), so web behavior is unchanged —
+    // this just enables the deep-link return inside the Capacitor app.
+    void installOAuthBridge();
   }, []);
 
   return (
