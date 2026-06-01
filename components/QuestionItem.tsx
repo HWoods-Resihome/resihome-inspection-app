@@ -334,34 +334,37 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
   );
 }
 
+// Picklists with this many options or fewer render as quick tap-buttons
+// (Yes/No, Good/Fail, Pass/Fail/NA…); longer lists use the ListPicker pop-up.
+const PILL_MAX = 4;
+
 function renderInput(
   q: Question,
   a: AnswerInput,
   onUpdate: (patch: Partial<AnswerInput>) => void
 ) {
-  // SINGLE-SELECT picklists use the branded ListPicker pop-up (tap-to-select),
-  // consistent with the rest of the app's dropdowns.
-  if (q.responseType === 'single_select') {
-    const opts = q.responseOptions;
+  // Picklists: short choice sets (Yes/No, Good/Fail, Pass/Fail/NA, etc.) stay as
+  // quick tap-buttons; only LONGER lists use the branded ListPicker pop-up (a
+  // pop-up for a 2-3 option toggle would be slower, not faster).
+  if (q.responseType === 'single_select' || q.responseType === 'boolean') {
+    const opts = q.responseOptions.length > 0
+      ? q.responseOptions
+      : (q.responseType === 'boolean' ? ['Yes', 'No'] : []);
     if (opts.length === 0) {
       return <div className="text-xs text-brand">(no options defined)</div>;
     }
-    return (
-      <ListPicker
-        value={a.answerValue}
-        options={opts.map((o) => ({ value: o, label: o }))}
-        onChange={(v) => onUpdate({ answerValue: v })}
-        ariaLabel="Select an answer"
-        placeholder="Select…"
-        className="w-full sm:w-72 bg-gray-100 rounded-lg px-3 py-2.5 text-sm text-ink flex items-center justify-between"
-      />
-    );
-  }
-
-  // BOOLEAN stays a quick two-button (Yes/No) toggle — a pop-up for a binary
-  // choice would be slower, not faster.
-  if (q.responseType === 'boolean') {
-    const opts = q.responseOptions.length > 0 ? q.responseOptions : ['Yes', 'No'];
+    if (opts.length > PILL_MAX) {
+      return (
+        <ListPicker
+          value={a.answerValue}
+          options={opts.map((o) => ({ value: o, label: o }))}
+          onChange={(v) => onUpdate({ answerValue: v })}
+          ariaLabel="Select an answer"
+          placeholder="Select…"
+          className="w-full sm:w-72 bg-gray-100 rounded-lg px-3 py-2.5 text-sm text-ink flex items-center justify-between"
+        />
+      );
+    }
     return (
       <div className="flex flex-wrap gap-1.5">
         {opts.map((opt) => {
