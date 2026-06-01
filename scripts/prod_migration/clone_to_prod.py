@@ -372,6 +372,58 @@ def cmd_import_questions(portal_arg: str, live: bool):
     print("Done.")
 
 
+# Clean, parenthesis-free DISPLAY labels for the inspection.template_type
+# dropdown. Keys are the INTERNAL option values (which never change); only the
+# shown label is updated. Mirrors lib/templateLabels.ts.
+TEMPLATE_LABELS = {
+    "pm_scope_rate_card": "Scope Rate Card",
+    "pm_turn_reinspect_qc": "Turn Re-Inspect QC",
+    "pm_community_inspection": "Community / Visit Inspection",
+    "pm_vacancy_occupancy_check": "Vacancy / Occupancy Check",
+    "leasing_agent_1099_property_inspection": "Leasing Agent Property Inspection",
+    "qc_new_construction_rrqc": "New Construction RRQC",
+    # legacy
+    "pm_scope_inspection": "Scope",
+    "pm_turn_inspection": "Turn",
+    "pm_property_visit_inspection": "Property Visit",
+    "qc_completed_unit_inspection": "QC Completed Unit",
+    "preleasing_property_inspection": "Pre-leasing Property",
+}
+
+
+def cmd_relabel_templates(portal_arg: str, live: bool):
+    """Update the SHOWN labels on inspection.template_type's dropdown options to
+    the clean short names (internal option values are left unchanged)."""
+    require_prod(portal_arg)
+    typeId = next((s["objectTypeId"] for s in all_schemas() if s.get("name") == "inspection"), None)
+    if not typeId:
+        sys.exit("No 'inspection' object found in this portal.")
+    prop = hs("GET", f"/crm/v3/properties/{typeId}/template_type")
+    if not prop or prop.get("type") != "enumeration":
+        sys.exit("template_type is not a dropdown/enumeration property — nothing to relabel.")
+    opts = prop.get("options", [])
+    new_opts = []
+    changes = []
+    for o in opts:
+        val = o.get("value")
+        clean = TEMPLATE_LABELS.get(val)
+        no = {k: o[k] for k in ("label", "value", "displayOrder", "hidden", "description") if k in o and o[k] is not None}
+        if clean and o.get("label") != clean:
+            changes.append(f'  "{val}": "{o.get("label")}"  ->  "{clean}"')
+            no["label"] = clean
+        new_opts.append(no)
+    if not changes:
+        print("All template_type labels are already clean — nothing to do.")
+        return
+    print(f"template_type on {typeId} — {'LIVE' if live else 'DRY-RUN'}; label changes:")
+    print("\n".join(changes))
+    if not live:
+        print("\nDRY-RUN only. Re-run with --live to apply.")
+        return
+    hs("PATCH", f"/crm/v3/properties/{typeId}/template_type", {"options": new_opts})
+    print("\nApplied. Existing records keep their value; the dropdown now shows the clean labels.")
+
+
 def main():
     args = sys.argv[1:]
     if not args:
@@ -385,8 +437,10 @@ def main():
         cmd_import(portal, live)
     elif cmd == "import-questions":
         cmd_import_questions(portal, live)
+    elif cmd == "relabel-templates":
+        cmd_relabel_templates(portal, live)
     else:
-        sys.exit(f"Unknown command '{cmd}'. Use: export | import | import-questions")
+        sys.exit(f"Unknown command '{cmd}'. Use: export | import | import-questions | relabel-templates")
 
 
 if __name__ == "__main__":
