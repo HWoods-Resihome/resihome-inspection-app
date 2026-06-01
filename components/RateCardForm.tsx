@@ -17,7 +17,7 @@ import { isInternalResolution } from '@/lib/vendors';
 import { AiReviewModal } from '@/components/AiReviewModal';
 import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, saveReviewCache, loadReviewCache, clearReviewCache, type AiAdjustment } from '@/lib/aiReview';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
-import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
+import { uploadFilesBatch, formatMoney, uploadPhoto } from '@/lib/photoUpload';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
@@ -2115,6 +2115,24 @@ export function RateCardForm(props: RateCardFormProps) {
   // room AND tag them onto the flagged line. Returns true once a photo is added.
   const aiPhotoTargetRef = useRef<{ sectionId: string; lineExternalId?: string; resolve: (ok: boolean) => void } | null>(null);
   const [aiCameraTarget, setAiCameraTarget] = useState<{ sectionId: string; lineExternalId?: string } | null>(null);
+
+  // In-app camera for capturing AFTER photos on an Internal Resolution line.
+  // Opening it is triggered from the line card's After Photos "+"; on Done the
+  // captured URLs are appended to that line's afterPhotoUrls and saved. Kept
+  // separate from the section photo pool (these are line-level proof-of-work).
+  const [afterCameraTarget, setAfterCameraTarget] = useState<{ sectionId: string; lineExternalId: string } | null>(null);
+  async function handleAfterPhotoCapture(target: { sectionId: string; lineExternalId: string }, urls: string[]) {
+    const real = (urls || []).filter((u) => !u.startsWith('blob:'));
+    if (real.length === 0) return;
+    const line = (linesBySectionRef.current[target.sectionId] || []).find((l) => l.externalId === target.lineExternalId);
+    if (!line) return;
+    const updated = { ...line, afterPhotoUrls: Array.from(new Set([...(line.afterPhotoUrls || []), ...real])) };
+    setLinesBySection((m) => ({
+      ...m,
+      [target.sectionId]: (m[target.sectionId] || []).map((l) => (l.externalId === target.lineExternalId ? updated : l)),
+    }));
+    await handleSaveLineForSection(target.sectionId, updated);
+  }
   const addPhotoForAdjustment = useCallback((a: AiAdjustment): Promise<boolean> => {
     return new Promise<boolean>((resolve) => {
       aiPhotoTargetRef.current = { sectionId: a.sectionId, lineExternalId: a.lineExternalId, resolve };
@@ -2909,6 +2927,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               mobile={isMobile}
                               tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
                               afterPhotosEnabled={afterPhotosEnabled}
+                              onCaptureAfterPhotos={() => setAfterCameraTarget({ sectionId: s.id, lineExternalId: line.externalId })}
                               onSave={(updated) => handleSaveLineForSection(s.id, updated)}
                               onDelete={() => handleDeleteLine(s.id, line.externalId)}
                               onOpenPhoto={(index) => {
@@ -3048,6 +3067,21 @@ export function RateCardForm(props: RateCardFormProps) {
           uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, props.inspectionRecordId, aiCameraTarget.sectionId)}
           rooms={(() => { const s = sections.find((x) => x.id === aiCameraTarget.sectionId); return [{ id: aiCameraTarget.sectionId, name: s?.displayName || s?.label || 'Room', photoCount: (photosBySection[aiCameraTarget.sectionId] || []).length, needsPhotos: false }]; })()}
           currentRoomId={aiCameraTarget.sectionId}
+        />
+      )}
+      {/* In-app camera for an Internal Resolution line's After Photos. Online
+          uploader (real URLs only); captures append to the line's afterPhotoUrls
+          and save. Not added to the section photo pool. */}
+      {afterCameraTarget && (
+        <CameraCapture
+          isOpen
+          addressSnapshot={props.propertyName}
+          propertyRecordId={props.propertyRecordId}
+          onComplete={(urls) => { const t = afterCameraTarget; setAfterCameraTarget(null); void handleAfterPhotoCapture(t, urls); }}
+          onClose={() => setAfterCameraTarget(null)}
+          uploadPhoto={uploadPhoto}
+          rooms={(() => { const s = sections.find((x) => x.id === afterCameraTarget.sectionId); return [{ id: afterCameraTarget.sectionId, name: `${s?.displayName || s?.label || 'Room'} — After`, photoCount: 0, needsPhotos: false }]; })()}
+          currentRoomId={afterCameraTarget.sectionId}
         />
       )}
 
