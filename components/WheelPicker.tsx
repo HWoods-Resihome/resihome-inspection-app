@@ -14,9 +14,7 @@ interface Props {
   className?: string;       // trigger button classes (defaults to a select-like field)
 }
 
-const ITEM_H = 40;          // px per row
-const VISIBLE = 5;          // visible rows (odd so one is centered)
-const PAD = ((VISIBLE - 1) / 2) * ITEM_H;
+const ITEM_H = 44;          // px per row (comfortable touch target)
 
 /**
  * A wheel/spinner selector (like the iOS picker). The closed state looks like a
@@ -69,14 +67,26 @@ function WheelSheet({
     const i = options.findIndex((o) => o.value === value);
     return i >= 0 ? i : 0;
   });
+  // Size the wheel to ~40% of the viewport: pick an ODD number of visible rows
+  // (so one is centered) that fills that height.
+  const [rows, setRows] = useState(5);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let r = Math.round((window.innerHeight * 0.4) / ITEM_H);
+    if (r % 2 === 0) r -= 1;             // keep it odd
+    setRows(Math.max(5, Math.min(11, r)));
+  }, []);
+  const PAD = ((rows - 1) / 2) * ITEM_H;
+  const containerH = rows * ITEM_H;
   const settleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Position the wheel on the current value when it opens.
+  // Position the wheel on the current value when it opens (re-run if the row
+  // count resolves after first paint).
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = pendingIdx * ITEM_H;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [rows]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -107,7 +117,7 @@ function WheelSheet({
           {ariaLabel && <span className="text-sm font-heading font-semibold text-ink">{ariaLabel}</span>}
           <button type="button" onClick={() => onPick(options[pendingIdx].value)} className="text-sm font-heading font-bold text-brand px-1">Done</button>
         </div>
-        <div className="relative" style={{ height: VISIBLE * ITEM_H }}>
+        <div className="relative" style={{ height: containerH }}>
           {/* Center selection band. */}
           <div
             className="absolute inset-x-0 pointer-events-none border-y-2 border-brand/40 bg-brand/5 rounded"
@@ -126,8 +136,10 @@ function WheelSheet({
             {options.map((o, i) => (
               <div
                 key={o.value}
-                onClick={() => pickIndex(i)}
-                className={`flex items-center justify-center cursor-pointer select-none transition-colors ${i === pendingIdx ? 'text-ink font-bold text-lg' : 'text-gray-400 text-base'}`}
+                // Tap a non-centered row to spin it to the middle; tap the row
+                // that's already centered to confirm (Done).
+                onClick={() => { if (i === pendingIdx) onPick(o.value); else pickIndex(i); }}
+                className={`flex items-center justify-center cursor-pointer select-none transition-colors ${i === pendingIdx ? 'text-ink font-bold text-xl' : 'text-gray-400 text-base'}`}
                 style={{ height: ITEM_H, scrollSnapAlign: 'center' }}
               >
                 {o.label}
