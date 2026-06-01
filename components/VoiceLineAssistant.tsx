@@ -330,6 +330,18 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       } catch { /* non-fatal */ }
       if (!cancelled) setWarming(false);
     })();
+    // Pre-warm TTS: the browser's speechSynthesis engine is slow to start the
+    // FIRST utterance (voice list loads lazily; some engines spin up on first
+    // speak). Nudge it now with a near-silent utterance and force the voice
+    // list to load, so the first real spoken reply comes back instantly.
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.getVoices(); // triggers async voice load
+        const u = new SpeechSynthesisUtterance(' ');
+        u.volume = 0; // inaudible warm-up
+        window.speechSynthesis.speak(u);
+      }
+    } catch { /* non-fatal */ }
     return () => { cancelled = true; };
   }, [open]);
 

@@ -468,6 +468,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // as a guardrail: if the model tries to end the turn with a question without
     // having proposed any of these ready items, we nudge it to act first.
     let preSearchConfidentCount = 0;
+    // True when the utterance is a single item that pre-search matched
+    // confidently and it's not an edit — the easy, dominant case. We let the
+    // FAST model handle round 0 here (real-time feel) because the heavy semantic
+    // matching is already done and the accuracy-critical rules (measured-quantity
+    // bounce, confidence gating, dropped-item nudge) are enforced server-side
+    // regardless of model. Anything compound/ambiguous/edit stays on the smart
+    // model, and if the fast model is unsure and calls search_catalog, the next
+    // round escalates to smart automatically.
+    let simpleConfidentAdd = false;
     try {
       const lastMsg = clientMessages[clientMessages.length - 1];
       const utter = lastMsg && lastMsg.role === 'user' ? String(lastMsg.content || '') : '';
@@ -497,6 +506,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           blocks.push(`"${m.q}" → ${top}`);
         }
         preSearchConfidentCount = blocks.length;
+        simpleConfidentAdd = queries.length === 1 && blocks.length === 1;
         if (blocks.length) {
           preSearchBlock = [
             ``,
@@ -521,9 +531,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       sseHeartbeat(res); // keep the stream warm before each (possibly slow) round
-      // Round 0 always uses the smart model. After that, the smart model is only
-      // needed if a fresh catalog search happened (interpreting candidates).
-      const model = round === 0 || usedSearchThisTurn ? MODEL_SMART : MODEL_FAST;
+      // Model selection, tuned for latency without losing accuracy:
+      //  - Round 0: the FAST model for a single confidently-matched add (the
+      //    common case — heavy matching already done by pre-search); otherwise
+      //    the SMART model for compound/ambiguous/edit requests.
+      //  - Later rounds: SMART only if a fresh catalog search happened this turn
+      //    (interpreting candidates); else FAST.
+      const model = round === 0
+        ? (simpleConfidentAdd && !usedSearchThisTurn ? MODEL_FAST : MODEL_SMART)
+        : (usedSearchThisTurn ? MODEL_SMART : MODEL_FAST);
 
       // Stream this model call; forward text deltas live to the client.
       const { content } = await streamAnthropic(
