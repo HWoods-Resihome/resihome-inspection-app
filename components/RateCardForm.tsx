@@ -97,6 +97,17 @@ function sectionPhotoExempt(name: string): boolean {
   return /\bwhole\s*house\b/i.test((name || '').trim());
 }
 
+/** "{qty} {friendly unit}" for inline display, e.g. 3 EA -> "3 ea", 1448 SF ->
+ *  "1,448 sq ft". Returns '' for invalid quantities. */
+function friendlyQtyUnit(qty: number, meas: string): string {
+  if (!isFinite(qty) || qty <= 0) return '';
+  const n = qty.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  const u = (meas || '').trim().toUpperCase();
+  const friendly = u === 'SF' ? 'sq ft' : u === 'LF' ? 'lin ft' : u === 'SY' ? 'sq yd'
+    : u === 'EA' ? 'ea' : u === 'HR' ? 'hr' : (meas || '').trim().toLowerCase();
+  return friendly ? `${n} ${friendly}` : n;
+}
+
 export function RateCardForm(props: RateCardFormProps) {
   const dialog = useAppDialog();
   // Sections are now stateful — they may be customized (renamed, deleted,
@@ -1796,7 +1807,7 @@ export function RateCardForm(props: RateCardFormProps) {
 
   // Cross-section roll-up of every line by catalog category, each carrying its
   // own line items, so the totals header can drill down category → line item.
-  type CatLine = { key: string; label: string; section: string; vendor: number; client: number; tenant: number };
+  type CatLine = { key: string; label: string; qty: string; section: string; vendor: number; client: number; tenant: number };
   type CatGroup = { category: string; count: number; vendor: number; client: number; tenant: number; lines: CatLine[] };
   const categoryBreakdown = useMemo<CatGroup[]>(() => {
     const map = new Map<string, CatGroup>();
@@ -1811,7 +1822,7 @@ export function RateCardForm(props: RateCardFormProps) {
         let g = map.get(category);
         if (!g) { g = { category, count: 0, vendor: 0, client: 0, tenant: 0, lines: [] }; map.set(category, g); }
         g.count++; g.vendor += v; g.client += c; g.tenant += t;
-        g.lines.push({ key: `${s.id}:${line.externalId || line.lineItemCode}`, label: lineLabel(line), section: s.displayName, vendor: v, client: c, tenant: t });
+        g.lines.push({ key: `${s.id}:${line.externalId || line.lineItemCode}`, label: lineLabel(line), qty: friendlyQtyUnit(line.quantity, item?.laborMeas || ''), section: s.displayName, vendor: v, client: c, tenant: t });
       }
     }
     // Biggest client cost first — that's what the eye looks for in a scope review.
@@ -2758,7 +2769,7 @@ export function RateCardForm(props: RateCardFormProps) {
                     {g.lines.map((ln) => (
                       <div key={ln.key} className="flex items-start gap-1 pl-6 pr-2.5 py-1.5 border-t border-gray-100">
                         <div className="flex-1 min-w-0">
-                          <div className="text-[12px] text-gray-700 leading-snug break-words">{ln.label}</div>
+                          <div className="text-[12px] text-gray-700 leading-snug break-words">{ln.label}{ln.qty ? <span className="text-gray-400"> ({ln.qty})</span> : null}</div>
                           <div className="text-[10px] text-gray-400 break-words">{ln.section}</div>
                         </div>
                         <div className="w-[52px] sm:w-[68px] text-right text-[11px] sm:text-[12px] tabular-nums whitespace-nowrap text-gray-600">${formatMoney(ln.vendor)}</div>
