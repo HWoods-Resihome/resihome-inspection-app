@@ -66,10 +66,17 @@ function genId(): string {
   return `RCLINE-${uuid}`;
 }
 
-function isIOS(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && (navigator as any).maxTouchPoints > 1);
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const r = reader.result as string;
+      const comma = r.indexOf(',');
+      resolve(comma >= 0 ? r.slice(comma + 1) : r);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 export function LiveRoomScan(props: Props) {
@@ -84,20 +91,23 @@ export function LiveRoomScan(props: Props) {
   const stillTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const inFlight = useRef(false);
   const openRef = useRef(true);
-  const recRef = useRef<any>(null);
+  const audioRecRef = useRef<MediaRecorder | null>(null);
+  const audioLoopRef = useRef(false);
 
   const stampLinesRef = useRef<StampLine[]>([]);
   const seenDescRef = useRef<Set<string>>(new Set());   // sent to model + dedupe
   const seenCodeRef = useRef<Set<string>>(new Set());   // client dedupe
-  const transcriptBufRef = useRef('');                  // finals not yet sent
+  const transcriptBufRef = useRef('');                  // transcribed text not yet sent
   const stillUrlsRef = useRef<string[]>([]);
   const latestStillRef = useRef<string | undefined>(undefined);
   const stagedRef = useRef<RateCardLineInput[]>([]);
+  const chipsRef = useRef<LiveSuggestion[]>([]);        // live mirror for the inference payload
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
-  const [voiceOn, setVoiceOn] = useState(false);
-  const [interim, setInterim] = useState('');
+  const [listening, setListening] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [heardText, setHeardText] = useState('');
   const [chips, setChips] = useState<LiveSuggestion[]>([]);
   const [qtyById, setQtyById] = useState<Record<string, string>>({});
   const [stagedCount, setStagedCount] = useState(0);
@@ -105,6 +115,8 @@ export function LiveRoomScan(props: Props) {
   const [scanning, setScanning] = useState(false);
   const [arSupported, setArSupported] = useState(false);
   const [measuring, setMeasuring] = useState(false);
+
+  useEffect(() => { chipsRef.current = chips; }, [chips]);
 
   useEffect(() => {
     let on = true;
@@ -119,7 +131,7 @@ export function LiveRoomScan(props: Props) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false,
+          audio: true,
         });
         if (!openRef.current) { stream.getTracks().forEach((t) => t.stop()); return; }
         streamRef.current = stream;
@@ -136,7 +148,7 @@ export function LiveRoomScan(props: Props) {
           getGeoFix(),
         ]);
         stampLinesRef.current = buildStampLines(addressSnapshot, fix, ref);
-        startVoice();
+        startAudioLoop();
         // Kick off loops.
         setTimeout(() => { void captureStill(); }, 700);
         inferTimer.current = setInterval(() => { void runInference(); }, INFER_INTERVAL_MS);
@@ -153,8 +165,7 @@ export function LiveRoomScan(props: Props) {
     openRef.current = false;
     if (inferTimer.current) clearInterval(inferTimer.current);
     if (stillTimer.current) clearInterval(stillTimer.current);
-    try { recRef.current?.stop?.(); } catch { /* noop */ }
-    recRef.current = null;
+    stopAudioLoop();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
   }
@@ -164,8 +175,7 @@ export function LiveRoomScan(props: Props) {
   function pauseForAr() {
     if (inferTimer.current) clearInterval(inferTimer.current);
     if (stillTimer.current) clearInterval(stillTimer.current);
-    try { recRef.current?.stop?.(); } catch { /* noop */ }
-    recRef.current = null;
+    stopAudioLoop();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
   }
@@ -174,12 +184,12 @@ export function LiveRoomScan(props: Props) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
+        audio: true,
       });
       if (!openRef.current) { stream.getTracks().forEach((t) => t.stop()); return; }
       streamRef.current = stream;
       if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play().catch(() => {}); }
-      startVoice();
+      startAudioLoop();
       inferTimer.current = setInterval(() => { void runInference(); }, INFER_INTERVAL_MS);
       stillTimer.current = setInterval(() => { void captureStill(); }, STILL_INTERVAL_MS);
     } catch {
@@ -198,34 +208,78 @@ export function LiveRoomScan(props: Props) {
     }
   }
 
-  // ---- voice (continuous; auto-restart) ----
-  function startVoice() {
-    const SR = (typeof window !== 'undefined') && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
-    if (!SR || isIOS()) { setVoiceOn(false); return; } // iOS Safari has no reliable continuous recognition
-    try {
-      const rec = new SR();
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.lang = 'en-US';
-      rec.onresult = (e: any) => {
-        let finalDelta = '';
-        let interimTxt = '';
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          const r = e.results[i];
-          if (r.isFinal) finalDelta += r[0].transcript + ' ';
-          else interimTxt += r[0].transcript;
-        }
-        if (finalDelta) transcriptBufRef.current += finalDelta;
-        setInterim(interimTxt.trim());
-      };
-      rec.onend = () => { if (openRef.current) { try { rec.start(); } catch { /* noop */ } } };
-      rec.onerror = () => { /* transient — onend restarts */ };
-      rec.start();
-      recRef.current = rec;
-      setVoiceOn(true);
-    } catch {
-      setVoiceOn(false);
+  // ---- voice: chunked audio → Whisper (works on iOS Safari too) ----
+  // We cycle a MediaRecorder in ~4s clips; each complete clip is transcribed and
+  // fed to the next inference. This replaces the Web Speech API (absent/flaky on
+  // iOS) and gives a reliable "heard you" signal on every platform.
+  function pickAudioMime(): string {
+    const MR: any = (typeof window !== 'undefined') && (window as any).MediaRecorder;
+    if (!MR?.isTypeSupported) return '';
+    for (const m of ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']) {
+      try { if (MR.isTypeSupported(m)) return m; } catch { /* noop */ }
     }
+    return '';
+  }
+  // Common Whisper "silence hallucinations" we don't want to feed the model.
+  function isNoise(t: string): boolean {
+    const s = t.trim().toLowerCase().replace(/[.!?]/g, '');
+    return s.length < 2 || ['you', 'thank you', 'thanks', 'thanks for watching', 'bye', 'okay', 'ok'].includes(s);
+  }
+  async function transcribeChunk(blob: Blob) {
+    try {
+      setTranscribing(true);
+      const base64 = await blobToBase64(blob);
+      const r = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64, mime: (blob.type || 'audio/mp4').split(';')[0] }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        const txt = String(d.text || '').trim();
+        if (txt && !isNoise(txt)) {
+          transcriptBufRef.current += txt + ' ';
+          setHeardText(txt);
+        }
+      }
+    } catch { /* skip this clip */ } finally {
+      setTranscribing(false);
+    }
+  }
+  function startAudioLoop() {
+    const stream = streamRef.current;
+    if (!stream || stream.getAudioTracks().length === 0) { setListening(false); return; }
+    audioLoopRef.current = true;
+    setListening(true);
+    const mime = pickAudioMime();
+    const recordOnce = () => {
+      if (!audioLoopRef.current || !openRef.current || !streamRef.current) return;
+      try {
+        const audioStream = new MediaStream(streamRef.current.getAudioTracks());
+        const rec = mime ? new MediaRecorder(audioStream, { mimeType: mime }) : new MediaRecorder(audioStream);
+        audioRecRef.current = rec;
+        const parts: BlobPart[] = [];
+        rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
+        rec.onstop = () => {
+          if (parts.length) {
+            const blob = new Blob(parts, { type: rec.mimeType || mime || 'audio/mp4' });
+            if (blob.size > 1200) void transcribeChunk(blob);
+          }
+          if (audioLoopRef.current && openRef.current) recordOnce();
+        };
+        rec.start();
+        setTimeout(() => { try { if (rec.state !== 'inactive') rec.stop(); } catch { /* noop */ } }, 4000);
+      } catch {
+        setListening(false);
+      }
+    };
+    recordOnce();
+  }
+  function stopAudioLoop() {
+    audioLoopRef.current = false;
+    setListening(false);
+    try { if (audioRecRef.current && audioRecRef.current.state !== 'inactive') audioRecRef.current.stop(); } catch { /* noop */ }
+    audioRecRef.current = null;
   }
 
   // ---- keyframe + still capture ----
@@ -243,25 +297,30 @@ export function LiveRoomScan(props: Props) {
     return c.toDataURL('image/jpeg', 0.6).split(',')[1] || null;
   }
 
-  async function captureStill() {
+  // Capture a full-res, evidence-stamped still → upload → room photos. Returns
+  // the uploaded URL. `force` bypasses the periodic cap (used for per-suggestion
+  // stills and the manual shutter, so each item gets its OWN photo).
+  async function captureStill(force = false): Promise<string | undefined> {
     const v = videoRef.current;
-    if (!openRef.current || !v || !v.videoWidth || stillUrlsRef.current.length >= MAX_STILLS) return;
+    if (!openRef.current || !v || !v.videoWidth) return undefined;
+    if (!force && stillUrlsRef.current.length >= MAX_STILLS) return undefined;
     const c = document.createElement('canvas');
     c.width = v.videoWidth; c.height = v.videoHeight;
     const ctx = c.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) return undefined;
     ctx.drawImage(v, 0, 0, c.width, c.height);
     drawEvidenceStamp(ctx, c.width, c.height, stampLinesRef.current);
     const blob = await new Promise<Blob | null>((res) => c.toBlob((b) => res(b), 'image/jpeg', 0.8));
-    if (!blob) return;
+    if (!blob) return undefined;
     try {
       const f = new File([blob], `live_${Date.now()}.jpg`, { type: 'image/jpeg' });
       const url = await uploadPhoto(f);
-      if (!openRef.current) return;
+      if (!openRef.current) return undefined;
       stillUrlsRef.current.push(url);
       latestStillRef.current = url;
       setStillCount(stillUrlsRef.current.length);
-    } catch { /* non-fatal */ }
+      return url;
+    } catch { return undefined; }
   }
 
   // ---- inference ----
@@ -282,19 +341,52 @@ export function LiveRoomScan(props: Props) {
           tenantMonths: typeof tenantMonths === 'number' ? tenantMonths : 12,
           transcriptDelta: delta,
           seen: Array.from(seenDescRef.current),
+          active: chipsRef.current.map((c) => ({ id: c.id, description: c.description, unit: c.unit })),
           frame: b64,
         }),
       });
       if (!r.ok || !openRef.current) return;
       const d = await r.json();
+
+      // Apply voice edits to pending chips first (qty / scope / vendor / %).
+      const editList: any[] = Array.isArray(d.edits) ? d.edits : [];
+      if (editList.length) {
+        setChips((cur) => cur.map((c) => {
+          const e = editList.find((x) => x.targetId === c.id);
+          if (!e) return c;
+          const nc = { ...c };
+          if (e.lineItemCode) {
+            nc.lineItemCode = e.lineItemCode;
+            nc.description = e.description || nc.description;
+            nc.category = e.category || nc.category;
+            nc.subcategory = e.subcategory ?? nc.subcategory;
+            nc.unit = e.unit || nc.unit;
+            nc.needsMeasurement = !!e.needsMeasurement;
+            nc.measurementUnit = e.measurementUnit || '';
+          }
+          if (e.vendor) nc.suggestedVendor = e.vendor;
+          if (typeof e.tenantBillBackPercent === 'number') nc.tenantBillBackPercent = e.tenantBillBackPercent;
+          if (typeof e.quantity === 'number') nc.quantity = e.quantity;
+          return nc;
+        }));
+        setQtyById((m) => {
+          const n = { ...m };
+          for (const e of editList) if (typeof e.quantity === 'number') n[e.targetId] = String(e.quantity);
+          return n;
+        });
+      }
+
       const incoming: LiveSuggestion[] = Array.isArray(d.suggestions) ? d.suggestions : [];
       const fresh = incoming.filter((s) => s.lineItemCode && !seenCodeRef.current.has(s.lineItemCode));
       if (fresh.length) {
+        // Capture a DEDICATED still for this batch so each call-out gets its own
+        // relevant photo (not a single shared frame).
+        const batchStill = await captureStill(true);
         const seed: Record<string, string> = {};
         for (const s of fresh) {
           seenCodeRef.current.add(s.lineItemCode);
           seenDescRef.current.add(s.description);
-          s.stillUrl = latestStillRef.current;
+          s.stillUrl = batchStill || latestStillRef.current;
           if (s.needsMeasurement && s.estimatedQuantity && s.estimatedQuantity > 0) seed[s.id] = String(s.estimatedQuantity);
         }
         if (Object.keys(seed).length) setQtyById((m) => ({ ...m, ...seed }));
@@ -363,16 +455,17 @@ export function LiveRoomScan(props: Props) {
           <span className="text-[10px] font-bold uppercase tracking-wide text-white bg-violet-600 rounded px-1.5 py-0.5">Live · Beta</span>
         </div>
         <div className="flex items-center gap-3">
+          {/* Always-listening indicator */}
           <span className="flex items-center gap-1 text-[11px] text-white/90">
-            <span className={`w-2 h-2 rounded-full ${scanning ? 'bg-violet-400 animate-pulse' : 'bg-white/40'}`} />
-            {scanning ? 'Scanning…' : ready ? 'Ready' : 'Starting…'}
+            <span className={`w-2 h-2 rounded-full ${listening ? 'bg-emerald-400 animate-pulse' : 'bg-white/40'}`} />
+            {listening ? 'Listening' : 'Mic off'}
           </span>
           <button onClick={() => { teardown(); onClose(); }} aria-label="Cancel"
             className="text-white/90 text-2xl leading-none w-8 h-8 flex items-center justify-center">×</button>
         </div>
       </div>
 
-      {/* Voice / guidance line */}
+      {/* Voice / guidance + assurance line */}
       <div className="relative z-10 px-4">
         {error ? (
           <div className="text-sm text-red-300 bg-black/50 rounded-lg px-3 py-2">
@@ -383,10 +476,16 @@ export function LiveRoomScan(props: Props) {
             )}
           </div>
         ) : (
-          <div className="text-[12px] text-white/80 bg-black/30 rounded-lg px-3 py-1.5 inline-block max-w-full">
-            {voiceOn
-              ? (interim ? <span className="italic">“{interim}”</span> : 'Pan slowly — say what you see (e.g. “broken blinds, carpet needs replacing”).')
-              : 'Pan slowly across the room. (Voice call-outs aren’t available in this browser.)'}
+          <div className="text-[12px] text-white bg-black/40 rounded-lg px-3 py-1.5 inline-block max-w-full">
+            {scanning ? (
+              <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" /> Thinking…</span>
+            ) : transcribing ? (
+              <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Heard you — processing…</span>
+            ) : heardText ? (
+              <span className="italic text-emerald-200">“{heardText}”</span>
+            ) : (
+              <span className="text-white/80">Pan slowly — say what you see (e.g. “broken blinds, paint two walls, carpet needs replacing”).</span>
+            )}
           </div>
         )}
       </div>
@@ -448,10 +547,17 @@ export function LiveRoomScan(props: Props) {
         <div className="text-[12px] text-white/85">
           <span className="font-semibold text-white">{stagedCount}</span> added · {stillCount} photo{stillCount === 1 ? '' : 's'}
         </div>
-        <button onClick={() => void finish()}
-          className="bg-violet-600 hover:bg-violet-700 text-white font-heading font-bold px-6 py-2.5 rounded-lg">
-          Finish
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Manual shutter — grab a still into the room photos any time. */}
+          <button onClick={() => void captureStill(true)} disabled={!ready} aria-label="Take photo"
+            className="w-12 h-12 rounded-full bg-white/90 border-4 border-white/60 shadow-lg active:scale-95 disabled:opacity-50 flex items-center justify-center">
+            <span className="w-7 h-7 rounded-full bg-white border border-gray-300" />
+          </button>
+          <button onClick={() => void finish()}
+            className="bg-violet-600 hover:bg-violet-700 text-white font-heading font-bold px-6 py-2.5 rounded-lg">
+            Finish
+          </button>
+        </div>
       </div>
     </div>
   );
