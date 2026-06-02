@@ -702,6 +702,53 @@ async function getDefaultAssociationTypeId(fromTypeId: string, toTypeId: string)
   return (unlabeled?.typeId ?? results[0]?.typeId) ?? null;
 }
 
+/**
+ * Resolve a usable Inspection<->Property association type, creating one if it
+ * doesn't exist yet. Returns the direction to associate in (HubSpot links are
+ * bidirectional, so associating either way connects the records):
+ *   { fromTypeId, toTypeId, typeId, reversed }
+ * `reversed` = true means associate Property->Inspection (fromId=property).
+ * Returns null only if no type exists AND one can't be created (missing scope).
+ */
+type AssocResolution = { fromTypeId: string; toTypeId: string; typeId: number; reversed: boolean };
+let _inspPropAssocCache: AssocResolution | null = null;
+async function resolveInspToPropertyAssoc(): Promise<AssocResolution | null> {
+  if (_inspPropAssocCache) return _inspPropAssocCache;
+  const { inspection, property } = typeIds();
+
+  // 1) Inspection -> Property: prefer the "Property" label, else the default.
+  let t = await getAssociationTypeId(inspection, property, 'Property');
+  if (t == null) t = await getDefaultAssociationTypeId(inspection, property);
+  if (t != null) return (_inspPropAssocCache = { fromTypeId: inspection, toTypeId: property, typeId: t, reversed: false });
+
+  // 2) Property -> Inspection (reverse) — associating that way links them too.
+  const r = await getDefaultAssociationTypeId(property, inspection);
+  if (r != null) return (_inspPropAssocCache = { fromTypeId: property, toTypeId: inspection, typeId: r, reversed: true });
+
+  // 3) Neither exists — create a labeled association type Inspection -> Property.
+  try {
+    const created = await hubspotFetch(assocLabelsUrl(inspection, property), {
+      method: 'POST',
+      body: JSON.stringify({ label: 'Property', name: 'inspection_to_property' }),
+    });
+    const newId = created?.results?.[0]?.typeId ?? created?.typeId ?? created?.results?.[0]?.associationTypeId;
+    if (newId != null) return (_inspPropAssocCache = { fromTypeId: inspection, toTypeId: property, typeId: Number(newId), reversed: false });
+    console.warn('Created Inspection->Property assoc but no typeId in response:', JSON.stringify(created).slice(0, 300));
+  } catch (e) {
+    console.warn('Could not create Inspection->Property association type:', e);
+  }
+  return null;
+}
+
+/** Associate one inspection to its property, resolving/creating the type as needed. */
+async function associateInspectionToProperty(inspectionId: string, propertyId: string): Promise<boolean> {
+  const a = await resolveInspToPropertyAssoc();
+  if (!a) return false;
+  const pair = a.reversed ? { fromId: propertyId, toId: inspectionId } : { fromId: inspectionId, toId: propertyId };
+  const r = await batchCreateAssociations(a.fromTypeId, a.toTypeId, a.typeId, [pair]);
+  return r.failed === 0;
+}
+
 async function createInspection(props: Record<string, any>): Promise<string> {
   const { inspection: typeId } = typeIds();
   const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, {
@@ -794,28 +841,17 @@ async function batchCreateAssociations(
 export async function submitInspection(input: SubmitInput): Promise<{ inspectionId: string }> {
   const tids = typeIds();
 
-  const [inspToAnswer, qToAnswer, inspToPropertyLabeled] = await Promise.all([
+  const [inspToAnswer, qToAnswer] = await Promise.all([
     getAssociationTypeId(tids.inspection, tids.answer, 'Answer of'),
     getAssociationTypeId(tids.question, tids.answer, 'Answer to'),
-    getAssociationTypeId(tids.inspection, tids.property, 'Property'),
   ]);
-  // Fall back to the default/primary association type so the Inspection->Property
-  // link is created even when there's no custom "Property" label.
-  const inspToProperty = inspToPropertyLabeled
-    ?? (await getDefaultAssociationTypeId(tids.inspection, tids.property));
 
   const inspectionId = await createInspection(input.inspectionProps);
   const answerResults = await createAnswers(input.answersProps.map((a) => a.answerProps));
 
-  // Inspection -> Property (single pair via batch endpoint, since v4 single PUT
-  // is deprecated and the date-based labeled-single PUT pattern is verbose).
-  if (inspToProperty != null) {
-    const result = await batchCreateAssociations(
-      tids.inspection, tids.property, inspToProperty,
-      [{ fromId: inspectionId, toId: input.propertyRecordId }],
-    );
-    if (result.failed > 0) console.warn(`Inspection->Property association failed`);
-  }
+  // Inspection -> Property (resolves/creates the association type as needed).
+  const propOk = await associateInspectionToProperty(inspectionId, input.propertyRecordId);
+  if (!propOk) console.warn('Inspection->Property association not created');
 
   // Inspection -> Answers (batch)
   if (inspToAnswer != null && answerResults.length > 0) {
@@ -851,11 +887,11 @@ export async function backfillInspectionPropertyAssociations(): Promise<{
   scanned: number; withRef: number; associated: number; failed: number; missingRef: number;
 }> {
   const tids = typeIds();
-  const assocType = (await getAssociationTypeId(tids.inspection, tids.property, 'Property'))
-    ?? (await getDefaultAssociationTypeId(tids.inspection, tids.property));
-  if (assocType == null) throw new Error('No Inspection->Property association type exists in HubSpot.');
+  const assoc = await resolveInspToPropertyAssoc();
+  if (!assoc) throw new Error('No Inspection<->Property association type exists in HubSpot, and one could not be created (the API token likely lacks association-schema write scope). Create an Inspection→Property association in HubSpot Settings, then re-run.');
 
-  // Page through every inspection record, collecting (inspectionId, propertyId).
+  // Page through every inspection record, collecting (inspectionId, propertyId)
+  // and orienting each pair per the resolved association direction.
   const pairs: Array<{ fromId: string; toId: string }> = [];
   let scanned = 0; let missingRef = 0;
   let after: string | undefined = undefined;
@@ -866,13 +902,13 @@ export async function backfillInspectionPropertyAssociations(): Promise<{
     for (const r of (resp.results || [])) {
       scanned++;
       const ref = (r.properties?.property_id_ref || '').trim();
-      if (ref) pairs.push({ fromId: r.id, toId: ref });
+      if (ref) pairs.push(assoc.reversed ? { fromId: ref, toId: r.id } : { fromId: r.id, toId: ref });
       else missingRef++;
     }
     after = resp.paging?.next?.after;
   } while (after);
 
-  const { ok, failed } = await batchCreateAssociations(tids.inspection, tids.property, assocType, pairs);
+  const { ok, failed } = await batchCreateAssociations(assoc.fromTypeId, assoc.toTypeId, assoc.typeId, pairs);
   return { scanned, withRef: pairs.length, associated: ok, failed, missingRef };
 }
 
@@ -1515,25 +1551,9 @@ export async function createScheduledInspection(args: {
   inspectionProps: Record<string, any>;
   propertyRecordId: string;
 }): Promise<{ inspectionId: string }> {
-  const tids = typeIds();
-  // Prefer a "Property"-labeled association, but fall back to the default/primary
-  // (usually unlabeled) type — otherwise the Inspection->Property link is
-  // silently skipped when the association has no custom "Property" label.
-  const inspToProperty = (await getAssociationTypeId(tids.inspection, tids.property, 'Property'))
-    ?? (await getDefaultAssociationTypeId(tids.inspection, tids.property));
-
   const inspectionId = await createInspection(args.inspectionProps);
-
-  if (inspToProperty != null) {
-    const r = await batchCreateAssociations(
-      tids.inspection, tids.property, inspToProperty,
-      [{ fromId: inspectionId, toId: args.propertyRecordId }],
-    );
-    if (r.failed > 0) console.warn('createScheduledInspection: Inspection->Property association failed');
-  } else {
-    console.warn('createScheduledInspection: no Inspection->Property association type found');
-  }
-
+  const ok = await associateInspectionToProperty(inspectionId, args.propertyRecordId);
+  if (!ok) console.warn('createScheduledInspection: Inspection->Property association not created');
   return { inspectionId };
 }
 

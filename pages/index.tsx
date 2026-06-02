@@ -9,6 +9,9 @@ import { ListPicker } from '@/components/ListPicker';
 
 interface MeUser { userId: string; email: string; name: string; }
 
+// Emails that see admin maintenance actions (e.g. the property-link backfill).
+const ADMIN_EMAILS = ['hwoods@resihome.com'];
+
 type StatusFilter = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
 
 export default function Home() {
@@ -109,6 +112,26 @@ export default function Home() {
   async function handleLogout() {
     try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
     router.replace('/login');
+  }
+
+  // Admin maintenance: backfill the Inspection->Property association across all
+  // inspections (idempotent). Visible only to admins.
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const isAdmin = !!me && ADMIN_EMAILS.includes(me.email.toLowerCase());
+  async function handleBackfillPropertyLinks() {
+    if (backfillBusy) return;
+    if (!window.confirm('Link every inspection to its property in HubSpot? This is safe to run repeatedly.')) return;
+    setBackfillBusy(true);
+    try {
+      const r = await fetch('/api/admin/backfill-inspection-property', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
+      window.alert(`Property links synced.\n\nScanned: ${d.scanned}\nAssociated: ${d.associated}\nFailed: ${d.failed}\nMissing property ref: ${d.missingRef}`);
+    } catch (e: any) {
+      window.alert(`Backfill failed: ${e?.message || e}`);
+    } finally {
+      setBackfillBusy(false);
+    }
   }
 
   // Apply search + status + inspector + template filters to the inspection list
@@ -338,6 +361,16 @@ export default function Home() {
               </div>
               <div className="flex items-center gap-3 whitespace-nowrap">
                 <GmailConnectChip />
+                {isAdmin && (
+                  <button
+                    onClick={handleBackfillPropertyLinks}
+                    disabled={backfillBusy}
+                    className="text-xs font-heading font-semibold text-white/90 hover:text-white disabled:opacity-50"
+                    title="Link every inspection to its property in HubSpot (admin)"
+                  >
+                    {backfillBusy ? 'Syncing…' : 'Sync Property Links'}
+                  </button>
+                )}
                 <button
                   onClick={handleLogout}
                   className="text-xs font-heading font-semibold text-white/90 hover:text-white"
