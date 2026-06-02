@@ -34,7 +34,9 @@ function anthropicKey(): string {
 
 const SYSTEM = [
   'You are a move-out scope reviewer watching a LIVE camera pan of one room. You get the current frame, any new voice-over, the items ALREADY on screen this session, and the items still PENDING the inspector\'s decision.',
-  'STANDARD: SAFE, CLEAN, FUNCTIONAL — no luxury. QUALITY OVER QUANTITY: only call out work with clear visible evidence in THIS frame, or that the inspector just said. Most frames warrant ZERO new items — that is correct. Never invent work.',
+  'STANDARD: SAFE, CLEAN, FUNCTIONAL — no luxury. Never invent work.',
+  'VOICE IS AUTHORITATIVE: if the inspector just SAID a defect or repair (e.g. "light bulb is out", "missing blind", "carpet is stained", "paint this wall", "outlet cover is broken"), you MUST suggest_line for it even if you cannot see it in the frame — they are looking at it. Pick the closest catalog work for what they described.',
+  'VISION IS CONSERVATIVE: from the frame alone, only call out work with clear visible evidence. Most frames warrant ZERO purely-visual items — that is correct.',
   'Do NOT repeat anything in the already-suggested list (or near-duplicates).',
   'TWO things you can do, both via tools, all in one response (often neither):',
   ' • suggest_line — a genuinely NEW item seen or just called out.',
@@ -164,10 +166,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // --- new suggestions ---
     const seenLower = new Set(seen.map((s) => s.toLowerCase()));
     const out: any[] = [];
+    const unmatched: string[] = [];
     for (let i = 0; i < suggestUses.length; i++) {
       const inp = suggestUses[i].input || {};
       const resolved = await resolveItem(String(inp.query || ''), String(inp.category || ''));
-      if (!resolved) continue;
+      if (!resolved) { if (inp.query) unmatched.push(String(inp.query).slice(0, 40)); continue; }
       const { item, unit, isMeasured, isWholeHouse, tenantPct, measurementUnit } = resolved;
       if (seenLower.has(item.lineItemCode.toLowerCase()) || seenLower.has(item.laborShortDescription.toLowerCase())) continue;
       seenLower.add(item.lineItemCode.toLowerCase());
@@ -225,7 +228,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (Object.keys(edit).length > 1) edits.push(edit);
     }
 
-    return res.status(200).json({ suggestions: out, edits });
+    return res.status(200).json({ suggestions: out, edits, unmatched });
   } catch (e: any) {
     console.error('[room-scan-live] failed:', e);
     return res.status(500).json({ error: String(e?.message || e).slice(0, 200) });

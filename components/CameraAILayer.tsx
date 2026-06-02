@@ -106,6 +106,7 @@ export function CameraAILayer(props: Props) {
   const [transcribing, setTranscribing] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [heardText, setHeardText] = useState('');
+  const [errText, setErrText] = useState('');
   const [chips, setChips] = useState<LiveSuggestion[]>([]);
   const [qtyById, setQtyById] = useState<Record<string, string>>({});
 
@@ -144,7 +145,7 @@ export function CameraAILayer(props: Props) {
   useEffect(() => {
     if (!enabled) return;
     const iv = setInterval(() => {
-      const a = getActiveRoom();
+      const a = getActiveRoomRef.current();
       const id = a?.id ?? null;
       if (id !== activeIdRef.current) {
         activeIdRef.current = id;
@@ -292,10 +293,10 @@ export function CameraAILayer(props: Props) {
   // ---- inference ----
   async function runInference() {
     if (inFlight.current || !openRef.current) return;
-    const room = getActiveRoom();
-    if (!room) return;
+    const room = getActiveRoomRef.current();
+    if (!room) { setErrText('No active room'); return; }
     const b64 = grabKeyframeB64(KEYFRAME_EDGE);
-    if (!b64) return;
+    if (!b64) { setErrText('Camera not ready'); return; }
     inFlight.current = true;
     setScanning(true);
     const delta = transcriptBufRef.current.trim();
@@ -313,8 +314,14 @@ export function CameraAILayer(props: Props) {
           frame: b64,
         }),
       });
-      if (!r.ok || !openRef.current) return;
+      if (!openRef.current) return;
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        setErrText(`AI ${r.status}: ${String(e?.error || '').slice(0, 80) || 'request failed'}`);
+        return;
+      }
       const d = await r.json();
+      setErrText('');
 
       const editList: any[] = Array.isArray(d.edits) ? d.edits : [];
       if (editList.length) {
@@ -346,7 +353,16 @@ export function CameraAILayer(props: Props) {
         if (Object.keys(seed).length) setQtyById((m) => ({ ...m, ...seed }));
         setChips((cur) => [...cur, ...fresh]);
       }
-    } catch { /* skip */ } finally {
+
+      // The model heard/saw something but it didn't map to a catalog item — tell
+      // the inspector instead of silently dropping it.
+      const unmatched: string[] = Array.isArray(d.unmatched) ? d.unmatched : [];
+      if (!fresh.length && !editList.length && unmatched.length) {
+        setHeardText(`No catalog match for “${unmatched[0]}” — try naming the work`);
+      }
+    } catch (e: any) {
+      if (openRef.current) setErrText(`AI offline: ${String(e?.message || e).slice(0, 60)}`);
+    } finally {
       inFlight.current = false;
       setScanning(false);
     }
@@ -382,7 +398,9 @@ export function CameraAILayer(props: Props) {
           dropdown in the camera top bar. */}
       <div className="px-3 pt-16 flex justify-end">
         <div className="pointer-events-none text-[12px] text-white bg-black/45 rounded-full px-3 py-1.5 max-w-[70%] text-right">
-          {scanning ? (
+          {errText ? (
+            <span className="flex items-center gap-1.5 text-rose-200"><span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> {errText}</span>
+          ) : scanning ? (
             <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" /> Thinking…</span>
           ) : transcribing ? (
             <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Heard you…</span>
