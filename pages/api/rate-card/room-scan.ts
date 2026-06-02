@@ -54,7 +54,7 @@ const SYSTEM = [
   '',
   'For EACH genuinely-warranted item, call the suggest_line tool ONCE. Emit all of them in this single response. Do not write prose.',
   'The `query` field is a short, accurate catalog search phrase for the SPECIFIC work (e.g. "replace carpet", "4x4 drywall patch", "carpet re-stretch", "level 1 sales clean", "blind replacement"). We resolve it to a real catalog code on our side AND DROP it if there is no good match — so describe the real work plainly; do not force-fit or guess at items the catalog is unlikely to have.',
-  'MEASURED items (carpet/flooring in SF, trim/gutters/baseboard in LF): set quantityStated=true and the number ONLY if the inspector actually said a measurement in the voice-over. Otherwise leave quantity empty and quantityStated=false — the inspector confirms it. NEVER guess square footage or linear feet from a frame.',
+  'MEASURED items (carpet/flooring in SF, trim/gutters/baseboard in LF): NEVER claim a confirmed measurement unless the inspector actually stated it in the voice-over (then set quantityStated=true + the number). When NOT stated, leave quantityStated=false BUT provide estimatedQuantity — a ROUGH, clearly-approximate amount based on the apparent room size (e.g. a typical bedroom floor ≈ 120–180 SF; a small bath ≈ 40–60 SF; baseboard LF ≈ room perimeter). This is only a starting point the inspector will confirm or overwrite — do not imply precision, but DO give a sensible number so the approve screen is pre-filled.',
   'COUNT/EACH items (fixtures, outlets, blinds, a single patch): quantity defaults to 1 — set quantity=1, quantityStated=true.',
   'Set frameIndex to the 0-based index of the frame that best shows the issue, so we can attach that still to the line. Set confidence honestly (low if you are unsure — and prefer dropping the item over a low-confidence guess).',
 ].join('\n');
@@ -69,6 +69,7 @@ const SUGGEST_TOOL = {
       category: { type: 'string', description: 'Best-guess catalog category, e.g. Flooring, Painting, Cleaning, Drywall, Electrical, Plumbing, Appliance, Doors, Windows/Glass.' },
       quantity: { type: 'number', description: 'Quantity if (and only if) it is known: 1 for count/EA items, or the measured amount IF the inspector stated it in the voice-over. Omit for measured items with no stated measurement.' },
       quantityStated: { type: 'boolean', description: 'true only when quantity is genuinely known (count item = 1, or the inspector said the measurement). false for measured items needing the inspector to confirm.' },
+      estimatedQuantity: { type: 'number', description: 'For MEASURED items NOT stated by the inspector: a rough, approximate amount (e.g. estimated floor SF or baseboard LF) based on apparent room size, used to pre-fill the approve screen. Always a draft to be confirmed — never precise.' },
       frameIndex: { type: 'integer', description: '0-based index of the frame that best shows this issue.' },
       rationale: { type: 'string', description: 'One short sentence on what you see that justifies this line.' },
       confidence: { type: 'string', enum: ['high', 'medium', 'low'], description: 'How sure you are this work is warranted.' },
@@ -90,6 +91,7 @@ interface Suggestion {
   quantity: number | null;  // null => needs the inspector to enter a measurement
   needsMeasurement: boolean;
   measurementUnit: string;  // 'square feet' | 'linear feet' | '' (for needsMeasurement)
+  estimatedQuantity: number | null; // AI rough estimate to pre-fill (confirm/overwrite)
   suggestedVendor: string;
   tenantBillBackPercent: number;
   frameIndex: number;
@@ -192,6 +194,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const quantityStated = inp.quantityStated === true && typeof inp.quantity === 'number' && isFinite(inp.quantity);
       const needsMeasurement = isMeasured && !isWholeHouse && !quantityStated;
       const quantity = quantityStated ? Number(inp.quantity) : (needsMeasurement ? null : 1);
+      // Rough AI estimate (clamped to something sane) to pre-fill the approve
+      // screen for measured items the inspector didn't state. Draft only.
+      const rawEst = Number(inp.estimatedQuantity);
+      const estimatedQuantity = (needsMeasurement && isFinite(rawEst) && rawEst > 0)
+        ? Math.min(100000, Math.round(rawEst))
+        : null;
 
       // Default tenant % the same way voice/manual adds do (depreciation-aware).
       const depKind = depKindForCategory(item.category, item.laborShortDescription);
@@ -212,6 +220,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         quantity,
         needsMeasurement,
         measurementUnit: needsMeasurement ? (unit === 'SF' ? 'square feet' : unit === 'LF' ? 'linear feet' : 'square yards') : '',
+        estimatedQuantity,
         suggestedVendor: 'Vendor 1',
         tenantBillBackPercent: tenantPct,
         frameIndex,

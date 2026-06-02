@@ -50,6 +50,7 @@ interface Suggestion {
   quantity: number | null;
   needsMeasurement: boolean;
   measurementUnit: string;
+  estimatedQuantity: number | null;
   suggestedVendor: string;
   tenantBillBackPercent: number;
   frameIndex: number;
@@ -236,6 +237,13 @@ export function RoomScanModal(props: Props) {
       const data = await r.json();
       const list: Suggestion[] = Array.isArray(data.suggestions) ? data.suggestions : [];
       setSuggestions(list);
+      // Pre-fill the measurement field with the AI's rough estimate so the
+      // approve screen isn't blank — the inspector confirms or overwrites it.
+      const seed: Record<string, string> = {};
+      for (const s of list) {
+        if (s.needsMeasurement && s.estimatedQuantity && s.estimatedQuantity > 0) seed[s.id] = String(s.estimatedQuantity);
+      }
+      setQtyById(seed);
       setPhase('review');
     } catch (err: any) {
       setError(String(err?.message || err));
@@ -354,15 +362,22 @@ export function RoomScanModal(props: Props) {
                           {s.rationale && <div className="text-xs text-gray-600 mt-1 leading-snug">{s.rationale}</div>}
 
                           {s.needsMeasurement && !state && (
-                            <div className="mt-2 flex items-center gap-2">
-                              <input
-                                type="text" inputMode="decimal"
-                                value={qtyById[s.id] || ''}
-                                onChange={(e) => setQtyById((m) => ({ ...m, [s.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
-                                placeholder={`Enter ${s.measurementUnit}`}
-                                className="h-9 w-32 bg-gray-100 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-violet-300"
-                              />
-                              <span className="text-xs text-gray-500">{s.measurementUnit}</span>
+                            <div className="mt-2">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text" inputMode="decimal"
+                                  value={qtyById[s.id] || ''}
+                                  onChange={(e) => setQtyById((m) => ({ ...m, [s.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
+                                  placeholder={`Enter ${s.measurementUnit}`}
+                                  className="h-9 w-32 bg-gray-100 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-violet-300"
+                                />
+                                <span className="text-xs text-gray-500">{s.measurementUnit}</span>
+                              </div>
+                              {s.estimatedQuantity && s.estimatedQuantity > 0 && (
+                                <div className="text-[11px] text-amber-700 mt-1">
+                                  ≈ AI estimate ({s.estimatedQuantity} {s.unit}) — confirm or edit before adding.
+                                </div>
+                              )}
                             </div>
                           )}
                           {!s.needsMeasurement && !state && (
