@@ -549,9 +549,23 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           if (failed.length === 0) {
             // Speak ONLY a short one-sentence summary — never read each line's
             // full detail aloud (those are shown on screen, not spoken).
-            const spoken = `Added ${savedCount} item${savedCount === 1 ? '' : 's'}${where}. Anything else?`;
-            setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
-            speakThenListenRef.current(spoken);
+            const base = `Added ${savedCount} item${savedCount === 1 ? '' : 's'}${where}.`;
+            // If the agent ALSO asked a follow-up this turn (e.g. it added the
+            // ready item but still needs a measured quantity for another, like
+            // "How many square feet for the carpet?"), acknowledge the add AND
+            // ask the question — then keep the mic open for the answer. Without
+            // this the question is shown but never spoken and the turn closes
+            // with "Anything else?", silently dropping the un-quantified item.
+            const followUp = (finalData?.text ? String(finalData.text).trim() : '');
+            if (followUp) {
+              const spoken = `${base} ${followUp}`;
+              setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
+              speakThenListenRef.current(spoken);
+            } else {
+              const spoken = `${base} Anything else?`;
+              setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
+              speakThenListenRef.current(spoken);
+            }
           } else {
             // Some (or all) saves failed. Be honest and surface the error on
             // screen so the cause is visible; speak a short recoverable message.
