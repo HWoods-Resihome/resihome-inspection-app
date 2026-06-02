@@ -304,6 +304,17 @@ export function EditableLineRow(props: Props) {
   // Internal Resolution completion timing (editor copy). Defaults to "Complete
   // Now"; persisted on save via onSetResolutionTiming keyed by the line id.
   const [editTiming, setEditTiming] = useState<'now' | 'later'>(props.resolutionTiming || 'now');
+  // Whether a Now/Later choice was already made for this line (a stored timing
+  // existed at mount). On DESKTOP, selecting Internal Resolution requires an
+  // explicit choice before the line can be saved or the row left — so we track
+  // whether one has been made this session. On MOBILE we keep the existing
+  // behavior (defaults to "Complete Now", no hard requirement), per the
+  // manual-add popup spec.
+  const initialHasTiming = props.resolutionTiming === 'now' || props.resolutionTiming === 'later';
+  const [timingChosen, setTimingChosen] = useState<boolean>(mobile ? true : initialHasTiming);
+  // Set true when the user tries to leave/save an Internal Resolution line on
+  // desktop without picking Now/Later — turns the toggle red to nudge them.
+  const [timingPrompt, setTimingPrompt] = useState(false);
   const [customVendorCost, setCustomVendorCost] = useState<string>(
     line?.customVendorCost != null ? String(line.customVendorCost) : ''
   );
@@ -479,13 +490,58 @@ export function EditableLineRow(props: Props) {
     }
   }
 
+  function handleVendorChange(v: string) {
+    setVendor(v);
+    if (isInternalResolution(v)) {
+      // Switching INTO Internal Resolution on desktop forces a fresh Now/Later
+      // decision unless one was already stored for this line.
+      if (!mobile && !initialHasTiming) setTimingChosen(false);
+    } else {
+      // Not Internal Resolution → no timing requirement; clear any nudge.
+      setTimingPrompt(false);
+    }
+  }
+
+  // Eraser (desktop edit row): wipe every field on this line so the inspector
+  // can re-enter it from scratch. Non-destructive to the SAVED line — clicking
+  // out without re-filling just leaves the previously-saved values in place.
+  function clearLine() {
+    setCategory('');
+    setSubcategory('');
+    setLineItemCode('');
+    setQuantity('');
+    setTenantPct(DEFAULT_TENANT_PCT);
+    setVendor(DEFAULT_VENDOR);
+    setCustomVendorCost('');
+    setCustomDescription('');
+    setEditTiming(props.resolutionTiming || 'now');
+    setTimingChosen(mobile ? true : initialHasTiming);
+    setTimingPrompt(false);
+    descTouchedRef.current = false;
+    tenantTouchedRef.current = false;
+  }
+
   // -------------------------------------------------------------------
   // Save / cancel
   // -------------------------------------------------------------------
-  const isComplete = !!selectedItem && validQuantity && vendor.length > 0;
+  // Desktop-only: an Internal Resolution line must have an explicit Now/Later
+  // decision before it's complete. Mobile keeps the default-on behavior.
+  const irNeedsTiming = !mobile && isInternalResolution(vendor) && !timingChosen;
+  // Required catalog fields, independent of the timing gate. Used by the global
+  // commit-all (which bypasses the timing requirement).
+  const baseComplete = !!selectedItem && validQuantity && vendor.length > 0;
+  const isComplete = baseComplete && !irNeedsTiming;
 
-  function trySave() {
-    if (!isComplete || !selectedItem) {
+  function trySave(force = false) {
+    // Block leaving an Internal Resolution line until Now/Later is picked.
+    // `force` (the global commit-all on Save & Close / Submit) bypasses this so
+    // a global save is never silently blocked — it commits with the current
+    // timing (defaults to "now").
+    if (!force && irNeedsTiming) {
+      setTimingPrompt(true);
+      return;
+    }
+    if (!baseComplete || !selectedItem) {
       // For a new row that never got filled out, discard it.
       if (!line && onDiscardNew) onDiscardNew();
       setIsEditing(false);
@@ -533,6 +589,8 @@ export function EditableLineRow(props: Props) {
     setTenantPct(line?.tenantBillBackPercent ?? DEFAULT_TENANT_PCT);
     setVendor(line?.assignedTo || DEFAULT_VENDOR);
     setEditTiming(props.resolutionTiming || 'now');
+    setTimingChosen(mobile ? true : initialHasTiming);
+    setTimingPrompt(false);
     setCustomVendorCost(line?.customVendorCost != null ? String(line.customVendorCost) : '');
     setCustomDescription(line?.customLaborFullDescription || '');
     // Keep the description-reset effect from wiping the restored override.
@@ -595,7 +653,10 @@ export function EditableLineRow(props: Props) {
     // the autosave flushes to HubSpot. Without this, the user can click
     // "Save & Close" mid-edit and lose what they just typed.
     function handleCommitAll() {
-      trySave();
+      // Global save (Save & Close / Submit): commit even if the Internal
+      // Resolution timing wasn't explicitly picked (falls back to "now") so a
+      // top-level save is never silently blocked by an open row.
+      trySave(true);
     }
     document.addEventListener('mousedown', handleMouseDown);
     document.addEventListener('keydown', handleKeyDown);
@@ -606,7 +667,7 @@ export function EditableLineRow(props: Props) {
       window.removeEventListener('ratecard:commit-all', handleCommitAll as EventListener);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing, mobile, isComplete, selectedItem, quantityNum, tenantPct, vendor, customVendorCost, lineItemCode, category, subcategory]);
+  }, [isEditing, mobile, isComplete, selectedItem, quantityNum, tenantPct, vendor, customVendorCost, lineItemCode, category, subcategory, timingChosen, editTiming]);
 
   // -------------------------------------------------------------------
   // Render — VIEW mode
@@ -790,7 +851,7 @@ export function EditableLineRow(props: Props) {
                   <ListPicker
                     value={vendor}
                     options={VENDORS.map((v) => ({ value: v, label: v }))}
-                    onChange={setVendor}
+                    onChange={handleVendorChange}
                     ariaLabel="Vendor"
                     className={TRIGGER_CLS}
                   />
@@ -911,17 +972,33 @@ export function EditableLineRow(props: Props) {
   return (
     <>
     <tr ref={rowRef} className="border-b border-brand/30 bg-brand/5">
-      {/* Cat */}
-      <td className="px-2 py-1.5 align-middle min-w-[110px]">
-        <select
-          value={category}
-          onChange={(e) => handleCategoryChange(e.target.value)}
-          className="h-9 w-full border border-gray-300 rounded px-2 text-sm bg-white"
-          autoFocus
-        >
-          <option value="">—</option>
-          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
+      {/* Cat — with an eraser button to the left that clears the whole line */}
+      <td className="px-2 py-1.5 align-middle min-w-[140px]">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}  // don't blur/commit the row
+            onClick={(e) => { e.stopPropagation(); clearLine(); }}
+            className="shrink-0 h-9 w-7 rounded flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 border border-gray-200"
+            title="Clear this line (wipe all fields)"
+            aria-label="Clear line"
+          >
+            {/* eraser icon */}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M7 21h13" />
+              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L9 17l-4 1 1-4Z" />
+            </svg>
+          </button>
+          <select
+            value={category}
+            onChange={(e) => handleCategoryChange(e.target.value)}
+            className="h-9 w-full border border-gray-300 rounded px-2 text-sm bg-white"
+            autoFocus
+          >
+            <option value="">—</option>
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
       </td>
       {/* Sub */}
       <td className="px-2 py-1.5 align-middle min-w-[120px]">
@@ -976,16 +1053,47 @@ export function EditableLineRow(props: Props) {
       <td className="px-2 py-1.5 text-center text-sm text-gray-700 align-middle">
         {selectedItem?.laborMeas || '—'}
       </td>
-      {/* Vendor */}
-      <td className="px-2 py-1.5 align-middle min-w-[100px] max-w-[130px]">
+      {/* Vendor — Internal Resolution reveals a REQUIRED Now/Later choice below
+          the dropdown that must be picked before the row can be saved or left. */}
+      <td className="px-2 py-1.5 align-top min-w-[120px] max-w-[150px]">
         <select
           value={vendor}
-          onChange={(e) => setVendor(e.target.value)}
+          onChange={(e) => handleVendorChange(e.target.value)}
           className="h-9 w-full border border-gray-300 rounded px-1 text-xs bg-white"
           title={vendor}
         >
           {VENDORS.map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
+        {isInternalResolution(vendor) && (
+          <div className="mt-1.5">
+            <div className={`text-[9px] uppercase tracking-wide font-bold mb-1 ${timingPrompt && !timingChosen ? 'text-red-600' : 'text-gray-500'}`}>
+              Resolution <span className="text-brand">*</span>
+            </div>
+            <div className="grid grid-cols-1 gap-1">
+              {(['now', 'later'] as const).map((v) => {
+                const selected = timingChosen && editTiming === v;
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}  // don't commit the row
+                    onClick={(e) => { e.stopPropagation(); setEditTiming(v); setTimingChosen(true); setTimingPrompt(false); }}
+                    className={`h-7 rounded text-[11px] font-heading font-semibold border leading-none px-1 ${
+                      selected
+                        ? 'bg-brand text-white border-brand'
+                        : `bg-white text-gray-700 ${timingPrompt && !timingChosen ? 'border-red-400' : 'border-gray-300'}`
+                    }`}
+                  >
+                    {v === 'now' ? 'Complete Now' : 'Complete Later'}
+                  </button>
+                );
+              })}
+            </div>
+            {timingPrompt && !timingChosen && (
+              <div className="text-[10px] text-red-600 mt-1 leading-tight">Pick Now or Later to continue.</div>
+            )}
+          </div>
+        )}
       </td>
       {/* Vendor $ — override input */}
       <td className="px-2 py-1.5 align-middle">
@@ -1047,7 +1155,7 @@ export function EditableLineRow(props: Props) {
                 ? 'bg-emerald-600 text-white hover:bg-emerald-700'
                 : 'bg-gray-200 text-gray-400 cursor-not-allowed'
             }`}
-            title={isComplete ? 'Save line (Enter)' : 'Fill in Category, Line Item, Qty, and Vendor first'}
+            title={isComplete ? 'Save line (Enter)' : (irNeedsTiming ? 'Pick Complete Now or Complete Later first' : 'Fill in Category, Line Item, Qty, and Vendor first')}
             aria-label="Save line"
           >
             ✓
