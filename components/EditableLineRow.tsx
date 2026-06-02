@@ -1243,23 +1243,44 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
   // existing strict behavior (after-photos required) until switched to "later".
   const timing: 'now' | 'later' = resolutionTiming || 'now';
   const afterRequired = timing !== 'later';
+  const timingButtons = (['now', 'later'] as const).map((v) => (
+    <button
+      key={v}
+      type="button"
+      disabled={readOnly}
+      onClick={(e) => { e.stopPropagation(); onSetResolutionTiming?.(line.externalId, v); }}
+      className={`h-7 rounded-md border text-[11px] text-center leading-none font-heading font-semibold ${timing === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}
+    >
+      {v === 'now' ? 'Now' : 'Later'}
+    </button>
+  ));
+  const completeLabel = <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500">Complete: <span className="text-brand">*</span></span>;
   const resolutionToggle = showIrPhotos ? (
-    <div className="mt-2 w-full" onClick={(e) => e.stopPropagation()}>
-      <div className="text-[11px] font-bold uppercase tracking-wide text-gray-500 mb-1">Complete: <span className="text-brand">*</span></div>
-      <div className="grid grid-cols-2 gap-1.5 w-full max-w-[160px] select-none">
-        {(['now', 'later'] as const).map((v) => (
-          <button
-            key={v}
-            type="button"
-            disabled={readOnly}
-            onClick={(e) => { e.stopPropagation(); onSetResolutionTiming?.(line.externalId, v); }}
-            className={`h-7 rounded-md border text-[11px] text-center leading-none font-heading font-semibold ${timing === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}
-          >
-            {v === 'now' ? 'Now' : 'Later'}
-          </button>
-        ))}
+    mobile ? (
+      // Mobile: label on its own line, buttons stacked below.
+      <div className="mt-2 w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-1">{completeLabel}</div>
+        <div className="grid grid-cols-2 gap-1.5 w-full max-w-[160px] select-none">{timingButtons}</div>
       </div>
-    </div>
+    ) : (
+      // Desktop: COMPLETE: Now Later all on one line.
+      <div className="mt-1.5 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        <span className="shrink-0">{completeLabel}</span>
+        <div className="flex gap-1.5 select-none">
+          {(['now', 'later'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              disabled={readOnly}
+              onClick={(e) => { e.stopPropagation(); onSetResolutionTiming?.(line.externalId, v); }}
+              className={`h-7 w-14 rounded-md border text-[11px] text-center leading-none font-heading font-semibold ${timing === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}
+            >
+              {v === 'now' ? 'Now' : 'Later'}
+            </button>
+          ))}
+        </div>
+      </div>
+    )
   ) : null;
 
   function startEditDesc(e: React.MouseEvent) {
@@ -1491,6 +1512,8 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
         )}
         {line.note && <div className="text-xs italic text-gray-600 mt-1">📝 {line.note}</div>}
         {calc?.isCustomPriced && <div className="text-xs font-semibold text-yellow-700 mt-1">⚡ Custom Priced</div>}
+        {/* Internal Resolution: COMPLETE: Now/Later directly under the subtext. */}
+        {resolutionToggle}
         {/* Internal Resolution: tagged section photos = BEFORE photos; the After
             Photos panel (in-app camera) renders below the strip. */}
         {showIrPhotos && (line.photoUrls?.length ?? 0) > 0 && (
@@ -1532,18 +1555,13 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
       </td>
       <td className="px-3 py-2 text-center text-sm text-gray-900 whitespace-nowrap">{line.quantity}</td>
       <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{item.laborMeas}</td>
-      {/* Vendor — with the Complete: Now/Later toggle directly beneath the
-          Internal Resolution pill (same spot the selection was made). */}
-      <td className="px-3 py-2 text-center align-middle">
-        <div className="inline-flex flex-col items-center gap-1">
-          <span
-            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold max-w-[140px] truncate ${pill.bg} ${pill.text} ${pill.border || ''}`}
-            title={line.assignedTo}
-          >
-            {line.assignedTo}
-          </span>
-          {resolutionToggle}
-        </div>
+      <td className="px-3 py-2 text-center align-middle whitespace-nowrap">
+        <span
+          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold max-w-[140px] truncate ${pill.bg} ${pill.text} ${pill.border || ''}`}
+          title={line.assignedTo}
+        >
+          {line.assignedTo}
+        </span>
       </td>
       <td className="px-3 py-2 text-right text-sm text-gray-900 whitespace-nowrap">
         {calc ? `$${formatMoney(roundMoney(calc.vendorCost))}` : '…'}
