@@ -14,6 +14,7 @@ import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { RoomScanModal } from '@/components/RoomScanModal';
+import { LiveRoomScan } from '@/components/LiveRoomScan';
 import { isInternalResolution } from '@/lib/vendors';
 import { AiReviewModal } from '@/components/AiReviewModal';
 import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, saveReviewCache, loadReviewCache, clearReviewCache, type AiAdjustment } from '@/lib/aiReview';
@@ -246,8 +247,10 @@ export function RateCardForm(props: RateCardFormProps) {
 
   // Camera modal (for in-app capture). When non-null, captures append to this section.
   const [cameraSectionId, setCameraSectionId] = useState<string | null>(null);
-  // AI Room Scan (Beta) modal — when non-null, the scan flow targets this section.
+  // AI Room Scan (Beta) record-video modal — when non-null, targets this section.
   const [roomScanSectionId, setRoomScanSectionId] = useState<string | null>(null);
+  // Live in-camera scan (Phase 3) — when non-null, the live scan targets this section.
+  const [liveScanSectionId, setLiveScanSectionId] = useState<string | null>(null);
   // ----- AI scope review -----
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -2857,10 +2860,10 @@ export function RateCardForm(props: RateCardFormProps) {
                               line items + pulls photos into the room. */}
                           <button
                             type="button"
-                            onClick={() => setRoomScanSectionId(s.id)}
+                            onClick={() => setLiveScanSectionId(s.id)}
                             disabled={isUploadingHere}
                             className="inline-flex items-center gap-1 text-xs bg-violet-600 text-white font-semibold py-1 px-2.5 rounded hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                            title="AI Room Scan (Beta) — record the room, AI suggests line items"
+                            title="AI Room Scan (Beta) — live camera; AI suggests line items as you pan"
                           >
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" />
@@ -3110,6 +3113,35 @@ export function RateCardForm(props: RateCardFormProps) {
         />
       )}
 
+      {/* Live in-camera scan (Phase 3): AI call-outs as the inspector pans the
+          room; stamped stills satisfy the photo requirement. */}
+      {liveScanSectionId !== null && (() => {
+        const s = sections.find((x) => x.id === liveScanSectionId);
+        if (!s) return null;
+        const mergeFrames = (urls: string[]) => {
+          const real = urls.filter((u) => !u.startsWith('blob:'));
+          if (real.length === 0) return;
+          const base = photosBySectionRef.current[s.id] || [];
+          const next = Array.from(new Set([...base, ...real]));
+          setPhotosBySection((m) => ({ ...m, [s.id]: next }));
+          void savePhotosForSection(s.id, next);
+        };
+        return (
+          <LiveRoomScan
+            sectionLabel={s.label}
+            sectionDisplayName={s.displayName || s.label}
+            location={s.location}
+            tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
+            addressSnapshot={props.propertyName}
+            propertyRecordId={props.propertyRecordId}
+            onClose={() => setLiveScanSectionId(null)}
+            onAddLine={(line) => { const p = handleSaveLineForSection(s.id, line); revealSection(s.id, line.externalId); return p; }}
+            onFramesCaptured={mergeFrames}
+            onFallbackToRecord={() => { setLiveScanSectionId(null); setRoomScanSectionId(s.id); }}
+          />
+        );
+      })()}
+
       {/* AI Room Scan (Beta): record a room video → AI line-item suggestions +
           stamped stills that satisfy the room photo requirement. */}
       {roomScanSectionId !== null && (() => {
@@ -3203,7 +3235,8 @@ export function RateCardForm(props: RateCardFormProps) {
           || aiModalOpen          // AI review popup
           || aiCameraTarget !== null // AI review's in-app camera
           || afterCameraTarget !== null // Internal Resolution after-photo camera
-          || roomScanSectionId !== null; // AI Room Scan (Beta) modal
+          || roomScanSectionId !== null // AI Room Scan (Beta) record modal
+          || liveScanSectionId !== null; // Live in-camera scan (Phase 3)
         const hidden = overlayOpen && !voiceEngaged;
         return (
           <div
