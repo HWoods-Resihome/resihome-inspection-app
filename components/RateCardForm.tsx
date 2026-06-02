@@ -2578,7 +2578,11 @@ export function RateCardForm(props: RateCardFormProps) {
 
       <div id="sticky-totals-header" className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
         <div className="sm:flex sm:items-center sm:justify-between sm:gap-4">
-          <div className="text-center sm:text-left mb-2 sm:mb-0 min-w-0">
+          <div className="flex items-center justify-center sm:justify-start gap-2 mb-2 sm:mb-0 min-w-0">
+            {/* ResiWALK house mark — top-left brand badge on the inspection. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/house-mark.svg" alt="ResiWALK" className="h-7 w-7 shrink-0" />
+            <div className="text-center sm:text-left min-w-0">
             <div className="text-sm font-semibold text-gray-800 truncate">{props.propertyName}</div>
             <div className="text-[11px] text-gray-500 truncate">
               {props.bedrooms} bed / {props.bathrooms} bath
@@ -2607,11 +2611,9 @@ export function RateCardForm(props: RateCardFormProps) {
             <div className="text-[11px] text-gray-500 truncate">
               Internal Resolution: ${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
+            </div>
           </div>
-          <div className="flex items-center justify-center sm:justify-end shrink-0 gap-2">
-            {/* ResiWALK house mark — top-right brand badge on the inspection. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/house-mark.svg" alt="ResiWALK" className="h-7 w-7 shrink-0" />
+          <div className="flex justify-center sm:justify-end shrink-0">
             <button
               type="button"
               onClick={() => setOverviewExpanded((v) => !v)}
