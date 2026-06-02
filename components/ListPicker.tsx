@@ -83,11 +83,11 @@ function ListSheet({
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
-        className={`relative ${large ? 'w-96 max-w-[94vw] max-h-[82vh]' : 'w-72 max-w-[88vw] max-h-[70vh]'} bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden`}
+        className={`relative ${large ? 'w-80 max-w-[92vw] max-h-[82vh]' : 'w-72 max-w-[88vw] max-h-[70vh]'} bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 shrink-0">
-          <span className={`font-heading font-semibold text-ink ${large ? 'text-base' : 'text-sm'}`}>{ariaLabel}</span>
+          <span className="font-heading font-semibold text-ink text-sm">{ariaLabel}</span>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl leading-none w-7 h-7 flex items-center justify-center" aria-label="Close">×</button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto py-1">
@@ -101,7 +101,7 @@ function ListSheet({
                 ref={o.value === value ? selectedRef : undefined}
                 type="button"
                 onClick={() => choose(o.value)}
-                className={`w-full text-left flex items-center justify-between gap-2 transition-colors ${large ? 'px-5 py-4 text-lg' : 'px-4 py-3 text-base'} ${
+                className={`w-full text-left flex items-center justify-between gap-2 transition-colors px-4 py-3 text-base ${
                   isActive
                     ? 'bg-brand/10 border-y-2 border-brand text-ink font-semibold'
                     : 'text-ink border-y-2 border-transparent hover:bg-gray-50 active:bg-brand/10'

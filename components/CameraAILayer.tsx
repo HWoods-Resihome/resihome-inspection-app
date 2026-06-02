@@ -190,6 +190,11 @@ export function CameraAILayer(props: Props) {
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [scanning, setScanning] = useState(false);
+  // "Working" lingers ~1.4s past the last transcribe/inference so the status
+  // doesn't flicker back to "Listening" in the gaps between clips — it reads as
+  // one continuous "Processing…" until the work actually settles.
+  const [working, setWorking] = useState(false);
+  const workTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [heardText, setHeardText] = useState('');
   const [errText, setErrText] = useState('');
   const [chips, setChips] = useState<LiveSuggestion[]>([]);
@@ -211,20 +216,32 @@ export function CameraAILayer(props: Props) {
 
   useEffect(() => { chipsRef.current = chips; }, [chips]);
 
+  // Hold "working" true while transcribing/scanning, and for a short linger after,
+  // so brief gaps between clips don't bounce the status back to "Listening".
+  useEffect(() => {
+    if (scanning || transcribing) {
+      if (workTimer.current) { clearTimeout(workTimer.current); workTimer.current = null; }
+      setWorking(true);
+    } else {
+      if (workTimer.current) clearTimeout(workTimer.current);
+      workTimer.current = setTimeout(() => { setWorking(false); workTimer.current = null; }, 1400);
+    }
+  }, [scanning, transcribing]);
+
   // Derive a single status line + tone and report it up to the host camera,
   // which renders it in its black header strip (not floating over the image).
   useEffect(() => {
     if (!enabled) return;
     let text: string; let tone: 'idle' | 'listen' | 'heard' | 'think' | 'err';
-    // Single forward flow: Listening → Processing → (output card / message).
-    // No flip-flop between "Thinking" and the raw transcript.
+    // Single forward flow that only moves forward: Listening → Processing →
+    // (output card / message). "working" lingers so it never flickers backward.
     if (errText) { text = errText; tone = 'err'; }
-    else if (scanning || transcribing) { text = 'Processing…'; tone = 'think'; }
+    else if (working) { text = 'Processing…'; tone = 'think'; }
     else if (heardText) { text = heardText; tone = 'heard'; }
     else if (listening) { text = 'Listening — say what you see'; tone = 'listen'; }
     else { text = 'Starting mic…'; tone = 'idle'; }
     onStatus?.({ text, tone });
-  }, [enabled, errText, scanning, transcribing, heardText, listening, onStatus]);
+  }, [enabled, errText, working, heardText, listening, onStatus]);
 
   function seenFor(roomId: string) {
     if (!seenByRoomRef.current[roomId]) seenByRoomRef.current[roomId] = { codes: new Set(), descs: new Set() };
@@ -253,6 +270,7 @@ export function CameraAILayer(props: Props) {
       if (stillTimer.current) clearInterval(stillTimer.current);
       if (savedTimer.current) clearTimeout(savedTimer.current);
       if (addedTimer.current) clearTimeout(addedTimer.current);
+      if (workTimer.current) clearTimeout(workTimer.current);
       stopAudioLoop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -795,7 +813,7 @@ export function CameraAILayer(props: Props) {
           const e = editOf(s);
           const addDisabled = s.needsMeasurement && !(Number(e.qty) > 0);
           return (
-          <div key={s.id} className="pointer-events-auto bg-white/97 backdrop-blur rounded-xl p-3 shadow-lg">
+          <div key={s.id} className="pointer-events-auto bg-white rounded-xl p-3 shadow-xl ring-1 ring-black/5">
             <div className="flex items-start gap-2">
               {s.stillUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -806,7 +824,7 @@ export function CameraAILayer(props: Props) {
                   <span className={`w-2 h-2 rounded-full shrink-0 ${confColor(s.confidence)}`} />
                   <span className="text-sm font-semibold text-ink leading-tight">{s.description}</span>
                 </div>
-                <div className="text-[11px] text-gray-500">{s.category}{s.subcategory ? ` · ${s.subcategory}` : ''}</div>
+                <div className="text-[11px] text-gray-600">{s.category}{s.subcategory ? ` · ${s.subcategory}` : ''}</div>
               </div>
             </div>
 

@@ -16,7 +16,6 @@ interface Props {
 }
 
 const ITEM_H = 44;          // px per row (comfortable touch target)
-const ITEM_H_LG = 60;       // larger touch target for the big (camera) variant
 
 /**
  * A wheel/spinner selector (like the iOS picker). The closed state looks like a
@@ -66,23 +65,28 @@ function WheelSheet({
   onClose: () => void;
   onPick: (value: string) => void;
 }) {
-  const itemH = large ? ITEM_H_LG : ITEM_H;
+  const itemH = ITEM_H;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pendingIdx, setPendingIdx] = useState(() => {
     const i = options.findIndex((o) => o.value === value);
     return i >= 0 ? i : 0;
   });
-  // Size the wheel to a share of the viewport: pick an ODD number of visible rows
-  // (so one is centered) that fills that height. The large variant fills more.
+  // Number of visible rows (ODD so one is centered). The large variant shows a
+  // fixed 5 so the inspector sees several options at once; the default sizes to
+  // the viewport.
   const [rows, setRows] = useState(5);
   useEffect(() => {
+    if (large) { setRows(5); return; }
     if (typeof window === 'undefined') return;
-    let r = Math.round((window.innerHeight * (large ? 0.55 : 0.4)) / itemH);
+    let r = Math.round((window.innerHeight * 0.4) / itemH);
     if (r % 2 === 0) r -= 1;             // keep it odd
-    setRows(Math.max(5, Math.min(large ? 9 : 11, r)));
+    setRows(Math.max(5, Math.min(11, r)));
   }, [large, itemH]);
   const PAD = ((rows - 1) / 2) * itemH;
   const containerH = rows * itemH;
+  // Default wheel fades non-center rows heavily; large keeps the fade tiny so all
+  // ~5 rows stay clearly readable (the whole point of the bigger picker).
+  const fadeH = large ? Math.round(itemH * 0.4) : PAD;
   const settleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Position the wheel on the current value when it opens (re-run if the row
@@ -114,13 +118,13 @@ function WheelSheet({
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
-        className={`relative ${large ? 'w-96 max-w-[94vw]' : 'w-72 max-w-[88vw]'} bg-white rounded-2xl shadow-xl p-3`}
+        className={`relative ${large ? 'w-80 max-w-[92vw]' : 'w-72 max-w-[88vw]'} bg-white rounded-2xl shadow-2xl p-3`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-1">
-          <button type="button" onClick={onClose} className={`font-heading text-gray-500 hover:text-gray-700 px-1 ${large ? 'text-base' : 'text-sm'}`}>Cancel</button>
-          {ariaLabel && <span className={`font-heading font-semibold text-ink ${large ? 'text-base' : 'text-sm'}`}>{ariaLabel}</span>}
-          <button type="button" onClick={() => onPick(options[pendingIdx].value)} className={`font-heading font-bold text-brand px-1 ${large ? 'text-base' : 'text-sm'}`}>Done</button>
+          <button type="button" onClick={onClose} className="font-heading text-gray-500 hover:text-gray-700 px-1 text-sm">Cancel</button>
+          {ariaLabel && <span className="font-heading font-semibold text-ink text-sm">{ariaLabel}</span>}
+          <button type="button" onClick={() => onPick(options[pendingIdx].value)} className="font-heading font-bold text-brand px-1 text-sm">Done</button>
         </div>
         <div className="relative" style={{ height: containerH }}>
           {/* Center selection band. */}
@@ -129,8 +133,8 @@ function WheelSheet({
             style={{ top: PAD, height: itemH }}
           />
           {/* Soft fade at top/bottom for the "wheel" feel. */}
-          <div className="absolute inset-x-0 top-0 pointer-events-none bg-gradient-to-b from-white to-transparent" style={{ height: PAD }} />
-          <div className="absolute inset-x-0 bottom-0 pointer-events-none bg-gradient-to-t from-white to-transparent" style={{ height: PAD }} />
+          <div className="absolute inset-x-0 top-0 pointer-events-none bg-gradient-to-b from-white to-transparent" style={{ height: fadeH }} />
+          <div className="absolute inset-x-0 bottom-0 pointer-events-none bg-gradient-to-t from-white to-transparent" style={{ height: fadeH }} />
           <div
             ref={scrollRef}
             onScroll={handleScroll}
@@ -144,7 +148,7 @@ function WheelSheet({
                 // Tap a non-centered row to spin it to the middle; tap the row
                 // that's already centered to confirm (Done).
                 onClick={() => { if (i === pendingIdx) onPick(o.value); else pickIndex(i); }}
-                className={`flex items-center justify-center text-center px-3 leading-tight cursor-pointer select-none transition-colors ${i === pendingIdx ? `text-ink font-bold ${large ? 'text-2xl' : 'text-lg'}` : `text-gray-500 ${large ? 'text-xl' : 'text-base'}`}`}
+                className={`flex items-center justify-center text-center px-3 leading-tight cursor-pointer select-none transition-colors ${i === pendingIdx ? 'text-ink font-bold text-lg' : 'text-gray-500 text-base'}`}
                 style={{ height: itemH, scrollSnapAlign: 'center' }}
               >
                 {o.label}
