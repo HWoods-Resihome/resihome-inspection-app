@@ -1244,24 +1244,22 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
   const timing: 'now' | 'later' = resolutionTiming || 'now';
   const afterRequired = timing !== 'later';
   const resolutionToggle = showIrPhotos ? (
-    <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-center gap-2">
-        <span className="text-[11px] font-bold text-gray-600 shrink-0">Complete: <span className="text-brand">*</span></span>
-        <div className="grid grid-cols-2 gap-1 flex-1 max-w-[200px] select-none">
-          {(['now', 'later'] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              disabled={readOnly}
-              onClick={(e) => { e.stopPropagation(); onSetResolutionTiming?.(line.externalId, v); }}
-              className={`h-7 rounded-md border text-[11px] text-center leading-none font-heading font-semibold ${timing === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}
-            >
-              {v === 'now' ? 'Now' : 'Later'}
-            </button>
-          ))}
-        </div>
+    <div className="mt-2 w-full" onClick={(e) => e.stopPropagation()}>
+      <div className="text-[11px] font-bold text-gray-600 mb-1">Complete: <span className="text-brand">*</span></div>
+      <div className="grid grid-cols-2 gap-2 w-full max-w-[260px] select-none">
+        {(['now', 'later'] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            disabled={readOnly}
+            onClick={(e) => { e.stopPropagation(); onSetResolutionTiming?.(line.externalId, v); }}
+            className={`h-9 rounded-md border text-xs text-center leading-none font-heading font-semibold ${timing === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}
+          >
+            {v === 'now' ? 'Now' : 'Later'}
+          </button>
+        ))}
       </div>
-      {timing === 'later' && <div className="text-[11px] text-gray-500 mt-1">Marked to complete later — after photos optional for now.</div>}
+      {timing === 'later' && <div className="text-[11px] text-gray-500 mt-1">After Photos Optional</div>}
     </div>
   ) : null;
 
