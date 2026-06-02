@@ -14,7 +14,6 @@ type StatusFilter = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | '
 export default function Home() {
   const dialog = useAppDialog();
   const router = useRouter();
-  const [hasLogo, setHasLogo] = useState(false);
   const [me, setMe] = useState<MeUser | null>(null);
 
   const [inspections, setInspections] = useState<InspectionSummary[]>([]);
@@ -36,13 +35,6 @@ export default function Home() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [cancelBusy, setCancelBusy] = useState(false);
-
-  useEffect(() => {
-    const img = new window.Image();
-    img.onload = () => setHasLogo(true);
-    img.onerror = () => setHasLogo(false);
-    img.src = '/logo.png';
-  }, []);
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -326,21 +318,17 @@ export default function Home() {
           <div className="max-w-3xl mx-auto px-4 pt-4 pb-5">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div className="flex items-center gap-3 min-w-0">
-                {hasLogo ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src="/logo.png"
-                    alt="ResiHome"
-                    className="h-10 w-10 object-contain rounded-lg bg-white p-1 shadow"
-                  />
-                ) : (
-                  <div className="h-10 w-10 flex items-center justify-center bg-white text-brand rounded-lg font-heading font-extrabold">
-                    RH
-                  </div>
-                )}
+                {/* ResiWALK lockup on a white pill so the full-color logo reads
+                    on the pink header. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/resiwalk-logo.svg"
+                  alt="ResiWALK"
+                  className="h-9 w-auto bg-white rounded-lg px-2.5 py-1 shadow shrink-0"
+                />
                 <div className="min-w-0">
                   <h1 className="font-heading font-extrabold text-lg tracking-tight">
-                    ResiHome Inspections
+                    Field Inspections
                   </h1>
                   {me && (
                     <div className="text-xs text-white/80 truncate">Welcome, {me.name}</div>

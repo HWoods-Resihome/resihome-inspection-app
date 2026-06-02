@@ -1,6 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
-  <!-- ResiWALK browser-tab mark: pink house on a transparent background.
-       Matches public/house-mark.svg (the inspection-page corner badge). -->
+  <!-- ResiWALK house mark: brand-pink silhouette, transparent background.
+       Peaked roof with a stepped block on the upper right (echoes the logo's
+       square), and a door cut out via fill-rule="evenodd" so it reads at any
+       size (favicon + the inspection page corner badge). -->
   <path fill="#ff0060" fill-rule="evenodd" d="
     M12 60
     L60 16

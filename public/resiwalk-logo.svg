@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 170" role="img" aria-label="ResiWALK">
+  <defs>
+    <linearGradient id="rwLine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff0060"/>
+      <stop offset="0.7" stop-color="#ff0060"/>
+      <stop offset="1" stop-color="#ff0060" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- House mark -->
+  <g transform="translate(6,20) scale(1.15)">
+    <path fill="#ff0060" fill-rule="evenodd" d="
+      M12 60 L60 16 L84 38 L84 26 L98 26 L98 51 L108 60 L96 60 L96 104 L24 104 L24 60 Z
+      M48 104 L48 72 L72 72 L72 104 Z
+    "/>
+  </g>
+
+  <!-- Footprint (angled shoe sole) overlapping the house base-right -->
+  <g transform="rotate(-15 150 115)" fill="#ff0060">
+    <rect x="132" y="74" width="40" height="52" rx="20"/>
+    <rect x="139" y="112" width="26" height="34" rx="13"/>
+  </g>
+
+  <!-- Wordmark: RESI (ink) + WALK (brand pink) -->
+  <text x="206" y="120" font-family="Arial, 'Helvetica Neue', Helvetica, sans-serif"
+        font-weight="900" font-size="78" letter-spacing="1">
+    <tspan fill="#111111">RESI</tspan><tspan fill="#ff0060">WALK</tspan>
+  </text>
+  <text x="600" y="66" font-family="Arial, sans-serif" font-weight="700" font-size="18" fill="#ff0060">TM</text>
+
+  <!-- Fading underline (the "walk" path) -->
+  <rect x="150" y="138" width="460" height="5" rx="2.5" fill="url(#rwLine)"/>
+</svg>

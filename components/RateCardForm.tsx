@@ -2608,7 +2608,10 @@ export function RateCardForm(props: RateCardFormProps) {
               Internal Resolution: ${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
           </div>
-          <div className="flex justify-center sm:justify-end shrink-0">
+          <div className="flex items-center justify-center sm:justify-end shrink-0 gap-2">
+            {/* ResiWALK house mark — top-right brand badge on the inspection. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/house-mark.svg" alt="ResiWALK" className="h-7 w-7 shrink-0" />
             <button
               type="button"
               onClick={() => setOverviewExpanded((v) => !v)}

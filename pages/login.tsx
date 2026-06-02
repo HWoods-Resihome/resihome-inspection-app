@@ -73,9 +73,9 @@ export default function LoginPage() {
           <div className="flex flex-col items-center mb-8">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/resiwalk-logo.png"
+              src="/resiwalk-logo.svg"
               alt="ResiWALK"
-              className="w-full max-w-[280px] object-contain mb-2"
+              className="w-full max-w-[300px] object-contain mb-2"
             />
             <p className="text-sm text-gray-500 font-heading uppercase tracking-widest">
               Field Inspections
