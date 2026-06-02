@@ -74,6 +74,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const id = String(req.query.id || '');
   if (!id) return res.status(400).json({ error: 'Missing inspection id' });
 
+  // Self-approval lockout: the person who submitted an inspection for approval
+  // can't finalize it themselves for SELF_APPROVAL_LOCK_MS — a second reviewer
+  // must approve (or they wait it out). Any OTHER user can finalize immediately.
+  // Best-effort/fails-open: if the tracking properties don't exist or can't be
+  // read, finalize proceeds as normal.
+  const SELF_APPROVAL_LOCK_MS = 5 * 60 * 1000;
+  try {
+    const guard = await readInspectionProps(id, ['submitted_by_email', 'submitted_at']);
+    const submitter = String(guard?.submitted_by_email || '').trim().toLowerCase();
+    const submittedMs = guard?.submitted_at ? (Date.parse(String(guard.submitted_at)) || 0) : 0;
+    if (submitter && submitter === session.email.trim().toLowerCase() && submittedMs) {
+      const elapsed = Date.now() - submittedMs;
+      if (elapsed >= 0 && elapsed < SELF_APPROVAL_LOCK_MS) {
+        const mins = Math.ceil((SELF_APPROVAL_LOCK_MS - elapsed) / 60000);
+        return res.status(423).json({
+          error: `You submitted this inspection for approval, so it needs a second reviewer. Another user can approve it now, or you can finalize it yourself in about ${mins} minute${mins === 1 ? '' : 's'}.`,
+          selfApprovalLocked: true,
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('[finalize] self-approval lockout check skipped:', e);
+  }
+
   const lockNow = Date.now();
   const localStartedAt = inFlightFinalize.get(id);
   if (localStartedAt && lockNow - localStartedAt < FINALIZE_LOCK_MS) {

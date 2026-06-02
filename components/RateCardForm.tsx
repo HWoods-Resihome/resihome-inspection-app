@@ -91,6 +91,12 @@ interface RateCardFormProps {
 // and QuestionForm both stay in sync. PHOTO_EXEMPT is derived per-section via
 // the SectionInstance.photoOptional flag.
 
+// "Whole House" is a catch-all/miscellaneous bucket, not a real room — never
+// require a section photo for it (in addition to the per-section photoOptional).
+function sectionPhotoExempt(name: string): boolean {
+  return /\bwhole\s*house\b/i.test((name || '').trim());
+}
+
 export function RateCardForm(props: RateCardFormProps) {
   const dialog = useAppDialog();
   // Sections are now stateful — they may be customized (renamed, deleted,
@@ -2280,7 +2286,7 @@ export function RateCardForm(props: RateCardFormProps) {
     const missingSections: string[] = [];
     for (const s of sections) {
       const photos = photosBySection[s.id] || [];
-      const required = !s.photoOptional;
+      const required = !s.photoOptional && !sectionPhotoExempt(s.displayName || s.label);
       if (required && photos.length === 0) missingSections.push(s.displayName);
     }
     if (missingSections.length > 0) {
@@ -2381,13 +2387,19 @@ export function RateCardForm(props: RateCardFormProps) {
           body: JSON.stringify({}),
         });
         if (!r.ok) {
-          const text = await r.text();
-          throw new Error(`HTTP ${r.status}: ${text.slice(0, 300)}`);
+          // Surface the server's clean message (e.g. the self-approval lockout)
+          // rather than a raw HTTP body.
+          let msg = `HTTP ${r.status}`;
+          try { const j = await r.json(); if (j?.error) msg = j.error; } catch { /* non-JSON */ }
+          const err: any = new Error(msg); err.status = r.status;
+          throw err;
         }
         const data = await r.json();
         setFinalizeResult(data as FinalizeResult);
       } catch (e: any) {
-        await dialog.alert(`Finalize failed: ${e?.message || e}\n\nThe inspection status was NOT changed. You can try again.`);
+        // The self-approval lockout (423) is an expected workflow state, not a failure.
+        if (e?.status === 423) await dialog.alert(e.message);
+        else await dialog.alert(`Finalize failed: ${e?.message || e}\n\nThe inspection status was NOT changed. You can try again.`);
       } finally {
         setFinalizing(false);
       }
@@ -2818,7 +2830,7 @@ export function RateCardForm(props: RateCardFormProps) {
           const isOpen = userChoice === undefined ? hasContent : userChoice;
           const heading = s.displayName;
           const t = sectionTotals[s.id] || { count: 0, vendor: 0, client: 0, tenant: 0 };
-          const photosRequired = !s.photoOptional;
+          const photosRequired = !s.photoOptional && !sectionPhotoExempt(heading || s.label);
           const photosMissing = photosRequired && photos.length === 0;
           const isUploadingHere = uploadingSection?.sectionId === s.id;
           return (
@@ -2992,7 +3004,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               afterPhotosEnabled={afterPhotosEnabled}
                               onCaptureAfterPhotos={() => setAfterCameraTarget({ sectionId: s.id, lineExternalId: line.externalId })}
                               resolutionTiming={resolutionTimings[line.externalId]}
-                              onSetResolutionTiming={(v) => setLineTiming(line.externalId, v)}
+                              onSetResolutionTiming={setLineTiming}
                               onSave={(updated) => handleSaveLineForSection(s.id, updated)}
                               onDelete={() => handleDeleteLine(s.id, line.externalId)}
                               onOpenPhoto={(index) => {
@@ -3023,6 +3035,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               autoSfQuantity={/whole\s*house/i.test(s.label) && props.squareFootage ? props.squareFootage : null}
                               tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
                               afterPhotosEnabled={afterPhotosEnabled}
+                              onSetResolutionTiming={setLineTiming}
                               onSave={(created) => handleSaveLineForSection(s.id, created)}
                               onDelete={() => handleDiscardNew(s.id)}  /* unused for new rows (no view-mode), kept for typing */
                               onDiscardNew={() => handleDiscardNew(s.id)}
@@ -3187,7 +3200,7 @@ export function RateCardForm(props: RateCardFormProps) {
               id: s.id,
               name: s.displayName || s.label,
               photoCount: count,
-              needsPhotos: !s.photoOptional && count === 0,
+              needsPhotos: !s.photoOptional && !sectionPhotoExempt(s.displayName || s.label) && count === 0,
             };
           })}
           currentRoomId={cameraSectionId}

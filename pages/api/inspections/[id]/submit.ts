@@ -52,6 +52,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     await updateInspection(id, props);
+    // Record WHO submitted for approval and WHEN — used to lock the submitter out
+    // of self-finalizing for a short window (a second reviewer must approve, or
+    // they wait it out). Best-effort: if the HubSpot properties don't exist yet,
+    // the lockout simply stays inert (fails open). Only meaningful for rate cards.
+    if (isRateCard) {
+      try {
+        await updateInspection(id, {
+          submitted_by_email: session.email,
+          submitted_at: nowIso,
+        });
+      } catch (e) {
+        console.warn('[submit] could not record submitted_by_email/submitted_at (create these HubSpot properties to enable the self-approval lockout):', e);
+      }
+    }
     const inspection = await fetchInspectionById(id);
 
     return res.status(200).json({

@@ -82,7 +82,7 @@ interface Props {
   // Internal Resolution completion timing: "now" enforces after-photos at
   // finalize; "later" defers them. Persisted by the parent.
   resolutionTiming?: 'now' | 'later';
-  onSetResolutionTiming?: (v: 'now' | 'later') => void;
+  onSetResolutionTiming?: (lineExternalId: string, v: 'now' | 'later') => void;
   // Reports when this row's edit modal opens/closes (so the parent can hide the
   // floating mic while a line modal is up).
   onEditingChange?: (editing: boolean) => void;
@@ -301,6 +301,9 @@ export function EditableLineRow(props: Props) {
   const [quantity, setQuantity] = useState<string>(line?.quantity != null ? String(line.quantity) : '1');
   const [tenantPct, setTenantPct] = useState<number>(line?.tenantBillBackPercent ?? DEFAULT_TENANT_PCT);
   const [vendor, setVendor] = useState<string>(line?.assignedTo || DEFAULT_VENDOR);
+  // Internal Resolution completion timing (editor copy). Defaults to "Complete
+  // Now"; persisted on save via onSetResolutionTiming keyed by the line id.
+  const [editTiming, setEditTiming] = useState<'now' | 'later'>(props.resolutionTiming || 'now');
   const [customVendorCost, setCustomVendorCost] = useState<string>(
     line?.customVendorCost != null ? String(line.customVendorCost) : ''
   );
@@ -514,6 +517,8 @@ export function EditableLineRow(props: Props) {
       })(),
     };
     onSave(next);
+    // Persist the Internal Resolution timing for this line (keyed by its id).
+    if (isInternalResolution(vendor)) props.onSetResolutionTiming?.(next.externalId, editTiming);
     setIsEditing(false);
   }
 
@@ -527,6 +532,7 @@ export function EditableLineRow(props: Props) {
     setQuantity(line?.quantity ? String(line.quantity) : '1');
     setTenantPct(line?.tenantBillBackPercent ?? DEFAULT_TENANT_PCT);
     setVendor(line?.assignedTo || DEFAULT_VENDOR);
+    setEditTiming(props.resolutionTiming || 'now');
     setCustomVendorCost(line?.customVendorCost != null ? String(line.customVendorCost) : '');
     setCustomDescription(line?.customLaborFullDescription || '');
     // Keep the description-reset effect from wiping the restored override.
@@ -789,6 +795,27 @@ export function EditableLineRow(props: Props) {
                     className={TRIGGER_CLS}
                   />
                 </div>
+
+                {/* Internal Resolution: choose completion timing. "Complete Now"
+                    (default) requires after-photos; "Complete Later" defers them. */}
+                {isInternalResolution(vendor) && (
+                  <div>
+                    <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Resolution <span className="text-brand">*</span></label>
+                    <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm select-none max-w-full">
+                      {(['now', 'later'] as const).map((v) => (
+                        <button
+                          key={v}
+                          type="button"
+                          onClick={() => setEditTiming(v)}
+                          className={`px-3.5 py-2 leading-none font-heading font-semibold whitespace-nowrap ${editTiming === v ? 'bg-brand text-white' : 'bg-white text-gray-700'} ${v === 'now' ? 'border-r border-gray-300' : ''}`}
+                        >
+                          {v === 'now' ? 'Complete Now' : 'Complete Later'}
+                        </button>
+                      ))}
+                    </div>
+                    {editTiming === 'later' && <div className="text-[11px] text-gray-500 mt-1">After photos optional — line marked to complete later.</div>}
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-heading font-bold text-gray-700 mb-1">
@@ -1077,7 +1104,7 @@ interface ViewRowProps {
   onCaptureAfterPhotos?: () => void;
   // Internal Resolution timing: "now" requires after-photos; "later" defers them.
   resolutionTiming?: 'now' | 'later';
-  onSetResolutionTiming?: (v: 'now' | 'later') => void;
+  onSetResolutionTiming?: (lineExternalId: string, v: 'now' | 'later') => void;
 }
 
 function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotosEnabled, onEnterEdit, onDelete, onOpenPhoto, onSaveDescription, onSaveAfterPhotos, onCaptureAfterPhotos, resolutionTiming, onSetResolutionTiming }: ViewRowProps) {
@@ -1105,15 +1132,15 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
   const afterRequired = timing !== 'later';
   const resolutionToggle = showIrPhotos ? (
     <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-      <div className="text-[11px] font-bold text-gray-700 mb-1">Resolution <span className="text-brand">*</span></div>
-      <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs select-none">
+      <div className="text-[10px] uppercase tracking-wide font-bold text-gray-500 mb-1">Resolution <span className="text-brand">*</span></div>
+      <div className="inline-flex rounded-md border border-gray-300 overflow-hidden text-[11px] select-none max-w-full">
         {(['now', 'later'] as const).map((v) => (
           <button
             key={v}
             type="button"
             disabled={readOnly}
-            onClick={(e) => { e.stopPropagation(); onSetResolutionTiming?.(v); }}
-            className={`px-3 py-1.5 font-heading font-semibold ${timing === v ? 'bg-brand text-white' : 'bg-white text-gray-700'} ${v === 'now' ? 'border-r border-gray-300' : ''}`}
+            onClick={(e) => { e.stopPropagation(); onSetResolutionTiming?.(line.externalId, v); }}
+            className={`px-2.5 py-1 leading-none font-heading font-semibold whitespace-nowrap ${timing === v ? 'bg-brand text-white' : 'bg-white text-gray-700'} ${v === 'now' ? 'border-r border-gray-300' : ''}`}
           >
             {v === 'now' ? 'Complete Now' : 'Complete Later'}
           </button>
