@@ -14,7 +14,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { fetchInspectionWithPropertyRef } from '@/lib/hubspot';
-import { uploadToSftp } from '@/lib/sftp';
+import { uploadToSftp, probeSftp } from '@/lib/sftp';
 
 const ADMIN_EMAIL = 'hwoods@resihome.com';
 
@@ -34,6 +34,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const { id } = req.query;
   if (!id || typeof id !== 'string') {
     return res.status(400).json({ error: 'Missing inspection id' });
+  }
+
+  // Diagnostic mode: POST ...?probe=1 — connect read-only and report the
+  // working directory + folder listings so we can find the correct remote path
+  // (no file is uploaded). Use this to fix "Not Found" path errors.
+  if (req.query.probe) {
+    const probe = await probeSftp();
+    return res.status(probe.ok ? 200 : (probe.configured ? 502 : 503)).json(probe);
   }
 
   try {
