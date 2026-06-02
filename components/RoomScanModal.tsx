@@ -17,7 +17,7 @@
  * Nothing is auto-final: every line is the inspector's explicit Add.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { uploadPhoto } from '@/lib/photoUpload';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { extractAudioWav16k } from '@/lib/audioExtract';
@@ -27,6 +27,18 @@ import {
 import type { RateCardLineInput } from '@/lib/types';
 
 const FRAME_COUNT = 8;                 // stills pulled from the clip
+
+// Friendly cycling status (same cadence as the AI-review modal) so the wait
+// feels like the assistant is working through the room.
+const SCAN_PHASES = [
+  'Pulling photos from your video…',
+  'Reading the room…',
+  'Checking walls, floors & fixtures…',
+  'Noting your call-outs…',
+  'Matching to the rate card…',
+  'Applying clean, safe & functional rules…',
+  'Pulling together suggestions…',
+];
 
 interface Suggestion {
   id: string;
@@ -159,6 +171,14 @@ export function RoomScanModal(props: Props) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [qtyById, setQtyById] = useState<Record<string, string>>({});
   const [handled, setHandled] = useState<Record<string, 'added' | 'declined'>>({});
+  const [phraseIdx, setPhraseIdx] = useState(0);
+
+  const working = phase === 'extracting' || phase === 'analyzing';
+  useEffect(() => {
+    if (!working) { setPhraseIdx(0); return; }
+    const t = setInterval(() => setPhraseIdx((p) => (p + 1) % SCAN_PHASES.length), 3800);
+    return () => clearInterval(t);
+  }, [working]);
 
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = (e.target.files || [])[0];
@@ -289,10 +309,11 @@ export function RoomScanModal(props: Props) {
             </div>
           )}
 
-          {(phase === 'extracting' || phase === 'analyzing') && (
+          {working && (
             <div className="text-center py-10">
               <div className="inline-block w-8 h-8 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin mb-3" />
-              <div className="text-sm text-gray-700">{status || 'Working…'}</div>
+              <div className="text-sm font-semibold text-gray-800 transition-opacity">{SCAN_PHASES[phraseIdx]}</div>
+              {status && <div className="text-xs text-gray-400 mt-1">{status}</div>}
             </div>
           )}
 

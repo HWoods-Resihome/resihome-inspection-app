@@ -221,6 +221,13 @@ function normalizeDomainTerms(text: string): string {
   t = t.replace(/\bmis[\s-]?match(ed|ing)?\b/gi, 'mist match');
   t = t.replace(/\bmissed[\s-]?match(ed|ing)?\b/gi, 'mist match');
   t = t.replace(/\bmist[\s-]?match(ed|ing)\b/gi, 'mist match');
+  // BLINDS default to FAUX WOOD. A bare "blind(s)" call-out (broken/missing/etc.)
+  // is the standard turn item — bias matching to a faux-wood blind replacement
+  // so it never resolves to a valance / vertical / wand. Leave it alone when the
+  // inspector already named a specific type (faux/vertical/white/valance/wand/slat).
+  if (/\bblinds?\b/i.test(t) && !/\b(faux|vertical|valance|wand|slat|white\s+blind)\b/i.test(t)) {
+    t = t.replace(/\bblinds?\b/gi, 'faux wood blind');
+  }
   return t;
 }
 
