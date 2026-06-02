@@ -20,10 +20,13 @@
 import { useRef, useState } from 'react';
 import { uploadPhoto } from '@/lib/photoUpload';
 import { displayImageSrc } from '@/lib/photoDisplay';
+import { extractAudioWav16k } from '@/lib/audioExtract';
+import {
+  drawEvidenceStamp, buildStampLines, getGeoFix, resolvePropertyRefCoords, type StampLine,
+} from '@/lib/evidenceStamp';
 import type { RateCardLineInput } from '@/lib/types';
 
 const FRAME_COUNT = 8;                 // stills pulled from the clip
-const TRANSCRIBE_MAX_BYTES = 11 * 1024 * 1024; // /api/transcribe body cap headroom
 
 interface Suggestion {
   id: string;
@@ -50,6 +53,7 @@ interface Props {
   region: string;
   tenantMonths: number | null;
   addressSnapshot: string;
+  propertyRecordId?: string;  // for the GPS proximity verdict (same as the camera)
   onClose: () => void;
   onAddLine: (line: RateCardLineInput) => void;
   onFramesCaptured: (urls: string[]) => void;  // add stamped stills to room photos
@@ -76,24 +80,6 @@ function fileToBase64(file: Blob): Promise<string> {
   });
 }
 
-// Burn a simple evidence stamp (address + date/time) into the bottom-left,
-// mirroring how the in-app camera stamps captures.
-function stamp(ctx: CanvasRenderingContext2D, w: number, h: number, address: string) {
-  const lines = [address, new Date().toLocaleString()].filter(Boolean) as string[];
-  const fontPx = Math.max(12, Math.round(h * 0.022));
-  ctx.font = `600 ${fontPx}px Arial, sans-serif`;
-  const pad = Math.round(fontPx * 0.5);
-  const lineH = Math.round(fontPx * 1.35);
-  const boxH = lineH * lines.length + pad;
-  const boxW = Math.min(w - 12, Math.max(...lines.map((l) => ctx.measureText(l).width)) + pad * 2);
-  const y0 = h - boxH - 8;
-  ctx.fillStyle = 'rgba(0,0,0,0.55)';
-  ctx.fillRect(8, y0, boxW, boxH);
-  ctx.fillStyle = '#ffffff';
-  ctx.textBaseline = 'top';
-  lines.forEach((l, i) => ctx.fillText(l, 8 + pad, y0 + pad / 2 + i * lineH));
-}
-
 function seek(video: HTMLVideoElement, t: number): Promise<void> {
   return new Promise((resolve) => {
     const on = () => { video.removeEventListener('seeked', on); resolve(); };
@@ -102,8 +88,9 @@ function seek(video: HTMLVideoElement, t: number): Promise<void> {
   });
 }
 
-// Extract `count` JPEG frames evenly across the clip, each stamped.
-async function extractFrames(file: File, count: number, address: string): Promise<Blob[]> {
+// Extract `count` JPEG frames evenly across the clip, each burned with the
+// shared evidence stamp (address / timestamp / GPS) — identical to the camera.
+async function extractFrames(file: File, count: number, stampLines: StampLine[]): Promise<Blob[]> {
   const url = URL.createObjectURL(file);
   const video = document.createElement('video');
   video.src = url;
@@ -126,7 +113,7 @@ async function extractFrames(file: File, count: number, address: string): Promis
       const ctx = canvas.getContext('2d');
       if (!ctx) continue;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      stamp(ctx, canvas.width, canvas.height, address);
+      drawEvidenceStamp(ctx, canvas.width, canvas.height, stampLines);
       const blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/jpeg', 0.8));
       if (blob) out.push(blob);
       if (dur === 0) break; // a still/0-length file → one frame is enough
@@ -137,14 +124,18 @@ async function extractFrames(file: File, count: number, address: string): Promis
   }
 }
 
+// Pull the clip's audio (16 kHz mono WAV — tiny) and transcribe it, so spoken
+// measurements / call-outs feed the AI. Robust to clip length: we send audio,
+// not the whole video, so there's no size cap. Returns '' if unavailable.
 async function transcribeVideo(file: File): Promise<string> {
   try {
-    if (file.size > TRANSCRIBE_MAX_BYTES) return ''; // too large for the endpoint — skip voice-over
-    const base64 = await fileToBase64(file);
+    const wav = await extractAudioWav16k(file);
+    if (!wav || wav.size === 0) return '';
+    const base64 = await fileToBase64(wav);
     const r = await fetch('/api/transcribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64, mime: (file.type || 'video/mp4').split(';')[0] }),
+      body: JSON.stringify({ base64, mime: 'audio/wav' }),
     });
     if (!r.ok) return '';
     const d = await r.json();
@@ -176,9 +167,18 @@ export function RoomScanModal(props: Props) {
     setError('');
     setPhase('extracting');
     try {
+      // 0) Resolve location once so the stills carry the same GPS/proximity
+      //    stamp the live camera burns (address + time + coords + ✓/✗).
+      setStatus('Checking location…');
+      const [refCoords, fix] = await Promise.all([
+        resolvePropertyRefCoords(props.propertyRecordId, addressSnapshot),
+        getGeoFix(),
+      ]);
+      const stampLines = buildStampLines(addressSnapshot, fix, refCoords);
+
       // 1) Frames (stamped) → upload → room photos.
       setStatus('Grabbing photos from the video…');
-      const blobs = await extractFrames(file, FRAME_COUNT, addressSnapshot);
+      const blobs = await extractFrames(file, FRAME_COUNT, stampLines);
       if (blobs.length === 0) throw new Error('Could not read frames from that video.');
       const base64s: string[] = [];
       const urls: string[] = [];

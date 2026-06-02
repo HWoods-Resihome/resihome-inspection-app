@@ -3124,6 +3124,7 @@ export function RateCardForm(props: RateCardFormProps) {
             region={inspectionRegion}
             tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
             addressSnapshot={props.propertyName}
+            propertyRecordId={props.propertyRecordId}
             onClose={() => setRoomScanSectionId(null)}
             onAddLine={(line) => { const p = handleSaveLineForSection(s.id, line); revealSection(s.id, line.externalId); return p; }}
             onFramesCaptured={(urls) => {
