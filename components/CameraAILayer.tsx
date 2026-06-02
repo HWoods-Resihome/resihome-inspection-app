@@ -20,6 +20,7 @@ import {
   drawEvidenceStamp, buildStampLines, getGeoFix, resolvePropertyRefCoords, type StampLine,
 } from '@/lib/evidenceStamp';
 import type { RateCardLineInput } from '@/lib/types';
+import { VENDORS } from '@/lib/vendors';
 
 const INFER_INTERVAL_MS = 2500;
 const KEYFRAME_EDGE = 640;
@@ -56,6 +57,19 @@ interface LiveSuggestion {
   confidence: 'high' | 'medium' | 'low';
   roomId: string;
   stillUrl?: string;
+}
+
+interface ChipEdit { qty: string; vendor: string; tenantPct: string; vendorCost: string }
+const EMPTY_EDIT: ChipEdit = { qty: '', vendor: 'Vendor 1', tenantPct: '100', vendorCost: '' };
+function seedEdit(s: LiveSuggestion): ChipEdit {
+  return {
+    qty: s.needsMeasurement
+      ? (s.estimatedQuantity && s.estimatedQuantity > 0 ? String(s.estimatedQuantity) : '')
+      : String(s.quantity ?? 1),
+    vendor: s.suggestedVendor || 'Vendor 1',
+    tenantPct: String(s.tenantBillBackPercent ?? 100),
+    vendorCost: '',
+  };
 }
 
 interface Props {
@@ -133,6 +147,10 @@ export function CameraAILayer(props: Props) {
 
   const stampLinesRef = useRef<StampLine[]>([]);
   const transcriptBufRef = useRef('');
+  // Recently-sent speech (last ~8s) prepended as CONTEXT to the next voice tick,
+  // so a phrase chopped across 4s clips ("the blinds need to" + "be replaced")
+  // is seen complete by the model.
+  const recentCtxRef = useRef<{ t: number; text: string }[]>([]);
   // Recent transcript fragments for room-nav matching — a command like
   // "move to the front entryway" often splits across two ~4s clips, so we match
   // against a short rolling window, not a single clip.
@@ -166,7 +184,11 @@ export function CameraAILayer(props: Props) {
   const [heardText, setHeardText] = useState('');
   const [errText, setErrText] = useState('');
   const [chips, setChips] = useState<LiveSuggestion[]>([]);
-  const [qtyById, setQtyById] = useState<Record<string, string>>({});
+  // Per-chip editable values (qty / vendor / tenant% / vendor $) — the inspector
+  // can tweak these on the card OR by voice BEFORE adding. Seeded from the
+  // suggestion; voice edit_line and the inline controls both write here.
+  const [editById, setEditById] = useState<Record<string, ChipEdit>>({});
+  const setEdit = (id: string, patch: Partial<ChipEdit>) => setEditById((m) => ({ ...m, [id]: { ...(m[id] || EMPTY_EDIT), ...patch } }));
   // Capture animation: a shutter flash + a "saved" thumbnail toast so the
   // inspector sees the AI grabbing room photos and doesn't re-shoot them.
   const [flashKey, setFlashKey] = useState(0);
@@ -230,6 +252,9 @@ export function CameraAILayer(props: Props) {
         activeIdRef.current = id;
         setActiveId(id);
         roomEnteredAtRef.current = Date.now();
+        transcriptBufRef.current = '';
+        recentCtxRef.current = [];
+        navRecentRef.current = [];
         setHeardText('');
         dbg(`room → ${a?.name || '—'}`);
       }
@@ -322,6 +347,9 @@ export function CameraAILayer(props: Props) {
       const navWindow = navRecentRef.current.map((e) => e.text).join(' ');
       if (maybeNavigate(navWindow)) { navRecentRef.current = []; return; }
       transcriptBufRef.current += txt + ' ';
+      // Fire inference immediately so the card appears right after you speak,
+      // instead of waiting for the next fixed tick. (Guarded by inFlight.)
+      if (!inFlight.current && openRef.current) void runInference();
     } catch (e: any) {
       dbg(`stt err ${String(e?.message || e).slice(0, 30)}`);
     } finally { setTranscribing(false); }
@@ -522,14 +550,23 @@ export function CameraAILayer(props: Props) {
     if (inFlight.current || !openRef.current) return;
     const room = getActiveRoomRef.current();
     if (!room) { setErrText('No active room'); return; }
-    const delta = transcriptBufRef.current.trim();
+    const newText = transcriptBufRef.current.trim();
+    const hasNewVoice = newText.length > 0;
     const b64 = grabKeyframeB64(KEYFRAME_EDGE);
     // Voice goes text-only, so a missing frame only blocks SILENT ticks. If the
     // inspector spoke, proceed even without a usable frame (camera covered/booting).
-    if (!delta && !b64) { setErrText('Camera not ready'); return; }
+    if (!hasNewVoice && !b64) { setErrText('Camera not ready'); return; }
+    // Prepend recent context so a phrase split across clips reads complete; only
+    // include context when there's NEW speech (silent ticks send no transcript).
+    const now = Date.now();
+    recentCtxRef.current = recentCtxRef.current.filter((e) => now - e.t < 8000);
+    const ctx = recentCtxRef.current.map((e) => e.text).join(' ');
+    const delta = hasNewVoice ? (ctx + ' ' + newText).trim() : '';
     transcriptBufRef.current = '';
-    // If this call fails, put the spoken words back so they aren't lost.
-    const rebufferOnFail = () => { if (delta) transcriptBufRef.current = (delta + ' ' + transcriptBufRef.current).trimStart(); };
+    // On failure, put the new words back (don't commit to context); on success,
+    // commit them to context for the next tick.
+    const rebufferOnFail = () => { if (hasNewVoice) transcriptBufRef.current = (newText + ' ' + transcriptBufRef.current).trimStart(); };
+    const commitContext = () => { if (hasNewVoice) recentCtxRef.current.push({ t: Date.now(), text: newText }); };
     inFlight.current = true;
     setScanning(true);
     const seen = seenFor(room.id);
@@ -556,6 +593,7 @@ export function CameraAILayer(props: Props) {
       }
       const d = await r.json();
       setErrText('');
+      commitContext();
       const nS = Array.isArray(d.suggestions) ? d.suggestions.length : 0;
       const nE = Array.isArray(d.edits) ? d.edits.length : 0;
       const nU = Array.isArray(d.unmatched) ? d.unmatched.length : 0;
@@ -568,27 +606,38 @@ export function CameraAILayer(props: Props) {
           if (!e) return c;
           const nc = { ...c };
           if (e.lineItemCode) { nc.lineItemCode = e.lineItemCode; nc.description = e.description || nc.description; nc.category = e.category || nc.category; nc.subcategory = e.subcategory ?? nc.subcategory; nc.unit = e.unit || nc.unit; nc.needsMeasurement = !!e.needsMeasurement; nc.measurementUnit = e.measurementUnit || ''; }
-          if (e.vendor) nc.suggestedVendor = e.vendor;
-          if (typeof e.tenantBillBackPercent === 'number') nc.tenantBillBackPercent = e.tenantBillBackPercent;
-          if (typeof e.quantity === 'number') nc.quantity = e.quantity;
           return nc;
         }));
-        setQtyById((m) => { const n = { ...m }; for (const e of editList) if (typeof e.quantity === 'number') n[e.targetId] = String(e.quantity); return n; });
+        // Voice amendments write into the same editById the card binds to.
+        setEditById((m) => {
+          const n = { ...m };
+          for (const e of editList) {
+            const cur = n[e.targetId] || EMPTY_EDIT;
+            const patch: ChipEdit = { ...cur };
+            if (e.vendor) patch.vendor = e.vendor;
+            if (typeof e.tenantBillBackPercent === 'number') patch.tenantPct = String(e.tenantBillBackPercent);
+            if (typeof e.quantity === 'number') patch.qty = String(e.quantity);
+            n[e.targetId] = patch;
+          }
+          return n;
+        });
+        const ed = editList[0];
+        dbg(`edit ${ed.vendor ? `vendor=${ed.vendor}` : ''}${typeof ed.quantity === 'number' ? ` qty=${ed.quantity}` : ''}${typeof ed.tenantBillBackPercent === 'number' ? ` tenant=${ed.tenantBillBackPercent}` : ''}`.trim());
       }
 
       const incoming: LiveSuggestion[] = Array.isArray(d.suggestions) ? d.suggestions : [];
       const fresh = incoming.filter((s) => s.lineItemCode && !seen.codes.has(s.lineItemCode));
       if (fresh.length) {
         const batchStill = await captureStill(true, 'call-out');
-        const seed: Record<string, string> = {};
+        const seeds: Record<string, ChipEdit> = {};
         for (const s of fresh) {
           seen.codes.add(s.lineItemCode);
           seen.descs.add(s.description);
           s.roomId = room.id;
           s.stillUrl = batchStill;
-          if (s.needsMeasurement && s.estimatedQuantity && s.estimatedQuantity > 0) seed[s.id] = String(s.estimatedQuantity);
+          seeds[s.id] = seedEdit(s);
         }
-        if (Object.keys(seed).length) setQtyById((m) => ({ ...m, ...seed }));
+        setEditById((m) => ({ ...m, ...seeds }));
         setChips((cur) => [...cur, ...fresh]);
       }
 
@@ -608,18 +657,25 @@ export function CameraAILayer(props: Props) {
   }
 
   // ---- chip actions ----
+  function editOf(s: LiveSuggestion): ChipEdit { return editById[s.id] || seedEdit(s); }
   function addChip(s: LiveSuggestion) {
+    const e = editOf(s);
     let qty: number;
-    if (s.needsMeasurement) { const v = Number(qtyById[s.id]); if (!isFinite(v) || v <= 0) return; qty = v; }
-    else qty = s.quantity ?? 1;
+    if (s.needsMeasurement) { const v = Number(e.qty); if (!isFinite(v) || v <= 0) return; qty = v; }
+    else { const v = Number(e.qty); qty = isFinite(v) && v > 0 ? v : (s.quantity ?? 1); }
+    const tenant = Math.max(0, Math.min(100, Math.round(Number(e.tenantPct))));
+    const vCost = Number(e.vendorCost);
     const line: RateCardLineInput = {
       externalId: genId(), section: '', location: '',
       lineItemCode: s.lineItemCode, quantity: qty,
-      tenantBillBackPercent: s.tenantBillBackPercent, assignedTo: s.suggestedVendor || 'Vendor 1',
-      note: '', customLaborRate: null, customAdjustedMaterialCost: null, customVendorCost: null,
+      tenantBillBackPercent: isFinite(tenant) ? tenant : (s.tenantBillBackPercent ?? 100),
+      assignedTo: e.vendor || s.suggestedVendor || 'Vendor 1',
+      note: '', customLaborRate: null, customAdjustedMaterialCost: null,
+      customVendorCost: (isFinite(vCost) && e.vendorCost.trim() !== '') ? vCost : null,
       photoUrls: s.stillUrl ? [s.stillUrl] : [],
     };
-    onAddLine(s.roomId, line);
+    onAddLineRef.current(s.roomId, line);
+    dbg(`✚ added ${s.lineItemCode} q${qty} ${line.assignedTo}`);
     setChips((cur) => cur.filter((c) => c.id !== s.id));
   }
   function dismissChip(s: LiveSuggestion) {
@@ -675,46 +731,71 @@ export function CameraAILayer(props: Props) {
         <button onClick={() => setDbgOn(true)} className="absolute left-2 top-[140px] z-40 pointer-events-auto bg-black/60 rounded-full w-7 h-7 text-sm">🐞</button>
       )}
 
-      {/* Chip tray — floats above the camera controls */}
-      <div className="pointer-events-none absolute left-0 right-0 bottom-28 px-3 space-y-2 max-h-[42vh] overflow-y-auto">
-        {visibleChips.map((s) => (
-          <div key={s.id} className="pointer-events-auto bg-white/95 backdrop-blur rounded-xl p-3 shadow-lg">
+      {/* Chip tray — floats above the camera controls. Each card has inline
+          qty / vendor / tenant% / vendor$ controls so the inspector (or voice)
+          can adjust BEFORE adding. */}
+      <div className="pointer-events-none absolute left-0 right-0 bottom-28 px-3 space-y-2 max-h-[52vh] overflow-y-auto">
+        {visibleChips.map((s) => {
+          const e = editOf(s);
+          const addDisabled = s.needsMeasurement && !(Number(e.qty) > 0);
+          return (
+          <div key={s.id} className="pointer-events-auto bg-white/97 backdrop-blur rounded-xl p-3 shadow-lg">
             <div className="flex items-start gap-2">
               {s.stillUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={displayImageSrc(s.stillUrl)} alt="" className="w-12 h-12 object-cover rounded border border-gray-200 shrink-0" />
+                <img src={displayImageSrc(s.stillUrl)} alt="" className="w-11 h-11 object-cover rounded border border-gray-200 shrink-0" />
               )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className={`w-2 h-2 rounded-full shrink-0 ${confColor(s.confidence)}`} />
-                  <span className="text-sm font-semibold text-ink">{s.description}</span>
+                  <span className="text-sm font-semibold text-ink leading-tight">{s.description}</span>
                 </div>
-                <div className="text-[11px] text-gray-500">{s.category}{s.subcategory ? ` · ${s.subcategory}` : ''} · {s.suggestedVendor}</div>
-                {s.rationale && <div className="text-xs text-gray-600 mt-0.5 leading-snug">{s.rationale}</div>}
-                {s.needsMeasurement && (
-                  <div className="mt-2">
-                    <div className="flex items-center gap-2">
-                      <input type="text" inputMode="decimal" value={qtyById[s.id] || ''}
-                        onChange={(e) => setQtyById((m) => ({ ...m, [s.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
-                        placeholder={`Enter ${s.measurementUnit}`}
-                        className="h-9 w-28 bg-gray-100 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-violet-300" />
-                      <span className="text-xs text-gray-500">{s.measurementUnit}</span>
-                    </div>
-                    {s.estimatedQuantity && s.estimatedQuantity > 0 && (
-                      <div className="text-[11px] text-amber-700 mt-1">≈ AI estimate ({s.estimatedQuantity} {s.unit}) — confirm, edit, or say the size.</div>
-                    )}
-                  </div>
-                )}
+                <div className="text-[11px] text-gray-500">{s.category}{s.subcategory ? ` · ${s.subcategory}` : ''}</div>
               </div>
             </div>
+
+            {/* Editable fields — 2 compact rows */}
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] uppercase tracking-wide text-gray-400">Qty{s.measurementUnit ? ` (${s.measurementUnit})` : ''}</span>
+                <input type="text" inputMode="decimal" value={e.qty}
+                  onChange={(ev) => setEdit(s.id, { qty: ev.target.value.replace(/[^0-9.]/g, '') })}
+                  placeholder={s.needsMeasurement ? `Enter ${s.measurementUnit}` : '1'}
+                  className="h-9 bg-gray-100 rounded-lg px-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-300" />
+              </label>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] uppercase tracking-wide text-gray-400">Vendor</span>
+                <select value={e.vendor} onChange={(ev) => setEdit(s.id, { vendor: ev.target.value })}
+                  className="h-9 bg-gray-100 rounded-lg px-2 text-sm outline-none focus:ring-2 focus:ring-violet-300">
+                  {VENDORS.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] uppercase tracking-wide text-gray-400">Tenant %</span>
+                <input type="text" inputMode="numeric" value={e.tenantPct}
+                  onChange={(ev) => setEdit(s.id, { tenantPct: ev.target.value.replace(/[^0-9]/g, '').slice(0, 3) })}
+                  className="h-9 bg-gray-100 rounded-lg px-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-300" />
+              </label>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] uppercase tracking-wide text-gray-400">Vendor $ (opt)</span>
+                <input type="text" inputMode="decimal" value={e.vendorCost}
+                  onChange={(ev) => setEdit(s.id, { vendorCost: ev.target.value.replace(/[^0-9.]/g, '') })}
+                  placeholder="auto" className="h-9 bg-gray-100 rounded-lg px-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-300" />
+              </label>
+            </div>
+            {s.needsMeasurement && s.estimatedQuantity && s.estimatedQuantity > 0 && (
+              <div className="text-[11px] text-amber-700 mt-1">≈ AI estimate ({s.estimatedQuantity} {s.unit}) — confirm, edit, or say the size.</div>
+            )}
+
             <div className="flex gap-2 mt-2">
-              <button onClick={() => addChip(s)} disabled={s.needsMeasurement && !(Number(qtyById[s.id]) > 0)}
+              <button onClick={() => addChip(s)} disabled={addDisabled}
                 className="flex-1 h-9 rounded-lg bg-emerald-600 text-white font-heading font-semibold text-sm hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed">Add</button>
               <button onClick={() => dismissChip(s)}
                 className="px-4 h-9 rounded-lg border border-gray-300 text-gray-700 font-heading font-semibold text-sm bg-white hover:bg-gray-50">✕</button>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
