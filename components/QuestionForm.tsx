@@ -5,6 +5,7 @@ import { QuestionItem } from './QuestionItem';
 import { CameraCapture } from './CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadPhoto, uploadFilesBatch } from '@/lib/photoUpload';
+import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
 import { useAppDialog } from '@/components/AppDialog';
@@ -500,6 +501,8 @@ export function QuestionForm({
           }));
         },
         (current) => setUploadingSection((prev) => prev ? { ...prev, current } : prev),
+        // Offline-aware: caches to IndexedDB on weak signal (draft), syncs later.
+        (file) => uploadPhotoOrQueue(file, inspectionRecordId, instanceKey),
       );
       if (failed > 0) {
         // Show the first error reason so the inspector knows WHY it failed
@@ -533,7 +536,8 @@ export function QuestionForm({
   async function replaceSectionPhoto(instanceKey: string, idx: number, file: File) {
     if (readOnly) return;
     try {
-      const url = await uploadPhoto(file);
+      const oldForReplace = (sectionPhotos[instanceKey] || [])[idx];
+      const url = await uploadPhotoOrQueue(file, inspectionRecordId, instanceKey, { replacesUrl: oldForReplace });
       setSectionPhotos((prev) => {
         const arr = [...(prev[instanceKey] || [])];
         if (idx < 0 || idx >= arr.length) return prev;
@@ -573,6 +577,8 @@ export function QuestionForm({
 
       for (const instanceKey of dirtyKeys) {
         const urls = sectionPhotos[instanceKey] || [];
+        // Never persist offline draft (blob:) URLs — they sync + swap later.
+        const realUrls = urls.filter((u) => !u.startsWith('blob:'));
         const inst = sectionInstances.find((x) => x.instanceKey === instanceKey);
         if (!inst) continue;
         const existingRecordId = sectionPhotoRecordIdsRef.current.get(instanceKey);
@@ -585,6 +591,9 @@ export function QuestionForm({
           }
           continue;
         }
+        // Only offline drafts so far — don't archive or upsert; the queue flush
+        // will swap in real URLs and re-mark this dirty once they sync.
+        if (realUrls.length === 0) continue;
 
         const externalId = `${inspectionExternalId}_sp_${instanceKey.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
         externalIdToInstance.set(externalId, instanceKey);
@@ -595,7 +604,7 @@ export function QuestionForm({
           inspectionIdExternal: inspectionExternalId,
           section: baseSection,
           summaryLabel: inst.displayName,
-          photoUrls: urls,
+          photoUrls: realUrls,
           location: inst.location,
         });
 
@@ -643,6 +652,59 @@ export function QuestionForm({
   }, [readOnly, inspectionRecordId, inspectionExternalId, sectionPhotos, sectionInstances]);
 
   const hasEverHadSectionSave = useRef(false);
+
+  // ---- Offline photo cache + auto-sync (section photos) -------------------
+  // Captures on a weak signal cache to IndexedDB (draft blob: URLs) and
+  // re-attach + persist when connectivity returns. Section photos queue under
+  // their instanceKey (no '::'); inline question photos are not queued here.
+  const photoRehydratedRef = useRef(false);
+  const runSectionFlush = useCallback(async () => {
+    if (readOnly || !photoRehydratedRef.current) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    await flushQueuedPhotos(inspectionRecordId, ({ sectionId, oldUrl, newUrl, replacesUrl, lineExternalId }) => {
+      if (lineExternalId || sectionId.includes('::')) return; // not a section photo
+      setSectionPhotos((cur) => {
+        const arr = cur[sectionId];
+        if (!arr) return cur;
+        let changed = false;
+        const sw = arr.map((u) => { if (u === oldUrl || (replacesUrl && u === replacesUrl)) { changed = true; return newUrl; } return u; });
+        if (!changed) return cur;
+        sectionPhotoDirtyRef.current.add(sectionId); // re-persist real URL on next tick
+        return { ...cur, [sectionId]: sw };
+      });
+    }).catch(() => {});
+  }, [readOnly, inspectionRecordId]);
+  const runSectionFlushRef = useRef(runSectionFlush);
+  runSectionFlushRef.current = runSectionFlush;
+
+  // Rehydrate queued drafts on mount, then drain.
+  useEffect(() => {
+    if (readOnly || photoRehydratedRef.current) return;
+    photoRehydratedRef.current = true;
+    void rehydrateQueuedPhotos(inspectionRecordId).then((drafts) => {
+      const bySection: Record<string, string[]> = {};
+      for (const d of drafts) {
+        if (d.lineExternalId || d.sectionId.includes('::')) continue;
+        (bySection[d.sectionId] = bySection[d.sectionId] || []).push(d.url);
+      }
+      if (Object.keys(bySection).length) {
+        setSectionPhotos((cur) => {
+          const n = { ...cur };
+          for (const [k, urls] of Object.entries(bySection)) n[k] = Array.from(new Set([...(n[k] || []), ...urls]));
+          return n;
+        });
+      }
+    }).catch(() => {}).finally(() => { void runSectionFlushRef.current(); });
+  }, [readOnly, inspectionRecordId]);
+
+  // Auto-retry: flush on reconnect + periodic reconcile.
+  useEffect(() => {
+    if (readOnly) return;
+    const onOnline = () => { void runSectionFlushRef.current(); };
+    window.addEventListener('online', onOnline);
+    const iv = setInterval(() => { void runSectionFlushRef.current(); }, 15000);
+    return () => { window.removeEventListener('online', onOnline); clearInterval(iv); };
+  }, [readOnly]);
 
   function scrollToAndFlash(domId: string, instanceKey?: string) {
     if (typeof document === 'undefined') return;
@@ -1059,6 +1121,9 @@ export function QuestionForm({
                                 </span>
                               </span>
                             )}
+                            {url.startsWith('blob:') && (
+                              <span className="absolute bottom-0 inset-x-0 bg-amber-500/95 text-white text-[8px] font-heading font-bold text-center leading-tight py-0.5 rounded-b pointer-events-none" title="Saved Offline · Will Sync When Online">Saved Offline</span>
+                            )}
                             {!readOnly && (
                               <button
                                 type="button"
@@ -1175,7 +1240,8 @@ export function QuestionForm({
         addressSnapshot={propertyName}
         propertyRecordId={propertyRecordId}
         onClose={() => setSectionCameraInstance(null)}
-        uploadPhoto={uploadPhoto}
+        uploadPhoto={(file) => uploadPhotoOrQueue(file, inspectionRecordId, sectionCameraInstance || '')}
+        uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, inspectionRecordId, sectionCameraInstance || '')}
         rooms={sectionInstances.map((inst) => {
           const count = (sectionPhotos[inst.instanceKey] || []).length;
           const required = !sectionPhotosExempt(inst.baseSectionName, inst.sectionOrder);

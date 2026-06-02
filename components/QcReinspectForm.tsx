@@ -17,7 +17,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { uploadFilesBatch, uploadPhoto, formatMoney } from '@/lib/photoUpload';
+import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
+import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { vendorPillStyle } from '@/lib/vendors';
@@ -171,7 +172,13 @@ export function QcReinspectForm(props: Props) {
   const allMarked = lines.length > 0 && lines.every((l) => l.passFail === 'pass' || l.passFail === 'fail');
   const allSectionsHaveAfter = sections.every((s) => (afterPhotos[s.key] || []).length > 0);
 
-  const uploadHelper = useCallback((file: File) => uploadPhoto(file), []);
+  // Offline-aware uploader for the in-app camera — caches to IndexedDB on a weak
+  // signal and returns a draft URL, tagged to the camera's active section so it
+  // re-attaches on sync. cameraKey tracks the room being shot.
+  const uploadHelper = useCallback(
+    (file: File) => uploadPhotoOrQueue(file, props.inspectionRecordId, cameraKey || ''),
+    [props.inspectionRecordId, cameraKey],
+  );
 
   function toggleCollapse(key: string) {
     setCollapsed((cur) => {
@@ -186,7 +193,10 @@ export function QcReinspectForm(props: Props) {
     setCollapsed(c ? new Set(sections.map((s) => s.key)) : new Set());
   }
 
-  async function persistAfterPhotos(key: string, section: string, location: string, urls: string[]) {
+  async function persistAfterPhotos(key: string, section: string, location: string, urlsIn: string[]) {
+    // Never POST offline draft (blob:) URLs to HubSpot — they're local only and
+    // get swapped for the real URL when the queue flushes on reconnect.
+    const urls = urlsIn.filter((u) => !u.startsWith('blob:'));
     const existingId = afterPhotoRecordIds[key];
     const uuid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     const externalId = existingId || `QCAFTER-${props.inspectionRecordId}-${key}-${uuid}`;
@@ -230,7 +240,8 @@ export function QcReinspectForm(props: Props) {
   async function handleFilePick(key: string, section: string, location: string, files: FileList | null) {
     if (!files || files.length === 0) return;
     const uploaded: string[] = [];
-    await uploadFilesBatch(Array.from(files), (url) => uploaded.push(url));
+    await uploadFilesBatch(Array.from(files), (url) => uploaded.push(url), undefined,
+      (file) => uploadPhotoOrQueue(file, props.inspectionRecordId, key));
     await addAfterPhotos(key, section, location, uploaded);
   }
 
@@ -251,6 +262,8 @@ export function QcReinspectForm(props: Props) {
   // Persist a QC line's photo_urls to its answer record (shared by tag/untag).
   async function saveLinePhotos(lineRecordId: string, urls: string[]) {
     setLines((cur) => cur.map((l) => (l.recordId === lineRecordId ? { ...l, photoUrls: urls } : l)));
+    // Persist only real URLs — offline drafts (blob:) sync + swap on reconnect.
+    const real = urls.filter((u) => !u.startsWith('blob:'));
     try {
       markSaving();
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
@@ -259,7 +272,7 @@ export function QcReinspectForm(props: Props) {
         body: JSON.stringify({
           upserts: [{
             recordId: lineRecordId,
-            answerProps: { photo_urls: joinPhotoUrls(urls), photo_count: urls.length },
+            answerProps: { photo_urls: joinPhotoUrls(real), photo_count: real.length },
             questionHubspotRecordId: null,
           }],
         }),
@@ -282,7 +295,8 @@ export function QcReinspectForm(props: Props) {
   // Swap an After photo for its marked-up version (re-upload + replace, persist).
   async function replaceAfterPhoto(key: string, section: string, location: string, index: number, file: File) {
     try {
-      const url = await uploadPhoto(file);
+      const oldForReplace = (afterPhotos[key] || [])[index];
+      const url = await uploadPhotoOrQueue(file, props.inspectionRecordId, key, { replacesUrl: oldForReplace });
       const arr = [...(afterPhotos[key] || [])];
       if (index < 0 || index >= arr.length) return;
       const oldUrl = arr[index];
@@ -316,6 +330,80 @@ export function QcReinspectForm(props: Props) {
     if (!url || !line) return;
     await saveLinePhotos(lineRecordId, (line.photoUrls || []).filter((u) => u !== url));
   }
+
+  // ---- Offline photo cache + auto-sync ----------------------------------
+  // Captures on a weak signal are cached to IndexedDB (draft blob: URLs) and
+  // re-attached + persisted when connectivity returns. Mirrors RateCardForm.
+  const afterPhotosRef = useRef(afterPhotos); afterPhotosRef.current = afterPhotos;
+  const linesRef = useRef(lines); linesRef.current = lines;
+  const persistRef = useRef(persistAfterPhotos); persistRef.current = persistAfterPhotos;
+  const saveLineRef = useRef(saveLinePhotos); saveLineRef.current = saveLinePhotos;
+  const rehydratedRef = useRef(false);
+
+  const runQcFlush = async () => {
+    if (!rehydratedRef.current) return; // wait until drafts are in state to swap
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    const sectionSwaps = new Map<string, string>();
+    const lineSwaps = new Map<string, string>();
+    await flushQueuedPhotos(props.inspectionRecordId, ({ sectionId, oldUrl, newUrl, replacesUrl, lineExternalId }) => {
+      if (lineExternalId) { if (oldUrl) lineSwaps.set(oldUrl, newUrl); if (replacesUrl) lineSwaps.set(replacesUrl, newUrl); }
+      else { if (oldUrl) sectionSwaps.set(oldUrl, newUrl); if (replacesUrl) sectionSwaps.set(replacesUrl, newUrl); }
+    }).catch(() => ({ synced: 0 } as any));
+    if (sectionSwaps.size) {
+      const cur = afterPhotosRef.current;
+      const next: Record<string, string[]> = { ...cur };
+      const persistKeys: string[] = [];
+      for (const [k, urls] of Object.entries(cur)) {
+        let changed = false;
+        const sw = urls.map((u) => { const r = sectionSwaps.get(u); if (r) { changed = true; return r; } return u; });
+        if (changed) { next[k] = sw; persistKeys.push(k); }
+      }
+      if (persistKeys.length) {
+        setAfterPhotos(next);
+        for (const k of persistKeys) { const [section, location] = k.split('||'); void persistRef.current(k, section, location || '', next[k]); }
+      }
+    }
+    if (lineSwaps.size) {
+      const cur = linesRef.current;
+      const toSave: { id: string; urls: string[] }[] = [];
+      const next = cur.map((l) => {
+        const photos = l.photoUrls || [];
+        let changed = false;
+        const sw = photos.map((u) => { const r = lineSwaps.get(u); if (r) { changed = true; return r; } return u; });
+        if (!changed) return l;
+        toSave.push({ id: l.recordId, urls: sw });
+        return { ...l, photoUrls: sw };
+      });
+      if (toSave.length) { setLines(next); for (const t of toSave) void saveLineRef.current(t.id, t.urls); }
+    }
+  };
+  const runQcFlushRef = useRef(runQcFlush); runQcFlushRef.current = runQcFlush;
+
+  // Rehydrate queued drafts into state once the record has loaded, then drain.
+  useEffect(() => {
+    if (loading || rehydratedRef.current) return;
+    rehydratedRef.current = true;
+    void rehydrateQueuedPhotos(props.inspectionRecordId).then((drafts) => {
+      if (drafts.length) {
+        const bySection: Record<string, string[]> = {};
+        const byLine: Record<string, string[]> = {};
+        for (const d of drafts) {
+          if (d.lineExternalId) (byLine[d.lineExternalId] = byLine[d.lineExternalId] || []).push(d.url);
+          else (bySection[d.sectionId] = bySection[d.sectionId] || []).push(d.url);
+        }
+        if (Object.keys(bySection).length) setAfterPhotos((cur) => { const n = { ...cur }; for (const [k, urls] of Object.entries(bySection)) n[k] = Array.from(new Set([...(n[k] || []), ...urls])); return n; });
+        if (Object.keys(byLine).length) setLines((cur) => cur.map((l) => byLine[l.recordId] ? { ...l, photoUrls: Array.from(new Set([...(l.photoUrls || []), ...byLine[l.recordId]])) } : l));
+      }
+    }).catch(() => {}).finally(() => { void runQcFlushRef.current(); });
+  }, [loading, props.inspectionRecordId]);
+
+  // Auto-retry: flush on reconnect + a periodic reconcile.
+  useEffect(() => {
+    const onOnline = () => { void runQcFlushRef.current(); };
+    window.addEventListener('online', onOnline);
+    const iv = setInterval(() => { void runQcFlushRef.current(); }, 15000);
+    return () => { window.removeEventListener('online', onOnline); clearInterval(iv); };
+  }, []);
   // Which of a section's lines the After photo at `index` is tagged to.
   function currentTagsForAfter(key: string, index: number): { externalId: string; label: string }[] {
     const url = (afterPhotos[key] || [])[index];
@@ -756,6 +844,7 @@ export function QcReinspectForm(props: Props) {
           propertyRecordId={props.propertyRecordId}
           onClose={() => setCameraKey(null)}
           uploadPhoto={uploadHelper}
+          uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, props.inspectionRecordId, cameraKey || '')}
           rooms={sections.map((s) => {
             const count = (afterPhotos[s.key] || []).length;
             return {
