@@ -938,6 +938,9 @@ export function CameraCapture({
   }, []);
 
   const [roomMenuOpen, setRoomMenuOpen] = useState(false);
+  // Live AI-assist status, surfaced by CameraAILayer and rendered in the black
+  // header strip (below the title) so it never floats over the live image.
+  const [aiStatus, setAiStatus] = useState<{ text: string; tone: 'idle' | 'listen' | 'heard' | 'think' | 'err' } | null>(null);
   const [renamingRoomId, setRenamingRoomId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [addingRoom, setAddingRoom] = useState(false);
@@ -1040,6 +1043,7 @@ export function CameraCapture({
           videoRef={videoRef}
           getStream={() => streamRef.current}
           getLastManualCaptureAt={() => lastManualCaptureRef.current}
+          onStatus={setAiStatus}
           getActiveRoom={() => {
             const r = rooms?.find((x) => x.id === currentRoomId);
             if (r) return { id: r.id, name: r.name, photoCount: r.photoCount };
@@ -1073,6 +1077,25 @@ export function CameraCapture({
         {/* Spacer to keep the count centered now that Done moved to the bottom. */}
         <div className="w-14" aria-hidden />
       </div>
+
+      {/* AI-assist status strip — lives in the black header (below the title),
+          out of the live image, so the inspector always sees Listening/Thinking
+          /transcript without it covering the camera. */}
+      {aiAssist && (
+        <div className="bg-black/75 text-white px-4 py-1.5 flex items-center justify-center border-b border-white/10">
+          <div className="text-[12px] flex items-center gap-1.5 min-w-0">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+              aiStatus?.tone === 'err' ? 'bg-rose-400'
+                : aiStatus?.tone === 'think' ? 'bg-violet-400 animate-pulse'
+                : aiStatus?.tone === 'heard' ? 'bg-emerald-400 animate-pulse'
+                : aiStatus?.tone === 'listen' ? 'bg-emerald-400 animate-pulse'
+                : 'bg-white/40'}`} />
+            <span className={`truncate ${aiStatus?.tone === 'err' ? 'text-rose-200' : aiStatus?.tone === 'heard' ? 'italic text-emerald-200' : 'text-white/90'}`}>
+              {aiStatus?.text || 'Starting AI assist…'}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Room switcher (multi-room mode): ‹ Room Name (N) › — name opens a
           scrollable room list showing photo counts and which rooms still need

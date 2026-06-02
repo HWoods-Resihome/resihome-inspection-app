@@ -71,6 +71,8 @@ interface Props {
   uploadPhoto: (file: File) => Promise<string>;
   onAddLine: (sectionId: string, line: RateCardLineInput) => void;
   onStill: (sectionId: string, url: string) => void;
+  // Report the live status up so the host camera can render it in its header.
+  onStatus?: (s: { text: string; tone: 'idle' | 'listen' | 'heard' | 'think' | 'err' }) => void;
 }
 
 function genId(): string {
@@ -88,7 +90,7 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 export function CameraAILayer(props: Props) {
-  const { enabled, videoRef, getStream, getLastManualCaptureAt, getActiveRoom, rooms, onNavigateRoom, region, tenantMonths, addressSnapshot, propertyRecordId, uploadPhoto, onAddLine, onStill } = props;
+  const { enabled, videoRef, getStream, getLastManualCaptureAt, getActiveRoom, rooms, onNavigateRoom, region, tenantMonths, addressSnapshot, propertyRecordId, uploadPhoto, onAddLine, onStill, onStatus } = props;
 
   // Kept fresh each render so the once-wired audio loop / inference timers read
   // current rooms + callbacks instead of their first-render closures.
@@ -141,6 +143,20 @@ export function CameraAILayer(props: Props) {
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { chipsRef.current = chips; }, [chips]);
+
+  // Derive a single status line + tone and report it up to the host camera,
+  // which renders it in its black header strip (not floating over the image).
+  useEffect(() => {
+    if (!enabled) return;
+    let text: string; let tone: 'idle' | 'listen' | 'heard' | 'think' | 'err';
+    if (errText) { text = errText; tone = 'err'; }
+    else if (scanning) { text = 'Thinking…'; tone = 'think'; }
+    else if (transcribing) { text = 'Heard you…'; tone = 'heard'; }
+    else if (heardText) { text = `“${heardText}”`; tone = 'heard'; }
+    else if (listening) { text = 'Listening — say what you see'; tone = 'listen'; }
+    else { text = 'Starting mic…'; tone = 'idle'; }
+    onStatus?.({ text, tone });
+  }, [enabled, errText, scanning, transcribing, heardText, listening, onStatus]);
 
   function seenFor(roomId: string) {
     if (!seenByRoomRef.current[roomId]) seenByRoomRef.current[roomId] = { codes: new Set(), descs: new Set() };
@@ -550,25 +566,6 @@ export function CameraAILayer(props: Props) {
           </div>
         </div>
       )}
-
-      {/* Status / heard line — a compact pill centered BELOW the camera toolbar
-          (in the clear gap between the proximity badge and the camera buttons),
-          so it never overlaps the title, room dropdown, or room arrows. */}
-      <div className="absolute top-[100px] left-1/2 -translate-x-1/2 z-30 pointer-events-none px-3 max-w-[82vw]">
-        <div className="text-[11.5px] text-white bg-black/65 rounded-full px-3 py-1 shadow whitespace-nowrap overflow-hidden text-ellipsis">
-          {errText ? (
-            <span className="flex items-center gap-1.5 text-rose-200"><span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" /> {errText}</span>
-          ) : scanning ? (
-            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse shrink-0" /> Thinking…</span>
-          ) : transcribing ? (
-            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" /> Heard you…</span>
-          ) : heardText ? (
-            <span className="italic text-emerald-200">“{heardText.length > 38 ? heardText.slice(0, 38) + '…' : heardText}”</span>
-          ) : (
-            <span className="flex items-center gap-1.5"><span className={`w-1.5 h-1.5 rounded-full shrink-0 ${listening ? 'bg-emerald-400 animate-pulse' : 'bg-white/40'}`} /> {listening ? 'Listening — say what you see' : 'Starting mic…'}</span>
-          )}
-        </div>
-      </div>
 
       {/* On-device debug HUD — the live mic → Whisper → vision pipeline so we can
           see exactly where things stall on a real phone. Toggle with the 🐞 chip. */}

@@ -96,15 +96,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const active: Array<{ id: string; description?: string; unit?: string }> =
       Array.isArray(body.active) ? body.active.slice(0, 20) : [];
     const frameB64: string = typeof body.frame === 'string' ? body.frame : '';
-    if (!frameB64) return res.status(400).json({ error: 'No frame.' });
+    const wantsVoice = !!String(body.transcriptDelta || '').trim();
+    // The frame is only needed for silent (vision) ticks. Voice ticks run
+    // text-only, so a missing/bad frame there is fine.
+    if (!frameB64 && !wantsVoice) return res.status(400).json({ error: 'No frame.' });
 
     let imageBlock: any;
-    try {
-      const buf = Buffer.from(frameB64, 'base64');
-      const jpeg = await sharp(buf).rotate().resize(FRAME_EDGE, FRAME_EDGE, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 55 }).toBuffer();
-      imageBlock = { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } };
-    } catch {
-      return res.status(400).json({ error: 'Bad frame.' });
+    if (frameB64) {
+      try {
+        const buf = Buffer.from(frameB64, 'base64');
+        const jpeg = await sharp(buf).rotate().resize(FRAME_EDGE, FRAME_EDGE, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 55 }).toBuffer();
+        imageBlock = { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } };
+      } catch {
+        if (!wantsVoice) return res.status(400).json({ error: 'Bad frame.' });
+      }
     }
 
     const catalog = await getCachedCatalog();
@@ -136,18 +141,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return { item, unit, isMeasured, isWholeHouse, tenantPct, measurementUnit };
     };
 
-    const userContent: any[] = [
-      { type: 'text', text:
-        `Room: ${sectionName}. Current frame below.` +
-        (transcriptDelta
-          ? `\n\n*** THE INSPECTOR JUST SAID: "${transcriptDelta}" ***\nThis is a direct instruction. Call suggest_line for EACH concrete repair/replace/clean/paint/trim/install/remove task or defect in that sentence — REGARDLESS of what the frame shows (ignore the frame if it is unrelated). Do not skip any. Do not ask for confirmation.`
-          : `\nNo new voice this tick — only call suggest_line for clear, unambiguous visible damage in the frame (usually none).`) +
-        (seen.length ? `\nAlready suggested (do NOT repeat): ${seen.join('; ')}` : '') +
-        (active.length ? `\nPending items the inspector may amend (use edit_line with the id):\n` + active.map((a) => `  [${a.id}] ${a.description}${a.unit ? ` (${a.unit})` : ''}`).join('\n') : '') +
-        `\nReturn NEW items via suggest_line and/or amendments via edit_line.`
-      },
-      imageBlock,
-    ];
+    // When the inspector SPOKE, we run a TEXT-ONLY pass (no frame). An image
+    // model fed an unrelated frame (a road, a hallway) keeps discounting the
+    // voice; text-only Haiku obeys the instruction reliably and is faster. The
+    // frame is only used on silent ticks for conservative visual call-outs.
+    const hasVoice = !!transcriptDelta;
+    const sharedTail =
+      (seen.length ? `\nAlready suggested (do NOT repeat): ${seen.join('; ')}` : '') +
+      (active.length ? `\nPending items the inspector may amend (use edit_line with the id):\n` + active.map((a) => `  [${a.id}] ${a.description}${a.unit ? ` (${a.unit})` : ''}`).join('\n') : '');
+
+    const userContent: any[] = hasVoice
+      ? [{ type: 'text', text:
+          `Room: ${sectionName}.\n` +
+          `*** THE INSPECTOR JUST SAID: "${transcriptDelta}" ***\n` +
+          `This is a direct work order. Call suggest_line for EACH distinct repair/replace/clean/paint/trim/install/remove task or defect in that sentence — one call per item. This is REQUIRED. Do NOT ask for confirmation, do NOT skip items, do NOT stay silent. If a phrase is a defect ("X is broken/missing/stained/dirty/out") emit the corresponding repair. If you are unsure of the exact catalog item, still call suggest_line with your best query.` +
+          sharedTail +
+          `\nUse edit_line instead of suggest_line only when they are clearly amending a PENDING item above.`
+        }]
+      : [{ type: 'text', text:
+          `Room: ${sectionName}. Current frame below. No new voice this tick — only call suggest_line for clear, unambiguous VISIBLE damage in the frame (usually none; staying silent is correct).` +
+          sharedTail
+        }, imageBlock];
 
     const resp = await fetch(ANTHROPIC_URL, {
       method: 'POST',
@@ -157,7 +171,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         max_tokens: 900,
         system: SYSTEM,
         tools: [SUGGEST_TOOL, EDIT_TOOL],
-        tool_choice: { type: 'auto' },
+        // On a voice tick, force a tool call so it can't reply with prose and
+        // silently drop the work order; on silent ticks let it choose (often none).
+        tool_choice: hasVoice ? { type: 'any' } : { type: 'auto' },
         messages: [{ role: 'user', content: userContent }],
       }),
     });
