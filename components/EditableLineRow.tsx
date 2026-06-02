@@ -230,11 +230,11 @@ function PhotoChipRow({
     <div className="mt-2" onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center gap-2 mb-1">
         <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{label}</span>
-        {required && urls.length === 0
-          ? <span className="text-[10px] font-semibold text-amber-600">Required</span>
-          : urls.length > 0
-            ? <span className="text-[10px] text-emerald-600">&#10003; {urls.length}</span>
-            : null}
+        {urls.length > 0
+          ? <span className="text-[10px] text-emerald-600">&#10003; {urls.length}</span>
+          : required
+            ? <span className="text-[10px] font-semibold text-amber-600">Required</span>
+            : <span className="text-[10px] font-semibold text-gray-400">Optional</span>}
       </div>
       <div className="flex gap-1.5 flex-wrap items-center">
         {urls.map((u, i) => (
@@ -1246,20 +1246,19 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
   const resolutionToggle = showIrPhotos ? (
     <div className="mt-2 w-full" onClick={(e) => e.stopPropagation()}>
       <div className="text-[11px] font-bold text-gray-600 mb-1">Complete: <span className="text-brand">*</span></div>
-      <div className="grid grid-cols-2 gap-2 w-full max-w-[260px] select-none">
+      <div className="grid grid-cols-2 gap-1.5 w-full max-w-[160px] select-none">
         {(['now', 'later'] as const).map((v) => (
           <button
             key={v}
             type="button"
             disabled={readOnly}
             onClick={(e) => { e.stopPropagation(); onSetResolutionTiming?.(line.externalId, v); }}
-            className={`h-9 rounded-md border text-xs text-center leading-none font-heading font-semibold ${timing === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}
+            className={`h-7 rounded-md border text-[11px] text-center leading-none font-heading font-semibold ${timing === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}
           >
             {v === 'now' ? 'Now' : 'Later'}
           </button>
         ))}
       </div>
-      {timing === 'later' && <div className="text-[11px] text-gray-500 mt-1">After Photos Optional</div>}
     </div>
   ) : null;
 
