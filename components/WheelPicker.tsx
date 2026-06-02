@@ -115,7 +115,7 @@ function WheelSheet({
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+    <div className={`fixed inset-0 z-[9999] flex justify-center px-4 ${large ? 'items-center pt-[20vh] pb-4' : 'items-center p-4'}`}>
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
         className={`relative ${large ? 'w-80 max-w-[92vw]' : 'w-72 max-w-[88vw]'} bg-white rounded-2xl shadow-2xl p-3`}

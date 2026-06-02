@@ -205,6 +205,12 @@ export function CameraAILayer(props: Props) {
   const setEdit = (id: string, patch: Partial<ChipEdit>) => setEditById((m) => ({ ...m, [id]: { ...(m[id] || EMPTY_EDIT), ...patch } }));
   // Which inline field is currently open for editing (tap-to-edit, like the form).
   const [editing, setEditing] = useState<{ id: string; field: keyof ChipEdit } | null>(null);
+  // Draft text while a qty / vendor$ input is open — committed on Done/Enter (qty
+  // also commits on blur; vendor$ reverts on blur so a stray tap-out keeps the
+  // formula value).
+  const [draft, setDraft] = useState('');
+  const openEdit = (id: string, field: keyof ChipEdit, current: string) => { setDraft(current); setEditing({ id, field }); };
+  const money2 = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // Capture animation: a shutter flash + a "saved" thumbnail toast so the
   // inspector sees the AI grabbing room photos and doesn't re-shoot them.
   const [flashKey, setFlashKey] = useState(0);
@@ -604,7 +610,9 @@ export function CameraAILayer(props: Props) {
     const rebufferOnFail = () => { if (hasNewVoice) transcriptBufRef.current = (newText + ' ' + transcriptBufRef.current).trimStart(); };
     const commitContext = () => { if (hasNewVoice) recentCtxRef.current.push({ t: Date.now(), text: newText }); };
     inFlight.current = true;
-    setScanning(true);
+    // Only surface "Processing…" for VOICE-driven work — silent background vision
+    // ticks shouldn't keep the header stuck on Processing after a line is added.
+    if (hasNewVoice) setScanning(true);
     const seen = seenFor(room.id);
     try {
       const r = await fetch('/api/rate-card/room-scan-live', {
@@ -812,6 +820,9 @@ export function CameraAILayer(props: Props) {
         {visibleChips.map((s) => {
           const e = editOf(s);
           const addDisabled = s.needsMeasurement && !(Number(e.qty) > 0);
+          const item = catalog.find((c) => c.lineItemCode === s.lineItemCode);
+          const subtext = (item?.laborSubtext || item?.laborFullDescription || '').trim();
+          const unitAbbr = s.measurementUnit ? s.unit : ''; // SF / LF / SY (compact)
           return (
           <div key={s.id} className="pointer-events-auto bg-white rounded-xl p-3 shadow-xl ring-1 ring-black/5">
             <div className="flex items-start gap-2">
@@ -825,6 +836,9 @@ export function CameraAILayer(props: Props) {
                   <span className="text-sm font-semibold text-ink leading-tight">{s.description}</span>
                 </div>
                 <div className="text-[11px] text-gray-600">{s.category}{s.subcategory ? ` · ${s.subcategory}` : ''}</div>
+                {subtext && (
+                  <div className="text-[11px] text-gray-600 mt-0.5" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{subtext}</div>
+                )}
               </div>
             </div>
 
@@ -833,15 +847,17 @@ export function CameraAILayer(props: Props) {
                 as the manual line card). Vendor $ shows the live formula cost. */}
             {(() => { const vc = vendorCostFor(s, e); const vcFormula = vendorCostFor(s, { ...e, vendorCost: '' }); const overridden = e.vendorCost.trim() !== ''; return (
             <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[12px]">
-              {/* Qty (tap-to-edit) */}
+              {/* Qty — tap to edit; full value pre-selected; Done/Enter or blur keeps it. */}
               {editing && editing.id === s.id && editing.field === 'qty' ? (
-                <input autoFocus type="text" inputMode="decimal" value={e.qty}
-                  onChange={(ev) => setEdit(s.id, { qty: ev.target.value.replace(/[^0-9.]/g, '') })}
-                  onBlur={() => setEditing(null)} onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === 'Escape') setEditing(null); }}
+                <input autoFocus type="text" inputMode="decimal" enterKeyHint="done" value={draft}
+                  onFocus={(ev) => ev.currentTarget.select()}
+                  onChange={(ev) => setDraft(ev.target.value.replace(/[^0-9.]/g, ''))}
+                  onBlur={() => { setEdit(s.id, { qty: draft }); setEditing(null); }}
+                  onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); setEdit(s.id, { qty: draft }); setEditing(null); } else if (ev.key === 'Escape') { setEditing(null); } }}
                   className="h-7 w-16 bg-gray-100 rounded-lg px-2 text-[12px] outline-none ring-2 ring-brand/40" />
               ) : (
-                <button onClick={() => setEditing({ id: s.id, field: 'qty' })} className="text-gray-500">
-                  Qty <span className="text-gray-900 font-semibold">{e.qty || (s.needsMeasurement ? '—' : '1')}</span>{s.measurementUnit ? ` ${s.measurementUnit}` : ''}
+                <button onClick={() => openEdit(s.id, 'qty', e.qty)} className="text-gray-500">
+                  Qty <span className="text-gray-900 font-semibold">{e.qty || (s.needsMeasurement ? '—' : '1')}</span>{unitAbbr ? ` ${unitAbbr}` : ''}
                 </button>
               )}
               <span className="text-gray-300">·</span>
@@ -857,16 +873,19 @@ export function CameraAILayer(props: Props) {
                   className="inline-flex items-center gap-0.5 text-gray-900 font-semibold" />
               </span>
               <span className="text-gray-300">·</span>
-              {/* Vendor $ — live formula cost; tap to override */}
+              {/* Vendor $ — live formula cost; tap to override. Done/Enter keeps the
+                  override; tapping out (blur) reverts to the formula value. */}
               {editing && editing.id === s.id && editing.field === 'vendorCost' ? (
-                <input autoFocus type="text" inputMode="decimal" value={e.vendorCost}
-                  onChange={(ev) => setEdit(s.id, { vendorCost: ev.target.value.replace(/[^0-9.]/g, '') })}
-                  onBlur={() => setEditing(null)} onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === 'Escape') setEditing(null); }}
-                  placeholder={vcFormula != null ? vcFormula.toFixed(2) : 'auto'}
-                  className="h-7 w-20 bg-gray-100 rounded-lg px-2 text-[12px] outline-none ring-2 ring-brand/40" />
+                <input autoFocus type="text" inputMode="decimal" enterKeyHint="done" value={draft}
+                  onFocus={(ev) => ev.currentTarget.select()}
+                  onChange={(ev) => setDraft(ev.target.value.replace(/[^0-9.]/g, ''))}
+                  onBlur={() => setEditing(null)} /* revert: don't commit on tap-out */
+                  onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); setEdit(s.id, { vendorCost: draft }); setEditing(null); } else if (ev.key === 'Escape') { setEditing(null); } }}
+                  placeholder={vcFormula != null ? money2(vcFormula) : 'auto'}
+                  className="h-7 w-24 bg-gray-100 rounded-lg px-2 text-[12px] outline-none ring-2 ring-brand/40" />
               ) : (
-                <button onClick={() => setEditing({ id: s.id, field: 'vendorCost' })} className="text-gray-500">
-                  Vendor $ <span className="text-gray-900 font-semibold">{vc != null ? `$${vc.toFixed(2)}` : '—'}</span>
+                <button onClick={() => openEdit(s.id, 'vendorCost', e.vendorCost)} className="text-gray-500">
+                  Vendor $ <span className="text-gray-900 font-semibold">{vc != null ? `$${money2(vc)}` : '—'}</span>
                   {overridden && <span className="text-brand"> ✎</span>}
                 </button>
               )}

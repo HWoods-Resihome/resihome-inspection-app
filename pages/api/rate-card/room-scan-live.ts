@@ -83,9 +83,33 @@ const SUGGEST_TOOL = {
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
+
+  // Warm-up ping (GET): pre-load the cold-start work — catalog + its embeddings
+  // + the Voyage query path — and prime Haiku (TLS + server-side prompt cache),
+  // so the inspector's FIRST spoken call-out in the AI camera is fast. The client
+  // fires this when the camera opens. No vision call, so it's cheap.
+  if (req.method === 'GET') {
+    try {
+      const catalog = await getCachedCatalog();
+      await Promise.allSettled([
+        matchCatalog('warmup', catalog, { topK: 1 }),
+        (async () => {
+          try {
+            await fetch(ANTHROPIC_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey(), 'anthropic-version': '2023-06-01' },
+              body: JSON.stringify({ model: MODEL_FAST, max_tokens: 1, system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: 'ok' }] }),
+            });
+          } catch { /* non-fatal */ }
+        })(),
+      ]);
+    } catch { /* non-fatal warm-up */ }
+    return res.status(200).json({ ok: true });
+  }
+
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
     const body = req.body || {};

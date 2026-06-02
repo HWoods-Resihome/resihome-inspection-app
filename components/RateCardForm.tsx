@@ -248,6 +248,20 @@ export function RateCardForm(props: RateCardFormProps) {
   // AI Camera (Beta): when true, the section camera opens with the AI assist
   // layer on top (live call-outs while you talk + pan). Take button = false.
   const [aiCameraMode, setAiCameraMode] = useState(false);
+  // AI camera warm-up: prime catalog embeddings + Haiku (same cold-start work the
+  // mic button does) so the first spoken call-out is fast. The Beta button stays
+  // disabled until this completes, exactly like the floating mic.
+  const [aiCamWarmed, setAiCamWarmed] = useState(false);
+  const aiCamWarmStartedRef = useRef(false);
+  useEffect(() => {
+    if (aiCamWarmStartedRef.current || !online) return;
+    if (props.readOnly || props.templateType !== 'pm_scope_rate_card') return;
+    aiCamWarmStartedRef.current = true;
+    (async () => {
+      try { await fetch('/api/rate-card/room-scan-live', { method: 'GET' }); } catch { /* non-fatal */ }
+      setAiCamWarmed(true); // set even on failure so the button can't get stuck
+    })();
+  }, [online, props.readOnly, props.templateType]);
   // ----- AI scope review -----
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -2859,14 +2873,18 @@ export function RateCardForm(props: RateCardFormProps) {
                           <button
                             type="button"
                             onClick={() => { setAiCameraMode(true); setCameraSectionId(s.id); }}
-                            disabled={isUploadingHere}
-                            className="inline-flex items-center gap-1 text-xs bg-violet-600 text-white font-semibold py-1 px-2.5 rounded hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                            title="AI Camera (Beta) — full camera with live AI call-outs as you talk and pan"
+                            disabled={isUploadingHere || !aiCamWarmed}
+                            className="inline-flex items-center gap-1 text-xs bg-violet-600 text-white font-semibold py-1 px-2.5 rounded hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-opacity"
+                            title={aiCamWarmed ? 'AI Camera (Beta) — full camera with live AI call-outs as you talk and pan' : 'AI Camera (Beta) — getting ready…'}
                           >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" />
-                              <path d="M19 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" />
-                            </svg>
+                            {!aiCamWarmed ? (
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                            ) : (
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" />
+                                <path d="M19 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" />
+                              </svg>
+                            )}
                             AI<span className="text-[9px] font-bold uppercase ml-0.5 opacity-90">Beta</span>
                           </button>
                           <button
