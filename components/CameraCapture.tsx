@@ -200,6 +200,9 @@ export function CameraCapture({
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // Last time the inspector pressed the shutter (manual capture). The AI auto-
+  // still fallback reads this so it only fills gaps when nobody's shooting.
+  const lastManualCaptureRef = useRef(0);
   const streamRef = useRef<MediaStream | null>(null);
   // Latest GPS fix, kept fresh while the camera is open, burned into captures.
   const geoRef = useRef<GeolocationPosition | null>(null);
@@ -826,6 +829,9 @@ export function CameraCapture({
       const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const file = new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' });
       enqueueFile(file);
+      // Mark manual-capture activity so the AI layer's auto-still fallback stays
+      // quiet while the inspector is actively shooting their own photos.
+      lastManualCaptureRef.current = Date.now();
     } catch (e: any) {
       console.error('Capture error:', e);
     } finally {
@@ -1033,10 +1039,11 @@ export function CameraCapture({
           enabled={!!aiAssist}
           videoRef={videoRef}
           getStream={() => streamRef.current}
+          getLastManualCaptureAt={() => lastManualCaptureRef.current}
           getActiveRoom={() => {
             const r = rooms?.find((x) => x.id === currentRoomId);
-            if (r) return { id: r.id, name: r.name };
-            return currentRoomId ? { id: currentRoomId, name: 'Room' } : null;
+            if (r) return { id: r.id, name: r.name, photoCount: r.photoCount };
+            return currentRoomId ? { id: currentRoomId, name: 'Room', photoCount: 0 } : null;
           }}
           rooms={(rooms || []).map((r) => ({ id: r.id, name: r.name }))}
           onNavigateRoom={(id) => { void switchToRoom(id); }}

@@ -22,12 +22,17 @@ import {
 import type { RateCardLineInput } from '@/lib/types';
 
 const INFER_INTERVAL_MS = 2500;
-const STILL_INTERVAL_MS = 6000;
 const KEYFRAME_EDGE = 640;
 const AUDIO_CHUNK_MS = 4000;
 const MAX_ROOM_STILLS = 12;
+// Auto-still is now a FALLBACK: it only fires when the inspector has gone idle
+// (no manual shutter, no AI still, no chip) for this long — so supplemental
+// photos fill gaps instead of firing every few seconds.
+const AUTO_IDLE_MS = 15000;
+const AUTO_CHECK_MS = 3500;
+const DEBUG_DEFAULT = true; // on-device pipeline HUD (mic → Whisper → vision)
 
-interface ActiveRoom { id: string; name: string }
+interface ActiveRoom { id: string; name: string; photoCount?: number }
 
 interface LiveSuggestion {
   id: string;
@@ -54,6 +59,8 @@ interface Props {
   // The camera's shared stream (video + audio in AI mode). We pull the mic from
   // here instead of opening a second getUserMedia — one stream = reliable voice.
   getStream: () => MediaStream | null;
+  // Epoch ms of the last manual shutter press (0 if none) — gates the auto-still.
+  getLastManualCaptureAt: () => number;
   getActiveRoom: () => ActiveRoom | null;
   rooms: ActiveRoom[];
   onNavigateRoom: (sectionId: string) => void;
@@ -81,7 +88,7 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 export function CameraAILayer(props: Props) {
-  const { enabled, videoRef, getStream, getActiveRoom, rooms, onNavigateRoom, region, tenantMonths, addressSnapshot, propertyRecordId, uploadPhoto, onAddLine, onStill } = props;
+  const { enabled, videoRef, getStream, getLastManualCaptureAt, getActiveRoom, rooms, onNavigateRoom, region, tenantMonths, addressSnapshot, propertyRecordId, uploadPhoto, onAddLine, onStill } = props;
 
   // Kept fresh each render so the once-wired audio loop / inference timers read
   // current rooms + callbacks instead of their first-render closures.
@@ -106,6 +113,19 @@ export function CameraAILayer(props: Props) {
   const roomStillCountRef = useRef<Record<string, number>>({});
   const chipsRef = useRef<LiveSuggestion[]>([]);
   const activeIdRef = useRef<string | null>(null);
+  // Auto-still fallback bookkeeping: last AI still + room-entered timestamps.
+  const lastAiStillAtRef = useRef(0);
+  const roomEnteredAtRef = useRef(Date.now());
+
+  // ---- on-device debug HUD (mic → Whisper → vision pipeline) ----
+  const [dbgOn, setDbgOn] = useState(DEBUG_DEFAULT);
+  const [dbgLines, setDbgLines] = useState<string[]>([]);
+  function dbg(s: string) {
+    const line = `${new Date().toLocaleTimeString('en-US', { hour12: false })} ${s}`;
+    // eslint-disable-next-line no-console
+    console.log('[AICam]', line);
+    setDbgLines((p) => [...p.slice(-11), line]);
+  }
 
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -131,6 +151,7 @@ export function CameraAILayer(props: Props) {
   useEffect(() => {
     if (!enabled) return;
     openRef.current = true;
+    dbg('layer enabled');
     (async () => {
       const [ref, fix] = await Promise.all([
         resolvePropertyRefCoords(propertyRecordId, addressSnapshot),
@@ -139,8 +160,8 @@ export function CameraAILayer(props: Props) {
       stampLinesRef.current = buildStampLines(addressSnapshot, fix, ref);
       await startAudioLoop();
       inferTimer.current = setInterval(() => { void runInference(); }, INFER_INTERVAL_MS);
-      stillTimer.current = setInterval(() => { void captureStill(false); }, STILL_INTERVAL_MS);
-      setTimeout(() => { void captureStill(false); }, 1200);
+      // Auto-still FALLBACK: only when idle (no manual/AI photo) for AUTO_IDLE_MS.
+      stillTimer.current = setInterval(() => { void maybeAutoStill(); }, AUTO_CHECK_MS);
     })();
     return () => {
       openRef.current = false;
@@ -160,19 +181,43 @@ export function CameraAILayer(props: Props) {
       const id = a?.id ?? null;
       if (id !== activeIdRef.current) {
         activeIdRef.current = id;
+        roomEnteredAtRef.current = Date.now();
         setChips([]);
         setHeardText('');
+        dbg(`room → ${a?.name || '—'}`);
       }
     }, 600);
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
+  // Auto-still fallback: fire ONE supplemental stamped still only when the
+  // inspector has been idle (no manual shutter, no AI still) for AUTO_IDLE_MS,
+  // so we ensure coverage without spamming photos while they're shooting/talking.
+  async function maybeAutoStill() {
+    if (!openRef.current) return;
+    const room = getActiveRoomRef.current();
+    if (!room) return;
+    if ((roomStillCountRef.current[room.id] || 0) >= MAX_ROOM_STILLS) return;
+    const lastManual = getLastManualCaptureAt?.() || 0;
+    const idleSince = Math.max(lastManual, lastAiStillAtRef.current, roomEnteredAtRef.current);
+    if (Date.now() - idleSince < AUTO_IDLE_MS) return;
+    dbg(`auto-still (idle ${Math.round((Date.now() - idleSince) / 1000)}s)`);
+    await captureStill(false, 'auto');
+  }
+
   // ---- voice: chunked audio → Whisper ----
   function pickAudioMime(): string {
     const MR: any = (typeof window !== 'undefined') && (window as any).MediaRecorder;
     if (!MR?.isTypeSupported) return '';
-    for (const m of ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']) { try { if (MR.isTypeSupported(m)) return m; } catch { /* noop */ } }
+    // iOS Safari ONLY records audio/mp4; Android Chrome's mp4 audio recording is
+    // often broken/empty, while webm/opus is reliable — so order by platform.
+    const isIOS = typeof navigator !== 'undefined'
+      && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && (navigator as any).maxTouchPoints > 1));
+    const order = isIOS
+      ? ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']
+      : ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+    for (const m of order) { try { if (MR.isTypeSupported(m)) return m; } catch { /* noop */ } }
     return '';
   }
   // Whisper "silence hallucinations" — on a near-silent clip it emits stock
@@ -199,8 +244,24 @@ export function CameraAILayer(props: Props) {
       setTranscribing(true);
       const base64 = await blobToBase64(blob);
       const r = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base64, mime: (blob.type || 'audio/mp4').split(';')[0] }) });
-      if (r.ok) { const d = await r.json(); const txt = String(d.text || '').trim(); if (txt && !isNoise(txt)) { maybeNavigate(txt); transcriptBufRef.current += txt + ' '; setHeardText(txt); } }
-    } catch { /* skip */ } finally { setTranscribing(false); }
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        dbg(`stt ✗ ${r.status} ${String(e?.error || '').slice(0, 40)}`);
+        setErrText(`Voice ${r.status}: ${String(e?.error || '').slice(0, 50)}`);
+        return;
+      }
+      const d = await r.json();
+      const txt = String(d.text || '').trim();
+      if (!txt) { dbg('stt: (empty)'); return; }
+      if (isNoise(txt)) { dbg(`stt: noise “${txt.slice(0, 24)}”`); return; }
+      dbg(`stt ✓ “${txt.slice(0, 32)}”`);
+      setErrText('');
+      maybeNavigate(txt);
+      transcriptBufRef.current += txt + ' ';
+      setHeardText(txt);
+    } catch (e: any) {
+      dbg(`stt err ${String(e?.message || e).slice(0, 30)}`);
+    } finally { setTranscribing(false); }
   }
 
   // ---- voice room navigation ("go to kitchen", "walking into bedroom 1") ----
@@ -267,21 +328,25 @@ export function CameraAILayer(props: Props) {
       await new Promise((r) => setTimeout(r, 200));
     }
     if (!openRef.current) return;
+    let source = getStream?.()?.getAudioTracks().some((t) => t.readyState === 'live') ? 'shared' : 'none';
     if (!liveAudioTracks().length) {
+      dbg('no shared audio — opening own mic');
       try {
         const own = await navigator.mediaDevices.getUserMedia({ audio: true });
         if (!openRef.current) { own.getTracks().forEach((t) => t.stop()); return; }
         ownAudioRef.current = own;
-      } catch { setListening(false); return; }
+        source = 'own';
+      } catch (e: any) { dbg(`mic denied: ${String(e?.name || e).slice(0, 24)}`); setListening(false); setErrText('Mic blocked — allow microphone'); return; }
     }
-    if (!liveAudioTracks().length) { setListening(false); return; }
+    if (!liveAudioTracks().length) { dbg('mic: 0 tracks'); setListening(false); return; }
     audioLoopRef.current = true;
     setListening(true);
     const mime = pickAudioMime();
+    dbg(`mic ✓ ${source} · ${mime || 'default'}`);
     const recordOnce = () => {
       if (!audioLoopRef.current || !openRef.current) return;
       const tracks = liveAudioTracks();
-      if (!tracks.length) { setListening(false); return; }
+      if (!tracks.length) { dbg('mic tracks lost'); setListening(false); return; }
       try {
         const audioStream = new MediaStream(tracks);
         const rec = mime ? new MediaRecorder(audioStream, { mimeType: mime }) : new MediaRecorder(audioStream);
@@ -289,12 +354,17 @@ export function CameraAILayer(props: Props) {
         const parts: BlobPart[] = [];
         rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
         rec.onstop = () => {
-          if (parts.length) { const blob = new Blob(parts, { type: rec.mimeType || mime || 'audio/mp4' }); if (blob.size > 1200) void transcribeChunk(blob); }
+          if (parts.length) {
+            const blob = new Blob(parts, { type: rec.mimeType || mime || 'audio/mp4' });
+            if (blob.size > 1200) { dbg(`clip ${Math.round(blob.size / 1024)}KB`); void transcribeChunk(blob); }
+            else dbg(`clip too small (${blob.size}b)`);
+          } else dbg('clip: no data');
           if (audioLoopRef.current && openRef.current) recordOnce();
         };
+        rec.onerror = (ev: any) => dbg(`rec err ${String(ev?.error?.name || '')}`);
         rec.start();
         setTimeout(() => { try { if (rec.state !== 'inactive') rec.stop(); } catch { /* noop */ } }, AUDIO_CHUNK_MS);
-      } catch { setListening(false); }
+      } catch (e: any) { dbg(`rec start err ${String(e?.message || e).slice(0, 24)}`); setListening(false); }
     };
     recordOnce();
   }
@@ -319,7 +389,7 @@ export function CameraAILayer(props: Props) {
     ctx.drawImage(v, 0, 0, w, h);
     return c.toDataURL('image/jpeg', 0.6).split(',')[1] || null;
   }
-  async function captureStill(force: boolean): Promise<string | undefined> {
+  async function captureStill(force: boolean, reason = 'still'): Promise<string | undefined> {
     const v = videoRef.current;
     const room = getActiveRoomRef.current();
     if (!openRef.current || !v || !v.videoWidth || !room) return undefined;
@@ -331,6 +401,7 @@ export function CameraAILayer(props: Props) {
     // Fire the shutter flash the instant we grab the frame — immediate feedback,
     // before the (slower) upload round-trip.
     setFlashKey((k) => k + 1);
+    lastAiStillAtRef.current = Date.now(); // counts as activity → throttles fallback
     const blob = await new Promise<Blob | null>((res) => c.toBlob((b) => res(b), 'image/jpeg', 0.8));
     if (!blob) return undefined;
     try {
@@ -339,12 +410,13 @@ export function CameraAILayer(props: Props) {
       const count = (roomStillCountRef.current[room.id] || 0) + 1;
       roomStillCountRef.current[room.id] = count;
       onStill(room.id, url);
+      dbg(`📸 ${reason} → ${room.name} (#${count})`);
       // Pop the saved-thumbnail toast (re-keyed so back-to-back grabs re-animate).
       setSavedShot({ key: Date.now(), url, roomName: room.name, count });
       if (savedTimer.current) clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setSavedShot(null), 2200);
       return url;
-    } catch { return undefined; }
+    } catch (e: any) { dbg(`still upload err ${String(e?.message || e).slice(0, 24)}`); return undefined; }
   }
 
   // ---- inference ----
@@ -374,11 +446,16 @@ export function CameraAILayer(props: Props) {
       if (!openRef.current) return;
       if (!r.ok) {
         const e = await r.json().catch(() => ({}));
+        dbg(`vision ✗ ${r.status} ${String(e?.error || '').slice(0, 40)}`);
         setErrText(`AI ${r.status}: ${String(e?.error || '').slice(0, 80) || 'request failed'}`);
         return;
       }
       const d = await r.json();
       setErrText('');
+      const nS = Array.isArray(d.suggestions) ? d.suggestions.length : 0;
+      const nE = Array.isArray(d.edits) ? d.edits.length : 0;
+      const nU = Array.isArray(d.unmatched) ? d.unmatched.length : 0;
+      dbg(`vision ✓${delta ? ` +voice` : ''} sugg:${nS} edit:${nE} unmatch:${nU}`);
 
       const editList: any[] = Array.isArray(d.edits) ? d.edits : [];
       if (editList.length) {
@@ -398,7 +475,7 @@ export function CameraAILayer(props: Props) {
       const incoming: LiveSuggestion[] = Array.isArray(d.suggestions) ? d.suggestions : [];
       const fresh = incoming.filter((s) => s.lineItemCode && !seen.codes.has(s.lineItemCode));
       if (fresh.length) {
-        const batchStill = await captureStill(true);
+        const batchStill = await captureStill(true, 'call-out');
         const seed: Record<string, string> = {};
         for (const s of fresh) {
           seen.codes.add(s.lineItemCode);
@@ -474,24 +551,41 @@ export function CameraAILayer(props: Props) {
         </div>
       )}
 
-      {/* Status / heard line — pinned to the blank TOP-RIGHT corner of the
-          camera toolbar (top row, beside "Take Photos") so it never overlaps the
-          room dropdown or the prev/next-room arrows on the row below. */}
-      <div className="absolute top-2.5 right-2 max-w-[62%] flex justify-end">
-        <div className="pointer-events-none text-[11.5px] text-white bg-black/55 rounded-full px-2.5 py-1 text-right shadow">
+      {/* Status / heard line — a compact pill centered BELOW the camera toolbar
+          (in the clear gap between the proximity badge and the camera buttons),
+          so it never overlaps the title, room dropdown, or room arrows. */}
+      <div className="absolute top-[100px] left-1/2 -translate-x-1/2 z-30 pointer-events-none px-3 max-w-[82vw]">
+        <div className="text-[11.5px] text-white bg-black/65 rounded-full px-3 py-1 shadow whitespace-nowrap overflow-hidden text-ellipsis">
           {errText ? (
-            <span className="flex items-center gap-1.5 text-rose-200"><span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> {errText}</span>
+            <span className="flex items-center gap-1.5 text-rose-200"><span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" /> {errText}</span>
           ) : scanning ? (
-            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" /> Thinking…</span>
+            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse shrink-0" /> Thinking…</span>
           ) : transcribing ? (
-            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Heard you…</span>
+            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" /> Heard you…</span>
           ) : heardText ? (
-            <span className="italic text-emerald-200">“{heardText}”</span>
+            <span className="italic text-emerald-200">“{heardText.length > 38 ? heardText.slice(0, 38) + '…' : heardText}”</span>
           ) : (
-            <span className="flex items-center gap-1.5"><span className={`w-1.5 h-1.5 rounded-full ${listening ? 'bg-emerald-400 animate-pulse' : 'bg-white/40'}`} /> {listening ? 'Listening — say what you see' : 'Mic off'}</span>
+            <span className="flex items-center gap-1.5"><span className={`w-1.5 h-1.5 rounded-full shrink-0 ${listening ? 'bg-emerald-400 animate-pulse' : 'bg-white/40'}`} /> {listening ? 'Listening — say what you see' : 'Starting mic…'}</span>
           )}
         </div>
       </div>
+
+      {/* On-device debug HUD — the live mic → Whisper → vision pipeline so we can
+          see exactly where things stall on a real phone. Toggle with the 🐞 chip. */}
+      {dbgOn ? (
+        <div className="absolute left-2 top-[140px] z-40 w-[190px] bg-black/78 rounded-lg p-2 text-[9px] leading-[1.35] text-emerald-200 font-mono pointer-events-auto shadow-lg">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-white font-bold">AI DEBUG</span>
+            <button onClick={() => setDbgOn(false)} className="text-white/70 px-1">✕</button>
+          </div>
+          <div className="space-y-0.5 max-h-[40vh] overflow-y-auto">
+            {dbgLines.length === 0 ? <div className="text-white/50">starting…</div>
+              : dbgLines.map((l, i) => <div key={i} className="break-words">{l}</div>)}
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setDbgOn(true)} className="absolute left-2 top-[140px] z-40 pointer-events-auto bg-black/60 rounded-full w-7 h-7 text-sm">🐞</button>
+      )}
 
       {/* Chip tray — floats above the camera controls */}
       <div className="pointer-events-none absolute left-0 right-0 bottom-28 px-3 space-y-2 max-h-[42vh] overflow-y-auto">
