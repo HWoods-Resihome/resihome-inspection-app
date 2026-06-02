@@ -29,7 +29,7 @@ const TENANT_PCT_OPTIONS = Array.from({ length: 21 }, (_, i) => i * 5); // 0..10
 
 const INFER_INTERVAL_MS = 2500;
 const KEYFRAME_EDGE = 640;
-const AUDIO_CHUNK_MS = 4000;
+const AUDIO_CHUNK_MS = 2800; // shorter clips = transcript + card sooner (rolling context stitches splits)
 const MAX_ROOM_STILLS = 12;
 // Auto-still is now a FALLBACK: it only fires when the inspector has gone idle
 // (no manual shutter, no AI still, no chip) for this long — so supplemental
@@ -205,6 +205,9 @@ export function CameraAILayer(props: Props) {
   const [flashKey, setFlashKey] = useState(0);
   const [savedShot, setSavedShot] = useState<{ key: number; url: string; roomName: string; count: number } | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Quick "Added ✓" confirmation that pops then fizzles out on Add.
+  const [addedFx, setAddedFx] = useState<{ key: number; label: string } | null>(null);
+  const addedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { chipsRef.current = chips; }, [chips]);
 
@@ -213,10 +216,11 @@ export function CameraAILayer(props: Props) {
   useEffect(() => {
     if (!enabled) return;
     let text: string; let tone: 'idle' | 'listen' | 'heard' | 'think' | 'err';
+    // Single forward flow: Listening → Processing → (output card / message).
+    // No flip-flop between "Thinking" and the raw transcript.
     if (errText) { text = errText; tone = 'err'; }
-    else if (scanning) { text = 'Thinking…'; tone = 'think'; }
-    else if (transcribing) { text = 'Heard you…'; tone = 'heard'; }
-    else if (heardText) { text = `“${heardText}”`; tone = 'heard'; }
+    else if (scanning || transcribing) { text = 'Processing…'; tone = 'think'; }
+    else if (heardText) { text = heardText; tone = 'heard'; }
     else if (listening) { text = 'Listening — say what you see'; tone = 'listen'; }
     else { text = 'Starting mic…'; tone = 'idle'; }
     onStatus?.({ text, tone });
@@ -248,6 +252,7 @@ export function CameraAILayer(props: Props) {
       if (inferTimer.current) clearInterval(inferTimer.current);
       if (stillTimer.current) clearInterval(stillTimer.current);
       if (savedTimer.current) clearTimeout(savedTimer.current);
+      if (addedTimer.current) clearTimeout(addedTimer.current);
       stopAudioLoop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -313,7 +318,7 @@ export function CameraAILayer(props: Props) {
     'see you next time', 'see you later', 'okay', 'ok', 'uh', 'um', 'hmm', 'mm',
     'mhm', 'yeah', 'so', 'the', 'please subscribe', 'subscribe', 'i', 'oh',
     'thank you so much', 'thanks so much', 'music', 'applause', 'foreign',
-    'pdf', 'pdf pdf', 'pc', 'la la la', 'na na na',
+    'pdf', 'pdf pdf', 'pc', 'la la la', 'na na na', 'silence', 'background noise',
   ]);
   // Single tokens that, when they dominate a clip, mark it as hallucinated noise.
   const JUNK_TOKENS = new Set(['pdf', 'pc', 'you', 'the', 'uh', 'um', 'mm', 'mhm', 'la', 'na', 'ah', 'oh', 'yeah', 'bye', 'thank', 'thanks', 'so', 'a', 'i']);
@@ -349,7 +354,9 @@ export function CameraAILayer(props: Props) {
       if (isNoise(txt)) { dbg(`stt: noise “${txt.slice(0, 24)}”`); return; }
       dbg(`stt ✓ “${txt.slice(0, 32)}”`);
       setErrText('');
-      setHeardText(txt);
+      // NB: we intentionally do NOT echo the raw transcript to the status line —
+      // flipping between the quote and "Processing" read like an error. The card
+      // is the confirmation. heardText is reserved for nav / no-match messages.
       // Try room navigation against a short rolling window (commands split across
       // clips). If it navigates, treat the window as consumed and DON'T feed it to
       // the work endpoint (otherwise "move to the kitchen" becomes a bogus line).
@@ -664,6 +671,9 @@ export function CameraAILayer(props: Props) {
     } finally {
       inFlight.current = false;
       setScanning(false);
+      // If the inspector kept talking while this call was in flight, process the
+      // buffered words right away instead of waiting for the next tick.
+      if (openRef.current && transcriptBufRef.current.trim()) setTimeout(() => { if (!inFlight.current) void runInference(); }, 40);
     }
   }
 
@@ -687,6 +697,10 @@ export function CameraAILayer(props: Props) {
     };
     onAddLineRef.current(s.roomId, line);
     dbg(`✚ added ${s.lineItemCode} q${qty} ${line.assignedTo}`);
+    // Quick visual confirmation that fizzles out.
+    setAddedFx({ key: Date.now(), label: s.description });
+    if (addedTimer.current) clearTimeout(addedTimer.current);
+    addedTimer.current = setTimeout(() => setAddedFx(null), 1150);
     setChips((cur) => cur.filter((c) => c.id !== s.id));
   }
   function dismissChip(s: LiveSuggestion) {
@@ -740,6 +754,17 @@ export function CameraAILayer(props: Props) {
               </div>
               <div className="text-[10.5px] text-white/70">{savedShot.roomName} · {savedShot.count} auto</div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* "Added ✓" confirmation — pops in the center then fizzles out. */}
+      {addedFx && (
+        <div key={addedFx.key} className="fixed left-1/2 top-[42%] z-[60] pointer-events-none animate-addedPop">
+          <div className="flex items-center gap-2 bg-emerald-600 text-white rounded-full px-5 py-2.5 shadow-xl">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+            <span className="text-sm font-heading font-bold">Added</span>
+            <span className="text-sm text-white/85 max-w-[180px] truncate">{addedFx.label}</span>
           </div>
         </div>
       )}
@@ -804,13 +829,13 @@ export function CameraAILayer(props: Props) {
               <span className="text-gray-300">·</span>
               {/* Vendor — branded ListPicker */}
               <ListPicker value={e.vendor} options={VENDORS.map((v) => ({ value: v, label: v }))}
-                onChange={(v) => setEdit(s.id, { vendor: v })} ariaLabel="Vendor"
+                onChange={(v) => setEdit(s.id, { vendor: v })} ariaLabel="Vendor" large
                 className="inline-flex items-center gap-0.5 text-gray-900 font-semibold max-w-[150px]" />
               <span className="text-gray-300">·</span>
               {/* Tenant % — branded WheelPicker */}
               <span className="inline-flex items-center text-gray-500">Tenant&nbsp;
                 <WheelPicker value={e.tenantPct || '100'} options={TENANT_PCT_OPTIONS.map((p) => ({ value: String(p), label: `${p}%` }))}
-                  onChange={(v) => setEdit(s.id, { tenantPct: v })} ariaLabel="Tenant %"
+                  onChange={(v) => setEdit(s.id, { tenantPct: v })} ariaLabel="Tenant %" large
                   className="inline-flex items-center gap-0.5 text-gray-900 font-semibold" />
               </span>
               <span className="text-gray-300">·</span>

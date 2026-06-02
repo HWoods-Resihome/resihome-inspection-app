@@ -13,6 +13,7 @@ interface Props {
   placeholder?: string;     // trigger text when nothing is selected
   disabled?: boolean;
   className?: string;       // trigger button classes
+  large?: boolean;          // bigger, higher-contrast sheet (used on the AI camera)
 }
 
 /**
@@ -22,7 +23,7 @@ interface Props {
  * white space. Used for Category / Sub-category, where a tap-to-pick list reads
  * better than a spin wheel.
  */
-export function ListPicker({ value, options, onChange, ariaLabel, placeholder, disabled, className }: Props) {
+export function ListPicker({ value, options, onChange, ariaLabel, placeholder, disabled, className, large }: Props) {
   const [open, setOpen] = useState(false);
   const selected = options.find((o) => o.value === value);
 
@@ -45,6 +46,7 @@ export function ListPicker({ value, options, onChange, ariaLabel, placeholder, d
           options={options}
           value={value}
           ariaLabel={ariaLabel}
+          large={!!large}
           onClose={() => setOpen(false)}
           onPick={(v) => { setOpen(false); onChange(v); }}
         />
@@ -54,11 +56,12 @@ export function ListPicker({ value, options, onChange, ariaLabel, placeholder, d
 }
 
 function ListSheet({
-  options, value, ariaLabel, onClose, onPick,
+  options, value, ariaLabel, large, onClose, onPick,
 }: {
   options: ListOption[];
   value: string;
   ariaLabel?: string;
+  large?: boolean;
   onClose: () => void;
   onPick: (value: string) => void;
 }) {
@@ -80,11 +83,11 @@ function ListSheet({
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
-        className="relative w-72 max-w-[88vw] max-h-[70vh] bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden"
+        className={`relative ${large ? 'w-96 max-w-[94vw] max-h-[82vh]' : 'w-72 max-w-[88vw] max-h-[70vh]'} bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 shrink-0">
-          <span className="text-sm font-heading font-semibold text-ink">{ariaLabel}</span>
+          <span className={`font-heading font-semibold text-ink ${large ? 'text-base' : 'text-sm'}`}>{ariaLabel}</span>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl leading-none w-7 h-7 flex items-center justify-center" aria-label="Close">×</button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto py-1">
@@ -98,7 +101,7 @@ function ListSheet({
                 ref={o.value === value ? selectedRef : undefined}
                 type="button"
                 onClick={() => choose(o.value)}
-                className={`w-full text-left px-4 py-3 text-base flex items-center justify-between gap-2 transition-colors ${
+                className={`w-full text-left flex items-center justify-between gap-2 transition-colors ${large ? 'px-5 py-4 text-lg' : 'px-4 py-3 text-base'} ${
                   isActive
                     ? 'bg-brand/10 border-y-2 border-brand text-ink font-semibold'
                     : 'text-ink border-y-2 border-transparent hover:bg-gray-50 active:bg-brand/10'

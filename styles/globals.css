@@ -136,11 +136,21 @@ h1, h2, h3, h4, h5, h6 {
   100% { opacity: 0; transform: translateY(-6px) scale(0.98); }
 }
 .animate-shotSaved { animation: shotSaved 2200ms ease-out forwards; }
+/* Quick confirmation when an AI suggestion is added to the room — pops, holds
+   briefly, then fizzles out. translateX(-50%) is baked in so it stays centered. */
+@keyframes addedPop {
+  0% { opacity: 0; transform: translateX(-50%) translateY(8px) scale(0.85); }
+  18% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1.06); }
+  34% { transform: translateX(-50%) translateY(0) scale(1); }
+  72% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-10px) scale(0.98); }
+}
+.animate-addedPop { animation: addedPop 1150ms ease-out forwards; }
 
 /* Respect reduced-motion preferences. */
 @media (prefers-reduced-motion: reduce) {
   .animate-fadeIn, .animate-scaleIn, .animate-popIn, .animate-slideUp,
-  .animate-shutterFlash, .animate-shotSaved,
+  .animate-shutterFlash, .animate-shotSaved, .animate-addedPop,
   .flash-highlight { animation: none; }
   * { scroll-behavior: auto !important; }
 }
