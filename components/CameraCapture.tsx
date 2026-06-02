@@ -4,6 +4,8 @@ import { PhotoAnnotator } from '@/components/PhotoAnnotator';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadVideo } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
+import { CameraAILayer } from '@/components/CameraAILayer';
+import type { RateCardLineInput } from '@/lib/types';
 
 /**
  * State of each photo in the capture session.
@@ -79,6 +81,15 @@ interface Props {
   // Reports when an in-camera overlay (photo viewer or markup editor) is open, so
   // the parent can hide the floating mic over it (unless a conversation is engaged).
   onOverlayChange?: (open: boolean) => void;
+  // --- AI assist (Beta) — the all-in-one layer ---------------------------------
+  // When true, an AI overlay rides on top of the camera: always-listening voice,
+  // periodic vision call-outs, and add/decline chips that commit lines to the
+  // CURRENT room. Off => the camera behaves exactly as before.
+  aiAssist?: boolean;
+  aiRegion?: string;
+  aiTenantMonths?: number | null;
+  onAiAddLine?: (sectionId: string, line: RateCardLineInput) => void;
+  onAiStill?: (sectionId: string, url: string) => void;
 }
 
 // A stamp line; `mark` appends a colored ✓ (location matches the property) or
@@ -185,6 +196,7 @@ export function CameraCapture({
   isOpen, onClose, onComplete, uploadPhoto, uploadVideoEntry, maxPhotos = 30,
   rooms, currentRoomId, onRoomChange, onRenameRoom, onDeleteRoom, onAddRoom,
   addressSnapshot, propertyRecordId, voiceSlot, tagLines, onTagPhotoToLine, onOverlayChange,
+  aiAssist, aiRegion, aiTenantMonths, onAiAddLine, onAiStill,
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -1005,6 +1017,25 @@ export function CameraCapture({
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col select-none animate-fadeIn">
+      {/* AI assist (Beta) — overlay that reads this camera's video + its own mic. */}
+      {aiAssist && onAiAddLine && (
+        <CameraAILayer
+          enabled={!!aiAssist}
+          videoRef={videoRef}
+          getActiveRoom={() => {
+            const r = rooms?.find((x) => x.id === currentRoomId);
+            if (r) return { id: r.id, name: r.name };
+            return currentRoomId ? { id: currentRoomId, name: 'Room' } : null;
+          }}
+          region={aiRegion || ''}
+          tenantMonths={aiTenantMonths ?? null}
+          addressSnapshot={addressSnapshot || ''}
+          propertyRecordId={propertyRecordId}
+          uploadPhoto={uploadPhoto}
+          onAddLine={onAiAddLine}
+          onStill={(sid, url) => onAiStill?.(sid, url)}
+        />
+      )}
       {/* Top bar */}
       <div className="flex items-center justify-between px-4 py-3 bg-black/60 text-white">
         <button
