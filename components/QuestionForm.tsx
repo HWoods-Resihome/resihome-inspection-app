@@ -4,7 +4,7 @@ import type { SavedAnswer } from '@/lib/hubspot';
 import { QuestionItem } from './QuestionItem';
 import { CameraCapture } from './CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
-import { uploadPhoto, uploadFilesBatch } from '@/lib/photoUpload';
+import { uploadFilesBatch } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
@@ -471,7 +471,10 @@ export function QuestionForm({
 
     if (!onlyPanelToggle) {
       const [, instanceKey] = key.split('::');
-      autosave.noteEdit(key, merged, merged.questionHubspotRecordId, instanceKey);
+      // Persist only real URLs — offline draft (blob:) photos sync + swap later
+      // (they stay in component state above for immediate display).
+      const persistMerged: AnswerInput = { ...merged, photoUrls: (merged.photoUrls || []).filter((u) => !u.startsWith('blob:')) };
+      autosave.noteEdit(key, persistMerged, persistMerged.questionHubspotRecordId, instanceKey);
     }
   }
 
@@ -653,29 +656,43 @@ export function QuestionForm({
 
   const hasEverHadSectionSave = useRef(false);
 
-  // ---- Offline photo cache + auto-sync (section photos) -------------------
+  // ---- Offline photo cache + auto-sync -----------------------------------
   // Captures on a weak signal cache to IndexedDB (draft blob: URLs) and
   // re-attach + persist when connectivity returns. Section photos queue under
-  // their instanceKey (no '::'); inline question photos are not queued here.
+  // their instanceKey; inline question photos queue under the answer key
+  // (`${questionIdExternal}::${instanceKey}`, which contains '::').
   const photoRehydratedRef = useRef(false);
-  const runSectionFlush = useCallback(async () => {
+  const answersRef = useRef(answers); answersRef.current = answers;
+  const autosaveRef = useRef(autosave); autosaveRef.current = autosave;
+  const runPhotoFlush = useCallback(async () => {
     if (readOnly || !photoRehydratedRef.current) return;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
     await flushQueuedPhotos(inspectionRecordId, ({ sectionId, oldUrl, newUrl, replacesUrl, lineExternalId }) => {
-      if (lineExternalId || sectionId.includes('::')) return; // not a section photo
+      if (lineExternalId) return;
+      const matches = (u: string) => u === oldUrl || (!!replacesUrl && u === replacesUrl);
+      if (sectionId.includes('::')) {
+        // Inline question photo → swap in that answer + persist real URLs.
+        const key = sectionId;
+        const a = answersRef.current[key];
+        if (!a || !(a.photoUrls || []).some(matches)) return;
+        const sw = (a.photoUrls || []).map((u) => (matches(u) ? newUrl : u));
+        setAnswers((cur) => (cur[key] ? { ...cur, [key]: { ...cur[key], photoUrls: (cur[key].photoUrls || []).map((u) => (matches(u) ? newUrl : u)) } } : cur));
+        const [, instanceKey] = key.split('::');
+        const persist = { ...a, photoUrls: sw.filter((u) => !u.startsWith('blob:')) };
+        autosaveRef.current.noteEdit(key, persist, persist.questionHubspotRecordId, instanceKey);
+        return;
+      }
+      // Section photo → swap + mark dirty so the debounced save persists it.
       setSectionPhotos((cur) => {
         const arr = cur[sectionId];
-        if (!arr) return cur;
-        let changed = false;
-        const sw = arr.map((u) => { if (u === oldUrl || (replacesUrl && u === replacesUrl)) { changed = true; return newUrl; } return u; });
-        if (!changed) return cur;
-        sectionPhotoDirtyRef.current.add(sectionId); // re-persist real URL on next tick
-        return { ...cur, [sectionId]: sw };
+        if (!arr || !arr.some(matches)) return cur;
+        sectionPhotoDirtyRef.current.add(sectionId);
+        return { ...cur, [sectionId]: arr.map((u) => (matches(u) ? newUrl : u)) };
       });
     }).catch(() => {});
   }, [readOnly, inspectionRecordId]);
-  const runSectionFlushRef = useRef(runSectionFlush);
-  runSectionFlushRef.current = runSectionFlush;
+  const runPhotoFlushRef = useRef(runPhotoFlush);
+  runPhotoFlushRef.current = runPhotoFlush;
 
   // Rehydrate queued drafts on mount, then drain.
   useEffect(() => {
@@ -683,9 +700,11 @@ export function QuestionForm({
     photoRehydratedRef.current = true;
     void rehydrateQueuedPhotos(inspectionRecordId).then((drafts) => {
       const bySection: Record<string, string[]> = {};
+      const byQuestion: Record<string, string[]> = {};
       for (const d of drafts) {
-        if (d.lineExternalId || d.sectionId.includes('::')) continue;
-        (bySection[d.sectionId] = bySection[d.sectionId] || []).push(d.url);
+        if (d.lineExternalId) continue;
+        if (d.sectionId.includes('::')) (byQuestion[d.sectionId] = byQuestion[d.sectionId] || []).push(d.url);
+        else (bySection[d.sectionId] = bySection[d.sectionId] || []).push(d.url);
       }
       if (Object.keys(bySection).length) {
         setSectionPhotos((cur) => {
@@ -694,15 +713,24 @@ export function QuestionForm({
           return n;
         });
       }
-    }).catch(() => {}).finally(() => { void runSectionFlushRef.current(); });
+      if (Object.keys(byQuestion).length) {
+        setAnswers((cur) => {
+          const n = { ...cur };
+          for (const [k, urls] of Object.entries(byQuestion)) {
+            if (n[k]) n[k] = { ...n[k], photoUrls: Array.from(new Set([...(n[k].photoUrls || []), ...urls])) };
+          }
+          return n;
+        });
+      }
+    }).catch(() => {}).finally(() => { void runPhotoFlushRef.current(); });
   }, [readOnly, inspectionRecordId]);
 
   // Auto-retry: flush on reconnect + periodic reconcile.
   useEffect(() => {
     if (readOnly) return;
-    const onOnline = () => { void runSectionFlushRef.current(); };
+    const onOnline = () => { void runPhotoFlushRef.current(); };
     window.addEventListener('online', onOnline);
-    const iv = setInterval(() => { void runSectionFlushRef.current(); }, 15000);
+    const iv = setInterval(() => { void runPhotoFlushRef.current(); }, 15000);
     return () => { window.removeEventListener('online', onOnline); clearInterval(iv); };
   }, [readOnly]);
 
@@ -830,7 +858,7 @@ export function QuestionForm({
             note: a.note,
             quantity: a.quantity,
             assignedTo: a.assignedTo,
-            photoUrls: a.photoUrls,
+            photoUrls: (a.photoUrls || []).filter((u) => !u.startsWith('blob:')),
           }, { isScope: false });
           upserts.push({
             recordId: existingRecordId || undefined,
@@ -1146,7 +1174,7 @@ export function QuestionForm({
                           question={q}
                           answer={answers[key]}
                           onUpdate={(patch) => updateAnswer(key, patch)}
-                          uploadPhoto={uploadPhoto}
+                          uploadPhoto={(file) => uploadPhotoOrQueue(file, inspectionRecordId, key)}
                           propertyName={propertyName}
                           propertyRecordId={propertyRecordId}
                         />
