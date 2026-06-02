@@ -19,6 +19,9 @@ import imageCompression from 'browser-image-compression';
 
 const MAX_UPLOAD_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 800;
+// Per-attempt network timeout. A stalled upload on a weak signal aborts here so
+// the caller can fall back to the offline cache instead of spinning forever.
+const UPLOAD_TIMEOUT_MS = 20000;
 const TARGET_MAX_SIZE_MB = 0.6;     // aim for ~600KB output
 const TARGET_MAX_DIMENSION = 1280;  // 1280px on the long edge
 
@@ -63,18 +66,30 @@ export async function compressToJpeg(file: File): Promise<Blob> {
   return compressed;
 }
 
-/** Upload an already-compressed JPEG blob to HubSpot Files. Retries transient. */
-export async function uploadJpegBlob(blob: Blob, filename: string): Promise<string> {
+/** Upload an already-compressed JPEG blob to HubSpot Files. Retries transient.
+ *  Each attempt is bounded by a timeout (AbortController) so a stalled request on
+ *  a low-bar connection FAILS instead of hanging forever — letting the caller
+ *  fall back to the offline queue. */
+export async function uploadJpegBlob(
+  blob: Blob,
+  filename: string,
+  opts?: { attempts?: number; timeoutMs?: number },
+): Promise<string> {
   const base64 = await fileToBase64(blob);
   const payload = JSON.stringify({ filename, contentType: 'image/jpeg', base64 });
+  const attempts = Math.max(1, opts?.attempts ?? MAX_UPLOAD_ATTEMPTS);
+  const timeoutMs = opts?.timeoutMs ?? UPLOAD_TIMEOUT_MS;
 
   let lastError: Error | null = null;
-  for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const r = await fetch('/api/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload,
+        signal: controller.signal,
       });
       if (!r.ok) {
         const text = await r.text();
@@ -84,10 +99,16 @@ export async function uploadJpegBlob(blob: Blob, filename: string): Promise<stri
       if (!data.url) throw new Error('Server response missing url');
       return data.url as string;
     } catch (e: any) {
-      lastError = e instanceof Error ? e : new Error(String(e));
-      if (attempt < MAX_UPLOAD_ATTEMPTS) {
+      // A timeout surfaces as AbortError — normalize it to a clear network error
+      // so the offline-detection (isOfflineErr) queues the photo.
+      lastError = e?.name === 'AbortError'
+        ? new Error('Upload timed out (slow or no connection)')
+        : (e instanceof Error ? e : new Error(String(e)));
+      if (attempt < attempts) {
         await new Promise((r) => setTimeout(r, RETRY_BASE_DELAY_MS * attempt));
       }
+    } finally {
+      clearTimeout(timer);
     }
   }
   throw lastError || new Error('Upload failed for unknown reason');
@@ -155,11 +176,14 @@ async function uploadVideoBase64(file: File, filename: string, contentType: stri
   const payload = JSON.stringify({ filename, contentType, base64 });
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
     try {
       const r = await fetch('/api/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload,
+        signal: controller.signal,
       });
       if (!r.ok) {
         const text = await r.text();
@@ -169,10 +193,14 @@ async function uploadVideoBase64(file: File, filename: string, contentType: stri
       if (!data.url) throw new Error('Server response missing url');
       return data.url as string;
     } catch (e: any) {
-      lastError = e instanceof Error ? e : new Error(String(e));
+      lastError = e?.name === 'AbortError'
+        ? new Error('Video upload timed out (slow or no connection)')
+        : (e instanceof Error ? e : new Error(String(e)));
       if (attempt < MAX_UPLOAD_ATTEMPTS) {
         await new Promise((r) => setTimeout(r, RETRY_BASE_DELAY_MS * attempt));
       }
+    } finally {
+      clearTimeout(timer);
     }
   }
   throw lastError || new Error('Video upload failed for unknown reason');

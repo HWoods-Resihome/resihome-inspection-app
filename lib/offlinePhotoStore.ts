@@ -138,10 +138,10 @@ export async function uploadPhotoOrQueue(
 ): Promise<string> {
   const blob = await compressToJpeg(file);
   const filename = toJpegName(file.name);
-  try {
-    return await uploadJpegBlob(blob, filename);
-  } catch (e) {
-    if (!isOfflineErr(e) || !idbAvailable()) throw e;
+  // Cache the compressed blob to the durable IndexedDB queue and return a local
+  // draft URL for immediate display. Shared by the offline fast-path and the
+  // upload-failed fallback so the photo is NEVER lost to a stuck spinner.
+  const queueDraft = async (): Promise<string> => {
     const localId = `idbph_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     await putRecord({
       localId, inspectionRecordId, sectionId, kind: 'photo', blob, filename,
@@ -151,6 +151,21 @@ export async function uploadPhotoOrQueue(
     urlByLocalId.set(localId, { displayUrl: url, revokables: [url] });
     void requestPhotoBackgroundSync();
     return url;
+  };
+
+  // Fast path: if the browser reports offline, don't even attempt the upload —
+  // cache it straight away so the camera resolves instantly.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false && idbAvailable()) {
+    return queueDraft();
+  }
+
+  try {
+    // Fail fast (2 attempts, shorter timeout): queuing is non-destructive and
+    // auto-syncs, so it's better to cache quickly on a weak signal than to spin.
+    return await uploadJpegBlob(blob, filename, { attempts: 2, timeoutMs: 12000 });
+  } catch (e) {
+    if (!isOfflineErr(e) || !idbAvailable()) throw e;
+    return queueDraft();
   }
 }
 
@@ -166,11 +181,7 @@ export async function uploadVideoEntryOrQueue(
   sectionId: string,
 ): Promise<string> {
   const filename = `clip_${Date.now()}_poster.jpg`;
-  try {
-    const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename), uploadVideo(videoFile)]);
-    return makeVideoEntry(pUrl, vUrl);
-  } catch (e) {
-    if (!isOfflineErr(e) || !idbAvailable()) throw e;
+  const queueDraft = async (): Promise<string> => {
     const localId = `idbvid_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     await putRecord({
       localId, inspectionRecordId, sectionId, kind: 'video',
@@ -183,6 +194,16 @@ export async function uploadVideoEntryOrQueue(
     urlByLocalId.set(localId, { displayUrl: entry, revokables: [pObj, vObj] });
     void requestPhotoBackgroundSync();
     return entry;
+  };
+  if (typeof navigator !== 'undefined' && navigator.onLine === false && idbAvailable()) {
+    return queueDraft();
+  }
+  try {
+    const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename, { attempts: 2, timeoutMs: 12000 }), uploadVideo(videoFile)]);
+    return makeVideoEntry(pUrl, vUrl);
+  } catch (e) {
+    if (!isOfflineErr(e) || !idbAvailable()) throw e;
+    return queueDraft();
   }
 }
 
