@@ -24,6 +24,7 @@ import { extractAudioWav16k } from '@/lib/audioExtract';
 import {
   drawEvidenceStamp, buildStampLines, getGeoFix, resolvePropertyRefCoords, type StampLine,
 } from '@/lib/evidenceStamp';
+import { isArMeasureSupported, measureFloorAreaSF } from '@/lib/webxrMeasure';
 import type { RateCardLineInput } from '@/lib/types';
 
 const FRAME_COUNT = 8;                 // stills pulled from the clip
@@ -173,6 +174,24 @@ export function RoomScanModal(props: Props) {
   const [qtyById, setQtyById] = useState<Record<string, string>>({});
   const [handled, setHandled] = useState<Record<string, 'added' | 'declined'>>({});
   const [phraseIdx, setPhraseIdx] = useState(0);
+  const [arSupported, setArSupported] = useState(false);
+  const [measuringId, setMeasuringId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let on = true;
+    isArMeasureSupported().then((v) => { if (on) setArSupported(v); }).catch(() => {});
+    return () => { on = false; };
+  }, []);
+
+  async function measure(id: string) {
+    setMeasuringId(id);
+    try {
+      const sf = await measureFloorAreaSF();
+      if (sf && sf > 0) setQtyById((m) => ({ ...m, [id]: String(sf) }));
+    } catch { /* keep estimate */ } finally {
+      setMeasuringId(null);
+    }
+  }
 
   const working = phase === 'extracting' || phase === 'analyzing';
   useEffect(() => {
@@ -372,10 +391,16 @@ export function RoomScanModal(props: Props) {
                                   className="h-9 w-32 bg-gray-100 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-violet-300"
                                 />
                                 <span className="text-xs text-gray-500">{s.measurementUnit}</span>
+                                {arSupported && s.unit === 'SF' && (
+                                  <button type="button" onClick={() => void measure(s.id)} disabled={measuringId === s.id}
+                                    className="ml-auto text-xs font-semibold text-violet-700 border border-violet-300 rounded-lg px-2 py-1 disabled:opacity-50">
+                                    {measuringId === s.id ? 'Measuring…' : '📐 Measure (AR)'}
+                                  </button>
+                                )}
                               </div>
                               {s.estimatedQuantity && s.estimatedQuantity > 0 && (
                                 <div className="text-[11px] text-amber-700 mt-1">
-                                  ≈ AI estimate ({s.estimatedQuantity} {s.unit}) — confirm or edit before adding.
+                                  ≈ AI estimate ({s.estimatedQuantity} {s.unit}) — confirm, edit{arSupported ? ', or Measure (AR)' : ''} before adding.
                                 </div>
                               )}
                             </div>

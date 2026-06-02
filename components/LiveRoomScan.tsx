@@ -21,6 +21,7 @@ import { displayImageSrc } from '@/lib/photoDisplay';
 import {
   drawEvidenceStamp, buildStampLines, getGeoFix, resolvePropertyRefCoords, type StampLine,
 } from '@/lib/evidenceStamp';
+import { isArMeasureSupported, measureFloorAreaSF } from '@/lib/webxrMeasure';
 import type { RateCardLineInput } from '@/lib/types';
 
 const INFER_INTERVAL_MS = 2500;   // keyframe → vision cadence
@@ -102,6 +103,14 @@ export function LiveRoomScan(props: Props) {
   const [stagedCount, setStagedCount] = useState(0);
   const [stillCount, setStillCount] = useState(0);
   const [scanning, setScanning] = useState(false);
+  const [arSupported, setArSupported] = useState(false);
+  const [measuring, setMeasuring] = useState(false);
+
+  useEffect(() => {
+    let on = true;
+    isArMeasureSupported().then((v) => { if (on) setArSupported(v); }).catch(() => {});
+    return () => { on = false; };
+  }, []);
 
   // ---- lifecycle ----
   useEffect(() => {
@@ -148,6 +157,45 @@ export function LiveRoomScan(props: Props) {
     recRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+  }
+
+  // AR measure needs exclusive camera access, so pause the live pipeline, run
+  // the WebXR session, then resume — keeps both smooth and conflict-free.
+  function pauseForAr() {
+    if (inferTimer.current) clearInterval(inferTimer.current);
+    if (stillTimer.current) clearInterval(stillTimer.current);
+    try { recRef.current?.stop?.(); } catch { /* noop */ }
+    recRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }
+  async function resumeAfterAr() {
+    if (!openRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      if (!openRef.current) { stream.getTracks().forEach((t) => t.stop()); return; }
+      streamRef.current = stream;
+      if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play().catch(() => {}); }
+      startVoice();
+      inferTimer.current = setInterval(() => { void runInference(); }, INFER_INTERVAL_MS);
+      stillTimer.current = setInterval(() => { void captureStill(); }, STILL_INTERVAL_MS);
+    } catch {
+      setError('Couldn’t restart the camera after measuring — tap Finish and reopen.');
+    }
+  }
+  async function measureChip(id: string) {
+    setMeasuring(true);
+    pauseForAr();
+    try {
+      const sf = await measureFloorAreaSF();
+      if (sf && sf > 0) setQtyById((m) => ({ ...m, [id]: String(sf) }));
+    } catch { /* keep estimate */ } finally {
+      await resumeAfterAr();
+      setMeasuring(false);
+    }
   }
 
   // ---- voice (continuous; auto-restart) ----
@@ -366,9 +414,15 @@ export function LiveRoomScan(props: Props) {
                         className="h-9 w-28 bg-gray-100 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-violet-300"
                       />
                       <span className="text-xs text-gray-500">{s.measurementUnit}</span>
+                      {arSupported && (s.unit === 'SF') && (
+                        <button onClick={() => void measureChip(s.id)} disabled={measuring}
+                          className="ml-auto text-xs font-semibold text-violet-700 border border-violet-300 rounded-lg px-2 py-1 disabled:opacity-50">
+                          {measuring ? 'Measuring…' : '📐 Measure (AR)'}
+                        </button>
+                      )}
                     </div>
                     {s.estimatedQuantity && s.estimatedQuantity > 0 && (
-                      <div className="text-[11px] text-amber-700 mt-1">≈ AI estimate ({s.estimatedQuantity} {s.unit}) — confirm or edit.</div>
+                      <div className="text-[11px] text-amber-700 mt-1">≈ AI estimate ({s.estimatedQuantity} {s.unit}) — confirm, edit{arSupported ? ', or Measure (AR)' : ''}.</div>
                     )}
                   </div>
                 )}
