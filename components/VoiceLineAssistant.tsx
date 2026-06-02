@@ -515,25 +515,14 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         if (finalType === 'error') {
           setError(finalData?.error || 'Something went wrong.');
         } else if (addedThisTurn > 0) {
-          // Wait for the save round-trips to finish so we report the TRUTH, not
-          // an optimistic guess. If any failed, say so (and show the error) —
-          // never claim "Added" for a line that didn't persist.
-          const results = await Promise.all(savePromises);
-          const failed = results.filter((r) => !r.ok);
-          const savedCount = addedThisTurn - failed.length;
-          // Surface a concise diagnostic ONLY when something looks off — a save
-          // was skipped, the line got re-routed to a different section, or it
-          // persisted without a record id. In the clean case this stays silent.
-          const odd = results.filter((r) => r.skippedSave || r.reRouted || (r.ok && !r.recordId && !r.skippedSave));
-          if (odd.length > 0) {
-            const diag = odd.map((r) => {
-              const route = r.reRouted ? `${r.requested}→${r.routedTo}` : (r.routedTo || r.requested || '?');
-              const flags = [r.skippedSave ? 'not-saved(loading)' : '', r.reRouted ? 're-routed' : '', (r.ok && !r.recordId && !r.skippedSave) ? 'no-record-id' : '']
-                .filter(Boolean).join(',');
-              return `${route}${flags ? ` [${flags}]` : ''}`;
-            }).join('; ');
-            setMessages((m) => [...m, { role: 'assistant', content: `diag: ${diag}` }]);
-          }
+          // Speak the confirmation IMMEDIATELY — optimistically — instead of
+          // blocking on the HubSpot save round-trip first. Waiting for the save
+          // put a noticeable pause between the line appearing on screen and the
+          // assistant speaking (worse on cell), which felt like two separate
+          // replies. The save still runs; any failure is reconciled in the
+          // background below AND surfaced by the sync banner, so a line is never
+          // silently lost.
+          //
           // Name the room(s) the lines ACTUALLY landed in (from the stream), not
           // React state, which lags during the stream and would name the wrong room.
           const roomNames = Array.from(addedRoomIds)
@@ -542,40 +531,36 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               return s ? (s.displayName || s.label) : null;
             })
             .filter(Boolean) as string[];
-          let where: string;
-          if (roomNames.length === 1) where = ` in ${roomNames[0]}`;
-          else if (roomNames.length > 1) where = ` across ${roomNames.length} rooms`;
-          else where = '';
-          if (failed.length === 0) {
-            // Speak ONLY a short one-sentence summary — never read each line's
-            // full detail aloud (those are shown on screen, not spoken).
-            const base = `Added ${savedCount} item${savedCount === 1 ? '' : 's'}${where}.`;
-            // If the agent ALSO asked a follow-up this turn (e.g. it added the
-            // ready item but still needs a measured quantity for another, like
-            // "How many square feet for the carpet?"), acknowledge the add AND
-            // ask the question — then keep the mic open for the answer. Without
-            // this the question is shown but never spoken and the turn closes
-            // with "Anything else?", silently dropping the un-quantified item.
-            const followUp = (finalData?.text ? String(finalData.text).trim() : '');
-            if (followUp) {
-              const spoken = `${base} ${followUp}`;
-              setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
-              speakThenListenRef.current(spoken);
-            } else {
-              const spoken = `${base} Anything else?`;
-              setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
-              speakThenListenRef.current(spoken);
+          const where = roomNames.length === 1 ? ` in ${roomNames[0]}`
+            : roomNames.length > 1 ? ` across ${roomNames.length} rooms` : '';
+          const base = `Added ${addedThisTurn} item${addedThisTurn === 1 ? '' : 's'}${where}.`;
+          // If the agent ALSO asked a follow-up this turn (e.g. it added the
+          // ready item but still needs a measured quantity for another, like
+          // "How many square feet for the carpet?"), acknowledge the add AND
+          // ask the question — then keep the mic open for the answer.
+          const followUp = (finalData?.text ? String(finalData.text).trim() : '');
+          const spoken = followUp ? `${base} ${followUp}` : `${base} Anything else?`;
+          setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
+          speakThenListenRef.current(spoken);
+          // Reconcile saves in the background (non-blocking): surface failures /
+          // routing oddities on screen without holding up the conversation.
+          void Promise.all(savePromises).then((results) => {
+            const odd = results.filter((r) => r.skippedSave || r.reRouted || (r.ok && !r.recordId && !r.skippedSave));
+            if (odd.length > 0) {
+              const diag = odd.map((r) => {
+                const route = r.reRouted ? `${r.requested}→${r.routedTo}` : (r.routedTo || r.requested || '?');
+                const flags = [r.skippedSave ? 'not-saved(loading)' : '', r.reRouted ? 're-routed' : '', (r.ok && !r.recordId && !r.skippedSave) ? 'no-record-id' : '']
+                  .filter(Boolean).join(',');
+                return `${route}${flags ? ` [${flags}]` : ''}`;
+              }).join('; ');
+              setMessages((m) => [...m, { role: 'assistant', content: `diag: ${diag}` }]);
             }
-          } else {
-            // Some (or all) saves failed. Be honest and surface the error on
-            // screen so the cause is visible; speak a short recoverable message.
-            const detail = failed[0].error ? ` (${failed[0].error})` : '';
-            const spoken = savedCount > 0
-              ? `Saved ${savedCount}, but ${failed.length} didn't save. Please try those again.`
-              : `That didn't save — please try again or check your connection.`;
-            setMessages((m) => [...m, { role: 'assistant', content: `${spoken}${detail}` }]);
-            speakThenListenRef.current(spoken);
-          }
+            const failed = results.filter((r) => !r.ok);
+            if (failed.length > 0) {
+              const detail = failed[0].error ? ` (${failed[0].error})` : '';
+              setMessages((m) => [...m, { role: 'assistant', content: `Heads up — ${failed.length} line${failed.length === 1 ? '' : 's'} didn't save${detail}. Check the sync banner and retry.` }]);
+            }
+          }).catch(() => { /* non-fatal */ });
         } else if (finalType === 'question') {
           // The agent needs more info (e.g. ambiguous item, missing quantity).
           const text = finalData?.text || accumulated || 'Could you clarify that?';
