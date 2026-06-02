@@ -31,21 +31,6 @@ export default function ExistingInspection() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [submitResultUrl, setSubmitResultUrl] = useState<string>('');
   const [pdfUrl, setPdfUrl] = useState<string>('');
-  const [currentUserEmail, setCurrentUserEmail] = useState<string>('');
-
-  // Who's logged in — used only to gate the admin SFTP test button.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch('/api/auth/me');
-        if (!r.ok) return;
-        const data = await r.json();
-        if (!cancelled && data?.user?.email) setCurrentUserEmail(String(data.user.email));
-      } catch { /* ignore — button just won't show */ }
-    })();
-    return () => { cancelled = true; };
-  }, []);
 
   // Load inspection + answers
   useEffect(() => {
@@ -295,10 +280,6 @@ export default function ExistingInspection() {
             {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
               <CompletedPdfMenu inspection={inspection} />
             )}
-            {isCompleted && inspection.templateType === 'pm_scope_rate_card'
-              && currentUserEmail.toLowerCase() === 'hwoods@resihome.com' && (
-              <SendXlsxSftpButton inspectionId={inspectionId} />
-            )}
             {isCompleted && inspection.templateType === 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
               <a href={inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
                  className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
@@ -503,104 +484,5 @@ function CompletedPdfMenu({ inspection }: { inspection: InspectionSummary }) {
         </>
       )}
     </div>
-  );
-}
-
-/**
- * Admin-only test button (hwoods@resihome.com): re-push this completed Rate
- * Card's Tenant Chargeback Import xlsx to the SFTP site to validate the
- * pipeline. Hits POST /api/inspections/[id]/send-xlsx-sftp (itself gated to the
- * same admin email server-side, so this is double-gated).
- */
-function SendXlsxSftpButton({ inspectionId }: { inspectionId: string }) {
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [probe, setProbe] = useState<string | null>(null);
-
-  async function send() {
-    if (busy) return;
-    setBusy(true);
-    setResult(null);
-    setProbe(null);
-    try {
-      const r = await fetch(`/api/inspections/${inspectionId}/send-xlsx-sftp`, { method: 'POST' });
-      const data = await r.json().catch(() => ({}));
-      if (r.ok && data.ok) {
-        setResult({ ok: true, msg: `Sent to SFTP${data.remotePath ? `: ${data.remotePath}` : ''}` });
-      } else {
-        setResult({ ok: false, msg: data.error || `Failed (HTTP ${r.status})` });
-      }
-    } catch (e: any) {
-      setResult({ ok: false, msg: String(e?.message || e) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function runProbe() {
-    if (busy) return;
-    setBusy(true);
-    setResult(null);
-    setProbe(null);
-    try {
-      const r = await fetch(`/api/inspections/${inspectionId}/send-xlsx-sftp?probe=1`, { method: 'POST' });
-      const data = await r.json().catch(() => ({}));
-      if (!data || (!data.ok && !data.error)) {
-        setProbe(`HTTP ${r.status}: ${JSON.stringify(data)}`);
-      } else if (data.error) {
-        setProbe(`Error: ${data.error}`);
-      } else {
-        const lines: string[] = [];
-        lines.push(`Working dir after login (real SFTP root): ${data.cwd || '(unknown)'}`);
-        lines.push(`Configured SFTP_REMOTE_DIR: ${data.configuredDir}`);
-        lines.push(`  → exists? ${data.configuredDirExists === 'd' ? 'YES (directory)' : data.configuredDirExists ? `exists but type "${data.configuredDirExists}"` : 'NO — this is why upload failed'}`);
-        lines.push('');
-        for (const [path, entries] of Object.entries(data.listings || {})) {
-          lines.push(`${path}:`);
-          for (const e of entries as string[]) lines.push(`  ${e}`);
-          lines.push('');
-        }
-        setProbe(lines.join('\n'));
-      }
-    } catch (e: any) {
-      setProbe(`Error: ${String(e?.message || e)}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <span className="inline-flex flex-col items-start gap-1">
-      <span className="inline-flex items-center gap-2 flex-wrap">
-        <button
-          type="button"
-          onClick={send}
-          disabled={busy}
-          className="text-sm bg-gray-800 text-white px-3 py-1.5 rounded font-semibold hover:bg-gray-900 disabled:opacity-60"
-          title="Admin: re-send the Tenant Chargeback Import xlsx to the SFTP site"
-        >
-          {busy ? 'Working…' : 'Send xlsx to SFTP (admin)'}
-        </button>
-        <button
-          type="button"
-          onClick={runProbe}
-          disabled={busy}
-          className="text-sm bg-gray-200 text-gray-800 px-3 py-1.5 rounded font-semibold hover:bg-gray-300 disabled:opacity-60"
-          title="Admin: connect and list SFTP folders to find the correct remote path"
-        >
-          Probe path
-        </button>
-        {result && (
-          <span className={'text-xs font-semibold ' + (result.ok ? 'text-emerald-700' : 'text-red-700')}>
-            {result.ok ? '✅ ' : '❌ '}{result.msg}
-          </span>
-        )}
-      </span>
-      {probe && (
-        <pre className="mt-1 max-h-72 w-full max-w-2xl overflow-auto rounded bg-gray-900 p-3 text-left text-[11px] leading-snug text-gray-100 whitespace-pre-wrap">
-{probe}
-        </pre>
-      )}
-    </span>
   );
 }
