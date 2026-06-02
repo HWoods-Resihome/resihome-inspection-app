@@ -801,13 +801,13 @@ export function EditableLineRow(props: Props) {
                 {isInternalResolution(vendor) && (
                   <div>
                     <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Resolution <span className="text-brand">*</span></label>
-                    <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm select-none max-w-full">
+                    <div className="grid grid-cols-2 w-full max-w-xs rounded-lg border border-gray-300 overflow-hidden text-sm select-none">
                       {(['now', 'later'] as const).map((v) => (
                         <button
                           key={v}
                           type="button"
                           onClick={() => setEditTiming(v)}
-                          className={`px-3.5 py-2 leading-none font-heading font-semibold whitespace-nowrap ${editTiming === v ? 'bg-brand text-white' : 'bg-white text-gray-700'} ${v === 'now' ? 'border-r border-gray-300' : ''}`}
+                          className={`px-3 py-2 text-center leading-tight font-heading font-semibold ${editTiming === v ? 'bg-brand text-white' : 'bg-white text-gray-700'} ${v === 'now' ? 'border-r border-gray-300' : ''}`}
                         >
                           {v === 'now' ? 'Complete Now' : 'Complete Later'}
                         </button>
@@ -1133,14 +1133,14 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
   const resolutionToggle = showIrPhotos ? (
     <div className="mt-2" onClick={(e) => e.stopPropagation()}>
       <div className="text-[10px] uppercase tracking-wide font-bold text-gray-500 mb-1">Resolution <span className="text-brand">*</span></div>
-      <div className="inline-flex rounded-md border border-gray-300 overflow-hidden text-[11px] select-none max-w-full">
+      <div className="grid grid-cols-2 w-full rounded-md border border-gray-300 overflow-hidden text-[11px] select-none">
         {(['now', 'later'] as const).map((v) => (
           <button
             key={v}
             type="button"
             disabled={readOnly}
             onClick={(e) => { e.stopPropagation(); onSetResolutionTiming?.(line.externalId, v); }}
-            className={`px-2.5 py-1 leading-none font-heading font-semibold whitespace-nowrap ${timing === v ? 'bg-brand text-white' : 'bg-white text-gray-700'} ${v === 'now' ? 'border-r border-gray-300' : ''}`}
+            className={`px-1.5 py-1 text-center leading-tight font-heading font-semibold ${timing === v ? 'bg-brand text-white' : 'bg-white text-gray-700'} ${v === 'now' ? 'border-r border-gray-300' : ''}`}
           >
             {v === 'now' ? 'Complete Now' : 'Complete Later'}
           </button>
