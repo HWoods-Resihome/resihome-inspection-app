@@ -117,6 +117,17 @@ function catalogDescription(item: { laborSubtext?: string; laborFullDescription:
   return (item.laborSubtext && item.laborSubtext.trim()) || item.laborFullDescription || '';
 }
 
+/** Format "{qty} {friendly unit}" for the line-title parenthetical, e.g.
+ *  3 EA -> "3 ea", 1448 SF -> "1,448 sq ft". Returns '' if qty is invalid. */
+function friendlyQtyUnit(qty: number, meas: string): string {
+  if (!isFinite(qty) || qty <= 0) return '';
+  const n = qty.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  const u = (meas || '').trim().toUpperCase();
+  const friendly = u === 'SF' ? 'sq ft' : u === 'LF' ? 'lin ft' : u === 'SY' ? 'sq yd'
+    : u === 'EA' ? 'ea' : u === 'HR' ? 'hr' : (meas || '').trim().toLowerCase();
+  return friendly ? `${n} ${friendly}` : n;
+}
+
 /**
  * Amber warning triangle shown next to a tenant % that has been manually raised
  * ABOVE the paint/flooring depreciation cap for the tenant's time in home.
@@ -1068,6 +1079,9 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
 
   const fullDescription = line.customLaborFullDescription || catalogDescription(item);
   const shortDescription = item.laborShortDescription;
+  // Quantity + friendly unit shown in parentheses next to the line title, e.g.
+  // "Replace Doorstops (3 ea)" / "Sales Clean (1,448 sq ft)".
+  const qtyParen = friendlyQtyUnit(line.quantity, item.laborMeas);
   const truncated = fullDescription.length > 120
     ? fullDescription.slice(0, 120).trim() + '…'
     : fullDescription;
@@ -1111,7 +1125,6 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
   if (mobile) {
     const money2 = (n: number) => `$${formatMoney(roundMoney(n))}`;
     const subParts = [item.category, item.subcategory].filter(Boolean).join(' · ');
-    const qtyUnit = `${line.quantity} ${item.laborMeas}`.trim();
     return (
       <tr data-line-id={line.externalId}>
         <td colSpan={12} className="p-0">
@@ -1135,7 +1148,10 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
             {/* Left: description + details (flexes, but never pushes the price
                 block — that block has a fixed width so columns always align) */}
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-ink leading-snug">{shortDescription}</div>
+              <div className="text-sm font-medium text-ink leading-snug">
+                {shortDescription}
+                {qtyParen && <span className="font-normal text-gray-400"> ({qtyParen})</span>}
+              </div>
               {/* Subtext: clamp to 2 lines, then a "more" toggle. */}
               {fullDescription && fullDescription !== shortDescription && (
                 <div className="text-xs text-gray-500 mt-0.5 leading-snug">
@@ -1151,7 +1167,7 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
                   )}
                 </div>
               )}
-              <div className="text-xs text-gray-500 mt-0.5">{subParts}{subParts ? ' · ' : ''}{qtyUnit}</div>
+              <div className="text-xs text-gray-500 mt-0.5">{subParts}</div>
               <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                 {/* Vendor-only chip */}
                 <span
@@ -1244,7 +1260,10 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
       <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{item.category}</td>
       <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{item.subcategory}</td>
       <td className="px-3 py-2 min-w-[260px]">
-        <div className="font-medium text-sm text-ink">{shortDescription}</div>
+        <div className="font-medium text-sm text-ink">
+          {shortDescription}
+          {qtyParen && <span className="font-normal text-gray-400"> ({qtyParen})</span>}
+        </div>
         {editingDesc ? (
           <div onClick={(e) => e.stopPropagation()}>
             <textarea
