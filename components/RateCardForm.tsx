@@ -13,6 +13,7 @@ import { EditableLineRow } from '@/components/EditableLineRow';
 import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
+import { RoomScanModal } from '@/components/RoomScanModal';
 import { isInternalResolution } from '@/lib/vendors';
 import { AiReviewModal } from '@/components/AiReviewModal';
 import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, saveReviewCache, loadReviewCache, clearReviewCache, type AiAdjustment } from '@/lib/aiReview';
@@ -245,6 +246,8 @@ export function RateCardForm(props: RateCardFormProps) {
 
   // Camera modal (for in-app capture). When non-null, captures append to this section.
   const [cameraSectionId, setCameraSectionId] = useState<string | null>(null);
+  // AI Room Scan (Beta) modal — when non-null, the scan flow targets this section.
+  const [roomScanSectionId, setRoomScanSectionId] = useState<string | null>(null);
   // ----- AI scope review -----
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -2850,6 +2853,21 @@ export function RateCardForm(props: RateCardFormProps) {
                       </button>
                       {!props.readOnly && (
                         <div className="flex gap-2 items-center shrink-0">
+                          {/* AI Room Scan (Beta) — record a room video; AI suggests
+                              line items + pulls photos into the room. */}
+                          <button
+                            type="button"
+                            onClick={() => setRoomScanSectionId(s.id)}
+                            disabled={isUploadingHere}
+                            className="inline-flex items-center gap-1 text-xs bg-violet-600 text-white font-semibold py-1 px-2.5 rounded hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                            title="AI Room Scan (Beta) — record the room, AI suggests line items"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" />
+                              <path d="M19 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" />
+                            </svg>
+                            AI<span className="text-[9px] font-bold uppercase ml-0.5 opacity-90">Beta</span>
+                          </button>
                           <button
                             type="button"
                             onClick={() => setCameraSectionId(s.id)}
@@ -3092,6 +3110,34 @@ export function RateCardForm(props: RateCardFormProps) {
         />
       )}
 
+      {/* AI Room Scan (Beta): record a room video → AI line-item suggestions +
+          stamped stills that satisfy the room photo requirement. */}
+      {roomScanSectionId !== null && (() => {
+        const s = sections.find((x) => x.id === roomScanSectionId);
+        if (!s) return null;
+        return (
+          <RoomScanModal
+            sectionId={s.id}
+            sectionLabel={s.label}
+            sectionDisplayName={s.displayName || s.label}
+            location={s.location}
+            region={inspectionRegion}
+            tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
+            addressSnapshot={props.propertyName}
+            onClose={() => setRoomScanSectionId(null)}
+            onAddLine={(line) => { const p = handleSaveLineForSection(s.id, line); revealSection(s.id, line.externalId); return p; }}
+            onFramesCaptured={(urls) => {
+              const real = urls.filter((u) => !u.startsWith('blob:'));
+              if (real.length === 0) return;
+              const base = photosBySectionRef.current[s.id] || [];
+              const next = Array.from(new Set([...base, ...real]));
+              setPhotosBySection((m) => ({ ...m, [s.id]: next }));
+              void savePhotosForSection(s.id, next);
+            }}
+          />
+        );
+      })()}
+
       {cameraSectionId !== null && (
         <CameraCapture
           isOpen={true}
@@ -3155,7 +3201,8 @@ export function RateCardForm(props: RateCardFormProps) {
           || cameraOverlayOpen
           || aiModalOpen          // AI review popup
           || aiCameraTarget !== null // AI review's in-app camera
-          || afterCameraTarget !== null; // Internal Resolution after-photo camera
+          || afterCameraTarget !== null // Internal Resolution after-photo camera
+          || roomScanSectionId !== null; // AI Room Scan (Beta) modal
         const hidden = overlayOpen && !voiceEngaged;
         return (
           <div
