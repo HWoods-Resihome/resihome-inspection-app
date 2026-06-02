@@ -79,6 +79,10 @@ interface Props {
   // Resolution) line. Owned by the parent so it uses the established
   // CameraCapture, not the OS picker. Captured URLs are appended + saved there.
   onCaptureAfterPhotos?: () => void;
+  // Internal Resolution completion timing: "now" enforces after-photos at
+  // finalize; "later" defers them. Persisted by the parent.
+  resolutionTiming?: 'now' | 'later';
+  onSetResolutionTiming?: (v: 'now' | 'later') => void;
   // Reports when this row's edit modal opens/closes (so the parent can hide the
   // floating mic while a line modal is up).
   onEditingChange?: (editing: boolean) => void;
@@ -658,6 +662,8 @@ export function EditableLineRow(props: Props) {
         }}
         onSaveAfterPhotos={(urls) => onSave({ ...line, afterPhotoUrls: urls })}
         onCaptureAfterPhotos={onCaptureAfterPhotos}
+        resolutionTiming={props.resolutionTiming}
+        onSetResolutionTiming={props.onSetResolutionTiming}
       />
     );
   }
@@ -1069,9 +1075,12 @@ interface ViewRowProps {
   onSaveDescription: (text: string) => void;
   onSaveAfterPhotos: (urls: string[]) => void;
   onCaptureAfterPhotos?: () => void;
+  // Internal Resolution timing: "now" requires after-photos; "later" defers them.
+  resolutionTiming?: 'now' | 'later';
+  onSetResolutionTiming?: (v: 'now' | 'later') => void;
 }
 
-function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotosEnabled, onEnterEdit, onDelete, onOpenPhoto, onSaveDescription, onSaveAfterPhotos, onCaptureAfterPhotos }: ViewRowProps) {
+function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotosEnabled, onEnterEdit, onDelete, onOpenPhoto, onSaveDescription, onSaveAfterPhotos, onCaptureAfterPhotos, resolutionTiming, onSetResolutionTiming }: ViewRowProps) {
   const [showFull, setShowFull] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState('');
@@ -1090,6 +1099,29 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
   // Internal Resolution lines split their photos into Before (the tagged
   // section photos) and After (captured in-app). Only once the feature is live.
   const showIrPhotos = !!afterPhotosEnabled && isInternalResolution(line.assignedTo);
+  // Resolution timing (Internal Resolution only). Default "now" preserves the
+  // existing strict behavior (after-photos required) until switched to "later".
+  const timing: 'now' | 'later' = resolutionTiming || 'now';
+  const afterRequired = timing !== 'later';
+  const resolutionToggle = showIrPhotos ? (
+    <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+      <div className="text-[11px] font-bold text-gray-700 mb-1">Resolution <span className="text-brand">*</span></div>
+      <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs select-none">
+        {(['now', 'later'] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            disabled={readOnly}
+            onClick={(e) => { e.stopPropagation(); onSetResolutionTiming?.(v); }}
+            className={`px-3 py-1.5 font-heading font-semibold ${timing === v ? 'bg-brand text-white' : 'bg-white text-gray-700'} ${v === 'now' ? 'border-r border-gray-300' : ''}`}
+          >
+            {v === 'now' ? 'Complete Now' : 'Complete Later'}
+          </button>
+        ))}
+      </div>
+      {timing === 'later' && <div className="text-[11px] text-gray-500 mt-1">Marked to complete later — after photos optional for now.</div>}
+    </div>
+  ) : null;
 
   function startEditDesc(e: React.MouseEvent) {
     e.stopPropagation();
@@ -1207,11 +1239,12 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
                   ))}
                 </div>
               )}
+              {resolutionToggle}
               {showIrPhotos && (
                 <PhotoChipRow
                   label="After Photos"
                   urls={line.afterPhotoUrls || []}
-                  required
+                  required={afterRequired}
                   onAdd={readOnly ? undefined : onCaptureAfterPhotos}
                   onChange={readOnly ? undefined : onSaveAfterPhotos}
                   readOnly={readOnly}
@@ -1345,11 +1378,12 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
             ))}
           </div>
         )}
+        {resolutionToggle}
         {showIrPhotos && (
           <PhotoChipRow
             label="After Photos"
             urls={line.afterPhotoUrls || []}
-            required
+            required={afterRequired}
             onAdd={readOnly ? undefined : onCaptureAfterPhotos}
             onChange={readOnly ? undefined : onSaveAfterPhotos}
             readOnly={readOnly}

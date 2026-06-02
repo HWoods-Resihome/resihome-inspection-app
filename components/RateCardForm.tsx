@@ -14,6 +14,7 @@ import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { isInternalResolution } from '@/lib/vendors';
+import { getResolutionTimings, setResolutionTiming } from '@/lib/resolutionTiming';
 import { AiReviewModal } from '@/components/AiReviewModal';
 import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, saveReviewCache, loadReviewCache, clearReviewCache, type AiAdjustment } from '@/lib/aiReview';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
@@ -161,6 +162,13 @@ export function RateCardForm(props: RateCardFormProps) {
   // response reports it; we gate the finalize block on it so it can't deadlock
   // before the migration (you couldn't save after-photos to satisfy it).
   const [afterPhotosEnabled, setAfterPhotosEnabled] = useState(false);
+  // Internal Resolution "Complete Now / Complete Later" per line (device-local).
+  // "later" defers the after-photo requirement at finalize.
+  const [resolutionTimings, setResolutionTimings] = useState<Record<string, 'now' | 'later'>>({});
+  const setLineTiming = useCallback((lineExternalId: string, v: 'now' | 'later') => {
+    setResolutionTiming(props.inspectionRecordId, lineExternalId, v);
+    setResolutionTimings((m) => ({ ...m, [lineExternalId]: v }));
+  }, [props.inspectionRecordId]);
   const [linesBySection, setLinesBySection] = useState<Record<string, RateCardLineInput[]>>({});
   const [photosBySection, setPhotosBySection] = useState<Record<string, string[]>>({});
   // Live mirror of photosBySection so async save paths persist the LATEST merged
@@ -499,6 +507,8 @@ export function RateCardForm(props: RateCardFormProps) {
         if (cancelled) return;
 
         setAfterPhotosEnabled(data.afterPhotosEnabled === true);
+        // Restore per-line Internal Resolution timing choices (device-local).
+        setResolutionTimings(getResolutionTimings(props.inspectionRecordId));
         const answers = data.answers || [];
 
         // Build a lookup: "label||location" -> sectionId
@@ -2288,7 +2298,10 @@ export function RateCardForm(props: RateCardFormProps) {
       const missingAfter: string[] = [];
       for (const s of sections) {
         for (const line of (linesBySection[s.id] || [])) {
-          if (isInternalResolution(line.assignedTo) && (line.afterPhotoUrls?.length ?? 0) === 0) {
+          // Only "Complete Now" Internal Resolution lines require after-photos.
+          // "Complete Later" defers the work, so it's exempt at finalize.
+          const timing = resolutionTimings[line.externalId] || 'now';
+          if (isInternalResolution(line.assignedTo) && timing === 'now' && (line.afterPhotoUrls?.length ?? 0) === 0) {
             const desc = catalog.find((c) => c.lineItemCode === line.lineItemCode)?.laborShortDescription || line.lineItemCode;
             missingAfter.push(`${s.displayName}: ${desc}`);
           }
@@ -2296,7 +2309,7 @@ export function RateCardForm(props: RateCardFormProps) {
       }
       if (missingAfter.length > 0) {
         await dialog.alert(
-          'After photos are required on every Internal Resolution line before finalizing. Add an After Photo to:\n\n' +
+          'After photos are required on every "Complete Now" Internal Resolution line before finalizing. Add an After Photo (or switch it to "Complete Later") for:\n\n' +
           missingAfter.slice(0, 10).map((n) => `  • ${n}`).join('\n') +
           (missingAfter.length > 10 ? `\n  ...and ${missingAfter.length - 10} more` : '')
         );
@@ -2978,6 +2991,8 @@ export function RateCardForm(props: RateCardFormProps) {
                               tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
                               afterPhotosEnabled={afterPhotosEnabled}
                               onCaptureAfterPhotos={() => setAfterCameraTarget({ sectionId: s.id, lineExternalId: line.externalId })}
+                              resolutionTiming={resolutionTimings[line.externalId]}
+                              onSetResolutionTiming={(v) => setLineTiming(line.externalId, v)}
                               onSave={(updated) => handleSaveLineForSection(s.id, updated)}
                               onDelete={() => handleDeleteLine(s.id, line.externalId)}
                               onOpenPhoto={(index) => {
