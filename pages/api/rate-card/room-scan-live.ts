@@ -171,9 +171,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         max_tokens: 900,
         system: SYSTEM,
         tools: [SUGGEST_TOOL, EDIT_TOOL],
-        // On a voice tick, force a tool call so it can't reply with prose and
-        // silently drop the work order; on silent ticks let it choose (often none).
-        tool_choice: hasVoice ? { type: 'any' } : { type: 'auto' },
+        // Always 'auto': forcing a tool call would turn navigation commands
+        // ("move to front entryway") and noise into bogus suggestions. The
+        // text-only voice pass + strong prompt is enough for real work items.
+        tool_choice: { type: 'auto' },
         messages: [{ role: 'user', content: userContent }],
       }),
     });

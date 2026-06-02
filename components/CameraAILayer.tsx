@@ -111,6 +111,10 @@ export function CameraAILayer(props: Props) {
 
   const stampLinesRef = useRef<StampLine[]>([]);
   const transcriptBufRef = useRef('');
+  // Recent transcript fragments for room-nav matching — a command like
+  // "move to the front entryway" often splits across two ~4s clips, so we match
+  // against a short rolling window, not a single clip.
+  const navRecentRef = useRef<{ t: number; text: string }[]>([]);
   const seenByRoomRef = useRef<Record<string, { codes: Set<string>; descs: Set<string> }>>({});
   const roomStillCountRef = useRef<Record<string, number>>({});
   const chipsRef = useRef<LiveSuggestion[]>([]);
@@ -236,23 +240,33 @@ export function CameraAILayer(props: Props) {
     for (const m of order) { try { if (MR.isTypeSupported(m)) return m; } catch { /* noop */ } }
     return '';
   }
-  // Whisper "silence hallucinations" — on a near-silent clip it emits stock
-  // phrases ("bye bye", "thank you for watching", "please subscribe", …). Drop
-  // them so they never reach the model or the on-screen feedback.
+  // Whisper "silence hallucinations" — on a near-silent / noisy clip (road, wind)
+  // it emits stock phrases ("thank you", "bye bye") or repeated junk tokens
+  // ("pdf pdf PDF PDF…", "you you you"). Drop them so they never reach the model
+  // or the on-screen feedback.
   const NOISE_PHRASES = new Set([
     'you', 'thank you', 'thanks', 'thank you very much', 'thanks for watching',
     'thank you for watching', 'bye', 'bye bye', 'byebye', 'goodbye', 'see you',
     'see you next time', 'see you later', 'okay', 'ok', 'uh', 'um', 'hmm', 'mm',
     'mhm', 'yeah', 'so', 'the', 'please subscribe', 'subscribe', 'i', 'oh',
+    'thank you so much', 'thanks so much', 'music', 'applause', 'foreign',
+    'pdf', 'pdf pdf', 'pc', 'la la la', 'na na na',
   ]);
+  // Single tokens that, when they dominate a clip, mark it as hallucinated noise.
+  const JUNK_TOKENS = new Set(['pdf', 'pc', 'you', 'the', 'uh', 'um', 'mm', 'mhm', 'la', 'na', 'ah', 'oh', 'yeah', 'bye', 'thank', 'thanks', 'so', 'a', 'i']);
   function isNoise(t: string): boolean {
     const s = t.trim().toLowerCase().replace(/[^a-z\s]/g, '').replace(/\s+/g, ' ').trim();
     if (s.length < 3) return true;
     if (NOISE_PHRASES.has(s)) return true;
-    // Repeated single junk token, e.g. "bye bye bye" / "you you".
-    const words = s.split(' ');
-    const uniq = new Set(words);
-    if (uniq.size === 1 && NOISE_PHRASES.has(words[0])) return true;
+    const words = s.split(' ').filter(Boolean);
+    if (!words.length) return true;
+    // Dominant repeated token: e.g. "pdf pdf PDF PDF pdf PDF PDF pc p" — if one
+    // token is >=50% of a 3+ word clip, it's hallucinated noise, not speech.
+    const freq: Record<string, number> = {};
+    let maxTok = ''; let maxN = 0;
+    for (const w of words) { freq[w] = (freq[w] || 0) + 1; if (freq[w] > maxN) { maxN = freq[w]; maxTok = w; } }
+    if (words.length >= 3 && maxN / words.length >= 0.5) return true;
+    if (Object.keys(freq).length === 1 && JUNK_TOKENS.has(maxTok)) return true;
     return false;
   }
   async function transcribeChunk(blob: Blob) {
@@ -272,9 +286,15 @@ export function CameraAILayer(props: Props) {
       if (isNoise(txt)) { dbg(`stt: noise “${txt.slice(0, 24)}”`); return; }
       dbg(`stt ✓ “${txt.slice(0, 32)}”`);
       setErrText('');
-      maybeNavigate(txt);
-      transcriptBufRef.current += txt + ' ';
       setHeardText(txt);
+      // Try room navigation against a short rolling window (commands split across
+      // clips). If it navigates, treat the window as consumed and DON'T feed it to
+      // the work endpoint (otherwise "move to the kitchen" becomes a bogus line).
+      const now = Date.now();
+      navRecentRef.current = [...navRecentRef.current.filter((e) => now - e.t < 8000), { t: now, text: txt }];
+      const navWindow = navRecentRef.current.map((e) => e.text).join(' ');
+      if (maybeNavigate(navWindow)) { navRecentRef.current = []; return; }
+      transcriptBufRef.current += txt + ' ';
     } catch (e: any) {
       dbg(`stt err ${String(e?.message || e).slice(0, 30)}`);
     } finally { setTranscribing(false); }
@@ -287,34 +307,35 @@ export function CameraAILayer(props: Props) {
       .replace(/\bfour\b/g, '4').replace(/\bfive\b/g, '5').replace(/\bsix\b/g, '6')
       .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
   }
-  function maybeNavigate(raw: string) {
+  function maybeNavigate(raw: string): boolean {
     const t = normalizeNav(raw);
-    if (!t) return;
+    if (!t) return false;
     const list = roomsRef.current || [];
-    if (list.length < 2) return;
+    if (list.length < 2) return false;
     const cur = getActiveRoomRef.current();
-    const go = (id: string) => {
-      if (!id || id === cur?.id) return;
+    const go = (id: string): boolean => {
+      if (!id || id === cur?.id) return false;
       const r = list.find((x) => x.id === id);
       navRef.current(id);
-      if (r) setHeardText(`→ ${r.name}`);
+      if (r) { setHeardText(`→ ${r.name}`); dbg(`nav → ${r.name}`); }
+      return true;
     };
 
     // "next room" / "previous room" relative moves.
     if (/\bnext\s+room\b/.test(t)) {
       const i = list.findIndex((x) => x.id === cur?.id);
-      if (i >= 0) { go(list[(i + 1) % list.length].id); return; }
+      if (i >= 0) return go(list[(i + 1) % list.length].id);
     }
     if (/\b(?:previous|prev|last)\s+room\b/.test(t)) {
       const i = list.findIndex((x) => x.id === cur?.id);
-      if (i >= 0) { go(list[(i - 1 + list.length) % list.length].id); return; }
+      if (i >= 0) return go(list[(i - 1 + list.length) % list.length].id);
     }
 
     // Require a navigation cue, then match a room name in the trailing words.
     const cue = t.match(/(?:go(?:ing)?\s+(?:to|into|in)|walk(?:ing)?\s+(?:into|in|to)|head(?:ing)?\s+(?:to|into)|switch(?:ing)?\s+to|mov(?:e|ing)\s+(?:to|on\s+to)|over\s+to|now\s+(?:in|on)|let\s+s\s+(?:do|go\s+to)|back\s+to|this\s+is\s+(?:the\s+)?)/);
-    if (!cue || cue.index === undefined) return;
+    if (!cue || cue.index === undefined) return false;
     const tail = t.slice(cue.index + cue[0].length).trim();
-    if (!tail) return;
+    if (!tail) return false;
 
     let best: { id: string; score: number } | null = null;
     for (const r of list) {
@@ -325,7 +346,8 @@ export function CameraAILayer(props: Props) {
       const score = hit / tokens.length; // fraction of the room name heard
       if (hit > 0 && (!best || score > best.score)) best = { id: r.id, score };
     }
-    if (best && best.score >= 0.5) go(best.id);
+    if (best && best.score >= 0.5) return go(best.id);
+    return false;
   }
   // Current mic tracks: prefer the camera's SHARED stream; fall back to a mic we
   // opened ourselves. Re-derived each clip so a re-acquired stream is picked up.
