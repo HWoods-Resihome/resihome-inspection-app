@@ -542,9 +542,11 @@ export function EditableLineRow(props: Props) {
       return;
     }
     if (!baseComplete || !selectedItem) {
-      // For a new row that never got filled out, discard it.
-      if (!line && onDiscardNew) onDiscardNew();
-      setIsEditing(false);
+      // Incomplete on leave (e.g. the line was erased then clicked out of):
+      // for a brand-new row, discard it; for an existing saved line, REVERT to
+      // the saved values. cancelEdit() handles both. Without this we'd exit
+      // with wiped local state and render a bogus "not in catalog" orphan row.
+      cancelEdit();
       return;
     }
     const next: RateCardLineInput = {
