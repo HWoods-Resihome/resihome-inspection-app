@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ResiWALK brand palette. styles.xml references colorPrimary/Dark/Accent,
+         which were previously undefined; define them here on brand pink. -->
+    <color name="colorPrimary">#ff0060</color>
+    <color name="colorPrimaryDark">#cc004d</color>
+    <color name="colorAccent">#ff0060</color>
+    <!-- Splash background (matches capacitor.config SplashScreen.backgroundColor). -->
+    <color name="splashBackground">#ff0060</color>
+</resources>
