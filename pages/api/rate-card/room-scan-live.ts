@@ -33,10 +33,11 @@ function anthropicKey(): string {
 }
 
 const SYSTEM = [
-  'You are a move-out scope reviewer watching a LIVE camera pan of one room. You get the current frame, any new voice-over, the items ALREADY on screen this session, and the items still PENDING the inspector\'s decision.',
-  'STANDARD: SAFE, CLEAN, FUNCTIONAL — no luxury. Never invent work.',
-  'VOICE IS AUTHORITATIVE: if the inspector just SAID a defect or repair (e.g. "light bulb is out", "missing blind", "carpet is stained", "paint this wall", "outlet cover is broken"), you MUST suggest_line for it even if you cannot see it in the frame — they are looking at it. Pick the closest catalog work for what they described.',
-  'VISION IS CONSERVATIVE: from the frame alone, only call out work with clear visible evidence. Most frames warrant ZERO purely-visual items — that is correct.',
+  'You help a property inspector capture move-out repair scope. You get the current camera frame, any new VOICE-OVER from the inspector, the items ALREADY suggested this session, and the items still PENDING their decision.',
+  'STANDARD: SAFE, CLEAN, FUNCTIONAL — no luxury.',
+  'VOICE IS THE PRIMARY SIGNAL — OBEY IT LITERALLY. The inspector is telling you what work is needed. For EVERY concrete task or defect they mention, you MUST call suggest_line — once per item. This is REQUIRED, not optional. Do this EVEN IF the item is not visible in the frame, EVEN IF the frame shows something completely unrelated (e.g. a car, a road, a hallway), and EVEN IF you are unsure of the exact catalog item. NEVER stay silent on something they explicitly named. Examples that MUST each produce a suggest_line: "I need to trim the bushes" -> query "trim bushes / shrub trimming"; "the carpet is stained" -> "replace carpet"; "replace this blind" -> "replace faux wood blind"; "paint the whole room" -> "paint whole room"; "the outlet cover is missing" -> "replace outlet cover"; "clean the oven" -> "clean oven"; "light bulb is out" -> "replace light bulb". If they list several things, emit several suggest_line calls.',
+  'Translate their words into the closest catalog work phrase in the query field. When unsure, STILL call suggest_line with your best guess query rather than skipping it — a wrong-but-close suggestion they can dismiss is far better than silence.',
+  'VISION IS SECONDARY AND CONSERVATIVE: from the frame ALONE (when the inspector said nothing relevant), only call out work with clear, unambiguous visible damage. Most frames warrant ZERO purely-visual items — that is fine. Never invent visual work.',
   'Do NOT repeat anything in the already-suggested list (or near-duplicates).',
   'TWO things you can do, both via tools, all in one response (often neither):',
   ' • suggest_line — a genuinely NEW item seen or just called out.',
@@ -111,12 +112,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Resolve a free-text work phrase → real catalog item + computed fields.
     // Applies the confidence floor and the blinds→faux-wood guard.
-    const resolveItem = async (query: string, categoryHint: string) => {
+    // Voice-named items get a more lenient match floor: the inspector explicitly
+    // asked for the work, so a close-but-sub-threshold candidate beats dropping it.
+    const VOICE_FLOOR = 0.32;
+    const resolveItem = async (query: string, categoryHint: string, fromVoice = false) => {
       const q = String(query || '').trim();
       if (!q) return null;
       const match = await matchCatalog(q, catalog, { sectionName, categoryHint });
       let top = match.candidates[0];
-      if (!top || !match.confident) return null;
+      const ok = match.confident || (fromVoice && top && match.topScore >= VOICE_FLOOR);
+      if (!top || !ok) return null;
       if (/\bblind/i.test(q) && !/valance|wand|vertical/i.test(q) && /valance|wand/i.test(top.item.laborShortDescription)) {
         const faux = match.candidates.find((c) => /faux\s*wood\s*blind/i.test(c.item.laborShortDescription));
         if (faux) top = faux;
@@ -134,10 +139,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const userContent: any[] = [
       { type: 'text', text:
         `Room: ${sectionName}. Current frame below.` +
-        (transcriptDelta ? `\nInspector just said: "${transcriptDelta}"` : '') +
+        (transcriptDelta
+          ? `\n\n*** THE INSPECTOR JUST SAID: "${transcriptDelta}" ***\nThis is a direct instruction. Call suggest_line for EACH concrete repair/replace/clean/paint/trim/install/remove task or defect in that sentence — REGARDLESS of what the frame shows (ignore the frame if it is unrelated). Do not skip any. Do not ask for confirmation.`
+          : `\nNo new voice this tick — only call suggest_line for clear, unambiguous visible damage in the frame (usually none).`) +
         (seen.length ? `\nAlready suggested (do NOT repeat): ${seen.join('; ')}` : '') +
         (active.length ? `\nPending items the inspector may amend (use edit_line with the id):\n` + active.map((a) => `  [${a.id}] ${a.description}${a.unit ? ` (${a.unit})` : ''}`).join('\n') : '') +
-        `\nReturn NEW items via suggest_line and/or amendments via edit_line (often none).`
+        `\nReturn NEW items via suggest_line and/or amendments via edit_line.`
       },
       imageBlock,
     ];
@@ -169,7 +176,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const unmatched: string[] = [];
     for (let i = 0; i < suggestUses.length; i++) {
       const inp = suggestUses[i].input || {};
-      const resolved = await resolveItem(String(inp.query || ''), String(inp.category || ''));
+      const resolved = await resolveItem(String(inp.query || ''), String(inp.category || ''), !!transcriptDelta);
       if (!resolved) { if (inp.query) unmatched.push(String(inp.query).slice(0, 40)); continue; }
       const { item, unit, isMeasured, isWholeHouse, tenantPct, measurementUnit } = resolved;
       if (seenLower.has(item.lineItemCode.toLowerCase()) || seenLower.has(item.laborShortDescription.toLowerCase())) continue;
