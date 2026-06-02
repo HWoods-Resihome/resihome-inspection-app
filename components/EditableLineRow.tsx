@@ -979,14 +979,15 @@ export function EditableLineRow(props: Props) {
             type="button"
             onMouseDown={(e) => e.preventDefault()}  // don't blur/commit the row
             onClick={(e) => { e.stopPropagation(); clearLine(); }}
-            className="shrink-0 h-9 w-7 rounded flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 border border-gray-200"
+            className="shrink-0 h-9 w-6 rounded flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50"
             title="Clear this line (wipe all fields)"
             aria-label="Clear line"
           >
             {/* eraser icon */}
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M7 21h13" />
-              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L9 17l-4 1 1-4Z" />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+              <path d="M22 21H7" />
+              <path d="m5 11 9 9" />
             </svg>
           </button>
           <select
@@ -1054,8 +1055,10 @@ export function EditableLineRow(props: Props) {
         {selectedItem?.laborMeas || '—'}
       </td>
       {/* Vendor — Internal Resolution reveals a REQUIRED Now/Later choice below
-          the dropdown that must be picked before the row can be saved or left. */}
-      <td className="px-2 py-1.5 align-top min-w-[120px] max-w-[150px]">
+          the dropdown that must be picked before the row can be saved or left.
+          The dropdown stays vertically centered (like the other cells) until
+          that toggle appears. */}
+      <td className="px-2 py-1.5 align-middle min-w-[150px] max-w-[180px]">
         <select
           value={vendor}
           onChange={(e) => handleVendorChange(e.target.value)}
@@ -1065,11 +1068,11 @@ export function EditableLineRow(props: Props) {
           {VENDORS.map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
         {isInternalResolution(vendor) && (
-          <div className="mt-1.5">
-            <div className={`text-[9px] uppercase tracking-wide font-bold mb-1 ${timingPrompt && !timingChosen ? 'text-red-600' : 'text-gray-500'}`}>
-              Resolution <span className="text-brand">*</span>
-            </div>
-            <div className="grid grid-cols-1 gap-1">
+          <div className="mt-1.5 flex items-center gap-1">
+            <span className={`text-[11px] font-bold shrink-0 ${timingPrompt && !timingChosen ? 'text-red-600' : 'text-gray-600'}`}>
+              Complete:
+            </span>
+            <div className="grid grid-cols-2 gap-1 flex-1">
               {(['now', 'later'] as const).map((v) => {
                 const selected = timingChosen && editTiming === v;
                 return (
@@ -1084,14 +1087,11 @@ export function EditableLineRow(props: Props) {
                         : `bg-white text-gray-700 ${timingPrompt && !timingChosen ? 'border-red-400' : 'border-gray-300'}`
                     }`}
                   >
-                    {v === 'now' ? 'Complete Now' : 'Complete Later'}
+                    {v === 'now' ? 'Now' : 'Later'}
                   </button>
                 );
               })}
             </div>
-            {timingPrompt && !timingChosen && (
-              <div className="text-[10px] text-red-600 mt-1 leading-tight">Pick Now or Later to continue.</div>
-            )}
           </div>
         )}
       </td>
