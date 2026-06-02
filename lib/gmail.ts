@@ -88,7 +88,13 @@ async function buildMimeMessage(
   lines.push(`--${altBoundary}--`);
   lines.push('');
 
-  // attachments
+  // attachments. Gmail rejects messages over ~25 MB (the whole base64-encoded
+  // message), bouncing with "An error occurred. Your message was not sent." We
+  // cap the cumulative RAW attachment bytes well under that (base64 inflates
+  // ~33%); any attachment that would push us over is skipped — recipients still
+  // get it from the download Links in the email body.
+  const MAX_TOTAL_ATTACH_BYTES = 17 * 1024 * 1024;
+  let attachBytes = 0;
   for (const att of payload.attachments) {
     let bytes: Buffer;
     try {
@@ -97,6 +103,11 @@ async function buildMimeMessage(
       console.error(`[gmail] skipping attachment (fetch failed): ${att.filename}`, e);
       continue;
     }
+    if (attachBytes + bytes.length > MAX_TOTAL_ATTACH_BYTES) {
+      console.warn(`[gmail] skipping attachment (size cap ${MAX_TOTAL_ATTACH_BYTES} exceeded): ${att.filename} (${bytes.length} bytes; ${attachBytes} already attached) — available via the email's download links`);
+      continue;
+    }
+    attachBytes += bytes.length;
     lines.push(`--${mixedBoundary}`);
     lines.push(`Content-Type: ${att.mimeType}; name="${att.filename}"`);
     lines.push('Content-Transfer-Encoding: base64');

@@ -374,13 +374,6 @@ export function composeInspectionEmail(args: {
       mimeType: 'application/pdf',
     });
   }
-  if (attachments.chargebackPdf) {
-    attachmentList.push({
-      filename: attachments.chargebackPdf.name,
-      url: attachments.chargebackPdf.url,
-      mimeType: 'application/pdf',
-    });
-  }
   // Vendor PDFs in the order produced by vendorBreakdown so the listing in
   // the body matches the attachment order in mail clients.
   const vendorPdfMap = new Map(attachments.vendorPdfs.map((v) => [v.vendor, v]));
