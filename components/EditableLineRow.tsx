@@ -859,22 +859,25 @@ export function EditableLineRow(props: Props) {
                   />
                 </div>
 
-                {/* Internal Resolution: choose completion timing. "Complete Now"
-                    (default) requires after-photos; "Complete Later" defers them. */}
+                {/* Internal Resolution: choose completion timing, inline as
+                    "Complete: [Now] [Later]". "Now" (default) requires after-
+                    photos; "Later" defers them. */}
                 {isInternalResolution(vendor) && (
                   <div>
-                    <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Resolution <span className="text-brand">*</span></label>
-                    <div className="grid grid-cols-2 w-full max-w-xs rounded-lg border border-gray-300 overflow-hidden text-sm select-none">
-                      {(['now', 'later'] as const).map((v) => (
-                        <button
-                          key={v}
-                          type="button"
-                          onClick={() => setEditTiming(v)}
-                          className={`px-3 py-2 text-center leading-tight font-heading font-semibold ${editTiming === v ? 'bg-brand text-white' : 'bg-white text-gray-700'} ${v === 'now' ? 'border-r border-gray-300' : ''}`}
-                        >
-                          {v === 'now' ? 'Complete Now' : 'Complete Later'}
-                        </button>
-                      ))}
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-heading font-bold text-gray-700 shrink-0">Complete: <span className="text-brand">*</span></span>
+                      <div className="grid grid-cols-2 gap-2 flex-1 max-w-xs select-none">
+                        {(['now', 'later'] as const).map((v) => (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => setEditTiming(v)}
+                            className={`h-9 rounded-lg border text-sm text-center leading-none font-heading font-semibold ${editTiming === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}
+                          >
+                            {v === 'now' ? 'Now' : 'Later'}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                     {editTiming === 'later' && <div className="text-[11px] text-gray-500 mt-1">After photos optional — line marked to complete later.</div>}
                   </div>
@@ -1242,19 +1245,21 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
   const afterRequired = timing !== 'later';
   const resolutionToggle = showIrPhotos ? (
     <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-      <div className="text-[10px] uppercase tracking-wide font-bold text-gray-500 mb-1">Resolution <span className="text-brand">*</span></div>
-      <div className="grid grid-cols-2 w-full rounded-md border border-gray-300 overflow-hidden text-[11px] select-none">
-        {(['now', 'later'] as const).map((v) => (
-          <button
-            key={v}
-            type="button"
-            disabled={readOnly}
-            onClick={(e) => { e.stopPropagation(); onSetResolutionTiming?.(line.externalId, v); }}
-            className={`px-1.5 py-1 text-center leading-tight font-heading font-semibold ${timing === v ? 'bg-brand text-white' : 'bg-white text-gray-700'} ${v === 'now' ? 'border-r border-gray-300' : ''}`}
-          >
-            {v === 'now' ? 'Complete Now' : 'Complete Later'}
-          </button>
-        ))}
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-bold text-gray-600 shrink-0">Complete: <span className="text-brand">*</span></span>
+        <div className="grid grid-cols-2 gap-1 flex-1 max-w-[200px] select-none">
+          {(['now', 'later'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              disabled={readOnly}
+              onClick={(e) => { e.stopPropagation(); onSetResolutionTiming?.(line.externalId, v); }}
+              className={`h-7 rounded-md border text-[11px] text-center leading-none font-heading font-semibold ${timing === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}
+            >
+              {v === 'now' ? 'Now' : 'Later'}
+            </button>
+          ))}
+        </div>
       </div>
       {timing === 'later' && <div className="text-[11px] text-gray-500 mt-1">Marked to complete later — after photos optional for now.</div>}
     </div>
