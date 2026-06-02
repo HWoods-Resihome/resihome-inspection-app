@@ -229,7 +229,7 @@ function PhotoChipRow({
   return (
     <div className="mt-2" onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{label}</span>
+        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500 whitespace-nowrap shrink-0">{label}</span>
         {urls.length > 0
           ? <span className="text-[10px] text-emerald-600">&#10003; {urls.length}</span>
           : required
@@ -1245,7 +1245,7 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
   const afterRequired = timing !== 'later';
   const resolutionToggle = showIrPhotos ? (
     <div className="mt-2 w-full" onClick={(e) => e.stopPropagation()}>
-      <div className="text-[11px] font-bold text-gray-600 mb-1">Complete: <span className="text-brand">*</span></div>
+      <div className="text-[11px] font-bold uppercase tracking-wide text-gray-500 mb-1">Complete: <span className="text-brand">*</span></div>
       <div className="grid grid-cols-2 gap-1.5 w-full max-w-[160px] select-none">
         {(['now', 'later'] as const).map((v) => (
           <button
@@ -1534,7 +1534,7 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
       <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{item.laborMeas}</td>
       {/* Vendor — with the Complete: Now/Later toggle directly beneath the
           Internal Resolution pill (same spot the selection was made). */}
-      <td className="px-3 py-2 text-center align-top">
+      <td className="px-3 py-2 text-center align-middle">
         <div className="inline-flex flex-col items-center gap-1">
           <span
             className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold max-w-[140px] truncate ${pill.bg} ${pill.text} ${pill.border || ''}`}
