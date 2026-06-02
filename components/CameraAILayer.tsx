@@ -109,6 +109,11 @@ export function CameraAILayer(props: Props) {
   const [errText, setErrText] = useState('');
   const [chips, setChips] = useState<LiveSuggestion[]>([]);
   const [qtyById, setQtyById] = useState<Record<string, string>>({});
+  // Capture animation: a shutter flash + a "saved" thumbnail toast so the
+  // inspector sees the AI grabbing room photos and doesn't re-shoot them.
+  const [flashKey, setFlashKey] = useState(0);
+  const [savedShot, setSavedShot] = useState<{ key: number; url: string; roomName: string; count: number } | null>(null);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { chipsRef.current = chips; }, [chips]);
 
@@ -136,6 +141,7 @@ export function CameraAILayer(props: Props) {
       openRef.current = false;
       if (inferTimer.current) clearInterval(inferTimer.current);
       if (stillTimer.current) clearInterval(stillTimer.current);
+      if (savedTimer.current) clearTimeout(savedTimer.current);
       stopAudioLoop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -272,20 +278,28 @@ export function CameraAILayer(props: Props) {
   }
   async function captureStill(force: boolean): Promise<string | undefined> {
     const v = videoRef.current;
-    const room = getActiveRoom();
+    const room = getActiveRoomRef.current();
     if (!openRef.current || !v || !v.videoWidth || !room) return undefined;
     if (!force && (roomStillCountRef.current[room.id] || 0) >= MAX_ROOM_STILLS) return undefined;
     const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
     const ctx = c.getContext('2d'); if (!ctx) return undefined;
     ctx.drawImage(v, 0, 0, c.width, c.height);
     drawEvidenceStamp(ctx, c.width, c.height, stampLinesRef.current);
+    // Fire the shutter flash the instant we grab the frame — immediate feedback,
+    // before the (slower) upload round-trip.
+    setFlashKey((k) => k + 1);
     const blob = await new Promise<Blob | null>((res) => c.toBlob((b) => res(b), 'image/jpeg', 0.8));
     if (!blob) return undefined;
     try {
       const url = await uploadPhoto(new File([blob], `ai_${Date.now()}.jpg`, { type: 'image/jpeg' }));
       if (!openRef.current) return undefined;
-      roomStillCountRef.current[room.id] = (roomStillCountRef.current[room.id] || 0) + 1;
+      const count = (roomStillCountRef.current[room.id] || 0) + 1;
+      roomStillCountRef.current[room.id] = count;
       onStill(room.id, url);
+      // Pop the saved-thumbnail toast (re-keyed so back-to-back grabs re-animate).
+      setSavedShot({ key: Date.now(), url, roomName: room.name, count });
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSavedShot(null), 2200);
       return url;
     } catch { return undefined; }
   }
@@ -394,6 +408,29 @@ export function CameraAILayer(props: Props) {
 
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 z-30">
+      {/* Shutter flash — full-screen white blink the instant a still is grabbed. */}
+      {flashKey > 0 && (
+        <div key={flashKey} className="fixed inset-0 z-40 bg-white animate-shutterFlash pointer-events-none" />
+      )}
+
+      {/* Saved-thumbnail toast — confirms the AI just saved a room photo so the
+          inspector knows it's covered and won't re-shoot the same view. */}
+      {savedShot && (
+        <div key={savedShot.key} className="fixed left-1/2 -translate-x-1/2 top-28 z-40 pointer-events-none animate-shotSaved">
+          <div className="flex items-center gap-2 bg-black/75 text-white rounded-xl pl-2 pr-3 py-2 shadow-lg">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={displayImageSrc(savedShot.url)} alt="" className="w-9 h-9 object-cover rounded-md border border-white/30" />
+            <div className="leading-tight">
+              <div className="text-[12px] font-semibold flex items-center gap-1">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                Photo saved
+              </div>
+              <div className="text-[10.5px] text-white/70">{savedShot.roomName} · {savedShot.count} auto</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Status / heard line — right-aligned so it clears the centered room
           dropdown in the camera top bar. */}
       <div className="px-3 pt-16 flex justify-end">
