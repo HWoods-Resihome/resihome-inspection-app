@@ -1478,12 +1478,22 @@ export function CameraCapture({
                   </button>
                 )}
                 {it.status === 'uploaded' && (
-                  <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center border-2 border-black">
-                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white"
-                         strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  </div>
+                  it.hubspotUrl && it.hubspotUrl.startsWith('blob:') ? (
+                    // Offline draft — cached locally; will upload when back online.
+                    <span
+                      className="absolute bottom-0 inset-x-0 bg-amber-500/95 text-white text-[8px] font-heading font-bold text-center leading-tight py-0.5 rounded-b"
+                      title="Saved Offline · Will Sync When Online"
+                    >
+                      Saved Offline
+                    </span>
+                  ) : (
+                    <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center border-2 border-black">
+                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white"
+                           strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </div>
+                  )
                 )}
                 {/* Delete button */}
                 <button

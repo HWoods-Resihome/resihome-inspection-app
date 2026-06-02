@@ -2924,6 +2924,12 @@ export function RateCardForm(props: RateCardFormProps) {
                                 </span>
                               </span>
                             )}
+                            {url.startsWith('blob:') && (
+                              <span
+                                className="absolute bottom-0 inset-x-0 bg-amber-500/95 text-white text-[8px] font-heading font-bold text-center leading-tight py-0.5 rounded-b pointer-events-none"
+                                title="Saved Offline · Will Sync When Online"
+                              >Saved Offline</span>
+                            )}
                             {!props.readOnly && (
                               <button
                                 type="button"
