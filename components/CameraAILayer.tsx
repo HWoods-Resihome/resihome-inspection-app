@@ -189,6 +189,8 @@ export function CameraAILayer(props: Props) {
   // suggestion; voice edit_line and the inline controls both write here.
   const [editById, setEditById] = useState<Record<string, ChipEdit>>({});
   const setEdit = (id: string, patch: Partial<ChipEdit>) => setEditById((m) => ({ ...m, [id]: { ...(m[id] || EMPTY_EDIT), ...patch } }));
+  // Which inline field is currently open for editing (tap-to-edit, like the form).
+  const [editing, setEditing] = useState<{ id: string; field: keyof ChipEdit } | null>(null);
   // Capture animation: a shutter flash + a "saved" thumbnail toast so the
   // inspector sees the AI grabbing room photos and doesn't re-shoot them.
   const [flashKey, setFlashKey] = useState(0);
@@ -754,34 +756,56 @@ export function CameraAILayer(props: Props) {
               </div>
             </div>
 
-            {/* Editable fields — 2 compact rows */}
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] uppercase tracking-wide text-gray-400">Qty{s.measurementUnit ? ` (${s.measurementUnit})` : ''}</span>
-                <input type="text" inputMode="decimal" value={e.qty}
+            {/* Editable fields — ONE row of grey, tap-to-edit values (matches the
+                form's line editing). Tap a value to turn it into an input/select. */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+              {/* Qty */}
+              {editing && editing.id === s.id && editing.field === 'qty' ? (
+                <input autoFocus type="text" inputMode="decimal" value={e.qty}
                   onChange={(ev) => setEdit(s.id, { qty: ev.target.value.replace(/[^0-9.]/g, '') })}
-                  placeholder={s.needsMeasurement ? `Enter ${s.measurementUnit}` : '1'}
-                  className="h-9 bg-gray-100 rounded-lg px-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-300" />
-              </label>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] uppercase tracking-wide text-gray-400">Vendor</span>
-                <select value={e.vendor} onChange={(ev) => setEdit(s.id, { vendor: ev.target.value })}
-                  className="h-9 bg-gray-100 rounded-lg px-2 text-sm outline-none focus:ring-2 focus:ring-violet-300">
+                  onBlur={() => setEditing(null)} onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === 'Escape') setEditing(null); }}
+                  className="h-7 w-16 bg-gray-100 rounded px-2 text-[12px] outline-none ring-2 ring-violet-300" />
+              ) : (
+                <button onClick={() => setEditing({ id: s.id, field: 'qty' })} className="text-gray-500 underline decoration-dotted underline-offset-2">
+                  Qty <span className="text-gray-900 font-semibold">{e.qty || (s.needsMeasurement ? '—' : '1')}</span>{s.measurementUnit ? ` ${s.measurementUnit}` : ''}
+                </button>
+              )}
+              <span className="text-gray-300">·</span>
+              {/* Vendor */}
+              {editing && editing.id === s.id && editing.field === 'vendor' ? (
+                <select autoFocus value={e.vendor} onChange={(ev) => { setEdit(s.id, { vendor: ev.target.value }); setEditing(null); }} onBlur={() => setEditing(null)}
+                  className="h-7 bg-gray-100 rounded px-1 text-[12px] outline-none ring-2 ring-violet-300">
                   {VENDORS.map((v) => <option key={v} value={v}>{v}</option>)}
                 </select>
-              </label>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] uppercase tracking-wide text-gray-400">Tenant %</span>
-                <input type="text" inputMode="numeric" value={e.tenantPct}
+              ) : (
+                <button onClick={() => setEditing({ id: s.id, field: 'vendor' })} className="text-gray-900 font-semibold underline decoration-dotted underline-offset-2">
+                  {e.vendor}
+                </button>
+              )}
+              <span className="text-gray-300">·</span>
+              {/* Tenant % */}
+              {editing && editing.id === s.id && editing.field === 'tenantPct' ? (
+                <input autoFocus type="text" inputMode="numeric" value={e.tenantPct}
                   onChange={(ev) => setEdit(s.id, { tenantPct: ev.target.value.replace(/[^0-9]/g, '').slice(0, 3) })}
-                  className="h-9 bg-gray-100 rounded-lg px-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-300" />
-              </label>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] uppercase tracking-wide text-gray-400">Vendor $ (opt)</span>
-                <input type="text" inputMode="decimal" value={e.vendorCost}
+                  onBlur={() => setEditing(null)} onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === 'Escape') setEditing(null); }}
+                  className="h-7 w-14 bg-gray-100 rounded px-2 text-[12px] outline-none ring-2 ring-violet-300" />
+              ) : (
+                <button onClick={() => setEditing({ id: s.id, field: 'tenantPct' })} className="text-gray-500 underline decoration-dotted underline-offset-2">
+                  Tenant <span className="text-gray-900 font-semibold">{e.tenantPct || '100'}%</span>
+                </button>
+              )}
+              <span className="text-gray-300">·</span>
+              {/* Vendor $ (optional override) */}
+              {editing && editing.id === s.id && editing.field === 'vendorCost' ? (
+                <input autoFocus type="text" inputMode="decimal" value={e.vendorCost}
                   onChange={(ev) => setEdit(s.id, { vendorCost: ev.target.value.replace(/[^0-9.]/g, '') })}
-                  placeholder="auto" className="h-9 bg-gray-100 rounded-lg px-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-300" />
-              </label>
+                  onBlur={() => setEditing(null)} onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === 'Escape') setEditing(null); }}
+                  placeholder="auto" className="h-7 w-16 bg-gray-100 rounded px-2 text-[12px] outline-none ring-2 ring-violet-300" />
+              ) : (
+                <button onClick={() => setEditing({ id: s.id, field: 'vendorCost' })} className="text-gray-500 underline decoration-dotted underline-offset-2">
+                  Vendor $ <span className="text-gray-900 font-semibold">{e.vendorCost ? `$${e.vendorCost}` : 'auto'}</span>
+                </button>
+              )}
             </div>
             {s.needsMeasurement && s.estimatedQuantity && s.estimatedQuantity > 0 && (
               <div className="text-[11px] text-amber-700 mt-1">≈ AI estimate ({s.estimatedQuantity} {s.unit}) — confirm, edit, or say the size.</div>
