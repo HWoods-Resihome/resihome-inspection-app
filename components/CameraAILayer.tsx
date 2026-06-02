@@ -29,7 +29,13 @@ const TENANT_PCT_OPTIONS = Array.from({ length: 21 }, (_, i) => i * 5); // 0..10
 
 const INFER_INTERVAL_MS = 2500;
 const KEYFRAME_EDGE = 640;
-const AUDIO_CHUNK_MS = 2800; // shorter clips = transcript + card sooner (rolling context stitches splits)
+const AUDIO_CHUNK_MS = 2800; // fallback fixed-clip length when VAD is unavailable (iOS suspended ctx)
+// Voice-activity endpointing: cut the utterance once the inspector has been quiet
+// for SILENCE_HANG_MS (a short buffer so mini "umm…" pauses don't split a phrase),
+// with a hard safety cap and an idle-restart to drop silent buffers.
+const SILENCE_HANG_MS = 900;
+const MAX_UTTER_MS = 9000;
+const IDLE_RESTART_MS = 5000;
 const MAX_ROOM_STILLS = 12;
 // Auto-still is now a FALLBACK: it only fires when the inspector has gone idle
 // (no manual shutter, no AI still, no chip) for this long — so supplemental
@@ -153,6 +159,7 @@ export function CameraAILayer(props: Props) {
   // loudness and skip transcription on near-silent clips so Whisper can't
   // hallucinate stock phrases ("bye bye", "thank you") on silence.
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const monitorRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stampLinesRef = useRef<StampLine[]>([]);
   const transcriptBufRef = useRef('');
@@ -478,65 +485,86 @@ export function CameraAILayer(props: Props) {
     setListening(true);
     const mime = pickAudioMime();
     dbg(`mic ✓ ${source} · ${mime || 'default'}`);
-    const recordOnce = () => {
+
+    // Persistent AudioContext for voice-activity detection (endpointing).
+    const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (AC && !audioCtxRef.current) { try { audioCtxRef.current = new AC(); } catch { /* noop */ } }
+    try { if (audioCtxRef.current?.state === 'suspended') audioCtxRef.current.resume().catch(() => {}); } catch { /* noop */ }
+
+    // Per-utterance mutable state (shared by beginUtterance / endUtterance / monitor).
+    let analyser: AnalyserNode | null = null;
+    let srcNode: MediaStreamAudioSourceNode | null = null;
+    let parts: BlobPart[] = [];
+    let hadSpeech = false;
+    let pendingSend = true;
+    let recStart = 0;
+    let lastLoud = 0;
+    const buf = new Uint8Array(512);
+    const teardownNodes = () => { try { srcNode?.disconnect(); analyser?.disconnect(); } catch { /* noop */ } srcNode = null; analyser = null; };
+
+    const beginUtterance = () => {
       if (!audioLoopRef.current || !openRef.current) return;
       const tracks = liveAudioTracks();
       if (!tracks.length) { dbg('mic tracks lost'); setListening(false); return; }
       try {
         const audioStream = new MediaStream(tracks);
+        if (audioCtxRef.current) {
+          try {
+            srcNode = audioCtxRef.current.createMediaStreamSource(audioStream);
+            analyser = audioCtxRef.current.createAnalyser(); analyser.fftSize = 512;
+            srcNode.connect(analyser);
+          } catch { analyser = null; srcNode = null; }
+        }
         const rec = mime ? new MediaRecorder(audioStream, { mimeType: mime }) : new MediaRecorder(audioStream);
         audioRecRef.current = rec;
-        const parts: BlobPart[] = [];
-
-        // --- voice-activity detection: track the clip's peak loudness ---
-        let peak = 0; let vadActive = false; let sampler: ReturnType<typeof setInterval> | null = null;
-        let srcNode: MediaStreamAudioSourceNode | null = null;
-        let analyserNode: AnalyserNode | null = null;
-        try {
-          const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
-          if (AC) {
-            if (!audioCtxRef.current) audioCtxRef.current = new AC();
-            const ctx = audioCtxRef.current!;
-            if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-            srcNode = ctx.createMediaStreamSource(audioStream);
-            const an = ctx.createAnalyser(); an.fftSize = 512;
-            srcNode.connect(an);
-            analyserNode = an;
-            const buf = new Uint8Array(an.fftSize);
-            sampler = setInterval(() => {
-              an.getByteTimeDomainData(buf);
-              let m = 0; for (let i = 0; i < buf.length; i++) { const d = Math.abs(buf[i] - 128); if (d > m) m = d; }
-              if (m > peak) peak = m;
-            }, 120);
-          }
-        } catch { /* VAD unavailable → don't gate */ }
-
+        parts = []; hadSpeech = false; pendingSend = true; recStart = Date.now(); lastLoud = Date.now();
         rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
         rec.onstop = () => {
-          if (sampler) clearInterval(sampler);
-          try { srcNode?.disconnect(); analyserNode?.disconnect(); } catch { /* noop */ }
-          vadActive = !!audioCtxRef.current && audioCtxRef.current.state === 'running';
-          if (parts.length) {
+          teardownNodes();
+          if (pendingSend && hadSpeech && parts.length) {
             const blob = new Blob(parts, { type: rec.mimeType || mime || 'audio/mp4' });
-            const kb = Math.round(blob.size / 1024);
-            if (blob.size <= 1200) dbg(`clip too small (${blob.size}b)`);
-            // Gate on loudness ONLY when VAD is actually running (Android/desktop);
-            // if the AudioContext never resumed (some iOS), send the clip ungated.
-            else if (vadActive && peak < VAD_PEAK_MIN) dbg(`silent clip skipped (pk${peak})`);
-            else { dbg(`clip ${kb}KB pk${peak}`); void transcribeChunk(blob); }
-          } else dbg('clip: no data');
-          if (audioLoopRef.current && openRef.current) recordOnce();
+            if (blob.size > 1200) { dbg(`utterance ${Math.round(blob.size / 1024)}KB`); void transcribeChunk(blob); }
+          }
+          if (audioLoopRef.current && openRef.current) beginUtterance();
         };
         rec.onerror = (ev: any) => dbg(`rec err ${String(ev?.error?.name || '')}`);
         rec.start();
-        setTimeout(() => { try { if (rec.state !== 'inactive') rec.stop(); } catch { /* noop */ } }, AUDIO_CHUNK_MS);
       } catch (e: any) { dbg(`rec start err ${String(e?.message || e).slice(0, 24)}`); setListening(false); }
     };
-    recordOnce();
+    const endUtterance = (send: boolean) => {
+      pendingSend = send;
+      try { if (audioRecRef.current && audioRecRef.current.state !== 'inactive') audioRecRef.current.stop(); } catch { /* noop */ }
+    };
+
+    // Monitor: cut the utterance at end-of-speech (after a short pause buffer) so
+    // a 2-word call-out fires fast while "umm… it's… 1200 sqft" stays one phrase.
+    // Falls back to fixed-length clips when VAD (AudioContext) isn't running (iOS).
+    monitorRef.current = setInterval(() => {
+      if (!audioLoopRef.current || !openRef.current) return;
+      const rec = audioRecRef.current;
+      if (!rec || rec.state === 'inactive') return;
+      const now = Date.now();
+      const dur = now - recStart;
+      const vadActive = audioCtxRef.current?.state === 'running' && !!analyser;
+      if (vadActive && analyser) {
+        analyser.getByteTimeDomainData(buf);
+        let m = 0; for (let i = 0; i < buf.length; i++) { const d = Math.abs(buf[i] - 128); if (d > m) m = d; }
+        if (m >= VAD_PEAK_MIN) { lastLoud = now; hadSpeech = true; }
+        const sinceLoud = now - lastLoud;
+        if (hadSpeech && sinceLoud >= SILENCE_HANG_MS) endUtterance(true);   // end after the pause buffer
+        else if (!hadSpeech && dur >= IDLE_RESTART_MS) endUtterance(false);  // drop a silence-only buffer
+        else if (dur >= MAX_UTTER_MS) endUtterance(true);                    // safety cap
+      } else if (dur >= AUDIO_CHUNK_MS) {
+        hadSpeech = true; endUtterance(true);                               // no VAD → fixed clips
+      }
+    }, 100);
+
+    beginUtterance();
   }
   function stopAudioLoop() {
     audioLoopRef.current = false;
     setListening(false);
+    if (monitorRef.current) { clearInterval(monitorRef.current); monitorRef.current = null; }
     try { if (audioRecRef.current && audioRecRef.current.state !== 'inactive') audioRecRef.current.stop(); } catch { /* noop */ }
     audioRecRef.current = null;
     // Only stop a mic WE opened — never the camera's shared stream.

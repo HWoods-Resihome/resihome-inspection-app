@@ -5,9 +5,13 @@
 
 import sharp from 'sharp';
 
-const MAX_WIDTH = 600;   // max width for embedded images (pixels)
-const MAX_HEIGHT = 450;  // max height
-const JPEG_QUALITY = 70;
+// Embedded photos are sized/compressed for documentation legibility while
+// keeping the PDF small — photo-heavy scopes were pushing the finalize email
+// past Gmail's 25 MB cap. ~520px @ q62 (mozjpeg) roughly halves the bytes vs
+// 600px @ q70 with no meaningful loss at PDF print scale.
+const MAX_WIDTH = 520;   // max width for embedded images (pixels)
+const MAX_HEIGHT = 400;  // max height
+const JPEG_QUALITY = 62;
 
 /**
  * Fetch a single image URL and resize it to a JPEG data URI.

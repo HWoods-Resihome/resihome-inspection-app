@@ -130,8 +130,9 @@ function buildHtmlBody(args: {
   ctx: PdfBuildContext;
   vendorBreakdown: VendorTotal[];
   links: InspectionLinks;
+  files: Array<{ filename: string; url: string }>;
 }): string {
-  const { prop, ctx, vendorBreakdown, links } = args;
+  const { prop, ctx, vendorBreakdown, links, files } = args;
   const addressLine = [
     prop.addressStreet,
     [prop.city, prop.stateCode].filter(Boolean).join(', ') + (prop.zipCode ? ` ${prop.zipCode}` : ''),
@@ -229,6 +230,15 @@ function buildHtmlBody(args: {
           </td>
         </tr>
 
+        ${files.length > 0 ? `<!-- Files (direct downloads) -->
+        <tr>
+          <td style="padding:16px 24px 0 24px;">
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;font-weight:bold;">Files</div>
+            ${files.map((f) => `<div style="margin-bottom:6px;"><a href="${escapeAttr(f.url)}" style="color:#ff0060;text-decoration:underline;font-weight:bold;">${escapeHtml(f.filename)}</a></div>`).join('')}
+            <div style="font-size:11px;color:#9ca3af;margin-top:4px;">Attached below where size allows — large files may be link-only, so download here if an attachment is missing.</div>
+          </td>
+        </tr>` : ''}
+
         <!-- Links -->
         <tr>
           <td style="padding:16px 24px;">
@@ -262,9 +272,9 @@ function buildTextBody(args: {
   ctx: PdfBuildContext;
   vendorBreakdown: VendorTotal[];
   links: InspectionLinks;
-  attachmentNames: string[];
+  files: Array<{ filename: string; url: string }>;
 }): string {
-  const { prop, ctx, vendorBreakdown, links, attachmentNames } = args;
+  const { prop, ctx, vendorBreakdown, links, files } = args;
   const addressLine = [
     prop.addressStreet,
     [prop.city, prop.stateCode].filter(Boolean).join(', ') + (prop.zipCode ? ` ${prop.zipCode}` : ''),
@@ -294,11 +304,11 @@ function buildTextBody(args: {
   lines.push('  HubSpot: ' + links.hubspotUrl);
   lines.push('  App:     ' + links.appUrl);
   lines.push('');
-  lines.push('ATTACHED');
-  if (attachmentNames.length === 0) {
+  lines.push('FILES (attached where size allows; download links below)');
+  if (files.length === 0) {
     lines.push('  (none)');
   } else {
-    for (const n of attachmentNames) lines.push('  - ' + n);
+    for (const f of files) { lines.push('  - ' + f.filename); lines.push('    ' + f.url); }
   }
   lines.push('');
   lines.push('-- Sent from the ResiHome Inspection App');
@@ -392,11 +402,13 @@ export function composeInspectionEmail(args: {
     });
   }
 
-  // Subject + body
+  // Subject + body. Direct download links for every file go in the body so a
+  // large attachment that gets skipped at send time (Gmail 25 MB cap) is still
+  // one click away.
   const subject = buildSubject(ctx.grandTotals.client, prop);
-  const attachmentNames = attachmentList.map((a) => a.filename);
-  const htmlBody = buildHtmlBody({ prop, ctx, vendorBreakdown, links });
-  const textBody = buildTextBody({ prop, ctx, vendorBreakdown, links, attachmentNames });
+  const files = attachmentList.map((a) => ({ filename: a.filename, url: a.url }));
+  const htmlBody = buildHtmlBody({ prop, ctx, vendorBreakdown, links, files });
+  const textBody = buildTextBody({ prop, ctx, vendorBreakdown, links, files });
 
   return { to, cc, subject, htmlBody, textBody, attachments: attachmentList };
 }
