@@ -31,6 +31,9 @@ const MAX_ROOM_STILLS = 12;
 const AUTO_IDLE_MS = 15000;
 const AUTO_CHECK_MS = 3500;
 const DEBUG_DEFAULT = true; // on-device pipeline HUD (mic → Whisper → vision)
+// Peak deviation (0–128) a clip must reach to count as speech. Below this it's
+// silence/background and we skip Whisper (which otherwise hallucinates phrases).
+const VAD_PEAK_MIN = 12;
 
 interface ActiveRoom { id: string; name: string; photoCount?: number }
 
@@ -108,6 +111,10 @@ export function CameraAILayer(props: Props) {
   // Only set if the shared stream had no audio (mic permission denied on the
   // combined request) and we had to open our own mic as a fallback.
   const ownAudioRef = useRef<MediaStream | null>(null);
+  // Web Audio analyser for voice-activity detection — we measure each clip's
+  // loudness and skip transcription on near-silent clips so Whisper can't
+  // hallucinate stock phrases ("bye bye", "thank you") on silence.
+  const audioCtxRef = useRef<AudioContext | null>(null);
 
   const stampLinesRef = useRef<StampLine[]>([]);
   const transcriptBufRef = useRef('');
@@ -390,12 +397,41 @@ export function CameraAILayer(props: Props) {
         const rec = mime ? new MediaRecorder(audioStream, { mimeType: mime }) : new MediaRecorder(audioStream);
         audioRecRef.current = rec;
         const parts: BlobPart[] = [];
+
+        // --- voice-activity detection: track the clip's peak loudness ---
+        let peak = 0; let vadActive = false; let sampler: ReturnType<typeof setInterval> | null = null;
+        let srcNode: MediaStreamAudioSourceNode | null = null;
+        try {
+          const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+          if (AC) {
+            if (!audioCtxRef.current) audioCtxRef.current = new AC();
+            const ctx = audioCtxRef.current!;
+            if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+            srcNode = ctx.createMediaStreamSource(audioStream);
+            const analyser = ctx.createAnalyser(); analyser.fftSize = 512;
+            srcNode.connect(analyser);
+            const buf = new Uint8Array(analyser.fftSize);
+            sampler = setInterval(() => {
+              analyser.getByteTimeDomainData(buf);
+              let m = 0; for (let i = 0; i < buf.length; i++) { const d = Math.abs(buf[i] - 128); if (d > m) m = d; }
+              if (m > peak) peak = m;
+            }, 120);
+          }
+        } catch { /* VAD unavailable → don't gate */ }
+
         rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
         rec.onstop = () => {
+          if (sampler) clearInterval(sampler);
+          try { srcNode?.disconnect(); } catch { /* noop */ }
+          vadActive = !!audioCtxRef.current && audioCtxRef.current.state === 'running';
           if (parts.length) {
             const blob = new Blob(parts, { type: rec.mimeType || mime || 'audio/mp4' });
-            if (blob.size > 1200) { dbg(`clip ${Math.round(blob.size / 1024)}KB`); void transcribeChunk(blob); }
-            else dbg(`clip too small (${blob.size}b)`);
+            const kb = Math.round(blob.size / 1024);
+            if (blob.size <= 1200) dbg(`clip too small (${blob.size}b)`);
+            // Gate on loudness ONLY when VAD is actually running (Android/desktop);
+            // if the AudioContext never resumed (some iOS), send the clip ungated.
+            else if (vadActive && peak < VAD_PEAK_MIN) dbg(`silent clip skipped (pk${peak})`);
+            else { dbg(`clip ${kb}KB pk${peak}`); void transcribeChunk(blob); }
           } else dbg('clip: no data');
           if (audioLoopRef.current && openRef.current) recordOnce();
         };
@@ -414,6 +450,8 @@ export function CameraAILayer(props: Props) {
     // Only stop a mic WE opened — never the camera's shared stream.
     ownAudioRef.current?.getTracks().forEach((t) => t.stop());
     ownAudioRef.current = null;
+    try { audioCtxRef.current?.close(); } catch { /* noop */ }
+    audioCtxRef.current = null;
   }
 
   // ---- frames + stills (read the shared camera video) ----
@@ -565,7 +603,10 @@ export function CameraAILayer(props: Props) {
   const confColor = (c: string) => c === 'high' ? 'bg-emerald-500' : c === 'low' ? 'bg-amber-500' : 'bg-sky-500';
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-0 z-30">
+    // Full-viewport overlay (pointer-events pass through except on the chips /
+    // debug panel). MUST be fixed inset-0 — a zero-height container would push
+    // the bottom-anchored chip tray off-screen.
+    <div className="pointer-events-none fixed inset-0 z-30">
       {/* Shutter flash — full-screen white blink the instant a still is grabbed. */}
       {flashKey > 0 && (
         <div key={flashKey} className="fixed inset-0 z-40 bg-white animate-shutterFlash pointer-events-none" />
