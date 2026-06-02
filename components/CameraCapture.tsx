@@ -1027,6 +1027,8 @@ export function CameraCapture({
             if (r) return { id: r.id, name: r.name };
             return currentRoomId ? { id: currentRoomId, name: 'Room' } : null;
           }}
+          rooms={(rooms || []).map((r) => ({ id: r.id, name: r.name }))}
+          onNavigateRoom={(id) => { void switchToRoom(id); }}
           region={aiRegion || ''}
           tenantMonths={aiTenantMonths ?? null}
           addressSnapshot={addressSnapshot || ''}

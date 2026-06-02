@@ -52,6 +52,8 @@ interface Props {
   enabled: boolean;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   getActiveRoom: () => ActiveRoom | null;
+  rooms: ActiveRoom[];
+  onNavigateRoom: (sectionId: string) => void;
   region: string;
   tenantMonths: number | null;
   addressSnapshot: string;
@@ -76,7 +78,14 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 export function CameraAILayer(props: Props) {
-  const { enabled, videoRef, getActiveRoom, region, tenantMonths, addressSnapshot, propertyRecordId, uploadPhoto, onAddLine, onStill } = props;
+  const { enabled, videoRef, getActiveRoom, rooms, onNavigateRoom, region, tenantMonths, addressSnapshot, propertyRecordId, uploadPhoto, onAddLine, onStill } = props;
+
+  // Kept fresh each render so the once-wired audio loop / inference timers read
+  // current rooms + callbacks instead of their first-render closures.
+  const roomsRef = useRef<ActiveRoom[]>(rooms);
+  const navRef = useRef(onNavigateRoom);
+  const getActiveRoomRef = useRef(getActiveRoom);
+  useEffect(() => { roomsRef.current = rooms; navRef.current = onNavigateRoom; getActiveRoomRef.current = getActiveRoom; });
 
   const openRef = useRef(false);
   const inFlight = useRef(false);
@@ -163,8 +172,56 @@ export function CameraAILayer(props: Props) {
       setTranscribing(true);
       const base64 = await blobToBase64(blob);
       const r = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base64, mime: (blob.type || 'audio/mp4').split(';')[0] }) });
-      if (r.ok) { const d = await r.json(); const txt = String(d.text || '').trim(); if (txt && !isNoise(txt)) { transcriptBufRef.current += txt + ' '; setHeardText(txt); } }
+      if (r.ok) { const d = await r.json(); const txt = String(d.text || '').trim(); if (txt && !isNoise(txt)) { maybeNavigate(txt); transcriptBufRef.current += txt + ' '; setHeardText(txt); } }
     } catch { /* skip */ } finally { setTranscribing(false); }
+  }
+
+  // ---- voice room navigation ("go to kitchen", "walking into bedroom 1") ----
+  function normalizeNav(s: string): string {
+    return s.toLowerCase()
+      .replace(/\bone\b/g, '1').replace(/\btwo\b/g, '2').replace(/\bthree\b/g, '3')
+      .replace(/\bfour\b/g, '4').replace(/\bfive\b/g, '5').replace(/\bsix\b/g, '6')
+      .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function maybeNavigate(raw: string) {
+    const t = normalizeNav(raw);
+    if (!t) return;
+    const list = roomsRef.current || [];
+    if (list.length < 2) return;
+    const cur = getActiveRoomRef.current();
+    const go = (id: string) => {
+      if (!id || id === cur?.id) return;
+      const r = list.find((x) => x.id === id);
+      navRef.current(id);
+      if (r) setHeardText(`→ ${r.name}`);
+    };
+
+    // "next room" / "previous room" relative moves.
+    if (/\bnext\s+room\b/.test(t)) {
+      const i = list.findIndex((x) => x.id === cur?.id);
+      if (i >= 0) { go(list[(i + 1) % list.length].id); return; }
+    }
+    if (/\b(?:previous|prev|last)\s+room\b/.test(t)) {
+      const i = list.findIndex((x) => x.id === cur?.id);
+      if (i >= 0) { go(list[(i - 1 + list.length) % list.length].id); return; }
+    }
+
+    // Require a navigation cue, then match a room name in the trailing words.
+    const cue = t.match(/(?:go(?:ing)?\s+(?:to|into|in)|walk(?:ing)?\s+(?:into|in|to)|head(?:ing)?\s+(?:to|into)|switch(?:ing)?\s+to|mov(?:e|ing)\s+(?:to|on\s+to)|over\s+to|now\s+(?:in|on)|let\s+s\s+(?:do|go\s+to)|back\s+to|this\s+is\s+(?:the\s+)?)/);
+    if (!cue || cue.index === undefined) return;
+    const tail = t.slice(cue.index + cue[0].length).trim();
+    if (!tail) return;
+
+    let best: { id: string; score: number } | null = null;
+    for (const r of list) {
+      const tokens = normalizeNav(r.name).split(' ').filter(Boolean);
+      if (!tokens.length) continue;
+      let hit = 0;
+      for (const tok of tokens) { if (tok.length >= 2 && new RegExp(`\\b${tok}\\b`).test(tail)) hit++; }
+      const score = hit / tokens.length; // fraction of the room name heard
+      if (hit > 0 && (!best || score > best.score)) best = { id: r.id, score };
+    }
+    if (best && best.score >= 0.5) go(best.id);
   }
   async function startAudioLoop() {
     try {
@@ -321,9 +378,10 @@ export function CameraAILayer(props: Props) {
 
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 z-30">
-      {/* Status / heard line (just under the camera top bar) */}
-      <div className="px-4 pt-16 flex justify-center">
-        <div className="pointer-events-none text-[12px] text-white bg-black/45 rounded-full px-3 py-1.5 max-w-[92%]">
+      {/* Status / heard line — right-aligned so it clears the centered room
+          dropdown in the camera top bar. */}
+      <div className="px-3 pt-16 flex justify-end">
+        <div className="pointer-events-none text-[12px] text-white bg-black/45 rounded-full px-3 py-1.5 max-w-[70%] text-right">
           {scanning ? (
             <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" /> Thinking…</span>
           ) : transcribing ? (
