@@ -5,7 +5,7 @@ import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadVideo } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
 import { CameraAILayer } from '@/components/CameraAILayer';
-import type { RateCardLineInput } from '@/lib/types';
+import type { RateCardLineInput, RateCardLineItem, RegionRate } from '@/lib/types';
 
 /**
  * State of each photo in the capture session.
@@ -88,6 +88,8 @@ interface Props {
   aiAssist?: boolean;
   aiRegion?: string;
   aiTenantMonths?: number | null;
+  aiCatalog?: RateCardLineItem[];
+  aiRegions?: RegionRate[];
   onAiAddLine?: (sectionId: string, line: RateCardLineInput) => void;
   onAiStill?: (sectionId: string, url: string) => void;
 }
@@ -196,7 +198,7 @@ export function CameraCapture({
   isOpen, onClose, onComplete, uploadPhoto, uploadVideoEntry, maxPhotos = 30,
   rooms, currentRoomId, onRoomChange, onRenameRoom, onDeleteRoom, onAddRoom,
   addressSnapshot, propertyRecordId, voiceSlot, tagLines, onTagPhotoToLine, onOverlayChange,
-  aiAssist, aiRegion, aiTenantMonths, onAiAddLine, onAiStill,
+  aiAssist, aiRegion, aiTenantMonths, aiCatalog, aiRegions, onAiAddLine, onAiStill,
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -1052,6 +1054,8 @@ export function CameraCapture({
           rooms={(rooms || []).map((r) => ({ id: r.id, name: r.name }))}
           onNavigateRoom={(id) => { void switchToRoom(id); }}
           region={aiRegion || ''}
+          catalog={aiCatalog || []}
+          regions={aiRegions || []}
           tenantMonths={aiTenantMonths ?? null}
           addressSnapshot={addressSnapshot || ''}
           propertyRecordId={propertyRecordId}

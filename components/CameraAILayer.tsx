@@ -19,8 +19,13 @@ import { displayImageSrc } from '@/lib/photoDisplay';
 import {
   drawEvidenceStamp, buildStampLines, getGeoFix, resolvePropertyRefCoords, type StampLine,
 } from '@/lib/evidenceStamp';
-import type { RateCardLineInput } from '@/lib/types';
+import type { RateCardLineInput, RateCardLineItem, RegionRate } from '@/lib/types';
 import { VENDORS } from '@/lib/vendors';
+import { calculateLine, roundMoney } from '@/lib/rateCardMath';
+import { ListPicker } from '@/components/ListPicker';
+import { WheelPicker } from '@/components/WheelPicker';
+
+const TENANT_PCT_OPTIONS = Array.from({ length: 21 }, (_, i) => i * 5); // 0..100 step 5
 
 const INFER_INTERVAL_MS = 2500;
 const KEYFRAME_EDGE = 640;
@@ -31,7 +36,8 @@ const MAX_ROOM_STILLS = 12;
 // photos fill gaps instead of firing every few seconds.
 const AUTO_IDLE_MS = 15000;
 const AUTO_CHECK_MS = 3500;
-const DEBUG_DEFAULT = true; // on-device pipeline HUD (mic → Whisper → vision)
+const DEBUG_DEFAULT = false; // on-device pipeline HUD (mic → Whisper → vision) — off; flip to re-enable
+const AUTO_PHOTO = false;    // auto room-still capture (idle fallback + per-call-out) — off; flip to re-enable
 // Peak deviation (0–128) a clip must reach to count as speech. Below this it's
 // silence/background and we skip Whisper (which otherwise hallucinates phrases).
 // Kept low enough not to clip quiet/distant speech; the phrase filter is the
@@ -84,6 +90,9 @@ interface Props {
   rooms: ActiveRoom[];
   onNavigateRoom: (sectionId: string) => void;
   region: string;
+  // Catalog + region rates so the card can compute live vendor cost (qty-aware).
+  catalog: RateCardLineItem[];
+  regions: RegionRate[];
   tenantMonths: number | null;
   addressSnapshot: string;
   propertyRecordId?: string;
@@ -109,7 +118,7 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 export function CameraAILayer(props: Props) {
-  const { enabled, videoRef, getStream, getLastManualCaptureAt, getActiveRoom, rooms, onNavigateRoom, region, tenantMonths, addressSnapshot, propertyRecordId, uploadPhoto, onAddLine, onStill, onStatus } = props;
+  const { enabled, videoRef, getStream, getLastManualCaptureAt, getActiveRoom, rooms, onNavigateRoom, region, catalog, regions, tenantMonths, addressSnapshot, propertyRecordId, uploadPhoto, onAddLine, onStill, onStatus } = props;
 
   // Kept fresh each render so the once-wired audio loop / inference timers read
   // current rooms + callbacks instead of their first-render closures.
@@ -231,8 +240,8 @@ export function CameraAILayer(props: Props) {
       stampLinesRef.current = buildStampLines(addressSnapshot, fix, ref);
       await startAudioLoop();
       inferTimer.current = setInterval(() => { void runInference(); }, INFER_INTERVAL_MS);
-      // Auto-still FALLBACK: only when idle (no manual/AI photo) for AUTO_IDLE_MS.
-      stillTimer.current = setInterval(() => { void maybeAutoStill(); }, AUTO_CHECK_MS);
+      // Auto-still FALLBACK (disabled while AUTO_PHOTO is off): only when idle.
+      if (AUTO_PHOTO) stillTimer.current = setInterval(() => { void maybeAutoStill(); }, AUTO_CHECK_MS);
     })();
     return () => {
       openRef.current = false;
@@ -630,7 +639,7 @@ export function CameraAILayer(props: Props) {
       const incoming: LiveSuggestion[] = Array.isArray(d.suggestions) ? d.suggestions : [];
       const fresh = incoming.filter((s) => s.lineItemCode && !seen.codes.has(s.lineItemCode));
       if (fresh.length) {
-        const batchStill = await captureStill(true, 'call-out');
+        const batchStill = AUTO_PHOTO ? await captureStill(true, 'call-out') : undefined;
         const seeds: Record<string, ChipEdit> = {};
         for (const s of fresh) {
           seen.codes.add(s.lineItemCode);
@@ -684,6 +693,25 @@ export function CameraAILayer(props: Props) {
     setChips((cur) => cur.filter((c) => c.id !== s.id));
   }
 
+  // Live vendor cost from the rate-card math — updates with qty / tenant% /
+  // override, identical to the manual line card's formula.
+  function vendorCostFor(s: LiveSuggestion, e: ChipEdit): number | null {
+    const item = catalog.find((c) => c.lineItemCode === s.lineItemCode);
+    if (!item) return null;
+    const qty = Number(e.qty);
+    if (!isFinite(qty) || qty <= 0) return null;
+    try {
+      const calc = calculateLine(item, region, regions, {
+        quantity: qty,
+        tenantBillBackPercent: Number(e.tenantPct) || 100,
+        customLaborRate: null,
+        customAdjustedMaterialCost: null,
+        customVendorCost: e.vendorCost.trim() === '' ? null : Number(e.vendorCost),
+      });
+      return roundMoney(calc.vendorCost);
+    } catch { return null; }
+  }
+
   if (!enabled) return null;
   const visibleChips = chips.filter((c) => c.roomId === activeId || !activeId);
   const confColor = (c: string) => c === 'high' ? 'bg-emerald-500' : c === 'low' ? 'bg-amber-500' : 'bg-sky-500';
@@ -716,9 +744,9 @@ export function CameraAILayer(props: Props) {
         </div>
       )}
 
-      {/* On-device debug HUD — the live mic → Whisper → vision pipeline so we can
-          see exactly where things stall on a real phone. Toggle with the 🐞 chip. */}
-      {dbgOn ? (
+      {/* On-device debug HUD (mic → Whisper → vision). Hidden unless DEBUG_DEFAULT
+          is flipped on; dbg() still logs to the console either way. */}
+      {dbgOn && (
         <div className="absolute left-2 top-[140px] z-40 w-[190px] bg-black/78 rounded-lg p-2 text-[9px] leading-[1.35] text-emerald-200 font-mono pointer-events-auto shadow-lg">
           <div className="flex items-center justify-between mb-1">
             <span className="text-white font-bold">AI DEBUG</span>
@@ -729,7 +757,8 @@ export function CameraAILayer(props: Props) {
               : dbgLines.map((l, i) => <div key={i} className="break-words">{l}</div>)}
           </div>
         </div>
-      ) : (
+      )}
+      {DEBUG_DEFAULT && !dbgOn && (
         <button onClick={() => setDbgOn(true)} className="absolute left-2 top-[140px] z-40 pointer-events-auto bg-black/60 rounded-full w-7 h-7 text-sm">🐞</button>
       )}
 
@@ -756,57 +785,50 @@ export function CameraAILayer(props: Props) {
               </div>
             </div>
 
-            {/* Editable fields — ONE row of grey, tap-to-edit values (matches the
-                form's line editing). Tap a value to turn it into an input/select. */}
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
-              {/* Qty */}
+            {/* Editable fields — one row. Qty + Vendor $ are tap-to-edit text;
+                Vendor + Tenant % use the branded ListPicker / WheelPicker (same
+                as the manual line card). Vendor $ shows the live formula cost. */}
+            {(() => { const vc = vendorCostFor(s, e); const vcFormula = vendorCostFor(s, { ...e, vendorCost: '' }); const overridden = e.vendorCost.trim() !== ''; return (
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[12px]">
+              {/* Qty (tap-to-edit) */}
               {editing && editing.id === s.id && editing.field === 'qty' ? (
                 <input autoFocus type="text" inputMode="decimal" value={e.qty}
                   onChange={(ev) => setEdit(s.id, { qty: ev.target.value.replace(/[^0-9.]/g, '') })}
                   onBlur={() => setEditing(null)} onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === 'Escape') setEditing(null); }}
-                  className="h-7 w-16 bg-gray-100 rounded px-2 text-[12px] outline-none ring-2 ring-violet-300" />
+                  className="h-7 w-16 bg-gray-100 rounded-lg px-2 text-[12px] outline-none ring-2 ring-brand/40" />
               ) : (
-                <button onClick={() => setEditing({ id: s.id, field: 'qty' })} className="text-gray-500 underline decoration-dotted underline-offset-2">
+                <button onClick={() => setEditing({ id: s.id, field: 'qty' })} className="text-gray-500">
                   Qty <span className="text-gray-900 font-semibold">{e.qty || (s.needsMeasurement ? '—' : '1')}</span>{s.measurementUnit ? ` ${s.measurementUnit}` : ''}
                 </button>
               )}
               <span className="text-gray-300">·</span>
-              {/* Vendor */}
-              {editing && editing.id === s.id && editing.field === 'vendor' ? (
-                <select autoFocus value={e.vendor} onChange={(ev) => { setEdit(s.id, { vendor: ev.target.value }); setEditing(null); }} onBlur={() => setEditing(null)}
-                  className="h-7 bg-gray-100 rounded px-1 text-[12px] outline-none ring-2 ring-violet-300">
-                  {VENDORS.map((v) => <option key={v} value={v}>{v}</option>)}
-                </select>
-              ) : (
-                <button onClick={() => setEditing({ id: s.id, field: 'vendor' })} className="text-gray-900 font-semibold underline decoration-dotted underline-offset-2">
-                  {e.vendor}
-                </button>
-              )}
+              {/* Vendor — branded ListPicker */}
+              <ListPicker value={e.vendor} options={VENDORS.map((v) => ({ value: v, label: v }))}
+                onChange={(v) => setEdit(s.id, { vendor: v })} ariaLabel="Vendor"
+                className="inline-flex items-center gap-0.5 text-gray-900 font-semibold max-w-[150px]" />
               <span className="text-gray-300">·</span>
-              {/* Tenant % */}
-              {editing && editing.id === s.id && editing.field === 'tenantPct' ? (
-                <input autoFocus type="text" inputMode="numeric" value={e.tenantPct}
-                  onChange={(ev) => setEdit(s.id, { tenantPct: ev.target.value.replace(/[^0-9]/g, '').slice(0, 3) })}
-                  onBlur={() => setEditing(null)} onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === 'Escape') setEditing(null); }}
-                  className="h-7 w-14 bg-gray-100 rounded px-2 text-[12px] outline-none ring-2 ring-violet-300" />
-              ) : (
-                <button onClick={() => setEditing({ id: s.id, field: 'tenantPct' })} className="text-gray-500 underline decoration-dotted underline-offset-2">
-                  Tenant <span className="text-gray-900 font-semibold">{e.tenantPct || '100'}%</span>
-                </button>
-              )}
+              {/* Tenant % — branded WheelPicker */}
+              <span className="inline-flex items-center text-gray-500">Tenant&nbsp;
+                <WheelPicker value={e.tenantPct || '100'} options={TENANT_PCT_OPTIONS.map((p) => ({ value: String(p), label: `${p}%` }))}
+                  onChange={(v) => setEdit(s.id, { tenantPct: v })} ariaLabel="Tenant %"
+                  className="inline-flex items-center gap-0.5 text-gray-900 font-semibold" />
+              </span>
               <span className="text-gray-300">·</span>
-              {/* Vendor $ (optional override) */}
+              {/* Vendor $ — live formula cost; tap to override */}
               {editing && editing.id === s.id && editing.field === 'vendorCost' ? (
                 <input autoFocus type="text" inputMode="decimal" value={e.vendorCost}
                   onChange={(ev) => setEdit(s.id, { vendorCost: ev.target.value.replace(/[^0-9.]/g, '') })}
                   onBlur={() => setEditing(null)} onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === 'Escape') setEditing(null); }}
-                  placeholder="auto" className="h-7 w-16 bg-gray-100 rounded px-2 text-[12px] outline-none ring-2 ring-violet-300" />
+                  placeholder={vcFormula != null ? vcFormula.toFixed(2) : 'auto'}
+                  className="h-7 w-20 bg-gray-100 rounded-lg px-2 text-[12px] outline-none ring-2 ring-brand/40" />
               ) : (
-                <button onClick={() => setEditing({ id: s.id, field: 'vendorCost' })} className="text-gray-500 underline decoration-dotted underline-offset-2">
-                  Vendor $ <span className="text-gray-900 font-semibold">{e.vendorCost ? `$${e.vendorCost}` : 'auto'}</span>
+                <button onClick={() => setEditing({ id: s.id, field: 'vendorCost' })} className="text-gray-500">
+                  Vendor $ <span className="text-gray-900 font-semibold">{vc != null ? `$${vc.toFixed(2)}` : '—'}</span>
+                  {overridden && <span className="text-brand"> ✎</span>}
                 </button>
               )}
             </div>
+            ); })()}
             {s.needsMeasurement && s.estimatedQuantity && s.estimatedQuantity > 0 && (
               <div className="text-[11px] text-amber-700 mt-1">≈ AI estimate ({s.estimatedQuantity} {s.unit}) — confirm, edit, or say the size.</div>
             )}

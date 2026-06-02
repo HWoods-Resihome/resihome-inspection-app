@@ -3123,6 +3123,8 @@ export function RateCardForm(props: RateCardFormProps) {
           // camera. The Take button leaves this off → unchanged camera.
           aiAssist={aiCameraMode}
           aiRegion={inspectionRegion}
+          aiCatalog={catalog}
+          aiRegions={regions}
           aiTenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
           onAiAddLine={(sid, line) => { const p = handleSaveLineForSection(sid, line); revealSection(sid, line.externalId); return p; }}
           onAiStill={(sid, url) => {
