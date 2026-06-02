@@ -62,13 +62,52 @@ export interface TenantChargebackXlsxInput {
  *
  * Matches the example file's pattern (which also had a double-space after the
  * room name — preserved here for byte-level compatibility with the importer).
+ *
+ * HARD LIMIT: Column L (Description) can never exceed 100 characters. When the
+ * full string would, we summarize it IN PLACE while keeping the exact structure:
+ * the entry (labor desc) is shortened first (at a word boundary), then category,
+ * then room as a last resort — so it always reads
+ * "Move-Out Charges: {ROOM} - {CAT} - {…} - Tenant Charged {%}%" and stays <=100.
  */
+const MAX_DESCRIPTION_LEN = 100;
+
+/** Clip text to `max` chars on a word boundary, trimming trailing punctuation. */
+function clip(s: string, max: number): string {
+  if (max <= 0) return '';
+  if (s.length <= max) return s;
+  let out = s.slice(0, max);
+  const sp = out.lastIndexOf(' ');
+  if (sp > max * 0.5) out = out.slice(0, sp); // prefer a word boundary when reasonable
+  return out.replace(/[\s\-–,;.]+$/, '').trim();
+}
+
 function buildDescription(line: PdfLineRow): string {
-  const room = line.section || '';
-  const category = line.category || '';
-  const shortDesc = line.laborShortDescription || '';
+  const room = (line.section || '').trim();
+  const category = (line.category || '').trim();
+  const shortDesc = (line.laborShortDescription || '').trim();
   const pct = Math.round(line.tenantBillBackPercent || 0);
-  return `Move-Out Charges: ${room}  - ${category} - ${shortDesc} - Tenant Charged ${pct}%`;
+  const compose = (rm: string, cat: string, entry: string) =>
+    `Move-Out Charges: ${rm}  - ${cat} - ${entry} - Tenant Charged ${pct}%`;
+
+  let rm = room; let cat = category; let entry = shortDesc;
+  let full = compose(rm, cat, entry);
+  if (full.length <= MAX_DESCRIPTION_LEN) return full;
+
+  // 1) Summarize the entry (labor desc) to fit — the usual long part.
+  entry = clip(entry, Math.max(0, entry.length - (full.length - MAX_DESCRIPTION_LEN)));
+  full = compose(rm, cat, entry);
+  // 2) Still over (e.g. very long category) → trim the category.
+  if (full.length > MAX_DESCRIPTION_LEN) {
+    cat = clip(cat, Math.max(0, cat.length - (full.length - MAX_DESCRIPTION_LEN)));
+    full = compose(rm, cat, entry);
+  }
+  // 3) Last resort → trim the room name.
+  if (full.length > MAX_DESCRIPTION_LEN) {
+    rm = clip(rm, Math.max(0, rm.length - (full.length - MAX_DESCRIPTION_LEN)));
+    full = compose(rm, cat, entry);
+  }
+  // Absolute safety net.
+  return full.length <= MAX_DESCRIPTION_LEN ? full : full.slice(0, MAX_DESCRIPTION_LEN);
 }
 
 /**

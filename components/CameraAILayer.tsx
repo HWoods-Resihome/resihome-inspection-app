@@ -42,7 +42,7 @@ const MAX_ROOM_STILLS = 12;
 // photos fill gaps instead of firing every few seconds.
 const AUTO_IDLE_MS = 15000;
 const AUTO_CHECK_MS = 3500;
-const DEBUG_DEFAULT = false; // on-device pipeline HUD (mic → Whisper → vision) — off; flip to re-enable
+const DEBUG_DEFAULT = true; // on-device pipeline HUD (mic → Whisper → vision) — temporarily ON to debug nav
 const AUTO_PHOTO = false;    // auto room-still capture (idle fallback + per-call-out) — off; flip to re-enable
 // Peak deviation (0–128) a clip must reach to count as speech. Below this it's
 // silence/background and we skip Whisper (which otherwise hallucinates phrases).
@@ -431,8 +431,9 @@ export function CameraAILayer(props: Props) {
     if (list.length < 2) return false;
     const cur = getActiveRoomRef.current();
     const go = (id: string): boolean => {
-      if (!id || id === cur?.id) return false;
+      if (!id) return false;
       const r = list.find((x) => x.id === id);
+      if (id === cur?.id) { dbg(`already in ${r?.name || id}`); return false; }
       navRef.current(id);
       if (r) { setHeardText(`→ ${r.name}`); dbg(`nav → ${r.name}`); }
       return true;
@@ -484,6 +485,9 @@ export function CameraAILayer(props: Props) {
           if (allCoreInRoom && score >= 0.5 && (!best || score > best.score)) best = { id: r.id, score };
         }
         if (best) return go(best.id);
+        // Diagnostic: heard a short, room-like phrase but no room matched — show
+        // the parsed words + the actual room names so we can see the mismatch.
+        dbg(`no room: "${core.join(' ')}" | rooms: ${list.map((r) => r.name).join(', ').slice(0, 80)}`);
       }
     }
     return false;
