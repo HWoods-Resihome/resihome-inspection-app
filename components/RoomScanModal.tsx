@@ -372,9 +372,20 @@ export function RoomScanModal(props: Props) {
                 })}
               </div>
 
-              <button type="button" onClick={onClose}
-                className="w-full mt-4 h-11 rounded-lg bg-gray-900 text-white font-heading font-bold">
-                {remaining > 0 ? `Done (${remaining} left)` : 'Done'}
+              {remaining > 0 && suggestions.length > 0 && (
+                <div className="text-[11px] text-amber-700 text-center mt-4 mb-1">
+                  Add or decline each suggestion to finish ({remaining} left).
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={remaining > 0}
+                className={`w-full ${remaining > 0 ? 'mt-1' : 'mt-4'} h-11 rounded-lg font-heading font-bold ${
+                  remaining > 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-gray-900 text-white'
+                }`}
+              >
+                Done
               </button>
             </div>
           )}

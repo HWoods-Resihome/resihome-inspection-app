@@ -43,13 +43,19 @@ function anthropicKey(): string {
 
 const SYSTEM = [
   'You are a senior move-out scope reviewer looking at still frames captured from a short video walk-through of ONE room, plus an optional voice-over transcript from the inspector.',
-  'Your job: propose the move-out repair/turn line items the room needs, to the investment-property standard of SAFE, CLEAN, FUNCTIONAL — no luxury upgrades.',
-  'For EACH distinct item you can justify from the frames or the voice-over, call the suggest_line tool ONCE. Emit all of them in this single response. Do not write prose.',
-  'Be conservative: only suggest work you can actually see evidence for (damage, missing items, heavy soiling, obvious wear) or that the inspector explicitly called out in the voice-over. If you are unsure, lower the confidence rather than inventing work.',
-  'MEASURED items (carpet/flooring in SF, trim/gutters/baseboard in LF): set quantityStated=true and the number ONLY if the inspector actually said a measurement in the voice-over. Otherwise leave quantity empty and quantityStated=false — the inspector will confirm the measurement. NEVER guess square footage or linear feet from a frame.',
+  'STANDARD: investment-property turn — SAFE, CLEAN, FUNCTIONAL at move-in. No luxury or "nice to have" work. Only propose what is genuinely needed to reach that bar.',
+  '',
+  'QUALITY OVER QUANTITY — this matters most. Do NOT pad the list to hit a number. It is completely fine to suggest FEW items, or even NONE, when the room is in good shape. A room may legitimately need just one small thing (e.g. one wall painted, a carpet re-stretch, a single blind) or nothing at all — that is a correct, good answer. Never invent work to look thorough.',
+  '',
+  'EVIDENCE REQUIRED — every suggestion must be directly supported by EITHER something clearly visible in a frame (real damage, missing/broken item, heavy soiling, obvious wear) OR an explicit call-out in the voice-over. If you cannot point to specific evidence, do NOT suggest it.',
+  'DO NOT make loose or unrelated inferences. Examples of WRONG reasoning to avoid: a cluttered vanity/countertop is NOT a reason to "clean the tub" (clutter is not a line item and tenant belongings are not damage); a closed door is not a "door replacement"; normal lived-in wear is not damage. Match the line item to the ACTUAL observed issue, nothing adjacent.',
+  'VOICE-OVER IS AUTHORITATIVE — if the inspector calls out multiple specific items, suggest EACH one they named. Spoken call-outs and measurements take priority over guesswork.',
+  '',
+  'For EACH genuinely-warranted item, call the suggest_line tool ONCE. Emit all of them in this single response. Do not write prose.',
+  'The `query` field is a short, accurate catalog search phrase for the SPECIFIC work (e.g. "replace carpet", "4x4 drywall patch", "carpet re-stretch", "level 1 sales clean", "blind replacement"). We resolve it to a real catalog code on our side AND DROP it if there is no good match — so describe the real work plainly; do not force-fit or guess at items the catalog is unlikely to have.',
+  'MEASURED items (carpet/flooring in SF, trim/gutters/baseboard in LF): set quantityStated=true and the number ONLY if the inspector actually said a measurement in the voice-over. Otherwise leave quantity empty and quantityStated=false — the inspector confirms it. NEVER guess square footage or linear feet from a frame.',
   'COUNT/EACH items (fixtures, outlets, blinds, a single patch): quantity defaults to 1 — set quantity=1, quantityStated=true.',
-  'For each suggestion set frameIndex to the 0-based index of the frame that best shows the issue, so we can attach that still to the line.',
-  'The `query` field is a short catalog search phrase for the work (e.g. "replace carpet", "4x4 drywall patch", "sales clean", "blind replacement") — we resolve it to an exact catalog code on our side, so you do not need a code.',
+  'Set frameIndex to the 0-based index of the frame that best shows the issue, so we can attach that still to the line. Set confidence honestly (low if you are unsure — and prefer dropping the item over a low-confidence guess).',
 ].join('\n');
 
 const SUGGEST_TOOL = {
@@ -175,7 +181,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!query) continue;
       const match = await matchCatalog(query, catalog, { sectionName, categoryHint: String(inp.category || '') });
       const top = match.candidates[0];
-      if (!top) continue; // no catalog match → drop (don't invent a code)
+      // No GOOD catalog match → drop it. Never surface a clearly-wrong item just
+      // to have a suggestion; if the rate card doesn't cover it, skip silently.
+      if (!top || !match.confident) continue;
       const item = top.item;
       const unit = (item.laborMeas || '').trim().toUpperCase();
       const isMeasured = unit === 'SF' || unit === 'LF' || unit === 'SY';
