@@ -230,16 +230,25 @@ export function CameraAILayer(props: Props) {
   useEffect(() => { chipsRef.current = chips; }, [chips]);
 
   // Hold "working" true while transcribing/scanning, and for a short linger after,
-  // so brief gaps between clips don't bounce the status back to "Listening".
+  // so brief gaps between an utterance, its transcription, and inference don't
+  // bounce the status back to "Listening".
   useEffect(() => {
     if (scanning || transcribing) {
       if (workTimer.current) { clearTimeout(workTimer.current); workTimer.current = null; }
       setWorking(true);
     } else {
       if (workTimer.current) clearTimeout(workTimer.current);
-      workTimer.current = setTimeout(() => { setWorking(false); workTimer.current = null; }, 1400);
+      workTimer.current = setTimeout(() => { setWorking(false); workTimer.current = null; }, 1800);
     }
   }, [scanning, transcribing]);
+
+  // Transient messages (nav confirmation, no-match hint) shouldn't stick in the
+  // header — auto-clear so the status falls back to Listening.
+  useEffect(() => {
+    if (!heardText) return;
+    const t = setTimeout(() => setHeardText(''), 3000);
+    return () => clearTimeout(t);
+  }, [heardText]);
 
   // Derive a single status line + tone and report it up to the host camera,
   // which renders it in its black header strip (not floating over the image).
@@ -411,6 +420,10 @@ export function CameraAILayer(props: Props) {
       .replace(/\bfour\b/g, '4').replace(/\bfive\b/g, '5').replace(/\bsix\b/g, '6')
       .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
   }
+  // Words that mark an utterance as a WORK call-out, not a navigation command —
+  // so "paint the kitchen wall" never gets mistaken for "go to Kitchen".
+  const NAV_WORK_WORDS = new Set(['replace', 'paint', 'clean', 'repair', 'install', 'remove', 'fix', 'patch', 'trim', 'needs', 'need', 'broken', 'damaged', 'missing', 'stained', 'cracked', 'add', 'replacement', 'out', 'leaking', 'leak']);
+  const NAV_STOPWORDS = new Set(['the', 'a', 'to', 'go', 'going', 'this', 'is', 'in', 'into', 'room', 'lets', 'let', 's', 'please', 'okay', 'ok', 'now', 'head', 'heading', 'over', 'back', 'move', 'moving', 'switch', 'um', 'uh', 'and', 'walk', 'walking', 'on']);
   function maybeNavigate(raw: string): boolean {
     const t = normalizeNav(raw);
     if (!t) return false;
@@ -424,6 +437,7 @@ export function CameraAILayer(props: Props) {
       if (r) { setHeardText(`→ ${r.name}`); dbg(`nav → ${r.name}`); }
       return true;
     };
+    const roomTokens = (name: string) => normalizeNav(name).split(' ').filter((w) => w.length >= 2);
 
     // "next room" / "previous room" relative moves.
     if (/\bnext\s+room\b/.test(t)) {
@@ -435,22 +449,43 @@ export function CameraAILayer(props: Props) {
       if (i >= 0) return go(list[(i - 1 + list.length) % list.length].id);
     }
 
-    // Require a navigation cue, then match a room name in the trailing words.
+    // Cue-based: "go to / walk into / switch to / this is the … <room>".
     const cue = t.match(/(?:go(?:ing)?\s+(?:to|into|in)|walk(?:ing)?\s+(?:into|in|to)|head(?:ing)?\s+(?:to|into)|switch(?:ing)?\s+to|mov(?:e|ing)\s+(?:to|on\s+to)|over\s+to|now\s+(?:in|on)|let\s+s\s+(?:do|go\s+to)|back\s+to|this\s+is\s+(?:the\s+)?)/);
-    if (!cue || cue.index === undefined) return false;
-    const tail = t.slice(cue.index + cue[0].length).trim();
-    if (!tail) return false;
-
-    let best: { id: string; score: number } | null = null;
-    for (const r of list) {
-      const tokens = normalizeNav(r.name).split(' ').filter(Boolean);
-      if (!tokens.length) continue;
-      let hit = 0;
-      for (const tok of tokens) { if (tok.length >= 2 && new RegExp(`\\b${tok}\\b`).test(tail)) hit++; }
-      const score = hit / tokens.length; // fraction of the room name heard
-      if (hit > 0 && (!best || score > best.score)) best = { id: r.id, score };
+    if (cue && cue.index !== undefined) {
+      const tail = t.slice(cue.index + cue[0].length).trim();
+      if (tail) {
+        let best: { id: string; score: number } | null = null;
+        for (const r of list) {
+          const tokens = roomTokens(r.name);
+          if (!tokens.length) continue;
+          let hit = 0;
+          for (const tok of tokens) if (new RegExp(`\\b${tok}\\b`).test(tail)) hit++;
+          const score = hit / tokens.length;
+          if (hit > 0 && (!best || score > best.score)) best = { id: r.id, score };
+        }
+        if (best && best.score >= 0.5) return go(best.id);
+      }
     }
-    if (best && best.score >= 0.5) return go(best.id);
+
+    // Cue-less: the inspector just says a room name ("kitchen", "bedroom one").
+    // Only when there's no work verb, and the spoken words are essentially a
+    // room's name (so it can't swallow a call-out).
+    const words = t.split(' ').filter(Boolean);
+    if (!words.some((w) => NAV_WORK_WORDS.has(w))) {
+      const core = words.filter((w) => !NAV_STOPWORDS.has(w));
+      if (core.length >= 1 && core.length <= 3) {
+        let best: { id: string; score: number } | null = null;
+        for (const r of list) {
+          const tokens = roomTokens(r.name);
+          if (!tokens.length) continue;
+          const allCoreInRoom = core.every((w) => tokens.includes(w));
+          let hit = 0; for (const tok of tokens) if (core.includes(tok)) hit++;
+          const score = hit / tokens.length;
+          if (allCoreInRoom && score >= 0.5 && (!best || score > best.score)) best = { id: r.id, score };
+        }
+        if (best) return go(best.id);
+      }
+    }
     return false;
   }
   // Current mic tracks: prefer the camera's SHARED stream; fall back to a mic we
@@ -863,9 +898,10 @@ export function CameraAILayer(props: Props) {
                   <span className={`w-2 h-2 rounded-full shrink-0 ${confColor(s.confidence)}`} />
                   <span className="text-sm font-semibold text-ink leading-tight">{s.description}</span>
                 </div>
-                <div className="text-[11px] text-gray-600">{s.category}{s.subcategory ? ` · ${s.subcategory}` : ''}</div>
+                {/* Indented to start under the title text (past the status dot). */}
+                <div className="pl-4 text-[11px] text-gray-600">{s.category}{s.subcategory ? ` · ${s.subcategory}` : ''}</div>
                 {subtext && (
-                  <div className="text-[11px] text-gray-600 mt-0.5" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{subtext}</div>
+                  <div className="pl-4 text-[11px] text-gray-600 mt-0.5" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{subtext}</div>
                 )}
               </div>
             </div>
@@ -874,7 +910,7 @@ export function CameraAILayer(props: Props) {
                 Vendor + Tenant % use the branded ListPicker / WheelPicker (same
                 as the manual line card). Vendor $ shows the live formula cost. */}
             {(() => { const vc = vendorCostFor(s, e); const vcFormula = vendorCostFor(s, { ...e, vendorCost: '' }); const overridden = e.vendorCost.trim() !== ''; return (
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[12px]">
+            <div className="mt-2 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1.5 text-[12px]">
               {/* Qty — tap to edit; full value pre-selected; Done/Enter or blur keeps it. */}
               {editing && editing.id === s.id && editing.field === 'qty' ? (
                 <input autoFocus type="text" inputMode="decimal" enterKeyHint="done" value={draft}
@@ -920,7 +956,7 @@ export function CameraAILayer(props: Props) {
             </div>
             ); })()}
             {s.needsMeasurement && s.estimatedQuantity && s.estimatedQuantity > 0 && (
-              <div className="text-[11px] text-amber-700 mt-1">≈ AI estimate ({s.estimatedQuantity} {s.unit}) — confirm, edit, or say the size.</div>
+              <div className="pl-4 text-[11px] text-amber-700 mt-1">≈ AI estimate ({s.estimatedQuantity} {s.unit}) — confirm, edit, or say the size.</div>
             )}
 
             <div className="flex gap-2 mt-2">
