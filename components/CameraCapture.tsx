@@ -287,15 +287,25 @@ export function CameraCapture({
     try {
       // Stop any existing stream before starting a new one (e.g., when switching facing)
       stopStream();
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode: { ideal: facing },
-          width: { ideal: CAPTURE_WIDTH },
-          height: { ideal: CAPTURE_HEIGHT },
-        },
-        audio: false,
+      const videoConstraint = {
+        facingMode: { ideal: facing },
+        width: { ideal: CAPTURE_WIDTH },
+        height: { ideal: CAPTURE_HEIGHT },
       };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // In AI mode we capture audio on the SAME stream so the AI layer can use a
+      // single, high-quality mic feed (a separate getUserMedia mic is low-gain /
+      // flaky on mobile). If the combined request fails, fall back to video-only
+      // so the camera itself NEVER breaks because of the mic.
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: !!aiAssist });
+      } catch (audioErr) {
+        if (aiAssist) {
+          stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: false });
+        } else {
+          throw audioErr;
+        }
+      }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -347,7 +357,7 @@ export function CameraCapture({
         setPermissionError(`Could not access camera: ${e?.message || String(e)}`);
       }
     }
-  }, [facing, stopStream]);
+  }, [facing, stopStream, aiAssist]);
 
   // Mount/unmount: start/stop the camera stream
   useEffect(() => {
@@ -1022,6 +1032,7 @@ export function CameraCapture({
         <CameraAILayer
           enabled={!!aiAssist}
           videoRef={videoRef}
+          getStream={() => streamRef.current}
           getActiveRoom={() => {
             const r = rooms?.find((x) => x.id === currentRoomId);
             if (r) return { id: r.id, name: r.name };

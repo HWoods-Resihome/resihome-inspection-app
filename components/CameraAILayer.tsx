@@ -51,6 +51,9 @@ interface LiveSuggestion {
 interface Props {
   enabled: boolean;
   videoRef: React.RefObject<HTMLVideoElement | null>;
+  // The camera's shared stream (video + audio in AI mode). We pull the mic from
+  // here instead of opening a second getUserMedia — one stream = reliable voice.
+  getStream: () => MediaStream | null;
   getActiveRoom: () => ActiveRoom | null;
   rooms: ActiveRoom[];
   onNavigateRoom: (sectionId: string) => void;
@@ -78,7 +81,7 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 export function CameraAILayer(props: Props) {
-  const { enabled, videoRef, getActiveRoom, rooms, onNavigateRoom, region, tenantMonths, addressSnapshot, propertyRecordId, uploadPhoto, onAddLine, onStill } = props;
+  const { enabled, videoRef, getStream, getActiveRoom, rooms, onNavigateRoom, region, tenantMonths, addressSnapshot, propertyRecordId, uploadPhoto, onAddLine, onStill } = props;
 
   // Kept fresh each render so the once-wired audio loop / inference timers read
   // current rooms + callbacks instead of their first-render closures.
@@ -93,7 +96,9 @@ export function CameraAILayer(props: Props) {
   const stillTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRecRef = useRef<MediaRecorder | null>(null);
   const audioLoopRef = useRef(false);
-  const audioStreamRef = useRef<MediaStream | null>(null);
+  // Only set if the shared stream had no audio (mic permission denied on the
+  // combined request) and we had to open our own mic as a fallback.
+  const ownAudioRef = useRef<MediaStream | null>(null);
 
   const stampLinesRef = useRef<StampLine[]>([]);
   const transcriptBufRef = useRef('');
@@ -170,9 +175,24 @@ export function CameraAILayer(props: Props) {
     for (const m of ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']) { try { if (MR.isTypeSupported(m)) return m; } catch { /* noop */ } }
     return '';
   }
+  // Whisper "silence hallucinations" — on a near-silent clip it emits stock
+  // phrases ("bye bye", "thank you for watching", "please subscribe", …). Drop
+  // them so they never reach the model or the on-screen feedback.
+  const NOISE_PHRASES = new Set([
+    'you', 'thank you', 'thanks', 'thank you very much', 'thanks for watching',
+    'thank you for watching', 'bye', 'bye bye', 'byebye', 'goodbye', 'see you',
+    'see you next time', 'see you later', 'okay', 'ok', 'uh', 'um', 'hmm', 'mm',
+    'mhm', 'yeah', 'so', 'the', 'please subscribe', 'subscribe', 'i', 'oh',
+  ]);
   function isNoise(t: string): boolean {
-    const s = t.trim().toLowerCase().replace(/[.!?]/g, '');
-    return s.length < 2 || ['you', 'thank you', 'thanks', 'thanks for watching', 'bye', 'okay', 'ok'].includes(s);
+    const s = t.trim().toLowerCase().replace(/[^a-z\s]/g, '').replace(/\s+/g, ' ').trim();
+    if (s.length < 3) return true;
+    if (NOISE_PHRASES.has(s)) return true;
+    // Repeated single junk token, e.g. "bye bye bye" / "you you".
+    const words = s.split(' ');
+    const uniq = new Set(words);
+    if (uniq.size === 1 && NOISE_PHRASES.has(words[0])) return true;
+    return false;
   }
   async function transcribeChunk(blob: Blob) {
     try {
@@ -230,39 +250,62 @@ export function CameraAILayer(props: Props) {
     }
     if (best && best.score >= 0.5) go(best.id);
   }
+  // Current mic tracks: prefer the camera's SHARED stream; fall back to a mic we
+  // opened ourselves. Re-derived each clip so a re-acquired stream is picked up.
+  function liveAudioTracks(): MediaStreamTrack[] {
+    const shared = getStream?.();
+    const st = shared?.getAudioTracks().filter((t) => t.readyState === 'live') || [];
+    if (st.length) return st;
+    return ownAudioRef.current?.getAudioTracks().filter((t) => t.readyState === 'live') || [];
+  }
   async function startAudioLoop() {
-    try {
-      const audio = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (!openRef.current) { audio.getTracks().forEach((t) => t.stop()); return; }
-      audioStreamRef.current = audio;
-      audioLoopRef.current = true;
-      setListening(true);
-      const mime = pickAudioMime();
-      const recordOnce = () => {
-        if (!audioLoopRef.current || !openRef.current || !audioStreamRef.current) return;
-        try {
-          const rec = mime ? new MediaRecorder(audioStreamRef.current, { mimeType: mime }) : new MediaRecorder(audioStreamRef.current);
-          audioRecRef.current = rec;
-          const parts: BlobPart[] = [];
-          rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
-          rec.onstop = () => {
-            if (parts.length) { const blob = new Blob(parts, { type: rec.mimeType || mime || 'audio/mp4' }); if (blob.size > 1200) void transcribeChunk(blob); }
-            if (audioLoopRef.current && openRef.current) recordOnce();
-          };
-          rec.start();
-          setTimeout(() => { try { if (rec.state !== 'inactive') rec.stop(); } catch { /* noop */ } }, AUDIO_CHUNK_MS);
-        } catch { setListening(false); }
-      };
-      recordOnce();
-    } catch { setListening(false); }
+    // Wait briefly for the camera's shared audio (the combined getUserMedia may
+    // still be resolving); only open our own mic if it never appears.
+    const start = Date.now();
+    while (openRef.current && Date.now() - start < 3000) {
+      if (liveAudioTracks().length) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    if (!openRef.current) return;
+    if (!liveAudioTracks().length) {
+      try {
+        const own = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (!openRef.current) { own.getTracks().forEach((t) => t.stop()); return; }
+        ownAudioRef.current = own;
+      } catch { setListening(false); return; }
+    }
+    if (!liveAudioTracks().length) { setListening(false); return; }
+    audioLoopRef.current = true;
+    setListening(true);
+    const mime = pickAudioMime();
+    const recordOnce = () => {
+      if (!audioLoopRef.current || !openRef.current) return;
+      const tracks = liveAudioTracks();
+      if (!tracks.length) { setListening(false); return; }
+      try {
+        const audioStream = new MediaStream(tracks);
+        const rec = mime ? new MediaRecorder(audioStream, { mimeType: mime }) : new MediaRecorder(audioStream);
+        audioRecRef.current = rec;
+        const parts: BlobPart[] = [];
+        rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
+        rec.onstop = () => {
+          if (parts.length) { const blob = new Blob(parts, { type: rec.mimeType || mime || 'audio/mp4' }); if (blob.size > 1200) void transcribeChunk(blob); }
+          if (audioLoopRef.current && openRef.current) recordOnce();
+        };
+        rec.start();
+        setTimeout(() => { try { if (rec.state !== 'inactive') rec.stop(); } catch { /* noop */ } }, AUDIO_CHUNK_MS);
+      } catch { setListening(false); }
+    };
+    recordOnce();
   }
   function stopAudioLoop() {
     audioLoopRef.current = false;
     setListening(false);
     try { if (audioRecRef.current && audioRecRef.current.state !== 'inactive') audioRecRef.current.stop(); } catch { /* noop */ }
     audioRecRef.current = null;
-    audioStreamRef.current?.getTracks().forEach((t) => t.stop());
-    audioStreamRef.current = null;
+    // Only stop a mic WE opened — never the camera's shared stream.
+    ownAudioRef.current?.getTracks().forEach((t) => t.stop());
+    ownAudioRef.current = null;
   }
 
   // ---- frames + stills (read the shared camera video) ----
@@ -431,10 +474,11 @@ export function CameraAILayer(props: Props) {
         </div>
       )}
 
-      {/* Status / heard line — right-aligned so it clears the centered room
-          dropdown in the camera top bar. */}
-      <div className="px-3 pt-16 flex justify-end">
-        <div className="pointer-events-none text-[12px] text-white bg-black/45 rounded-full px-3 py-1.5 max-w-[70%] text-right">
+      {/* Status / heard line — pinned to the blank TOP-RIGHT corner of the
+          camera toolbar (top row, beside "Take Photos") so it never overlaps the
+          room dropdown or the prev/next-room arrows on the row below. */}
+      <div className="absolute top-2.5 right-2 max-w-[62%] flex justify-end">
+        <div className="pointer-events-none text-[11.5px] text-white bg-black/55 rounded-full px-2.5 py-1 text-right shadow">
           {errText ? (
             <span className="flex items-center gap-1.5 text-rose-200"><span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> {errText}</span>
           ) : scanning ? (
