@@ -318,13 +318,13 @@ export default function Home() {
           <div className="max-w-3xl mx-auto px-4 pt-4 pb-5">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div className="flex items-center gap-3 min-w-0">
-                {/* ResiWALK lockup on a white pill so the full-color logo reads
-                    on the pink header. */}
+                {/* App icon — the ResiWALK favicon mark (house + footprint),
+                    on a white chip so it reads on the pink header. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src="/resiwalk-logo.svg"
+                  src="/favicon.svg"
                   alt="ResiWALK"
-                  className="h-9 w-auto bg-white rounded-lg px-2.5 py-1 shadow shrink-0"
+                  className="h-10 w-10 object-contain bg-white rounded-lg p-1 shadow shrink-0"
                 />
                 <div className="min-w-0">
                   <h1 className="font-heading font-extrabold text-lg tracking-tight">
