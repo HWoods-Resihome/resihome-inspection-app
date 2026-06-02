@@ -943,6 +943,9 @@ export function CameraCapture({
   // Live AI-assist status, surfaced by CameraAILayer and rendered in the black
   // header strip (below the title) so it never floats over the live image.
   const [aiStatus, setAiStatus] = useState<{ text: string; tone: 'idle' | 'listen' | 'heard' | 'think' | 'err' } | null>(null);
+  // AI assist can be paused mid-session (e.g. on low service the voice/call-outs
+  // get noisy). Starts on whenever the camera was opened in AI mode.
+  const [aiOn, setAiOn] = useState<boolean>(!!aiAssist);
   const [renamingRoomId, setRenamingRoomId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [addingRoom, setAddingRoom] = useState(false);
@@ -1041,7 +1044,7 @@ export function CameraCapture({
       {/* AI assist (Beta) — overlay that reads this camera's video + its own mic. */}
       {aiAssist && onAiAddLine && (
         <CameraAILayer
-          enabled={!!aiAssist}
+          enabled={aiOn}
           videoRef={videoRef}
           getStream={() => streamRef.current}
           getLastManualCaptureAt={() => lastManualCaptureRef.current}
@@ -1086,18 +1089,36 @@ export function CameraCapture({
           out of the live image, so the inspector always sees Listening/Thinking
           /transcript without it covering the camera. */}
       {aiAssist && (
-        <div className="bg-black/75 text-white px-4 py-1.5 flex items-center justify-center border-b border-white/10">
+        <div className="bg-black/75 text-white px-4 py-1.5 flex items-center justify-between gap-2 border-b border-white/10">
           <div className="text-[12px] flex items-center gap-1.5 min-w-0">
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-              aiStatus?.tone === 'err' ? 'bg-rose-400'
-                : aiStatus?.tone === 'think' ? 'bg-violet-400 animate-pulse'
-                : aiStatus?.tone === 'heard' ? 'bg-emerald-400 animate-pulse'
-                : aiStatus?.tone === 'listen' ? 'bg-emerald-400 animate-pulse'
-                : 'bg-white/40'}`} />
-            <span className={`truncate ${aiStatus?.tone === 'err' ? 'text-rose-200' : aiStatus?.tone === 'heard' ? 'italic text-emerald-200' : 'text-white/90'}`}>
-              {aiStatus?.text || 'Starting AI assist…'}
-            </span>
+            {aiOn ? (
+              <>
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                  aiStatus?.tone === 'err' ? 'bg-rose-400'
+                    : aiStatus?.tone === 'think' ? 'bg-violet-400 animate-pulse'
+                    : aiStatus?.tone === 'heard' ? 'bg-emerald-400 animate-pulse'
+                    : aiStatus?.tone === 'listen' ? 'bg-emerald-400 animate-pulse'
+                    : 'bg-white/40'}`} />
+                <span className={`truncate ${aiStatus?.tone === 'err' ? 'text-rose-200' : aiStatus?.tone === 'heard' ? 'italic text-emerald-200' : 'text-white/90'}`}>
+                  {aiStatus?.text || 'Starting AI assist…'}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-white/40" />
+                <span className="text-white/70">AI paused — voice &amp; call-outs off</span>
+              </>
+            )}
           </div>
+          {/* Toggle the AI voice + live call-outs on/off (e.g. on low service). */}
+          <button
+            type="button"
+            onClick={() => setAiOn((v) => !v)}
+            className={`shrink-0 text-[11px] font-heading font-semibold px-2.5 py-1 rounded-full border transition-colors ${aiOn ? 'border-white/30 text-white/90 hover:bg-white/10' : 'border-violet-400 bg-violet-600 text-white'}`}
+            aria-pressed={aiOn}
+          >
+            {aiOn ? 'Turn AI off' : 'Turn AI on'}
+          </button>
         </div>
       )}
 

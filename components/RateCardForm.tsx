@@ -17,7 +17,7 @@ import { isInternalResolution } from '@/lib/vendors';
 import { AiReviewModal } from '@/components/AiReviewModal';
 import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, saveReviewCache, loadReviewCache, clearReviewCache, type AiAdjustment } from '@/lib/aiReview';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
-import { uploadFilesBatch, formatMoney, uploadPhoto } from '@/lib/photoUpload';
+import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
@@ -3128,8 +3128,12 @@ export function RateCardForm(props: RateCardFormProps) {
           addressSnapshot={props.propertyName}
           propertyRecordId={props.propertyRecordId}
           onComplete={(urls) => { const t = afterCameraTarget; setAfterCameraTarget(null); void handleAfterPhotoCapture(t, urls); }}
+          uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, props.inspectionRecordId, afterCameraTarget.sectionId)}
           onClose={() => setAfterCameraTarget(null)}
-          uploadPhoto={uploadPhoto}
+          // Use the offline-aware, fail-fast uploader (12s × 2 + offline cache)
+          // instead of the raw uploader (3 × 20s) so after-photos don't hang on a
+          // weak signal. Tagged with the line so a queued draft attaches on sync.
+          uploadPhoto={(file) => uploadPhotoOrQueue(file, props.inspectionRecordId, afterCameraTarget.sectionId, { lineExternalId: afterCameraTarget.lineExternalId })}
           rooms={(() => { const s = sections.find((x) => x.id === afterCameraTarget.sectionId); return [{ id: afterCameraTarget.sectionId, name: `${s?.displayName || s?.label || 'Room'} — After`, photoCount: 0, needsPhotos: false }]; })()}
           currentRoomId={afterCameraTarget.sectionId}
         />
