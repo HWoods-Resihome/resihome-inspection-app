@@ -31,6 +31,21 @@ export default function ExistingInspection() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [submitResultUrl, setSubmitResultUrl] = useState<string>('');
   const [pdfUrl, setPdfUrl] = useState<string>('');
+  const [currentUserEmail, setCurrentUserEmail] = useState<string>('');
+
+  // Who's logged in — used only to gate the admin SFTP test button.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/auth/me');
+        if (!r.ok) return;
+        const data = await r.json();
+        if (!cancelled && data?.user?.email) setCurrentUserEmail(String(data.user.email));
+      } catch { /* ignore — button just won't show */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Load inspection + answers
   useEffect(() => {
@@ -280,6 +295,10 @@ export default function ExistingInspection() {
             {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
               <CompletedPdfMenu inspection={inspection} />
             )}
+            {isCompleted && inspection.templateType === 'pm_scope_rate_card'
+              && currentUserEmail.toLowerCase() === 'hwoods@resihome.com' && (
+              <SendXlsxSftpButton inspectionId={inspectionId} />
+            )}
             {isCompleted && inspection.templateType === 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
               <a href={inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
                  className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
@@ -484,5 +503,54 @@ function CompletedPdfMenu({ inspection }: { inspection: InspectionSummary }) {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Admin-only test button (hwoods@resihome.com): re-push this completed Rate
+ * Card's Tenant Chargeback Import xlsx to the SFTP site to validate the
+ * pipeline. Hits POST /api/inspections/[id]/send-xlsx-sftp (itself gated to the
+ * same admin email server-side, so this is double-gated).
+ */
+function SendXlsxSftpButton({ inspectionId }: { inspectionId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function send() {
+    if (busy) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const r = await fetch(`/api/inspections/${inspectionId}/send-xlsx-sftp`, { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok && data.ok) {
+        setResult({ ok: true, msg: `Sent to SFTP${data.remotePath ? `: ${data.remotePath}` : ''}` });
+      } else {
+        setResult({ ok: false, msg: data.error || `Failed (HTTP ${r.status})` });
+      }
+    } catch (e: any) {
+      setResult({ ok: false, msg: String(e?.message || e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      <button
+        type="button"
+        onClick={send}
+        disabled={busy}
+        className="text-sm bg-gray-800 text-white px-3 py-1.5 rounded font-semibold hover:bg-gray-900 disabled:opacity-60"
+        title="Admin: re-send the Tenant Chargeback Import xlsx to the SFTP site"
+      >
+        {busy ? 'Sending to SFTP…' : 'Send xlsx to SFTP (admin)'}
+      </button>
+      {result && (
+        <span className={'text-xs font-semibold ' + (result.ok ? 'text-emerald-700' : 'text-red-700')}>
+          {result.ok ? '✅ ' : '❌ '}{result.msg}
+        </span>
+      )}
+    </span>
   );
 }

@@ -131,8 +131,23 @@ function buildHtmlBody(args: {
   vendorBreakdown: VendorTotal[];
   links: InspectionLinks;
   files: Array<{ filename: string; url: string }>;
+  tenantImport?: TenantImportStatus | null;
 }): string {
-  const { prop, ctx, vendorBreakdown, links, files } = args;
+  const { prop, ctx, vendorBreakdown, links, files, tenantImport } = args;
+  // Tenant Charge Import (SFTP) status badge. Only rendered when we actually
+  // tried to push the xlsx (tenantImport present) AND the SFTP is configured —
+  // when unconfigured we stay silent rather than show a scary "Unsuccessful".
+  const tenantImportHtml = tenantImport && tenantImport.configured
+    ? `<!-- Tenant Charge Import (SFTP) -->
+        <tr>
+          <td style="padding:16px 24px 0 24px;">
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;font-weight:bold;">Tenant Charge Import</div>
+            ${tenantImport.ok
+              ? `<div style="font-size:14px;font-weight:bold;color:#047857;">✅ Tenant charge import successful</div>`
+              : `<div style="font-size:14px;font-weight:bold;color:#b91c1c;">❌ Tenant charge import unsuccessful</div>${tenantImport.error ? `<div style="font-size:11px;color:#9ca3af;margin-top:4px;">${escapeHtml(tenantImport.error)}</div>` : ''}`}
+          </td>
+        </tr>`
+    : '';
   const addressLine = [
     prop.addressStreet,
     [prop.city, prop.stateCode].filter(Boolean).join(', ') + (prop.zipCode ? ` ${prop.zipCode}` : ''),
@@ -239,6 +254,8 @@ function buildHtmlBody(args: {
           </td>
         </tr>` : ''}
 
+        ${tenantImportHtml}
+
         <!-- Links -->
         <tr>
           <td style="padding:16px 24px;">
@@ -273,8 +290,9 @@ function buildTextBody(args: {
   vendorBreakdown: VendorTotal[];
   links: InspectionLinks;
   files: Array<{ filename: string; url: string }>;
+  tenantImport?: TenantImportStatus | null;
 }): string {
-  const { prop, ctx, vendorBreakdown, links, files } = args;
+  const { prop, ctx, vendorBreakdown, links, files, tenantImport } = args;
   const addressLine = [
     prop.addressStreet,
     [prop.city, prop.stateCode].filter(Boolean).join(', ') + (prop.zipCode ? ` ${prop.zipCode}` : ''),
@@ -310,6 +328,13 @@ function buildTextBody(args: {
   } else {
     for (const f of files) { lines.push('  - ' + f.filename); lines.push('    ' + f.url); }
   }
+  if (tenantImport && tenantImport.configured) {
+    lines.push('');
+    lines.push('TENANT CHARGE IMPORT');
+    lines.push(tenantImport.ok
+      ? '  Tenant charge import successful'
+      : '  Tenant charge import unsuccessful' + (tenantImport.error ? ` (${tenantImport.error})` : ''));
+  }
   lines.push('');
   lines.push('-- Sent from the ResiHome Inspection App');
   return lines.join('\n');
@@ -337,6 +362,15 @@ function escapeAttr(s: string): string {
  * State code missing is not an error — the email still goes out, just without
  * the regional team on copy.
  */
+/** Status of pushing the Tenant Chargeback Import xlsx to the SFTP site. */
+export interface TenantImportStatus {
+  ok: boolean;
+  /** false when the SFTP_* env vars aren't set (upload was skipped). */
+  configured: boolean;
+  remotePath?: string;
+  error?: string;
+}
+
 export function composeInspectionEmail(args: {
   ctx: PdfBuildContext;
   prop: PropertyContact;
@@ -345,8 +379,11 @@ export function composeInspectionEmail(args: {
   /** Inspector's email from the HubSpot inspection record. Added to CC when
    *  it's a valid address that isn't already a recipient. */
   inspectorEmail?: string | null;
+  /** SFTP delivery status for the Tenant Chargeback Import xlsx, rendered as a
+   *  line in the email body. Omit/null when there was no xlsx to send. */
+  tenantImport?: TenantImportStatus | null;
 }): InspectionEmailPayload {
-  const { ctx, prop, links, attachments, inspectorEmail } = args;
+  const { ctx, prop, links, attachments, inspectorEmail, tenantImport } = args;
 
   // Recipients
   const to = [SODA_EMAIL];
@@ -407,8 +444,8 @@ export function composeInspectionEmail(args: {
   // one click away.
   const subject = buildSubject(ctx.grandTotals.client, prop);
   const files = attachmentList.map((a) => ({ filename: a.filename, url: a.url }));
-  const htmlBody = buildHtmlBody({ prop, ctx, vendorBreakdown, links, files });
-  const textBody = buildTextBody({ prop, ctx, vendorBreakdown, links, files });
+  const htmlBody = buildHtmlBody({ prop, ctx, vendorBreakdown, links, files, tenantImport });
+  const textBody = buildTextBody({ prop, ctx, vendorBreakdown, links, files, tenantImport });
 
   return { to, cc, subject, htmlBody, textBody, attachments: attachmentList };
 }

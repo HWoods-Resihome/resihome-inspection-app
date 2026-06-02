@@ -36,6 +36,7 @@ import { renderVendorPdfs } from '@/lib/pdfVendor';
 import { renderChargebackXlsx } from '@/lib/xlsxChargeback';
 import { composeInspectionEmail } from '@/lib/email';
 import { sendInspectionEmail } from '@/lib/gmail';
+import { uploadToSftp, type SftpUploadResult } from '@/lib/sftp';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
 
 export const config = {
@@ -422,6 +423,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (up.id) attachmentFileIds.push(up.id);
     }
 
+    // ---- 5b. Push the Tenant Chargeback Import xlsx to the SFTP site ----
+    // Best-effort: this NEVER blocks finalize. The result is reported as a line
+    // in the finalize email ("Tenant Charge Import: Successful / Unsuccessful").
+    // No-ops (configured:false) until the SFTP_* env vars are set on Vercel.
+    let sftpResult: SftpUploadResult | null = null;
+    if (chargebackXlsxBuf) {
+      try {
+        sftpResult = await uploadToSftp(chargebackXlsxFilename, chargebackXlsxBuf);
+        if (sftpResult.ok) {
+          console.log(`[finalize] tenant charge import uploaded to SFTP: ${sftpResult.remotePath}`);
+        } else if (sftpResult.configured) {
+          console.warn(`[finalize] tenant charge import SFTP upload failed: ${sftpResult.error}`);
+        } else {
+          console.warn('[finalize] tenant charge import SFTP not configured — skipped.');
+        }
+      } catch (e: any) {
+        // uploadToSftp is designed not to throw, but stay defensive.
+        sftpResult = { ok: false, configured: true, error: String(e?.message || e).slice(0, 220) };
+        console.warn('[finalize] tenant charge import SFTP upload threw (caught):', e);
+      }
+    }
+
     const vendorUrls: Record<string, string> = {};
     for (const [vendor, buf] of vendorBufs.entries()) {
       const up = await uploadFileWithId(buf, vendorFilename(vendor), 'application/pdf', '/inspection_pdfs', true);
@@ -512,6 +535,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             vendor, url, name: vendorFilename(vendor),
           })),
         },
+        // Report the SFTP delivery status of the Tenant Chargeback Import xlsx.
+        // Only included when we actually had an xlsx to push.
+        tenantImport: chargebackXlsxBuf && sftpResult
+          ? {
+              ok: sftpResult.ok,
+              configured: sftpResult.configured,
+              remotePath: sftpResult.remotePath,
+              error: sftpResult.error,
+            }
+          : null,
       });
 
       emailResult = await sendInspectionEmail(payload, session.email, req);
