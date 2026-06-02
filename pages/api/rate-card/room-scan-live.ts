@@ -93,6 +93,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const tenantMonths: number = (typeof body.tenantMonths === 'number' && body.tenantMonths > 0) ? body.tenantMonths : 12;
     const transcriptDelta: string = String(body.transcriptDelta || '').trim();
     const seen: string[] = Array.isArray(body.seen) ? body.seen.slice(0, 40).map((s: any) => String(s)) : [];
+    // Codes already on screen — the authoritative dedup key (descriptions are
+    // only for telling the model what NOT to repeat).
+    const seenCodes: string[] = Array.isArray(body.seenCodes) ? body.seenCodes.slice(0, 60).map((s: any) => String(s).toLowerCase()) : [];
     const active: Array<{ id: string; description?: string; unit?: string }> =
       Array.isArray(body.active) ? body.active.slice(0, 20) : [];
     const frameB64: string = typeof body.frame === 'string' ? body.frame : '';
@@ -188,7 +191,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const editUses = content.filter((c: any) => c.type === 'tool_use' && c.name === 'edit_line');
 
     // --- new suggestions ---
-    const seenLower = new Set(seen.map((s) => s.toLowerCase()));
+    // Dedup by CODE only (the client also filters by code). Descriptions are NOT
+    // used to drop items — a new item that merely shares wording with a prior one
+    // must still surface, not vanish silently.
+    const seenCodeSet = new Set(seenCodes);
     const out: any[] = [];
     const unmatched: string[] = [];
     for (let i = 0; i < suggestUses.length; i++) {
@@ -196,8 +202,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const resolved = await resolveItem(String(inp.query || ''), String(inp.category || ''), !!transcriptDelta);
       if (!resolved) { if (inp.query) unmatched.push(String(inp.query).slice(0, 40)); continue; }
       const { item, unit, isMeasured, isWholeHouse, tenantPct, measurementUnit } = resolved;
-      if (seenLower.has(item.lineItemCode.toLowerCase()) || seenLower.has(item.laborShortDescription.toLowerCase())) continue;
-      seenLower.add(item.lineItemCode.toLowerCase());
+      if (seenCodeSet.has(item.lineItemCode.toLowerCase())) continue;
+      seenCodeSet.add(item.lineItemCode.toLowerCase());
       const quantityStated = inp.quantityStated === true && typeof inp.quantity === 'number' && isFinite(inp.quantity);
       const needsMeasurement = isMeasured && !isWholeHouse && !quantityStated;
       const quantity = quantityStated ? Number(inp.quantity) : (needsMeasurement ? null : 1);

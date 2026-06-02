@@ -33,7 +33,9 @@ const AUTO_CHECK_MS = 3500;
 const DEBUG_DEFAULT = true; // on-device pipeline HUD (mic → Whisper → vision)
 // Peak deviation (0–128) a clip must reach to count as speech. Below this it's
 // silence/background and we skip Whisper (which otherwise hallucinates phrases).
-const VAD_PEAK_MIN = 12;
+// Kept low enough not to clip quiet/distant speech; the phrase filter is the
+// backstop for any hallucination that slips through.
+const VAD_PEAK_MIN = 9;
 
 interface ActiveRoom { id: string; name: string; photoCount?: number }
 
@@ -100,7 +102,20 @@ export function CameraAILayer(props: Props) {
   const roomsRef = useRef<ActiveRoom[]>(rooms);
   const navRef = useRef(onNavigateRoom);
   const getActiveRoomRef = useRef(getActiveRoom);
-  useEffect(() => { roomsRef.current = rooms; navRef.current = onNavigateRoom; getActiveRoomRef.current = getActiveRoom; });
+  // The timers/audio loop are wired once, so they'd otherwise call first-render
+  // versions of these props. Mirror them so the hot paths always use current.
+  const uploadPhotoRef = useRef(uploadPhoto);
+  const onStillRef = useRef(onStill);
+  const onAddLineRef = useRef(onAddLine);
+  const getStreamRef = useRef(getStream);
+  const getLastManualCaptureAtRef = useRef(getLastManualCaptureAt);
+  const tenantMonthsRef = useRef(tenantMonths);
+  useEffect(() => {
+    roomsRef.current = rooms; navRef.current = onNavigateRoom; getActiveRoomRef.current = getActiveRoom;
+    uploadPhotoRef.current = uploadPhoto; onStillRef.current = onStill; onAddLineRef.current = onAddLine;
+    getStreamRef.current = getStream; getLastManualCaptureAtRef.current = getLastManualCaptureAt;
+    tenantMonthsRef.current = tenantMonths;
+  });
 
   const openRef = useRef(false);
   const inFlight = useRef(false);
@@ -125,7 +140,12 @@ export function CameraAILayer(props: Props) {
   const seenByRoomRef = useRef<Record<string, { codes: Set<string>; descs: Set<string> }>>({});
   const roomStillCountRef = useRef<Record<string, number>>({});
   const chipsRef = useRef<LiveSuggestion[]>([]);
+  // Active room id. Ref drives the poll's change-detection (no stale closure);
+  // state drives the render filter. We NEVER clear chips on room change — chips
+  // are kept per-room and filtered by activeId, so an in-flight inference can't
+  // wipe a just-added chip, and a room's un-actioned chips reappear on return.
   const activeIdRef = useRef<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
   // Auto-still fallback bookkeeping: last AI still + room-entered timestamps.
   const lastAiStillAtRef = useRef(0);
   const roomEnteredAtRef = useRef(Date.now());
@@ -208,8 +228,8 @@ export function CameraAILayer(props: Props) {
       const id = a?.id ?? null;
       if (id !== activeIdRef.current) {
         activeIdRef.current = id;
+        setActiveId(id);
         roomEnteredAtRef.current = Date.now();
-        setChips([]);
         setHeardText('');
         dbg(`room → ${a?.name || '—'}`);
       }
@@ -226,7 +246,7 @@ export function CameraAILayer(props: Props) {
     const room = getActiveRoomRef.current();
     if (!room) return;
     if ((roomStillCountRef.current[room.id] || 0) >= MAX_ROOM_STILLS) return;
-    const lastManual = getLastManualCaptureAt?.() || 0;
+    const lastManual = getLastManualCaptureAtRef.current?.() || 0;
     const idleSince = Math.max(lastManual, lastAiStillAtRef.current, roomEnteredAtRef.current);
     if (Date.now() - idleSince < AUTO_IDLE_MS) return;
     dbg(`auto-still (idle ${Math.round((Date.now() - idleSince) / 1000)}s)`);
@@ -359,7 +379,7 @@ export function CameraAILayer(props: Props) {
   // Current mic tracks: prefer the camera's SHARED stream; fall back to a mic we
   // opened ourselves. Re-derived each clip so a re-acquired stream is picked up.
   function liveAudioTracks(): MediaStreamTrack[] {
-    const shared = getStream?.();
+    const shared = getStreamRef.current?.();
     const st = shared?.getAudioTracks().filter((t) => t.readyState === 'live') || [];
     if (st.length) return st;
     return ownAudioRef.current?.getAudioTracks().filter((t) => t.readyState === 'live') || [];
@@ -373,7 +393,7 @@ export function CameraAILayer(props: Props) {
       await new Promise((r) => setTimeout(r, 200));
     }
     if (!openRef.current) return;
-    let source = getStream?.()?.getAudioTracks().some((t) => t.readyState === 'live') ? 'shared' : 'none';
+    let source = getStreamRef.current?.()?.getAudioTracks().some((t) => t.readyState === 'live') ? 'shared' : 'none';
     if (!liveAudioTracks().length) {
       dbg('no shared audio — opening own mic');
       try {
@@ -401,6 +421,7 @@ export function CameraAILayer(props: Props) {
         // --- voice-activity detection: track the clip's peak loudness ---
         let peak = 0; let vadActive = false; let sampler: ReturnType<typeof setInterval> | null = null;
         let srcNode: MediaStreamAudioSourceNode | null = null;
+        let analyserNode: AnalyserNode | null = null;
         try {
           const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
           if (AC) {
@@ -408,11 +429,12 @@ export function CameraAILayer(props: Props) {
             const ctx = audioCtxRef.current!;
             if (ctx.state === 'suspended') ctx.resume().catch(() => {});
             srcNode = ctx.createMediaStreamSource(audioStream);
-            const analyser = ctx.createAnalyser(); analyser.fftSize = 512;
-            srcNode.connect(analyser);
-            const buf = new Uint8Array(analyser.fftSize);
+            const an = ctx.createAnalyser(); an.fftSize = 512;
+            srcNode.connect(an);
+            analyserNode = an;
+            const buf = new Uint8Array(an.fftSize);
             sampler = setInterval(() => {
-              analyser.getByteTimeDomainData(buf);
+              an.getByteTimeDomainData(buf);
               let m = 0; for (let i = 0; i < buf.length; i++) { const d = Math.abs(buf[i] - 128); if (d > m) m = d; }
               if (m > peak) peak = m;
             }, 120);
@@ -422,7 +444,7 @@ export function CameraAILayer(props: Props) {
         rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
         rec.onstop = () => {
           if (sampler) clearInterval(sampler);
-          try { srcNode?.disconnect(); } catch { /* noop */ }
+          try { srcNode?.disconnect(); analyserNode?.disconnect(); } catch { /* noop */ }
           vadActive = !!audioCtxRef.current && audioCtxRef.current.state === 'running';
           if (parts.length) {
             const blob = new Blob(parts, { type: rec.mimeType || mime || 'audio/mp4' });
@@ -481,11 +503,11 @@ export function CameraAILayer(props: Props) {
     const blob = await new Promise<Blob | null>((res) => c.toBlob((b) => res(b), 'image/jpeg', 0.8));
     if (!blob) return undefined;
     try {
-      const url = await uploadPhoto(new File([blob], `ai_${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      const url = await uploadPhotoRef.current(new File([blob], `ai_${Date.now()}.jpg`, { type: 'image/jpeg' }));
       if (!openRef.current) return undefined;
       const count = (roomStillCountRef.current[room.id] || 0) + 1;
       roomStillCountRef.current[room.id] = count;
-      onStill(room.id, url);
+      onStillRef.current(room.id, url);
       dbg(`📸 ${reason} → ${room.name} (#${count})`);
       // Pop the saved-thumbnail toast (re-keyed so back-to-back grabs re-animate).
       setSavedShot({ key: Date.now(), url, roomName: room.name, count });
@@ -500,27 +522,33 @@ export function CameraAILayer(props: Props) {
     if (inFlight.current || !openRef.current) return;
     const room = getActiveRoomRef.current();
     if (!room) { setErrText('No active room'); return; }
+    const delta = transcriptBufRef.current.trim();
     const b64 = grabKeyframeB64(KEYFRAME_EDGE);
-    if (!b64) { setErrText('Camera not ready'); return; }
+    // Voice goes text-only, so a missing frame only blocks SILENT ticks. If the
+    // inspector spoke, proceed even without a usable frame (camera covered/booting).
+    if (!delta && !b64) { setErrText('Camera not ready'); return; }
+    transcriptBufRef.current = '';
+    // If this call fails, put the spoken words back so they aren't lost.
+    const rebufferOnFail = () => { if (delta) transcriptBufRef.current = (delta + ' ' + transcriptBufRef.current).trimStart(); };
     inFlight.current = true;
     setScanning(true);
-    const delta = transcriptBufRef.current.trim();
-    transcriptBufRef.current = '';
     const seen = seenFor(room.id);
     try {
       const r = await fetch('/api/rate-card/room-scan-live', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sectionName: room.name,
-          tenantMonths: typeof tenantMonths === 'number' ? tenantMonths : 12,
+          tenantMonths: typeof tenantMonthsRef.current === 'number' ? tenantMonthsRef.current : 12,
           transcriptDelta: delta,
           seen: Array.from(seen.descs),
+          seenCodes: Array.from(seen.codes),
           active: chipsRef.current.filter((c) => c.roomId === room.id).map((c) => ({ id: c.id, description: c.description, unit: c.unit })),
-          frame: b64,
+          frame: b64 || '',
         }),
       });
       if (!openRef.current) return;
       if (!r.ok) {
+        rebufferOnFail();
         const e = await r.json().catch(() => ({}));
         dbg(`vision ✗ ${r.status} ${String(e?.error || '').slice(0, 40)}`);
         setErrText(`AI ${r.status}: ${String(e?.error || '').slice(0, 80) || 'request failed'}`);
@@ -571,6 +599,7 @@ export function CameraAILayer(props: Props) {
         setHeardText(`No catalog match for “${unmatched[0]}” — try naming the work`);
       }
     } catch (e: any) {
+      rebufferOnFail();
       if (openRef.current) setErrText(`AI offline: ${String(e?.message || e).slice(0, 60)}`);
     } finally {
       inFlight.current = false;
@@ -598,7 +627,6 @@ export function CameraAILayer(props: Props) {
   }
 
   if (!enabled) return null;
-  const activeId = activeIdRef.current;
   const visibleChips = chips.filter((c) => c.roomId === activeId || !activeId);
   const confColor = (c: string) => c === 'high' ? 'bg-emerald-500' : c === 'low' ? 'bg-amber-500' : 'bg-sky-500';
 
