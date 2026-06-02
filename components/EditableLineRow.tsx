@@ -1353,6 +1353,9 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
                 {line.note && <span className="text-[11px] italic text-gray-600 truncate">📝 {line.note}</span>}
                 {calc?.isCustomPriced && <span className="text-[11px] font-semibold text-yellow-700">⚡ Custom</span>}
               </div>
+              {/* Complete: Now/Later sits directly under the Internal Resolution
+                  chip (same spot the selection was made). */}
+              {resolutionToggle}
               {/* Internal Resolution: the tagged section photos read as the
                   BEFORE photos; the After Photos panel (in-app camera) is below. */}
               {showIrPhotos && (line.photoUrls?.length ?? 0) > 0 && (
@@ -1381,7 +1384,6 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
                   ))}
                 </div>
               )}
-              {resolutionToggle}
               {showIrPhotos && (
                 <PhotoChipRow
                   label="After Photos"
@@ -1520,7 +1522,6 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
             ))}
           </div>
         )}
-        {resolutionToggle}
         {showIrPhotos && (
           <PhotoChipRow
             label="After Photos"
@@ -1534,13 +1535,18 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
       </td>
       <td className="px-3 py-2 text-center text-sm text-gray-900 whitespace-nowrap">{line.quantity}</td>
       <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{item.laborMeas}</td>
-      <td className="px-3 py-2 text-center whitespace-nowrap">
-        <span
-          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold max-w-[140px] truncate ${pill.bg} ${pill.text} ${pill.border || ''}`}
-          title={line.assignedTo}
-        >
-          {line.assignedTo}
-        </span>
+      {/* Vendor — with the Complete: Now/Later toggle directly beneath the
+          Internal Resolution pill (same spot the selection was made). */}
+      <td className="px-3 py-2 text-center align-top">
+        <div className="inline-flex flex-col items-center gap-1">
+          <span
+            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold max-w-[140px] truncate ${pill.bg} ${pill.text} ${pill.border || ''}`}
+            title={line.assignedTo}
+          >
+            {line.assignedTo}
+          </span>
+          {resolutionToggle}
+        </div>
       </td>
       <td className="px-3 py-2 text-right text-sm text-gray-900 whitespace-nowrap">
         {calc ? `$${formatMoney(roundMoney(calc.vendorCost))}` : '…'}
