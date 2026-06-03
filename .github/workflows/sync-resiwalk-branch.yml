@@ -1,0 +1,40 @@
+name: Keep resiwalk branch in sync with main
+
+# Prevents drift between `main` and the long-lived working branch
+# `claude/resiwalk-setup-auto-deploy-Ciris`. On every push to main, the
+# branch is fast-forwarded to match. A fast-forward-only push is used on
+# purpose: if the branch ever holds unique commits, the push is REJECTED
+# rather than overwriting them, and this job fails loudly so a human can
+# reconcile. It never force-pushes and never loses work.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-resiwalk-branch
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fast-forward branch to main
+        env:
+          TARGET_BRANCH: claude/resiwalk-setup-auto-deploy-Ciris
+        run: |
+          set -euo pipefail
+          echo "Fast-forwarding '$TARGET_BRANCH' to $(git rev-parse --short origin/main)..."
+          # Pushing origin/main to the branch ref. Non-fast-forward updates
+          # are rejected by default, so unique commits on the branch are safe.
+          git push origin "origin/main:refs/heads/$TARGET_BRANCH"
+          echo "Done. '$TARGET_BRANCH' now matches main."
