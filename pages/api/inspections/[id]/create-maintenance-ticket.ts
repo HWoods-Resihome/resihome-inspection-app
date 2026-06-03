@@ -70,8 +70,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const data = await fetchInspectionWithPropertyRef(id);
     if (!data) return res.status(404).json({ error: 'Inspection not found' });
 
+    // TEST MODE: when HBMM_TEST_TICKET_ID (env) or ?ticketId= (query) is set, we
+    // SKIP creating a new ticket and just run the PDF-upload step against that
+    // existing ticket — so we can iterate on the upload without spawning tickets.
+    // Remove the env var to return to normal (create + upload).
+    const testTicketRaw = String((req.query.ticketId as string) || process.env.HBMM_TEST_TICKET_ID || '').trim();
+    const testTicketId = Number(testTicketRaw);
+    const testMode = !!testTicketRaw && Number.isFinite(testTicketId);
+
     const hbmmId = Number(data.propertyHbmmId || '');
-    if (!data.propertyHbmmId || !Number.isFinite(hbmmId)) {
+    if (!testMode && (!data.propertyHbmmId || !Number.isFinite(hbmmId))) {
       return res.status(400).json({
         error: 'This property has no hbmm_property_id set in HubSpot — can\'t map it to a Maintenance system property.',
       });
@@ -93,27 +101,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       shareVendorLinks[vendor] = buildShortLink(shareBase, id, 'vendor', vendor);
     }
 
-    const result = await createMaintenanceTicket({
-      propertyId: hbmmId,
-      description: buildTicketDescription(shareVendorLinks),
-    });
-
-    if (!result.configured) {
-      return res.status(503).json({
-        ok: false,
-        error: 'Maintenance AI is not configured. Set MAINTENANCE_AI_API_KEY (and optionally MAINTENANCE_AI_BASE_URL / MAINTENANCE_AI_API_VERSION).',
+    // Create the ticket (or reuse the test ticket).
+    let ticketId: number | undefined;
+    let requestId: string | undefined;
+    if (testMode) {
+      ticketId = testTicketId;
+      console.log(`[create-maintenance-ticket] TEST MODE: skipping creation, uploading to existing ticket #${ticketId}`);
+    } else {
+      const result = await createMaintenanceTicket({
+        propertyId: hbmmId,
+        description: buildTicketDescription(shareVendorLinks),
       });
+      if (!result.configured) {
+        return res.status(503).json({
+          ok: false,
+          error: 'Maintenance AI is not configured. Set MAINTENANCE_AI_API_KEY (and optionally MAINTENANCE_AI_BASE_URL / MAINTENANCE_AI_API_VERSION).',
+        });
+      }
+      if (!result.ok) {
+        return res.status(502).json({ ok: false, error: result.error || 'Ticket creation failed.', status: result.status, requestId: result.requestId });
+      }
+      ticketId = result.ticketId;
+      requestId = result.requestId;
+      console.log(`[create-maintenance-ticket] inspection ${id}: created ticket #${ticketId} on property ${hbmmId} (req ${requestId})`);
     }
-    if (!result.ok) {
-      return res.status(502).json({ ok: false, error: result.error || 'Ticket creation failed.', status: result.status, requestId: result.requestId });
-    }
-    console.log(`[create-maintenance-ticket] inspection ${id}: created ticket #${result.ticketId} on property ${hbmmId} (req ${result.requestId})`);
 
     // Phase 3: upload the per-vendor scope PDFs into the ticket via the UI
     // (best-effort; no-ops until HBMM_USERNAME/HBMM_PASSWORD are set). Uses the
     // direct HubSpot file URLs (long) for the actual bytes, excluding eviction.
     let upload: Awaited<ReturnType<typeof uploadTicketDocuments>> | null = null;
-    if (result.ticketId) {
+    if (ticketId) {
       const files: TicketUploadFile[] = Object.entries(vendorUrls)
         .filter(([vendor, url]) => vendorGetsOwnPdf(vendor) && !!url)
         .map(([vendor, url]) => {
@@ -122,12 +139,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           return { name, url };
         });
       if (files.length) {
-        upload = await uploadTicketDocuments({ ticketId: result.ticketId, files });
-        console.log(`[create-maintenance-ticket] ticket #${result.ticketId} upload: ok=${upload.ok} uploaded=${upload.uploaded} steps=${upload.steps.join(' | ')}${upload.error ? ` error=${upload.error}` : ''}`);
+        upload = await uploadTicketDocuments({ ticketId, files });
+        console.log(`[create-maintenance-ticket] ticket #${ticketId} upload: ok=${upload.ok} uploaded=${upload.uploaded} steps=${upload.steps.join(' | ')}${upload.error ? ` error=${upload.error}` : ''}`);
       }
     }
 
-    return res.status(200).json({ ok: true, ticketId: result.ticketId, propertyId: hbmmId, requestId: result.requestId, upload });
+    return res.status(200).json({ ok: true, ticketId, propertyId: testMode ? null : hbmmId, requestId, testMode, upload });
   } catch (e: any) {
     console.error(`[create-maintenance-ticket] inspection ${id} failed:`, e);
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });

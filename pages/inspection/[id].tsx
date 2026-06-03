@@ -561,7 +561,9 @@ function CreateTicketButton({ inspectionId }: { inspectionId: string }) {
       if (r.ok && data.ok) {
         setResult({
           ok: true,
-          msg: `Ticket #${data.ticketId ?? '?'} · property ${data.propertyId ?? '?'} · req ${data.requestId ?? '?'}`,
+          msg: data.testMode
+            ? `TEST: no new ticket — using existing #${data.ticketId}`
+            : `Ticket #${data.ticketId ?? '?'} · property ${data.propertyId ?? '?'} · req ${data.requestId ?? '?'}`,
         });
       } else {
         setResult({ ok: false, msg: data.error || `Failed (HTTP ${r.status})` });
