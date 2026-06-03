@@ -1634,6 +1634,10 @@ export async function populateBillingFields(inspectionRecordId: string): Promise
     }
   }
 
+  // Client invoice always defaults to 60 (overridden by the agent's value when
+  // matched). Vendor invoice stays blank unless the agent provides one.
+  update.client_invoice_amount = DEFAULT_CLIENT_INVOICE;
+
   // Owner → Agent → broker_code + invoice amounts
   let ownerId = (insp.hubspot_owner_id || '').toString().trim();
   if (!ownerId && inspectorEmail) ownerId = (await resolveOwnerIdByEmail(inspectorEmail)) || '';
@@ -1644,9 +1648,6 @@ export async function populateBillingFields(inspectionRecordId: string): Promise
       update.broker_code = agent.brokerCode || '';
       update.vendor_invoice_amount = agent.vendorCost !== '' ? agent.vendorCost : '';  // blank if null
       update.client_invoice_amount = agent.clientCost !== '' ? agent.clientCost : DEFAULT_CLIENT_INVOICE;
-    } else {
-      // No agent match — still default the client invoice to 60.
-      update.client_invoice_amount = DEFAULT_CLIENT_INVOICE;
     }
   }
 
