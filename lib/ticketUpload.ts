@@ -148,14 +148,19 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     // Capture upload network calls so we can see whether the file actually POSTed
     // and what the server returned (the modal can close optimistically on failure).
     const postResponses: string[] = [];
-    page.on('response', (resp: any) => {
+    page.on('response', async (resp: any) => {
       try {
         const rq = resp.request();
         const m = rq.method();
-        if (m === 'POST' || m === 'PUT') {
-          const u = rq.url().split('?')[0];
-          postResponses.push(`${resp.status()} ${u.slice(-70)}`);
+        if (m !== 'POST' && m !== 'PUT') return;
+        const u = rq.url();
+        // For upload-related endpoints, capture the response body — a 200 can
+        // still carry {success:false,...}/an error message.
+        let body = '';
+        if (/upload|image|document|file|attach/i.test(u)) {
+          try { body = (await resp.text()).replace(/\s+/g, ' ').slice(0, 300); } catch { /* ignore */ }
         }
+        postResponses.push(`${resp.status()} ${u.split('?')[0].slice(-55)}${body ? ` :: ${body}` : ''}`);
       } catch { /* ignore */ }
     });
 
@@ -331,10 +336,11 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     await sleep(9000);
     const newPosts = postResponses.slice(postsBefore);
     log(`upload network POST/PUT: ${newPosts.join(' | ') || '(NONE — file did not submit)'}`);
-    // Kendo success/error indicators, if present.
+    // Kendo success/error indicators (use the specific file-state classes; the
+    // .k-i-close icon is the per-file REMOVE button, NOT an error).
     const kendo = await page.evaluate(() => {
-      if (document.querySelector('.k-file-error, .k-file-invalid, .k-i-warning, .k-i-close')) return 'error';
-      if (document.querySelector('.k-file-success, .k-i-check, .k-i-tick')) return 'success';
+      if (document.querySelector('.k-file-error, .k-file-invalid')) return 'error';
+      if (document.querySelector('.k-file-success')) return 'success';
       return 'unknown';
     }).catch(() => 'unknown');
     log(`kendo file status: ${kendo}`);
