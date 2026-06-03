@@ -199,10 +199,17 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     log(`entered credentials (env username="${username}" len=${password.length}; field="${filled.u}" pwLen=${filled.pLen}; angularModel=${JSON.stringify(filled.model)})`);
     await sleep(600); // let AngularJS digest the model update
 
-    // Click LOGIN TO ACCOUNT (#login_btn → Authenticate()). It's an AJAX login,
-    // so wait for the login form to go away (success) rather than a navigation.
+    // Submit. Try the button (#login_btn → Authenticate()); if the form is still
+    // there, fall back to pressing Enter in the password field (natural submit).
+    // It's an AJAX login, so we wait for the login form to disappear (success).
     await page.evaluate((sel: string) => { (document.querySelector(sel) as HTMLElement | null)?.click(); }, selSubmit);
     log('clicked LOGIN TO ACCOUNT');
+    await sleep(1500);
+    if (await page.$('#login_btn')) {
+      await page.focus(selPassword).catch(() => {});
+      await page.keyboard.press('Enter');
+      log('pressed Enter to submit (fallback)');
+    }
     await page.waitForFunction(() => !document.querySelector('#login_btn'), { timeout: navTimeout })
       .catch(() => {});
     await sleep(3000);
