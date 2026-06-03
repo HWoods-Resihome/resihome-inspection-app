@@ -93,17 +93,17 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     return { ok: false, configured: true, uploaded: 0, steps, error: 'Could not build ticket URL.' };
   }
 
-  // @sparticuz/chromium only extracts its bundled shared libs (libnss3, etc.)
-  // and sets LD_LIBRARY_PATH when it detects an AWS Lambda runtime via
-  // AWS_EXECUTION_ENV — and it does so AT IMPORT TIME. Vercel runs on Lambda
-  // but doesn't set that var the way the package expects, so we set it ourselves
-  // (matching the running Node major version) BEFORE importing the package, so
-  // the right tarball (al2 for <20, al2023 for 20.x/22.x) is extracted.
-  if (!process.env.AWS_EXECUTION_ENV) {
-    const major = parseInt(process.version.replace(/^v/, ''), 10) || 20;
-    process.env.AWS_EXECUTION_ENV = `AWS_Lambda_nodejs${major}.x`;
-    log(`set AWS_EXECUTION_ENV=${process.env.AWS_EXECUTION_ENV}`);
-  }
+  // @sparticuz/chromium only extracts its bundled shared libs + sets
+  // LD_LIBRARY_PATH when it detects an AWS Lambda runtime via AWS_EXECUTION_ENV,
+  // AT IMPORT TIME, and it picks the lib set by the value:
+  //   "AWS_Lambda_nodejs20.x"/"22.x"  -> al2023 set (libnspr4, libnss3, …)
+  //   other "AWS_Lambda_nodejs…"      -> al2 set (libnss3 but NO libnspr4)
+  // Vercel's modern runtime is AL2023, which needs the al2023 set. Vercel may
+  // pre-set AWS_EXECUTION_ENV to a non-Node20 value (which pulled the wrong al2
+  // set → "libnspr4 missing"), so we FORCE the al2023 value before importing.
+  // Overridable via HBMM_CHROMIUM_LAMBDA_ENV if the runtime ever changes.
+  process.env.AWS_EXECUTION_ENV = (process.env.HBMM_CHROMIUM_LAMBDA_ENV || 'AWS_Lambda_nodejs20.x').trim();
+  log(`AWS_EXECUTION_ENV=${process.env.AWS_EXECUTION_ENV}`);
 
   // Dynamic imports so these heavy deps never enter a non-upload code path.
   const [{ default: puppeteer }, { default: chromium }] = await Promise.all([
