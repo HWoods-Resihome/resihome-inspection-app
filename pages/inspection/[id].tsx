@@ -294,10 +294,11 @@ export default function ExistingInspection() {
         <title>{inspection.propertyAddressSnapshot || 'Inspection'} - ResiHome</title>
       </Head>
       {readOnly && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2">
-          {/* Symmetrical 3-zone header: status (left) · downloads (center) ·
+        <div className="bg-amber-50 border-b border-amber-200 py-2">
+          {/* Symmetrical 3-zone header, aligned to the same max-width container
+              as the page content below: status (left) · downloads (center) ·
               Re-Open (right). */}
-          <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="max-w-7xl mx-auto px-5 sm:px-6 flex items-center justify-between gap-3 flex-wrap">
             {/* Left: status */}
             <span className="text-sm text-amber-900 font-heading font-semibold">
               {isCompleted ? 'This Inspection is Completed.' : 'This Inspection is Cancelled.'}
