@@ -143,38 +143,9 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     page.setDefaultNavigationTimeout(navTimeout);
     log('launched browser');
 
-    // 3. Log in.
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    await page.goto(loginUrl, { waitUntil: 'networkidle2' });
-    log(`opened login (${loginUrl})`);
-    await page.waitForSelector(selUsername, { timeout: navTimeout });
-    await page.type(selUsername, username, { delay: 20 });
-    await page.type(selPassword, password, { delay: 20 });
-    log('entered credentials');
-    // Click the login button (fallback: Enter in the password field).
-    try { await page.click(selSubmit); } catch { await page.focus(selPassword); await page.keyboard.press('Enter'); }
-    log('submitted login');
-    // The login is a SPA AJAX call that then redirects to the dashboard — there
-    // may be no full navigation. Wait for the login form to go away (success)
-    // and give the session a moment to settle.
-    await page.waitForSelector(selPassword, { hidden: true, timeout: navTimeout })
-      .then(() => log('login form cleared (authenticated)'))
-      .catch(() => log('login form still present after submit (login may have failed)'));
-    await sleep(2500);
-
-    // 4. Now that we're authenticated, navigate to the ticket. The app ignores
-    // the deep link during login and lands on home, so we (re)submit the ticket
-    // URL here and force the hash route to take.
-    await page.goto(ticketUrl, { waitUntil: 'networkidle2' });
-    await page.evaluate((u: string) => { if (window.location.href !== u) window.location.href = u; }, ticketUrl);
-    // Reload to force the AngularJS hash route to (re)initialize on the ticket.
-    await page.reload({ waitUntil: 'networkidle2' }).catch(() => {});
-    await sleep(3500);
-    const diag = await page.evaluate(() => /upload document/i.test(document.body?.innerText || document.body?.textContent || '')).catch(() => false);
-    log(`opened ticket (url=${page.url()} · hasUploadDocText=${diag})`);
-
-    // Robust click-by-visible-text over interactive elements (handles the icon
-    // next to "Upload Document", scrolls into view, polls until it appears).
+    // Robust click-by-visible-text over interactive elements (handles icons,
+    // scrolls into view, polls). exact=true requires the trimmed text to match.
     const clickByText = async (needle: string, exact = false): Promise<boolean> => {
       const end = Date.now() + navTimeout;
       const t = needle.toLowerCase();
@@ -194,6 +165,38 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
       }
       return false;
     };
+
+    // 3. Log in.
+    await page.goto(loginUrl, { waitUntil: 'networkidle2' });
+    log(`opened login (${loginUrl})`);
+    await page.waitForSelector(selUsername, { timeout: navTimeout });
+    await page.type(selUsername, username, { delay: 20 });
+    await page.type(selPassword, password, { delay: 20 });
+    log('entered credentials');
+    // Click the LOGIN TO ACCOUNT button by exact text (the page also has a
+    // "VENDOR ACCESS PORTAL" button — don't click that). Wait for the resulting
+    // navigation, fallback to Enter in the password field.
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: navTimeout }).catch(() => {}),
+      (async () => {
+        const clicked = await clickByText('login to account');
+        if (!clicked) { await page.focus(selPassword); await page.keyboard.press('Enter'); }
+      })(),
+    ]);
+    await sleep(2500);
+    const afterLoginUrl = page.url();
+    const stillOnLogin = /\/login(\?|\/|$|#)/i.test(afterLoginUrl) || /login/i.test(afterLoginUrl.split('#')[0].split('?')[0].split('/').pop() || '');
+    log(`after login: url=${afterLoginUrl}${stillOnLogin ? '  ← STILL ON LOGIN (auth failed — check creds/selector)' : '  (authenticated)'}`);
+    if (stillOnLogin) {
+      throw new Error(`Login did not establish a session (landed on ${afterLoginUrl}). Check HBMM_USERNAME/HBMM_PASSWORD or the login selectors.`);
+    }
+
+    // 4. Navigate to the ticket (single goto; we're authenticated so the cookie
+    // is sent). The app lands on home after login, so we submit the deep link.
+    await page.goto(ticketUrl, { waitUntil: 'networkidle2' });
+    await sleep(3500);
+    const diag = await page.evaluate(() => /upload document/i.test(document.body?.innerText || document.body?.textContent || '')).catch(() => false);
+    log(`opened ticket (url=${page.url()} · hasUploadDocText=${diag})`);
 
     // 5. Click "Upload Document" — precise AngularJS selector first, text fallback.
     const uploadDocCss = env('HBMM_SEL_UPLOAD_DOC_CSS', 'a[ng-click="openUploadModal(false)"], [ng-click*="openUploadModal"]');
