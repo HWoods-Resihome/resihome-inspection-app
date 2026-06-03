@@ -170,23 +170,33 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     await page.goto(loginUrl, { waitUntil: 'networkidle2' });
     log(`opened login (${loginUrl})`);
     await page.waitForSelector(selUsername, { timeout: navTimeout });
-    await page.type(selUsername, username, { delay: 25 });
-    await page.type(selPassword, password, { delay: 25 });
-    // Make sure AngularJS ng-model picked up the values (set + fire input/change).
-    await page.evaluate((su: string, sp: string, u: string, p: string) => {
-      const setVal = (sel: string, val: string) => {
+    // Type like a real user (per-field focus + keystrokes), then blur via Tab so
+    // an ng-model that updates on blur commits the value to the Angular model.
+    await page.click(selUsername).catch(() => {});
+    await page.type(selUsername, username, { delay: 30 });
+    await page.click(selPassword).catch(() => {});
+    await page.type(selPassword, password, { delay: 30 });
+    await page.keyboard.press('Tab');
+    // Fire input/change/blur explicitly too, in case the model binds on those.
+    await page.evaluate((su: string, sp: string) => {
+      for (const sel of [su, sp]) {
         const el = document.querySelector(sel) as HTMLInputElement | null;
-        if (el) { el.value = val; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }
-      };
-      setVal(su, u); setVal(sp, p);
-    }, selUsername, selPassword, username, password);
-    // Verify the model actually holds the values (helps spot empty/wrong env or
-    // an ng-model that didn't bind). Username shown (admin-only log); password masked.
-    const filled = await page.evaluate((su: string, sp: string) => ({
-      u: (document.querySelector(su) as HTMLInputElement | null)?.value || '',
-      pLen: ((document.querySelector(sp) as HTMLInputElement | null)?.value || '').length,
-    }), selUsername, selPassword).catch(() => ({ u: '', pLen: 0 }));
-    log(`entered credentials (env username="${username}" len=${password.length}; field username="${filled.u}" passwordLen=${filled.pLen})`);
+        if (el) ['input', 'change', 'blur'].forEach((ev) => el.dispatchEvent(new Event(ev, { bubbles: true })));
+      }
+    }, selUsername, selPassword);
+    // Read the actual AngularJS model so we can tell "field filled but model
+    // empty" (binding bug) from "model filled but creds rejected" (bad creds).
+    const filled = await page.evaluate((su: string, sp: string) => {
+      const uEl = document.querySelector(su) as HTMLInputElement | null;
+      const pEl = document.querySelector(sp) as HTMLInputElement | null;
+      let model: any = null;
+      try {
+        const ng = (window as any).angular;
+        if (ng && uEl) { const s = ng.element(uEl).scope(); if (s && s.Login) model = { u: s.Login.Username || '', hasPw: !!s.Login.AcctPassword }; }
+      } catch { /* ignore */ }
+      return { u: uEl?.value || '', pLen: (pEl?.value || '').length, model };
+    }, selUsername, selPassword).catch(() => ({ u: '', pLen: 0, model: null }));
+    log(`entered credentials (env username="${username}" len=${password.length}; field="${filled.u}" pwLen=${filled.pLen}; angularModel=${JSON.stringify(filled.model)})`);
     await sleep(600); // let AngularJS digest the model update
 
     // Click LOGIN TO ACCOUNT (#login_btn → Authenticate()). It's an AJAX login,
