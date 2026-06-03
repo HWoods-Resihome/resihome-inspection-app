@@ -170,20 +170,30 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     await page.goto(loginUrl, { waitUntil: 'networkidle2' });
     log(`opened login (${loginUrl})`);
     await page.waitForSelector(selUsername, { timeout: navTimeout });
-    // Type like a real user (per-field focus + keystrokes), then blur via Tab so
-    // an ng-model that updates on blur commits the value to the Angular model.
-    await page.click(selUsername).catch(() => {});
-    await page.type(selUsername, username, { delay: 30 });
-    await page.click(selPassword).catch(() => {});
-    await page.type(selPassword, password, { delay: 30 });
-    await page.keyboard.press('Tab');
-    // Fire input/change/blur explicitly too, in case the model binds on those.
-    await page.evaluate((su: string, sp: string) => {
-      for (const sel of [su, sp]) {
+    // Set each field directly into its own element (keyboard typing was dumping
+    // both values into the username box) AND push the value into the AngularJS
+    // ngModel the canonical way ($setViewValue inside $apply) so Login.Username /
+    // Login.AcctPassword actually bind before Authenticate() reads them.
+    await page.evaluate((su: string, sp: string, u: string, p: string) => {
+      const ng = (window as any).angular;
+      const setField = (sel: string, val: string) => {
         const el = document.querySelector(sel) as HTMLInputElement | null;
-        if (el) ['input', 'change', 'blur'].forEach((ev) => el.dispatchEvent(new Event(ev, { bubbles: true })));
-      }
-    }, selUsername, selPassword);
+        if (!el) return;
+        el.value = val;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        try {
+          if (ng) {
+            const ngEl = ng.element(el);
+            const ctrl = ngEl.controller && ngEl.controller('ngModel');
+            const scope = ngEl.scope && ngEl.scope();
+            if (ctrl && scope) scope.$apply(() => { ctrl.$setViewValue(val); ctrl.$render(); });
+          }
+        } catch { /* ignore — DOM value + events already set */ }
+      };
+      setField(su, u);
+      setField(sp, p);
+    }, selUsername, selPassword, username, password);
     // Read the actual AngularJS model so we can tell "field filled but model
     // empty" (binding bug) from "model filled but creds rejected" (bad creds).
     const filled = await page.evaluate((su: string, sp: string) => {
