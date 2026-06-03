@@ -293,11 +293,22 @@ export function CameraCapture({
     try {
       // Stop any existing stream before starting a new one (e.g., when switching facing)
       stopStream();
-      const videoConstraint = {
+      const videoConstraint: MediaTrackConstraints = {
         facingMode: { ideal: facing },
         width: { ideal: CAPTURE_WIDTH },
         height: { ideal: CAPTURE_HEIGHT },
+        // A steady 30fps keeps per-frame exposure short → less motion blur when
+        // panning/grabbing rapidly.
+        frameRate: { ideal: 30 },
       };
+      // Best-effort continuous autofocus / auto-exposure / auto-white-balance at
+      // acquisition (non-standard keys; silently ignored where unsupported). We
+      // also re-apply post-acquisition once capabilities are known (below).
+      (videoConstraint as any).advanced = [
+        { focusMode: 'continuous' },
+        { exposureMode: 'continuous' },
+        { whiteBalanceMode: 'continuous' },
+      ];
       // In AI mode we capture audio on the SAME stream so the AI layer can use a
       // single, high-quality mic feed (a separate getUserMedia mic is low-gain /
       // flaky on mobile). If the combined request fails, fall back to video-only
@@ -317,6 +328,27 @@ export function CameraCapture({
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => { /* play() may reject silently if autoplay is blocked; not fatal */ });
       }
+      // Keep the live preview continuously autofocused + auto-exposed so every
+      // grabbed frame is sharp — this same <video> feeds BOTH the manual shutter
+      // and the AI layer's stills. Continuous AF (vs. a per-shot focus pass)
+      // keeps rapid capture instant while minimizing soft/blurry frames.
+      // Capabilities populate late on some Android devices (like torch), so we
+      // apply now, on metadata, and on a couple of short delays. Best-effort.
+      const applyAutoFocus = () => {
+        try {
+          const track = streamRef.current?.getVideoTracks?.()[0];
+          if (!track) return;
+          const caps = (track.getCapabilities?.() as any) || {};
+          const advanced: any[] = [];
+          if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) advanced.push({ focusMode: 'continuous' });
+          if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous')) advanced.push({ exposureMode: 'continuous' });
+          if (Array.isArray(caps.whiteBalanceMode) && caps.whiteBalanceMode.includes('continuous')) advanced.push({ whiteBalanceMode: 'continuous' });
+          if (advanced.length) (track.applyConstraints as any)({ advanced }).catch(() => { /* unsupported on this device */ });
+        } catch { /* best-effort */ }
+      };
+      applyAutoFocus();
+      [500, 1500].forEach((ms) => setTimeout(applyAutoFocus, ms));
+      if (videoRef.current) videoRef.current.addEventListener('loadedmetadata', applyAutoFocus, { once: true });
       // Detect torch/flash support on the active video track. getCapabilities()
       // is unreliable immediately after getUserMedia — on many Android devices
       // .torch is undefined until the video has loaded metadata, and sometimes

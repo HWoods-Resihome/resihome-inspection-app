@@ -2915,7 +2915,7 @@ export function RateCardForm(props: RateCardFormProps) {
         <div className="flex items-center justify-between gap-2 mb-2">
           {assignedVendors.length > 0 ? (
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-xs font-heading text-gray-500 shrink-0">Filter by Assigned Vendor:</span>
+              <span className="text-xs font-heading text-gray-500 shrink-0">Vendor:</span>
               <ListPicker
                 value={activeVendorFilter}
                 options={[{ value: 'All', label: 'All Vendors' }, ...assignedVendors.map((v) => ({ value: v, label: v }))]}

@@ -21,7 +21,8 @@ import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
-import { vendorPillStyle } from '@/lib/vendors';
+import { vendorPillStyle, VENDORS } from '@/lib/vendors';
+import { ListPicker } from '@/components/ListPicker';
 import { PhotoStrip } from '@/components/PhotoStrip';
 import { useAppDialog } from '@/components/AppDialog';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
@@ -166,6 +167,27 @@ export function QcReinspectForm(props: Props) {
     }
     return order.map((k) => map.get(k)!);
   }, [lines, beforeMap]);
+
+  // Distinct vendors actually assigned on this reinspect, ordered by the
+  // canonical VENDORS list (then any extras). Drives the header filter dropdown.
+  const assignedVendors = useMemo(() => {
+    const present = new Set<string>();
+    for (const l of lines) { const v = (l.vendor || '').trim(); if (v) present.add(v); }
+    return [...VENDORS.filter((v) => present.has(v)), ...Array.from(present).filter((v) => !VENDORS.includes(v))];
+  }, [lines]);
+  const [vendorFilter, setVendorFilter] = useState<string>('All');
+  // Guard: if the selected vendor no longer has any lines, fall back to All.
+  const activeVendorFilter = vendorFilter !== 'All' && assignedVendors.includes(vendorFilter) ? vendorFilter : 'All';
+
+  // Sections to render — narrowed to the selected vendor's lines, hiding any
+  // section that has none of them. Keeps the same key/photos so collapse state
+  // and before/after photo maps still line up.
+  const visibleSections = useMemo(() => {
+    if (activeVendorFilter === 'All') return sections;
+    return sections
+      .map((s) => ({ ...s, lines: s.lines.filter((l) => (l.vendor || '').trim() === activeVendorFilter) }))
+      .filter((s) => s.lines.length > 0);
+  }, [sections, activeVendorFilter]);
 
   const totalPass = lines.filter((l) => l.passFail === 'pass').length;
   const totalFail = lines.filter((l) => l.passFail === 'fail').length;
@@ -520,8 +542,29 @@ export function QcReinspectForm(props: Props) {
 
       <div className="sticky top-0 z-10 -mx-5 sm:-mx-6 px-5 sm:px-6 py-2 mb-3 bg-white border-b border-gray-200 shadow-sm">
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <span className="text-sm font-semibold text-gray-700">{lines.length} items</span>
+            {assignedVendors.length > 0 && (
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-xs font-heading text-gray-500 shrink-0">Vendor:</span>
+                <ListPicker
+                  value={activeVendorFilter}
+                  options={[{ value: 'All', label: 'All Vendors' }, ...assignedVendors.map((v) => ({ value: v, label: v }))]}
+                  onChange={setVendorFilter}
+                  ariaLabel="Filter by Assigned Vendor"
+                  className="text-xs font-heading text-gray-800 flex items-center gap-0.5 hover:text-brand"
+                />
+                {activeVendorFilter !== 'All' && (
+                  <button
+                    type="button"
+                    onClick={() => setVendorFilter('All')}
+                    className="text-xs text-brand underline font-heading font-semibold shrink-0"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
             {sections.length > 1 && (
               <button
                 type="button"
@@ -550,7 +593,7 @@ export function QcReinspectForm(props: Props) {
         </div>
       )}
 
-      {sections.map((s) => {
+      {visibleSections.map((s) => {
         const secPass = s.lines.filter((l) => l.passFail === 'pass').length;
         const secFail = s.lines.filter((l) => l.passFail === 'fail').length;
         const after = afterPhotos[s.key] || [];
