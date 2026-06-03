@@ -526,7 +526,10 @@ function CreateTicketButton({ inspectionId }: { inspectionId: string }) {
       const r = await fetch(`/api/inspections/${inspectionId}/create-maintenance-ticket`, { method: 'POST' });
       const data = await r.json().catch(() => ({}));
       if (r.ok && data.ok) {
-        setResult({ ok: true, msg: `Ticket created${data.ticketId ? ` #${data.ticketId}` : ''}` });
+        setResult({
+          ok: true,
+          msg: `Ticket #${data.ticketId ?? '?'} · property ${data.propertyId ?? '?'} · req ${data.requestId ?? '?'}`,
+        });
       } else {
         setResult({ ok: false, msg: data.error || `Failed (HTTP ${r.status})` });
         // On failure, pull masked config diagnostics so we can see what was sent.

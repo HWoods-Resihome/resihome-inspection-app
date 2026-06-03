@@ -96,6 +96,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!result.ok) {
       return res.status(502).json({ ok: false, error: result.error || 'Ticket creation failed.', status: result.status, requestId: result.requestId });
     }
+    console.log(`[create-maintenance-ticket] inspection ${id}: created ticket #${result.ticketId} on property ${hbmmId} (req ${result.requestId})`);
     return res.status(200).json({ ok: true, ticketId: result.ticketId, propertyId: hbmmId, requestId: result.requestId });
   } catch (e: any) {
     console.error(`[create-maintenance-ticket] inspection ${id} failed:`, e);
