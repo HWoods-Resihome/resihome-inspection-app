@@ -37,6 +37,7 @@ import { renderChargebackXlsx } from '@/lib/xlsxChargeback';
 import { composeInspectionEmail } from '@/lib/email';
 import { sendInspectionEmail } from '@/lib/gmail';
 import { uploadToSftp, type SftpUploadResult } from '@/lib/sftp';
+import { createMaintenanceTicket, buildTicketDescription, type CreateTicketResult } from '@/lib/maintenanceAi';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
 
 export const config = {
@@ -558,6 +559,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     }
 
+    // ---- 8. Create a maintenance ticket (best-effort, first finalize only) ----
+    // Posts to the ResiCap/Ameritrust Maintenance AI API on the SAME property
+    // (hbmm_property_id), with our fixed intro + per-vendor scope-document links.
+    // Never blocks finalize; no-ops until MAINTENANCE_AI_API_KEY is set. Skipped
+    // on re-finalize so a reopen doesn't create duplicate tickets.
+    let ticketResult: CreateTicketResult | null = null;
+    if (!isRefinalize) {
+      try {
+        const hbmmId = Number(inspectionData.propertyHbmmId || '');
+        if (!inspectionData.propertyHbmmId || !Number.isFinite(hbmmId)) {
+          console.warn('[finalize] maintenance ticket skipped — property has no hbmm_property_id.');
+          ticketResult = { ok: false, configured: true, error: 'Property has no hbmm_property_id.' };
+        } else {
+          ticketResult = await createMaintenanceTicket({
+            propertyId: hbmmId,
+            description: buildTicketDescription(vendorUrls),
+          });
+          if (ticketResult.ok) {
+            console.log(`[finalize] maintenance ticket created: #${ticketResult.ticketId}`);
+          } else if (ticketResult.configured) {
+            console.warn(`[finalize] maintenance ticket failed: ${ticketResult.error}`);
+          } else {
+            console.warn('[finalize] maintenance ticket skipped — MAINTENANCE_AI not configured.');
+          }
+        }
+      } catch (e: any) {
+        ticketResult = { ok: false, configured: true, error: String(e?.message || e).slice(0, 300) };
+        console.warn('[finalize] maintenance ticket threw (caught, finalize continues):', e);
+      }
+    }
+
     bustInspectionsCache(); // status → completed; reflect in the list at once
     const elapsed = Date.now() - t0;
     return res.status(200).json({
@@ -575,6 +607,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })),
       },
       email: emailResult,
+      maintenanceTicket: ticketResult,
       totals: {
         vendor: ctx.grandTotals.vendor,
         client: ctx.grandTotals.client,

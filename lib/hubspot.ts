@@ -1209,6 +1209,10 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
    *  null when the property has no value (or the field doesn't exist yet);
    *  callers default to 12. */
   propertyLastTenantMonths: number | null;
+  /** Numeric Property ID in the ResiCap/Ameritrust Maintenance system
+   *  (`hbmm_property_id` on the HubSpot property). Used as `propertyId` when
+   *  creating a maintenance ticket. null when unset. */
+  propertyHbmmId: string | null;
 } | null> {
   const { inspection: typeId, property: propertyTypeId } = typeIds();
   const properties = [
@@ -1248,6 +1252,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     let propertyEntityId: string | null = null;
     let propertyLastPrimaryTenant: string | null = null;
     let propertyLastTenantMonths: number | null = null;
+    let propertyHbmmId: string | null = null;
     if (propertyIdRef) {
       // ISOLATED fetch for the (possibly not-yet-created) tenant-occupancy field.
       // Kept separate from the extras batch below so that, if HubSpot 400s on an
@@ -1269,6 +1274,9 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
           'square_footage', 'zip', 'zip_code',
           'address', 'city', 'state_code',
           'entity_id', 'last_primary_tenant',
+          // Numeric Property ID in the ResiCap/Ameritrust Maintenance system —
+          // used as `propertyId` when creating a maintenance ticket at finalize.
+          'hbmm_property_id',
         ];
         const propQs = propProps.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
         const propResp = await hubspotFetch(
@@ -1286,6 +1294,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         propertyStateCode = (pp.state_code || '').toString().trim() || null;
         propertyEntityId = (pp.entity_id || '').toString().trim() || null;
         propertyLastPrimaryTenant = (pp.last_primary_tenant || '').toString().trim() || null;
+        propertyHbmmId = (pp.hbmm_property_id || '').toString().trim() || null;
       } catch (e: any) {
         console.warn(`[fetchInspectionWithPropertyRef] could not fetch property ${propertyIdRef} extras:`, String(e).slice(0, 200));
       }
@@ -1335,6 +1344,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       propertyEntityId,
       propertyLastPrimaryTenant,
       propertyLastTenantMonths,
+      propertyHbmmId,
     };
   } catch (e: any) {
     if (String(e).includes('404')) return null;
