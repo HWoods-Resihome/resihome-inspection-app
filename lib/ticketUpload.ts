@@ -180,7 +180,14 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
       };
       setVal(su, u); setVal(sp, p);
     }, selUsername, selPassword, username, password);
-    log('entered credentials');
+    // Verify the model actually holds the values (helps spot empty/wrong env or
+    // an ng-model that didn't bind). Username shown (admin-only log); password masked.
+    const filled = await page.evaluate((su: string, sp: string) => ({
+      u: (document.querySelector(su) as HTMLInputElement | null)?.value || '',
+      pLen: ((document.querySelector(sp) as HTMLInputElement | null)?.value || '').length,
+    }), selUsername, selPassword).catch(() => ({ u: '', pLen: 0 }));
+    log(`entered credentials (env username="${username}" len=${password.length}; field username="${filled.u}" passwordLen=${filled.pLen})`);
+    await sleep(600); // let AngularJS digest the model update
 
     // Click LOGIN TO ACCOUNT (#login_btn → Authenticate()). It's an AJAX login,
     // so wait for the login form to go away (success) rather than a navigation.
@@ -191,10 +198,17 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     await sleep(3000);
     const afterLoginUrl = page.url();
     const stillOnLogin = !!(await page.$('#login_btn'));
-    log(`after login: url=${afterLoginUrl}${stillOnLogin ? '  ← STILL ON LOGIN (auth failed — check creds)' : '  (authenticated)'}`);
     if (stillOnLogin) {
-      throw new Error(`Login did not succeed (still on the login form). Check HBMM_USERNAME / HBMM_PASSWORD.`);
+      // Surface any visible error message the login page is showing.
+      const msg = await page.evaluate(() => {
+        const t = (document.body?.innerText || '').replace(/\s+/g, ' ');
+        const m = t.match(/(invalid|incorrect|wrong|failed|not recognized|does not match|locked|disabled|required)[^.]{0,80}/i);
+        return m ? m[0].trim() : '';
+      }).catch(() => '');
+      log(`after login: url=${afterLoginUrl}  ← STILL ON LOGIN${msg ? ` · page says: "${msg}"` : ''}`);
+      throw new Error(`Login did not succeed (still on the login form).${msg ? ` Page says: "${msg}".` : ''} Verify HBMM_USERNAME / HBMM_PASSWORD.`);
     }
+    log(`after login: url=${afterLoginUrl}  (authenticated)`);
 
     // 4. Navigate to the ticket (single goto; we're authenticated so the cookie
     // is sent). The app lands on home after login, so we submit the deep link.
