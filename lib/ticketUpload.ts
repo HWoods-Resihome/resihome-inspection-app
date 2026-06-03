@@ -124,12 +124,14 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
   };
 
   try {
-    // 1. Download the files locally.
+    // 1. Download the files locally (log sizes — a tiny size means we fetched an
+    // error/HTML page instead of the PDF).
     const localPaths: string[] = [];
     for (let i = 0; i < args.files.length; i++) {
-      localPaths.push(await downloadToTmp(args.files[i], tmpDir, i));
+      const p = await downloadToTmp(args.files[i], tmpDir, i);
+      localPaths.push(p);
+      log(`downloaded ${args.files[i].name} → ${(fs.statSync(p).size / 1024).toFixed(0)} KB`);
     }
-    log(`downloaded ${localPaths.length} file(s)`);
 
     // 2. Launch headless Chromium.
     browser = await puppeteer.launch({
@@ -142,6 +144,20 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     page.setDefaultTimeout(navTimeout);
     page.setDefaultNavigationTimeout(navTimeout);
     log('launched browser');
+
+    // Capture upload network calls so we can see whether the file actually POSTed
+    // and what the server returned (the modal can close optimistically on failure).
+    const postResponses: string[] = [];
+    page.on('response', (resp: any) => {
+      try {
+        const rq = resp.request();
+        const m = rq.method();
+        if (m === 'POST' || m === 'PUT') {
+          const u = rq.url().split('?')[0];
+          postResponses.push(`${resp.status()} ${u.slice(-70)}`);
+        }
+      } catch { /* ignore */ }
+    });
 
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     // Robust click-by-visible-text over interactive elements (handles icons,
@@ -264,11 +280,16 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     // files dispatches a change event → Kendo stages them in fileList.
     await sleep(1500);
     await page.waitForSelector(selFileInput, { timeout: navTimeout });
-    const inputs = await page.$$(selFileInput);
-    const input = inputs[inputs.length - 1] || inputs[0];
+    // Prefer the Kendo document uploader (#uploader); fall back to the last file input.
+    let input = await page.$('input#uploader');
+    if (!input) { const inputs = await page.$$(selFileInput); input = inputs[inputs.length - 1] || inputs[0]; }
     if (!input) throw new Error(`file input not found (${selFileInput})`);
     await input.uploadFile(...localPaths);
     log(`attached ${localPaths.length} file(s) to the input`);
+    // Confirm Kendo actually staged the file(s) (fileList row appears).
+    await sleep(1200);
+    const staged = await page.evaluate(() => document.querySelectorAll('.k-file, .k-upload-files li, [data-uid].k-file').length).catch(() => 0);
+    log(`staged files in widget: ${staged}`);
 
     // If there's a required "Add Files to:" section dropdown showing, pick the
     // first real option (skip the "?" placeholder) so upload isn't blocked.
@@ -291,6 +312,7 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     // disabled until files are staged — wait for it to enable, then click.
     await sleep(1200);
     const selUp = env('HBMM_SEL_UPLOAD_BTN_CSS', 'button[ng-click="upload()"]');
+    const postsBefore = postResponses.length;
     let clickedUpload = false;
     try {
       await page.waitForFunction((sel: string) => {
@@ -304,14 +326,33 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     if (!clickedUpload) throw new Error('could not click the modal Upload button (still disabled — files may not have staged)');
     log('clicked Upload');
 
-    // Wait for the async upload to finish — prefer the modal closing as the
-    // success signal, otherwise give it a generous fixed wait.
-    await page.waitForFunction(() => !document.querySelector('.modal.in, .modal[style*="display: block"]'), { timeout: 20000 })
-      .then(() => log('upload modal closed (success)'))
-      .catch(() => log('upload modal still open after wait (verify on the ticket)'));
-    await sleep(2000);
+    // Wait for the async upload to actually complete, then judge by the NETWORK
+    // (the modal can close optimistically even when the upload fails).
+    await sleep(9000);
+    const newPosts = postResponses.slice(postsBefore);
+    log(`upload network POST/PUT: ${newPosts.join(' | ') || '(NONE — file did not submit)'}`);
+    // Kendo success/error indicators, if present.
+    const kendo = await page.evaluate(() => {
+      if (document.querySelector('.k-file-error, .k-file-invalid, .k-i-warning, .k-i-close')) return 'error';
+      if (document.querySelector('.k-file-success, .k-i-check, .k-i-tick')) return 'success';
+      return 'unknown';
+    }).catch(() => 'unknown');
+    log(`kendo file status: ${kendo}`);
 
-    return { ok: true, configured: true, uploaded: localPaths.length, steps };
+    const shot = await screenshotB64();
+    const had2xxPost = newPosts.some((s) => /^2\d\d /.test(s));
+    const hadErrPost = newPosts.some((s) => /^[45]\d\d /.test(s));
+    const succeeded = kendo === 'success' || (had2xxPost && kendo !== 'error' && !hadErrPost);
+    if (!succeeded) {
+      return {
+        ok: false, configured: true, uploaded: 0, steps,
+        error: newPosts.length
+          ? `Upload did not confirm. Server responses: ${newPosts.join(', ')}; widget status: ${kendo}.`
+          : `No upload request was sent (file may not have staged; widget status: ${kendo}).`,
+        screenshot: shot,
+      };
+    }
+    return { ok: true, configured: true, uploaded: localPaths.length, steps, screenshot: shot };
   } catch (e: any) {
     const shot = await screenshotB64();
     return {

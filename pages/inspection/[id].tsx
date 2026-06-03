@@ -626,8 +626,8 @@ function CreateTicketButton({ inspectionId }: { inspectionId: string }) {
 {upload.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}
             </pre>
           )}
-          {/* Failure screenshot helps tune selectors without a redeploy. */}
-          {!upload.ok && upload.screenshot && (
+          {/* Final screenshot (success or failure) for verification/tuning. */}
+          {upload.screenshot && (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={upload.screenshot} alt="upload failure screenshot" className="mt-1 w-full max-w-md border border-gray-300 rounded" />
           )}
