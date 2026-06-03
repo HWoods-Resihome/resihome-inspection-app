@@ -98,6 +98,15 @@ export interface InspectionSummary {
   qcVerdict: 'pass' | 'fail' | null;
   qcPassCount: number | null;
   qcFailCount: number | null;
+  // Rate Card submit/approve stamps. submittedAt is set when the inspector
+  // submits for approval; approvedByName/approvedAt when an approver finalizes.
+  submittedAt: string | null;
+  approvedByName: string | null;
+  approvedAt: string | null;
+  // Per-line Internal Resolution timing map { lineExternalId: 'now' | 'later' },
+  // persisted at submit so the approver (any device) + the finalize gate honor
+  // "Complete Later" (after-photos optional). Empty/null before set.
+  resolutionTimingJson: string | null;
 }
 
 export interface HubSpotUser {

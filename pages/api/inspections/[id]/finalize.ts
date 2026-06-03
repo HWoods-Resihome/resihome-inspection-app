@@ -291,14 +291,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
-    // Internal Resolution lines REQUIRE after-photos (in-house proof of work).
-    // Gated on the property existing so this can't block before the migration
-    // (a first re-finalize is exempt — it's a regeneration, not a fresh submit).
+    // Per-line Internal Resolution timing: "Complete Later" lines are exempt
+    // from the after-photo requirement. The map is persisted at submit
+    // (resolution_timing_json) so the approver — on any device — and this
+    // server gate both honor it. Also accept a map in the request body as a
+    // fallback (same-device finalize / older inspections).
+    const laterLineIds = new Set<string>();
+    const applyTimingMap = (raw: any) => {
+      if (raw && typeof raw === 'object') {
+        for (const [extId, v] of Object.entries(raw)) {
+          if (v === 'later') laterLineIds.add(extId);
+        }
+      }
+    };
+    try { applyTimingMap(JSON.parse(inspection.resolutionTimingJson || '{}')); } catch { /* ignore */ }
+    applyTimingMap((req.body || {}).resolutionTimings);
+
+    // Internal Resolution lines REQUIRE after-photos (in-house proof of work),
+    // UNLESS marked "Complete Later". Gated on the property existing so this
+    // can't block before the migration (a first re-finalize is exempt — it's a
+    // regeneration, not a fresh submit).
     if (!isRefinalize && await answerHasAfterPhotoProperty()) {
       const missingAfter: string[] = [];
       for (const g of sectionGroups.values()) {
         for (const line of g.lines) {
-          if (isInternalResolution(line.vendor) && (line.afterPhotoUrls?.length ?? 0) === 0) {
+          if (isInternalResolution(line.vendor)
+            && !laterLineIds.has(line.externalId)
+            && (line.afterPhotoUrls?.length ?? 0) === 0) {
             missingAfter.push(`${g.displayName}: ${line.laborShortDescription}`);
           }
         }
@@ -325,6 +344,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       squareFootage: inspectionData.propertySquareFootage,
       region: inspection.regionSnapshot || null,
       generatedAtIso: new Date().toISOString(),
+      // Submit/approve stamps for the Master PDF. Approver = the current
+      // finalizer (or the previously-recorded approver on a re-finalize).
+      submittedAtIso: inspection.submittedAt || null,
+      approverName: (isRefinalize ? inspection.approvedByName : (session.name || session.email)) || null,
+      approvedAtIso: (isRefinalize ? inspection.approvedAt : new Date().toISOString()) || null,
       // Preserve the section instance ordering
       sections: sectionInstances.map((s) => sectionGroups.get(s.id)!).filter(Boolean),
       grandTotals: { vendor: grandVendor, client: grandClient, tenant: grandTenant, lineCount: grandLineCount },
@@ -492,6 +516,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       link_chargeback: shareChargebackUrl || '',
       link_xlsx: shareXlsxUrl || '',
       link_vendors_json: JSON.stringify(shareVendorLinks),
+      // Approver stamp (the finalize IS the approval). Set on first finalize so
+      // a later regeneration doesn't overwrite the original approver.
+      ...(!isRefinalize ? { approved_by_name: session.name || session.email, approved_at: nowIso } : {}),
     };
     try {
       await updateInspection(id, fullUpdate);

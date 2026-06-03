@@ -57,13 +57,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // they wait it out). Best-effort: if the HubSpot properties don't exist yet,
     // the lockout simply stays inert (fails open). Only meaningful for rate cards.
     if (isRateCard) {
+      // Persist the per-line Internal Resolution timing map { externalId: 'now'|'later' }
+      // sent by the client. This makes "Complete Later" authoritative for the
+      // approver (any device) and for the server-side finalize after-photo gate,
+      // instead of living only in the submitter's localStorage.
+      const rawTimings = body.resolutionTimings;
+      let resolutionTimingJson = '';
+      if (rawTimings && typeof rawTimings === 'object') {
+        try { resolutionTimingJson = JSON.stringify(rawTimings); } catch { /* ignore */ }
+      }
       try {
         await updateInspection(id, {
           submitted_by_email: session.email,
           submitted_at: nowIso,
+          ...(resolutionTimingJson ? { resolution_timing_json: resolutionTimingJson } : {}),
         });
       } catch (e) {
-        console.warn('[submit] could not record submitted_by_email/submitted_at (create these HubSpot properties to enable the self-approval lockout):', e);
+        console.warn('[submit] could not record submitted_by_email/submitted_at/resolution_timing_json (create these HubSpot properties to enable the self-approval lockout + Complete Later):', e);
       }
     }
     const inspection = await fetchInspectionById(id);

@@ -37,10 +37,22 @@ import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 
+// "M/DD/YY" stamp for the header submit/approve lines. Returns '' for missing/bad input.
+function fmtStamp(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getMonth() + 1}/${String(d.getDate()).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`;
+}
+
 interface RateCardFormProps {
   templateType: TemplateType;
   templateLabel: string;
   inspectorName: string;
+  /** Submit/approve stamps for the header (ISO strings). */
+  submittedAt?: string | null;
+  approverName?: string | null;
+  approvedAt?: string | null;
   propertyName: string;
   /** Property record id — used to validate camera GPS against the property. */
   propertyRecordId?: string;
@@ -531,8 +543,17 @@ export function RateCardForm(props: RateCardFormProps) {
         if (cancelled) return;
 
         setAfterPhotosEnabled(data.afterPhotosEnabled === true);
-        // Restore per-line Internal Resolution timing choices (device-local).
-        setResolutionTimings(getResolutionTimings(props.inspectionRecordId));
+        // Restore per-line Internal Resolution timing choices: device-local
+        // first, then overlay the server-persisted map (set at submit) so the
+        // approver — on any device — sees the same "Complete Later" choices.
+        {
+          let merged: Record<string, 'now' | 'later'> = { ...getResolutionTimings(props.inspectionRecordId) };
+          try {
+            const serverMap = JSON.parse(data.inspection?.resolutionTimingJson || '{}');
+            if (serverMap && typeof serverMap === 'object') merged = { ...merged, ...serverMap };
+          } catch { /* ignore malformed */ }
+          setResolutionTimings(merged);
+        }
         const answers = data.answers || [];
 
         // Build a lookup: "label||location" -> sectionId
@@ -2402,7 +2423,9 @@ export function RateCardForm(props: RateCardFormProps) {
         const r = await fetch(`/api/inspections/${props.inspectionRecordId}/finalize`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
+          // Send the timing map so same-device finalize honors "Complete Later"
+          // even for inspections submitted before the map was persisted.
+          body: JSON.stringify({ resolutionTimings }),
         });
         if (!r.ok) {
           // Surface the server's clean message (e.g. the self-approval lockout)
@@ -2428,7 +2451,9 @@ export function RateCardForm(props: RateCardFormProps) {
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        // Persist the per-line "Complete Now/Later" choices so the approver (any
+        // device) and the finalize gate honor them.
+        body: JSON.stringify({ resolutionTimings }),
       });
       if (!r.ok) {
         const text = await r.text();
@@ -2506,7 +2531,20 @@ export function RateCardForm(props: RateCardFormProps) {
                 </span>
               )}
             </div>
-            <div className="text-xs text-gray-500 mt-0.5">Inspector: {props.inspectorName}</div>
+            <div className="text-xs text-gray-500 mt-0.5">
+              Inspector: {props.inspectorName}
+              {fmtStamp(props.submittedAt) && (
+                <span className="text-gray-400">{'  ·  '}{fmtStamp(props.submittedAt)} Submitted</span>
+              )}
+            </div>
+            {props.approverName && (
+              <div className="text-xs text-gray-500 mt-0.5">
+                Approver: {props.approverName}
+                {fmtStamp(props.approvedAt) && (
+                  <span className="text-gray-400">{'  ·  '}{fmtStamp(props.approvedAt)} Approved</span>
+                )}
+              </div>
+            )}
             {props.pdfUrl && (
               <a href={props.pdfUrl} target="_blank" rel="noopener noreferrer"
                  className="inline-block mt-2 text-sm text-brand underline">View PDF</a>

@@ -31,10 +31,20 @@ const COL = {
   tenantCost: '9%',
 };
 
+// "M/DD/YY" stamp (month not padded, day 2-digit, year 2-digit).
+function stampDate(iso?: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return `${d.getMonth() + 1}/${String(d.getDate()).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`;
+}
+
 function MasterDoc(props: { ctx: PdfBuildContext }) {
   ensureFontRegistered();
   const { ctx } = props;
   const generatedAtLabel = isoToHumanDate(ctx.generatedAtIso);
+  const submittedStamp = stampDate(ctx.submittedAtIso);
+  const approvedStamp = stampDate(ctx.approvedAtIso);
   const populatedSections = ctx.sections.filter(
     (s) => s.lines.length > 0 || s.photoUrls.length > 0
   );
@@ -50,6 +60,9 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
           docTitle={`${ctx.templateLabel} - Master`}
           propertyName={ctx.propertyName}
           inspectorName={ctx.inspectorName}
+          submittedLabel={submittedStamp ? `${submittedStamp} Submitted` : null}
+          approverName={ctx.approverName || null}
+          approvedLabel={approvedStamp ? `${approvedStamp} Approved` : null}
           region={ctx.region}
           squareFootage={ctx.squareFootage}
           bedrooms={ctx.bedrooms}

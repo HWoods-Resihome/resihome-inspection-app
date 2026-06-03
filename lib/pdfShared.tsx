@@ -321,11 +321,20 @@ export function PdfHeaderStrip(props: {
   bedrooms: number;
   bathrooms: number;
   generatedAtLabel: string;
+  /** Optional "M/DD/YY Submitted" stamp shown right after the inspector name. */
+  submittedLabel?: string | null;
+  /** Optional approver name + "M/DD/YY Approved" stamp shown on a second line. */
+  approverName?: string | null;
+  approvedLabel?: string | null;
   /** Right-aligned summary content — typically a Tenant Total or Vendor Total. */
   summary?: React.ReactNode;
 }) {
+  // Inspector + (optional) submitted stamp on one line.
+  const inspectorLine = props.submittedLabel
+    ? `${props.inspectorName}  ·  ${props.submittedLabel}`
+    : props.inspectorName;
+
   const metaParts: string[] = [];
-  metaParts.push(props.inspectorName);
   if (props.bedrooms > 0 || props.bathrooms > 0) {
     metaParts.push(`${props.bedrooms} bed / ${props.bathrooms} bath`);
   }
@@ -340,6 +349,12 @@ export function PdfHeaderStrip(props: {
       <View style={pdfStyles.headerLeft}>
         <Text style={pdfStyles.headerTitle}>{props.docTitle}</Text>
         <Text style={pdfStyles.headerProperty}>{props.propertyName}</Text>
+        <Text style={pdfStyles.headerMeta}>{inspectorLine}</Text>
+        {props.approverName ? (
+          <Text style={pdfStyles.headerMeta}>
+            Approver: {props.approverName}{props.approvedLabel ? `  ·  ${props.approvedLabel}` : ''}
+          </Text>
+        ) : null}
         <Text style={pdfStyles.headerMeta}>{metaParts.join(' · ')}</Text>
       </View>
       {props.summary ? <View style={pdfStyles.headerRight}>{props.summary}</View> : null}
@@ -459,6 +474,12 @@ export interface PdfBuildContext {
   squareFootage: number | null;
   region: string | null;
   generatedAtIso: string;
+  /** When the inspector submitted for approval (ISO). Drives the "Submitted" stamp. */
+  submittedAtIso?: string | null;
+  /** Approver's full name + when they approved (the finalize). Drives the
+   *  "Approver: … Approved" line. */
+  approverName?: string | null;
+  approvedAtIso?: string | null;
   sections: PdfSectionGroup[];
   grandTotals: { vendor: number; client: number; tenant: number; lineCount: number };
 }

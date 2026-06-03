@@ -349,6 +349,9 @@ export default function ExistingInspection() {
           propertyRecordId={propertyRecordId}
           templateLabel={templateLabel}
           inspectorName={inspection.inspectorName}
+          submittedAt={inspection.submittedAt}
+          approverName={inspection.approvedByName}
+          approvedAt={inspection.approvedAt}
           propertyName={propertyName}
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}

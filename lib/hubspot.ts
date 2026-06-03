@@ -569,6 +569,10 @@ export async function fetchInspections(opts: { search?: string } = {}): Promise<
         qcVerdict: null,
         qcPassCount: null,
         qcFailCount: null,
+        submittedAt: null,
+        approvedByName: null,
+        approvedAt: null,
+        resolutionTimingJson: null,
       });
     }
     after = resp.paging?.next?.after;
@@ -1179,6 +1183,10 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
       qcVerdict: null,
       qcPassCount: null,
       qcFailCount: null,
+      submittedAt: null,
+      approvedByName: null,
+      approvedAt: null,
+      resolutionTimingJson: null,
     };
   } catch (e: any) {
     if (String(e).includes('404')) return null;
@@ -1226,6 +1234,8 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     // Phase 4 PDF outputs (Rate Card finalize)
     'pdf_master_url', 'pdf_chargeback_url', 'pdf_chargeback_xlsx_url', 'pdf_vendor_urls_json', 'pdf_generated_at',
     'source_rate_card_id', 'source_rate_card_name', 'qc_verdict', 'qc_pass_count', 'qc_fail_count',
+    // Submit/approve stamps + Internal Resolution timing map
+    'submitted_at', 'approved_by_name', 'approved_at', 'resolution_timing_json',
   ];
   try {
     const qs = properties.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
@@ -1334,6 +1344,10 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         qcVerdict: (p.qc_verdict === 'pass' || p.qc_verdict === 'fail') ? p.qc_verdict : null,
         qcPassCount: p.qc_pass_count != null && p.qc_pass_count !== '' ? Number(p.qc_pass_count) : null,
         qcFailCount: p.qc_fail_count != null && p.qc_fail_count !== '' ? Number(p.qc_fail_count) : null,
+        submittedAt: p.submitted_at || null,
+        approvedByName: p.approved_by_name || null,
+        approvedAt: p.approved_at || null,
+        resolutionTimingJson: p.resolution_timing_json || null,
       },
       propertyIdRef,
       propertySquareFootage,
