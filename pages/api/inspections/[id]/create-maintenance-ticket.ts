@@ -14,6 +14,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { fetchInspectionWithPropertyRef } from '@/lib/hubspot';
 import { createMaintenanceTicket, buildTicketDescription } from '@/lib/maintenanceAi';
+import { buildShortLink } from '@/lib/shortLinks';
 
 const ADMIN_EMAIL = 'hwoods@resihome.com';
 
@@ -73,7 +74,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
-    // Per-vendor scope PDF links from the stored finalize output.
+    // Per-vendor scope PDFs from the stored finalize output → clean short links.
     let vendorUrls: Record<string, string> = {};
     if (data.inspection.pdfVendorUrlsJson) {
       try {
@@ -81,10 +82,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (parsed && typeof parsed === 'object') vendorUrls = parsed as Record<string, string>;
       } catch { /* malformed — fall through with empty links */ }
     }
+    const shareHost = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
+    const shareProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+    const shareBase = `${shareProto}://${shareHost}`;
+    const shareVendorLinks: Record<string, string> = {};
+    for (const vendor of Object.keys(vendorUrls)) {
+      shareVendorLinks[vendor] = buildShortLink(shareBase, id, 'vendor', vendor);
+    }
 
     const result = await createMaintenanceTicket({
       propertyId: hbmmId,
-      description: buildTicketDescription(vendorUrls),
+      description: buildTicketDescription(shareVendorLinks),
     });
 
     if (!result.configured) {

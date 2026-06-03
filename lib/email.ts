@@ -132,8 +132,9 @@ function buildHtmlBody(args: {
   links: InspectionLinks;
   files: Array<{ filename: string; url: string }>;
   tenantImport?: TenantImportStatus | null;
+  maintenanceTicket?: MaintenanceTicketStatus | null;
 }): string {
-  const { prop, ctx, vendorBreakdown, links, files, tenantImport } = args;
+  const { prop, ctx, vendorBreakdown, links, files, tenantImport, maintenanceTicket } = args;
   // Tenant Charge Import (SFTP) status badge. Only rendered when we actually
   // tried to push the xlsx (tenantImport present) AND the SFTP is configured —
   // when unconfigured we stay silent rather than show a scary "Unsuccessful".
@@ -145,6 +146,19 @@ function buildHtmlBody(args: {
             ${tenantImport.ok
               ? `<div style="font-size:14px;font-weight:bold;color:#047857;">✅ Tenant charge import successful</div>`
               : `<div style="font-size:14px;font-weight:bold;color:#b91c1c;">❌ Tenant charge import unsuccessful</div>${tenantImport.error ? `<div style="font-size:11px;color:#9ca3af;margin-top:4px;">${escapeHtml(tenantImport.error)}</div>` : ''}`}
+          </td>
+        </tr>`
+    : '';
+  // Maintenance ticket status badge. Only rendered when creation was attempted
+  // AND configured. Links to the ticket when we have a URL.
+  const ticketHtml = maintenanceTicket && maintenanceTicket.configured
+    ? `<!-- Maintenance Ticket -->
+        <tr>
+          <td style="padding:16px 24px 0 24px;">
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;font-weight:bold;">Maintenance Ticket</div>
+            ${maintenanceTicket.ok
+              ? `<div style="font-size:14px;font-weight:bold;color:#047857;">✅ Ticket created${maintenanceTicket.ticketId ? ` #${maintenanceTicket.ticketId}` : ''}${maintenanceTicket.url ? ` — <a href="${escapeAttr(maintenanceTicket.url)}" style="color:#ff0060;text-decoration:underline;font-weight:bold;">View ticket</a>` : ''}</div>`
+              : `<div style="font-size:14px;font-weight:bold;color:#b91c1c;">❌ Ticket not created</div>${maintenanceTicket.error ? `<div style="font-size:11px;color:#9ca3af;margin-top:4px;">${escapeHtml(maintenanceTicket.error)}</div>` : ''}`}
           </td>
         </tr>`
     : '';
@@ -256,6 +270,8 @@ function buildHtmlBody(args: {
 
         ${tenantImportHtml}
 
+        ${ticketHtml}
+
         <!-- Links -->
         <tr>
           <td style="padding:16px 24px;">
@@ -291,8 +307,9 @@ function buildTextBody(args: {
   links: InspectionLinks;
   files: Array<{ filename: string; url: string }>;
   tenantImport?: TenantImportStatus | null;
+  maintenanceTicket?: MaintenanceTicketStatus | null;
 }): string {
-  const { prop, ctx, vendorBreakdown, links, files, tenantImport } = args;
+  const { prop, ctx, vendorBreakdown, links, files, tenantImport, maintenanceTicket } = args;
   const addressLine = [
     prop.addressStreet,
     [prop.city, prop.stateCode].filter(Boolean).join(', ') + (prop.zipCode ? ` ${prop.zipCode}` : ''),
@@ -335,6 +352,16 @@ function buildTextBody(args: {
       ? '  Tenant charge import successful'
       : '  Tenant charge import unsuccessful' + (tenantImport.error ? ` (${tenantImport.error})` : ''));
   }
+  if (maintenanceTicket && maintenanceTicket.configured) {
+    lines.push('');
+    lines.push('MAINTENANCE TICKET');
+    if (maintenanceTicket.ok) {
+      lines.push('  Ticket created' + (maintenanceTicket.ticketId ? ` #${maintenanceTicket.ticketId}` : ''));
+      if (maintenanceTicket.url) lines.push('  ' + maintenanceTicket.url);
+    } else {
+      lines.push('  Ticket not created' + (maintenanceTicket.error ? ` (${maintenanceTicket.error})` : ''));
+    }
+  }
   lines.push('');
   lines.push('-- Sent from the ResiHome Inspection App');
   return lines.join('\n');
@@ -371,6 +398,24 @@ export interface TenantImportStatus {
   error?: string;
 }
 
+/** Short share links (resolve to the real files) for the displayed Files list. */
+export interface ShareLinks {
+  masterPdf?: string | null;
+  chargebackPdf?: string | null;
+  chargebackXlsx?: string | null;
+  vendorPdfs?: Record<string, string>;
+}
+
+/** Maintenance-ticket creation status, rendered as a line in the email body. */
+export interface MaintenanceTicketStatus {
+  ok: boolean;
+  /** false when MAINTENANCE_AI_API_KEY isn't set (creation was skipped). */
+  configured: boolean;
+  ticketId?: number;
+  url?: string | null;
+  error?: string;
+}
+
 export function composeInspectionEmail(args: {
   ctx: PdfBuildContext;
   prop: PropertyContact;
@@ -382,8 +427,13 @@ export function composeInspectionEmail(args: {
   /** SFTP delivery status for the Tenant Chargeback Import xlsx, rendered as a
    *  line in the email body. Omit/null when there was no xlsx to send. */
   tenantImport?: TenantImportStatus | null;
+  /** Clean short links for the displayed Files section (attachments still use
+   *  the real URLs for fetching). When omitted, the real URLs are displayed. */
+  shareLinks?: ShareLinks | null;
+  /** Maintenance-ticket creation status → status line in the body. */
+  maintenanceTicket?: MaintenanceTicketStatus | null;
 }): InspectionEmailPayload {
-  const { ctx, prop, links, attachments, inspectorEmail, tenantImport } = args;
+  const { ctx, prop, links, attachments, inspectorEmail, tenantImport, shareLinks, maintenanceTicket } = args;
 
   // Recipients
   const to = [SODA_EMAIL];
@@ -443,9 +493,25 @@ export function composeInspectionEmail(args: {
   // large attachment that gets skipped at send time (Gmail 25 MB cap) is still
   // one click away.
   const subject = buildSubject(ctx.grandTotals.client, prop);
-  const files = attachmentList.map((a) => ({ filename: a.filename, url: a.url }));
-  const htmlBody = buildHtmlBody({ prop, ctx, vendorBreakdown, links, files, tenantImport });
-  const textBody = buildTextBody({ prop, ctx, vendorBreakdown, links, files, tenantImport });
+  // Displayed Files links prefer the clean short links (resolve to the real
+  // file); fall back to the real URL when a short link wasn't provided. Order
+  // mirrors attachmentList: master, chargeback PDF, vendor PDFs, xlsx last.
+  const files: Array<{ filename: string; url: string }> = [];
+  if (attachments.masterPdf) {
+    files.push({ filename: attachments.masterPdf.name, url: shareLinks?.masterPdf || attachments.masterPdf.url });
+  }
+  if (attachments.chargebackPdf) {
+    files.push({ filename: attachments.chargebackPdf.name, url: shareLinks?.chargebackPdf || attachments.chargebackPdf.url });
+  }
+  for (const vb of vendorBreakdown) {
+    const vp = vendorPdfMap.get(vb.vendor);
+    if (vp) files.push({ filename: vp.name, url: shareLinks?.vendorPdfs?.[vb.vendor] || vp.url });
+  }
+  if (attachments.chargebackXlsx) {
+    files.push({ filename: attachments.chargebackXlsx.name, url: shareLinks?.chargebackXlsx || attachments.chargebackXlsx.url });
+  }
+  const htmlBody = buildHtmlBody({ prop, ctx, vendorBreakdown, links, files, tenantImport, maintenanceTicket });
+  const textBody = buildTextBody({ prop, ctx, vendorBreakdown, links, files, tenantImport, maintenanceTicket });
 
   return { to, cc, subject, htmlBody, textBody, attachments: attachmentList };
 }

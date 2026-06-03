@@ -50,6 +50,12 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // Short share-link resolver (/d/...) is public: it only 302-redirects to an
+  // already-public HubSpot file URL, and the link itself is HMAC-signed.
+  if (pathname.startsWith('/d/')) {
+    return NextResponse.next();
+  }
+
   const token = req.cookies.get('resihome_session')?.value;
   if (!token) return redirectToLogin(req);
 

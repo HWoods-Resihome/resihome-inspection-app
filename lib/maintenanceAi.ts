@@ -37,6 +37,18 @@ export const TICKET_DESCRIPTION_INTRO =
 
 const DESCRIPTION_MAX = 8000;
 
+/**
+ * Build the human-facing ticket URL for a created ticket. Template is env-driven
+ * (so dev/stage/prod can differ) with a {ticketId} placeholder; defaults to the
+ * HoneyBadger production format. Returns null if there's no ticket id.
+ */
+export function buildTicketUrl(ticketId: number | null | undefined): string | null {
+  if (ticketId == null) return null;
+  const tmpl = (process.env.MAINTENANCE_AI_TICKET_URL_TEMPLATE
+    || 'https://honeybadgermm.com/Maintenance#/EditTicket/{ticketId}').trim();
+  return tmpl.replace('{ticketId}', String(ticketId));
+}
+
 export interface CreateTicketResult {
   ok: boolean;
   configured: boolean;

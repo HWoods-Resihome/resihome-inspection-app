@@ -37,7 +37,8 @@ import { renderChargebackXlsx } from '@/lib/xlsxChargeback';
 import { composeInspectionEmail } from '@/lib/email';
 import { sendInspectionEmail } from '@/lib/gmail';
 import { uploadToSftp, type SftpUploadResult } from '@/lib/sftp';
-import { createMaintenanceTicket, buildTicketDescription, type CreateTicketResult } from '@/lib/maintenanceAi';
+import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, type CreateTicketResult } from '@/lib/maintenanceAi';
+import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
 
 export const config = {
@@ -487,7 +488,54 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // ---- 7. Email notification (Gmail send) ----
+    // ---- 6b. Short, clean, signed share links for email + ticket ----
+    // Resolve via /d/<id>/<type>/<sig> on our own domain → 302 to the real
+    // HubSpot file. Replaces the giant raw URLs in everything we share.
+    const shareHost = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
+    const shareProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+    const shareBase = `${shareProto}://${shareHost}`;
+    const shareMasterUrl = masterUrl ? buildShortLink(shareBase, id, 'master') : null;
+    const shareChargebackUrl = (chargebackBuf && chargebackUrl) ? buildShortLink(shareBase, id, 'chargeback') : null;
+    const shareXlsxUrl = (chargebackXlsxBuf && chargebackXlsxUrl) ? buildShortLink(shareBase, id, 'xlsx') : null;
+    const shareVendorLinks: Record<string, string> = {};
+    for (const vendor of Object.keys(vendorUrls)) {
+      shareVendorLinks[vendor] = buildShortLink(shareBase, id, 'vendor', vendor);
+    }
+
+    // ---- 7. Create a maintenance ticket (best-effort, first finalize only) ----
+    // Runs BEFORE the email so its pass/fail + ticket link can be reported there.
+    // Posts to the Maintenance AI API on the SAME property (hbmm_property_id),
+    // with our fixed intro + per-vendor scope-document SHORT links. Never blocks
+    // finalize; no-ops until MAINTENANCE_AI_API_KEY is set. Skipped on re-finalize
+    // so a reopen doesn't create duplicate tickets.
+    let ticketResult: CreateTicketResult | null = null;
+    if (!isRefinalize) {
+      try {
+        const hbmmId = Number(inspectionData.propertyHbmmId || '');
+        if (!inspectionData.propertyHbmmId || !Number.isFinite(hbmmId)) {
+          console.warn('[finalize] maintenance ticket skipped — property has no hbmm_property_id.');
+          ticketResult = { ok: false, configured: true, error: 'Property has no hbmm_property_id.' };
+        } else {
+          ticketResult = await createMaintenanceTicket({
+            propertyId: hbmmId,
+            description: buildTicketDescription(shareVendorLinks),
+          });
+          if (ticketResult.ok) {
+            console.log(`[finalize] maintenance ticket created: #${ticketResult.ticketId} on property ${hbmmId}`);
+          } else if (ticketResult.configured) {
+            console.warn(`[finalize] maintenance ticket failed: ${ticketResult.error}`);
+          } else {
+            console.warn('[finalize] maintenance ticket skipped — MAINTENANCE_AI not configured.');
+          }
+        }
+      } catch (e: any) {
+        ticketResult = { ok: false, configured: true, error: String(e?.message || e).slice(0, 300) };
+        console.warn('[finalize] maintenance ticket threw (caught, finalize continues):', e);
+      }
+    }
+    const ticketUrl = ticketResult?.ok ? buildTicketUrl(ticketResult.ticketId) : null;
+
+    // ---- 8. Email notification (Gmail send) ----
     // Composed regardless of whether Gmail is connected, so the result
     // modal can still preview where it WOULD have gone. Actual send may
     // no-op until OAuth is wired up. Wrapped in try/catch so an email
@@ -546,6 +594,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               error: sftpResult.error,
             }
           : null,
+        // Clean short links (resolve to the real files) for the body/Files
+        // section. Attachments above still use the real URLs for fetching.
+        shareLinks: {
+          masterPdf: shareMasterUrl,
+          chargebackPdf: shareChargebackUrl,
+          chargebackXlsx: shareXlsxUrl,
+          vendorPdfs: shareVendorLinks,
+        },
+        // Maintenance ticket result → "Maintenance Ticket: ✅ #123 [View]" line.
+        maintenanceTicket: ticketResult
+          ? {
+              ok: ticketResult.ok,
+              configured: ticketResult.configured,
+              ticketId: ticketResult.ticketId,
+              url: ticketUrl,
+              error: ticketResult.error,
+            }
+          : null,
       });
 
       emailResult = await sendInspectionEmail(payload, session.email, req);
@@ -557,37 +623,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         message: String(e?.message || e).slice(0, 300),
       };
     }
-    }
-
-    // ---- 8. Create a maintenance ticket (best-effort, first finalize only) ----
-    // Posts to the ResiCap/Ameritrust Maintenance AI API on the SAME property
-    // (hbmm_property_id), with our fixed intro + per-vendor scope-document links.
-    // Never blocks finalize; no-ops until MAINTENANCE_AI_API_KEY is set. Skipped
-    // on re-finalize so a reopen doesn't create duplicate tickets.
-    let ticketResult: CreateTicketResult | null = null;
-    if (!isRefinalize) {
-      try {
-        const hbmmId = Number(inspectionData.propertyHbmmId || '');
-        if (!inspectionData.propertyHbmmId || !Number.isFinite(hbmmId)) {
-          console.warn('[finalize] maintenance ticket skipped — property has no hbmm_property_id.');
-          ticketResult = { ok: false, configured: true, error: 'Property has no hbmm_property_id.' };
-        } else {
-          ticketResult = await createMaintenanceTicket({
-            propertyId: hbmmId,
-            description: buildTicketDescription(vendorUrls),
-          });
-          if (ticketResult.ok) {
-            console.log(`[finalize] maintenance ticket created: #${ticketResult.ticketId}`);
-          } else if (ticketResult.configured) {
-            console.warn(`[finalize] maintenance ticket failed: ${ticketResult.error}`);
-          } else {
-            console.warn('[finalize] maintenance ticket skipped — MAINTENANCE_AI not configured.');
-          }
-        }
-      } catch (e: any) {
-        ticketResult = { ok: false, configured: true, error: String(e?.message || e).slice(0, 300) };
-        console.warn('[finalize] maintenance ticket threw (caught, finalize continues):', e);
-      }
     }
 
     bustInspectionsCache(); // status → completed; reflect in the list at once
