@@ -6,6 +6,7 @@ import { useRouter } from 'next/router';
 import type { InspectionSummary } from '@/lib/types';
 import { InspectionCard } from '@/components/InspectionCard';
 import { ListPicker } from '@/components/ListPicker';
+import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
 
 interface MeUser { userId: string; email: string; name: string; }
 
@@ -41,6 +42,26 @@ export default function Home() {
       .then((r) => r.json())
       .then((data) => { if (data.authenticated) setMe(data.user); })
       .catch(() => {});
+  }, []);
+
+  // Warm the Rate Card catalog cache from the home screen while there's signal,
+  // so the FIRST manual "add line item" search works instantly — even offline in
+  // the field. Fire-and-forget; only when online and not already cached.
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (loadCachedRateCard()) return; // already have it
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 25000);
+    Promise.all([
+      fetch('/api/rate-card/catalog', { signal: ctrl.signal }).then((r) => r.json()),
+      fetch('/api/rate-card/regions', { signal: ctrl.signal }).then((r) => r.json()),
+    ])
+      .then(([cat, reg]) => {
+        if (Array.isArray(cat?.items) && cat.items.length) saveCachedRateCard(cat.items, reg?.regions || []);
+      })
+      .catch(() => { /* weak signal — RateCardForm will cache on first open instead */ })
+      .finally(() => clearTimeout(timer));
+    return () => { clearTimeout(timer); ctrl.abort(); };
   }, []);
 
   // Keep the latest search term in a ref so refetch-on-focus / post-action

@@ -22,6 +22,7 @@ import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
 import { setErrorContext } from '@/lib/clientErrorReporter';
 import { useAppDialog } from '@/components/AppDialog';
@@ -470,25 +471,74 @@ export function RateCardForm(props: RateCardFormProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function ensureDataLoaded(): Promise<boolean> {
-    if (dataLoaded || dataLoading) return dataLoaded;
-    setDataLoading(true);
-    setDataError(null);
+  // Fetch catalog + regions with a hard timeout so a stalled request on weak
+  // service fails fast (and the cache-first path below can take over) instead of
+  // spinning forever. `refresh` bypasses the server-side 60-min cache.
+  async function fetchRateCardData(refresh: boolean, timeoutMs: number): Promise<{ catalog: RateCardLineItem[]; regions: RegionRate[] }> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
+      const qs = refresh ? '?refresh=1' : '';
       const [catRes, regRes] = await Promise.all([
-        fetch('/api/rate-card/catalog'),
-        fetch('/api/rate-card/regions'),
+        fetch(`/api/rate-card/catalog${qs}`, { signal: ctrl.signal }),
+        fetch(`/api/rate-card/regions${qs}`, { signal: ctrl.signal }),
       ]);
       const catData = await catRes.json();
       const regData = await regRes.json();
       if (!catRes.ok) throw new Error(catData.error || `Catalog HTTP ${catRes.status}`);
       if (!regRes.ok) throw new Error(regData.error || `Regions HTTP ${regRes.status}`);
-      setCatalog(catData.items || []);
-      setRegions(regData.regions || []);
+      return { catalog: catData.items || [], regions: regData.regions || [] };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // Quietly refresh from the network and update both state + the local cache.
+  // Never surfaces an error — it's a background freshen, the (cached) data the
+  // inspector is already using stays valid if it fails.
+  async function revalidateRateCardInBackground(): Promise<void> {
+    try {
+      const { catalog, regions } = await fetchRateCardData(false, 20000);
+      if (catalog.length === 0) return;
+      setCatalog(catalog);
+      setRegions(regions);
+      saveCachedRateCard(catalog, regions);
+    } catch {
+      /* offline / weak signal — keep the cached catalog */
+    }
+  }
+
+  async function ensureDataLoaded(): Promise<boolean> {
+    if (dataLoaded || dataLoading) return dataLoaded;
+    setDataLoading(true);
+    setDataError(null);
+
+    // Cache-first: the catalog is identical for every inspection, so if we have
+    // it cached locally use it INSTANTLY — the manual "add line item" search then
+    // works with zero network, fully offline. We revalidate in the background.
+    const cached = loadCachedRateCard();
+    if (cached) {
+      setCatalog(cached.catalog);
+      setRegions(cached.regions);
       setDataLoaded(true);
+      setDataLoading(false);
+      void revalidateRateCardInBackground();
+      return true;
+    }
+
+    // No cache (first ever load): fetch with a timeout and cache for next time.
+    try {
+      const { catalog, regions } = await fetchRateCardData(false, 25000);
+      setCatalog(catalog);
+      setRegions(regions);
+      setDataLoaded(true);
+      saveCachedRateCard(catalog, regions);
       return true;
     } catch (e: any) {
-      setDataError(String(e?.message || e));
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      setDataError(offline
+        ? 'You appear to be offline. The line-item catalog hasn’t been saved to this device yet — connect once to load it, then it works offline.'
+        : (e?.name === 'AbortError' ? 'Loading the line-item catalog timed out (weak signal). Pull to retry once you have signal.' : String(e?.message || e)));
       return false;
     } finally {
       setDataLoading(false);
@@ -511,18 +561,12 @@ export function RateCardForm(props: RateCardFormProps) {
     setDataLoading(true);
     setDataError(null);
     try {
-      const [catRes, regRes] = await Promise.all([
-        fetch('/api/rate-card/catalog?refresh=1'),
-        fetch('/api/rate-card/regions?refresh=1'),
-      ]);
-      const catData = await catRes.json();
-      const regData = await regRes.json();
-      if (!catRes.ok) throw new Error(catData.error || `Catalog HTTP ${catRes.status}`);
-      if (!regRes.ok) throw new Error(regData.error || `Regions HTTP ${regRes.status}`);
-      setCatalog(catData.items || []);
-      setRegions(regData.regions || []);
+      const { catalog, regions } = await fetchRateCardData(true, 30000);
+      setCatalog(catalog);
+      setRegions(regions);
       setDataLoaded(true);
-      void dialog.alert(`Rate card refreshed: ${catData.items?.length || 0} line items, ${regData.regions?.length || 0} regions loaded from HubSpot.`);
+      saveCachedRateCard(catalog, regions);
+      void dialog.alert(`Rate card refreshed: ${catalog.length} line items, ${regions.length} regions loaded from HubSpot.`);
     } catch (e: any) {
       setDataError(String(e?.message || e));
       void dialog.alert(`Refresh failed: ${e?.message || e}`);

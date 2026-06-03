@@ -7,6 +7,7 @@ import type {
   Property, TemplateType, HubSpotUser,
 } from '@/lib/types';
 import { Combobox } from '@/components/Combobox';
+import { loadCachedProperties, saveCachedProperties } from '@/lib/offlineCache';
 
 type Stage = 'setup' | 'loading_questions' | 'error';
 
@@ -88,17 +89,48 @@ export default function NewInspection() {
   // while typing; only the initial load shows the disabled "Loading…" state.
   useEffect(() => {
     let cancelled = false;
-    const url = '/api/properties' + (propertyQuery ? `?q=${encodeURIComponent(propertyQuery)}` : '');
-    fetch(url)
+    const q = propertyQuery.trim();
+
+    // Cache-first: show the last results we saw for this exact query (and the
+    // default recent page) INSTANTLY, so a weak/stalled connection doesn't leave
+    // the picker spinning or blank. The network result below replaces these.
+    const cached = loadCachedProperties<Property>(q);
+    if (cached && cached.length) {
+      setProperties(cached);
+      setPropertiesError(null);
+      setPropertiesLoading(false);
+    }
+
+    // Time the request out so a stalled fetch on weak service fails fast instead
+    // of hanging — we keep the cached list visible if it does.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    const url = '/api/properties' + (q ? `?q=${encodeURIComponent(q)}` : '');
+    fetch(url, { signal: ctrl.signal })
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
-        if (data.error) setPropertiesError(data.error);
-        else { setPropertiesError(null); setProperties(data.properties || []); }
+        if (data.error) {
+          if (!cached) setPropertiesError(data.error);
+        } else {
+          setPropertiesError(null);
+          setProperties(data.properties || []);
+          saveCachedProperties(q, data.properties || []);
+        }
       })
-      .catch((e) => { if (!cancelled) setPropertiesError(String(e.message || e)); })
+      .catch(() => {
+        if (cancelled) return;
+        // Weak/no service: keep the cached results if we have them; otherwise
+        // give a clear, non-blocking hint instead of an endless spinner.
+        if (!cached || !cached.length) {
+          const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+          setPropertiesError(offline
+            ? 'Offline — showing only properties you’ve already searched on this device.'
+            : 'Search is slow on this signal — showing saved results. Try again when you have signal.');
+        }
+      })
       .finally(() => { if (!cancelled) setPropertiesLoading(false); });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(timer); ctrl.abort(); };
   }, [propertyQuery]);
 
   // Session (inspector identity) — loaded once.
