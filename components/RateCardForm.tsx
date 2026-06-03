@@ -319,6 +319,11 @@ export function RateCardForm(props: RateCardFormProps) {
   const [aiStreaming, setAiStreaming] = useState(false);
   const [aiApplying, setAiApplying] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  // True only after the AI Review has been genuinely attempted (with auto-retry)
+  // and ultimately failed because of connectivity — NOT a server/content error.
+  // This is what unlocks the "submit without review" escape hatch, so the bypass
+  // is only ever offered after a valiant effort to actually run the check.
+  const [aiConnectivityFailed, setAiConnectivityFailed] = useState(false);
   const [aiSummary, setAiSummary] = useState('');
   const [aiAdjustments, setAiAdjustments] = useState<AiAdjustment[]>([]);
   // Approve/decline decisions, persisted so they survive a reload mid-review.
@@ -2019,109 +2024,136 @@ export function RateCardForm(props: RateCardFormProps) {
     setAiSummary('');
     setAiAdjustments([]);
     setAiDecisions({});
-    // Weak-signal watchdog: abort the review if the stream stalls (no bytes for
-    // STALL_MS). In low-service areas the SSE can hang indefinitely; failing fast
-    // lets the inspector move on (AI Review isn't required to submit — it's
-    // required at finalize). Re-armed on every chunk so a slow-but-progressing
-    // stream isn't killed.
-    const ctrl = new AbortController();
+    setAiConnectivityFailed(false);
+
+    // Flush pending edits once up front so the server reviews what's on screen.
+    try { await commitAndWait(); } catch { /* proceed with client state */ }
+
+    // Build the payload once — scope is flushed and unchanged between retries.
+    const flatLines = sections.flatMap((s) =>
+      (linesBySectionRef.current[s.id] || []).map((l) => ({
+        sectionId: s.id,
+        externalId: l.externalId,
+        lineItemCode: l.lineItemCode,
+        quantity: l.quantity,
+        tenantBillBackPercent: l.tenantBillBackPercent,
+        assignedTo: l.assignedTo,
+        note: l.note,
+        customVendorCost: l.customVendorCost ?? null,
+        customLaborRate: l.customLaborRate ?? null,
+        customAdjustedMaterialCost: l.customAdjustedMaterialCost ?? null,
+      }))
+    );
+    const photosBySectionPayload: Record<string, string[]> = {};
+    for (const s of sections) {
+      const urls = (photosBySectionRef.current[s.id] || []).filter((u) => !u.startsWith('blob:'));
+      if (urls.length) photosBySectionPayload[s.id] = urls;
+    }
+    const body = JSON.stringify({
+      sections: sections.map((s) => ({ id: s.id, name: s.displayName || s.label, location: s.location })),
+      lines: flatLines,
+      photosBySection: photosBySectionPayload,
+      // Lines the inspector chose to "Ignore" for photo evidence — the
+      // review won't re-flag these for a photo.
+      ignoredLineIds: getIgnoredPhotoLines(props.inspectionRecordId),
+      property: {
+        bedrooms: props.bedrooms,
+        bathrooms: props.bathrooms,
+        squareFootage: props.squareFootage,
+        // Real value when present; the endpoint defaults null/invalid to 12.
+        tenantMonths: (typeof props.lastTenantMonths === 'number' && props.lastTenantMonths >= 0) ? props.lastTenantMonths : null,
+      },
+      region: inspectionRegion,
+    });
+
+    // One streaming attempt. Throws an AbortError if the stream stalls (weak
+    // signal) so the caller can retry; throws a normal Error on HTTP failure.
+    // A server-side SSE 'error' event is surfaced but NOT thrown (it's a content
+    // error, not connectivity — retrying wouldn't help).
     const STALL_MS = 30000;
-    let stallTimer: ReturnType<typeof setTimeout> | null = null;
-    const armStall = () => { if (stallTimer) clearTimeout(stallTimer); stallTimer = setTimeout(() => ctrl.abort(), STALL_MS); };
-    try {
-      // Flush pending edits so the server reviews what the inspector sees.
-      try { await commitAndWait(); } catch { /* proceed with client state */ }
-      const flatLines = sections.flatMap((s) =>
-        (linesBySectionRef.current[s.id] || []).map((l) => ({
-          sectionId: s.id,
-          externalId: l.externalId,
-          lineItemCode: l.lineItemCode,
-          quantity: l.quantity,
-          tenantBillBackPercent: l.tenantBillBackPercent,
-          assignedTo: l.assignedTo,
-          note: l.note,
-          customVendorCost: l.customVendorCost ?? null,
-          customLaborRate: l.customLaborRate ?? null,
-          customAdjustedMaterialCost: l.customAdjustedMaterialCost ?? null,
-        }))
-      );
-      const photosBySectionPayload: Record<string, string[]> = {};
-      for (const s of sections) {
-        const urls = (photosBySectionRef.current[s.id] || []).filter((u) => !u.startsWith('blob:'));
-        if (urls.length) photosBySectionPayload[s.id] = urls;
-      }
-      armStall(); // start the watchdog as the request goes out
-      const res = await fetch(`/api/inspections/${props.inspectionRecordId}/ai-review`, {
-        method: 'POST',
-        signal: ctrl.signal,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sections: sections.map((s) => ({ id: s.id, name: s.displayName || s.label, location: s.location })),
-          lines: flatLines,
-          photosBySection: photosBySectionPayload,
-          // Lines the inspector chose to "Ignore" for photo evidence — the
-          // review won't re-flag these for a photo.
-          ignoredLineIds: getIgnoredPhotoLines(props.inspectionRecordId),
-          property: {
-            bedrooms: props.bedrooms,
-            bathrooms: props.bathrooms,
-            squareFootage: props.squareFootage,
-            // Real value when present; the endpoint defaults null/invalid to 12.
-            tenantMonths: (typeof props.lastTenantMonths === 'number' && props.lastTenantMonths >= 0) ? props.lastTenantMonths : null,
-          },
-          region: inspectionRegion,
-        }),
-      });
-      if (!res.ok || !res.body) {
-        const txt = await res.text().catch(() => '');
-        throw new Error(`Review failed (${res.status}). ${txt.slice(0, 160)}`);
-      }
-      // Stream the SSE response, appending each suggestion to the popup as it
-      // arrives so the inspector sees results fill in instead of one long wait.
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let event = '';
-      let streamErr: string | null = null;
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        armStall(); // progress → re-arm the stall watchdog
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n');
-        buffer = parts.pop() || '';
-        for (const raw of parts) {
-          const line = raw.trim();
-          if (line.startsWith('event:')) { event = line.slice(6).trim(); continue; }
-          if (!line.startsWith('data:')) continue;
-          let data: any;
-          try { data = JSON.parse(line.slice(5).trim()); } catch { continue; }
-          if (event === 'adjustment') {
-            setAiLoading(false);
-            setAiStreaming(true);
-            setAiAdjustments((prev) => [...prev, data]);
-          } else if (event === 'summary') {
-            setAiLoading(false);
-            setAiSummary(String(data.summary || ''));
-          } else if (event === 'error') {
-            streamErr = String(data.error || 'Review failed');
+    const attempt = async (): Promise<void> => {
+      setAiAdjustments([]); // fresh slate per attempt so a retry can't duplicate
+      setAiSummary('');
+      const ctrl = new AbortController();
+      let stallTimer: ReturnType<typeof setTimeout> | null = null;
+      const armStall = () => { if (stallTimer) clearTimeout(stallTimer); stallTimer = setTimeout(() => ctrl.abort(), STALL_MS); };
+      try {
+        armStall(); // start the watchdog as the request goes out
+        const res = await fetch(`/api/inspections/${props.inspectionRecordId}/ai-review`, {
+          method: 'POST',
+          signal: ctrl.signal,
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        });
+        if (!res.ok || !res.body) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`Review failed (${res.status}). ${txt.slice(0, 160)}`);
+        }
+        // Stream the SSE response, appending each suggestion as it arrives.
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let event = '';
+        let streamErr: string | null = null;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          armStall(); // progress → re-arm the stall watchdog
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n');
+          buffer = parts.pop() || '';
+          for (const raw of parts) {
+            const line = raw.trim();
+            if (line.startsWith('event:')) { event = line.slice(6).trim(); continue; }
+            if (!line.startsWith('data:')) continue;
+            let data: any;
+            try { data = JSON.parse(line.slice(5).trim()); } catch { continue; }
+            if (event === 'adjustment') {
+              setAiLoading(false);
+              setAiStreaming(true);
+              setAiAdjustments((prev) => [...prev, data]);
+            } else if (event === 'summary') {
+              setAiLoading(false);
+              setAiSummary(String(data.summary || ''));
+            } else if (event === 'error') {
+              streamErr = String(data.error || 'Review failed');
+            }
           }
         }
+        if (streamErr) setAiError(streamErr);
+      } finally {
+        if (stallTimer) clearTimeout(stallTimer);
       }
-      if (streamErr) setAiError(streamErr);
-    } catch (e: any) {
-      const aborted = e?.name === 'AbortError' || ctrl.signal.aborted;
+    };
+
+    // Valiant effort: try, and auto-retry once on a connectivity abort before
+    // giving up. Only a connectivity failure flips aiConnectivityFailed (which
+    // unlocks the "submit without review" escape hatch at submit).
+    const MAX_ATTEMPTS = 2;
+    let lastErr: any = null;
+    for (let i = 1; i <= MAX_ATTEMPTS; i++) {
+      try { await attempt(); lastErr = null; break; }
+      catch (e: any) {
+        lastErr = e;
+        if (e?.name === 'AbortError' && i < MAX_ATTEMPTS) {
+          setAiError(`Weak connection — retrying AI Review (attempt ${i + 1} of ${MAX_ATTEMPTS})…`);
+          continue;
+        }
+        break;
+      }
+    }
+    if (lastErr) {
+      const aborted = lastErr?.name === 'AbortError';
+      setAiConnectivityFailed(aborted);
       setAiError(
         aborted
-          ? 'AI Review stopped — weak connection. You can submit without it for now (it’s required before final approval). Tap retry when you have signal.'
-          : String(e?.message || e)
+          ? 'AI Review couldn’t complete after several attempts (weak connection). Retry when you have signal, or tap Submit — you’ll be offered the option to submit without it.'
+          : String(lastErr?.message || lastErr)
       );
-    } finally {
-      if (stallTimer) clearTimeout(stallTimer);
-      setAiLoading(false);
-      setAiStreaming(false);
     }
+    setAiLoading(false);
+    setAiStreaming(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, props.inspectionRecordId, props.bedrooms, props.bathrooms, props.squareFootage, props.lastTenantMonths, inspectionRegion]);
 
@@ -2490,12 +2522,34 @@ export function RateCardForm(props: RateCardFormProps) {
       const ok = await dialog.confirm('No line items have been added. Submit anyway?', { confirmLabel: 'Submit' });
       if (!ok) return;
     }
-    // AI review gate — a Scope rate card must pass AI review for the CURRENT
-    // scope. NOTE: AI Review is NOT required to SUBMIT — an inspector in a
-    // low-service area can submit for approval without waiting on the review (it
-    // would otherwise hang on weak signal). The review is instead REQUIRED at
-    // FINALIZE (below), where it's run by the approver on (presumably) good
-    // connectivity. This unblocks the field while keeping the QC gate.
+    // AI Review gate at SUBMIT — a Scope rate card must pass AI Review for the
+    // CURRENT scope before it can be submitted for approval. Any edit since the
+    // last review invalidates it (see reviewValid), so this re-prompts after
+    // changes.
+    //
+    // Low-service escape hatch: the review is normally REQUIRED, but if it's been
+    // genuinely attempted (with auto-retry) and ultimately failed on connectivity
+    // (aiConnectivityFailed), we offer a one-tap "submit without review". The
+    // bypass is ONLY offered after that valiant effort — it can't be reached by
+    // simply declining the review. A bypassed submit is still caught by the hard
+    // AI-Review gate at finalize, so the check always happens before PDFs.
+    if (props.templateType === 'pm_scope_rate_card' && props.inspectionStatus !== 'pending_approval' && !reviewValid) {
+      if (aiConnectivityFailed) {
+        const ok = await dialog.confirm(
+          'AI Review couldn’t complete after several attempts (weak connection).\n\nSubmit for approval WITHOUT the AI Review? It will still be required before the inspection can be finalized.',
+          { confirmLabel: 'Submit without review', cancelLabel: 'Try review again' }
+        );
+        if (!ok) { void runAiReview(); return; }
+        // else: bypass granted (after a valiant effort) — fall through to submit.
+      } else {
+        const ok = await dialog.confirm(
+          'AI Review must be completed before submitting for approval.\n\nIt checks the scope against the turn standard (depreciation, duplicates, tenant responsibility) and suggests adjustments to approve or decline.',
+          { confirmLabel: 'Run AI Review', cancelLabel: 'Not now' }
+        );
+        if (ok) void runAiReview();
+        return;
+      }
+    }
     // Flush pending edits to make sure HubSpot has everything before the submit.
     try {
       await commitAndWait();
@@ -2518,10 +2572,12 @@ export function RateCardForm(props: RateCardFormProps) {
         );
         return;
       }
-      // AI Review gate (moved here from submit): a Scope rate card must pass AI
-      // Review for the CURRENT scope before it can be finalized. Whoever finalizes
-      // (normally the approver) runs it here. Any edit since the last review
-      // invalidates it (see reviewValid), so this re-prompts after changes.
+      // AI Review gate at FINALIZE — HARD requirement, no bypass. This is the
+      // backstop that guarantees AI Review always runs before PDFs are generated:
+      // it catches any submit that used the low-service "submit without review"
+      // escape hatch, and it's the approver's own QC pass (reviewValid is
+      // per-device, so a second reviewer runs it fresh here). Any edit since the
+      // last review invalidates it (see reviewValid), so this re-prompts too.
       if (props.templateType === 'pm_scope_rate_card' && !reviewValid) {
         const ok = await dialog.confirm(
           'AI Review must be completed before finalizing.\n\nIt checks the scope against the turn standard (depreciation, duplicates, tenant responsibility) and suggests adjustments to approve or decline.',
@@ -3376,7 +3432,7 @@ export function RateCardForm(props: RateCardFormProps) {
                   type="button"
                   onClick={() => { if (aiAdjustments.length > 0 && !aiModalOpen) setAiModalOpen(true); else void runAiReview(); }}
                   disabled={aiLoading}
-                  title={reviewValid ? 'AI Review complete — tap to re-run' : aiAdjustments.length > 0 ? 'AI Review in progress — tap to resume' : 'Run AI Review (required before finalizing)'}
+                  title={reviewValid ? 'AI Review complete — tap to re-run' : aiAdjustments.length > 0 ? 'AI Review in progress — tap to resume' : 'Run AI Review (required before submit)'}
                   aria-label="AI Review"
                   className={`relative shrink-0 w-10 h-10 rounded-full flex items-center justify-center border-2 transition disabled:opacity-50 ${reviewValid ? 'border-emerald-400 text-emerald-600 bg-emerald-50' : 'border-brand text-brand bg-brand/5 hover:bg-brand/10'}`}
                 >
