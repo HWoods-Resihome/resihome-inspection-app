@@ -22,6 +22,7 @@ import {
   attachFilesToInspectionRecord,
   updateInspection,
   answerHasAfterPhotoProperty,
+  stampFirstCompleted,
 } from '@/lib/hubspot';
 import { isInternalResolution } from '@/lib/vendors';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
@@ -533,6 +534,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         throw e;
       }
     }
+    // Stamp the FIRST completion timestamp (kept even if re-finalized later).
+    await stampFirstCompleted(id, nowIso);
 
     // ---- 7. Create a maintenance ticket (best-effort, first finalize only) ----
     // Runs BEFORE the email so its pass/fail + ticket link can be reported there.

@@ -1547,6 +1547,178 @@ export async function updateInspection(recordId: string, props: Record<string, a
   });
 }
 
+// ---------------------------------------------------------------------------
+// Billing-field sync (for clean billing reports)
+//
+// On schedule/creation we copy billing fields onto the inspection from the
+// related Property + the Agent object (2-13064238), matched by HubSpot owner:
+//   entity_id, full_address          ← Property
+//   broker_code, vendor/client cost  ← Agent owned by the inspector's owner
+// Owner is resolved from the inspector's email (Owners API). Best-effort — never
+// throws; missing properties are reported so the create-script can be run.
+// ---------------------------------------------------------------------------
+
+function agentTypeId(): string {
+  return normalizeTypeId(process.env.HUBSPOT_AGENT_TYPE_ID) || '2-13064238';
+}
+
+/** Resolve a HubSpot owner id from an email via the Owners API. */
+async function resolveOwnerIdByEmail(email: string): Promise<string | null> {
+  const e = (email || '').trim();
+  if (!e) return null;
+  try {
+    const resp = await hubspotFetch(`/crm/v3/owners/?email=${encodeURIComponent(e)}&limit=1`);
+    const o = (resp.results || [])[0];
+    return o?.id ? String(o.id) : null;
+  } catch (e2) {
+    console.warn('[billing] owner lookup failed:', e2);
+    return null;
+  }
+}
+
+/** Find the Agent record owned by `ownerId` and read its billing fields. */
+async function fetchAgentBillingByOwner(ownerId: string): Promise<{ brokerCode: string; vendorCost: string; clientCost: string } | null> {
+  if (!ownerId) return null;
+  // The agent property that holds the owner id (default the standard owner field).
+  const matchProp = (process.env.HUBSPOT_AGENT_OWNER_MATCH_PROP || 'hubspot_owner_id').trim();
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filterGroups: [{ filters: [{ propertyName: matchProp, operator: 'EQ', value: ownerId }] }],
+        properties: ['broker_code', 'inspection_vendor_cost', 'inspection_client_cost', 'name'],
+        limit: 1,
+      }),
+    });
+    const a = (resp.results || [])[0];
+    if (!a) return null;
+    const p = a.properties || {};
+    return {
+      brokerCode: (p.broker_code ?? '').toString().trim(),
+      vendorCost: (p.inspection_vendor_cost ?? '').toString().trim(),
+      clientCost: (p.inspection_client_cost ?? '').toString().trim(),
+    };
+  } catch (e) {
+    console.warn('[billing] agent lookup failed:', e);
+    return null;
+  }
+}
+
+/** Default client invoice when the agent has no client cost. */
+const DEFAULT_CLIENT_INVOICE = '60';
+
+/**
+ * Copy billing fields onto an inspection from the Property + matched Agent.
+ * Best-effort; returns which fields were written (for backfill reporting).
+ */
+export async function populateBillingFields(inspectionRecordId: string): Promise<{ ok: boolean; updated: string[]; note?: string }> {
+  const { property: propType } = typeIds();
+  const insp = await readInspectionProps(inspectionRecordId, [
+    'inspector_email', 'inspector_name', 'property_id_ref', 'hubspot_owner_id',
+  ]);
+  if (!insp) return { ok: false, updated: [], note: 'inspection not found' };
+
+  const propertyId = (insp.property_id_ref || '').toString().trim();
+  const inspectorEmail = (insp.inspector_email || '').toString().trim();
+  const update: Record<string, any> = {};
+
+  // Property → entity_id, full_address
+  if (propertyId) {
+    try {
+      const pr = await hubspotFetch(`/crm/v3/objects/${propType}/${propertyId}?properties=entity_id&properties=full_address`);
+      const pp = pr.properties || {};
+      if (pp.entity_id != null && pp.entity_id !== '') update.entity_id = String(pp.entity_id);
+      if (pp.full_address != null && pp.full_address !== '') update.full_address = String(pp.full_address);
+    } catch (e) {
+      console.warn('[billing] property read failed:', e);
+    }
+  }
+
+  // Owner → Agent → broker_code + invoice amounts
+  let ownerId = (insp.hubspot_owner_id || '').toString().trim();
+  if (!ownerId && inspectorEmail) ownerId = (await resolveOwnerIdByEmail(inspectorEmail)) || '';
+  if (ownerId) {
+    update.hubspot_owner_id = ownerId;
+    const agent = await fetchAgentBillingByOwner(ownerId);
+    if (agent) {
+      update.broker_code = agent.brokerCode || '';
+      update.vendor_invoice_amount = agent.vendorCost !== '' ? agent.vendorCost : '';  // blank if null
+      update.client_invoice_amount = agent.clientCost !== '' ? agent.clientCost : DEFAULT_CLIENT_INVOICE;
+    } else {
+      // No agent match — still default the client invoice to 60.
+      update.client_invoice_amount = DEFAULT_CLIENT_INVOICE;
+    }
+  }
+
+  if (Object.keys(update).length === 0) return { ok: true, updated: [], note: 'no source data found' };
+  try {
+    await updateInspection(inspectionRecordId, update);
+    return { ok: true, updated: Object.keys(update) };
+  } catch (e: any) {
+    console.warn('[billing] update failed (run scripts/billing_fields to create the properties):', e);
+    return { ok: false, updated: [], note: String(e?.message || e).slice(0, 200) };
+  }
+}
+
+/**
+ * Stamp `first_completed_date` (datetime) the FIRST time an inspection completes.
+ * Idempotent: leaves an existing value untouched so re-finalize/edits don't
+ * overwrite the original completion timestamp. Best-effort.
+ */
+export async function stampFirstCompleted(inspectionRecordId: string, iso: string): Promise<void> {
+  try {
+    const cur = await readInspectionProps(inspectionRecordId, ['first_completed_date']);
+    const existing = (cur?.first_completed_date || '').toString().trim();
+    if (!existing) await updateInspection(inspectionRecordId, { first_completed_date: iso });
+  } catch (e) {
+    console.warn('[billing] stampFirstCompleted skipped (create the property to enable):', e);
+  }
+}
+
+/**
+ * Backfill billing fields across existing inspections. Paginated + resumable:
+ * processes up to `max` records starting from `after`, and returns `nextAfter`
+ * (null when done) so callers can loop. For each record it (re)runs
+ * populateBillingFields and stamps first_completed_date from completed_at when
+ * it's missing. Idempotent — safe to re-run.
+ */
+export async function backfillBillingFields(opts: { after?: string; max?: number } = {}): Promise<{ processed: number; updated: number; errors: number; nextAfter: string | null }> {
+  const { inspection: typeId } = typeIds();
+  const max = opts.max ?? 300;
+  let after = opts.after;
+  let processed = 0, updated = 0, errors = 0;
+
+  while (processed < max) {
+    const body: any = { filterGroups: [], properties: ['completed_at', 'first_completed_date'], limit: 100 };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    const results = resp.results || [];
+    for (const r of results) {
+      processed++;
+      try {
+        const bf = await populateBillingFields(r.id);
+        if (bf.ok && bf.updated.length) updated++;
+        const p = r.properties || {};
+        const completed = (p.completed_at || '').toString().trim();
+        const first = (p.first_completed_date || '').toString().trim();
+        if (completed && !first) await stampFirstCompleted(r.id, completed);
+      } catch (e) {
+        errors++;
+        console.warn(`[billing-backfill] record ${r.id} failed:`, e);
+      }
+      await new Promise((res) => setTimeout(res, 120)); // polite to the API
+    }
+    after = resp.paging?.next?.after;
+    if (!after) return { processed, updated, errors, nextAfter: null };
+    if (processed >= max) return { processed, updated, errors, nextAfter: after };
+  }
+  return { processed, updated, errors, nextAfter: after || null };
+}
+
+
 /**
  * Stamp the inspection's "last edited" timestamp. Called on every edit (answers,
  * photos, rate-card lines) so the list can sort by most-recently-touched.

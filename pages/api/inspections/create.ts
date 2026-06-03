@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById } from '@/lib/hubspot';
+import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 
@@ -162,6 +162,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     bustInspectionsCache(); // show the new inspection in the list immediately
+
+    // Billing sync: copy entity_id/full_address (property) + broker_code +
+    // vendor/client invoice (agent owned by the inspector's owner) onto the new
+    // inspection so billing reports are clean from the start. Best-effort —
+    // never blocks creation. No-op if the billing properties don't exist yet.
+    try {
+      const billing = await populateBillingFields(inspectionId);
+      if (!billing.ok) console.warn(`[create] billing populate note for ${inspectionId}: ${billing.note}`);
+    } catch (e) {
+      console.warn(`[create] billing populate failed for ${inspectionId} (continuing):`, e);
+    }
+
     return res.status(200).json({ success: true, inspectionId, externalId, inspectionName, copiedLines });
   } catch (e: any) {
     console.error('POST /api/inspections/create failed:', e);

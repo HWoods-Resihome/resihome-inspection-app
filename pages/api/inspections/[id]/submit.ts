@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { updateInspection, fetchInspectionById } from '@/lib/hubspot';
+import { updateInspection, fetchInspectionById, stampFirstCompleted } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 
 /**
@@ -52,6 +52,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     await updateInspection(id, props);
+    // Non-rate-card templates complete here → stamp first completion timestamp.
+    if (!isRateCard) await stampFirstCompleted(id, nowIso);
     // Record WHO submitted for approval and WHEN — used to lock the submitter out
     // of self-finalizing for a short window (a second reviewer must approve, or
     // they wait it out). Best-effort: if the HubSpot properties don't exist yet,
