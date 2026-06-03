@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AiAdjustment } from '@/lib/aiReview';
+import { formatQty } from '@/lib/photoUpload';
 
 type Decision = 'approve' | 'decline';
 
@@ -295,7 +296,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                           ? <div className="text-xs text-emerald-700 mb-1">+ {a.suggested?.description || a.suggested?.lineItemCode}</div>
                                           : a.current && (
                                             <div className="text-[11px] text-gray-400 mb-1">
-                                              now: {a.current.tenantBillBackPercent != null && `${a.current.tenantBillBackPercent}% Tenant`}{a.current.tenantDollars != null && ` (${money(a.current.tenantDollars)})`}{a.current.quantity != null && ` · qty ${a.current.quantity}${unit ? ` ${unit}` : ''}`}
+                                              now: {a.current.tenantBillBackPercent != null && `${a.current.tenantBillBackPercent}% Tenant`}{a.current.tenantDollars != null && ` (${money(a.current.tenantDollars)})`}{a.current.quantity != null && ` · qty ${formatQty(a.current.quantity)}${unit ? ` ${unit}` : ''}`}
                                             </div>
                                           )}
                                         <div className="flex items-end gap-2 flex-wrap">

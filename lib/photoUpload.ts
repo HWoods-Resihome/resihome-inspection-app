@@ -337,3 +337,12 @@ export function formatMoney(v: number): string {
   if (!isFinite(v)) return '0.00';
   return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+/** Format a line-item quantity with thousands separators, no forced decimals:
+ *  1833 -> "1,833", 12.5 -> "12.5", 1448 -> "1,448". Returns '' for non-finite
+ *  input so callers can render an empty cell. Used everywhere a qty is DISPLAYED
+ *  (rate-card view rows, re-inspect tables, AI suggestion cards). */
+export function formatQty(v: number): string {
+  if (!isFinite(v)) return '';
+  return v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+}

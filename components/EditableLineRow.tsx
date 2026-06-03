@@ -26,7 +26,7 @@ import { Combobox } from '@/components/Combobox';
 import { WheelPicker } from '@/components/WheelPicker';
 import { ListPicker } from '@/components/ListPicker';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
-import { formatMoney } from '@/lib/photoUpload';
+import { formatMoney, formatQty } from '@/lib/photoUpload';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
 import { VENDORS, vendorPillStyle, isInternalResolution } from '@/lib/vendors';
@@ -1566,7 +1566,7 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
           />
         )}
       </td>
-      <td className="px-3 py-2 text-center text-sm text-gray-900 whitespace-nowrap">{line.quantity}</td>
+      <td className="px-3 py-2 text-center text-sm text-gray-900 tabular-nums whitespace-nowrap">{formatQty(line.quantity)}</td>
       <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{item.laborMeas}</td>
       <td className="px-3 py-2 text-center align-middle whitespace-nowrap">
         <span

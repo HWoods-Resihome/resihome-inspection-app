@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
+import { uploadFilesBatch, formatMoney, formatQty } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
@@ -675,7 +675,7 @@ export function QcReinspectForm(props: Props) {
                         <th className="px-3 py-2 font-semibold text-center">Qty</th>
                         <th className="px-3 py-2 font-semibold text-center">Unit</th>
                         <th className="px-3 py-2 font-semibold text-center">Vendor</th>
-                        <th className="px-3 py-2 font-semibold text-right">Vendor $</th>
+                        <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Vendor $</th>
                         <th className="px-3 py-2 font-semibold text-center">Result</th>
                       </tr>
                     </thead>
@@ -685,7 +685,7 @@ export function QcReinspectForm(props: Props) {
                           <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{ln.category}</td>
                           <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{ln.subcategory}</td>
                           <td className="px-3 py-2.5 text-gray-900 min-w-[200px]">{ln.description}</td>
-                          <td className="px-3 py-2.5 text-center text-gray-600">{ln.quantity != null ? ln.quantity : ''}</td>
+                          <td className="px-3 py-2.5 text-center text-gray-600 tabular-nums whitespace-nowrap">{ln.quantity != null ? formatQty(ln.quantity) : ''}</td>
                           <td className="px-3 py-2.5 text-center text-gray-600">{ln.unit}</td>
                           <td className="px-3 py-2.5 text-center">
                             {ln.vendor && (() => {
@@ -759,7 +759,7 @@ export function QcReinspectForm(props: Props) {
                                 {ln.vendor}
                               </span>
                             )}
-                            {ln.unit && <span>{ln.quantity != null ? `${ln.quantity} ` : ''}{ln.unit}</span>}
+                            {ln.unit && <span>{ln.quantity != null ? `${formatQty(ln.quantity)} ` : ''}{ln.unit}</span>}
                             {ln.vendorCost != null && (<><span>·</span><span className="text-gray-800 font-semibold">${formatMoney(ln.vendorCost)}</span></>)}
                           </div>
                         </div>

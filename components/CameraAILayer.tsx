@@ -25,6 +25,7 @@ import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { ListPicker } from '@/components/ListPicker';
 import { WheelPicker } from '@/components/WheelPicker';
 import { EditableLineRow } from '@/components/EditableLineRow';
+import { formatQty } from '@/lib/photoUpload';
 
 const TENANT_PCT_OPTIONS = Array.from({ length: 21 }, (_, i) => i * 5); // 0..100 step 5
 
@@ -979,7 +980,7 @@ export function CameraAILayer(props: Props) {
                   className="h-7 w-16 bg-gray-100 rounded-lg px-2 text-[12px] outline-none ring-2 ring-brand/40" />
               ) : (
                 <button onClick={() => openEdit(s.id, 'qty', e.qty)} className="text-gray-500">
-                  Qty <span className="text-gray-900 font-semibold">{e.qty || (s.needsMeasurement ? '—' : '1')}</span>{unitAbbr ? ` ${unitAbbr}` : ''}
+                  Qty <span className="text-gray-900 font-semibold tabular-nums">{e.qty ? (formatQty(Number(e.qty)) || e.qty) : (s.needsMeasurement ? '—' : '1')}</span>{unitAbbr ? ` ${unitAbbr}` : ''}
                 </button>
               )}
               <span className="text-gray-300">·</span>
@@ -1014,7 +1015,7 @@ export function CameraAILayer(props: Props) {
             </div>
             ); })()}
             {s.needsMeasurement && s.estimatedQuantity && s.estimatedQuantity > 0 && (
-              <div className="pl-4 text-[11px] text-amber-700 mt-1">≈ AI estimate ({s.estimatedQuantity} {s.unit}) — confirm, edit, or say the size.</div>
+              <div className="pl-4 text-[11px] text-amber-700 mt-1">≈ AI estimate ({formatQty(s.estimatedQuantity)} {s.unit}) — confirm, edit, or say the size.</div>
             )}
 
             <div className="flex gap-2 mt-2">
