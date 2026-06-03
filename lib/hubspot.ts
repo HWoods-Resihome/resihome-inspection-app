@@ -570,6 +570,7 @@ export async function fetchInspections(opts: { search?: string } = {}): Promise<
         qcPassCount: null,
         qcFailCount: null,
         submittedAt: null,
+        submittedByEmail: null,
         approvedByName: null,
         approvedAt: null,
         resolutionTimingJson: null,
@@ -1184,6 +1185,7 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
       qcPassCount: null,
       qcFailCount: null,
       submittedAt: null,
+      submittedByEmail: null,
       approvedByName: null,
       approvedAt: null,
       resolutionTimingJson: null,
@@ -1235,7 +1237,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     'pdf_master_url', 'pdf_chargeback_url', 'pdf_chargeback_xlsx_url', 'pdf_vendor_urls_json', 'pdf_generated_at',
     'source_rate_card_id', 'source_rate_card_name', 'qc_verdict', 'qc_pass_count', 'qc_fail_count',
     // Submit/approve stamps + Internal Resolution timing map
-    'submitted_at', 'approved_by_name', 'approved_at', 'resolution_timing_json',
+    'submitted_at', 'submitted_by_email', 'approved_by_name', 'approved_at', 'resolution_timing_json',
   ];
   try {
     const qs = properties.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
@@ -1345,6 +1347,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         qcPassCount: p.qc_pass_count != null && p.qc_pass_count !== '' ? Number(p.qc_pass_count) : null,
         qcFailCount: p.qc_fail_count != null && p.qc_fail_count !== '' ? Number(p.qc_fail_count) : null,
         submittedAt: p.submitted_at || null,
+        submittedByEmail: p.submitted_by_email || null,
         approvedByName: p.approved_by_name || null,
         approvedAt: p.approved_at || null,
         resolutionTimingJson: p.resolution_timing_json || null,

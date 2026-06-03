@@ -56,6 +56,13 @@ interface RateCardFormProps {
   inspectorName: string;
   /** Submit/approve stamps for the header (ISO strings). */
   submittedAt?: string | null;
+  /** Email of whoever submitted for approval, and the logged-in user's email.
+   *  When they match AND status is pending_approval AND it's within 5 min of
+   *  submit, the Finalize button is locked (mirrors the server's self-approval
+   *  lockout) so the submitter can't accidentally finalize their own work —
+   *  their only move is Save & Close. */
+  submittedByEmail?: string | null;
+  currentUserEmail?: string | null;
   approverName?: string | null;
   approvedAt?: string | null;
   propertyName: string;
@@ -2486,6 +2493,15 @@ export function RateCardForm(props: RateCardFormProps) {
     // Branch on status: pending_approval -> finalize flow, else submit flow.
     const isFinalizing = props.inspectionStatus === 'pending_approval';
     if (isFinalizing) {
+      // Belt-and-suspenders: the button is disabled while the submitter is in
+      // their self-approval window, but guard the handler too so a stray call
+      // can't slip a self-approval finalize past the (also server-enforced) lock.
+      if (selfApprovalLocked) {
+        await dialog.alert(
+          `You submitted this inspection for approval, so it needs a second reviewer.\n\nAnother user can approve it now, or you can finalize it yourself in about ${Math.max(1, selfApprovalRemainingMin)} minute${selfApprovalRemainingMin === 1 ? '' : 's'}.\n\nFor now, tap "Save & Close".`
+        );
+        return;
+      }
       // Before finalizing, make sure Gmail is connected so the completion
       // email can actually send. If the server is configured for Gmail but
       // this user hasn't connected yet, bounce them through the OAuth flow —
@@ -2597,6 +2613,39 @@ export function RateCardForm(props: RateCardFormProps) {
       default: return null;
     }
   })();
+
+  // ---- Self-approval lockout (mirrors the server) ----
+  // The person who submitted for approval can't finalize their own submission
+  // for 5 minutes — a second reviewer must approve (or they wait it out). This
+  // stops the common foot-gun: after submitting, the inspector reopens to add a
+  // line item and then hits "Finalize & Generate PDFs" by reflex instead of
+  // "Save & Close". While locked we GRAY OUT Finalize and animate Save & Close.
+  const SELF_APPROVAL_LOCK_MS = 5 * 60 * 1000;
+  const submittedMs = useMemo(() => {
+    const raw = String(props.submittedAt || '').trim();
+    if (!raw) return 0;
+    return /^\d+$/.test(raw) ? Number(raw) : (Date.parse(raw) || 0);
+  }, [props.submittedAt]);
+  const isSubmitter =
+    !!props.currentUserEmail && !!props.submittedByEmail &&
+    props.currentUserEmail.trim().toLowerCase() === props.submittedByEmail.trim().toLowerCase();
+  // Live clock so the lock auto-expires (and the countdown ticks) without a reload.
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  useEffect(() => {
+    if (props.inspectionStatus !== 'pending_approval' || !isSubmitter || !submittedMs) return;
+    setNowTs(Date.now());
+    const t = setInterval(() => {
+      setNowTs(Date.now());
+      if (Date.now() - submittedMs >= SELF_APPROVAL_LOCK_MS) clearInterval(t);
+    }, 1000);
+    return () => clearInterval(t);
+  }, [props.inspectionStatus, isSubmitter, submittedMs]);
+  const selfApprovalRemainingMs =
+    props.inspectionStatus === 'pending_approval' && isSubmitter && submittedMs
+      ? Math.max(0, SELF_APPROVAL_LOCK_MS - (nowTs - submittedMs))
+      : 0;
+  const selfApprovalLocked = selfApprovalRemainingMs > 0;
+  const selfApprovalRemainingMin = Math.ceil(selfApprovalRemainingMs / 60000);
 
   const submitLabel = finalizing
     ? 'Generating PDFs...'
@@ -3287,7 +3336,9 @@ export function RateCardForm(props: RateCardFormProps) {
               showCancelInspection={!!props.onCancelInspection}
               submitLabel={submitLabel}
               submitLabelShort={submitLabelShort}
-              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || aiApplying || (pendingSync + pendingPhotos) > 0}
+              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || aiApplying || (pendingSync + pendingPhotos) > 0 || selfApprovalLocked}
+              selfApprovalLocked={selfApprovalLocked}
+              selfApprovalRemainingMin={selfApprovalRemainingMin}
               onCancelInspection={handleCancelInspectionClick}
               onSaveAndClose={handleSaveAndClose}
               onSubmit={handleSubmitOrFinalize}
@@ -3794,39 +3845,59 @@ function TerminalActions(props: {
   submitLabel: string;
   submitLabelShort?: string;
   submitDisabled: boolean;
+  /** When the submitter is inside their 5-min self-approval window: animate
+   *  Save & Close (the only valid move) and explain why Finalize is greyed. */
+  selfApprovalLocked?: boolean;
+  selfApprovalRemainingMin?: number;
   onCancelInspection: () => void;
   onSaveAndClose: () => void;
   onSubmit: () => void;
   voiceSlot?: React.ReactNode;
   aiSlot?: React.ReactNode;
 }) {
+  const locked = !!props.selfApprovalLocked;
   return (
-    <div className="flex items-center gap-2">
-      {/* Left: Save & Close */}
-      <div className="flex-1 flex justify-start min-w-0">
-        <button
-          type="button"
-          onClick={props.onSaveAndClose}
-          className="px-3.5 sm:px-5 py-2.5 text-sm border border-emerald-300 text-emerald-700 rounded-lg font-semibold hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 transition-colors whitespace-nowrap"
-        >
-          Save &amp; Close
-        </button>
-      </div>
-      {/* Center: voice assistant mic — dead center because the left and right
-          flex containers are equal-weight. */}
-      <div className="shrink-0 flex justify-center">{props.voiceSlot}</div>
-      {/* Right: AI Review icon (with status kicker) + Submit / Finalize */}
-      <div className="flex-1 flex justify-end items-center gap-2 min-w-0">
-        {props.aiSlot}
-        <button
-          type="button"
-          onClick={props.onSubmit}
-          disabled={props.submitDisabled}
-          className="px-4 sm:px-6 py-2.5 text-sm bg-white border border-brand text-brand font-semibold rounded-lg hover:bg-brand hover:text-white active:bg-brand-dark active:border-brand-dark active:text-white transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed whitespace-nowrap"
-        >
-          <span className="sm:hidden">{props.submitLabelShort || props.submitLabel}</span>
-          <span className="hidden sm:inline">{props.submitLabel}</span>
-        </button>
+    <div className="flex flex-col gap-1.5">
+      {/* When the submitter is locked out, a one-line nudge spans the row so the
+          intent is unmistakable: this is pending approval — just Save & Close. */}
+      {locked && (
+        <div className="text-[11px] sm:text-xs text-emerald-700 font-medium text-center animate-[fadeIn_160ms_ease-out]">
+          Pending approval — tap <span className="font-bold">Save &amp; Close</span>.
+          A second reviewer can finalize now, or you can in ~{Math.max(1, props.selfApprovalRemainingMin || 1)} min.
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        {/* Left: Save & Close — pulsed when locked so it reads as THE button. */}
+        <div className="flex-1 flex justify-start min-w-0">
+          <button
+            type="button"
+            onClick={props.onSaveAndClose}
+            className={`px-3.5 sm:px-5 py-2.5 text-sm rounded-lg font-semibold transition-colors whitespace-nowrap ${
+              locked
+                ? 'bg-emerald-600 text-white border border-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 animate-[saveNudge_1.4s_ease-in-out_infinite] motion-reduce:animate-none ring-2 ring-emerald-300'
+                : 'border border-emerald-300 text-emerald-700 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700'
+            }`}
+          >
+            Save &amp; Close
+          </button>
+        </div>
+        {/* Center: voice assistant mic — dead center because the left and right
+            flex containers are equal-weight. */}
+        <div className="shrink-0 flex justify-center">{props.voiceSlot}</div>
+        {/* Right: AI Review icon (with status kicker) + Submit / Finalize */}
+        <div className="flex-1 flex justify-end items-center gap-2 min-w-0">
+          {props.aiSlot}
+          <button
+            type="button"
+            onClick={props.onSubmit}
+            disabled={props.submitDisabled}
+            title={locked ? `You submitted this for approval — finalize unlocks in about ${Math.max(1, props.selfApprovalRemainingMin || 1)} minute(s). Use Save & Close.` : undefined}
+            className="px-4 sm:px-6 py-2.5 text-sm bg-white border border-brand text-brand font-semibold rounded-lg hover:bg-brand hover:text-white active:bg-brand-dark active:border-brand-dark active:text-white transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed whitespace-nowrap"
+          >
+            <span className="sm:hidden">{props.submitLabelShort || props.submitLabel}</span>
+            <span className="hidden sm:inline">{props.submitLabel}</span>
+          </button>
+        </div>
       </div>
     </div>
   );

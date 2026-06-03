@@ -101,6 +101,9 @@ export interface InspectionSummary {
   // Rate Card submit/approve stamps. submittedAt is set when the inspector
   // submits for approval; approvedByName/approvedAt when an approver finalizes.
   submittedAt: string | null;
+  // Email of whoever submitted for approval — drives the self-approval lockout
+  // (the submitter can't finalize their own submission for 5 min).
+  submittedByEmail: string | null;
   approvedByName: string | null;
   approvedAt: string | null;
   // Per-line Internal Resolution timing map { lineExternalId: 'now' | 'later' },

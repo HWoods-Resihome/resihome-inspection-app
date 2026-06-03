@@ -147,6 +147,15 @@ h1, h2, h3, h4, h5, h6 {
 }
 .animate-addedPop { animation: addedPop 1150ms ease-out forwards; }
 
+/* Gentle attention pulse for the "Save & Close" button while the submitter is
+   inside their self-approval lockout — it's the only valid action, so nudge it.
+   Used via Tailwind's arbitrary syntax: animate-[saveNudge_1.4s_ease-in-out_infinite]
+   (paired with motion-reduce:animate-none to honor reduced-motion). */
+@keyframes saveNudge {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
+  50% { transform: scale(1.045); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+}
+
 /* Respect reduced-motion preferences. */
 @media (prefers-reduced-motion: reduce) {
   .animate-fadeIn, .animate-scaleIn, .animate-popIn, .animate-slideUp,

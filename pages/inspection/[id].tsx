@@ -30,6 +30,18 @@ export default function ExistingInspection() {
   const [stage, setStage] = useState<Stage>('loading');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Logged-in user's email — used to mirror the server's self-approval lockout
+  // in the UI (the submitter can't finalize their own submission for 5 min).
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d?.email) setCurrentUserEmail(String(d.email)); })
+      .catch(() => { /* non-fatal: lockout still enforced server-side */ });
+    return () => { cancelled = true; };
+  }, []);
+
   const [inspection, setInspection] = useState<InspectionSummary | null>(null);
   const [propertyRecordId, setPropertyRecordId] = useState<string>('');
   const [propertySquareFootage, setPropertySquareFootage] = useState<number | null>(null);
@@ -344,6 +356,8 @@ export default function ExistingInspection() {
           templateLabel={templateLabel}
           inspectorName={inspection.inspectorName}
           submittedAt={inspection.submittedAt}
+          submittedByEmail={inspection.submittedByEmail}
+          currentUserEmail={currentUserEmail}
           approverName={inspection.approvedByName}
           approvedAt={inspection.approvedAt}
           propertyName={propertyName}
