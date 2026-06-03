@@ -24,6 +24,7 @@ import { VENDORS } from '@/lib/vendors';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { ListPicker } from '@/components/ListPicker';
 import { WheelPicker } from '@/components/WheelPicker';
+import { EditableLineRow } from '@/components/EditableLineRow';
 
 const TENANT_PCT_OPTIONS = Array.from({ length: 21 }, (_, i) => i * 5); // 0..100 step 5
 
@@ -226,6 +227,11 @@ export function CameraAILayer(props: Props) {
   // Quick "Added ✓" confirmation that pops then fizzles out on Add.
   const [addedFx, setAddedFx] = useState<{ key: number; label: string } | null>(null);
   const addedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // When set, the full "Add Line Item" editor (the SAME one as the manual rate-
+  // card form) is open, seeded from a tapped suggestion. The inspector can tweak
+  // any field — category / sub / item / qty / vendor / tenant % / vendor $ — then
+  // Save Line to add it to the chip's room, exactly like the inline Add.
+  const [editorState, setEditorState] = useState<{ chip: LiveSuggestion; line: RateCardLineInput } | null>(null);
 
   useEffect(() => { chipsRef.current = chips; }, [chips]);
 
@@ -800,6 +806,42 @@ export function CameraAILayer(props: Props) {
     setChips((cur) => cur.filter((c) => c.id !== s.id));
   }
 
+  // Build the line a tapped suggestion seeds the full editor with — using the
+  // chip's CURRENT edited values (qty / vendor / tenant % / vendor $) so anything
+  // already tweaked on the card (or by voice) carries into the editor. Mirrors
+  // addChip's line shape; section/location are left blank and stamped by the
+  // parent's onAddLine (routes by roomId), same as the inline Add.
+  function chipToSeedLine(s: LiveSuggestion): RateCardLineInput {
+    const e = editOf(s);
+    const qn = Number(e.qty);
+    const qty = isFinite(qn) && qn > 0 ? qn : (s.quantity ?? 1);
+    const tenant = Math.max(0, Math.min(100, Math.round(Number(e.tenantPct))));
+    const vCost = Number(e.vendorCost);
+    return {
+      externalId: genId(), section: '', location: '',
+      lineItemCode: s.lineItemCode, quantity: qty,
+      tenantBillBackPercent: isFinite(tenant) ? tenant : (s.tenantBillBackPercent ?? 100),
+      assignedTo: e.vendor || s.suggestedVendor || 'Vendor 1',
+      note: '', customLaborRate: null, customAdjustedMaterialCost: null,
+      customVendorCost: (isFinite(vCost) && e.vendorCost.trim() !== '') ? vCost : null,
+      photoUrls: s.stillUrl ? [s.stillUrl] : [],
+    };
+  }
+  // Tap a suggestion's title/subtext → open the full manual add-line editor,
+  // seeded once (stable externalId) from the chip.
+  function openFullEditor(s: LiveSuggestion) {
+    setEditorState({ chip: s, line: chipToSeedLine(s) });
+  }
+  // Commit from the full editor: add to the chip's room, confirm, drop the chip.
+  function commitEditor(chip: LiveSuggestion, line: RateCardLineInput) {
+    onAddLineRef.current(chip.roomId, line);
+    dbg(`✚ added (editor) ${line.lineItemCode} q${line.quantity} ${line.assignedTo}`);
+    setAddedFx({ key: Date.now(), label: chip.description });
+    if (addedTimer.current) clearTimeout(addedTimer.current);
+    addedTimer.current = setTimeout(() => setAddedFx(null), 1150);
+    setChips((cur) => cur.filter((c) => c.id !== chip.id));
+  }
+
   // Live vendor cost from the rate-card math — updates with qty / tenant% /
   // override, identical to the manual line card's formula.
   function vendorCostFor(s: LiveSuggestion, e: ChipEdit): number | null {
@@ -892,7 +934,15 @@ export function CameraAILayer(props: Props) {
           const unitAbbr = s.measurementUnit ? s.unit : ''; // SF / LF / SY (compact)
           return (
           <div key={s.id} className="pointer-events-auto bg-white rounded-xl p-3 shadow-xl ring-1 ring-black/5">
-            <div className="flex items-start gap-2">
+            {/* Tap the title/subtext (not the controls below) to open the full
+                manual add-line editor, seeded from this suggestion. */}
+            <button
+              type="button"
+              onClick={() => openFullEditor(s)}
+              aria-label={`Edit and add ${s.description} as a line item`}
+              title="Tap to open the full add-line editor"
+              className="flex items-start gap-2 w-full text-left -m-1 p-1 rounded-lg hover:bg-gray-50 active:bg-gray-100"
+            >
               {s.stillUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={displayImageSrc(s.stillUrl)} alt="" className="w-11 h-11 object-cover rounded border border-gray-200 shrink-0" />
@@ -901,6 +951,10 @@ export function CameraAILayer(props: Props) {
                 <div className="flex items-center gap-2">
                   <span className={`w-2 h-2 rounded-full shrink-0 ${confColor(s.confidence)}`} />
                   <span className="text-sm font-semibold text-ink leading-tight">{s.description}</span>
+                  <span className="ml-auto shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-brand/80">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                    Edit
+                  </span>
                 </div>
                 {/* Indented to start under the title text (past the status dot). */}
                 <div className="pl-4 text-[11px] text-gray-600">{s.category}{s.subcategory ? ` · ${s.subcategory}` : ''}</div>
@@ -908,7 +962,7 @@ export function CameraAILayer(props: Props) {
                   <div className="pl-4 text-[11px] text-gray-600 mt-0.5" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{subtext}</div>
                 )}
               </div>
-            </div>
+            </button>
 
             {/* Editable fields — one row. Qty + Vendor $ are tap-to-edit text;
                 Vendor + Tenant % use the branded ListPicker / WheelPicker (same
@@ -973,6 +1027,35 @@ export function CameraAILayer(props: Props) {
           );
         })}
       </div>
+
+      {/* Full "Add Line Item" editor — the SAME component the manual rate-card
+          form uses (category / sub / item / qty / vendor / tenant % / vendor $),
+          seeded from the tapped suggestion. It renders its own full-screen
+          overlay; Save Line adds to the chip's room and clears the chip, Cancel
+          just closes. Wrapped in a table because EditableLineRow is a <tr>. */}
+      {editorState && (
+        <div className="pointer-events-auto">
+          <table className="absolute w-0 h-0 overflow-hidden">
+            <tbody>
+              <EditableLineRow
+                mobile
+                startInEditMode
+                line={editorState.line}
+                catalog={catalog}
+                regions={regions}
+                inspectionRegion={region}
+                section={editorState.line.section}
+                location={editorState.line.location}
+                tenantMonths={tenantMonths}
+                onSave={(line) => commitEditor(editorState.chip, line)}
+                onDelete={() => setEditorState(null)}
+                onDiscardNew={() => setEditorState(null)}
+                onEditingChange={(isEditing) => { if (!isEditing) setEditorState(null); }}
+              />
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
