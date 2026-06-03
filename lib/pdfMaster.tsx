@@ -83,7 +83,7 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
             <Text style={pdfStyles.grandTotalsValue}>{ctx.grandTotals.lineCount}</Text>
           </View>
           <View style={pdfStyles.grandTotalsItem}>
-            <Text style={pdfStyles.grandTotalsLabel}>Vendor Total</Text>
+            <Text style={pdfStyles.grandTotalsLabel}>All Vendors Cost</Text>
             <Text style={pdfStyles.grandTotalsValue}>${formatMoneyPdf(ctx.grandTotals.vendor)}</Text>
           </View>
           <View style={pdfStyles.grandTotalsItem}>
