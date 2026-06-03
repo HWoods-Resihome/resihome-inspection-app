@@ -75,11 +75,12 @@ export function buildTicketDescription(vendorUrls: Record<string, string>): stri
   ];
   const links = ordered
     .filter((v) => vendorGetsOwnPdf(v) && (vendorUrls[v] || '').trim())
-    .map((v) => `- ${v}: ${vendorUrls[v]}`);
+    .map((v) => `${v}: ${vendorUrls[v]}`);
 
   const parts = [TICKET_DESCRIPTION_INTRO];
   if (links.length > 0) {
-    parts.push('', 'Vendor Documents:', ...links);
+    // One "Vendor: URL" line each (e.g. "Internal Resolution: …", "Vendor 1: …").
+    parts.push('', ...links);
   }
   const out = parts.join('\n');
   return out.length > DESCRIPTION_MAX ? out.slice(0, DESCRIPTION_MAX) : out;

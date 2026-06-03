@@ -1,14 +1,22 @@
 // Short share-link resolver: /d/<id>/<type>/<sig>  (and /d/<id>/v/<slug>/<sig>)
 //
 // Verifies the signature, looks up the real HubSpot file URL stored on the
-// inspection, and 302-redirects to it. Public (no session) — see middleware.ts.
-// Nothing renders; the redirect happens in getServerSideProps.
+// inspection, and forwards to it. Public (no session) — see middleware.ts.
+//
+// We render a tiny branded interstitial (instead of a bare server 302) so the
+// page carries our favicon/title (from _document) while it forwards — link
+// previews + the loading tab show ResiWalk branding. The forward is immediate
+// (meta refresh at 0s + JS replace), with a manual link as a no-JS fallback.
 
 import type { GetServerSideProps } from 'next';
+import Head from 'next/head';
+import { useEffect } from 'react';
 import { readInspectionProps } from '@/lib/hubspot';
 import { verifyShareSig, slugifyVendor, SHARE_TYPE_TO_PROP, type ShareDocType } from '@/lib/shortLinks';
 
-export const getServerSideProps: GetServerSideProps = async (ctx) => {
+interface Props { destination: string | null }
+
+export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
   const parts = (ctx.params?.parts as string[]) || [];
   const notFound = { notFound: true as const };
 
@@ -31,7 +39,6 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     if (!id || !type || !sig) return notFound;
     if (!verifyShareSig(id, type as ShareDocType, sig, type === 'vendor' ? vendorSlug : '')) return notFound;
 
-    // Resolve the real URL from the inspection's stored properties.
     const props = await readInspectionProps(id, [
       'pdf_master_url', 'pdf_chargeback_url', 'pdf_chargeback_xlsx_url', 'pdf_vendor_urls_json',
       'pdf_attachment_url',
@@ -51,13 +58,42 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     }
 
     if (!destination) return notFound;
-    return { redirect: { destination, permanent: false } };
+    return { props: { destination } };
   } catch {
     return notFound;
   }
 };
 
-export default function ShareRedirect() {
-  // Never rendered (server-side redirect). Minimal fallback just in case.
-  return null;
+export default function ShareRedirect({ destination }: Props) {
+  useEffect(() => {
+    if (destination) window.location.replace(destination);
+  }, [destination]);
+
+  return (
+    <>
+      <Head>
+        <title>ResiWalk — Opening document…</title>
+        {/* favicon links also come from _document; repeated here so the tab/
+            preview shows our brand on this forwarding page too. */}
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+        {destination ? <meta httpEquiv="refresh" content={`0;url=${destination}`} /> : null}
+        <meta name="robots" content="noindex" />
+      </Head>
+      <div style={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif', color: '#374151',
+        background: '#ffffff', textAlign: 'center', padding: 24,
+      }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Opening your document…</div>
+          {destination ? (
+            <a href={destination} style={{ color: '#ff0060', fontSize: 13, textDecoration: 'underline' }}>
+              Click here if it doesn’t open automatically
+            </a>
+          ) : null}
+        </div>
+      </div>
+    </>
+  );
 }
