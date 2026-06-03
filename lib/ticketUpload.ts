@@ -39,10 +39,10 @@ export interface TicketUploadResult {
 
 const DEFAULTS = {
   loginUrl: 'https://honeybadgermm.com/',
-  selUsername: 'input[name="username"], input[name="email"], input[type="email"], input[type="text"], input#username, input#email',
-  selPassword: 'input[type="password"], input[name="password"], input#password',
-  // HoneyBadger's button reads "LOGIN TO ACCOUNT".
-  selSubmit: 'button::-p-text(LOGIN TO ACCOUNT), input[type="submit"], button[type="submit"], button::-p-text(Login), button::-p-text(Log In), button::-p-text(Sign In)',
+  selUsername: 'input#username, input[name="username"]',
+  selPassword: 'input#password, input[name="pwd"], input[type="password"]',
+  // AngularJS login button: <button id="login_btn" ng-click="Authenticate()">.
+  selSubmit: 'button#login_btn, [ng-click="Authenticate()"]',
   selUploadDoc: '::-p-text(Upload Document)',
   selFileInput: 'input#uploader, input[type="file"][name="files"], input[type="file"]',
   selUploadBtn: 'button::-p-text(Upload)',
@@ -166,29 +166,34 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
       return false;
     };
 
-    // 3. Log in.
+    // 3. Log in (AngularJS: ng-model fields + ng-click="Authenticate()" AJAX).
     await page.goto(loginUrl, { waitUntil: 'networkidle2' });
     log(`opened login (${loginUrl})`);
     await page.waitForSelector(selUsername, { timeout: navTimeout });
-    await page.type(selUsername, username, { delay: 20 });
-    await page.type(selPassword, password, { delay: 20 });
+    await page.type(selUsername, username, { delay: 25 });
+    await page.type(selPassword, password, { delay: 25 });
+    // Make sure AngularJS ng-model picked up the values (set + fire input/change).
+    await page.evaluate((su: string, sp: string, u: string, p: string) => {
+      const setVal = (sel: string, val: string) => {
+        const el = document.querySelector(sel) as HTMLInputElement | null;
+        if (el) { el.value = val; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }
+      };
+      setVal(su, u); setVal(sp, p);
+    }, selUsername, selPassword, username, password);
     log('entered credentials');
-    // Click the LOGIN TO ACCOUNT button by exact text (the page also has a
-    // "VENDOR ACCESS PORTAL" button — don't click that). Wait for the resulting
-    // navigation, fallback to Enter in the password field.
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: navTimeout }).catch(() => {}),
-      (async () => {
-        const clicked = await clickByText('login to account');
-        if (!clicked) { await page.focus(selPassword); await page.keyboard.press('Enter'); }
-      })(),
-    ]);
-    await sleep(2500);
+
+    // Click LOGIN TO ACCOUNT (#login_btn → Authenticate()). It's an AJAX login,
+    // so wait for the login form to go away (success) rather than a navigation.
+    await page.evaluate((sel: string) => { (document.querySelector(sel) as HTMLElement | null)?.click(); }, selSubmit);
+    log('clicked LOGIN TO ACCOUNT');
+    await page.waitForFunction(() => !document.querySelector('#login_btn'), { timeout: navTimeout })
+      .catch(() => {});
+    await sleep(3000);
     const afterLoginUrl = page.url();
-    const stillOnLogin = /\/login(\?|\/|$|#)/i.test(afterLoginUrl) || /login/i.test(afterLoginUrl.split('#')[0].split('?')[0].split('/').pop() || '');
-    log(`after login: url=${afterLoginUrl}${stillOnLogin ? '  ← STILL ON LOGIN (auth failed — check creds/selector)' : '  (authenticated)'}`);
+    const stillOnLogin = !!(await page.$('#login_btn'));
+    log(`after login: url=${afterLoginUrl}${stillOnLogin ? '  ← STILL ON LOGIN (auth failed — check creds)' : '  (authenticated)'}`);
     if (stillOnLogin) {
-      throw new Error(`Login did not establish a session (landed on ${afterLoginUrl}). Check HBMM_USERNAME/HBMM_PASSWORD or the login selectors.`);
+      throw new Error(`Login did not succeed (still on the login form). Check HBMM_USERNAME / HBMM_PASSWORD.`);
     }
 
     // 4. Navigate to the ticket (single goto; we're authenticated so the cookie
