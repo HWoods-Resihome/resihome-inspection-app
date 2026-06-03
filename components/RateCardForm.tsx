@@ -2914,20 +2914,20 @@ export function RateCardForm(props: RateCardFormProps) {
       {(assignedVendors.length > 0 || sections.length > 1) && (
         <div className="flex items-center justify-between gap-2 mb-2">
           {assignedVendors.length > 0 ? (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-heading text-gray-500 shrink-0">Vendor:</span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-xs font-heading text-gray-500 shrink-0">Filter by Assigned Vendor:</span>
               <ListPicker
                 value={activeVendorFilter}
                 options={[{ value: 'All', label: 'All Vendors' }, ...assignedVendors.map((v) => ({ value: v, label: v }))]}
                 onChange={setVendorFilter}
-                ariaLabel="Filter the report by assigned vendor"
-                className="h-8 min-w-[150px] bg-white border border-gray-300 rounded-lg px-3 text-sm text-ink font-heading flex items-center justify-between hover:border-brand"
+                ariaLabel="Filter by Assigned Vendor"
+                className="text-xs font-heading text-gray-800 flex items-center gap-0.5 hover:text-brand"
               />
               {activeVendorFilter !== 'All' && (
                 <button
                   type="button"
                   onClick={() => setVendorFilter('All')}
-                  className="text-xs text-brand underline font-heading font-semibold"
+                  className="text-xs text-brand underline font-heading font-semibold shrink-0"
                 >
                   Clear
                 </button>
