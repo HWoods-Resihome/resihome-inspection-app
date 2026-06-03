@@ -295,35 +295,47 @@ export default function ExistingInspection() {
       </Head>
       {readOnly && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-2">
-          <div className="flex items-center justify-center gap-3 flex-wrap">
+          {/* Symmetrical 3-zone header: status (left) · downloads (center) ·
+              Re-Open (right). */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            {/* Left: status */}
             <span className="text-sm text-amber-900 font-heading font-semibold">
               {isCompleted ? 'This Inspection is Completed.' : 'This Inspection is Cancelled.'}
             </span>
-            {isCompleted && (
-              <button onClick={handleReopen} className="text-sm text-brand underline font-semibold">
-                Reopen for editing
+
+            {/* Center: download options (brand-colored to match the scheme) */}
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
+                <CompletedPdfMenu inspection={inspection} shareLinks={shareLinks} />
+              )}
+              {isCompleted && inspection.templateType === 'pm_scope_rate_card'
+                && currentUserEmail.toLowerCase() === 'hwoods@resihome.com' && (
+                <CreateTicketButton inspectionId={inspectionId} />
+              )}
+              {isCompleted && inspection.templateType === 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
+                <a href={shareLinks?.report || inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
+                   className="text-sm bg-brand hover:bg-brand-dark text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
+                  Download QC Report (PDF)
+                </a>
+              )}
+              {isCompleted && inspection.templateType !== 'pm_scope_rate_card'
+                && inspection.templateType !== 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
+                <a href={shareLinks?.report || inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
+                   className="text-sm bg-brand hover:bg-brand-dark text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
+                  Download Report (PDF)
+                </a>
+              )}
+            </div>
+
+            {/* Right: Re-Open for Edits (secondary, outlined) */}
+            {isCompleted ? (
+              <button
+                onClick={handleReopen}
+                className="text-sm text-brand border border-brand hover:bg-brand/5 font-heading font-semibold px-3 py-1.5 rounded-lg"
+              >
+                Re-Open for Edits
               </button>
-            )}
-            {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
-              <CompletedPdfMenu inspection={inspection} shareLinks={shareLinks} />
-            )}
-            {isCompleted && inspection.templateType === 'pm_scope_rate_card'
-              && currentUserEmail.toLowerCase() === 'hwoods@resihome.com' && (
-              <CreateTicketButton inspectionId={inspectionId} />
-            )}
-            {isCompleted && inspection.templateType === 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
-              <a href={shareLinks?.report || inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
-                 className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
-                Download QC Report (PDF)
-              </a>
-            )}
-            {isCompleted && inspection.templateType !== 'pm_scope_rate_card'
-              && inspection.templateType !== 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
-              <a href={shareLinks?.report || inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
-                 className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
-                Download Report (PDF)
-              </a>
-            )}
+            ) : <span />}
           </div>
         </div>
       )}
@@ -449,7 +461,7 @@ function CompletedPdfMenu({ inspection, shareLinks }: { inspection: InspectionSu
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded font-semibold hover:bg-blue-700"
+        className="text-sm bg-brand hover:bg-brand-dark text-white px-3 py-1.5 rounded-lg font-heading font-semibold"
       >
         Download PDFs ▾
       </button>

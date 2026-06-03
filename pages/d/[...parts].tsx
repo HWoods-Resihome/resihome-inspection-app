@@ -1,22 +1,19 @@
-// Short share-link resolver: /d/<id>/<type>/<sig>  (and /d/<id>/v/<slug>/<sig>)
+// Short share-link resolver/proxy: /d/<id>/<type>/<sig>  (+ /d/<id>/v/<slug>/<sig>)
 //
 // Verifies the signature, looks up the real HubSpot file URL stored on the
-// inspection, and forwards to it. Public (no session) — see middleware.ts.
-//
-// We render a tiny branded interstitial (instead of a bare server 302) so the
-// page carries our favicon/title (from _document) while it forwards — link
-// previews + the loading tab show ResiWalk branding. The forward is immediate
-// (meta refresh at 0s + JS replace), with a manual link as a no-JS fallback.
+// inspection, then STREAMS the file back through our domain so the browser
+// stays on the clean resiwalk.com/d/... URL (instead of redirecting and
+// exposing the giant HubSpot URL). Streaming (not buffering) so large PDFs
+// aren't capped by the serverless buffered-response limit. Public — see
+// middleware.ts. On any failure we fall back to a redirect so the file is still
+// reachable.
 
 import type { GetServerSideProps } from 'next';
-import Head from 'next/head';
-import { useEffect } from 'react';
+import { Readable } from 'stream';
 import { readInspectionProps } from '@/lib/hubspot';
 import { verifyShareSig, slugifyVendor, SHARE_TYPE_TO_PROP, type ShareDocType } from '@/lib/shortLinks';
 
-interface Props { destination: string | null }
-
-export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const parts = (ctx.params?.parts as string[]) || [];
   const notFound = { notFound: true as const };
 
@@ -59,50 +56,43 @@ export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
 
     if (!destination) return notFound;
 
-    // Content-negotiate: a real browser navigation sends `Accept: text/html` —
-    // give it the branded interstitial (favicon/title) that forwards. Anything
-    // else (fetch() for blob downloads, link-fetchers, curl) gets a clean 302 to
-    // the file so programmatic downloads still work.
-    const accept = String(ctx.req.headers['accept'] || '');
-    if (!accept.includes('text/html')) {
+    // Proxy the file so the clean URL stays in the address bar.
+    const fileResp = await fetch(destination);
+    if (!fileResp.ok || !fileResp.body) {
+      // Couldn't fetch — fall back to a redirect so the file is still reachable.
       return { redirect: { destination, permanent: false } };
     }
-    return { props: { destination } };
+
+    const contentType = fileResp.headers.get('content-type') || 'application/pdf';
+    let filename = 'document.pdf';
+    try {
+      const seg = new URL(destination).pathname.split('/').pop();
+      if (seg) filename = decodeURIComponent(seg);
+    } catch { /* keep default */ }
+
+    ctx.res.setHeader('Content-Type', contentType);
+    // inline → view in the browser tab at the clean URL; clients can still save.
+    ctx.res.setHeader('Content-Disposition', `inline; filename="${filename.replace(/["\\]/g, '')}"`);
+    ctx.res.setHeader('Cache-Control', 'private, max-age=300');
+    const len = fileResp.headers.get('content-length');
+    if (len) ctx.res.setHeader('Content-Length', len);
+
+    await new Promise<void>((resolve, reject) => {
+      const nodeStream = Readable.fromWeb(fileResp.body as any);
+      nodeStream.on('error', reject);
+      ctx.res.on('error', reject);
+      ctx.res.on('finish', resolve);
+      nodeStream.pipe(ctx.res);
+    });
+
+    // Response already streamed; nothing to render.
+    return { props: {} };
   } catch {
     return notFound;
   }
 };
 
-export default function ShareRedirect({ destination }: Props) {
-  useEffect(() => {
-    if (destination) window.location.replace(destination);
-  }, [destination]);
-
-  return (
-    <>
-      <Head>
-        <title>ResiWalk — Opening document…</title>
-        {/* favicon links also come from _document; repeated here so the tab/
-            preview shows our brand on this forwarding page too. */}
-        <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=3" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3" />
-        {destination ? <meta httpEquiv="refresh" content={`0;url=${destination}`} /> : null}
-        <meta name="robots" content="noindex" />
-      </Head>
-      <div style={{
-        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif', color: '#374151',
-        background: '#ffffff', textAlign: 'center', padding: 24,
-      }}>
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Opening your document…</div>
-          {destination ? (
-            <a href={destination} style={{ color: '#ff0060', fontSize: 13, textDecoration: 'underline' }}>
-              Click here if it doesn’t open automatically
-            </a>
-          ) : null}
-        </div>
-      </div>
-    </>
-  );
+export default function ShareProxy() {
+  // Never rendered — getServerSideProps streams the file (or redirects/404s).
+  return null;
 }
