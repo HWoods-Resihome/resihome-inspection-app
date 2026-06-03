@@ -145,22 +145,34 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     page.setDefaultNavigationTimeout(navTimeout);
     log('launched browser');
 
-    // Capture upload network calls so we can see whether the file actually POSTed
-    // and what the server returned (the modal can close optimistically on failure).
+    // Capture upload network calls so we can see whether the file actually POSTed,
+    // to WHICH endpoint (image vs document), and what the server returned.
     const postResponses: string[] = [];
+    const reqPayloads: string[] = [];
+    page.on('request', (req: any) => {
+      try {
+        const u = req.url();
+        if ((req.method() === 'POST' || req.method() === 'PUT') && /upload|image|document|file|attach/i.test(u)) {
+          const ct = (req.headers()['content-type'] || '');
+          const pd = /multipart/i.test(ct) ? '(multipart)' : (req.postData() || '').slice(0, 200);
+          reqPayloads.push(`${u.slice(-80)} ${pd}`);
+        }
+      } catch { /* ignore */ }
+    });
     page.on('response', async (resp: any) => {
       try {
         const rq = resp.request();
         const m = rq.method();
         if (m !== 'POST' && m !== 'PUT') return;
         const u = rq.url();
-        // For upload-related endpoints, capture the response body — a 200 can
-        // still carry {success:false,...}/an error message.
+        const isUpload = /upload|image|document|file|attach/i.test(u);
+        // Keep the full URL (incl. query — ticket id is often there) for uploads,
+        // and capture the response body (a 200 can carry {success:false,...}).
         let body = '';
-        if (/upload|image|document|file|attach/i.test(u)) {
+        if (isUpload) {
           try { body = (await resp.text()).replace(/\s+/g, ' ').slice(0, 300); } catch { /* ignore */ }
         }
-        postResponses.push(`${resp.status()} ${u.split('?')[0].slice(-55)}${body ? ` :: ${body}` : ''}`);
+        postResponses.push(`${resp.status()} ${(isUpload ? u : u.split('?')[0]).slice(-90)}${body ? ` :: ${body}` : ''}`);
       } catch { /* ignore */ }
     });
 
@@ -285,8 +297,11 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     // files dispatches a change event → Kendo stages them in fileList.
     await sleep(1500);
     await page.waitForSelector(selFileInput, { timeout: navTimeout });
-    // Prefer the Kendo document uploader (#uploader); fall back to the last file input.
-    let input = await page.$('input#uploader');
+    // Scope to the DOCUMENT modal's uploader (#frmUploadFile) so we don't grab a
+    // stray photo uploader (which routes the file to the image store as .jpg).
+    let input = await page.$('#frmUploadFile input[type="file"]')
+      || await page.$('.modal.in input[type="file"], .modal[style*="display: block"] input[type="file"]')
+      || await page.$('input#uploader');
     if (!input) { const inputs = await page.$$(selFileInput); input = inputs[inputs.length - 1] || inputs[0]; }
     if (!input) throw new Error(`file input not found (${selFileInput})`);
     await input.uploadFile(...localPaths);
@@ -336,6 +351,7 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     await sleep(9000);
     const newPosts = postResponses.slice(postsBefore);
     log(`upload network POST/PUT: ${newPosts.join(' | ') || '(NONE — file did not submit)'}`);
+    if (reqPayloads.length) log(`upload request endpoints: ${reqPayloads.join(' | ')}`);
     // Kendo success/error indicators (use the specific file-state classes; the
     // .k-i-close icon is the per-file REMOVE button, NOT an error).
     const kendo = await page.evaluate(() => {
