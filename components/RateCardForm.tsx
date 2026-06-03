@@ -2019,6 +2019,15 @@ export function RateCardForm(props: RateCardFormProps) {
     setAiSummary('');
     setAiAdjustments([]);
     setAiDecisions({});
+    // Weak-signal watchdog: abort the review if the stream stalls (no bytes for
+    // STALL_MS). In low-service areas the SSE can hang indefinitely; failing fast
+    // lets the inspector move on (AI Review isn't required to submit — it's
+    // required at finalize). Re-armed on every chunk so a slow-but-progressing
+    // stream isn't killed.
+    const ctrl = new AbortController();
+    const STALL_MS = 30000;
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    const armStall = () => { if (stallTimer) clearTimeout(stallTimer); stallTimer = setTimeout(() => ctrl.abort(), STALL_MS); };
     try {
       // Flush pending edits so the server reviews what the inspector sees.
       try { await commitAndWait(); } catch { /* proceed with client state */ }
@@ -2041,8 +2050,10 @@ export function RateCardForm(props: RateCardFormProps) {
         const urls = (photosBySectionRef.current[s.id] || []).filter((u) => !u.startsWith('blob:'));
         if (urls.length) photosBySectionPayload[s.id] = urls;
       }
+      armStall(); // start the watchdog as the request goes out
       const res = await fetch(`/api/inspections/${props.inspectionRecordId}/ai-review`, {
         method: 'POST',
+        signal: ctrl.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sections: sections.map((s) => ({ id: s.id, name: s.displayName || s.label, location: s.location })),
@@ -2076,6 +2087,7 @@ export function RateCardForm(props: RateCardFormProps) {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        armStall(); // progress → re-arm the stall watchdog
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split('\n');
         buffer = parts.pop() || '';
@@ -2099,8 +2111,14 @@ export function RateCardForm(props: RateCardFormProps) {
       }
       if (streamErr) setAiError(streamErr);
     } catch (e: any) {
-      setAiError(String(e?.message || e));
+      const aborted = e?.name === 'AbortError' || ctrl.signal.aborted;
+      setAiError(
+        aborted
+          ? 'AI Review stopped — weak connection. You can submit without it for now (it’s required before final approval). Tap retry when you have signal.'
+          : String(e?.message || e)
+      );
     } finally {
+      if (stallTimer) clearTimeout(stallTimer);
       setAiLoading(false);
       setAiStreaming(false);
     }
@@ -2473,16 +2491,11 @@ export function RateCardForm(props: RateCardFormProps) {
       if (!ok) return;
     }
     // AI review gate — a Scope rate card must pass AI review for the CURRENT
-    // scope before it can be submitted for approval. Any edit since the last
-    // review invalidates it (see reviewValid), so this re-prompts after changes.
-    if (props.templateType === 'pm_scope_rate_card' && props.inspectionStatus !== 'pending_approval' && !reviewValid) {
-      const ok = await dialog.confirm(
-        'AI Review must be completed before submitting for approval.\n\nIt checks the scope against the turn standard (depreciation, duplicates, tenant responsibility) and suggests adjustments to approve or decline.',
-        { confirmLabel: 'Run AI Review', cancelLabel: 'Not now' }
-      );
-      if (ok) void runAiReview();
-      return;
-    }
+    // scope. NOTE: AI Review is NOT required to SUBMIT — an inspector in a
+    // low-service area can submit for approval without waiting on the review (it
+    // would otherwise hang on weak signal). The review is instead REQUIRED at
+    // FINALIZE (below), where it's run by the approver on (presumably) good
+    // connectivity. This unblocks the field while keeping the QC gate.
     // Flush pending edits to make sure HubSpot has everything before the submit.
     try {
       await commitAndWait();
@@ -2496,10 +2509,25 @@ export function RateCardForm(props: RateCardFormProps) {
       // Belt-and-suspenders: the button is disabled while the submitter is in
       // their self-approval window, but guard the handler too so a stray call
       // can't slip a self-approval finalize past the (also server-enforced) lock.
+      // We intentionally DON'T reveal the countdown — to the submitter it reads
+      // as a flat "you can't approve your own inspection" (it quietly clears
+      // after the window so they're never permanently stuck).
       if (selfApprovalLocked) {
         await dialog.alert(
-          `You submitted this inspection for approval, so it needs a second reviewer.\n\nAnother user can approve it now, or you can finalize it yourself in about ${Math.max(1, selfApprovalRemainingMin)} minute${selfApprovalRemainingMin === 1 ? '' : 's'}.\n\nFor now, tap "Save & Close".`
+          `You submitted this inspection for approval, so you can't approve it yourself.\n\nA second reviewer needs to finalize it. For now, tap "Save & Close".`
         );
+        return;
+      }
+      // AI Review gate (moved here from submit): a Scope rate card must pass AI
+      // Review for the CURRENT scope before it can be finalized. Whoever finalizes
+      // (normally the approver) runs it here. Any edit since the last review
+      // invalidates it (see reviewValid), so this re-prompts after changes.
+      if (props.templateType === 'pm_scope_rate_card' && !reviewValid) {
+        const ok = await dialog.confirm(
+          'AI Review must be completed before finalizing.\n\nIt checks the scope against the turn standard (depreciation, duplicates, tenant responsibility) and suggests adjustments to approve or decline.',
+          { confirmLabel: 'Run AI Review', cancelLabel: 'Not now' }
+        );
+        if (ok) void runAiReview();
         return;
       }
       // Before finalizing, make sure Gmail is connected so the completion
@@ -2581,6 +2609,9 @@ export function RateCardForm(props: RateCardFormProps) {
         const text = await r.text();
         throw new Error(`HTTP ${r.status}: ${text.slice(0, 200)}`);
       }
+      // Confirmation toast — it lives at the app root, so it stays visible after
+      // onSubmit() routes back to the inspections home screen (app + desktop).
+      flashApi.flash('Inspection submitted for approval — it’s now pending review. ✅', 'success', 8000);
       props.onSubmit();
     } catch (e: any) {
       await dialog.alert(`Submit failed: ${e.message || e}`);
@@ -2645,7 +2676,6 @@ export function RateCardForm(props: RateCardFormProps) {
       ? Math.max(0, SELF_APPROVAL_LOCK_MS - (nowTs - submittedMs))
       : 0;
   const selfApprovalLocked = selfApprovalRemainingMs > 0;
-  const selfApprovalRemainingMin = Math.ceil(selfApprovalRemainingMs / 60000);
 
   const submitLabel = finalizing
     ? 'Generating PDFs...'
@@ -3338,7 +3368,6 @@ export function RateCardForm(props: RateCardFormProps) {
               submitLabelShort={submitLabelShort}
               submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || aiApplying || (pendingSync + pendingPhotos) > 0 || selfApprovalLocked}
               selfApprovalLocked={selfApprovalLocked}
-              selfApprovalRemainingMin={selfApprovalRemainingMin}
               onCancelInspection={handleCancelInspectionClick}
               onSaveAndClose={handleSaveAndClose}
               onSubmit={handleSubmitOrFinalize}
@@ -3347,7 +3376,7 @@ export function RateCardForm(props: RateCardFormProps) {
                   type="button"
                   onClick={() => { if (aiAdjustments.length > 0 && !aiModalOpen) setAiModalOpen(true); else void runAiReview(); }}
                   disabled={aiLoading}
-                  title={reviewValid ? 'AI Review complete — tap to re-run' : aiAdjustments.length > 0 ? 'AI Review in progress — tap to resume' : 'Run AI Review (required before submit)'}
+                  title={reviewValid ? 'AI Review complete — tap to re-run' : aiAdjustments.length > 0 ? 'AI Review in progress — tap to resume' : 'Run AI Review (required before finalizing)'}
                   aria-label="AI Review"
                   className={`relative shrink-0 w-10 h-10 rounded-full flex items-center justify-center border-2 transition disabled:opacity-50 ${reviewValid ? 'border-emerald-400 text-emerald-600 bg-emerald-50' : 'border-brand text-brand bg-brand/5 hover:bg-brand/10'}`}
                 >
@@ -3845,10 +3874,11 @@ function TerminalActions(props: {
   submitLabel: string;
   submitLabelShort?: string;
   submitDisabled: boolean;
-  /** When the submitter is inside their 5-min self-approval window: animate
-   *  Save & Close (the only valid move) and explain why Finalize is greyed. */
+  /** When the submitter is inside their (hidden) self-approval window: animate
+   *  Save & Close (the only valid move) and explain why Finalize is greyed.
+   *  We deliberately DON'T surface a countdown — to the submitter it reads as a
+   *  flat lockout. */
   selfApprovalLocked?: boolean;
-  selfApprovalRemainingMin?: number;
   onCancelInspection: () => void;
   onSaveAndClose: () => void;
   onSubmit: () => void;
@@ -3862,8 +3892,7 @@ function TerminalActions(props: {
           intent is unmistakable: this is pending approval — just Save & Close. */}
       {locked && (
         <div className="text-[11px] sm:text-xs text-emerald-700 font-medium text-center animate-[fadeIn_160ms_ease-out]">
-          Pending approval — tap <span className="font-bold">Save &amp; Close</span>.
-          A second reviewer can finalize now, or you can in ~{Math.max(1, props.selfApprovalRemainingMin || 1)} min.
+          You submitted this — a second reviewer must approve. Tap <span className="font-bold">Save &amp; Close</span>.
         </div>
       )}
       <div className="flex items-center gap-2">
@@ -3891,7 +3920,7 @@ function TerminalActions(props: {
             type="button"
             onClick={props.onSubmit}
             disabled={props.submitDisabled}
-            title={locked ? `You submitted this for approval — finalize unlocks in about ${Math.max(1, props.selfApprovalRemainingMin || 1)} minute(s). Use Save & Close.` : undefined}
+            title={locked ? `You submitted this for approval, so you can't approve it yourself — a second reviewer must finalize it. Use Save & Close.` : undefined}
             className="px-4 sm:px-6 py-2.5 text-sm bg-white border border-brand text-brand font-semibold rounded-lg hover:bg-brand hover:text-white active:bg-brand-dark active:border-brand-dark active:text-white transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed whitespace-nowrap"
           >
             <span className="sm:hidden">{props.submitLabelShort || props.submitLabel}</span>
