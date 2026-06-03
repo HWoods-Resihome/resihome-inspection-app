@@ -174,7 +174,8 @@ export function RateCardForm(props: RateCardFormProps) {
   // room's section photos or a single line item's photos.
   type LightboxState =
     | { kind: 'section'; sectionId: string; index: number }
-    | { kind: 'line'; sectionId: string; externalId: string; index: number };
+    | { kind: 'line'; sectionId: string; externalId: string; index: number }
+    | { kind: 'after'; sectionId: string; externalId: string; index: number };
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
 
   // ----- Catalog + regions ---------------------------------------------
@@ -1748,6 +1749,40 @@ export function RateCardForm(props: RateCardFormProps) {
     }
   }
 
+  // After-photo (Internal Resolution) delete/replace — mirrors the line-photo
+  // handlers but on the line's afterPhotoUrls. Powers the after-photo lightbox.
+  function deleteAfterPhoto(sectionId: string, externalId: string, index: number) {
+    if (props.readOnly) return;
+    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
+    if (!line) return;
+    const next = (line.afterPhotoUrls || []).filter((_, i) => i !== index);
+    handleSaveLineForSection(sectionId, { ...line, afterPhotoUrls: next });
+  }
+
+  async function replaceAfterPhoto(sectionId: string, externalId: string, index: number, file: File) {
+    if (props.readOnly) return;
+    const line = (linesBySection[sectionId] || []).find((l) => l.externalId === externalId);
+    if (!line) return;
+    const arr = [...(line.afterPhotoUrls || [])];
+    if (index < 0 || index >= arr.length) return;
+    const oldUrl = arr[index];
+    try {
+      const url = await uploadPhotoOrQueue(file, props.inspectionRecordId, sectionId, { replacesUrl: oldUrl, lineExternalId: externalId });
+      arr[index] = url;
+      if (!url.startsWith('blob:')) {
+        handleSaveLineForSection(sectionId, { ...line, afterPhotoUrls: arr });
+      } else {
+        setLinesBySection((m) => {
+          const lines = m[sectionId] || [];
+          return { ...m, [sectionId]: lines.map((l) => (l.externalId === externalId ? { ...l, afterPhotoUrls: arr } : l)) };
+        });
+        refreshPending();
+      }
+    } catch (e) {
+      console.error('[RateCardForm] after photo replace failed:', e);
+    }
+  }
+
   function handleCameraComplete(hubspotUrls: string[]) {
     if (!cameraSectionId) return;
     if (hubspotUrls.length) {
@@ -3059,6 +3094,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
                               afterPhotosEnabled={afterPhotosEnabled}
                               onCaptureAfterPhotos={() => setAfterCameraTarget({ sectionId: s.id, lineExternalId: line.externalId })}
+                              onOpenAfterPhoto={(index) => setLightbox({ kind: 'after', sectionId: s.id, externalId: line.externalId, index })}
                               resolutionTiming={resolutionTimings[line.externalId]}
                               onSetResolutionTiming={setLineTiming}
                               onSave={(updated) => handleSaveLineForSection(s.id, updated)}
@@ -3386,6 +3422,21 @@ export function RateCardForm(props: RateCardFormProps) {
             onClose={() => setLightbox(null)}
             onDelete={(_g, index) => deleteLinePhoto(lightbox.sectionId, lightbox.externalId, index)}
             onReplace={(_g, index, file) => replaceLinePhoto(lightbox.sectionId, lightbox.externalId, index, file)}
+          />
+        );
+      })()}
+      {lightbox && lightbox.kind === 'after' && (() => {
+        const line = (linesBySection[lightbox.sectionId] || []).find((l) => l.externalId === lightbox.externalId);
+        return (
+          <PhotoLightbox
+            groups={[{ id: lightbox.externalId, name: line ? `${lineLabel(line)} — After Photos` : 'After photos' }]}
+            photosByGroup={{ [lightbox.externalId]: line?.afterPhotoUrls || [] }}
+            initialGroupId={lightbox.externalId}
+            initialIndex={lightbox.index}
+            readOnly={!!props.readOnly}
+            onClose={() => setLightbox(null)}
+            onDelete={(_g, index) => deleteAfterPhoto(lightbox.sectionId, lightbox.externalId, index)}
+            onReplace={(_g, index, file) => replaceAfterPhoto(lightbox.sectionId, lightbox.externalId, index, file)}
           />
         );
       })()}

@@ -79,6 +79,8 @@ interface Props {
   // Resolution) line. Owned by the parent so it uses the established
   // CameraCapture, not the OS picker. Captured URLs are appended + saved there.
   onCaptureAfterPhotos?: () => void;
+  // Open the line's AFTER photo at `index` in the lightbox (view/delete/replace).
+  onOpenAfterPhoto?: (index: number) => void;
   // Internal Resolution completion timing: "now" enforces after-photos at
   // finalize; "later" defers them. Persisted by the parent.
   resolutionTiming?: 'now' | 'later';
@@ -215,13 +217,14 @@ function OverCapAlert({
  * let it double as the "Before Photos" display (no + / required).
  */
 function PhotoChipRow({
-  urls, label, required, onAdd, onChange, readOnly,
+  urls, label, required, onAdd, onChange, onOpen, readOnly,
 }: {
   urls: string[];
   label: string;
   required?: boolean;
   onAdd?: () => void;            // when set, shows the "+" (in-app camera)
   onChange?: (urls: string[]) => void;  // when set, thumbnails get a delete ×
+  onOpen?: (index: number) => void;     // when set, tapping a thumbnail opens the lightbox
   readOnly?: boolean;
 }) {
   const removeAt = (i: number) => onChange?.((urls || []).filter((_, idx) => idx !== i));
@@ -240,7 +243,13 @@ function PhotoChipRow({
         {urls.map((u, i) => (
           <span key={`${u}-${i}`} className="relative inline-block">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={displayImageSrc(u)} alt="" className="w-12 h-12 object-cover rounded border border-gray-200" />
+            <img
+              src={displayImageSrc(u)}
+              alt=""
+              onClick={onOpen ? (e) => { e.stopPropagation(); onOpen(i); } : undefined}
+              className={`w-12 h-12 object-cover rounded border border-gray-200 ${onOpen ? 'cursor-pointer' : ''}`}
+              title={onOpen ? (isVideoEntry(u) ? 'Tap to play' : 'Tap to view') : undefined}
+            />
             {!readOnly && onChange && (
               <button
                 type="button"
@@ -275,7 +284,7 @@ export function EditableLineRow(props: Props) {
     line, catalog, regions, inspectionRegion,
     section, location, readOnly, startInEditMode, mobile,
     onSave, onDelete, onDiscardNew, autoSfQuantity, tenantMonths, afterPhotosEnabled,
-    onCaptureAfterPhotos,
+    onCaptureAfterPhotos, onOpenAfterPhoto,
   } = props;
 
   // -------------------------------------------------------------------
@@ -731,6 +740,7 @@ export function EditableLineRow(props: Props) {
         }}
         onSaveAfterPhotos={(urls) => onSave({ ...line, afterPhotoUrls: urls })}
         onCaptureAfterPhotos={onCaptureAfterPhotos}
+        onOpenAfterPhoto={onOpenAfterPhoto}
         resolutionTiming={props.resolutionTiming}
         onSetResolutionTiming={props.onSetResolutionTiming}
       />
@@ -1215,12 +1225,13 @@ interface ViewRowProps {
   onSaveDescription: (text: string) => void;
   onSaveAfterPhotos: (urls: string[]) => void;
   onCaptureAfterPhotos?: () => void;
+  onOpenAfterPhoto?: (index: number) => void;
   // Internal Resolution timing: "now" requires after-photos; "later" defers them.
   resolutionTiming?: 'now' | 'later';
   onSetResolutionTiming?: (lineExternalId: string, v: 'now' | 'later') => void;
 }
 
-function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotosEnabled, onEnterEdit, onDelete, onOpenPhoto, onSaveDescription, onSaveAfterPhotos, onCaptureAfterPhotos, resolutionTiming, onSetResolutionTiming }: ViewRowProps) {
+function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotosEnabled, onEnterEdit, onDelete, onOpenPhoto, onSaveDescription, onSaveAfterPhotos, onCaptureAfterPhotos, onOpenAfterPhoto, resolutionTiming, onSetResolutionTiming }: ViewRowProps) {
   const [showFull, setShowFull] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState('');
@@ -1409,6 +1420,7 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
                   required={afterRequired}
                   onAdd={readOnly ? undefined : onCaptureAfterPhotos}
                   onChange={readOnly ? undefined : onSaveAfterPhotos}
+                  onOpen={onOpenAfterPhoto}
                   readOnly={readOnly}
                 />
               )}
@@ -1549,6 +1561,7 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
             required={afterRequired}
             onAdd={readOnly ? undefined : onCaptureAfterPhotos}
             onChange={readOnly ? undefined : onSaveAfterPhotos}
+            onOpen={onOpenAfterPhoto}
             readOnly={readOnly}
           />
         )}
