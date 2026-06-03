@@ -65,7 +65,7 @@ export interface CreateTicketResult {
  * document links. Eviction vendors are excluded (same as the email / per-vendor
  * PDF rules). `vendorUrls` is a map of vendorName -> PDF url.
  */
-export function buildTicketDescription(vendorUrls: Record<string, string>): string {
+export function buildTicketDescription(vendorUrls: Record<string, string>, masterUrl?: string | null): string {
   // Order links by the canonical VENDORS list so output is stable, then append
   // any extra vendors not in the list. Skip eviction vendors.
   const present = Object.keys(vendorUrls || {});
@@ -73,13 +73,16 @@ export function buildTicketDescription(vendorUrls: Record<string, string>): stri
     ...VENDORS.filter((v) => present.includes(v)),
     ...present.filter((v) => !VENDORS.includes(v)),
   ];
-  const links = ordered
-    .filter((v) => vendorGetsOwnPdf(v) && (vendorUrls[v] || '').trim())
-    .map((v) => `${v}: ${vendorUrls[v]}`);
+  const links: string[] = [];
+  // Master report goes first.
+  if (masterUrl && masterUrl.trim()) links.push(`Master: ${masterUrl}`);
+  for (const v of ordered) {
+    if (vendorGetsOwnPdf(v) && (vendorUrls[v] || '').trim()) links.push(`${v}: ${vendorUrls[v]}`);
+  }
 
   const parts = [TICKET_DESCRIPTION_INTRO];
   if (links.length > 0) {
-    // One "Vendor: URL" line each (e.g. "Internal Resolution: …", "Vendor 1: …").
+    // One "Label: URL" line each (e.g. "Master: …", "Internal Resolution: …", "Vendor 1: …").
     parts.push('', ...links);
   }
   const out = parts.join('\n');

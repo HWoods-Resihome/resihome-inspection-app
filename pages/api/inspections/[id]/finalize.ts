@@ -550,7 +550,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         } else {
           ticketResult = await createMaintenanceTicket({
             propertyId: hbmmId,
-            description: buildTicketDescription(shareVendorLinks),
+            description: buildTicketDescription(shareVendorLinks, shareMasterUrl),
           });
           if (ticketResult.ok) {
             console.log(`[finalize] maintenance ticket created: #${ticketResult.ticketId} on property ${hbmmId}`);

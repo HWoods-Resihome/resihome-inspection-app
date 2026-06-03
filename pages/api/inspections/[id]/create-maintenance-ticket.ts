@@ -100,6 +100,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     for (const vendor of Object.keys(vendorUrls)) {
       shareVendorLinks[vendor] = buildShortLink(shareBase, id, 'vendor', vendor);
     }
+    const masterUrl = data.inspection.pdfMasterUrl || '';
+    const shareMasterUrl = masterUrl ? buildShortLink(shareBase, id, 'master') : null;
 
     // Create the ticket (or reuse the test ticket).
     let ticketId: number | undefined;
@@ -110,7 +112,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     } else {
       const result = await createMaintenanceTicket({
         propertyId: hbmmId,
-        description: buildTicketDescription(shareVendorLinks),
+        description: buildTicketDescription(shareVendorLinks, shareMasterUrl),
       });
       if (!result.configured) {
         return res.status(503).json({
@@ -131,13 +133,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // direct HubSpot file URLs (long) for the actual bytes, excluding eviction.
     let upload: Awaited<ReturnType<typeof uploadTicketDocuments>> | null = null;
     if (ticketId) {
-      const files: TicketUploadFile[] = Object.entries(vendorUrls)
-        .filter(([vendor, url]) => vendorGetsOwnPdf(vendor) && !!url)
-        .map(([vendor, url]) => {
-          let name = `${vendor} Rate Card.pdf`;
-          try { const seg = new URL(url).pathname.split('/').pop(); if (seg) name = decodeURIComponent(seg); } catch { /* keep */ }
-          return { name, url };
-        });
+      const nameFromUrl = (url: string, fallback: string) => {
+        try { const seg = new URL(url).pathname.split('/').pop(); if (seg) return decodeURIComponent(seg); } catch { /* keep */ }
+        return fallback;
+      };
+      const files: TicketUploadFile[] = [];
+      // Master report first, then each per-vendor PDF (eviction excluded).
+      if (masterUrl) files.push({ name: nameFromUrl(masterUrl, 'Master Rate Card.pdf'), url: masterUrl });
+      for (const [vendor, url] of Object.entries(vendorUrls)) {
+        if (vendorGetsOwnPdf(vendor) && url) files.push({ name: nameFromUrl(url, `${vendor} Rate Card.pdf`), url });
+      }
       if (files.length) {
         upload = await uploadTicketDocuments({ ticketId, files });
         console.log(`[create-maintenance-ticket] ticket #${ticketId} upload: ok=${upload.ok} uploaded=${upload.uploaded} steps=${upload.steps.join(' | ')}${upload.error ? ` error=${upload.error}` : ''}`);
