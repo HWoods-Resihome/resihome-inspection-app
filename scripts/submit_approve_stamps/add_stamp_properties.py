@@ -20,7 +20,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rate_card_phase1'))
-from _hubspot_helpers import ensure_property  # type: ignore
+from _hubspot_helpers import ensure_property, ensure_property_group  # type: ignore
 
 INSPECTION = "inspection"
 GROUP = "rate_card"
@@ -30,6 +30,9 @@ def main():
     print("=" * 70)
     print("Add submit/approve stamps + resolution timing map to inspection")
     print("=" * 70)
+
+    # The target property group may not exist in every portal (prod) — create it.
+    ensure_property_group(INSPECTION, GROUP, "Rate Card")
 
     ensure_property(
         INSPECTION, "submitted_by_email", "Submitted By (email)",

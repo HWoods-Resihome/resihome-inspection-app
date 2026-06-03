@@ -21,7 +21,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rate_card_phase1'))
-from _hubspot_helpers import ensure_property  # type: ignore
+from _hubspot_helpers import ensure_property, ensure_property_group  # type: ignore
 
 INSPECTION = "inspection"
 GROUP = "pdf_outputs"
@@ -31,6 +31,9 @@ def main():
     print("=" * 70)
     print("Short Links, Step 1: add link_* properties to inspection")
     print("=" * 70)
+
+    # The target property group may not exist in every portal (prod) — create it.
+    ensure_property_group(INSPECTION, GROUP, "PDF Outputs")
 
     ensure_property(
         INSPECTION, "link_master", "Link — Master Rate Card (short)",
