@@ -14,7 +14,9 @@
 
 import crypto from 'crypto';
 
-export type ShareDocType = 'master' | 'chargeback' | 'xlsx' | 'vendor';
+// 'report' is the single PDF used by non-Rate-Card templates (question
+// templates + QC reinspect), stored in pdf_attachment_url.
+export type ShareDocType = 'master' | 'chargeback' | 'xlsx' | 'report' | 'vendor';
 
 // Stable signing secret. Reuses SESSION_SECRET so we don't introduce a new env
 // var that would have to be kept in lockstep. Falls back to a constant only in
@@ -65,4 +67,5 @@ export const SHARE_TYPE_TO_PROP: Record<Exclude<ShareDocType, 'vendor'>, string>
   master: 'pdf_master_url',
   chargeback: 'pdf_chargeback_url',
   xlsx: 'pdf_chargeback_xlsx_url',
+  report: 'pdf_attachment_url',
 };

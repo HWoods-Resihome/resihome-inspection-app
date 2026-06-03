@@ -7,6 +7,7 @@ import {
   answerHasAfterPhotoProperty,
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
+import { buildShortLink } from '@/lib/shortLinks';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -22,12 +23,39 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const data = await fetchInspectionWithPropertyRef(id);
       if (!data) return res.status(404).json({ error: 'Inspection not found' });
       const answers = await fetchAnswersForInspection(id);
+
+      // Clean short links (resolve to the real files via /d/...) for whatever
+      // PDFs this inspection has — works for ALL templates: Rate Card
+      // (master/chargeback/xlsx/vendors) and the single report PDF used by
+      // question templates + QC reinspect. The client uses these for downloads.
+      const shareHost = req.headers['x-forwarded-host'] || req.headers.host || '';
+      const shareProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+      const shareBase = shareHost ? `${shareProto}://${shareHost}` : '';
+      const insp = data.inspection;
+      const vendors: Record<string, string> = {};
+      if (insp.pdfVendorUrlsJson) {
+        try {
+          const map = JSON.parse(insp.pdfVendorUrlsJson) || {};
+          for (const [vendor, url] of Object.entries(map)) {
+            if (typeof url === 'string' && url) vendors[vendor] = buildShortLink(shareBase, id, 'vendor', vendor);
+          }
+        } catch { /* ignore malformed */ }
+      }
+      const shareLinks = {
+        master: insp.pdfMasterUrl ? buildShortLink(shareBase, id, 'master') : null,
+        chargeback: insp.pdfChargebackUrl ? buildShortLink(shareBase, id, 'chargeback') : null,
+        xlsx: insp.pdfChargebackXlsxUrl ? buildShortLink(shareBase, id, 'xlsx') : null,
+        report: insp.pdfUrl ? buildShortLink(shareBase, id, 'report') : null,
+        vendors,
+      };
+
       return res.status(200).json({
         inspection: data.inspection,
         propertyRecordId: data.propertyIdRef,
         propertySquareFootage: data.propertySquareFootage,
         propertyZip: data.propertyZip,
         propertyLastTenantMonths: data.propertyLastTenantMonths,
+        shareLinks,
         answers,
         // The Internal Resolution after-photo requirement is live only once the
         // after_photo_urls property exists (migration run). The client uses this

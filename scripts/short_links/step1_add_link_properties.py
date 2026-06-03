@@ -52,8 +52,13 @@ def main():
         type="string", field_type="textarea", group_name=GROUP,
         description="JSON map of vendor name -> short signed share link for each per-vendor scope PDF.",
     )
+    ensure_property(
+        INSPECTION, "link_report", "Link — Report PDF (short)",
+        type="string", field_type="text", group_name=GROUP,
+        description="Short signed share link to the single report PDF used by non-Rate-Card templates (question templates + QC reinspect); resolves the pdf_attachment_url file.",
+    )
 
-    print("\n[done] link_master / link_chargeback / link_xlsx / link_vendors_json are ready on inspection.")
+    print("\n[done] link_master / link_chargeback / link_xlsx / link_vendors_json / link_report are ready on inspection.")
 
 
 if __name__ == '__main__':

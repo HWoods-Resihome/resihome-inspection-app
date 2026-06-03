@@ -34,6 +34,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     // Resolve the real URL from the inspection's stored properties.
     const props = await readInspectionProps(id, [
       'pdf_master_url', 'pdf_chargeback_url', 'pdf_chargeback_xlsx_url', 'pdf_vendor_urls_json',
+      'pdf_attachment_url',
     ]);
     if (!props) return notFound;
 

@@ -40,7 +40,7 @@ from _hubspot_helpers import (  # type: ignore
 INSPECTION = "inspection"
 DEFAULT_BASE = "https://resiwalk.com"
 
-PDF_PROPS = ["pdf_master_url", "pdf_chargeback_url", "pdf_chargeback_xlsx_url", "pdf_vendor_urls_json"]
+PDF_PROPS = ["pdf_master_url", "pdf_chargeback_url", "pdf_chargeback_xlsx_url", "pdf_vendor_urls_json", "pdf_attachment_url"]
 TYPE_TO_PROP = {
     "master": "pdf_master_url",
     "chargeback": "pdf_chargeback_url",
@@ -119,6 +119,7 @@ def main():
         master = (props.get("pdf_master_url") or "").strip()
         chargeback = (props.get("pdf_chargeback_url") or "").strip()
         xlsx = (props.get("pdf_chargeback_xlsx_url") or "").strip()
+        report = (props.get("pdf_attachment_url") or "").strip()
         vendors_raw = (props.get("pdf_vendor_urls_json") or "").strip()
 
         vendor_map = {}
@@ -131,7 +132,7 @@ def main():
                 pass
 
         # Nothing finalized on this record → skip.
-        if not master and not chargeback and not xlsx and not vendor_map:
+        if not master and not chargeback and not xlsx and not report and not vendor_map:
             skipped += 1
             continue
 
@@ -139,6 +140,7 @@ def main():
             "link_master": build_short_link(secret, base, rid, "master") if master else "",
             "link_chargeback": build_short_link(secret, base, rid, "chargeback") if chargeback else "",
             "link_xlsx": build_short_link(secret, base, rid, "xlsx") if xlsx else "",
+            "link_report": build_short_link(secret, base, rid, "report") if report else "",
             "link_vendors_json": json.dumps({
                 vendor: build_short_link(secret, base, rid, "vendor", vendor)
                 for vendor in vendor_map.keys()

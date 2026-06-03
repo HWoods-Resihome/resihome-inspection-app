@@ -24,6 +24,7 @@ import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
+import { buildShortLink } from '@/lib/shortLinks';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
 
 export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };
@@ -232,6 +233,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       } else {
         throw e;
       }
+    }
+
+    // Clean short links (resolve to this PDF) for the record + UI. Separate
+    // best-effort write so a missing link_* property never disturbs the QC
+    // update/fallback above. Run scripts/short_links to create the properties.
+    try {
+      const qcHost = req.headers['x-forwarded-host'] || req.headers.host || '';
+      const qcProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+      if (qcHost) {
+        const qcBase = `${qcProto}://${qcHost}`;
+        await updateInspection(id, {
+          link_report: buildShortLink(qcBase, id, 'report'),
+          link_master: buildShortLink(qcBase, id, 'master'),
+        });
+      }
+    } catch (e) {
+      console.warn('[qc-finalize] link_* write skipped (properties may not exist yet):', e);
     }
 
     bustInspectionsCache(); // status → completed; reflect in the list at once

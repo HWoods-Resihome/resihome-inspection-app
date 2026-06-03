@@ -3,7 +3,8 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
 import { InspectionPdf, PdfData, PdfAnswer } from '@/lib/pdf';
-import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord } from '@/lib/hubspot';
+import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord, updateInspection } from '@/lib/hubspot';
+import { buildShortLink } from '@/lib/shortLinks';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
 import { isVideoEntry, getPosterUrl, getVideoUrl, makeVideoEntry } from '@/lib/media';
 import type { AnswerInput } from '@/lib/types';
@@ -155,6 +156,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Step 6: patch Inspection record with PDF URL + attach to Attachments card.
     await attachPdfUrlToInspection(body.inspectionRecordId, pdfUrl);
+    // Store the clean short link (resolves to this PDF) so the record + UI show
+    // a tidy URL. Best-effort: skip silently if the property doesn't exist yet.
+    try {
+      const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+      const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
+      if (host) {
+        await updateInspection(body.inspectionRecordId, {
+          link_report: buildShortLink(`${proto}://${host}`, body.inspectionRecordId, 'report'),
+        });
+      }
+    } catch (e) {
+      console.warn('[pdf] link_report write skipped (property may not exist yet):', e);
+    }
     if (pdfFileId) {
       try {
         const noteId = await attachFilesToInspectionRecord(body.inspectionRecordId, [pdfFileId], 'Inspection report');

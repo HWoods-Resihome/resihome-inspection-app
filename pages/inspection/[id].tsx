@@ -13,6 +13,14 @@ import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 
 type Stage = 'loading' | 'loading_questions' | 'form' | 'submitting' | 'generating_pdf' | 'done' | 'error';
 
+interface ShareLinks {
+  master: string | null;
+  chargeback: string | null;
+  xlsx: string | null;
+  report: string | null;
+  vendors: Record<string, string>;
+}
+
 export default function ExistingInspection() {
   const dialog = useAppDialog();
   const router = useRouter();
@@ -32,6 +40,9 @@ export default function ExistingInspection() {
   const [submitResultUrl, setSubmitResultUrl] = useState<string>('');
   const [pdfUrl, setPdfUrl] = useState<string>('');
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('');
+  // Clean short links (resolve to the real files) for downloads — covers all
+  // templates. Computed server-side; null until loaded.
+  const [shareLinks, setShareLinks] = useState<ShareLinks | null>(null);
 
   // Who's logged in — used only to gate the admin maintenance-ticket test button.
   useEffect(() => {
@@ -58,6 +69,7 @@ export default function ExistingInspection() {
         if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
         if (cancelled) return;
         setInspection(data.inspection);
+        setShareLinks(data.shareLinks || null);
         setPropertyRecordId(data.propertyRecordId || '');
         setPropertySquareFootage(
           typeof data.propertySquareFootage === 'number' ? data.propertySquareFootage : null
@@ -293,21 +305,21 @@ export default function ExistingInspection() {
               </button>
             )}
             {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
-              <CompletedPdfMenu inspection={inspection} />
+              <CompletedPdfMenu inspection={inspection} shareLinks={shareLinks} />
             )}
             {isCompleted && inspection.templateType === 'pm_scope_rate_card'
               && currentUserEmail.toLowerCase() === 'hwoods@resihome.com' && (
               <CreateTicketButton inspectionId={inspectionId} />
             )}
             {isCompleted && inspection.templateType === 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
-              <a href={inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
+              <a href={shareLinks?.report || inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
                  className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
                 Download QC Report (PDF)
               </a>
             )}
             {isCompleted && inspection.templateType !== 'pm_scope_rate_card'
               && inspection.templateType !== 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
-              <a href={inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
+              <a href={shareLinks?.report || inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
                  className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
                 Download Report (PDF)
               </a>
@@ -396,7 +408,7 @@ function Layout({ children }: { children: React.ReactNode }) {
  * to write the URLs back). Vendor PDFs come out of pdf_vendor_urls_json
  * which is `{ vendorName: url, ... }`.
  */
-function CompletedPdfMenu({ inspection }: { inspection: InspectionSummary }) {
+function CompletedPdfMenu({ inspection, shareLinks }: { inspection: InspectionSummary; shareLinks: ShareLinks | null }) {
   const [open, setOpen] = useState(false);
   // Parse vendor URLs JSON (forgiving — if it's blank or malformed, treat as none)
   const vendorUrls = useMemo<Record<string, string>>(() => {
@@ -409,18 +421,20 @@ function CompletedPdfMenu({ inspection }: { inspection: InspectionSummary }) {
     }
   }, [inspection.pdfVendorUrlsJson]);
 
+  // Prefer the clean short links (resolve to the real file); fall back to the
+  // raw stored URL if a short link isn't available for some reason.
   const links: Array<{ label: string; url: string; primary?: boolean }> = [];
   if (inspection.pdfMasterUrl) {
-    links.push({ label: 'Master Report', url: inspection.pdfMasterUrl, primary: true });
+    links.push({ label: 'Master Report', url: shareLinks?.master || inspection.pdfMasterUrl, primary: true });
   }
   if (inspection.pdfChargebackUrl) {
-    links.push({ label: 'Tenant Chargeback (PDF)', url: inspection.pdfChargebackUrl });
+    links.push({ label: 'Tenant Chargeback (PDF)', url: shareLinks?.chargeback || inspection.pdfChargebackUrl });
   }
   if (inspection.pdfChargebackXlsxUrl) {
-    links.push({ label: 'Tenant Chargeback Import (xlsx)', url: inspection.pdfChargebackXlsxUrl });
+    links.push({ label: 'Tenant Chargeback Import (xlsx)', url: shareLinks?.xlsx || inspection.pdfChargebackXlsxUrl });
   }
   for (const [vendor, url] of Object.entries(vendorUrls)) {
-    if (url) links.push({ label: `Vendor — ${vendor}`, url });
+    if (url) links.push({ label: `Vendor — ${vendor}`, url: shareLinks?.vendors?.[vendor] || url });
   }
 
   // No PDFs at all? Don't render the menu (avoids confusion). The Reopen
