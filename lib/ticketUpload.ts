@@ -93,6 +93,18 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     return { ok: false, configured: true, uploaded: 0, steps, error: 'Could not build ticket URL.' };
   }
 
+  // @sparticuz/chromium only extracts its bundled shared libs (libnss3, etc.)
+  // and sets LD_LIBRARY_PATH when it detects an AWS Lambda runtime via
+  // AWS_EXECUTION_ENV — and it does so AT IMPORT TIME. Vercel runs on Lambda
+  // but doesn't set that var the way the package expects, so we set it ourselves
+  // (matching the running Node major version) BEFORE importing the package, so
+  // the right tarball (al2 for <20, al2023 for 20.x/22.x) is extracted.
+  if (!process.env.AWS_EXECUTION_ENV) {
+    const major = parseInt(process.version.replace(/^v/, ''), 10) || 20;
+    process.env.AWS_EXECUTION_ENV = `AWS_Lambda_nodejs${major}.x`;
+    log(`set AWS_EXECUTION_ENV=${process.env.AWS_EXECUTION_ENV}`);
+  }
+
   // Dynamic imports so these heavy deps never enter a non-upload code path.
   const [{ default: puppeteer }, { default: chromium }] = await Promise.all([
     import('puppeteer-core'),
