@@ -20,10 +20,36 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rate_card_phase1'))
-from _hubspot_helpers import ensure_property, ensure_property_group  # type: ignore
+from _hubspot_helpers import (  # type: ignore
+    ensure_property, ensure_property_group, get_property, hs_post, hs_delete,
+    get_object_type_id, wait_a_moment,
+)
 
 INSPECTION = "inspection"
 GROUP = "rate_card"
+
+
+def ensure_datetime_property(name: str, label: str, description: str) -> None:
+    """Ensure `name` is a datetime property. HubSpot can't change a property's
+    type in place, so if it exists as a different type (e.g. the old text field)
+    we delete + recreate it as datetime. We write ISO timestamps; HubSpot stores
+    them as datetime and returns epoch-ms via the API."""
+    type_id = get_object_type_id(INSPECTION)
+    existing = get_property(INSPECTION, name)
+    if existing:
+        if existing.get("type") == "datetime":
+            print(f"  [skip] {INSPECTION}.{name} already datetime.")
+            return
+        print(f"  [recreate] {INSPECTION}.{name}: {existing.get('type')} -> datetime (delete + create)")
+        hs_delete(f"/crm/v3/properties/{type_id}/{name}")
+        wait_a_moment(0.3)
+    else:
+        print(f"  [create] {INSPECTION}.{name} (datetime)")
+    hs_post(f"/crm/v3/properties/{type_id}", {
+        "name": name, "label": label, "type": "datetime", "fieldType": "date",
+        "groupName": GROUP, "description": description,
+    })
+    wait_a_moment(0.2)
 
 
 def main():
@@ -39,20 +65,18 @@ def main():
         type="string", field_type="text", group_name=GROUP,
         description="Email of the user who submitted the Rate Card for approval.",
     )
-    ensure_property(
-        INSPECTION, "submitted_at", "Submitted At",
-        type="string", field_type="text", group_name=GROUP,
-        description="ISO timestamp when the Rate Card was submitted for approval.",
+    ensure_datetime_property(
+        "submitted_at", "Submitted At",
+        "Timestamp when the Rate Card was submitted for approval.",
     )
     ensure_property(
         INSPECTION, "approved_by_name", "Approved By (name)",
         type="string", field_type="text", group_name=GROUP,
         description="Full name of the approver who finalized the Rate Card.",
     )
-    ensure_property(
-        INSPECTION, "approved_at", "Approved At",
-        type="string", field_type="text", group_name=GROUP,
-        description="ISO timestamp when the Rate Card was approved (finalized).",
+    ensure_datetime_property(
+        "approved_at", "Approved At",
+        "Timestamp when the Rate Card was approved (finalized).",
     )
     ensure_property(
         INSPECTION, "resolution_timing_json", "Internal Resolution Timing (JSON)",

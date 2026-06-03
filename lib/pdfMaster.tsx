@@ -31,12 +31,13 @@ const COL = {
   tenantCost: '9%',
 };
 
-// "M/DD/YY" stamp (month not padded, day 2-digit, year 2-digit).
+// "M/DD/YYYY" stamp. Handles ISO strings and epoch-ms strings (HubSpot datetime).
 function stampDate(iso?: string | null): string | null {
   if (!iso) return null;
-  const d = new Date(iso);
+  const s = String(iso).trim();
+  const d = /^\d+$/.test(s) ? new Date(Number(s)) : new Date(s);
   if (isNaN(d.getTime())) return null;
-  return `${d.getMonth() + 1}/${String(d.getDate()).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`;
+  return `${d.getMonth() + 1}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
 function MasterDoc(props: { ctx: PdfBuildContext }) {

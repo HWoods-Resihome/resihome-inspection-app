@@ -38,12 +38,14 @@ import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 
-// "M/DD/YY" stamp for the header submit/approve lines. Returns '' for missing/bad input.
-function fmtStamp(iso?: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
+// "M/DD/YYYY" stamp for the header submit/approve lines. Handles both ISO
+// strings (text props) and epoch-ms strings (HubSpot datetime props).
+function fmtStamp(v?: string | null): string {
+  if (!v) return '';
+  const s = String(v).trim();
+  const d = /^\d+$/.test(s) ? new Date(Number(s)) : new Date(s);
   if (isNaN(d.getTime())) return '';
-  return `${d.getMonth() + 1}/${String(d.getDate()).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`;
+  return `${d.getMonth() + 1}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
 interface RateCardFormProps {
