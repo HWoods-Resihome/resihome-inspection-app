@@ -39,9 +39,10 @@ export interface TicketUploadResult {
 
 const DEFAULTS = {
   loginUrl: 'https://honeybadgermm.com/',
-  selUsername: 'input[type="email"], input[name="username"], input[name="email"], input#username, input#email',
+  selUsername: 'input[name="username"], input[name="email"], input[type="email"], input[type="text"], input#username, input#email',
   selPassword: 'input[type="password"], input[name="password"], input#password',
-  selSubmit: 'button[type="submit"], button::-p-text(Log In), button::-p-text(Login), button::-p-text(Sign In)',
+  // HoneyBadger's button reads "LOGIN TO ACCOUNT".
+  selSubmit: 'button::-p-text(LOGIN TO ACCOUNT), input[type="submit"], button[type="submit"], button::-p-text(Login), button::-p-text(Log In), button::-p-text(Sign In)',
   selUploadDoc: '::-p-text(Upload Document)',
   selFileInput: 'input[type="file"]',
   selUploadBtn: 'button::-p-text(Upload)',
@@ -143,20 +144,30 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     log('launched browser');
 
     // 3. Log in.
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     await page.goto(loginUrl, { waitUntil: 'networkidle2' });
     log(`opened login (${loginUrl})`);
     await page.waitForSelector(selUsername, { timeout: navTimeout });
-    await page.type(selUsername, username, { delay: 15 });
-    await page.type(selPassword, password, { delay: 15 });
+    await page.type(selUsername, username, { delay: 20 });
+    await page.type(selPassword, password, { delay: 20 });
     log('entered credentials');
-    await Promise.all([
-      page.click(selSubmit).catch(() => page.keyboard.press('Enter')),
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: navTimeout }).catch(() => {}),
-    ]);
+    // Click the login button (fallback: Enter in the password field).
+    try { await page.click(selSubmit); } catch { await page.focus(selPassword); await page.keyboard.press('Enter'); }
     log('submitted login');
+    // The login is a SPA AJAX call that then redirects to the dashboard — there
+    // may be no full navigation. Wait for the login form to go away (success)
+    // and give the session a moment to settle.
+    await page.waitForSelector(selPassword, { hidden: true, timeout: navTimeout })
+      .then(() => log('login form cleared (authenticated)'))
+      .catch(() => log('login form still present after submit (login may have failed)'));
+    await sleep(2500);
 
-    // 4. Open the ticket's Edit page.
+    // 4. Now that we're authenticated, navigate to the ticket. The app ignores
+    // the deep link during login and lands on home, so we (re)submit the ticket
+    // URL here and force the hash route to take.
     await page.goto(ticketUrl, { waitUntil: 'networkidle2' });
+    await page.evaluate((u: string) => { if (window.location.href !== u) window.location.href = u; }, ticketUrl);
+    await sleep(3000);
     log(`opened ticket (${ticketUrl})`);
 
     // 5. Click "Upload Document".
