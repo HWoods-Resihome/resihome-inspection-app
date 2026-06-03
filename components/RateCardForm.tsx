@@ -325,6 +325,13 @@ export function RateCardForm(props: RateCardFormProps) {
       message?: string;
       recipients?: { to: string[]; cc: string[] };
     } | null;
+    maintenanceTicket?: {
+      ok: boolean;
+      configured: boolean;
+      ticketId?: number;
+      url?: string | null;
+      error?: string;
+    } | null;
     totals: { vendor: number; client: number; tenant: number; lineCount: number };
   };
   const [finalizing, setFinalizing] = useState(false);
@@ -3474,6 +3481,36 @@ export function RateCardForm(props: RateCardFormProps) {
                         )}
                       </div>
                     )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Maintenance ticket banner — only when the integration is
+                configured. Shows the created ticket # with a direct link, or
+                the failure reason. */}
+            {finalizeResult.maintenanceTicket && finalizeResult.maintenanceTicket.configured && (
+              <div className={`px-5 py-3 border-b ${finalizeResult.maintenanceTicket.ok ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                {finalizeResult.maintenanceTicket.ok ? (
+                  <>
+                    <div className="text-xs font-bold text-emerald-700 uppercase tracking-wider">
+                      Maintenance Ticket Created{finalizeResult.maintenanceTicket.ticketId ? ` #${finalizeResult.maintenanceTicket.ticketId}` : ''}
+                    </div>
+                    {finalizeResult.maintenanceTicket.url && (
+                      <a
+                        href={finalizeResult.maintenanceTicket.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-brand underline font-semibold mt-1 inline-block"
+                      >
+                        View ticket in HoneyBadger →
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="text-xs font-bold text-red-700 uppercase tracking-wider">Maintenance Ticket Not Created</div>
+                    <div className="text-xs text-red-900 mt-1">{finalizeResult.maintenanceTicket.error || 'Reason unknown.'}</div>
                   </>
                 )}
               </div>

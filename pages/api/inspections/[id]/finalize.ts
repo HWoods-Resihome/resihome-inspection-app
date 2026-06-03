@@ -460,9 +460,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       await attachFilesToInspectionRecord(id, attachmentFileIds, 'Move Out Scope report files');
     }
 
-    // ---- 6. Write URLs + completed status back to HubSpot ----
-    // Be defensive: if pdf_* properties don't exist yet (migration not run),
-    // we'd 500 here. Catch + try with just status update so the user isn't
+    // ---- 6. Short, clean, signed share links (resolve to the real files) ----
+    // /d/<id>/<type>/<sig> on our own domain → 302 to the real HubSpot file.
+    // Computed here so they can be stored on the record AND shared in email/ticket.
+    const shareHost = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
+    const shareProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+    const shareBase = `${shareProto}://${shareHost}`;
+    const shareMasterUrl = masterUrl ? buildShortLink(shareBase, id, 'master') : null;
+    const shareChargebackUrl = (chargebackBuf && chargebackUrl) ? buildShortLink(shareBase, id, 'chargeback') : null;
+    const shareXlsxUrl = (chargebackXlsxBuf && chargebackXlsxUrl) ? buildShortLink(shareBase, id, 'xlsx') : null;
+    const shareVendorLinks: Record<string, string> = {};
+    for (const vendor of Object.keys(vendorUrls)) {
+      shareVendorLinks[vendor] = buildShortLink(shareBase, id, 'vendor', vendor);
+    }
+
+    // ---- 6b. Write URLs + short links + completed status back to HubSpot ----
+    // Be defensive: if pdf_*/link_* properties don't exist yet (migration not
+    // run), we'd 500 here. Catch + retry with just status so the user isn't
     // completely blocked.
     const nowIso = new Date().toISOString();
     const fullUpdate: Record<string, any> = {
@@ -473,33 +487,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       pdf_chargeback_xlsx_url: chargebackXlsxUrl || '',
       pdf_vendor_urls_json: JSON.stringify(vendorUrls),
       pdf_generated_at: nowIso,
+      // Clean short links (run scripts/short_links to create these properties).
+      link_master: shareMasterUrl || '',
+      link_chargeback: shareChargebackUrl || '',
+      link_xlsx: shareXlsxUrl || '',
+      link_vendors_json: JSON.stringify(shareVendorLinks),
     };
     try {
       await updateInspection(id, fullUpdate);
     } catch (e: any) {
       const msg = String(e?.message || e);
-      // If a PDF property is missing on the schema, retry with just status.
+      // If a property is missing on the schema, retry with just status.
       // PDFs are still available to the client via the response below.
       if (msg.includes('PROPERTY_DOESNT_EXIST') || msg.includes('Property') && msg.includes('does not exist')) {
-        console.warn('[finalize] PDF properties not on schema — run phase4_step1_add_pdf_fields.py. Falling back to status-only update.');
+        console.warn('[finalize] pdf_*/link_* properties not on schema — run scripts/rate_card_phase4 + scripts/short_links. Falling back to status-only update.');
         await updateInspection(id, { status: 'completed', completed_at: nowIso });
       } else {
         throw e;
       }
-    }
-
-    // ---- 6b. Short, clean, signed share links for email + ticket ----
-    // Resolve via /d/<id>/<type>/<sig> on our own domain → 302 to the real
-    // HubSpot file. Replaces the giant raw URLs in everything we share.
-    const shareHost = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
-    const shareProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-    const shareBase = `${shareProto}://${shareHost}`;
-    const shareMasterUrl = masterUrl ? buildShortLink(shareBase, id, 'master') : null;
-    const shareChargebackUrl = (chargebackBuf && chargebackUrl) ? buildShortLink(shareBase, id, 'chargeback') : null;
-    const shareXlsxUrl = (chargebackXlsxBuf && chargebackXlsxUrl) ? buildShortLink(shareBase, id, 'xlsx') : null;
-    const shareVendorLinks: Record<string, string> = {};
-    for (const vendor of Object.keys(vendorUrls)) {
-      shareVendorLinks[vendor] = buildShortLink(shareBase, id, 'vendor', vendor);
     }
 
     // ---- 7. Create a maintenance ticket (best-effort, first finalize only) ----
@@ -642,7 +647,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })),
       },
       email: emailResult,
-      maintenanceTicket: ticketResult,
+      maintenanceTicket: ticketResult ? { ...ticketResult, url: ticketUrl } : null,
       totals: {
         vendor: ctx.grandTotals.vendor,
         client: ctx.grandTotals.client,
