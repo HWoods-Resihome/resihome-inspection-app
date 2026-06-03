@@ -5,6 +5,7 @@ import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadVideo } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
 import { CameraAILayer } from '@/components/CameraAILayer';
+import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
 import type { RateCardLineInput, RateCardLineItem, RegionRate } from '@/lib/types';
 
 /**
@@ -946,6 +947,8 @@ export function CameraCapture({
   // AI assist can be paused mid-session (e.g. on low service the voice/call-outs
   // get noisy). Starts on whenever the camera was opened in AI mode.
   const [aiOn, setAiOn] = useState<boolean>(!!aiAssist);
+  // "Teach the AI" voice-training popup (feeds the live knowledge base).
+  const [kbTrainerOpen, setKbTrainerOpen] = useState(false);
   const [renamingRoomId, setRenamingRoomId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [addingRoom, setAddingRoom] = useState(false);
@@ -1110,17 +1113,32 @@ export function CameraCapture({
               </>
             )}
           </div>
-          {/* Toggle the AI voice + live call-outs on/off (e.g. on low service). */}
-          <button
-            type="button"
-            onClick={() => setAiOn((v) => !v)}
-            className={`shrink-0 text-[11px] font-heading font-semibold px-2.5 py-1 rounded-full border transition-colors ${aiOn ? 'border-white/30 text-white/90 hover:bg-white/10' : 'border-violet-400 bg-violet-600 text-white'}`}
-            aria-pressed={aiOn}
-          >
-            {aiOn ? 'Turn AI off' : 'Turn AI on'}
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Teach the AI — record a voice tip that trains the live knowledge base. */}
+            <button
+              type="button"
+              onClick={() => setKbTrainerOpen(true)}
+              className="inline-flex items-center gap-1 text-[11px] font-heading font-semibold px-2.5 py-1 rounded-full border border-white/30 text-white/90 hover:bg-white/10 transition-colors"
+              aria-label="Teach the AI"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></svg>
+              Teach AI
+            </button>
+            {/* Toggle the AI voice + live call-outs on/off (e.g. on low service). */}
+            <button
+              type="button"
+              onClick={() => setAiOn((v) => !v)}
+              className={`text-[11px] font-heading font-semibold px-2.5 py-1 rounded-full border transition-colors ${aiOn ? 'border-white/30 text-white/90 hover:bg-white/10' : 'border-violet-400 bg-violet-600 text-white'}`}
+              aria-pressed={aiOn}
+            >
+              {aiOn ? 'Turn AI off' : 'Turn AI on'}
+            </button>
+          </div>
         </div>
       )}
+
+      {/* Voice "Teach the AI" trainer — records → transcribes → review → add to KB. */}
+      <KnowledgeTrainerModal open={kbTrainerOpen} onClose={() => setKbTrainerOpen(false)} />
 
       {/* Room switcher (multi-room mode): ‹ Room Name (N) › — name opens a
           scrollable room list showing photo counts and which rooms still need

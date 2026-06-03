@@ -1604,6 +1604,144 @@ async function fetchAgentBillingByOwner(ownerId: string): Promise<{ brokerCode: 
   }
 }
 
+// ---------------------------------------------------------------------------
+// AI Knowledge Base (live-camera operator notes)
+//
+// Inspectors "teach" the live in-camera call-out model via voice; their
+// approved tips persist as a JSON array on ONE property of the admin's Agent
+// record (no new custom object), keyed by AI_KNOWLEDGE_ADMIN_EMAIL (default
+// hwoods@resihome.com). The live scan endpoint reads these and appends them to
+// its system prompt so call-outs/edits learn from field feedback over time.
+// ---------------------------------------------------------------------------
+const AI_KB_PROP = 'ai_knowledge_base_json';
+
+export interface AiKnowledgeEntry {
+  id: string;
+  text: string;
+  addedByEmail: string;
+  addedByName?: string;
+  createdAt: number;   // epoch ms
+  updatedAt?: number;  // epoch ms (set when an admin edits)
+}
+
+// The admin Agent record id is resolved once and cached (5 min) — it never
+// changes within a deploy, and resolving it costs an Owners + Search round-trip.
+let _kbAgentIdCache: { id: string | null; at: number } | null = null;
+// Parsed entries cached briefly so the live camera (polls every couple seconds)
+// doesn't read HubSpot on every tick. Invalidated on any write.
+let _kbEntriesCache: { entries: AiKnowledgeEntry[]; at: number } | null = null;
+
+/** Resolve the Agent record id that stores the knowledge base. */
+export async function resolveKnowledgeAgentRecordId(): Promise<string | null> {
+  const override = (process.env.AI_KNOWLEDGE_AGENT_RECORD_ID || '').trim();
+  if (override) return override;
+  if (_kbAgentIdCache && Date.now() - _kbAgentIdCache.at < 5 * 60 * 1000) return _kbAgentIdCache.id;
+  const email = (process.env.AI_KNOWLEDGE_ADMIN_EMAIL || 'hwoods@resihome.com').trim();
+  let id: string | null = null;
+  const ownerId = await resolveOwnerIdByEmail(email);
+  if (ownerId) {
+    const matchProp = (process.env.HUBSPOT_AGENT_OWNER_MATCH_PROP || 'hubspot_owner_id').trim();
+    try {
+      const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/search?archived=false`, {
+        method: 'POST',
+        body: JSON.stringify({
+          filterGroups: [{ filters: [{ propertyName: matchProp, operator: 'EQ', value: ownerId }] }],
+          properties: ['name'],
+          limit: 1,
+        }),
+      });
+      const a = (resp.results || [])[0];
+      if (a?.id) id = String(a.id);
+    } catch (e) { console.warn('[ai-kb] agent lookup failed:', e); }
+  }
+  _kbAgentIdCache = { id, at: Date.now() };
+  return id;
+}
+
+/** All knowledge entries (newest first). Best-effort: returns [] on any error. */
+export async function readKnowledgeEntries(): Promise<AiKnowledgeEntry[]> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) return [];
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}?properties=${AI_KB_PROP}`);
+    const raw = resp?.properties?.[AI_KB_PROP];
+    if (!raw) return [];
+    const parsed = JSON.parse(String(raw));
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((e) => e && typeof e.text === 'string') as AiKnowledgeEntry[];
+  } catch (e) {
+    console.warn('[ai-kb] read failed:', e);
+    return [];
+  }
+}
+
+async function writeKnowledgeEntries(entries: AiKnowledgeEntry[]): Promise<void> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) {
+    throw new Error('AI knowledge agent record not found — set AI_KNOWLEDGE_AGENT_RECORD_ID, or ensure the admin (AI_KNOWLEDGE_ADMIN_EMAIL) is a HubSpot owner with an Agent record.');
+  }
+  await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ properties: { [AI_KB_PROP]: JSON.stringify(entries) } }),
+  });
+  _kbEntriesCache = null; // invalidate the live-camera cache
+}
+
+/** Append a new entry (inspector-submitted). Goes live immediately. */
+export async function addKnowledgeEntry(input: { text: string; addedByEmail: string; addedByName?: string }): Promise<AiKnowledgeEntry> {
+  const text = (input.text || '').trim();
+  if (!text) throw new Error('Empty knowledge text.');
+  const entries = await readKnowledgeEntries();
+  const entry: AiKnowledgeEntry = {
+    id: `kb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    text: text.slice(0, 1000),
+    addedByEmail: input.addedByEmail || '',
+    addedByName: input.addedByName || '',
+    createdAt: Date.now(),
+  };
+  entries.unshift(entry);
+  await writeKnowledgeEntries(entries.slice(0, 500)); // hard cap to keep the property small
+  return entry;
+}
+
+/** Admin: edit an entry's text. */
+export async function updateKnowledgeEntry(id: string, text: string): Promise<void> {
+  const entries = await readKnowledgeEntries();
+  const i = entries.findIndex((e) => e.id === id);
+  if (i < 0) throw new Error('Entry not found.');
+  entries[i] = { ...entries[i], text: (text || '').trim().slice(0, 1000), updatedAt: Date.now() };
+  await writeKnowledgeEntries(entries);
+}
+
+/** Admin: delete an entry. */
+export async function deleteKnowledgeEntry(id: string): Promise<void> {
+  const entries = await readKnowledgeEntries();
+  const next = entries.filter((e) => e.id !== id);
+  await writeKnowledgeEntries(next);
+}
+
+/**
+ * Compact bullet list of the knowledge entries for injection into the live scan
+ * system prompt. Cached ~60s so the high-frequency camera polling doesn't hit
+ * HubSpot every tick. Never throws.
+ */
+export async function getKnowledgeBasePromptText(maxChars = 2400): Promise<string> {
+  if (_kbEntriesCache && Date.now() - _kbEntriesCache.at < 60_000) {
+    // fallthrough below to format from cache
+  } else {
+    try {
+      const entries = await readKnowledgeEntries();
+      _kbEntriesCache = { entries, at: Date.now() };
+    } catch {
+      _kbEntriesCache = { entries: [], at: Date.now() };
+    }
+  }
+  const entries = _kbEntriesCache?.entries || [];
+  if (!entries.length) return '';
+  const lines = entries.map((e) => `- ${String(e.text).replace(/\s+/g, ' ').trim()}`);
+  return lines.join('\n').slice(0, maxChars);
+}
+
 /** Default client invoice when the agent has no client cost. */
 const DEFAULT_CLIENT_INVOICE = '60';
 

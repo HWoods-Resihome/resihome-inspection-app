@@ -12,6 +12,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import sharp from 'sharp';
 import { getSessionFromRequest } from '@/lib/auth';
+import { getKnowledgeBasePromptText } from '@/lib/hubspot';
 import { matchCatalog } from '@/lib/voiceCatalogMatch';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
@@ -190,13 +191,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           sharedTail
         }, imageBlock];
 
+    // Operator knowledge base — field-trained tips inspectors taught the AI by
+    // voice (admin-curated). Appended to the system prompt so call-outs/edits
+    // learn from feedback. Cached ~60s in lib/hubspot so this stays cheap.
+    const kb = await getKnowledgeBasePromptText();
+    const systemText = kb
+      ? `${SYSTEM}\n\nOPERATOR KNOWLEDGE BASE — house rules from inspectors. Treat these as authoritative guidance; apply them when relevant to your call-outs and edits:\n${kb}`
+      : SYSTEM;
+
     const resp = await fetch(ANTHROPIC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey(), 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
         model: MODEL_FAST,
         max_tokens: 900,
-        system: SYSTEM,
+        system: systemText,
         tools: [SUGGEST_TOOL, EDIT_TOOL],
         // Always 'auto': forcing a tool call would turn navigation commands
         // ("move to front entryway") and noise into bogus suggestions. The

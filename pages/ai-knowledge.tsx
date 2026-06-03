@@ -1,0 +1,203 @@
+/**
+ * /ai-knowledge — admin screen to review and curate the AI knowledge base.
+ *
+ * Lists every field-trained entry (who added it, when), and lets an admin edit,
+ * delete, or add entries. These feed the LIVE in-camera call-out model. Gated to
+ * @resihome.com staff (the API enforces this too).
+ */
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/router';
+
+interface Entry {
+  id: string;
+  text: string;
+  addedByEmail: string;
+  addedByName?: string;
+  createdAt: number;
+  updatedAt?: number;
+}
+
+function fmtDate(ms?: number): string {
+  if (!ms) return '';
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
+}
+
+export default function AiKnowledgePage() {
+  const router = useRouter();
+  const [authChecked, setAuthChecked] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [entries, setEntries] = useState<Entry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [newText, setNewText] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((data) => {
+        const admin = !!data.authenticated && /@resihome\.com$/i.test(data.user?.email || '');
+        setIsAdmin(admin);
+        setAuthChecked(true);
+        if (!data.authenticated) router.replace('/login');
+      })
+      .catch(() => setAuthChecked(true));
+  }, [router]);
+
+  async function load() {
+    try {
+      const r = await fetch('/api/ai-knowledge', { cache: 'no-store' });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || 'Failed to load'); return; }
+      setEntries(d.entries || []);
+      setError(null);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    }
+  }
+
+  useEffect(() => { if (isAdmin) load(); }, [isAdmin]);
+
+  async function addEntry() {
+    const text = newText.trim();
+    if (!text) return;
+    setBusy(true);
+    try {
+      const r = await fetch('/api/ai-knowledge', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || 'Add failed'); return; }
+      setNewText('');
+      await load();
+    } finally { setBusy(false); }
+  }
+
+  async function saveEdit(id: string) {
+    const text = draft.trim();
+    if (!text) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/ai-knowledge/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d.error || 'Save failed'); return; }
+      setEditingId(null);
+      await load();
+    } finally { setBusy(false); }
+  }
+
+  async function remove(id: string) {
+    if (!confirm('Delete this knowledge entry? The AI will stop using it.')) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/ai-knowledge/${id}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d.error || 'Delete failed'); return; }
+      await load();
+    } finally { setBusy(false); }
+  }
+
+  if (!authChecked) return null;
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 text-center">
+        <div>
+          <p className="text-gray-700 font-heading font-semibold mb-2">Admin only</p>
+          <Link href="/" className="text-brand underline text-sm">Back to inspections</Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-brand text-white">
+        <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></svg>
+            <h1 className="font-heading font-extrabold text-lg tracking-tight truncate">AI Knowledge Base</h1>
+          </div>
+          <Link href="/" className="text-xs font-heading font-semibold text-white/90 hover:text-white shrink-0">← Inspections</Link>
+        </div>
+      </header>
+
+      <main className="max-w-3xl mx-auto px-4 py-5">
+        <p className="text-[13px] text-gray-600 mb-4 leading-snug">
+          Field-trained guidance that the <strong>live in-camera AI</strong> uses for its call-outs and edits. Inspectors add entries by voice (“Teach AI” in the camera); they go live immediately. Edit or delete anything below to curate what the AI learns.
+        </p>
+
+        {/* Add new */}
+        <div className="bg-white rounded-xl border border-gray-200 p-3 mb-5 shadow-sm">
+          <label className="block text-xs font-heading font-semibold text-gray-500 mb-1">Add a knowledge entry</label>
+          <textarea
+            value={newText}
+            onChange={(e) => setNewText(e.target.value)}
+            rows={2}
+            placeholder="e.g. Gutter cleaning is always 100% tenant responsibility."
+            className="focus-brand w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-y"
+          />
+          <div className="flex justify-end mt-2">
+            <button
+              type="button"
+              onClick={addEntry}
+              disabled={busy || !newText.trim()}
+              className="h-9 px-4 rounded-lg bg-brand text-white font-heading font-bold text-sm hover:opacity-90 disabled:bg-gray-300"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+
+        {error && <div className="mb-4 p-3 bg-rose-50 border border-rose-300 rounded text-sm text-rose-800">{error}</div>}
+
+        {entries === null ? (
+          <div className="text-center text-gray-500 py-10 text-sm">Loading…</div>
+        ) : entries.length === 0 ? (
+          <div className="text-center text-gray-500 py-10 text-sm">No knowledge entries yet. Add one above, or use “Teach AI” in the camera.</div>
+        ) : (
+          <ul className="space-y-2.5">
+            {entries.map((e) => (
+              <li key={e.id} className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
+                {editingId === e.id ? (
+                  <>
+                    <textarea
+                      value={draft}
+                      onChange={(ev) => setDraft(ev.target.value)}
+                      rows={3}
+                      className="focus-brand w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-y"
+                    />
+                    <div className="flex justify-end gap-2 mt-2">
+                      <button type="button" onClick={() => setEditingId(null)} className="text-sm font-heading font-semibold text-gray-600 px-3 h-9">Cancel</button>
+                      <button type="button" onClick={() => saveEdit(e.id)} disabled={busy || !draft.trim()} className="h-9 px-4 rounded-lg bg-emerald-600 text-white font-heading font-bold text-sm disabled:bg-gray-300">Save</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-ink whitespace-pre-wrap">{e.text}</p>
+                    <div className="flex items-center justify-between gap-2 mt-2">
+                      <div className="text-[11px] text-gray-500 truncate">
+                        {(e.addedByName || e.addedByEmail || 'Unknown')}{e.createdAt ? ` · ${fmtDate(e.createdAt)}` : ''}{e.updatedAt ? ' · edited' : ''}
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <button type="button" onClick={() => { setEditingId(e.id); setDraft(e.text); }} className="text-xs font-heading font-semibold text-brand hover:underline">Edit</button>
+                        <button type="button" onClick={() => remove(e.id)} className="text-xs font-heading font-semibold text-rose-600 hover:underline">Delete</button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </main>
+    </div>
+  );
+}
