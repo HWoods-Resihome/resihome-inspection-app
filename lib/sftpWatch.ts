@@ -15,7 +15,7 @@
 import { decryptToken } from '@/lib/gmailAuth';
 import { sendReplyEmailWithToken } from '@/lib/gmail';
 import { withSftpClient, listSftpDir, downloadSftpFile, type SftpEntry } from '@/lib/sftp';
-import { readSftpWatchQueue, writeSftpWatchQueue } from '@/lib/hubspot';
+import { readSftpWatchQueue, writeSftpWatchQueue, updateInspection } from '@/lib/hubspot';
 
 // How long after a drop we keep checking. The importer runs every ~5 min (on
 // the 3 and 8 marks), so ~10 min guarantees we see at least one full cycle.
@@ -71,6 +71,27 @@ export function errorFileMatchesAddress(addressKeyNorm: string, errorFileName: s
     return new RegExp(`(^|\\D)${streetNum}(\\D|$)`).test(fileNorm) && fileNorm.includes(zip);
   }
   return false;
+}
+
+/**
+ * Record the SFTP import outcome on the inspection so it's visible in HubSpot
+ * later. Best-effort: if the sftp_import_* properties don't exist yet, the watch
+ * still works — this just no-ops with a warning.
+ */
+export async function recordSftpResult(
+  inspectionId: string,
+  result: 'pending' | 'processed' | 'errored' | 'no_error',
+  detail = '',
+): Promise<void> {
+  try {
+    await updateInspection(inspectionId, {
+      sftp_import_result: result,
+      sftp_import_detail: detail.slice(0, 250),
+      sftp_import_checked_at: Date.now(), // HubSpot datetime → epoch ms
+    });
+  } catch (e) {
+    console.warn('[sftp-watch] could not record result (run scripts/sftp_watch to create the sftp_import_* properties):', e);
+  }
 }
 
 /** Add a watch to the queue (best-effort; never throws). */
@@ -162,13 +183,15 @@ export async function runSftpWatchSweep(): Promise<SweepResult> {
             notes.push(`download failed: ${e.name} (${String((err as any)?.message || err).slice(0, 60)})`);
           }
         }
+        const errNames = matchedErrors.map((e) => e.name);
         const token = decryptToken(w.encToken);
         if (!token) {
           notes.push(`${w.inspectionId}: cannot send (token decrypt failed) — dropping watch`);
           errored++;
+          await recordSftpResult(w.inspectionId, 'errored', `error file(s): ${errNames.join(', ')}; reply not sent (token unavailable)`);
           continue; // drop it; we can't recover the token
         }
-        const { subject, textBody, htmlBody } = buildErrorEmail(w, matchedErrors.map((e) => e.name));
+        const { subject, textBody, htmlBody } = buildErrorEmail(w, errNames);
         const sent = await sendReplyEmailWithToken({
           refreshToken: token,
           fromEmail: w.reply.fromEmail,
@@ -179,22 +202,35 @@ export async function runSftpWatchSweep(): Promise<SweepResult> {
           threadId: w.reply.threadId,
           attachments,
         });
-        if (sent.sent) { errored++; notes.push(`${w.inspectionId}: error reply sent (${matchedErrors.length} file(s))`); }
-        else {
+        if (sent.sent) {
+          errored++;
+          notes.push(`${w.inspectionId}: error reply sent (${matchedErrors.length} file(s))`);
+          await recordSftpResult(w.inspectionId, 'errored', errNames.join(', '));
+        } else {
           // Send failed — keep the watch (within window) to retry next sweep.
           notes.push(`${w.inspectionId}: reply send failed: ${sent.error || 'unknown'}`);
           if (now < w.watchUntil) { keep.push({ ...w, attempts: (w.attempts || 0) + 1, lastCheckedAt: now }); }
-          else { errored++; } // give up after the window
+          else {
+            errored++; // give up after the window, but still flag the error in HubSpot
+            await recordSftpResult(w.inspectionId, 'errored', `error file(s): ${errNames.join(', ')}; reply send failed: ${sent.error || 'unknown'}`);
+          }
         }
         continue;
       }
 
       // No error — did it land in Processed? Then we're done (success).
-      if (processedFiles.some(isOurs)) { processed++; continue; }
+      if (processedFiles.some(isOurs)) {
+        processed++;
+        await recordSftpResult(w.inspectionId, 'processed', '');
+        continue;
+      }
 
       // Still nothing: keep watching until the window closes, then assume OK.
       if (now < w.watchUntil) keep.push({ ...w, lastCheckedAt: now });
-      else { expired++; }
+      else {
+        expired++;
+        await recordSftpResult(w.inspectionId, 'no_error', 'no error file seen within the watch window');
+      }
     }
 
     return { keep, errored, processed, expired, total: queue.length };

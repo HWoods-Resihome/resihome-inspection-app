@@ -701,6 +701,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             },
             encToken: encryptToken(refreshToken),
           });
+          // Mark it pending so the outcome is visible in HubSpot while we watch.
+          try {
+            await updateInspection(id, { sftp_import_result: 'pending', sftp_import_checked_at: droppedAt });
+          } catch { /* properties may not exist yet — non-fatal */ }
         } else {
           console.warn('[finalize] SFTP watch skipped — no Gmail token to send a later error reply.');
         }
