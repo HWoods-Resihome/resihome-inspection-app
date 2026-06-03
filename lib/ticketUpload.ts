@@ -170,22 +170,52 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     await sleep(3000);
     log(`opened ticket (${ticketUrl})`);
 
-    // 5. Click "Upload Document".
-    await page.waitForSelector(selUploadDoc, { timeout: navTimeout });
-    await page.click(selUploadDoc);
+    // Robust click-by-visible-text over interactive elements (handles the icon
+    // next to "Upload Document", scrolls into view, polls until it appears).
+    const clickByText = async (needle: string, exact = false): Promise<boolean> => {
+      const end = Date.now() + navTimeout;
+      const t = needle.toLowerCase();
+      while (Date.now() < end) {
+        const ok = await page.evaluate((needleText: string, ex: boolean) => {
+          const els = Array.from(document.querySelectorAll('button, a, input[type=button], input[type=submit], [role=button]')) as HTMLElement[];
+          const norm = (s: string) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          const target = els.find((e) => {
+            const txt = norm((e as HTMLInputElement).value || e.innerText || e.textContent || '');
+            return ex ? txt === needleText : txt.includes(needleText);
+          });
+          if (target) { target.scrollIntoView({ block: 'center' }); target.click(); return true; }
+          return false;
+        }, t, exact);
+        if (ok) return true;
+        await sleep(500);
+      }
+      return false;
+    };
+
+    // 5. Click "Upload Document" (button has an icon + text).
+    if (!(await clickByText('upload document'))) {
+      throw new Error('could not find the "Upload Document" button on the ticket page');
+    }
     log('clicked Upload Document');
 
-    // 6. Set the hidden file input with all files (no OS dialog).
+    // 6. Set the file input. The modal's input is added last, so prefer the
+    // last input[type=file] on the page.
+    await sleep(1500);
     await page.waitForSelector(selFileInput, { timeout: navTimeout });
-    const input = await page.$(selFileInput);
+    const inputs = await page.$$(selFileInput);
+    const input = inputs[inputs.length - 1];
     if (!input) throw new Error(`file input not found (${selFileInput})`);
     await input.uploadFile(...localPaths);
     log(`attached ${localPaths.length} file(s) to the input`);
 
-    // 7. Click "Upload" and give the upload time to complete.
-    await page.click(selUploadBtn);
+    // 7. Click the modal's "Upload" button (exact text — not "Upload Document"
+    // / "Upload Photo") and give the upload time to complete.
+    await sleep(800);
+    if (!(await clickByText('upload', true))) {
+      await page.click(selUploadBtn).catch(() => {});
+    }
     log('clicked Upload');
-    await new Promise((r) => setTimeout(r, 6000));
+    await sleep(6000);
     log('waited for upload to finish');
 
     return { ok: true, configured: true, uploaded: localPaths.length, steps };
