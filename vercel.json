@@ -14,6 +14,15 @@
     },
     "pages/api/inspections/[id]/qc-finalize.ts": {
       "maxDuration": 60
+    },
+    "pages/api/cron/sftp-watch.ts": {
+      "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/sftp-watch",
+      "schedule": "* * * * *"
+    }
+  ]
 }

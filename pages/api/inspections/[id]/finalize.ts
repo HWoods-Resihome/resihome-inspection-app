@@ -38,6 +38,8 @@ import { renderChargebackXlsx } from '@/lib/xlsxChargeback';
 import { composeInspectionEmail } from '@/lib/email';
 import { sendInspectionEmail } from '@/lib/gmail';
 import { uploadToSftp, type SftpUploadResult } from '@/lib/sftp';
+import { enqueueSftpWatch, WATCH_WINDOW_MS } from '@/lib/sftpWatch';
+import { getGmailRefreshToken, encryptToken } from '@/lib/gmailAuth';
 import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, type CreateTicketResult } from '@/lib/maintenanceAi';
 import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
@@ -668,6 +670,43 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         message: String(e?.message || e).slice(0, 300),
       };
     }
+    }
+
+    // ---- Background SFTP watch ----
+    // We dropped the Tenant Chargeback xlsx and emailed the inspection. Now kick
+    // off a SILENT background watch (no app/desktop alerts): the cron polls the
+    // SFTP Errors/Processed folders for ~10 min; if the importer errors the file,
+    // it replies to THIS email with the error file attached. Only when we have
+    // everything needed to act later: a successful drop, a sent email we can
+    // thread a reply to, and the sender's Gmail token to send it.
+    try {
+      if (chargebackXlsxBuf && sftpResult?.ok && emailResult?.sent && emailResult.messageId) {
+        const refreshToken = getGmailRefreshToken(req);
+        if (refreshToken) {
+          const droppedAt = Date.now();
+          await enqueueSftpWatch({
+            id: `${id}-${droppedAt}`,
+            inspectionId: id,
+            droppedFilename: chargebackXlsxFilename,
+            addressKey: safeAddress,
+            droppedAt,
+            watchUntil: droppedAt + WATCH_WINDOW_MS,
+            reply: {
+              to: emailResult.recipients?.to || [],
+              cc: emailResult.recipients?.cc || [],
+              subject: emailResult.subject || 'Inspection',
+              messageId: emailResult.messageId,
+              threadId: emailResult.threadId,
+              fromEmail: session.email,
+            },
+            encToken: encryptToken(refreshToken),
+          });
+        } else {
+          console.warn('[finalize] SFTP watch skipped — no Gmail token to send a later error reply.');
+        }
+      }
+    } catch (e) {
+      console.warn('[finalize] could not enqueue SFTP watch (non-fatal):', e);
     }
 
     bustInspectionsCache(); // status → completed; reflect in the list at once

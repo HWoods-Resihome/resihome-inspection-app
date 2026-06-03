@@ -33,6 +33,66 @@ function readConfig(): SftpConfig | null {
   return { host, username, password, port, dir };
 }
 
+/** The watch folders, derived from the drop dir (env-overridable). */
+export function sftpWatchDirs(): { drop: string; errors: string; processed: string } | null {
+  const cfg = readConfig();
+  if (!cfg) return null;
+  const drop = cfg.dir.replace(/\/+$/, '') || '/';
+  const base = drop === '/' ? '' : drop;
+  const errors = (process.env.SFTP_ERRORS_DIR || `${base}/Errors`).trim();
+  const processed = (process.env.SFTP_PROCESSED_DIR || `${base}/Processed`).trim();
+  return { drop, errors, processed };
+}
+
+export interface SftpEntry { name: string; modifyTime: number; size: number }
+
+/**
+ * Open ONE SFTP connection and hand it to `fn`, then always close it. Lets the
+ * watch sweep list both folders + download matched files over a single session
+ * instead of reconnecting per call. Returns a typed ok/err envelope (never
+ * throws) so callers can no-op gracefully when SFTP isn't configured/reachable.
+ */
+export async function withSftpClient<T>(
+  fn: (sftp: SftpClient, dirs: { drop: string; errors: string; processed: string }) => Promise<T>
+): Promise<{ ok: true; value: T } | { ok: false; configured: boolean; error: string }> {
+  const cfg = readConfig();
+  const dirs = sftpWatchDirs();
+  if (!cfg || !dirs) return { ok: false, configured: false, error: 'SFTP not configured.' };
+  const sftp = new SftpClient();
+  try {
+    await sftp.connect({ host: cfg.host, port: cfg.port, username: cfg.username, password: cfg.password, readyTimeout: 20000 });
+    const value = await fn(sftp, dirs);
+    return { ok: true, value };
+  } catch (e: any) {
+    return { ok: false, configured: true, error: String(e?.message || e).slice(0, 220) };
+  } finally {
+    try { await sftp.end(); } catch { /* ignore close errors */ }
+  }
+}
+
+/** List a directory's files (name + modify time + size). [] if it's missing. */
+export async function listSftpDir(sftp: SftpClient, dir: string): Promise<SftpEntry[]> {
+  try {
+    const kind = await sftp.exists(dir);
+    if (kind !== 'd') return [];
+    const list = await sftp.list(dir);
+    return list
+      .filter((e: any) => e.type === '-') // regular files only
+      .map((e: any) => ({ name: String(e.name), modifyTime: Number(e.modifyTime) || 0, size: Number(e.size) || 0 }));
+  } catch {
+    return [];
+  }
+}
+
+/** Download a file to a Buffer. */
+export async function downloadSftpFile(sftp: SftpClient, remotePath: string): Promise<Buffer> {
+  const data = await sftp.get(remotePath);
+  if (Buffer.isBuffer(data)) return data;
+  if (typeof data === 'string') return Buffer.from(data);
+  // ssh2-sftp-client returns a Buffer when no dst is given; defensive fallback.
+  return Buffer.from(data as any);
+}
+
 /**
  * Upload a buffer to the configured SFTP folder, overwriting a same-named file.
  * Never throws — returns a result object the caller can surface (e.g. in the

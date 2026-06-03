@@ -1742,6 +1742,38 @@ export async function getKnowledgeBasePromptText(maxChars = 2400): Promise<strin
   return lines.join('\n').slice(0, maxChars);
 }
 
+// ---------------------------------------------------------------------------
+// SFTP watch queue — a small singleton JSON array (on the same admin Agent
+// record as the AI knowledge base) of in-flight Tenant Chargeback uploads the
+// background cron is watching for a processed/errored result. Low volume: only
+// entries inside their ~10-minute window live here.
+// ---------------------------------------------------------------------------
+const SFTP_WATCH_PROP = 'sftp_watch_queue_json';
+
+export async function readSftpWatchQueue<T = any>(): Promise<T[]> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) return [];
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}?properties=${SFTP_WATCH_PROP}`);
+    const raw = resp?.properties?.[SFTP_WATCH_PROP];
+    if (!raw) return [];
+    const parsed = JSON.parse(String(raw));
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch (e) {
+    console.warn('[sftp-watch] queue read failed:', e);
+    return [];
+  }
+}
+
+export async function writeSftpWatchQueue(items: any[]): Promise<void> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) throw new Error('SFTP watch queue store not found — set AI_KNOWLEDGE_AGENT_RECORD_ID or ensure the admin owner has an Agent record.');
+  await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ properties: { [SFTP_WATCH_PROP]: JSON.stringify(items) } }),
+  });
+}
+
 /** Default client invoice when the agent has no client cost. */
 const DEFAULT_CLIENT_INVOICE = '60';
 

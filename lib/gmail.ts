@@ -27,6 +27,17 @@ export interface SendInspectionEmailResult {
     | 'send_failed';
   message?: string;
   recipients?: { to: string[]; cc: string[] };
+  // Threading handles for a later follow-up (e.g. the SFTP error reply).
+  messageId?: string;   // RFC822 Message-ID header we set on this message
+  threadId?: string;    // Gmail thread id returned by the send
+  subject?: string;     // the subject we sent (so a reply can "Re: …" it)
+}
+
+/** Generate an RFC822 Message-ID anchored to the sender's domain. */
+export function newMessageId(seed: string, fromEmail: string): string {
+  const domain = (fromEmail.split('@')[1] || 'resiwalk.com').trim();
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `<resiwalk.${seed}.${Date.now()}.${rand}@${domain}>`;
 }
 
 /** RFC 2047 encode a header value if it contains non-ASCII (for subjects). */
@@ -55,7 +66,8 @@ async function fetchAttachment(url: string): Promise<Buffer> {
  */
 async function buildMimeMessage(
   payload: InspectionEmailPayload,
-  fromEmail: string
+  fromEmail: string,
+  extraHeaders?: { messageId?: string; inReplyTo?: string; references?: string }
 ): Promise<string> {
   const mixedBoundary = `mixed_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const altBoundary = `alt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -65,6 +77,11 @@ async function buildMimeMessage(
   lines.push(`To: ${payload.to.join(', ')}`);
   if (payload.cc.length > 0) lines.push(`Cc: ${payload.cc.join(', ')}`);
   lines.push(`Subject: ${encodeHeader(payload.subject)}`);
+  // Our own Message-ID lets a later background job thread a reply to this exact
+  // message (via In-Reply-To/References). Reply headers thread the follow-up.
+  if (extraHeaders?.messageId) lines.push(`Message-ID: ${extraHeaders.messageId}`);
+  if (extraHeaders?.inReplyTo) lines.push(`In-Reply-To: ${extraHeaders.inReplyTo}`);
+  if (extraHeaders?.references) lines.push(`References: ${extraHeaders.references}`);
   lines.push('MIME-Version: 1.0');
   lines.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
   lines.push('');
@@ -181,7 +198,8 @@ export async function sendInspectionEmail(
   }
 
   try {
-    const mime = await buildMimeMessage(payload, userEmail);
+    const messageId = newMessageId('insp', userEmail);
+    const mime = await buildMimeMessage(payload, userEmail, { messageId });
     const raw = toBase64Url(mime);
     const res = await fetch(
       'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
@@ -204,7 +222,14 @@ export async function sendInspectionEmail(
         recipients: { to: payload.to, cc: payload.cc },
       };
     }
-    return { sent: true, recipients: { to: payload.to, cc: payload.cc } };
+    const sendData = await res.json().catch(() => ({} as any));
+    return {
+      sent: true,
+      recipients: { to: payload.to, cc: payload.cc },
+      messageId,
+      threadId: sendData?.threadId ? String(sendData.threadId) : undefined,
+      subject: payload.subject,
+    };
   } catch (e: any) {
     console.error('[sendInspectionEmail] send threw:', e);
     return {
@@ -213,5 +238,102 @@ export async function sendInspectionEmail(
       message: String(e?.message || e).slice(0, 200),
       recipients: { to: payload.to, cc: payload.cc },
     };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Background reply sender (used by the SFTP-watch cron).
+//
+// Unlike sendInspectionEmail (which reads the token from the request cookie),
+// this takes a refresh token explicitly — the cron has no cookie — and sends a
+// reply threaded to an existing message, with ONE in-memory attachment (the
+// error CSV downloaded from the SFTP). Never throws.
+// ---------------------------------------------------------------------------
+export interface ReplyEmailInput {
+  refreshToken: string;
+  fromEmail: string;
+  to: string[];
+  cc?: string[];
+  subject: string;          // already-prefixed (e.g. "Re: ...")
+  htmlBody: string;
+  textBody: string;
+  inReplyToMessageId?: string;
+  threadId?: string;
+  attachments?: Array<{ filename: string; content: Buffer; mimeType: string }>;
+}
+
+function buildReplyMime(input: ReplyEmailInput): string {
+  const mixedBoundary = `mixed_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const altBoundary = `alt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const lines: string[] = [];
+  lines.push(`From: ${input.fromEmail}`);
+  lines.push(`To: ${input.to.join(', ')}`);
+  if (input.cc && input.cc.length) lines.push(`Cc: ${input.cc.join(', ')}`);
+  lines.push(`Subject: ${encodeHeader(input.subject)}`);
+  lines.push(`Message-ID: ${newMessageId('sftp', input.fromEmail)}`);
+  if (input.inReplyToMessageId) {
+    lines.push(`In-Reply-To: ${input.inReplyToMessageId}`);
+    lines.push(`References: ${input.inReplyToMessageId}`);
+  }
+  lines.push('MIME-Version: 1.0');
+  lines.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+  lines.push('');
+  lines.push(`--${mixedBoundary}`);
+  lines.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+  lines.push('');
+  lines.push(`--${altBoundary}`);
+  lines.push('Content-Type: text/plain; charset="UTF-8"');
+  lines.push('Content-Transfer-Encoding: base64');
+  lines.push('');
+  lines.push(Buffer.from(input.textBody, 'utf8').toString('base64'));
+  lines.push('');
+  lines.push(`--${altBoundary}`);
+  lines.push('Content-Type: text/html; charset="UTF-8"');
+  lines.push('Content-Transfer-Encoding: base64');
+  lines.push('');
+  lines.push(Buffer.from(input.htmlBody, 'utf8').toString('base64'));
+  lines.push('');
+  lines.push(`--${altBoundary}--`);
+  lines.push('');
+  for (const att of input.attachments || []) {
+    lines.push(`--${mixedBoundary}`);
+    lines.push(`Content-Type: ${att.mimeType}; name="${att.filename}"`);
+    lines.push('Content-Transfer-Encoding: base64');
+    lines.push(`Content-Disposition: attachment; filename="${att.filename}"`);
+    lines.push('');
+    lines.push(att.content.toString('base64').replace(/(.{76})/g, '$1\r\n'));
+    lines.push('');
+  }
+  lines.push(`--${mixedBoundary}--`);
+  return lines.join('\r\n');
+}
+
+export async function sendReplyEmailWithToken(
+  input: ReplyEmailInput
+): Promise<{ sent: boolean; error?: string }> {
+  const cfg = getGmailOAuthConfig();
+  if (!cfg) return { sent: false, error: 'gmail_not_configured' };
+  let accessToken: string;
+  try {
+    accessToken = await refreshAccessToken(cfg, input.refreshToken);
+  } catch (e: any) {
+    return { sent: false, error: `token_refresh_failed: ${String(e?.message || e).slice(0, 120)}` };
+  }
+  try {
+    const raw = toBase64Url(buildReplyMime(input));
+    const body: Record<string, any> = { raw };
+    if (input.threadId) body.threadId = input.threadId; // keep it in the same Gmail thread
+    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return { sent: false, error: `gmail_${res.status}: ${text.slice(0, 160)}` };
+    }
+    return { sent: true };
+  } catch (e: any) {
+    return { sent: false, error: String(e?.message || e).slice(0, 160) };
   }
 }

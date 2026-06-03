@@ -19,6 +19,9 @@ const PUBLIC_PATHS = new Set<string>([
   // Version check for the update prompt — must work even when the session has
   // gone stale (so we can still tell the inspector to reload).
   '/api/version',
+  // Vercel Cron hits this with no session cookie; it enforces its own
+  // CRON_SECRET bearer auth inside the handler.
+  '/api/cron/sftp-watch',
 ]);
 
 function isStaticAsset(pathname: string): boolean {
