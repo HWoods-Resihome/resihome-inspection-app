@@ -167,8 +167,11 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     // URL here and force the hash route to take.
     await page.goto(ticketUrl, { waitUntil: 'networkidle2' });
     await page.evaluate((u: string) => { if (window.location.href !== u) window.location.href = u; }, ticketUrl);
-    await sleep(3000);
-    log(`opened ticket (${ticketUrl})`);
+    // Reload to force the AngularJS hash route to (re)initialize on the ticket.
+    await page.reload({ waitUntil: 'networkidle2' }).catch(() => {});
+    await sleep(3500);
+    const diag = await page.evaluate(() => /upload document/i.test(document.body?.innerText || document.body?.textContent || '')).catch(() => false);
+    log(`opened ticket (url=${page.url()} · hasUploadDocText=${diag})`);
 
     // Robust click-by-visible-text over interactive elements (handles the icon
     // next to "Upload Document", scrolls into view, polls until it appears).
@@ -192,10 +195,19 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
       return false;
     };
 
-    // 5. Click "Upload Document" (button has an icon + text).
-    if (!(await clickByText('upload document'))) {
-      throw new Error('could not find the "Upload Document" button on the ticket page');
-    }
+    // 5. Click "Upload Document" — precise AngularJS selector first, text fallback.
+    const uploadDocCss = env('HBMM_SEL_UPLOAD_DOC_CSS', 'a[ng-click="openUploadModal(false)"], [ng-click*="openUploadModal"]');
+    let clickedDoc = false;
+    try {
+      await page.waitForSelector(uploadDocCss, { timeout: navTimeout });
+      await page.evaluate((sel: string) => {
+        const el = document.querySelector(sel) as HTMLElement | null;
+        if (el) { el.scrollIntoView({ block: 'center' }); el.click(); }
+      }, uploadDocCss);
+      clickedDoc = true;
+    } catch { /* fall back to text */ }
+    if (!clickedDoc) clickedDoc = await clickByText('upload document');
+    if (!clickedDoc) throw new Error('could not find the "Upload Document" button on the ticket page');
     log('clicked Upload Document');
 
     // 6. Set the file input. The modal's input is added last, so prefer the
