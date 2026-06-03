@@ -1666,11 +1666,18 @@ export async function populateBillingFields(inspectionRecordId: string): Promise
  * Idempotent: leaves an existing value untouched so re-finalize/edits don't
  * overwrite the original completion timestamp. Best-effort.
  */
-export async function stampFirstCompleted(inspectionRecordId: string, iso: string): Promise<void> {
+export async function stampFirstCompleted(inspectionRecordId: string, when: string): Promise<void> {
   try {
     const cur = await readInspectionProps(inspectionRecordId, ['first_completed_date']);
     const existing = (cur?.first_completed_date || '').toString().trim();
-    if (!existing) await updateInspection(inspectionRecordId, { first_completed_date: iso });
+    if (existing) return;
+    // first_completed_date is a HubSpot datetime → write epoch-ms (ISO strings
+    // render as "Invalid date"). Accept either an ISO string or an epoch-ms
+    // string as input (e.g. completed_at from the backfill).
+    const s = String(when || '').trim();
+    const ms = /^\d+$/.test(s) ? Number(s) : new Date(s).getTime();
+    if (!Number.isFinite(ms) || ms <= 0) return;
+    await updateInspection(inspectionRecordId, { first_completed_date: ms });
   } catch (e) {
     console.warn('[billing] stampFirstCompleted skipped (create the property to enable):', e);
   }

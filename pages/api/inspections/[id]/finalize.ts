@@ -87,7 +87,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const guard = await readInspectionProps(id, ['submitted_by_email', 'submitted_at']);
     const submitter = String(guard?.submitted_by_email || '').trim().toLowerCase();
-    const submittedMs = guard?.submitted_at ? (Date.parse(String(guard.submitted_at)) || 0) : 0;
+    // submitted_at is a datetime (epoch-ms) but older records may hold an ISO
+    // string — handle both.
+    const submittedRaw = String(guard?.submitted_at || '').trim();
+    const submittedMs = submittedRaw ? (/^\d+$/.test(submittedRaw) ? Number(submittedRaw) : (Date.parse(submittedRaw) || 0)) : 0;
     if (submitter && submitter === session.email.trim().toLowerCase() && submittedMs) {
       const elapsed = Date.now() - submittedMs;
       if (elapsed >= 0 && elapsed < SELF_APPROVAL_LOCK_MS) {
@@ -519,7 +522,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       link_vendors_json: JSON.stringify(shareVendorLinks),
       // Approver stamp (the finalize IS the approval). Set on first finalize so
       // a later regeneration doesn't overwrite the original approver.
-      ...(!isRefinalize ? { approved_by_name: session.name || session.email, approved_at: nowIso } : {}),
+      // Approver stamp (the finalize IS the approval). approved_at is a HubSpot
+      // datetime → write epoch-ms (ISO strings show as "Invalid date"). Set on
+      // first finalize so a later regeneration doesn't overwrite the approver.
+      ...(!isRefinalize ? { approved_by_name: session.name || session.email, approved_at: new Date(nowIso).getTime() } : {}),
     };
     try {
       await updateInspection(id, fullUpdate);

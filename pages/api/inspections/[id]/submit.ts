@@ -71,7 +71,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try {
         await updateInspection(id, {
           submitted_by_email: session.email,
-          submitted_at: nowIso,
+          // submitted_at is a HubSpot datetime → write epoch-ms (ISO shows as
+          // "Invalid date").
+          submitted_at: new Date(nowIso).getTime(),
           ...(resolutionTimingJson ? { resolution_timing_json: resolutionTimingJson } : {}),
         });
       } catch (e) {
