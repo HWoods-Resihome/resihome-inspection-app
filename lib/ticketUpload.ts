@@ -170,43 +170,44 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     await page.goto(loginUrl, { waitUntil: 'networkidle2' });
     log(`opened login (${loginUrl})`);
     await page.waitForSelector(selUsername, { timeout: navTimeout });
-    // Set each field directly into its own element (keyboard typing was dumping
-    // both values into the username box) AND push the value into the AngularJS
-    // ngModel the canonical way ($setViewValue inside $apply) so Login.Username /
-    // Login.AcctPassword actually bind before Authenticate() reads them.
-    await page.evaluate((su: string, sp: string, u: string, p: string) => {
+    // The per-element ngModel approach bound the username but NOT the password,
+    // so Authenticate() submitted a blank password. Set the values DIRECTLY on
+    // the LoginController scope (Login.Username + Login.AcctPassword) inside a
+    // single $apply — that's the model Authenticate() actually reads — plus the
+    // DOM values for show. Paths/selectors are env-overridable.
+    const modelUserPath = env('HBMM_MODEL_USER_PATH', 'Login.Username');
+    const modelPassPath = env('HBMM_MODEL_PASS_PATH', 'Login.AcctPassword');
+    const ctrlSel = env('HBMM_SEL_LOGIN_CTRL', '[ng-controller="LoginController"]');
+    const bind = await page.evaluate((opts: { u: string; p: string; su: string; sp: string; userPath: string; passPath: string; ctrlSel: string }) => {
+      const { u, p, su, sp, userPath, passPath, ctrlSel } = opts;
       const ng = (window as any).angular;
-      const setField = (sel: string, val: string) => {
+      const setDom = (sel: string, val: string) => {
         const el = document.querySelector(sel) as HTMLInputElement | null;
-        if (!el) return;
-        el.value = val;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        try {
-          if (ng) {
-            const ngEl = ng.element(el);
-            const ctrl = ngEl.controller && ngEl.controller('ngModel');
-            const scope = ngEl.scope && ngEl.scope();
-            if (ctrl && scope) scope.$apply(() => { ctrl.$setViewValue(val); ctrl.$render(); });
-          }
-        } catch { /* ignore — DOM value + events already set */ }
+        if (el) { el.value = val; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }
       };
-      setField(su, u);
-      setField(sp, p);
-    }, selUsername, selPassword, username, password);
-    // Read the actual AngularJS model so we can tell "field filled but model
-    // empty" (binding bug) from "model filled but creds rejected" (bad creds).
-    const filled = await page.evaluate((su: string, sp: string) => {
-      const uEl = document.querySelector(su) as HTMLInputElement | null;
-      const pEl = document.querySelector(sp) as HTMLInputElement | null;
+      setDom(su, u); setDom(sp, p);
+      const assign = (root: any, path: string, val: any) => {
+        const parts = path.split('.'); let o = root;
+        for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; }
+        o[parts[parts.length - 1]] = val;
+      };
+      const read = (root: any, path: string) => { let o = root; for (const k of path.split('.')) { if (o == null) return undefined; o = o[k]; } return o; };
       let model: any = null;
       try {
-        const ng = (window as any).angular;
-        if (ng && uEl) { const s = ng.element(uEl).scope(); if (s && s.Login) model = { u: s.Login.Username || '', hasPw: !!s.Login.AcctPassword }; }
-      } catch { /* ignore */ }
-      return { u: uEl?.value || '', pLen: (pEl?.value || '').length, model };
-    }, selUsername, selPassword).catch(() => ({ u: '', pLen: 0, model: null }));
-    log(`entered credentials (env username="${username}" len=${password.length}; field="${filled.u}" pwLen=${filled.pLen}; angularModel=${JSON.stringify(filled.model)})`);
+        const ctrlEl = document.querySelector(ctrlSel) || document.querySelector(su);
+        const scope = ng && ctrlEl ? ng.element(ctrlEl).scope() : null;
+        if (scope) {
+          scope.$apply(() => { assign(scope, userPath, u); assign(scope, passPath, p); });
+          model = { u: read(scope, userPath) || '', hasPw: !!read(scope, passPath) };
+        }
+      } catch (e: any) { model = { error: String(e?.message || e) }; }
+      return {
+        fieldU: (document.querySelector(su) as HTMLInputElement | null)?.value || '',
+        pwLen: ((document.querySelector(sp) as HTMLInputElement | null)?.value || '').length,
+        model,
+      };
+    }, { u: username, p: password, su: selUsername, sp: selPassword, userPath: modelUserPath, passPath: modelPassPath, ctrlSel });
+    log(`entered credentials (env username="${username}" len=${password.length}; field="${bind.fieldU}" pwLen=${bind.pwLen}; angularModel=${JSON.stringify(bind.model)})`);
     await sleep(600); // let AngularJS digest the model update
 
     // Submit. Try the button (#login_btn → Authenticate()); if the form is still
