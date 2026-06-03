@@ -35,6 +35,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Missing inspection id' });
   }
 
+  // Diagnostic mode: POST ...?debug=1 — report (masked) what we'd send, so we
+  // can spot a key with stray quotes/whitespace or a wrong base URL, WITHOUT
+  // exposing the key or calling the API.
+  if (req.query.debug) {
+    const raw = process.env.MAINTENANCE_AI_API_KEY ?? '';
+    const trimmed = raw.trim();
+    const baseUrl = (process.env.MAINTENANCE_AI_BASE_URL || 'https://hbmm-admin-int.resicapdev.com').trim().replace(/\/+$/, '');
+    const version = (process.env.MAINTENANCE_AI_API_VERSION || 'v1').trim();
+    return res.status(200).json({
+      debug: true,
+      apiKey: {
+        present: raw.length > 0,
+        rawLength: raw.length,
+        trimmedLength: trimmed.length,
+        hadSurroundingWhitespaceOrNewline: raw.length !== trimmed.length,
+        startsWithQuote: /^["']/.test(trimmed),
+        endsWithQuote: /["']$/.test(trimmed),
+        hasInnerSpace: /\s/.test(trimmed),
+        first4: trimmed.slice(0, 4),
+        last4: trimmed.slice(-4),
+      },
+      baseUrl,
+      version,
+      fullUrl: `${baseUrl}/api/external/${version}/ticket`,
+    });
+  }
+
   try {
     const data = await fetchInspectionWithPropertyRef(id);
     if (!data) return res.status(404).json({ error: 'Inspection not found' });

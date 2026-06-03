@@ -515,11 +515,13 @@ function CompletedPdfMenu({ inspection }: { inspection: InspectionSummary }) {
 function CreateTicketButton({ inspectionId }: { inspectionId: string }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [debug, setDebug] = useState<string | null>(null);
 
   async function fire() {
     if (busy) return;
     setBusy(true);
     setResult(null);
+    setDebug(null);
     try {
       const r = await fetch(`/api/inspections/${inspectionId}/create-maintenance-ticket`, { method: 'POST' });
       const data = await r.json().catch(() => ({}));
@@ -527,6 +529,24 @@ function CreateTicketButton({ inspectionId }: { inspectionId: string }) {
         setResult({ ok: true, msg: `Ticket created${data.ticketId ? ` #${data.ticketId}` : ''}` });
       } else {
         setResult({ ok: false, msg: data.error || `Failed (HTTP ${r.status})` });
+        // On failure, pull masked config diagnostics so we can see what was sent.
+        try {
+          const dr = await fetch(`/api/inspections/${inspectionId}/create-maintenance-ticket?debug=1`, { method: 'POST' });
+          const dd = await dr.json().catch(() => ({}));
+          if (dd?.debug) {
+            const k = dd.apiKey || {};
+            setDebug([
+              `Base URL: ${dd.baseUrl}`,
+              `Full URL: ${dd.fullUrl}`,
+              `API version: ${dd.version}`,
+              `Key present: ${k.present} · length ${k.trimmedLength} (raw ${k.rawLength})`,
+              `Key starts/ends: ${k.first4}… …${k.last4}`,
+              `Surrounding whitespace/newline: ${k.hadSurroundingWhitespaceOrNewline}`,
+              `Wrapped in quotes: start=${k.startsWithQuote} end=${k.endsWithQuote}`,
+              `Inner whitespace: ${k.hasInnerSpace}`,
+            ].join('\n'));
+          }
+        } catch { /* ignore debug failure */ }
       }
     } catch (e: any) {
       setResult({ ok: false, msg: String(e?.message || e) });
@@ -536,20 +556,27 @@ function CreateTicketButton({ inspectionId }: { inspectionId: string }) {
   }
 
   return (
-    <span className="inline-flex items-center gap-2">
-      <button
-        type="button"
-        onClick={fire}
-        disabled={busy}
-        className="text-sm bg-gray-800 text-white px-3 py-1.5 rounded font-semibold hover:bg-gray-900 disabled:opacity-60"
-        title="Admin: create a maintenance ticket for this property (test)"
-      >
-        {busy ? 'Creating ticket…' : 'Create Maintenance Ticket (admin)'}
-      </button>
-      {result && (
-        <span className={'text-xs font-semibold ' + (result.ok ? 'text-emerald-700' : 'text-red-700')}>
-          {result.ok ? '✅ ' : '❌ '}{result.msg}
-        </span>
+    <span className="inline-flex flex-col items-start gap-1">
+      <span className="inline-flex items-center gap-2">
+        <button
+          type="button"
+          onClick={fire}
+          disabled={busy}
+          className="text-sm bg-gray-800 text-white px-3 py-1.5 rounded font-semibold hover:bg-gray-900 disabled:opacity-60"
+          title="Admin: create a maintenance ticket for this property (test)"
+        >
+          {busy ? 'Creating ticket…' : 'Create Maintenance Ticket (admin)'}
+        </button>
+        {result && (
+          <span className={'text-xs font-semibold ' + (result.ok ? 'text-emerald-700' : 'text-red-700')}>
+            {result.ok ? '✅ ' : '❌ '}{result.msg}
+          </span>
+        )}
+      </span>
+      {debug && (
+        <pre className="mt-1 max-w-xl overflow-auto rounded bg-gray-900 p-2 text-left text-[11px] leading-snug text-gray-100 whitespace-pre-wrap">
+{debug}
+        </pre>
       )}
     </span>
   );
