@@ -554,6 +554,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           });
           if (ticketResult.ok) {
             console.log(`[finalize] maintenance ticket created: #${ticketResult.ticketId} on property ${hbmmId}`);
+            // Persist the ticket id (best-effort) for visibility + background
+            // doc-upload retries. Swallow if the property doesn't exist yet.
+            try { await updateInspection(id, { hbmm_ticket_id: String(ticketResult.ticketId || '') }); }
+            catch (e) { console.warn('[finalize] could not store hbmm_ticket_id (create the property to enable retries):', e); }
           } else if (ticketResult.configured) {
             console.warn(`[finalize] maintenance ticket failed: ${ticketResult.error}`);
           } else {

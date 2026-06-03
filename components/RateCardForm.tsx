@@ -24,6 +24,7 @@ import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydra
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
 import { setErrorContext } from '@/lib/clientErrorReporter';
 import { useAppDialog } from '@/components/AppDialog';
+import { useFlash } from '@/components/Flash';
 import {
   type SectionInstance,
   resolveSections,
@@ -122,6 +123,7 @@ function friendlyQtyUnit(qty: number, meas: string): string {
 
 export function RateCardForm(props: RateCardFormProps) {
   const dialog = useAppDialog();
+  const flashApi = useFlash();
   // Sections are now stateful — they may be customized (renamed, deleted,
   // reordered, or have additions). The initial value is taken from the prop
   // `sectionListJson` if set, else derived from bedrooms+bathrooms.
@@ -2472,6 +2474,14 @@ export function RateCardForm(props: RateCardFormProps) {
         }
         const data = await r.json();
         setFinalizeResult(data as FinalizeResult);
+        // If a maintenance ticket was created, push the scope PDFs into it in
+        // the BACKGROUND (driving the HoneyBadger UI takes ~30-60s). This never
+        // blocks the completion screen; a bottom flash toast reports the result
+        // even after the user navigates away.
+        const mt = (data as FinalizeResult).maintenanceTicket;
+        if (mt && mt.ok && mt.ticketId) {
+          flashApi.runTicketUpload(props.inspectionRecordId, mt.ticketId);
+        }
       } catch (e: any) {
         // The self-approval lockout (423) is an expected workflow state, not a failure.
         if (e?.status === 423) await dialog.alert(e.message);

@@ -3,6 +3,7 @@ import type { AppProps } from 'next/app';
 import Head from 'next/head';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AppDialogProvider } from '@/components/AppDialog';
+import { FlashProvider } from '@/components/Flash';
 import { FieldStatusOverlays } from '@/components/FieldStatusOverlays';
 import { initErrorReporting } from '@/lib/clientErrorReporter';
 import { installSessionGuard } from '@/lib/sessionGuard';
@@ -31,8 +32,10 @@ export default function App({ Component, pageProps }: AppProps) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
       <AppDialogProvider>
-        <FieldStatusOverlays />
-        <Component {...pageProps} />
+        <FlashProvider>
+          <FieldStatusOverlays />
+          <Component {...pageProps} />
+        </FlashProvider>
       </AppDialogProvider>
     </ErrorBoundary>
   );

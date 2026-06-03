@@ -39,24 +39,9 @@ export default function ExistingInspection() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [submitResultUrl, setSubmitResultUrl] = useState<string>('');
   const [pdfUrl, setPdfUrl] = useState<string>('');
-  const [currentUserEmail, setCurrentUserEmail] = useState<string>('');
   // Clean short links (resolve to the real files) for downloads — covers all
   // templates. Computed server-side; null until loaded.
   const [shareLinks, setShareLinks] = useState<ShareLinks | null>(null);
-
-  // Who's logged in — used only to gate the admin maintenance-ticket test button.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch('/api/auth/me');
-        if (!r.ok) return;
-        const data = await r.json();
-        if (!cancelled && data?.user?.email) setCurrentUserEmail(String(data.user.email));
-      } catch { /* ignore — button just won't show */ }
-    })();
-    return () => { cancelled = true; };
-  }, []);
 
   // Load inspection + answers
   useEffect(() => {
@@ -309,10 +294,6 @@ export default function ExistingInspection() {
               {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
                 <CompletedPdfMenu inspection={inspection} shareLinks={shareLinks} />
               )}
-              {isCompleted && inspection.templateType === 'pm_scope_rate_card'
-                && currentUserEmail.toLowerCase() === 'hwoods@resihome.com' && (
-                <CreateTicketButton inspectionId={inspectionId} />
-              )}
               {isCompleted && inspection.templateType === 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
                 <a href={shareLinks?.report || inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
                    className="text-sm bg-brand hover:bg-brand-dark text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
@@ -536,103 +517,3 @@ function CompletedPdfMenu({ inspection, shareLinks }: { inspection: InspectionSu
   );
 }
 
-/**
- * Admin-only test button (hwoods@resihome.com): fire the Maintenance AI ticket
- * integration for this completed Rate Card to validate it end-to-end. Hits
- * POST /api/inspections/[id]/create-maintenance-ticket (also gated to the same
- * admin email server-side, so it's double-gated).
- */
-function CreateTicketButton({ inspectionId }: { inspectionId: string }) {
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [debug, setDebug] = useState<string | null>(null);
-  const [upload, setUpload] = useState<{ ok: boolean; configured: boolean; uploaded: number; steps: string[]; error?: string; screenshot?: string } | null>(null);
-
-  async function fire() {
-    if (busy) return;
-    setBusy(true);
-    setResult(null);
-    setDebug(null);
-    setUpload(null);
-    try {
-      const r = await fetch(`/api/inspections/${inspectionId}/create-maintenance-ticket`, { method: 'POST' });
-      const data = await r.json().catch(() => ({}));
-      if (data.upload) setUpload(data.upload);
-      if (r.ok && data.ok) {
-        setResult({
-          ok: true,
-          msg: data.testMode
-            ? `TEST: no new ticket — using existing #${data.ticketId}`
-            : `Ticket #${data.ticketId ?? '?'} · property ${data.propertyId ?? '?'} · req ${data.requestId ?? '?'}`,
-        });
-      } else {
-        setResult({ ok: false, msg: data.error || `Failed (HTTP ${r.status})` });
-        // On failure, pull masked config diagnostics so we can see what was sent.
-        try {
-          const dr = await fetch(`/api/inspections/${inspectionId}/create-maintenance-ticket?debug=1`, { method: 'POST' });
-          const dd = await dr.json().catch(() => ({}));
-          if (dd?.debug) {
-            const k = dd.apiKey || {};
-            setDebug([
-              `Base URL: ${dd.baseUrl}`,
-              `Full URL: ${dd.fullUrl}`,
-              `API version: ${dd.version}`,
-              `Key present: ${k.present} · length ${k.trimmedLength} (raw ${k.rawLength})`,
-              `Key starts/ends: ${k.first4}… …${k.last4}`,
-              `Surrounding whitespace/newline: ${k.hadSurroundingWhitespaceOrNewline}`,
-              `Wrapped in quotes: start=${k.startsWithQuote} end=${k.endsWithQuote}`,
-              `Inner whitespace: ${k.hasInnerSpace}`,
-            ].join('\n'));
-          }
-        } catch { /* ignore debug failure */ }
-      }
-    } catch (e: any) {
-      setResult({ ok: false, msg: String(e?.message || e) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <span className="inline-flex flex-col items-start gap-1">
-      <span className="inline-flex items-center gap-2">
-        <button
-          type="button"
-          onClick={fire}
-          disabled={busy}
-          className="text-sm bg-gray-800 text-white px-3 py-1.5 rounded font-semibold hover:bg-gray-900 disabled:opacity-60"
-          title="Admin: create a maintenance ticket for this property (test)"
-        >
-          {busy ? 'Creating ticket…' : 'Create Maintenance Ticket (admin)'}
-        </button>
-        {result && (
-          <span className={'text-xs font-semibold ' + (result.ok ? 'text-emerald-700' : 'text-red-700')}>
-            {result.ok ? '✅ ' : '❌ '}{result.msg}
-          </span>
-        )}
-      </span>
-      {debug && (
-        <pre className="mt-1 max-w-xl overflow-auto rounded bg-gray-900 p-2 text-left text-[11px] leading-snug text-gray-100 whitespace-pre-wrap">
-{debug}
-        </pre>
-      )}
-      {upload && upload.configured && (
-        <div className="mt-1 max-w-xl text-left">
-          <div className={'text-xs font-semibold ' + (upload.ok ? 'text-emerald-700' : 'text-red-700')}>
-            {upload.ok ? `✅ Uploaded ${upload.uploaded} PDF(s) into the ticket` : `❌ PDF upload: ${upload.error || 'failed'}`}
-          </div>
-          {upload.steps?.length > 0 && (
-            <pre className="mt-1 overflow-auto rounded bg-gray-900 p-2 text-[11px] leading-snug text-gray-100 whitespace-pre-wrap">
-{upload.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}
-            </pre>
-          )}
-          {/* Final screenshot (success or failure) for verification/tuning. */}
-          {upload.screenshot && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={upload.screenshot} alt="upload failure screenshot" className="mt-1 w-full max-w-md border border-gray-300 rounded" />
-          )}
-        </div>
-      )}
-    </span>
-  );
-}

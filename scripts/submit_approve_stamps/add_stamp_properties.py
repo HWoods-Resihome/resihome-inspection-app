@@ -59,6 +59,11 @@ def main():
         type="string", field_type="textarea", group_name=GROUP,
         description="JSON map { lineExternalId: 'now' | 'later' } of per-line Internal Resolution completion timing. 'later' lines are exempt from the after-photo requirement at finalize.",
     )
+    ensure_property(
+        INSPECTION, "hbmm_ticket_id", "HBMM Maintenance Ticket ID",
+        type="string", field_type="text", group_name=GROUP,
+        description="The HoneyBadger/Maintenance ticket id created at finalize. Used for visibility + background document-upload retries.",
+    )
 
     print("\n[done] submit/approve stamps + resolution_timing_json are ready on inspection.")
 
