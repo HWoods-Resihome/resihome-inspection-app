@@ -5,9 +5,17 @@ const nextConfig = {
   reactStrictMode: true,
   experimental: {
     // Keep the headless-browser packages external (not webpack-bundled) so
-    // @sparticuz/chromium resolves its binary correctly and Vercel traces it
-    // into the function. Used by lib/ticketUpload.ts (PDF upload into tickets).
+    // @sparticuz/chromium resolves its binary correctly. Used by
+    // lib/ticketUpload.ts (PDF upload into tickets).
     serverComponentsExternalPackages: ['@sparticuz/chromium', 'puppeteer-core'],
+    // Force the chromium payload (chromium.br + the al2/al2023 lib tarballs that
+    // hold libnss3 etc.) into the upload function's deployment — otherwise the
+    // browser launches but can't find its shared libraries.
+    outputFileTracingIncludes: {
+      '/api/inspections/[id]/create-maintenance-ticket': [
+        './node_modules/@sparticuz/chromium/bin/**',
+      ],
+    },
   },
   env: {
     // Baked at build time so the running client knows which version it is, and
