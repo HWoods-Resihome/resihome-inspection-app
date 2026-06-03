@@ -18,9 +18,13 @@ import { VENDORS, vendorGetsOwnPdf } from '@/lib/vendors';
 // ---- Defaults (documented reference-data IDs; "subject to change" per the doc) ----
 // 4.3 Priority: 777 = Medium. 4.2 Category: 23 = Unit Turns (Paint/Clean/Minor
 // Repairs). 4.5 Location: 23 = Whole House. 4.6 Timeslot: 3110 = 10am–12pm.
+// Ticket Type: 1828 = Turnkey. Overridable via MAINTENANCE_AI_TICKET_TYPE_ID in
+// case the reference data changes (no redeploy needed).
 export const TICKET_PRIORITY_MEDIUM = 777;
 export const TICKET_CATEGORY_UNIT_TURNS = 23;
 export const TICKET_LOCATION_WHOLE_HOUSE = 23;
+export const TICKET_TYPE_TURNKEY =
+  Number(process.env.MAINTENANCE_AI_TICKET_TYPE_ID) || 1828;
 const APPOINTMENT_TIMESLOT = 3110;
 // Appointments are required + must be in the future + must differ. We place two
 // placeholder windows 3 and 5 days out from the ticket-creation date.
@@ -112,10 +116,11 @@ export interface CreateTicketInput {
   propertyId: number;
   /** Full description text (intro + links). Use buildTicketDescription(). */
   description: string;
-  /** Overrides (default to the documented Medium / Unit Turns / Whole House). */
+  /** Overrides (default to the documented Medium / Unit Turns / Whole House / Turnkey). */
   priorityId?: number;
   categoryIds?: number[];
   locationId?: number;
+  ticketTypeId?: number;
 }
 
 /**
@@ -140,6 +145,7 @@ export async function createMaintenanceTicket(input: CreateTicketInput): Promise
 
   const body = {
     propertyId: input.propertyId,
+    ticketTypeId: input.ticketTypeId ?? TICKET_TYPE_TURNKEY,
     priorityId: input.priorityId ?? TICKET_PRIORITY_MEDIUM,
     categoryIds: input.categoryIds ?? [TICKET_CATEGORY_UNIT_TURNS],
     description: input.description,
