@@ -364,7 +364,7 @@ export default function ExistingInspection() {
           onCancel={() => router.push('/')}
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}
-          pdfUrl={inspection.pdfUrl || undefined}
+          pdfUrl={shareLinks?.report || inspection.pdfUrl || undefined}
           readOnly={readOnly}
           onCancelInspection={readOnly ? undefined : handleCancelInspection}
         />
@@ -384,7 +384,7 @@ export default function ExistingInspection() {
           onCancel={() => router.push('/')}
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}
-          pdfUrl={inspection.pdfUrl}
+          pdfUrl={shareLinks?.report || inspection.pdfUrl || undefined}
           existingAnswers={existingAnswers}
           readOnly={readOnly}
           onCancelInspection={readOnly ? undefined : handleCancelInspection}

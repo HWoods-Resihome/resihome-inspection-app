@@ -58,6 +58,15 @@ export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
     }
 
     if (!destination) return notFound;
+
+    // Content-negotiate: a real browser navigation sends `Accept: text/html` —
+    // give it the branded interstitial (favicon/title) that forwards. Anything
+    // else (fetch() for blob downloads, link-fetchers, curl) gets a clean 302 to
+    // the file so programmatic downloads still work.
+    const accept = String(ctx.req.headers['accept'] || '');
+    if (!accept.includes('text/html')) {
+      return { redirect: { destination, permanent: false } };
+    }
     return { props: { destination } };
   } catch {
     return notFound;

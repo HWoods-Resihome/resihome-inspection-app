@@ -664,13 +664,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       elapsedMs: elapsed,
       generatedAt: nowIso,
       pdfs: {
-        master: { name: masterFilename, url: masterUrl },
-        chargeback: chargebackBuf ? { name: chargebackFilename, url: chargebackUrl } : null,
-        chargebackXlsx: chargebackXlsxBuf ? { name: chargebackXlsxFilename, url: chargebackXlsxUrl } : null,
+        // Hand the client the clean short links (resolve to the real files) so
+        // the post-finalize "Downloads" use them everywhere.
+        master: { name: masterFilename, url: shareMasterUrl || masterUrl },
+        chargeback: chargebackBuf ? { name: chargebackFilename, url: shareChargebackUrl || chargebackUrl } : null,
+        chargebackXlsx: chargebackXlsxBuf ? { name: chargebackXlsxFilename, url: shareXlsxUrl || chargebackXlsxUrl } : null,
         vendors: Object.entries(vendorUrls).map(([vendor, url]) => ({
           vendor,
           name: vendorFilename(vendor),
-          url,
+          url: shareVendorLinks[vendor] || url,
         })),
       },
       email: emailResult,
