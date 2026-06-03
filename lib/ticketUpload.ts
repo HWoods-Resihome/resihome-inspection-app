@@ -44,7 +44,7 @@ const DEFAULTS = {
   // HoneyBadger's button reads "LOGIN TO ACCOUNT".
   selSubmit: 'button::-p-text(LOGIN TO ACCOUNT), input[type="submit"], button[type="submit"], button::-p-text(Login), button::-p-text(Log In), button::-p-text(Sign In)',
   selUploadDoc: '::-p-text(Upload Document)',
-  selFileInput: 'input[type="file"]',
+  selFileInput: 'input#uploader, input[type="file"][name="files"], input[type="file"]',
   selUploadBtn: 'button::-p-text(Upload)',
   navTimeout: 30000,
 };
@@ -210,25 +210,56 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     if (!clickedDoc) throw new Error('could not find the "Upload Document" button on the ticket page');
     log('clicked Upload Document');
 
-    // 6. Set the file input. The modal's input is added last, so prefer the
-    // last input[type=file] on the page.
+    // 6. Set the Kendo upload file input (id="uploader", name="files"). Setting
+    // files dispatches a change event → Kendo stages them in fileList.
     await sleep(1500);
     await page.waitForSelector(selFileInput, { timeout: navTimeout });
     const inputs = await page.$$(selFileInput);
-    const input = inputs[inputs.length - 1];
+    const input = inputs[inputs.length - 1] || inputs[0];
     if (!input) throw new Error(`file input not found (${selFileInput})`);
     await input.uploadFile(...localPaths);
     log(`attached ${localPaths.length} file(s) to the input`);
 
-    // 7. Click the modal's "Upload" button (exact text — not "Upload Document"
-    // / "Upload Photo") and give the upload time to complete.
-    await sleep(800);
-    if (!(await clickByText('upload', true))) {
-      await page.click(selUploadBtn).catch(() => {});
-    }
+    // If there's a required "Add Files to:" section dropdown showing, pick the
+    // first real option (skip the "?" placeholder) so upload isn't blocked.
+    try {
+      await page.evaluate(() => {
+        const sel = document.querySelector('select#documentSection') as HTMLSelectElement | null;
+        const grp = sel?.closest('.form-group') as HTMLElement | null;
+        const visible = sel && grp && !grp.classList.contains('ng-hide');
+        if (visible && (sel!.value === '?' || sel!.value === '')) {
+          const opt = Array.from(sel!.options).find((o) => o.value && o.value !== '?');
+          if (opt) {
+            sel!.value = opt.value;
+            sel!.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+      });
+    } catch { /* no section dropdown — fine */ }
+
+    // 7. Click the modal "Upload" button (ng-click="upload()"), which stays
+    // disabled until files are staged — wait for it to enable, then click.
+    await sleep(1200);
+    const selUp = env('HBMM_SEL_UPLOAD_BTN_CSS', 'button[ng-click="upload()"]');
+    let clickedUpload = false;
+    try {
+      await page.waitForFunction((sel: string) => {
+        const b = document.querySelector(sel) as HTMLButtonElement | null;
+        return !!b && !b.disabled;
+      }, { timeout: navTimeout }, selUp);
+      await page.evaluate((sel: string) => { (document.querySelector(sel) as HTMLElement | null)?.click(); }, selUp);
+      clickedUpload = true;
+    } catch { /* fall back to text */ }
+    if (!clickedUpload) clickedUpload = await clickByText('upload', true);
+    if (!clickedUpload) throw new Error('could not click the modal Upload button (still disabled — files may not have staged)');
     log('clicked Upload');
-    await sleep(6000);
-    log('waited for upload to finish');
+
+    // Wait for the async upload to finish — prefer the modal closing as the
+    // success signal, otherwise give it a generous fixed wait.
+    await page.waitForFunction(() => !document.querySelector('.modal.in, .modal[style*="display: block"]'), { timeout: 20000 })
+      .then(() => log('upload modal closed (success)'))
+      .catch(() => log('upload modal still open after wait (verify on the ticket)'));
+    await sleep(2000);
 
     return { ok: true, configured: true, uploaded: localPaths.length, steps };
   } catch (e: any) {
