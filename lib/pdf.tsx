@@ -6,6 +6,7 @@ import {
   Document, Page, Text, View, StyleSheet, Image, Link,
 } from '@react-pdf/renderer';
 import { isVideoEntry, getPosterUrl, getVideoUrl } from '@/lib/media';
+import { brandLogoDataUri } from '@/lib/pdfShared';
 
 // Brand colors from ResiHome brand guidelines
 const COLORS = {
@@ -46,6 +47,14 @@ const styles = StyleSheet.create({
     marginTop: -40,
     marginLeft: -40,
     marginRight: -40,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerLogo: {
+    width: 44,
+    height: 44,
+    borderRadius: 9,
+    marginRight: 14,
   },
   headerTitle: {
     fontSize: 22,
@@ -331,10 +340,13 @@ export function InspectionPdf({ data }: { data: PdfData }) {
       subject={`Inspection: ${data.propertyAddress}`}
     >
       <Page size="LETTER" style={styles.page} wrap>
-        {/* Brand header (hot pink) */}
+        {/* Brand header (hot pink) with the ResiWALK house+footprint logo */}
         <View style={styles.header} fixed={false}>
-          <Text style={styles.headerTitle}>RESIHOME</Text>
-          <Text style={styles.headerSubtitle}>{data.templateLabel}</Text>
+          {brandLogoDataUri() ? <Image src={brandLogoDataUri()} style={styles.headerLogo} /> : null}
+          <View>
+            <Text style={styles.headerTitle}>RESIHOME</Text>
+            <Text style={styles.headerSubtitle}>{data.templateLabel}</Text>
+          </View>
         </View>
 
         {/* Metadata card */}

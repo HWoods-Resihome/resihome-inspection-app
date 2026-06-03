@@ -13,6 +13,15 @@
 import React from 'react';
 import { StyleSheet, Text, View, Image, Link, Font } from '@react-pdf/renderer';
 import { isVideoEntry, getPosterUrl, getVideoUrl } from '@/lib/media';
+import { BRAND_LOGO_DATA_URI } from '@/lib/brandLogo';
+
+// Brand mark for the PDF header: the app logo (pink #ff0060 tile + white house &
+// footprint), inlined as a base64 data URI. Because the header background is the
+// same brand pink, the tile blends seamlessly and reads as a clean white
+// house+footprint on pink.
+export function brandLogoDataUri(): string {
+  return BRAND_LOGO_DATA_URI;
+}
 
 // Disable word hyphenation globally. @react-pdf's default hyphenation breaks
 // long words mid-word (e.g. "Internal Resolution" becomes "Internal Resolu-"
@@ -71,6 +80,12 @@ export const pdfStyles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+  },
+  headerLogo: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
+    marginRight: 12,
   },
   headerLeft: {
     flexDirection: 'column',
@@ -344,8 +359,10 @@ export function PdfHeaderStrip(props: {
   if (props.region) metaParts.push(props.region);
   metaParts.push(props.generatedAtLabel);
 
+  const logoSrc = brandLogoDataUri();
   return (
     <View style={pdfStyles.headerStrip}>
+      {logoSrc ? <Image src={logoSrc} style={pdfStyles.headerLogo} /> : null}
       <View style={pdfStyles.headerLeft}>
         <Text style={pdfStyles.headerTitle}>{props.docTitle}</Text>
         <Text style={pdfStyles.headerProperty}>{props.propertyName}</Text>

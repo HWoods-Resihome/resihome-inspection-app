@@ -84,8 +84,8 @@ export default function ShareRedirect({ destination }: Props) {
         <title>ResiWalk — Opening document…</title>
         {/* favicon links also come from _document; repeated here so the tab/
             preview shows our brand on this forwarding page too. */}
-        <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=3" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3" />
         {destination ? <meta httpEquiv="refresh" content={`0;url=${destination}`} /> : null}
         <meta name="robots" content="noindex" />
       </Head>
