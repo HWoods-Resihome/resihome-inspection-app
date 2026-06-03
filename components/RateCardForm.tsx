@@ -2667,7 +2667,7 @@ export function RateCardForm(props: RateCardFormProps) {
       }
       // Confirmation toast — it lives at the app root, so it stays visible after
       // onSubmit() routes back to the inspections home screen (app + desktop).
-      flashApi.flash('Inspection submitted for approval — it’s now pending review. ✅', 'success', 8000);
+      flashApi.flash('Scope Submitted - Pending Approval ✔️', 'success', 8000);
       props.onSubmit();
     } catch (e: any) {
       await dialog.alert(`Submit failed: ${e.message || e}`);
