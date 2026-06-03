@@ -154,8 +154,8 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
         const u = req.url();
         if ((req.method() === 'POST' || req.method() === 'PUT') && /upload|image|document|file|attach/i.test(u)) {
           const ct = (req.headers()['content-type'] || '');
-          const pd = /multipart/i.test(ct) ? '(multipart)' : (req.postData() || '').slice(0, 200);
-          reqPayloads.push(`${u.slice(-80)} ${pd}`);
+          const pd = /multipart/i.test(ct) ? '(multipart)' : (req.postData() || '').slice(0, 500);
+          reqPayloads.push(`${u.slice(-70)} ${pd}`);
         }
       } catch { /* ignore */ }
     });
@@ -278,8 +278,11 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     const diag = await page.evaluate(() => /upload document/i.test(document.body?.innerText || document.body?.textContent || '')).catch(() => false);
     log(`opened ticket (url=${page.url()} · hasUploadDocText=${diag})`);
 
-    // 5. Click "Upload Document" — precise AngularJS selector first, text fallback.
-    const uploadDocCss = env('HBMM_SEL_UPLOAD_DOC_CSS', 'a[ng-click="openUploadModal(false)"], [ng-click*="openUploadModal"]');
+    // 5. Click "Upload Document" — the DOCUMENT button is exactly
+    // ng-click="openUploadModal(false)". (The "Upload Photo" button is
+    // openUploadModal(true); a wildcard match would grab it instead since it's
+    // first in the DOM — which is why files were landing in the photo store.)
+    const uploadDocCss = env('HBMM_SEL_UPLOAD_DOC_CSS', '[ng-click="openUploadModal(false)"]');
     let clickedDoc = false;
     try {
       await page.waitForSelector(uploadDocCss, { timeout: navTimeout });
@@ -299,11 +302,12 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     await page.waitForSelector(selFileInput, { timeout: navTimeout });
     // Scope to the DOCUMENT modal's uploader (#frmUploadFile) so we don't grab a
     // stray photo uploader (which routes the file to the image store as .jpg).
-    let input = await page.$('#frmUploadFile input[type="file"]')
-      || await page.$('.modal.in input[type="file"], .modal[style*="display: block"] input[type="file"]')
-      || await page.$('input#uploader');
-    if (!input) { const inputs = await page.$$(selFileInput); input = inputs[inputs.length - 1] || inputs[0]; }
+    let input = await page.$('#frmUploadFile input[type="file"]'); let inputVia = '#frmUploadFile';
+    if (!input) { input = await page.$('.modal.in input[type="file"], .modal[style*="display: block"] input[type="file"]'); inputVia = 'open-modal'; }
+    if (!input) { input = await page.$('input#uploader'); inputVia = '#uploader'; }
+    if (!input) { const inputs = await page.$$(selFileInput); input = inputs[inputs.length - 1] || inputs[0]; inputVia = 'fallback-last'; }
     if (!input) throw new Error(`file input not found (${selFileInput})`);
+    log(`file input via: ${inputVia}`);
     await input.uploadFile(...localPaths);
     log(`attached ${localPaths.length} file(s) to the input`);
     // Confirm Kendo actually staged the file(s) (fileList row appears).
