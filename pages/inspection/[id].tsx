@@ -545,15 +545,18 @@ function CreateTicketButton({ inspectionId }: { inspectionId: string }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [debug, setDebug] = useState<string | null>(null);
+  const [upload, setUpload] = useState<{ ok: boolean; configured: boolean; uploaded: number; steps: string[]; error?: string; screenshot?: string } | null>(null);
 
   async function fire() {
     if (busy) return;
     setBusy(true);
     setResult(null);
     setDebug(null);
+    setUpload(null);
     try {
       const r = await fetch(`/api/inspections/${inspectionId}/create-maintenance-ticket`, { method: 'POST' });
       const data = await r.json().catch(() => ({}));
+      if (data.upload) setUpload(data.upload);
       if (r.ok && data.ok) {
         setResult({
           ok: true,
@@ -609,6 +612,23 @@ function CreateTicketButton({ inspectionId }: { inspectionId: string }) {
         <pre className="mt-1 max-w-xl overflow-auto rounded bg-gray-900 p-2 text-left text-[11px] leading-snug text-gray-100 whitespace-pre-wrap">
 {debug}
         </pre>
+      )}
+      {upload && upload.configured && (
+        <div className="mt-1 max-w-xl text-left">
+          <div className={'text-xs font-semibold ' + (upload.ok ? 'text-emerald-700' : 'text-red-700')}>
+            {upload.ok ? `✅ Uploaded ${upload.uploaded} PDF(s) into the ticket` : `❌ PDF upload: ${upload.error || 'failed'}`}
+          </div>
+          {upload.steps?.length > 0 && (
+            <pre className="mt-1 overflow-auto rounded bg-gray-900 p-2 text-[11px] leading-snug text-gray-100 whitespace-pre-wrap">
+{upload.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+            </pre>
+          )}
+          {/* Failure screenshot helps tune selectors without a redeploy. */}
+          {!upload.ok && upload.screenshot && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={upload.screenshot} alt="upload failure screenshot" className="mt-1 w-full max-w-md border border-gray-300 rounded" />
+          )}
+        </div>
       )}
     </span>
   );

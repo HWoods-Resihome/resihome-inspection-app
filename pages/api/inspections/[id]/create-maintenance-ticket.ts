@@ -15,10 +15,13 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { fetchInspectionWithPropertyRef } from '@/lib/hubspot';
 import { createMaintenanceTicket, buildTicketDescription } from '@/lib/maintenanceAi';
 import { buildShortLink } from '@/lib/shortLinks';
+import { vendorGetsOwnPdf } from '@/lib/vendors';
+import { uploadTicketDocuments, type TicketUploadFile } from '@/lib/ticketUpload';
 
 const ADMIN_EMAIL = 'hwoods@resihome.com';
 
-export const config = { maxDuration: 60 };
+// Browser automation (PDF upload) can take a while — allow up to 5 min.
+export const config = { maxDuration: 300 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -105,7 +108,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(502).json({ ok: false, error: result.error || 'Ticket creation failed.', status: result.status, requestId: result.requestId });
     }
     console.log(`[create-maintenance-ticket] inspection ${id}: created ticket #${result.ticketId} on property ${hbmmId} (req ${result.requestId})`);
-    return res.status(200).json({ ok: true, ticketId: result.ticketId, propertyId: hbmmId, requestId: result.requestId });
+
+    // Phase 3: upload the per-vendor scope PDFs into the ticket via the UI
+    // (best-effort; no-ops until HBMM_USERNAME/HBMM_PASSWORD are set). Uses the
+    // direct HubSpot file URLs (long) for the actual bytes, excluding eviction.
+    let upload: Awaited<ReturnType<typeof uploadTicketDocuments>> | null = null;
+    if (result.ticketId) {
+      const files: TicketUploadFile[] = Object.entries(vendorUrls)
+        .filter(([vendor, url]) => vendorGetsOwnPdf(vendor) && !!url)
+        .map(([vendor, url]) => {
+          let name = `${vendor} Rate Card.pdf`;
+          try { const seg = new URL(url).pathname.split('/').pop(); if (seg) name = decodeURIComponent(seg); } catch { /* keep */ }
+          return { name, url };
+        });
+      if (files.length) {
+        upload = await uploadTicketDocuments({ ticketId: result.ticketId, files });
+        console.log(`[create-maintenance-ticket] ticket #${result.ticketId} upload: ok=${upload.ok} uploaded=${upload.uploaded} steps=${upload.steps.join(' | ')}${upload.error ? ` error=${upload.error}` : ''}`);
+      }
+    }
+
+    return res.status(200).json({ ok: true, ticketId: result.ticketId, propertyId: hbmmId, requestId: result.requestId, upload });
   } catch (e: any) {
     console.error(`[create-maintenance-ticket] inspection ${id} failed:`, e);
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });

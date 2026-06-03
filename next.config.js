@@ -3,6 +3,12 @@ const pkg = require('./package.json');
 
 const nextConfig = {
   reactStrictMode: true,
+  experimental: {
+    // Keep the headless-browser packages external (not webpack-bundled) so
+    // @sparticuz/chromium resolves its binary correctly and Vercel traces it
+    // into the function. Used by lib/ticketUpload.ts (PDF upload into tickets).
+    serverComponentsExternalPackages: ['@sparticuz/chromium', 'puppeteer-core'],
+  },
   env: {
     // Baked at build time so the running client knows which version it is, and
     // can detect when a newer one has been deployed (see lib/useAppUpdate.ts).
