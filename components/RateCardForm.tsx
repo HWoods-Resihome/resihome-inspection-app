@@ -13,7 +13,8 @@ import { EditableLineRow } from '@/components/EditableLineRow';
 import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
-import { isInternalResolution } from '@/lib/vendors';
+import { isInternalResolution, VENDORS } from '@/lib/vendors';
+import { ListPicker } from '@/components/ListPicker';
 import { getResolutionTimings, setResolutionTiming } from '@/lib/resolutionTiming';
 import { AiReviewModal } from '@/components/AiReviewModal';
 import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, saveReviewCache, loadReviewCache, clearReviewCache, type AiAdjustment } from '@/lib/aiReview';
@@ -1848,6 +1849,20 @@ export function RateCardForm(props: RateCardFormProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, linesBySection, catalog, regions, inspectionRegion]);
 
+  // ----- Vendor filter (report-wide) -----------------------------------
+  // Distinct vendors actually assigned on this rate card, ordered by the
+  // canonical VENDORS list (then any extras). Drives the header filter dropdown.
+  const assignedVendors = useMemo(() => {
+    const present = new Set<string>();
+    for (const arr of Object.values(linesBySection)) {
+      for (const l of arr) { const v = (l.assignedTo || '').trim(); if (v) present.add(v); }
+    }
+    return [...VENDORS.filter((v) => present.has(v)), ...Array.from(present).filter((v) => !VENDORS.includes(v))];
+  }, [linesBySection]);
+  const [vendorFilter, setVendorFilter] = useState<string>('All');
+  // Guard: if the selected vendor no longer has any lines, fall back to All.
+  const activeVendorFilter = vendorFilter !== 'All' && assignedVendors.includes(vendorFilter) ? vendorFilter : 'All';
+
   const grandTotals = useMemo(() => {
     let v = 0, c = 0, t = 0, n = 0;
     for (const s of sections) {
@@ -2895,27 +2910,56 @@ export function RateCardForm(props: RateCardFormProps) {
         </div>
       )}
 
-      {/* Collapse / expand all */}
-      {sections.length > 1 && (
-        <div className="flex justify-end mb-2">
-          <button
-            type="button"
-            onClick={() => setAllSections(!anySectionOpen)}
-            className="inline-flex items-center gap-1 text-xs font-heading text-gray-500 hover:text-gray-800 transition-colors"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                 className={`transition-transform ${anySectionOpen ? '' : 'rotate-180'}`}>
-              <polyline points="18 15 12 9 6 15" />
-            </svg>
-            {anySectionOpen ? 'Collapse all' : 'Expand all'}
-          </button>
+      {/* Vendor filter (left) + Collapse/expand all (right) */}
+      {(assignedVendors.length > 0 || sections.length > 1) && (
+        <div className="flex items-center justify-between gap-2 mb-2">
+          {assignedVendors.length > 0 ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-heading text-gray-500 shrink-0">Vendor:</span>
+              <ListPicker
+                value={activeVendorFilter}
+                options={[{ value: 'All', label: 'All Vendors' }, ...assignedVendors.map((v) => ({ value: v, label: v }))]}
+                onChange={setVendorFilter}
+                ariaLabel="Filter the report by assigned vendor"
+                className="h-8 min-w-[150px] bg-white border border-gray-300 rounded-lg px-3 text-sm text-ink font-heading flex items-center justify-between hover:border-brand"
+              />
+              {activeVendorFilter !== 'All' && (
+                <button
+                  type="button"
+                  onClick={() => setVendorFilter('All')}
+                  className="text-xs text-brand underline font-heading font-semibold"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          ) : <span />}
+          {sections.length > 1 ? (
+            <button
+              type="button"
+              onClick={() => setAllSections(!anySectionOpen)}
+              className="inline-flex items-center gap-1 text-xs font-heading text-gray-500 hover:text-gray-800 transition-colors shrink-0"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                   className={`transition-transform ${anySectionOpen ? '' : 'rotate-180'}`}>
+                <polyline points="18 15 12 9 6 15" />
+              </svg>
+              {anySectionOpen ? 'Collapse all' : 'Expand all'}
+            </button>
+          ) : <span />}
         </div>
       )}
 
       {/* Sections */}
       <div className="space-y-3">
         {sections.map((s) => {
-          const lines = linesBySection[s.id] || [];
+          const allLines = linesBySection[s.id] || [];
+          // Vendor filter: show only the selected vendor's lines, and hide
+          // sections that have none of them (unless a new row is being added here).
+          const lines = activeVendorFilter === 'All'
+            ? allLines
+            : allLines.filter((l) => (l.assignedTo || '').trim() === activeVendorFilter);
+          if (activeVendorFilter !== 'All' && lines.length === 0 && !pendingNewBySection[s.id]) return null;
           const photos = photosBySection[s.id] || [];
           // Photos tagged to a line are shown UNDER that line's card and hidden
           // from the room strip (a visual "move"); the data stays in the section
@@ -2932,7 +2976,17 @@ export function RateCardForm(props: RateCardFormProps) {
           const userChoice = expanded[s.id];
           const isOpen = userChoice === undefined ? hasContent : userChoice;
           const heading = s.displayName;
-          const t = sectionTotals[s.id] || { count: 0, vendor: 0, client: 0, tenant: 0 };
+          // Header totals reflect the active vendor filter (recompute from the
+          // visible lines) so the report's numbers match what's shown.
+          let t = sectionTotals[s.id] || { count: 0, vendor: 0, client: 0, tenant: 0 };
+          if (activeVendorFilter !== 'All') {
+            let v = 0, c = 0, tn = 0;
+            for (const line of lines) {
+              const calc = totalsFor(line);
+              if (calc) { v += roundMoney(calc.vendorCost); c += roundMoney(calc.clientCost); tn += roundMoney(calc.tenantCost); }
+            }
+            t = { count: lines.length, vendor: v, client: c, tenant: tn };
+          }
           const photosRequired = !s.photoOptional && !sectionPhotoExempt(heading || s.label);
           const photosMissing = photosRequired && photos.length === 0;
           const isUploadingHere = uploadingSection?.sectionId === s.id;
