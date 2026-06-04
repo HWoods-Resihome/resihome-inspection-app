@@ -1,0 +1,27 @@
+<!--
+  Merge these keys into ios/App/App/Info.plist (inside the top-level <dict>).
+  The usage strings are REQUIRED — iOS terminates the app on first camera/mic/
+  location use if they're missing. The URL scheme lets the resiwalk://auth-callback
+  OAuth return reach the app (mirrors the Android intent-filter).
+-->
+
+<key>NSCameraUsageDescription</key>
+<string>ResiWALK uses the camera to photograph and record inspection evidence.</string>
+
+<key>NSMicrophoneUsageDescription</key>
+<string>ResiWALK uses the microphone for voice call-outs during inspections.</string>
+
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>ResiWALK stamps inspection photos with the property location to verify you're on site.</string>
+
+<key>CFBundleURLTypes</key>
+<array>
+  <dict>
+    <key>CFBundleURLName</key>
+    <string>com.resihome.resiwalk</string>
+    <key>CFBundleURLSchemes</key>
+    <array>
+      <string>resiwalk</string>
+    </array>
+  </dict>
+</array>
