@@ -3751,8 +3751,11 @@ export function RateCardForm(props: RateCardFormProps) {
         })}
 
         {/* Final Checklist — another room-style bubble at the very end of the
-            scope form. Editable scope inspections only (scheduled/in-progress +
-            future); pending-approval and completed are exempt. */}
+            scope form. Editable whenever the form is (readOnly = props.readOnly,
+            i.e. NOT completed/cancelled) — so during pending_approval the FC stays
+            editable like the room photos/lines (you can fix/delete FC photos and
+            answers in review). Only completed/cancelled lock it. `fcEditable`
+            still gates the pre-submit completeness requirement, not editability. */}
         {fcVisible && (
           <FinalChecklist
             answers={fcAnswers}
@@ -3769,7 +3772,7 @@ export function RateCardForm(props: RateCardFormProps) {
             onCameraOverlayChange={setCameraOverlayOpen}
             open={fcOpen}
             onToggleOpen={() => setFcOpen((o) => !o)}
-            readOnly={!fcEditable || !!props.readOnly}
+            readOnly={!!props.readOnly}
           />
         )}
       </div>
