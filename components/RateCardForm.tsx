@@ -24,7 +24,12 @@ import { getResolutionTimings, setResolutionTiming } from '@/lib/resolutionTimin
 import { AiReviewModal } from '@/components/AiReviewModal';
 import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, saveReviewCache, loadReviewCache, clearReviewCache, type AiAdjustment } from '@/lib/aiReview';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
-import { uploadFilesBatch, formatMoney, uploadPhoto as uploadPhotoDirect } from '@/lib/photoUpload';
+import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
+
+// Sentinel "section" used to queue Final Checklist photos through the offline
+// photo store (so they survive offline like room/line photos). The flush + the
+// rehydrate paths special-case this id to swap drafts in the checklist JSON.
+const FC_PHOTO_SECTION = '__final_checklist__';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
@@ -830,7 +835,13 @@ export function RateCardForm(props: RateCardFormProps) {
     // than reading state straight after setState (which hasn't applied yet).
     const sectionUrlMap = new Map<string, string>();   // url-to-replace -> real url (in section strips)
     const lineUrlMap = new Map<string, string>();      // url-to-replace -> real url (on line photos)
-    const photoRes = await flushQueuedPhotos(props.inspectionRecordId, ({ oldUrl, newUrl, replacesUrl, lineExternalId }) => {
+    const fcUrlMap = new Map<string, string>();        // url-to-replace -> real url (in the Final Checklist)
+    const photoRes = await flushQueuedPhotos(props.inspectionRecordId, ({ oldUrl, newUrl, replacesUrl, lineExternalId, sectionId }) => {
+      if (sectionId === FC_PHOTO_SECTION) {
+        if (oldUrl) fcUrlMap.set(oldUrl, newUrl);
+        if (replacesUrl) fcUrlMap.set(replacesUrl, newUrl);
+        return;
+      }
       if (lineExternalId) {
         // Line-photo annotation: the draft (oldUrl) and the original (replacesUrl)
         // both map to the real URL on that line.
@@ -882,6 +893,24 @@ export function RateCardForm(props: RateCardFormProps) {
         setLinesBySection(nextLines);
         for (const u of toPersist) void handleSaveLineForSection(u.sectionId, u.line);
       }
+    }
+
+    if (fcUrlMap.size > 0) {
+      // Swap the Final Checklist's draft (blob:) photo URLs for the real ones,
+      // then re-save the checklist JSON (now with real URLs).
+      setFcAnswers((prev) => {
+        let changed = false;
+        const swap = (arr?: string[]) => (arr || []).map((u) => { const real = fcUrlMap.get(u); if (real) { changed = true; return real; } return u; });
+        const next: FcAnswers = {};
+        for (const [qid, ans] of Object.entries(prev)) {
+          const n: FcAnswerState = { ...ans };
+          if (ans.photoUrls) n.photoUrls = swap(ans.photoUrls);
+          if (ans.stickerPhotos) n.stickerPhotos = Object.fromEntries(Object.entries(ans.stickerPhotos).map(([k, v]) => [k, swap(v)]));
+          next[qid] = n;
+        }
+        if (changed) doSaveFinalChecklist(next);
+        return changed ? next : prev;
+      });
     }
 
     refreshPending();
@@ -968,8 +997,32 @@ export function RateCardForm(props: RateCardFormProps) {
       // Section drafts: append new captures, or swap the replaced original for
       // an annotation draft. Line-photo annotation drafts are merged into the
       // line instead of the section strip.
-      const sectionDrafts = drafts.filter((d) => !d.lineExternalId);
-      const lineDrafts = drafts.filter((d) => d.lineExternalId);
+      const fcDrafts = drafts.filter((d) => d.sectionId === FC_PHOTO_SECTION);
+      const sectionDrafts = drafts.filter((d) => d.sectionId !== FC_PHOTO_SECTION && !d.lineExternalId);
+      const lineDrafts = drafts.filter((d) => d.sectionId !== FC_PHOTO_SECTION && d.lineExternalId);
+      if (fcDrafts.length > 0) {
+        // Re-show offline Final Checklist photos in their field (camKey = "qid:photoKey").
+        setFcAnswers((m) => {
+          const next = { ...m };
+          for (const d of fcDrafts) {
+            const [qid, key] = (d.lineExternalId || '').split(':');
+            if (!qid || !key) continue;
+            const ans = { ...(next[qid] || {}) };
+            if (key === 'photo') {
+              const arr = [...(ans.photoUrls || [])];
+              if (!arr.includes(d.url)) arr.push(d.url);
+              ans.photoUrls = arr;
+            } else {
+              const sp = { ...(ans.stickerPhotos || {}) };
+              const arr = [...(sp[key] || [])];
+              if (!arr.includes(d.url)) arr.push(d.url);
+              sp[key] = arr; ans.stickerPhotos = sp;
+            }
+            next[qid] = ans;
+          }
+          return next;
+        });
+      }
       if (sectionDrafts.length > 0) {
         setPhotosBySection((m) => {
           const next = { ...m };
@@ -1257,9 +1310,26 @@ export function RateCardForm(props: RateCardFormProps) {
     septic_fee: props.propertySepticFee ?? null,
   };
 
+  // Drop device-local draft (blob:) photo URLs before persisting — those are
+  // replaced with the real URL once the queued photo uploads (see runFlush).
+  function fcStripBlobs(a: FcAnswers): FcAnswers {
+    const clean = (arr?: string[]) => (arr || []).filter((u) => !u.startsWith('blob:'));
+    const out: FcAnswers = {};
+    for (const [qid, ans] of Object.entries(a)) {
+      const next: FcAnswerState = { ...ans };
+      if (ans.photoUrls) next.photoUrls = clean(ans.photoUrls);
+      if (ans.stickerPhotos) {
+        next.stickerPhotos = Object.fromEntries(Object.entries(ans.stickerPhotos).map(([k, v]) => [k, clean(v)]));
+      }
+      out[qid] = next;
+    }
+    return out;
+  }
+
   // Persist the whole checklist as ONE qa answer (JSON blob in `note`), upserted
   // by a stable external id. Serialized with the other answer writes.
   function doSaveFinalChecklist(answersToSave: FcAnswers) {
+    const sanitized = fcStripBlobs(answersToSave);
     const body = {
       upserts: [{
         recordId: fcRecordIdRef.current,
@@ -1271,7 +1341,7 @@ export function RateCardForm(props: RateCardFormProps) {
           section: 'Final Checklist',
           summaryInstanceLabel: '',
           answerValue: 'final_checklist',
-          note: JSON.stringify(answersToSave),
+          note: JSON.stringify(sanitized),
         }, { isScope: true }),
         questionHubspotRecordId: null,
       }],
@@ -3661,7 +3731,7 @@ export function RateCardForm(props: RateCardFormProps) {
           <FinalChecklist
             answers={fcAnswers}
             onPatch={handleFcPatch}
-            uploadPhoto={(file) => uploadPhotoDirect(file)}
+            uploadPhoto={(file, fieldKey) => uploadPhotoOrQueue(file, props.inspectionRecordId, FC_PHOTO_SECTION, { lineExternalId: fieldKey })}
             propertyName={props.propertyName}
             propertyRecordId={props.propertyRecordId}
             propertyValues={fcPropertyValues}

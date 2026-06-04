@@ -26,7 +26,9 @@ export type { FcAnswerState, FcAnswers } from '@/lib/finalChecklist';
 interface Props {
   answers: FcAnswers;
   onPatch: (questionId: string, patch: Partial<FcAnswerState>) => void;
-  uploadPhoto: (file: File) => Promise<string>;
+  /** Upload a photo for a field. fieldKey ("qid:photoKey") lets the parent queue
+   *  it offline and swap the draft for the real URL on reconnect. */
+  uploadPhoto: (file: File, fieldKey?: string) => Promise<string>;
   propertyName?: string;
   propertyRecordId?: string;
   propertyValues?: Record<string, string | number | null | undefined>;
@@ -468,7 +470,7 @@ export function FinalChecklist(props: Props) {
         addressSnapshot={props.propertyName}
         propertyRecordId={props.propertyRecordId}
         onClose={() => setCamera(null)}
-        uploadPhoto={props.uploadPhoto}
+        uploadPhoto={(file) => props.uploadPhoto(file, camFor || undefined)}
         onComplete={(urls) => {
           if (camFor && urls.length > 0) setPhotoList(camFor, [...getPhotoList(camFor), ...urls]);
           setCamera(null);
