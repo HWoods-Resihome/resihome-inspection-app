@@ -9,7 +9,7 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionHeader,
-  setPdfPhotoGalleryBase,
+  PdfGalleryBaseProvider,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
@@ -57,6 +57,7 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
       author="ResiHome"
       subject="Rate Card Inspection Report"
     >
+      <PdfGalleryBaseProvider base={ctx.photoGalleryBase}>
       <Page size="LETTER" style={pdfStyles.page} wrap>
         <PdfHeaderStrip
           docTitle={`${ctx.templateLabel} - Master`}
@@ -110,6 +111,7 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
 
         <PdfFooter docName="Master Report" propertyName={ctx.propertyName} />
       </Page>
+      </PdfGalleryBaseProvider>
     </Document>
   );
 }
@@ -203,6 +205,7 @@ function FinalChecklistBlock(props: { ctx: PdfBuildContext }) {
 }
 
 export async function renderMasterPdf(ctx: PdfBuildContext): Promise<Buffer> {
-  setPdfPhotoGalleryBase(ctx.photoGalleryBase);
+  // Gallery base flows through context (PdfGalleryBaseProvider inside the
+  // Document), so this render is self-contained and safe to run concurrently.
   return renderToBuffer(<MasterDoc ctx={ctx} />);
 }

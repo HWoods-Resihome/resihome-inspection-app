@@ -10,7 +10,7 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionHeader,
-  setPdfPhotoGalleryBase,
+  PdfGalleryBaseProvider,
   PdfSectionPhotos,
   formatMoneyPdf,
   formatQtyPdf,
@@ -20,6 +20,10 @@ import {
 } from './pdfShared';
 import { vendorGetsOwnPdf } from './vendors';
 import { slugifyVendor } from '@/lib/shortLinks';
+
+// Max @react-pdf renders running at once. Each transiently allocates 100+ MB,
+// so this caps peak memory on the lambda while still overlapping work.
+const VENDOR_RENDER_CONCURRENCY = 2;
 
 // Vendor column layout (Vendor-focused, no Client/Tenant):
 //   Cat 12 | Sub 12 | Description 55 | Qty 6 | Unit 5 | Ven$ 10
@@ -43,6 +47,10 @@ function VendorDoc(props: {
   const { ctx, vendor, vendorSections, vendorTotal, lineCount } = props;
   const generatedAtLabel = isoToHumanDate(ctx.generatedAtIso);
   const docTitle = `${vendor} ${ctx.templateLabel}`;
+  // Scope this vendor's gallery to its own photos (section photos + this
+  // vendor's line after-photos). Supplied via context so the render is
+  // self-contained and parallel-safe.
+  const galleryBase = ctx.photoGalleryBase ? `${ctx.photoGalleryBase}?k=vendor&v=${slugifyVendor(vendor)}` : undefined;
 
   return (
     <Document
@@ -50,6 +58,7 @@ function VendorDoc(props: {
       author="ResiHome"
       subject={docTitle}
     >
+      <PdfGalleryBaseProvider base={galleryBase}>
       <Page size="LETTER" style={pdfStyles.page} wrap>
         <PdfHeaderStrip
           docTitle={docTitle}
@@ -85,6 +94,7 @@ function VendorDoc(props: {
 
         <PdfFooter docName={vendor} propertyName={ctx.propertyName} />
       </Page>
+      </PdfGalleryBaseProvider>
     </Document>
   );
 }
@@ -139,7 +149,6 @@ function VendorSection(props: { section: PdfSectionGroup }) {
 }
 
 export async function renderVendorPdfs(ctx: PdfBuildContext): Promise<Map<string, Buffer>> {
-  setPdfPhotoGalleryBase(ctx.photoGalleryBase);
   // Group lines by vendor across sections
   const byVendor = new Map<string, PdfSectionGroup[]>();
   const lineCountByVendor = new Map<string, number>();
@@ -178,26 +187,35 @@ export async function renderVendorPdfs(ctx: PdfBuildContext): Promise<Map<string
     }
   }
 
+  // Vendors that actually get their own packet. (Some, e.g. Eviction Vendor
+  // (Past), don't — their lines still ride the Master + Tenant Chargeback PDFs.)
+  const vendors = [...byVendor.entries()].filter(([v, s]) => s.length > 0 && vendorGetsOwnPdf(v));
+
+  // Render with BOUNDED concurrency. Each @react-pdf render transiently
+  // allocates 100+ MB, so we never run more than VENDOR_RENDER_CONCURRENCY at
+  // once — that caps peak memory (safe on the lambda) while still overlapping
+  // renders for a real wall-clock win when there are several vendors. Each
+  // render is self-contained (gallery base flows through context), so there's
+  // no shared mutable state to race.
   const result = new Map<string, Buffer>();
-  for (const [vendor, sections] of byVendor.entries()) {
-    if (sections.length === 0) continue;
-    // Some vendors (e.g. Eviction Vendor (Past)) don't get their own packet —
-    // their lines still ride the Master + Tenant Chargeback PDFs.
-    if (!vendorGetsOwnPdf(vendor)) continue;
-    // Scope this vendor's gallery to its own photos (section photos + this
-    // vendor's line after-photos).
-    setPdfPhotoGalleryBase(ctx.photoGalleryBase ? `${ctx.photoGalleryBase}?k=vendor&v=${slugifyVendor(vendor)}` : undefined);
-    const buf = await renderToBuffer(
-      <VendorDoc
-        ctx={ctx}
-        vendor={vendor}
-        vendorSections={sections}
-        vendorTotal={vendorTotals.get(vendor) || 0}
-        lineCount={lineCountByVendor.get(vendor) || 0}
-      />
-    );
-    result.set(vendor, buf);
-  }
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < vendors.length) {
+      const idx = cursor++;
+      const [vendor, sections] = vendors[idx];
+      const buf = await renderToBuffer(
+        <VendorDoc
+          ctx={ctx}
+          vendor={vendor}
+          vendorSections={sections}
+          vendorTotal={vendorTotals.get(vendor) || 0}
+          lineCount={lineCountByVendor.get(vendor) || 0}
+        />
+      );
+      result.set(vendor, buf);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(VENDOR_RENDER_CONCURRENCY, vendors.length) }, worker));
 
   return result;
 }

@@ -436,11 +436,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     );
 
     // ---- 4. Render PDFs ----
-    // Sequential to avoid running out of memory on Vercel's lambda. (Each PDF
-    // render in @react-pdf can transiently allocate 100+ MB.)
+    // Render the Master FIRST and alone. Two reasons: (1) it always exists, so
+    // it's the natural warm-up, and (2) @react-pdf's yoga-layout WASM engine has
+    // a one-time async-init race — kicking off concurrent renders before it's
+    // initialized throws ("Expected … Config"). After this first render yoga is
+    // warm, so the rest can safely overlap.
+    //
+    // Then render Chargeback + the per-vendor PDFs concurrently. renderVendorPdfs
+    // uses its OWN bounded pool (2-wide) so peak concurrent renders stay capped
+    // (each transiently allocates 100+ MB). Every render is self-contained — the
+    // photo-gallery base flows through React context, not a shared global — so
+    // overlapping them can't cross-wire one PDF's gallery links into another.
     const masterBuf = await renderMasterPdf(ctx);
-    const chargebackBuf = await renderChargebackPdf(ctx);
-    const vendorBufs = await renderVendorPdfs(ctx);
+    const [chargebackBuf, vendorBufs] = await Promise.all([
+      renderChargebackPdf(ctx),
+      renderVendorPdfs(ctx),
+    ]);
 
     // Pretty file naming. New format puts the file TYPE first so files sort
     // and read clearly:

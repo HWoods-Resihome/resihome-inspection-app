@@ -10,7 +10,7 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionHeader,
-  setPdfPhotoGalleryBase,
+  PdfGalleryBaseProvider,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
@@ -58,6 +58,7 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
       author="ResiHome"
       subject="Tenant Chargeback"
     >
+      <PdfGalleryBaseProvider base={ctx.photoGalleryBase}>
       <Page size="LETTER" style={pdfStyles.page} wrap>
         <PdfHeaderStrip
           docTitle={`Tenant Chargeback — ${ctx.templateLabel}`}
@@ -93,6 +94,7 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
 
         <PdfFooter docName="Tenant Chargeback" propertyName={ctx.propertyName} />
       </Page>
+      </PdfGalleryBaseProvider>
     </Document>
   );
 }
@@ -141,7 +143,7 @@ function ChargebackSection(props: { section: PdfSectionGroup }) {
 }
 
 export async function renderChargebackPdf(ctx: PdfBuildContext): Promise<Buffer | null> {
-  setPdfPhotoGalleryBase(ctx.photoGalleryBase);
+  // Gallery base flows through context (provider inside the Document).
   const hasChargebackLines = ctx.sections.some(
     (s) => s.lines.some((l) => l.tenantBillBackPercent > 0 && l.tenantCost > 0)
   );

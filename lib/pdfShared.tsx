@@ -386,15 +386,28 @@ export function PdfHeaderStrip(props: {
  * thumbnail in a PDF viewer opens the full-resolution image in the user's
  * browser. Compatible with all major PDF viewers (Acrobat, Preview, Chrome).
  */
-// When set (per-render, by the render functions below), each photo links to the
-// in-app gallery viewer (left/right across ALL the inspection's photos) instead
-// of the raw file — so clicking a photo in any PDF gives a browsable gallery.
-// Module-level because PDFs render sequentially server-side; set before each
-// renderToBuffer. Falls back to the raw file URL when unset.
+// Each photo links to the in-app gallery viewer (left/right across ALL the
+// inspection's photos) instead of the raw file — so clicking a photo in any PDF
+// opens a browsable gallery. The gallery base is supplied PER RENDER through
+// React context (PdfGalleryBaseProvider, set inside each Document), so multiple
+// PDFs can render CONCURRENTLY without clobbering each other's base — the global
+// below is only a legacy fallback for callers not yet wrapped in the provider.
+const PdfGalleryBaseContext = React.createContext<string | undefined>(undefined);
+/** Wrap a Document's children so its photos link to this gallery base. */
+export function PdfGalleryBaseProvider(props: { base: string | undefined; children: React.ReactNode }) {
+  return <PdfGalleryBaseContext.Provider value={props.base}>{props.children}</PdfGalleryBaseContext.Provider>;
+}
+// Legacy module-level fallback (used by any render path not yet wrapped in the
+// provider). Set before renderToBuffer; the context value takes precedence.
+// NOTE: relying on this is NOT safe under concurrent renders — prefer the
+// provider for anything parallelized.
 let _photoGalleryBase: string | undefined;
 export function setPdfPhotoGalleryBase(base: string | undefined) { _photoGalleryBase = base; }
 
 export function PdfSectionPhotos(props: { photoUrls: string[] }) {
+  // Prefer the per-render context base; fall back to the legacy global.
+  const ctxBase = React.useContext(PdfGalleryBaseContext);
+  const galleryBase = ctxBase ?? _photoGalleryBase;
   if (props.photoUrls.length === 0) return null;
   return (
     <View style={pdfStyles.photoGrid}>
@@ -406,8 +419,8 @@ export function PdfSectionPhotos(props: { photoUrls: string[] }) {
         // Gallery link (starts at this photo) when a base is set; else the file.
         // Join correctly whether the base already carries query params (per-PDF
         // scoping, e.g. ?k=vendor&v=slug).
-        const sep = _photoGalleryBase && _photoGalleryBase.includes('?') ? '&' : '?';
-        const href = _photoGalleryBase ? `${_photoGalleryBase}${sep}u=${encodeURIComponent(entry)}` : fileHref;
+        const sep = galleryBase && galleryBase.includes('?') ? '&' : '?';
+        const href = galleryBase ? `${galleryBase}${sep}u=${encodeURIComponent(entry)}` : fileHref;
         return (
           <Link key={`${entry}-${i}`} src={href} style={pdfStyles.photoCell}>
             {/* eslint-disable-next-line jsx-a11y/alt-text */}
