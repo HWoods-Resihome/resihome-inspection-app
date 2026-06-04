@@ -1,15 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/router';
 import { useAppDialog } from '@/components/AppDialog';
 import type {
   Question, AnswerInput, TemplateType, InspectionSummary,
 } from '@/lib/types';
 import type { SavedAnswer } from '@/lib/hubspot';
-import { QuestionForm } from '@/components/QuestionForm';
-import { RateCardForm } from '@/components/RateCardForm';
-import { QcReinspectForm } from '@/components/QcReinspectForm';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
+
+// The three inspection forms are heavy and MUTUALLY EXCLUSIVE — exactly one
+// renders per inspection (by template type). Load each on demand so a Scope
+// inspection doesn't also ship the QC + Question form bundles (and vice-versa),
+// cutting first-load JS on the field phones inspectors actually use. ssr:false
+// because the page shell is static and these are interactive client-only forms.
+const FormLoading = () => <div className="p-6 text-sm text-gray-500">Loading…</div>;
+const QuestionForm = dynamic(() => import('@/components/QuestionForm').then((m) => m.QuestionForm), { loading: FormLoading, ssr: false });
+const RateCardForm = dynamic(() => import('@/components/RateCardForm').then((m) => m.RateCardForm), { loading: FormLoading, ssr: false });
+const QcReinspectForm = dynamic(() => import('@/components/QcReinspectForm').then((m) => m.QcReinspectForm), { loading: FormLoading, ssr: false });
 
 type Stage = 'loading' | 'loading_questions' | 'form' | 'submitting' | 'generating_pdf' | 'done' | 'error';
 
