@@ -26,6 +26,7 @@ import {
   upsertAnswers,
 } from '@/lib/hubspot';
 import { buildQaAnswerProps } from '@/lib/answerProps';
+import { isFinalizeAdmin } from '@/lib/finalizeAccess';
 import { isInternalResolution } from '@/lib/vendors';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
@@ -104,25 +105,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return {};
   });
 
-  // Self-approval lockout: the person who submitted an inspection for approval
-  // can't finalize it themselves for SELF_APPROVAL_LOCK_MS — a second reviewer
-  // must approve (or they wait it out). Any OTHER user can finalize immediately.
-  const SELF_APPROVAL_LOCK_MS = 5 * 60 * 1000;
+  // Dual-approval lockout: the person who submitted an inspection for approval
+  // can NEVER finalize it themselves — a second reviewer (any OTHER signed-in
+  // user) must. This is the approval layer. A finalize admin is exempt and may
+  // finalize their own work. (regenerateOnly is an admin-only PDF refresh that
+  // changes no status / sends nothing, so it is not subject to this lock.)
   if (!regenerateOnly) {
     const submitter = String(preflight?.submitted_by_email || '').trim().toLowerCase();
-    // submitted_at is a datetime (epoch-ms) but older records may hold an ISO
-    // string — handle both.
-    const submittedRaw = String(preflight?.submitted_at || '').trim();
-    const submittedMs = submittedRaw ? (/^\d+$/.test(submittedRaw) ? Number(submittedRaw) : (Date.parse(submittedRaw) || 0)) : 0;
-    if (submitter && submitter === session.email.trim().toLowerCase() && submittedMs) {
-      const elapsed = Date.now() - submittedMs;
-      if (elapsed >= 0 && elapsed < SELF_APPROVAL_LOCK_MS) {
-        const mins = Math.ceil((SELF_APPROVAL_LOCK_MS - elapsed) / 60000);
-        return res.status(423).json({
-          error: `You submitted this inspection for approval, so it needs a second reviewer. Another user can approve it now, or you can finalize it yourself in about ${mins} minute${mins === 1 ? '' : 's'}.`,
-          selfApprovalLocked: true,
-        });
-      }
+    if (submitter && submitter === session.email.trim().toLowerCase() && !isFinalizeAdmin(session.email)) {
+      return res.status(423).json({
+        error: `You submitted this inspection for approval, so it needs a second reviewer to finalize it. Another signed-in user can finalize it now.`,
+        selfApprovalLocked: true,
+      });
     }
   }
 

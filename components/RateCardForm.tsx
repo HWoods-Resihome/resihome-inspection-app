@@ -67,12 +67,14 @@ interface RateCardFormProps {
   /** Submit/approve stamps for the header (ISO strings). */
   submittedAt?: string | null;
   /** Email of whoever submitted for approval, and the logged-in user's email.
-   *  When they match AND status is pending_approval AND it's within 5 min of
-   *  submit, the Finalize button is locked (mirrors the server's self-approval
-   *  lockout) so the submitter can't accidentally finalize their own work —
-   *  their only move is Save & Close. */
+   *  When they match AND status is pending_approval, the Finalize button is
+   *  PERMANENTLY locked (mirrors the server) so the submitter can never finalize
+   *  their own work — a second reviewer must. Their only move is Save & Close.
+   *  A finalize admin (isFinalizeAdmin) is exempt and may finalize their own. */
   submittedByEmail?: string | null;
   currentUserEmail?: string | null;
+  /** This user may finalize their OWN submission (bypass the dual-approval lock). */
+  isFinalizeAdmin?: boolean;
   approverName?: string | null;
   approvedAt?: string | null;
   propertyName: string;
@@ -2921,15 +2923,12 @@ export function RateCardForm(props: RateCardFormProps) {
     // Branch on status: pending_approval -> finalize flow, else submit flow.
     const isFinalizing = props.inspectionStatus === 'pending_approval';
     if (isFinalizing) {
-      // Belt-and-suspenders: the button is disabled while the submitter is in
-      // their self-approval window, but guard the handler too so a stray call
-      // can't slip a self-approval finalize past the (also server-enforced) lock.
-      // We intentionally DON'T reveal the countdown — to the submitter it reads
-      // as a flat "you can't approve your own inspection" (it quietly clears
-      // after the window so they're never permanently stuck).
+      // Belt-and-suspenders: the button is disabled for the submitter, but guard
+      // the handler too so a stray call can't slip a self-approval finalize past
+      // the (also server-enforced) lock.
       if (selfApprovalLocked) {
         await dialog.alert(
-          `You submitted this inspection for approval, so you can't approve it yourself.\n\nA second reviewer needs to finalize it. For now, tap "Save & Close".`
+          `You submitted this inspection for approval, so you can't finalize it yourself.\n\nA second reviewer needs to finalize it. Tap "Save & Close".`
         );
         return;
       }
@@ -3062,37 +3061,19 @@ export function RateCardForm(props: RateCardFormProps) {
     }
   })();
 
-  // ---- Self-approval lockout (mirrors the server) ----
-  // The person who submitted for approval can't finalize their own submission
-  // for 5 minutes — a second reviewer must approve (or they wait it out). This
-  // stops the common foot-gun: after submitting, the inspector reopens to add a
-  // line item and then hits "Finalize & Generate PDFs" by reflex instead of
-  // "Save & Close". While locked we GRAY OUT Finalize and animate Save & Close.
-  const SELF_APPROVAL_LOCK_MS = 5 * 60 * 1000;
-  const submittedMs = useMemo(() => {
-    const raw = String(props.submittedAt || '').trim();
-    if (!raw) return 0;
-    return /^\d+$/.test(raw) ? Number(raw) : (Date.parse(raw) || 0);
-  }, [props.submittedAt]);
+  // ---- Dual-approval lockout (mirrors the server) ----
+  // The person who submitted for approval can NEVER finalize their own
+  // submission — a second reviewer (any other signed-in user) must. This is a
+  // permanent lock (not a 5-minute window), so it also stops the common
+  // foot-gun: after submitting, the inspector reopens to add a line item and
+  // then hits "Finalize & Generate PDFs" by reflex instead of "Save & Close".
+  // While locked we GRAY OUT Finalize and animate Save & Close. A finalize admin
+  // is exempt and may finalize their own work.
   const isSubmitter =
     !!props.currentUserEmail && !!props.submittedByEmail &&
     props.currentUserEmail.trim().toLowerCase() === props.submittedByEmail.trim().toLowerCase();
-  // Live clock so the lock auto-expires (and the countdown ticks) without a reload.
-  const [nowTs, setNowTs] = useState(() => Date.now());
-  useEffect(() => {
-    if (props.inspectionStatus !== 'pending_approval' || !isSubmitter || !submittedMs) return;
-    setNowTs(Date.now());
-    const t = setInterval(() => {
-      setNowTs(Date.now());
-      if (Date.now() - submittedMs >= SELF_APPROVAL_LOCK_MS) clearInterval(t);
-    }, 1000);
-    return () => clearInterval(t);
-  }, [props.inspectionStatus, isSubmitter, submittedMs]);
-  const selfApprovalRemainingMs =
-    props.inspectionStatus === 'pending_approval' && isSubmitter && submittedMs
-      ? Math.max(0, SELF_APPROVAL_LOCK_MS - (nowTs - submittedMs))
-      : 0;
-  const selfApprovalLocked = selfApprovalRemainingMs > 0;
+  const selfApprovalLocked =
+    props.inspectionStatus === 'pending_approval' && isSubmitter && !props.isFinalizeAdmin;
 
   const submitLabel = finalizing
     ? 'Generating PDFs...'
@@ -4367,10 +4348,9 @@ function TerminalActions(props: {
   submitTitle?: string;
   /** Tapping the greyed submit (mobile has no hover) flashes the reason. */
   onBlockedSubmit?: (reason: string) => void;
-  /** When the submitter is inside their (hidden) self-approval window: animate
-   *  Save & Close (the only valid move) and explain why Finalize is greyed.
-   *  We deliberately DON'T surface a countdown — to the submitter it reads as a
-   *  flat lockout. */
+  /** When the submitter is viewing their own pending-approval submission:
+   *  animate Save & Close (the only valid move) and explain why Finalize is
+   *  greyed. The lock is permanent — a second reviewer must finalize. */
   selfApprovalLocked?: boolean;
   onCancelInspection: () => void;
   onSaveAndClose: () => void;
@@ -4385,7 +4365,7 @@ function TerminalActions(props: {
           intent is unmistakable: this is pending approval — just Save & Close. */}
       {locked && (
         <div className="text-[11px] sm:text-xs text-emerald-700 font-medium text-center animate-[fadeIn_160ms_ease-out]">
-          You submitted this — a second reviewer must approve. Tap <span className="font-bold">Save &amp; Close</span>.
+          You submitted this — a second reviewer must finalize it. Tap <span className="font-bold">Save &amp; Close</span>.
         </div>
       )}
       <div className="flex items-center gap-2">

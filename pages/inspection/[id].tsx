@@ -38,14 +38,20 @@ export default function ExistingInspection() {
   const [stage, setStage] = useState<Stage>('loading');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Logged-in user's email — used to mirror the server's self-approval lockout
-  // in the UI (the submitter can't finalize their own submission for 5 min).
+  // Logged-in user's email + admin flag — used to mirror the server's
+  // dual-approval lockout in the UI (the submitter can never finalize their own
+  // submission; a second reviewer must — unless this user is a finalize admin).
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  const [isFinalizeAdmin, setIsFinalizeAdmin] = useState(false);
   useEffect(() => {
     let cancelled = false;
     fetch('/api/auth/me')
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!cancelled && d?.email) setCurrentUserEmail(String(d.email)); })
+      .then((d) => {
+        if (cancelled || !d) return;
+        if (d.user?.email) setCurrentUserEmail(String(d.user.email));
+        setIsFinalizeAdmin(!!d.isFinalizeAdmin);
+      })
       .catch(() => { /* non-fatal: lockout still enforced server-side */ });
     return () => { cancelled = true; };
   }, []);
@@ -384,6 +390,7 @@ export default function ExistingInspection() {
           submittedAt={inspection.submittedAt}
           submittedByEmail={inspection.submittedByEmail}
           currentUserEmail={currentUserEmail}
+          isFinalizeAdmin={isFinalizeAdmin}
           approverName={inspection.approvedByName}
           approvedAt={inspection.approvedAt}
           propertyName={propertyName}

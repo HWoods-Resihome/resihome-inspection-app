@@ -423,7 +423,7 @@ export const FINAL_CHECKLIST: FcSection[] = [
         label: 'Label Sticker Photos',
         type: 'photo_set',
         required: true,
-        help: 'Photograph the Applied ResiHome Label on Each Unit.',
+        help: 'Photograph the appliance label showing the Model & Serial #.',
         photos: [
           { id: 'air_handler', label: 'Air Handler', required: true },
           { id: 'outside_condenser', label: 'Outside Condenser', required: true },

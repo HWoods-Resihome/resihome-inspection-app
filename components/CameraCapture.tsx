@@ -408,6 +408,30 @@ export function CameraCapture({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, facing]);
 
+  // iOS pinch-zoom guard. While the camera is open, iOS Safari / WKWebView
+  // treats a pinch as a PAGE zoom — it scales the whole screen, pushing the
+  // shutter out of reach so the inspector can't take a photo (and the same
+  // happens over the video recorder). `touch-action: none` isn't honored for
+  // pinch on iOS, so we preventDefault the Safari gesture* events and any
+  // multi-touch move while the overlay is open. This blocks only page zoom;
+  // single-finger taps/drags (shutter, slide-to-zoom, the reference-photo
+  // strip's horizontal scroll) are untouched.
+  useEffect(() => {
+    if (!isOpen) return;
+    const preventGesture = (e: Event) => { e.preventDefault(); };
+    const preventPinchMove = (e: TouchEvent) => { if (e.touches.length > 1) e.preventDefault(); };
+    document.addEventListener('gesturestart', preventGesture as EventListener, { passive: false });
+    document.addEventListener('gesturechange', preventGesture as EventListener, { passive: false });
+    document.addEventListener('gestureend', preventGesture as EventListener, { passive: false });
+    document.addEventListener('touchmove', preventPinchMove, { passive: false });
+    return () => {
+      document.removeEventListener('gesturestart', preventGesture as EventListener);
+      document.removeEventListener('gesturechange', preventGesture as EventListener);
+      document.removeEventListener('gestureend', preventGesture as EventListener);
+      document.removeEventListener('touchmove', preventPinchMove);
+    };
+  }, [isOpen]);
+
   // Resume after backgrounding. When the tab is hidden (user switches apps /
   // locks the phone / changes tabs), the browser stops the camera tracks, so on
   // return the <video> is frozen and won't capture. Re-acquire the stream (or

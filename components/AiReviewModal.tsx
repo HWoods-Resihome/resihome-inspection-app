@@ -22,7 +22,7 @@ interface Props {
   // For needsPhoto suggestions: capture a photo of the damage and attach it to
   // the room + line. Resolves true if a photo was added.
   onAddPhoto?: (a: AiAdjustment) => Promise<boolean>;
-  // For missingCategory checks ("Decline — Add Items"): open the manual line-item
+  // For missingCategory checks ("Approve — Add Items"): open the manual line-item
   // editor. Resolves with the number of lines added (0 if cancelled).
   onAddLineItems?: (a: AiAdjustment) => Promise<number>;
   // Permanently dismiss a photo-gap flag so future reviews don't re-raise it.
@@ -127,8 +127,8 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
   const setAll = (d: Decision) => {
     const next: Record<string, Decision> = {};
     for (const a of adjustments) {
-      // missingCategory checks must be resolved individually (Approve = none
-      // needed, or Decline → add items) — never bulk-set.
+      // missingCategory checks must be resolved individually (Approve → add
+      // items, or Decline = none needed) — never bulk-set.
       if (a.missingCategory) { if (decisions[a.id]) next[a.id] = decisions[a.id]; continue; }
       next[a.id] = d;
     }
@@ -216,8 +216,8 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                               <div className="text-xs text-gray-600 mt-1 leading-snug">{a.rationale}</div>
 
                               {a.missingCategory ? (
-                                /* Deterministic "no <category> lines anywhere" check. Approve =
-                                   none required; Decline → add items via the manual editor. */
+                                /* Deterministic "no <category> lines anywhere" check. Approve →
+                                   add items via the manual editor; Decline = no items required. */
                                 (() => {
                                   const label = a.missingCategory === 'paint' ? 'Paint' : 'Cleaning';
                                   if (linesAdded[a.id]) {
@@ -226,26 +226,21 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                   return (
                                     <div className="mt-2">
                                       <div className="flex gap-2 flex-wrap">
-                                        <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'approve' }))}
-                                          className={`px-3 py-1.5 text-xs font-heading font-semibold rounded-md border ${d === 'approve' ? 'bg-brand text-white border-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`}>
-                                          Approve — No Items Required
-                                        </button>
                                         <button type="button" disabled={addingItems === a.id}
                                           onClick={async () => {
                                             if (!onAddLineItems) return;
                                             setAddingItems(a.id);
                                             const n = await onAddLineItems(a).catch(() => 0);
                                             setAddingItems(null);
-                                            if (n > 0) { setLinesAdded((m) => ({ ...m, [a.id]: n })); setDecisions((m) => ({ ...m, [a.id]: 'decline' })); }
+                                            if (n > 0) { setLinesAdded((m) => ({ ...m, [a.id]: n })); setDecisions((m) => ({ ...m, [a.id]: 'approve' })); }
                                           }}
-                                          className={`px-3 py-1.5 text-xs font-heading font-semibold rounded-md border disabled:opacity-50 ${d === 'decline' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
-                                          {addingItems === a.id ? 'Opening…' : 'Decline — Add Items'}
+                                          className={`px-3 py-1.5 text-xs font-heading font-semibold rounded-md border disabled:opacity-50 ${d === 'approve' ? 'bg-brand text-white border-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`}>
+                                          {addingItems === a.id ? 'Opening…' : 'Approve — Add Items'}
                                         </button>
-                                      </div>
-                                      {/* Descriptions below the options. */}
-                                      <div className="mt-2 space-y-0.5 text-[11px] text-gray-500 leading-snug">
-                                        <div><span className="font-semibold text-gray-700">Approve</span> — confirm no {label.toLowerCase()} is needed for this turn.</div>
-                                        <div><span className="font-semibold text-gray-700">Decline — Add Items</span> — open the line-item editor to add {label.toLowerCase()} line(s), then come back here.</div>
+                                        <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'decline' }))}
+                                          className={`px-3 py-1.5 text-xs font-heading font-semibold rounded-md border ${d === 'decline' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
+                                          Decline — No Items Required
+                                        </button>
                                       </div>
                                     </div>
                                   );

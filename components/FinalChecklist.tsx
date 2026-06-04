@@ -54,6 +54,11 @@ const num = (v: unknown): number | null => {
   return isFinite(n) ? n : null;
 };
 
+// Reserved answer key for the inspector's free-text final notes. NOT part of
+// the FINAL_CHECKLIST spec, so it never gates submit (the notes are optional);
+// it rides along in the same answers map that's JSON-persisted with the rest.
+const FC_FINAL_NOTES_ID = 'fc_inspector_final_notes';
+
 export function FinalChecklist(props: Props) {
   const { answers, onPatch, readOnly } = props;
   const [openInternal, setOpenInternal] = useState(true);
@@ -532,6 +537,23 @@ export function FinalChecklist(props: Props) {
               </div>
             );
           })}
+
+          {/* Inspector final notes — free-text and OPTIONAL. Sits at the very
+              bottom of the checklist; visible (read-only) to the reviewer who
+              finalizes. Persists with the rest of the Final Checklist answers. */}
+          <div className="px-4 py-4 border-t border-gray-100">
+            <div className="font-heading font-semibold text-ink text-sm leading-snug mb-2">
+              Inspector Final Notes <span className="text-gray-400 font-normal">(Optional)</span>
+            </div>
+            <textarea
+              value={ans(FC_FINAL_NOTES_ID).note || ''}
+              disabled={readOnly}
+              onChange={(e) => onPatch(FC_FINAL_NOTES_ID, { note: e.target.value })}
+              rows={3}
+              placeholder="Anything the approver should know about this turn (optional)…"
+              className="w-full text-sm rounded-md px-2 py-1.5 bg-white border border-gray-300 focus-brand disabled:bg-gray-50 disabled:text-gray-500"
+            />
+          </div>
         </>
       )}
 
