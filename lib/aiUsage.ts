@@ -14,7 +14,7 @@
  * instances reclaimed before a flush lose only their small tail — fine for an
  * estimate dashboard (the logs remain authoritative).
  */
-import { put, list } from '@vercel/blob';
+import { put, list, del } from '@vercel/blob';
 
 export type AiUsageSource =
   | 'ai_review' | 'room_scan_live' | 'room_scan' | 'voice_assist' | 'transcribe' | 'embeddings';
@@ -113,4 +113,33 @@ export async function readAiUsage(days = 7): Promise<{
     }
   } catch (e: any) { console.warn('[ai-usage] read failed:', String(e?.message || e).slice(0, 120)); }
   return { byDay, bySource, byModel, total };
+}
+
+/**
+ * Delete ai-usage rollup blobs older than `retentionDays`. These accumulate one
+ * blob per instance per day forever; pruning keeps storage bounded AND keeps
+ * readAiUsage's list() fast as months pass. Date lives in the pathname
+ * (ai-usage/<YYYY-MM-DD>/<instance>.json), and YYYY-MM-DD sorts chronologically
+ * as a string, so the cutoff compare is a plain string comparison. Best-effort.
+ */
+export async function pruneOldAiUsage(retentionDays = 90): Promise<{ deleted: number; scanned: number }> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return { deleted: 0, scanned: 0 };
+  const cutoff = new Date(Date.now() - Math.max(1, retentionDays) * 864e5).toISOString().slice(0, 10);
+  let deleted = 0, scanned = 0;
+  try {
+    const { blobs } = await list({ prefix: 'ai-usage/' });
+    const stale: string[] = [];
+    for (const b of blobs) {
+      scanned++;
+      const date = b.pathname.split('/')[1] || '';
+      if (date && date < cutoff) stale.push(b.url);
+    }
+    for (let i = 0; i < stale.length; i += 100) {
+      await del(stale.slice(i, i + 100)); // del takes a url or an array of urls
+      deleted += stale.slice(i, i + 100).length;
+    }
+  } catch (e: any) {
+    console.warn('[ai-usage] prune failed:', String(e?.message || e).slice(0, 120));
+  }
+  return { deleted, scanned };
 }

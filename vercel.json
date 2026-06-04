@@ -17,12 +17,19 @@
     },
     "pages/api/cron/sftp-watch.ts": {
       "maxDuration": 60
+    },
+    "pages/api/cron/blob-cleanup.ts": {
+      "maxDuration": 60
     }
   },
   "crons": [
     {
       "path": "/api/cron/sftp-watch",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/blob-cleanup",
+      "schedule": "0 8 * * *"
     }
   ]
 }
