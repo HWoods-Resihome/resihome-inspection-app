@@ -1,28 +1,26 @@
 /**
- * FinalChecklist — the "✦ Final Checklist" section rendered at the bottom of the
- * scope rate-card form. Driven entirely by lib/finalChecklist.ts (the spec).
+ * FinalChecklist — the "Final Checklist" section rendered as another room-style
+ * bubble at the very bottom of the scope rate-card form. Driven entirely by
+ * lib/finalChecklist.ts (the spec).
  *
  * Presentational + controlled: the parent owns the answer map and supplies the
- * persistence / property / line-item hooks. This component renders the UI and
- * calls back; it does no network I/O itself except photo upload (delegated).
- *
- * Phase 2 of the build — not yet mounted in RateCardForm. Mounting + answer
- * persistence + property fetch + Submit gating land in Phase 3; the Master PDF
- * block in Phase 4.
+ * persistence / property / line-item hooks. The whole bubble collapses like a
+ * room, and each subsection (Smart Home Tech, …) collapses independently.
  */
 
 import { useState } from 'react';
 import {
-  FINAL_CHECKLIST, type FcQuestion, type FcAddLineRule,
+  FINAL_CHECKLIST, FC_FILTER_OTHER,
+  type FcQuestion, type FcAddLineRule,
   type FcAnswerState, type FcAnswers,
 } from '@/lib/finalChecklist';
 import { titleCase } from '@/lib/titleCase';
-
-export type { FcAnswerState, FcAnswers } from '@/lib/finalChecklist';
 import { ListPicker } from '@/components/ListPicker';
 import { WheelPicker } from '@/components/WheelPicker';
 import { CameraCapture } from '@/components/CameraCapture';
 import { displayImageSrc } from '@/lib/photoDisplay';
+
+export type { FcAnswerState, FcAnswers } from '@/lib/finalChecklist';
 
 interface Props {
   answers: FcAnswers;
@@ -30,15 +28,13 @@ interface Props {
   uploadPhoto: (file: File) => Promise<string>;
   propertyName?: string;
   propertyRecordId?: string;
-  /** Raw property values (air_filters___total_quantity, septic_fee, …). */
   propertyValues?: Record<string, string | number | null | undefined>;
-  /** Filter-size dropdown options, fetched live from the HubSpot field (sorted). */
   filterSizeOptions?: string[];
-  /** True if a line with this exact short description already exists anywhere. */
-  lineExists?: (shortDescription: string) => boolean;
-  /** Auto-add a Whole-House line; resolves with the new line id + a cost label. */
+  lineExists?: (lineItemCode: string) => boolean;
   onAddLine?: (rule: FcAddLineRule, questionId: string) => Promise<{ externalId: string; costLabel: string } | null>;
   onUndoLine?: (externalId: string, questionId: string) => void;
+  /** Notify the parent when our camera overlay opens/closes (hides the floating mic). */
+  onCameraOverlayChange?: (open: boolean) => void;
   readOnly?: boolean;
 }
 
@@ -48,18 +44,30 @@ const num = (v: unknown): number | null => {
   return isFinite(n) ? n : null;
 };
 
+function Chevron({ open, className }: { open: boolean; className?: string }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+      strokeLinecap="round" strokeLinejoin="round"
+      className={`shrink-0 transition-transform ${open ? 'rotate-90' : ''} ${className || ''}`}>
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
 export function FinalChecklist(props: Props) {
   const { answers, onPatch, readOnly } = props;
-  // Which photo field has the camera open: `${questionId}:${photoKey}`.
+  const [open, setOpen] = useState(true);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
   const [camFor, setCamFor] = useState<string | null>(null);
   const [busyAdd, setBusyAdd] = useState<string | null>(null);
 
   const ans = (id: string): FcAnswerState => answers[id] || {};
+  const setCamera = (key: string | null) => { setCamFor(key); props.onCameraOverlayChange?.(key !== null); };
 
-  // ---- shared photo strip (standardized: yellow dashed "+" add box) ----
-  function PhotoStrip({ urls, camKey, required }: { urls: string[]; camKey: string; required?: boolean }) {
+  // ---- shared photo strip (standardized yellow dashed "+" add box) ----
+  function PhotoStrip({ urls, camKey, required, center }: { urls: string[]; camKey: string; required?: boolean; center?: boolean }) {
     return (
-      <div className="flex flex-wrap gap-2 items-center mt-1.5">
+      <div className={`flex flex-wrap gap-2 items-center mt-1.5 ${center ? 'justify-center' : ''}`}>
         {urls.map((u, i) => (
           <div key={`${u}-${i}`} className="relative">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -73,7 +81,7 @@ export function FinalChecklist(props: Props) {
         {!readOnly && (
           <button
             type="button"
-            onClick={() => setCamFor(camKey)}
+            onClick={() => setCamera(camKey)}
             aria-label="Add photo"
             className={`w-14 h-14 rounded-lg border-2 border-dashed flex items-center justify-center text-2xl leading-none
               ${required && urls.length === 0 ? 'border-amber-300 text-amber-500' : 'border-gray-300 text-gray-400 hover:border-brand/50 hover:text-brand'}`}
@@ -115,12 +123,11 @@ export function FinalChecklist(props: Props) {
     onPatch(q.id, { added: null });
   }
 
-  // ---- renderers ----
-  function Pills({ q, value, onPick }: { q: { options?: string[] }; value?: string; onPick: (v: string) => void }) {
-    const opts = q.options || [];
+  // ---- small renderers ----
+  function Pills({ options, value, onPick }: { options?: string[]; value?: string; onPick: (v: string) => void }) {
     return (
       <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: 'none' }}>
-        {opts.map((o) => {
+        {(options || []).map((o) => {
           const sel = value === o;
           return (
             <button key={o} type="button" disabled={readOnly} onClick={() => onPick(o)}
@@ -139,14 +146,14 @@ export function FinalChecklist(props: Props) {
     const match = (q.addLineOnValues || []).find((r) => r.value === a.value);
     if (!match) return null;
     const rule = match.rule;
-    const alreadyInScope = props.lineExists?.(rule.shortDescription);
+    const alreadyInScope = props.lineExists?.(rule.lineItemCode);
 
     if (a.added) {
       return (
         <div className="mt-3 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2.5 flex items-center gap-2.5">
           <span className="shrink-0 w-6 h-6 rounded-full bg-emerald-700 text-white flex items-center justify-center text-[13px] font-bold">✓</span>
           <div className="text-[12.5px] text-emerald-900 leading-tight">
-            <span className="font-semibold">{titleCase(rule.shortDescription)}</span> added to <span className="font-semibold">Whole House</span>
+            <span className="font-semibold">{titleCase(rule.label)}</span> added to <span className="font-semibold">Whole House</span>
             <div className="text-emerald-700 font-medium">Vendor 1 · Qty {rule.quantity} · {rule.tenantBillBackPercent}% Tenant · <span className="font-bold">{a.added.costLabel}</span></div>
           </div>
           {!readOnly && <button type="button" onClick={() => undoAdd(q)} className="ml-auto text-[11.5px] text-emerald-700 underline">Undo</button>}
@@ -154,17 +161,17 @@ export function FinalChecklist(props: Props) {
       );
     }
     if (alreadyInScope) {
-      return <div className="mt-3 text-[12px] text-gray-500">✓ <span className="font-medium">{titleCase(rule.shortDescription)}</span> already in this scope.</div>;
+      return <div className="mt-3 text-[12px] text-gray-500">✓ <span className="font-medium">{titleCase(rule.label)}</span> already in this scope.</div>;
     }
     return (
       <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3">
         {rule.optional && <span className="inline-block text-[9.5px] font-bold uppercase tracking-wide text-sky-700 bg-sky-100 rounded px-1.5 py-0.5 mb-1.5">Optional Add</span>}
-        <div className="flex gap-2.5 items-start">
+        <div className="flex gap-2.5 items-center">
           <span className="shrink-0 w-6 h-6 rounded-md bg-sky-100 text-sky-700 flex items-center justify-center font-bold">+</span>
           <div className="text-[12.5px] text-sky-900 leading-snug">
             {rule.optional
-              ? <><b>Optional:</b> add a <b>{titleCase(rule.shortDescription)}</b> line under <b>Whole House</b>? Only add it if a pump-out is needed.</>
-              : <>No <b>{titleCase(rule.shortDescription)}</b> line found anywhere in this scope. Add it under <b>Whole House</b>?</>}
+              ? <><b>Optional:</b> add a <b>{titleCase(rule.label)}</b> line under <b>Whole House</b>? Only add it if a pump-out is needed.</>
+              : <>No <b>{titleCase(rule.label)}</b> line found anywhere in this scope. Add it under <b>Whole House</b>?</>}
           </div>
         </div>
         {!readOnly && (
@@ -213,8 +220,8 @@ export function FinalChecklist(props: Props) {
     const r = (q.reminderOnValues || []).find((x) => x.value === a.value);
     if (!r) return null;
     return (
-      <div className="mt-2.5 flex gap-2.5 items-start rounded-xl border border-brand/20 bg-brand/5 px-3 py-2.5">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-brand mt-0.5"><circle cx="12" cy="12" r="9" /><path d="M12 8h.01M11 12h1v4h1" /></svg>
+      <div className="mt-2.5 flex gap-2.5 items-center rounded-xl border border-brand/20 bg-brand/5 px-3 py-2.5">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-brand"><circle cx="12" cy="12" r="9" /><path d="M12 8h.01M11 12h1v4h1" /></svg>
         <div className="text-[12px] font-medium text-brand-dark leading-snug">{r.text}</div>
       </div>
     );
@@ -252,7 +259,7 @@ export function FinalChecklist(props: Props) {
       const picked = devices.find((d) => d.value === a.value);
       return (
         <>
-          <Pills q={{ options: devices.map((d) => d.value) }} value={a.value} onPick={(v) => onPatch(q.id, { value: v, device: {} })} />
+          <Pills options={devices.map((d) => d.value)} value={a.value} onPick={(v) => onPatch(q.id, { value: v, device: {} })} />
           {picked && picked.fields && (
             <div className="mt-2.5 border border-gray-200 rounded-xl p-3">
               <div className="flex items-center justify-between font-heading font-bold text-[12.5px] mb-2.5">
@@ -263,7 +270,7 @@ export function FinalChecklist(props: Props) {
                 <div key={f.id} className="mb-2.5 last:mb-0">
                   <div className="text-[11px] font-heading font-bold text-gray-700 mb-1">{titleCase(f.label)} {f.required ? <span className="text-brand">(Required)</span> : <span className="text-gray-400">(Optional)</span>}</div>
                   {f.type === 'single_select'
-                    ? <Pills q={{ options: f.options }} value={a.device?.[f.id]} onPick={(v) => onPatch(q.id, { device: { ...(a.device || {}), [f.id]: v } })} />
+                    ? <Pills options={f.options} value={a.device?.[f.id]} onPick={(v) => onPatch(q.id, { device: { ...(a.device || {}), [f.id]: v } })} />
                     : <input type="text" disabled={readOnly} value={a.device?.[f.id] || ''} onChange={(e) => onPatch(q.id, { device: { ...(a.device || {}), [f.id]: e.target.value } })}
                         className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus-brand" />}
                 </div>
@@ -283,12 +290,16 @@ export function FinalChecklist(props: Props) {
     if (q.type === 'filter_sizes') {
       const qtyAns = ans('fc_air_filters_qty');
       const prefillQty = num(props.propertyValues?.['air_filters___total_quantity']);
-      const count = qtyAns.quantity ?? prefillQty ?? 1;
-      const opts = (props.filterSizeOptions || []).map((o) => ({ value: o, label: o }));
+      const count = Math.max(1, Math.min(3, qtyAns.quantity ?? prefillQty ?? 1));
+      const opts = [
+        ...(props.filterSizeOptions || []).map((o) => ({ value: o, label: o })),
+        { value: FC_FILTER_OTHER, label: FC_FILTER_OTHER },
+      ];
       const sizes = a.filterSizes || [];
+      const others = a.filterSizesOther || [];
       return (
         <div className="space-y-3">
-          {Array.from({ length: Math.max(1, Math.min(3, count)) }).map((_, i) => {
+          {Array.from({ length: count }).map((_, i) => {
             const propVal = props.propertyValues?.[`air_filters___type__${i + 1}`];
             const val = sizes[i] ?? (propVal != null ? String(propVal) : '');
             return (
@@ -302,6 +313,15 @@ export function FinalChecklist(props: Props) {
                   large
                   className="w-full max-w-[260px] bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm flex items-center justify-between"
                 />
+                {val === FC_FILTER_OTHER && (
+                  <input
+                    type="text" disabled={readOnly}
+                    value={others[i] || ''}
+                    onChange={(e) => { const next = [...others]; next[i] = e.target.value; onPatch(q.id, { filterSizesOther: next }); }}
+                    placeholder="Enter the filter size (e.g. 14 × 30 × 1)"
+                    className="mt-2 w-full max-w-[260px] bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus-brand"
+                  />
+                )}
               </div>
             );
           })}
@@ -317,7 +337,7 @@ export function FinalChecklist(props: Props) {
             const urls = (a.stickerPhotos || {})[p.id] || [];
             return (
               <div key={p.id} className="text-center">
-                <PhotoStrip urls={urls} camKey={`${q.id}:${p.id}`} required={p.required} />
+                <PhotoStrip urls={urls} camKey={`${q.id}:${p.id}`} required={p.required} center />
                 <div className="text-[10.5px] text-gray-500 mt-1.5">{titleCase(p.label)} {p.required && <span className="text-brand">*</span>}</div>
               </div>
             );
@@ -329,7 +349,7 @@ export function FinalChecklist(props: Props) {
     // single_select
     return (
       <>
-        <Pills q={{ options: q.options }} value={a.value} onPick={(v) => onPatch(q.id, { value: v, declined: false })} />
+        <Pills options={q.options} value={a.value} onPick={(v) => onPatch(q.id, { value: v, declined: false })} />
         <ActionPanel q={q} />
         <CountField q={q} />
         <Reminder q={q} />
@@ -346,23 +366,39 @@ export function FinalChecklist(props: Props) {
   }
 
   return (
-    <div className="bg-white">
-      {/* Pink brand header */}
-      <div className="px-5 py-4 bg-brand text-white">
-        <div className="font-heading font-bold text-lg flex items-center gap-2"><span>✦</span> Final Checklist</div>
-        <p className="text-xs text-white/90 mt-1">All Items Required. Items flagged here can add line items to scope.</p>
-      </div>
+    <section className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      {/* Bubble header — collapses the whole checklist (matches a room card). */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full px-4 py-3 bg-brand/5 hover:bg-brand/10 border-b border-gray-200 flex items-center gap-2 text-left"
+      >
+        <Chevron open={open} className="text-gray-400" />
+        <span className="font-semibold text-gray-900 text-sm sm:text-base flex items-center gap-1.5">
+          <span className="text-brand">✦</span> Final Checklist
+        </span>
+        <span className="ml-auto text-[11px] text-gray-400 font-normal">{open ? 'Required' : 'Tap to expand'}</span>
+      </button>
 
-      {FINAL_CHECKLIST.map((section) => {
+      {open && FINAL_CHECKLIST.map((section) => {
         const qs = section.questions.filter(visible);
         if (qs.length === 0) return null;
+        const sopen = openSections[section.id] ?? true;
         return (
-          <div key={section.id} className="border-b-8 border-gray-100">
-            <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 font-heading font-bold text-sm">
-              <span className="inline-block w-2 h-2 rounded-full bg-brand mr-2 align-middle" />{titleCase(section.name)}
-            </div>
-            {qs.map((q) => (
-              <div key={q.id} className="px-5 py-4 border-t border-gray-100 first:border-t-0">
+          <div key={section.id} className="border-b border-gray-100 last:border-b-0">
+            {/* Subsection header — collapses just this subsection. */}
+            <button
+              type="button"
+              onClick={() => setOpenSections((m) => ({ ...m, [section.id]: !(m[section.id] ?? true) }))}
+              aria-expanded={sopen}
+              className="w-full px-4 py-2.5 bg-gray-50 hover:bg-gray-100 flex items-center gap-2 text-left"
+            >
+              <Chevron open={sopen} className="text-gray-400" />
+              <span className="font-heading font-bold text-sm text-ink">{titleCase(section.name)}</span>
+            </button>
+            {sopen && qs.map((q) => (
+              <div key={q.id} className="px-4 py-4 border-t border-gray-100">
                 <div className="font-heading font-semibold text-ink text-sm leading-snug mb-2">
                   {titleCase(q.label)}{q.required && <span className="text-brand ml-1">*</span>}
                 </div>
@@ -374,18 +410,19 @@ export function FinalChecklist(props: Props) {
         );
       })}
 
-      {/* one shared camera for every photo field */}
+      {/* one shared camera for every photo field; signals the parent so the
+          floating mic hides while it's open. */}
       <CameraCapture
         isOpen={camFor !== null}
         addressSnapshot={props.propertyName}
         propertyRecordId={props.propertyRecordId}
-        onClose={() => setCamFor(null)}
+        onClose={() => setCamera(null)}
         uploadPhoto={props.uploadPhoto}
         onComplete={(urls) => {
           if (camFor && urls.length > 0) setPhotoList(camFor, [...getPhotoList(camFor), ...urls]);
-          setCamFor(null);
+          setCamera(null);
         }}
       />
-    </div>
+    </section>
   );
 }

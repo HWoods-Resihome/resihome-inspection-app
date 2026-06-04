@@ -23,11 +23,17 @@
 /** Vendor default for every auto-added Final-Checklist line. */
 export const FC_DEFAULT_VENDOR = 'Vendor 1';
 
+/** Sentinel filter-size option that reveals a free-text "different size" field. */
+export const FC_FILTER_OTHER = 'Different Size';
+
 /** A rule that adds a catalog line to Whole House when a question hits a value.
  *  `shortDescription` is matched to the live catalog by exact laborShortDescription
  *  (trimmed, case-insensitive) and resolved to its stable lineItemCode at runtime. */
 export interface FcAddLineRule {
-  shortDescription: string;        // catalog laborShortDescription to match
+  /** Stable catalog line item code — matched directly (robust to description edits). */
+  lineItemCode: string;
+  /** Friendly display name for the prompt and the added-line chip. */
+  label: string;
   vendor: string;                  // FC_DEFAULT_VENDOR
   quantity: number;                // default qty (1)
   tenantBillBackPercent: number;   // 100 (remotes/keys) | 0 (hvac/septic)
@@ -117,6 +123,8 @@ export interface FcAnswerState {
   count?: number | null;
   device?: Record<string, string>;
   filterSizes?: string[];
+  /** Free-text size when the matching filterSizes[i] is FC_FILTER_OTHER. */
+  filterSizesOther?: string[];
   stickerPhotos?: Record<string, string[]>;
   added?: { externalId: string; costLabel: string } | null;
   declined?: boolean;
@@ -176,7 +184,8 @@ export function summarizeFinalChecklist(
         const count = fcFilterCount(a, ctx.airQtyPrefill);
         const sizes: string[] = [];
         for (let i = 0; i < count; i++) {
-          const s = (ans.filterSizes?.[i] || ctx.filterPrefills[i] || '').trim();
+          let s = (ans.filterSizes?.[i] || ctx.filterPrefills[i] || '').trim();
+          if (s === FC_FILTER_OTHER) s = (ans.filterSizesOther?.[i] || '').trim();
           if (s) sizes.push(s);
         }
         value = sizes.length ? sizes.join(', ') : '—';
@@ -230,7 +239,9 @@ export function isFinalChecklistComplete(a: FcAnswers, ctx: FcCompletionCtx): bo
         const count = fcFilterCount(a, ctx.airQtyPrefill);
         const sizes = ans.filterSizes || [];
         for (let i = 0; i < count; i++) {
-          if (!((sizes[i] || ctx.filterPrefills[i] || '').trim())) return false;
+          const sel = (sizes[i] || ctx.filterPrefills[i] || '').trim();
+          if (!sel) return false;
+          if (sel === FC_FILTER_OTHER && !((ans.filterSizesOther?.[i] || '').trim())) return false;
         }
       } else if (q.type === 'photo_set') {
         for (const p of (q.photos || [])) {
@@ -296,7 +307,7 @@ export const FINAL_CHECKLIST: FcSection[] = [
         noteRequiredOnValues: ['Yes'],
         notePrompt: 'Where Are They Left?',
         addLineOnValues: [
-          { value: 'No', rule: { shortDescription: 'Universal Garage Remotes', ...t(100) } },
+          { value: 'No', rule: { lineItemCode: 'GADRL1037', label: 'Universal Garage Remotes', ...t(100) } },
         ],
       },
       {
@@ -309,7 +320,7 @@ export const FINAL_CHECKLIST: FcSection[] = [
         noteRequiredOnValues: ['Yes'],
         notePrompt: 'Where Are They Left?',
         addLineOnValues: [
-          { value: 'No', rule: { shortDescription: 'Replace Mailbox Key', ...t(100) } },
+          { value: 'No', rule: { lineItemCode: 'CARPL1047', label: 'Replace Mailbox Key', ...t(100) } },
         ],
       },
     ],
@@ -326,7 +337,7 @@ export const FINAL_CHECKLIST: FcSection[] = [
         options: ['Yes', 'No'],
         required: true,
         addLineOnValues: [
-          { value: 'No', rule: { shortDescription: 'HVAC Service Clean Top Off', ...t(0) } },
+          { value: 'No', rule: { lineItemCode: 'HVACL1603', label: 'HVAC Service Clean Top Off', ...t(0) } },
         ],
       },
       {
@@ -392,7 +403,7 @@ export const FINAL_CHECKLIST: FcSection[] = [
         help: 'Shown Because This Property Has a Septic Fee on File.',
         showWhenProperty: { field: 'septic_fee', gt: 0 },
         addLineOnValues: [
-          { value: 'Needs Pump-Out', rule: { shortDescription: 'Septic Pump Out', ...t(0), optional: true } },
+          { value: 'Needs Pump-Out', rule: { lineItemCode: 'SPTCL1003', label: 'Septic Pump Out', ...t(0), optional: true } },
         ],
       },
     ],

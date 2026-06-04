@@ -1321,20 +1321,16 @@ export function RateCardForm(props: RateCardFormProps) {
     return sections.find((s) => /whole\s*house/i.test(s.label));
   }
 
-  // Whole-inspection dedupe by exact catalog short description → lineItemCode.
-  function fcLineExists(shortDescription: string): boolean {
-    const want = shortDescription.trim().toLowerCase();
-    const item = catalog.find((c) => (c.laborShortDescription || '').trim().toLowerCase() === want);
-    if (!item) return false;
-    return Object.values(linesBySection).some((arr) => arr.some((l) => l.lineItemCode === item.lineItemCode));
+  // Whole-inspection dedupe by exact catalog lineItemCode.
+  function fcLineExists(lineItemCode: string): boolean {
+    return Object.values(linesBySection).some((arr) => arr.some((l) => l.lineItemCode === lineItemCode));
   }
 
   async function handleFcAddLine(rule: FcAddLineRule): Promise<{ externalId: string; costLabel: string } | null> {
     const ready = await ensureDataLoaded();
     if (!ready) return null;
-    const want = rule.shortDescription.trim().toLowerCase();
-    const item = catalog.find((c) => (c.laborShortDescription || '').trim().toLowerCase() === want);
-    if (!item) { void dialog.alert(`Couldn't find "${rule.shortDescription}" in the rate card catalog.`); return null; }
+    const item = catalog.find((c) => c.lineItemCode === rule.lineItemCode);
+    if (!item) { void dialog.alert(`Couldn't find "${rule.label}" (${rule.lineItemCode}) in the rate card catalog.`); return null; }
     const wh = fcWholeHouseSection();
     if (!wh) { void dialog.alert('No Whole House section found to add the line to.'); return null; }
     const externalId = `RCLINE-${(typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`}`;
@@ -1355,9 +1351,10 @@ export function RateCardForm(props: RateCardFormProps) {
         ? `$${formatMoney(roundMoney(calc.tenantCost))} Tenant`
         : `$${formatMoney(roundMoney(calc.vendorCost))} Vendor`;
     } catch { /* cost label is best-effort */ }
+    // Add to Whole House. We intentionally do NOT scroll to the line — the
+    // inspector stays in the checklist.
     const res = await handleSaveLineForSection(wh.id, line);
     if (!res.ok) { void dialog.alert(`Couldn't add the line: ${res.error || 'unknown error'}`); return null; }
-    revealSection(wh.id, externalId);
     return { externalId, costLabel };
   }
 
@@ -3583,25 +3580,26 @@ export function RateCardForm(props: RateCardFormProps) {
             </section>
           );
         })}
-      </div>
 
-      {/* Final Checklist — required questionnaire at the very bottom of the scope
-          form. Renders only for scope inspections. */}
-      {isScopeTemplate && (
-        <FinalChecklist
-          answers={fcAnswers}
-          onPatch={handleFcPatch}
-          uploadPhoto={(file) => uploadPhotoDirect(file)}
-          propertyName={props.propertyName}
-          propertyRecordId={props.propertyRecordId}
-          propertyValues={fcPropertyValues}
-          filterSizeOptions={props.filterSizeOptions}
-          lineExists={fcLineExists}
-          onAddLine={handleFcAddLine}
-          onUndoLine={(externalId) => handleFcUndoLine(externalId)}
-          readOnly={!!props.readOnly}
-        />
-      )}
+        {/* Final Checklist — another room-style bubble at the very end of the
+            scope form (scope only). Inside the same container so spacing matches. */}
+        {isScopeTemplate && (
+          <FinalChecklist
+            answers={fcAnswers}
+            onPatch={handleFcPatch}
+            uploadPhoto={(file) => uploadPhotoDirect(file)}
+            propertyName={props.propertyName}
+            propertyRecordId={props.propertyRecordId}
+            propertyValues={fcPropertyValues}
+            filterSizeOptions={props.filterSizeOptions}
+            lineExists={fcLineExists}
+            onAddLine={handleFcAddLine}
+            onUndoLine={(externalId) => handleFcUndoLine(externalId)}
+            onCameraOverlayChange={setCameraOverlayOpen}
+            readOnly={!!props.readOnly}
+          />
+        )}
+      </div>
 
       {/* Spacer below the last section. Small by default (footer height + a
           cushion) so there's no wasted white space; grows to ~a viewport only
@@ -3622,6 +3620,16 @@ export function RateCardForm(props: RateCardFormProps) {
               submitLabel={submitLabel}
               submitLabelShort={submitLabelShort}
               submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || aiApplying || (pendingSync + pendingPhotos) > 0 || selfApprovalLocked || (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !finalChecklistComplete)}
+              submitTitle={
+                props.readOnly ? undefined
+                : saveStatus.kind === 'saving' ? 'Saving — wait a moment, then submit.'
+                : finalizing ? 'Finalizing…'
+                : aiApplying ? 'Applying AI review…'
+                : (pendingSync + pendingPhotos) > 0 ? 'Waiting for offline changes to finish syncing.'
+                : (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !finalChecklistComplete) ? 'Complete the Final Checklist at the bottom (every required item) before submitting.'
+                : (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !reviewValid) ? 'Run the AI Review before submitting.'
+                : undefined
+              }
               selfApprovalLocked={selfApprovalLocked}
               onCancelInspection={handleCancelInspectionClick}
               onSaveAndClose={handleSaveAndClose}
@@ -4129,6 +4137,8 @@ function TerminalActions(props: {
   submitLabel: string;
   submitLabelShort?: string;
   submitDisabled: boolean;
+  /** Hover tooltip explaining WHY submit is disabled (the unmet gate). */
+  submitTitle?: string;
   /** When the submitter is inside their (hidden) self-approval window: animate
    *  Save & Close (the only valid move) and explain why Finalize is greyed.
    *  We deliberately DON'T surface a countdown — to the submitter it reads as a
@@ -4171,16 +4181,24 @@ function TerminalActions(props: {
         {/* Right: AI Review icon (with status kicker) + Submit / Finalize */}
         <div className="flex-1 flex justify-end items-center gap-2 min-w-0">
           {props.aiSlot}
-          <button
-            type="button"
-            onClick={props.onSubmit}
-            disabled={props.submitDisabled}
-            title={locked ? `You submitted this for approval, so you can't approve it yourself — a second reviewer must finalize it. Use Save & Close.` : undefined}
-            className="px-4 sm:px-6 py-2.5 text-sm bg-white border border-brand text-brand font-semibold rounded-lg hover:bg-brand hover:text-white active:bg-brand-dark active:border-brand-dark active:text-white transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed whitespace-nowrap"
+          {/* Wrapping span carries the tooltip so it shows on hover even while
+              the button is disabled (disabled buttons swallow their own title). */}
+          <span
+            className="inline-flex"
+            title={locked
+              ? `You submitted this for approval, so you can't approve it yourself — a second reviewer must finalize it. Use Save & Close.`
+              : (props.submitDisabled ? props.submitTitle : undefined)}
           >
-            <span className="sm:hidden">{props.submitLabelShort || props.submitLabel}</span>
-            <span className="hidden sm:inline">{props.submitLabel}</span>
-          </button>
+            <button
+              type="button"
+              onClick={props.onSubmit}
+              disabled={props.submitDisabled}
+              className="px-4 sm:px-6 py-2.5 text-sm bg-white border border-brand text-brand font-semibold rounded-lg hover:bg-brand hover:text-white active:bg-brand-dark active:border-brand-dark active:text-white transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              <span className="sm:hidden">{props.submitLabelShort || props.submitLabel}</span>
+              <span className="hidden sm:inline">{props.submitLabel}</span>
+            </button>
+          </span>
         </div>
       </div>
     </div>
