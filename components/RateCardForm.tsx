@@ -3599,7 +3599,7 @@ export function RateCardForm(props: RateCardFormProps) {
                         {photos.map((url, idx) => (
                           // Tagged photos live on their line card, not the room strip.
                           taggedSet.has(url) ? null : (
-                          <div key={idx} className="relative shrink-0">
+                          <div key={url} className="relative shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={displayImageSrc(url)}

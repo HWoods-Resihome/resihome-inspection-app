@@ -1533,6 +1533,13 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
   // would corrupt finalize totals, PDFs, reopen, and QC copy.
   const answerIds: string[] = [];
   let after: string | undefined;
+  // Runaway guard: 500/page × 200 pages = 100k answers — orders of magnitude
+  // beyond any real inspection. This bounds a pathological record AND a
+  // misbehaving paging cursor that never returns null (which would otherwise
+  // loop forever). If we ever hit it, log loudly — we do NOT silently drop
+  // answers (that would corrupt finalize/PDFs); the cap just stops the runaway.
+  const MAX_ASSOC_PAGES = 200;
+  let pageCount = 0;
   do {
     const qs = new URLSearchParams({ limit: '500' });
     if (after) qs.set('after', after);
@@ -1544,6 +1551,10 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
       if (id != null) answerIds.push(String(id));
     }
     after = assocResp.paging?.next?.after;
+    if (++pageCount >= MAX_ASSOC_PAGES && after) {
+      console.error(`[fetchAnswersForInspection] ${inspectionRecordId}: stopped after ${MAX_ASSOC_PAGES} association pages (${answerIds.length} ids) — unexpected volume or a runaway paging cursor. Investigate.`);
+      break;
+    }
   } while (after);
   if (answerIds.length === 0) return [];
 

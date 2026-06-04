@@ -3,6 +3,11 @@ const pkg = require('./package.json');
 
 const nextConfig = {
   reactStrictMode: true,
+  // Don't advertise the framework (tiny hardening; removes the X-Powered-By header).
+  poweredByHeader: false,
+  // Don't ship source maps to the browser in production — smaller deploy, and the
+  // app's own error reporter already captures what we need server-side.
+  productionBrowserSourceMaps: false,
   experimental: {
     // Keep the headless-browser packages external (not webpack-bundled) so
     // @sparticuz/chromium resolves its binary correctly. Used by
