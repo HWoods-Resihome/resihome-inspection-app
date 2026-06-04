@@ -347,6 +347,9 @@ export function RateCardForm(props: RateCardFormProps) {
   const [reviewedHash, setReviewedHash] = useState<string | null>(null);
   // ----- Final Checklist (bottom-of-form questionnaire) -----
   const [fcAnswers, setFcAnswers] = useState<FcAnswers>({});
+  // Outer collapse of the Final Checklist bubble — lifted so the form's global
+  // Expand/Collapse-all reaches it. Defaults open.
+  const [fcOpen, setFcOpen] = useState(true);
   const fcRecordIdRef = useRef<string | undefined>(undefined);
   const fcSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fcAfTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1351,10 +1354,13 @@ export function RateCardForm(props: RateCardFormProps) {
         ? `$${formatMoney(roundMoney(calc.tenantCost))} Tenant`
         : `$${formatMoney(roundMoney(calc.vendorCost))} Vendor`;
     } catch { /* cost label is best-effort */ }
-    // Add to Whole House. We intentionally do NOT scroll to the line — the
-    // inspector stays in the checklist.
-    const res = await handleSaveLineForSection(wh.id, line);
-    if (!res.ok) { void dialog.alert(`Couldn't add the line: ${res.error || 'unknown error'}`); return null; }
+    // Fire the save in the BACKGROUND so the "Added" confirmation shows
+    // instantly (no network wait). handleSaveLineForSection already does the
+    // optimistic state update + its own retry/offline handling. We don't scroll
+    // to the line — the inspector stays in the checklist.
+    void handleSaveLineForSection(wh.id, line)
+      .then((res) => { if (!res.ok) void dialog.alert(`Couldn't add the line: ${res.error || 'unknown error'}`); })
+      .catch(() => { /* handled inside */ });
     return { externalId, costLabel };
   }
 
@@ -2933,14 +2939,17 @@ export function RateCardForm(props: RateCardFormProps) {
 
   // Collapse/expand-all: mirrors the per-section isOpen logic (undefined =
   // default-open when the section has content).
-  const anySectionOpen = sections.some((s) => {
+  const anySectionOpen = (fcApplies && fcOpen) || sections.some((s) => {
     const uc = expanded[s.id];
     return uc !== undefined
       ? uc
       : ((linesBySection[s.id]?.length || 0) > 0 || (photosBySection[s.id]?.length || 0) > 0);
   });
-  const setAllSections = (open: boolean) =>
+  // Global Expand/Collapse-all also drives the Final Checklist bubble.
+  const setAllSections = (open: boolean) => {
     setExpanded(Object.fromEntries(sections.map((s) => [s.id, open])));
+    if (fcApplies) setFcOpen(open);
+  };
 
   // ----- Render --------------------------------------------------------
 
@@ -3605,6 +3614,8 @@ export function RateCardForm(props: RateCardFormProps) {
             onAddLine={handleFcAddLine}
             onUndoLine={(externalId) => handleFcUndoLine(externalId)}
             onCameraOverlayChange={setCameraOverlayOpen}
+            open={fcOpen}
+            onToggleOpen={() => setFcOpen((o) => !o)}
             readOnly={!!props.readOnly}
           />
         )}

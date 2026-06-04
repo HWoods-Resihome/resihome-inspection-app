@@ -3,9 +3,10 @@
  * bubble at the very bottom of the scope rate-card form. Driven entirely by
  * lib/finalChecklist.ts (the spec).
  *
- * Presentational + controlled: the parent owns the answer map and supplies the
- * persistence / property / line-item hooks. The whole bubble collapses like a
- * room, and each subsection (Smart Home Tech, …) collapses independently.
+ * Presentational + controlled: the parent owns the answer map (and the outer
+ * open/closed state so the form's global Expand/Collapse-all reaches it) and
+ * supplies the persistence / property / line-item hooks. Each subsection
+ * (Smart Home Tech, …) collapses independently, with its own Expand/Collapse-all.
  */
 
 import { useState } from 'react';
@@ -35,6 +36,9 @@ interface Props {
   onUndoLine?: (externalId: string, questionId: string) => void;
   /** Notify the parent when our camera overlay opens/closes (hides the floating mic). */
   onCameraOverlayChange?: (open: boolean) => void;
+  /** Outer collapse, controlled by the parent so the form's Expand/Collapse-all reaches it. */
+  open?: boolean;
+  onToggleOpen?: () => void;
   readOnly?: boolean;
 }
 
@@ -44,25 +48,21 @@ const num = (v: unknown): number | null => {
   return isFinite(n) ? n : null;
 };
 
-function Chevron({ open, className }: { open: boolean; className?: string }) {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-      strokeLinecap="round" strokeLinejoin="round"
-      className={`shrink-0 transition-transform ${open ? 'rotate-90' : ''} ${className || ''}`}>
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
-  );
-}
-
 export function FinalChecklist(props: Props) {
   const { answers, onPatch, readOnly } = props;
-  const [open, setOpen] = useState(true);
+  const [openInternal, setOpenInternal] = useState(true);
+  const open = props.open ?? openInternal;
+  const toggleOpen = () => (props.onToggleOpen ? props.onToggleOpen() : setOpenInternal((o) => !o));
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
   const [camFor, setCamFor] = useState<string | null>(null);
   const [busyAdd, setBusyAdd] = useState<string | null>(null);
 
   const ans = (id: string): FcAnswerState => answers[id] || {};
   const setCamera = (key: string | null) => { setCamFor(key); props.onCameraOverlayChange?.(key !== null); };
+
+  const sections = FINAL_CHECKLIST;
+  const allSubsOpen = sections.every((s) => openSections[s.id] ?? true);
+  const setAllSubs = (v: boolean) => setOpenSections(Object.fromEntries(sections.map((s) => [s.id, v])));
 
   // ---- shared photo strip (standardized yellow dashed "+" add box) ----
   function PhotoStrip({ urls, camKey, required, center }: { urls: string[]; camKey: string; required?: boolean; center?: boolean }) {
@@ -121,6 +121,21 @@ export function FinalChecklist(props: Props) {
     const a = ans(q.id);
     if (a.added) props.onUndoLine?.(a.added.externalId, q.id);
     onPatch(q.id, { added: null });
+  }
+
+  // Changing a single-select answer: if a line was auto-added for the prior
+  // answer and the new answer no longer triggers that add, auto-remove the line.
+  function pickSingle(q: FcQuestion, v: string) {
+    const a = ans(q.id);
+    if (a.added) {
+      const stillTriggers = (q.addLineOnValues || []).some((r) => r.value === v);
+      if (!stillTriggers) {
+        props.onUndoLine?.(a.added.externalId, q.id);
+        onPatch(q.id, { value: v, declined: false, added: null });
+        return;
+      }
+    }
+    onPatch(q.id, { value: v, declined: false });
   }
 
   // ---- small renderers ----
@@ -232,21 +247,26 @@ export function FinalChecklist(props: Props) {
     const c = (q.countOnValues || []).find((x) => x.value === a.value);
     if (!c) return null;
     return (
-      <div className="mt-3 max-w-[210px]">
+      <div className="mt-3 max-w-[230px]">
         <label className="block text-[11px] font-heading font-bold text-gray-700 mb-1">{titleCase(c.label)} <span className="text-brand">(Required)</span></label>
         <Stepper value={a.count ?? null} min={c.min ?? 0} max={c.max} onChange={(v) => onPatch(q.id, { count: v })} />
       </div>
     );
   }
 
+  // Stepper — wide, full-height tap targets on each side (whole side is the button).
   function Stepper({ value, min, max, onChange }: { value: number | null; min: number; max?: number; onChange: (v: number) => void }) {
     const v = value ?? min;
     const step = (d: number) => { const nv = Math.max(min, Math.min(max ?? 9999, v + d)); onChange(nv); };
+    const atMin = v <= min;
+    const atMax = max != null && v >= max;
     return (
-      <div className="inline-flex items-center border border-gray-300 rounded-xl overflow-hidden">
-        <button type="button" disabled={readOnly} onClick={() => step(-1)} className="w-10 h-10 bg-gray-50 text-lg text-gray-600">–</button>
-        <div className="w-14 h-10 flex items-center justify-center text-base font-semibold tabular-nums">{value ?? ''}</div>
-        <button type="button" disabled={readOnly} onClick={() => step(1)} className="w-10 h-10 bg-gray-50 text-lg text-gray-600">+</button>
+      <div className="inline-flex items-stretch border border-gray-300 rounded-xl overflow-hidden select-none h-12">
+        <button type="button" disabled={readOnly || atMin} onClick={() => step(-1)} aria-label="Decrease"
+          className="w-16 bg-gray-50 active:bg-gray-100 text-2xl text-gray-600 flex items-center justify-center disabled:opacity-30">–</button>
+        <div className="w-16 flex items-center justify-center text-lg font-semibold tabular-nums border-x border-gray-200">{value ?? ''}</div>
+        <button type="button" disabled={readOnly || atMax} onClick={() => step(1)} aria-label="Increase"
+          className="w-16 bg-gray-50 active:bg-gray-100 text-2xl text-gray-600 flex items-center justify-center disabled:opacity-30">+</button>
       </div>
     );
   }
@@ -349,7 +369,7 @@ export function FinalChecklist(props: Props) {
     // single_select
     return (
       <>
-        <Pills options={q.options} value={a.value} onPick={(v) => onPatch(q.id, { value: v, declined: false })} />
+        <Pills options={q.options} value={a.value} onPick={(v) => pickSingle(q, v)} />
         <ActionPanel q={q} />
         <CountField q={q} />
         <Reminder q={q} />
@@ -367,48 +387,65 @@ export function FinalChecklist(props: Props) {
 
   return (
     <section className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      {/* Bubble header — collapses the whole checklist (matches a room card). */}
+      {/* Header — title left-aligned like a room name; (Required) beside it; the
+          collapse chevron flush right (matches SectionHeader). */}
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
         aria-expanded={open}
         className="w-full px-4 py-3 bg-brand/5 hover:bg-brand/10 border-b border-gray-200 flex items-center gap-2 text-left"
       >
-        <Chevron open={open} className="text-gray-400" />
-        <span className="font-semibold text-gray-900 text-sm sm:text-base flex items-center gap-1.5">
-          <span className="text-brand">✦</span> Final Checklist
-        </span>
-        <span className="ml-auto text-[11px] text-gray-400 font-normal">{open ? 'Required' : 'Tap to expand'}</span>
+        <span className="font-semibold text-gray-900 text-sm sm:text-base">Final Checklist</span>
+        <span className="text-[11px] text-brand font-semibold">(Required)</span>
+        <span className="text-gray-400 ml-auto shrink-0">{open ? '▾' : '▸'}</span>
       </button>
 
-      {open && FINAL_CHECKLIST.map((section) => {
-        const qs = section.questions.filter(visible);
-        if (qs.length === 0) return null;
-        const sopen = openSections[section.id] ?? true;
-        return (
-          <div key={section.id} className="border-b border-gray-100 last:border-b-0">
-            {/* Subsection header — collapses just this subsection. */}
+      {open && (
+        <>
+          {/* The checklist's own Expand all / Collapse all for its subsections. */}
+          <div className="flex justify-end px-4 pt-2">
             <button
               type="button"
-              onClick={() => setOpenSections((m) => ({ ...m, [section.id]: !(m[section.id] ?? true) }))}
-              aria-expanded={sopen}
-              className="w-full px-4 py-2.5 bg-gray-50 hover:bg-gray-100 flex items-center gap-2 text-left"
+              onClick={() => setAllSubs(!allSubsOpen)}
+              className="inline-flex items-center gap-1 text-[11px] font-heading text-gray-500 hover:text-gray-800 transition-colors"
             >
-              <Chevron open={sopen} className="text-gray-400" />
-              <span className="font-heading font-bold text-sm text-ink">{titleCase(section.name)}</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                className={`transition-transform ${allSubsOpen ? '' : 'rotate-180'}`}>
+                <polyline points="18 15 12 9 6 15" />
+              </svg>
+              {allSubsOpen ? 'Collapse all' : 'Expand all'}
             </button>
-            {sopen && qs.map((q) => (
-              <div key={q.id} className="px-4 py-4 border-t border-gray-100">
-                <div className="font-heading font-semibold text-ink text-sm leading-snug mb-2">
-                  {titleCase(q.label)}{q.required && <span className="text-brand ml-1">*</span>}
-                </div>
-                {q.help && <p className="text-xs text-gray-500 italic -mt-1 mb-2">{q.help}</p>}
-                {renderQuestion(q)}
-              </div>
-            ))}
           </div>
-        );
-      })}
+
+          {sections.map((section) => {
+            const qs = section.questions.filter(visible);
+            if (qs.length === 0) return null;
+            const sopen = openSections[section.id] ?? true;
+            return (
+              <div key={section.id} className="border-b border-gray-100 last:border-b-0">
+                <button
+                  type="button"
+                  onClick={() => setOpenSections((m) => ({ ...m, [section.id]: !(m[section.id] ?? true) }))}
+                  aria-expanded={sopen}
+                  className="w-full px-4 py-2.5 bg-gray-50 hover:bg-gray-100 flex items-center gap-2 text-left"
+                >
+                  <span className="font-heading font-bold text-sm text-ink">{titleCase(section.name)}</span>
+                  <span className="text-gray-400 ml-auto shrink-0">{sopen ? '▾' : '▸'}</span>
+                </button>
+                {sopen && qs.map((q) => (
+                  <div key={q.id} className="px-4 py-4 border-t border-gray-100">
+                    <div className="font-heading font-semibold text-ink text-sm leading-snug mb-2">
+                      {titleCase(q.label)}{q.required && <span className="text-brand ml-1">*</span>}
+                    </div>
+                    {q.help && <p className="text-xs text-gray-500 italic -mt-1 mb-2">{q.help}</p>}
+                    {renderQuestion(q)}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </>
+      )}
 
       {/* one shared camera for every photo field; signals the parent so the
           floating mic hides while it's open. */}

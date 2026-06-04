@@ -277,7 +277,6 @@ export const FINAL_CHECKLIST: FcSection[] = [
             fields: [
               { id: 'status', label: 'Status', type: 'single_select', options: ['Online', 'Offline'], required: true },
               { id: 'serial', label: 'Serial Number', type: 'text', required: true },
-              { id: 'notes', label: 'Notes', type: 'text', required: false },
             ],
           },
           {
@@ -388,7 +387,7 @@ export const FINAL_CHECKLIST: FcSection[] = [
         type: 'single_select',
         options: ['Present', 'Missing', 'N/A'],
         required: true,
-        countOnValues: [{ value: 'Present', label: 'How Many Bins?', min: 1 }],
+        countOnValues: [{ value: 'Present', label: 'How Many Bins?', min: 1, max: 5 }],
         reminderOnValues: [{
           value: 'Present',
           text: 'Reminder: If the bins are empty, please move them to the side of the home or inside the garage before you leave.',
