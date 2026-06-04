@@ -386,6 +386,14 @@ export function PdfHeaderStrip(props: {
  * thumbnail in a PDF viewer opens the full-resolution image in the user's
  * browser. Compatible with all major PDF viewers (Acrobat, Preview, Chrome).
  */
+// When set (per-render, by the render functions below), each photo links to the
+// in-app gallery viewer (left/right across ALL the inspection's photos) instead
+// of the raw file — so clicking a photo in any PDF gives a browsable gallery.
+// Module-level because PDFs render sequentially server-side; set before each
+// renderToBuffer. Falls back to the raw file URL when unset.
+let _photoGalleryBase: string | undefined;
+export function setPdfPhotoGalleryBase(base: string | undefined) { _photoGalleryBase = base; }
+
 export function PdfSectionPhotos(props: { photoUrls: string[] }) {
   if (props.photoUrls.length === 0) return null;
   return (
@@ -394,8 +402,11 @@ export function PdfSectionPhotos(props: { photoUrls: string[] }) {
         // Video clips embed the poster image and link to the playable file.
         const poster = getPosterUrl(entry);
         const video = isVideoEntry(entry) ? getVideoUrl(entry) : '';
+        const fileHref = video || poster;
+        // Gallery link (starts at this photo) when a base is set; else the file.
+        const href = _photoGalleryBase ? `${_photoGalleryBase}?u=${encodeURIComponent(entry)}` : fileHref;
         return (
-          <Link key={`${entry}-${i}`} src={video || poster} style={pdfStyles.photoCell}>
+          <Link key={`${entry}-${i}`} src={href} style={pdfStyles.photoCell}>
             {/* eslint-disable-next-line jsx-a11y/alt-text */}
             <Image src={poster} style={pdfStyles.photoCellImage} />
             {video ? <Text style={pdfStyles.videoBadge}>VIDEO</Text> : null}
@@ -502,4 +513,8 @@ export interface PdfBuildContext {
   /** Final Checklist Q&A — rendered on the MASTER pdf only. Each section is a
    *  group of label/value rows. Absent/empty on non-scope templates. */
   finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
+  /** Signed base URL for the in-app photo gallery (e.g.
+   *  https://resiwalk.com/d/{id}/photos/{sig}). When set, PDF photos link here
+   *  (browsable left/right) instead of the raw file. */
+  photoGalleryBase?: string;
 }

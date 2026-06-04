@@ -17,6 +17,7 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionPhotos,
+  setPdfPhotoGalleryBase,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
@@ -211,5 +212,6 @@ function QcSection({ section: s }: { section: QcPdfSection }) {
 }
 
 export async function renderQcPdf(ctx: QcPdfContext): Promise<Buffer> {
+  setPdfPhotoGalleryBase((ctx as any).photoGalleryBase);
   return renderToBuffer(<QcDoc ctx={ctx} />);
 }

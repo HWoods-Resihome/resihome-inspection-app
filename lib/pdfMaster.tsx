@@ -9,6 +9,7 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionHeader,
+  setPdfPhotoGalleryBase,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
@@ -202,5 +203,6 @@ function FinalChecklistBlock(props: { ctx: PdfBuildContext }) {
 }
 
 export async function renderMasterPdf(ctx: PdfBuildContext): Promise<Buffer> {
+  setPdfPhotoGalleryBase(ctx.photoGalleryBase);
   return renderToBuffer(<MasterDoc ctx={ctx} />);
 }

@@ -10,6 +10,7 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionHeader,
+  setPdfPhotoGalleryBase,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
@@ -140,6 +141,7 @@ function ChargebackSection(props: { section: PdfSectionGroup }) {
 }
 
 export async function renderChargebackPdf(ctx: PdfBuildContext): Promise<Buffer | null> {
+  setPdfPhotoGalleryBase(ctx.photoGalleryBase);
   const hasChargebackLines = ctx.sections.some(
     (s) => s.lines.some((l) => l.tenantBillBackPercent > 0 && l.tenantCost > 0)
   );

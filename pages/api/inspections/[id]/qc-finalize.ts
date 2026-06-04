@@ -182,6 +182,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       sections,
     };
 
+    // Photos in the QC PDF link to the browsable in-app gallery too.
+    {
+      const ghost = req.headers['x-forwarded-host'] || req.headers.host || '';
+      const gproto = (req.headers['x-forwarded-proto'] as string) || 'https';
+      const gorigin = ghost ? `${gproto}://${ghost}` : '';
+      if (gorigin) (ctx as any).photoGalleryBase = buildShortLink(gorigin, id, 'photos');
+    }
     const pdfBuf = await renderQcPdf(ctx);
 
     // Filename: "Turn Re-Inspect QC - {address} - {date} - {shortId}.pdf"

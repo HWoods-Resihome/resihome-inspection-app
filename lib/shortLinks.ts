@@ -16,7 +16,7 @@ import crypto from 'crypto';
 
 // 'report' is the single PDF used by non-Rate-Card templates (question
 // templates + QC reinspect), stored in pdf_attachment_url.
-export type ShareDocType = 'master' | 'chargeback' | 'xlsx' | 'report' | 'vendor';
+export type ShareDocType = 'master' | 'chargeback' | 'xlsx' | 'report' | 'vendor' | 'photos';
 
 // Stable signing secret. Reuses SESSION_SECRET so we don't introduce a new env
 // var that would have to be kept in lockstep. Falls back to a constant only in
@@ -63,7 +63,7 @@ export function buildShortLink(baseUrl: string, id: string, type: ShareDocType, 
 }
 
 /** Map a non-vendor doc type to the HubSpot property holding its real URL. */
-export const SHARE_TYPE_TO_PROP: Record<Exclude<ShareDocType, 'vendor'>, string> = {
+export const SHARE_TYPE_TO_PROP: Record<Exclude<ShareDocType, 'vendor' | 'photos'>, string> = {
   master: 'pdf_master_url',
   chargeback: 'pdf_chargeback_url',
   xlsx: 'pdf_chargeback_xlsx_url',

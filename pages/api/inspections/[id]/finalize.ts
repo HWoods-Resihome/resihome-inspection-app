@@ -363,6 +363,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
+    // Signed gallery base so every PDF's photos link to a browsable in-app
+    // gallery (left/right across all the inspection's photos). Computed from the
+    // request origin here (the later shareBase is built after rendering).
+    const galleryHost = req.headers['x-forwarded-host'] || req.headers.host || '';
+    const galleryProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+    const galleryOrigin = galleryHost ? `${galleryProto}://${galleryHost}` : '';
+    const photoGalleryBase = galleryOrigin ? buildShortLink(galleryOrigin, id, 'photos') : undefined;
+
     const ctx: PdfBuildContext = {
       inspectionRecordId: id,
       templateLabel,
@@ -382,6 +390,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       sections: sectionInstances.map((s) => sectionGroups.get(s.id)!).filter(Boolean),
       grandTotals: { vendor: grandVendor, client: grandClient, tenant: grandTenant, lineCount: grandLineCount },
       finalChecklist: finalChecklistGroups,
+      photoGalleryBase,
     };
 
     // Resolve the state code once: prefer property.state_code, else first two

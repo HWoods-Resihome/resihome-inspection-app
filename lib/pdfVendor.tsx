@@ -10,6 +10,7 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionHeader,
+  setPdfPhotoGalleryBase,
   PdfSectionPhotos,
   formatMoneyPdf,
   formatQtyPdf,
@@ -137,6 +138,7 @@ function VendorSection(props: { section: PdfSectionGroup }) {
 }
 
 export async function renderVendorPdfs(ctx: PdfBuildContext): Promise<Map<string, Buffer>> {
+  setPdfPhotoGalleryBase(ctx.photoGalleryBase);
   // Group lines by vendor across sections
   const byVendor = new Map<string, PdfSectionGroup[]>();
   const lineCountByVendor = new Map<string, number>();
