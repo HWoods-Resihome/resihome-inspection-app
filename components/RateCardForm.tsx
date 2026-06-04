@@ -10,7 +10,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TemplateType, RateCardLineItem, RegionRate, RateCardLineInput } from '@/lib/types';
 import { EditableLineRow } from '@/components/EditableLineRow';
-import { buildSectionPhotoAnswerProps } from '@/lib/answerProps';
+import { FinalChecklist } from '@/components/FinalChecklist';
+import {
+  isFinalChecklistComplete,
+  type FcAnswers, type FcAnswerState, type FcAddLineRule,
+} from '@/lib/finalChecklist';
+import { buildSectionPhotoAnswerProps, buildQaAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { isInternalResolution, VENDORS } from '@/lib/vendors';
@@ -19,7 +24,7 @@ import { getResolutionTimings, setResolutionTiming } from '@/lib/resolutionTimin
 import { AiReviewModal } from '@/components/AiReviewModal';
 import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, saveReviewCache, loadReviewCache, clearReviewCache, type AiAdjustment } from '@/lib/aiReview';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
-import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
+import { uploadFilesBatch, formatMoney, uploadPhoto as uploadPhotoDirect } from '@/lib/photoUpload';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
@@ -77,6 +82,15 @@ interface RateCardFormProps {
    *  `last_tenant_time_in_home_months` on the property). Drives AI-review
    *  depreciation. null/absent → AI review defaults to 12. */
   lastTenantMonths?: number | null;
+  /** Final Checklist: air-filter qty/types (prefilled + written back) + septic
+   *  fee (gates the conditional septic question), and the live filter-size
+   *  dropdown options pulled from the HubSpot field. All optional. */
+  propertyAirFiltersTotal?: number | null;
+  propertyAirFiltersType1?: string | null;
+  propertyAirFiltersType2?: string | null;
+  propertyAirFiltersType3?: string | null;
+  propertySepticFee?: number | null;
+  filterSizeOptions?: string[];
   /** Current HubSpot status value, e.g. 'scheduled' | 'in_progress' |
    *  'pending_approval' | 'completed' | 'cancelled'. Controls which terminal
    *  button is shown at the bottom of the form:
@@ -331,6 +345,11 @@ export function RateCardForm(props: RateCardFormProps) {
   // The scope hash that last passed review (null = never reviewed this scope).
   // Persisted per inspection so it survives a reload (see lib/aiReview).
   const [reviewedHash, setReviewedHash] = useState<string | null>(null);
+  // ----- Final Checklist (bottom-of-form questionnaire) -----
+  const [fcAnswers, setFcAnswers] = useState<FcAnswers>({});
+  const fcRecordIdRef = useRef<string | undefined>(undefined);
+  const fcSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fcAfTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Upload progress (per section)
   const [uploadingSection, setUploadingSection] = useState<{
     sectionId: string;
@@ -631,6 +650,8 @@ export function RateCardForm(props: RateCardFormProps) {
         const photosAcc: Record<string, string[]> = {};
         const lineRecordIds: Record<string, string> = {};
         const photoRecordIds: Record<string, string> = {};
+        let fcInit: FcAnswers | null = null;
+        let fcRid: string | undefined;
 
         for (const ans of answers) {
           if (ans.answerType === 'rate_card_line' && ans.rateCardLine) {
@@ -671,6 +692,10 @@ export function RateCardForm(props: RateCardFormProps) {
             const sectionId = sectionLookup[`${ans.section}||${ans.location}`] || ans.section;
             photosAcc[sectionId] = ans.photoUrls || [];
             photoRecordIds[sectionId] = ans.recordId;
+          } else if (ans.answerType === 'qa' && ans.questionIdExternal === 'fc__all') {
+            // Final Checklist is persisted as a single qa answer (JSON in note).
+            fcRid = ans.recordId;
+            try { fcInit = ans.note ? JSON.parse(ans.note) : null; } catch { fcInit = null; }
           }
         }
 
@@ -686,6 +711,8 @@ export function RateCardForm(props: RateCardFormProps) {
         setPhotosBySection(photosAcc);
         setRecordIdsByExternalId(lineRecordIds);
         setSectionPhotoRecordIds(photoRecordIds);
+        if (fcInit) setFcAnswers(fcInit);
+        if (fcRid) fcRecordIdRef.current = fcRid;
         // Auto-expand sections that have content so the user can see their work
         const expandedInit: Record<string, boolean> = {};
         for (const sid of Object.keys(linesAcc)) expandedInit[sid] = true;
@@ -1200,6 +1227,143 @@ export function RateCardForm(props: RateCardFormProps) {
         saveInFlightRef.current--;
       }
     });
+  }
+
+  // ----- Final Checklist: persistence, line-add, and air-filter write-back -----
+  // Property values the checklist reads (prefill + conditional septic).
+  const fcPropertyValues = {
+    air_filters___total_quantity: props.propertyAirFiltersTotal ?? null,
+    air_filters___type__1: props.propertyAirFiltersType1 ?? null,
+    air_filters___type__2: props.propertyAirFiltersType2 ?? null,
+    air_filters___type__3: props.propertyAirFiltersType3 ?? null,
+    septic_fee: props.propertySepticFee ?? null,
+  };
+
+  // Persist the whole checklist as ONE qa answer (JSON blob in `note`), upserted
+  // by a stable external id. Serialized with the other answer writes.
+  function doSaveFinalChecklist(answersToSave: FcAnswers) {
+    const body = {
+      upserts: [{
+        recordId: fcRecordIdRef.current,
+        answerProps: buildQaAnswerProps({
+          answerIdExternal: `FINALCHECKLIST-${props.inspectionRecordId}`,
+          inspectionIdExternal: props.inspectionExternalId,
+          questionIdExternal: 'fc__all',
+          questionText: 'Final Checklist',
+          section: 'Final Checklist',
+          summaryInstanceLabel: '',
+          answerValue: 'final_checklist',
+          note: JSON.stringify(answersToSave),
+        }, { isScope: true }),
+        questionHubspotRecordId: null,
+      }],
+      archives: [] as string[],
+    };
+    saveInFlightRef.current++;
+    setSaveStatus({ kind: 'saving' });
+    void enqueueSave(async () => {
+      try {
+        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        if (!r.ok) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0, 300)}`); }
+        const data = await r.json();
+        const rid = data.results?.[0]?.recordId;
+        if (rid) fcRecordIdRef.current = rid;
+        setSaveStatus({ kind: 'saved', at: Date.now() });
+      } catch (e: any) {
+        if (isOfflineError(e)) {
+          // Replayed verbatim when back online (stitch is a no-op for this kind).
+          outboxEnqueue({
+            inspectionRecordId: props.inspectionRecordId,
+            endpoint: `/api/inspections/${props.inspectionRecordId}/answers`,
+            method: 'POST', body, kind: 'sectionList', meta: {},
+          });
+          setPendingSync(outboxCountFor(props.inspectionRecordId));
+          setSaveStatus({ kind: 'saved', at: Date.now() });
+        } else {
+          setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+        }
+      } finally { saveInFlightRef.current--; }
+    });
+  }
+
+  function scheduleFcSave(answersToSave: FcAnswers) {
+    if (!linesHydrated || props.readOnly) return;
+    if (fcSaveTimer.current) clearTimeout(fcSaveTimer.current);
+    fcSaveTimer.current = setTimeout(() => doSaveFinalChecklist(answersToSave), 900);
+  }
+
+  // Write the confirmed air-filter qty/types back onto the Property in HubSpot.
+  function scheduleAirFilterWriteback(a: FcAnswers) {
+    if (!props.propertyRecordId || props.readOnly) return;
+    if (fcAfTimer.current) clearTimeout(fcAfTimer.current);
+    fcAfTimer.current = setTimeout(() => {
+      const totalQuantity = a['fc_air_filters_qty']?.quantity ?? null;
+      const types = a['fc_filter_sizes']?.filterSizes ?? [];
+      void fetch(`/api/properties/${props.propertyRecordId}/air-filters`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ totalQuantity, types }),
+      }).catch(() => { /* best-effort write-back */ });
+    }, 1500);
+  }
+
+  function handleFcPatch(qid: string, patch: Partial<FcAnswerState>) {
+    setFcAnswers((prev) => {
+      const next = { ...prev, [qid]: { ...prev[qid], ...patch } };
+      scheduleFcSave(next);
+      if (qid === 'fc_air_filters_qty' || qid === 'fc_filter_sizes') scheduleAirFilterWriteback(next);
+      return next;
+    });
+  }
+
+  function fcWholeHouseSection() {
+    return sections.find((s) => /whole\s*house/i.test(s.label));
+  }
+
+  // Whole-inspection dedupe by exact catalog short description → lineItemCode.
+  function fcLineExists(shortDescription: string): boolean {
+    const want = shortDescription.trim().toLowerCase();
+    const item = catalog.find((c) => (c.laborShortDescription || '').trim().toLowerCase() === want);
+    if (!item) return false;
+    return Object.values(linesBySection).some((arr) => arr.some((l) => l.lineItemCode === item.lineItemCode));
+  }
+
+  async function handleFcAddLine(rule: FcAddLineRule): Promise<{ externalId: string; costLabel: string } | null> {
+    const ready = await ensureDataLoaded();
+    if (!ready) return null;
+    const want = rule.shortDescription.trim().toLowerCase();
+    const item = catalog.find((c) => (c.laborShortDescription || '').trim().toLowerCase() === want);
+    if (!item) { void dialog.alert(`Couldn't find "${rule.shortDescription}" in the rate card catalog.`); return null; }
+    const wh = fcWholeHouseSection();
+    if (!wh) { void dialog.alert('No Whole House section found to add the line to.'); return null; }
+    const externalId = `RCLINE-${(typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`}`;
+    const line: RateCardLineInput = {
+      externalId, section: wh.label, location: wh.location || '',
+      lineItemCode: item.lineItemCode, quantity: rule.quantity,
+      tenantBillBackPercent: rule.tenantBillBackPercent, assignedTo: rule.vendor,
+      note: '', customLaborRate: null, customAdjustedMaterialCost: null, customVendorCost: null,
+      photoUrls: [],
+    };
+    let costLabel = '';
+    try {
+      const calc = calculateLine(item, inspectionRegion, regions, {
+        quantity: rule.quantity, tenantBillBackPercent: rule.tenantBillBackPercent,
+        customLaborRate: null, customAdjustedMaterialCost: null, customVendorCost: null,
+      });
+      costLabel = rule.tenantBillBackPercent > 0
+        ? `$${formatMoney(roundMoney(calc.tenantCost))} Tenant`
+        : `$${formatMoney(roundMoney(calc.vendorCost))} Vendor`;
+    } catch { /* cost label is best-effort */ }
+    const res = await handleSaveLineForSection(wh.id, line);
+    if (!res.ok) { void dialog.alert(`Couldn't add the line: ${res.error || 'unknown error'}`); return null; }
+    revealSection(wh.id, externalId);
+    return { externalId, costLabel };
+  }
+
+  function handleFcUndoLine(externalId: string) {
+    const wh = fcWholeHouseSection();
+    if (wh) void handleDeleteLine(wh.id, externalId);
   }
 
   // The pending new row was discarded (user pressed Esc or blurred with empty fields).
@@ -1976,6 +2140,17 @@ export function RateCardForm(props: RateCardFormProps) {
   const currentScopeHash = useMemo(() => scopeHash(linesBySection), [linesBySection]);
   // Review is valid only while the scope it passed against is unchanged.
   const reviewValid = reviewedHash !== null && reviewedHash === currentScopeHash;
+  // Final Checklist completeness — gates Submit (scope only) just like AI review.
+  const finalChecklistComplete = useMemo(
+    () => isFinalChecklistComplete(fcAnswers, {
+      septicFee: props.propertySepticFee ?? null,
+      airQtyPrefill: props.propertyAirFiltersTotal ?? null,
+      filterOptionsAvailable: (props.filterSizeOptions?.length ?? 0) > 0,
+      filterPrefills: [props.propertyAirFiltersType1 ?? null, props.propertyAirFiltersType2 ?? null, props.propertyAirFiltersType3 ?? null],
+    }),
+    [fcAnswers, props.propertySepticFee, props.propertyAirFiltersTotal, props.filterSizeOptions,
+     props.propertyAirFiltersType1, props.propertyAirFiltersType2, props.propertyAirFiltersType3],
+  );
   // Load any persisted "passed" marker for this inspection on mount.
   useEffect(() => {
     setReviewedHash(getPassedReviewHash(props.inspectionRecordId));
@@ -2533,6 +2708,12 @@ export function RateCardForm(props: RateCardFormProps) {
     // bypass is ONLY offered after that valiant effort — it can't be reached by
     // simply declining the review. A bypassed submit is still caught by the hard
     // AI-Review gate at finalize, so the check always happens before PDFs.
+    // Final Checklist hard-gate (scope, first submit only): every required item
+    // must be complete, and each line-item prompt accepted or declined.
+    if (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !finalChecklistComplete) {
+      void dialog.alert('Please complete the Final Checklist at the bottom of the form before submitting for approval.');
+      return;
+    }
     if (props.templateType === 'pm_scope_rate_card' && props.inspectionStatus !== 'pending_approval' && !reviewValid) {
       if (aiConnectivityFailed) {
         const ok = await dialog.confirm(
@@ -3404,6 +3585,24 @@ export function RateCardForm(props: RateCardFormProps) {
         })}
       </div>
 
+      {/* Final Checklist — required questionnaire at the very bottom of the scope
+          form. Renders only for scope inspections. */}
+      {isScopeTemplate && (
+        <FinalChecklist
+          answers={fcAnswers}
+          onPatch={handleFcPatch}
+          uploadPhoto={(file) => uploadPhotoDirect(file)}
+          propertyName={props.propertyName}
+          propertyRecordId={props.propertyRecordId}
+          propertyValues={fcPropertyValues}
+          filterSizeOptions={props.filterSizeOptions}
+          lineExists={fcLineExists}
+          onAddLine={handleFcAddLine}
+          onUndoLine={(externalId) => handleFcUndoLine(externalId)}
+          readOnly={!!props.readOnly}
+        />
+      )}
+
       {/* Spacer below the last section. Small by default (footer height + a
           cushion) so there's no wasted white space; grows to ~a viewport only
           while we're scrolling to the last section, so a line added there can
@@ -3422,7 +3621,7 @@ export function RateCardForm(props: RateCardFormProps) {
               showCancelInspection={!!props.onCancelInspection}
               submitLabel={submitLabel}
               submitLabelShort={submitLabelShort}
-              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || aiApplying || (pendingSync + pendingPhotos) > 0 || selfApprovalLocked}
+              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || aiApplying || (pendingSync + pendingPhotos) > 0 || selfApprovalLocked || (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !finalChecklistComplete)}
               selfApprovalLocked={selfApprovalLocked}
               onCancelInspection={handleCancelInspectionClick}
               onSaveAndClose={handleSaveAndClose}

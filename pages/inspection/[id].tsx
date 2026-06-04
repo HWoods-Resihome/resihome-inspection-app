@@ -47,6 +47,12 @@ export default function ExistingInspection() {
   const [propertySquareFootage, setPropertySquareFootage] = useState<number | null>(null);
   const [propertyZip, setPropertyZip] = useState<string | null>(null);
   const [propertyLastTenantMonths, setPropertyLastTenantMonths] = useState<number | null>(null);
+  const [propertyAirFiltersTotal, setPropertyAirFiltersTotal] = useState<number | null>(null);
+  const [propertyAirFiltersType1, setPropertyAirFiltersType1] = useState<string | null>(null);
+  const [propertyAirFiltersType2, setPropertyAirFiltersType2] = useState<string | null>(null);
+  const [propertyAirFiltersType3, setPropertyAirFiltersType3] = useState<string | null>(null);
+  const [propertySepticFee, setPropertySepticFee] = useState<number | null>(null);
+  const [filterSizeOptions, setFilterSizeOptions] = useState<string[]>([]);
   const [existingAnswers, setExistingAnswers] = useState<SavedAnswer[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [submitResultUrl, setSubmitResultUrl] = useState<string>('');
@@ -75,6 +81,16 @@ export default function ExistingInspection() {
         setPropertyLastTenantMonths(
           typeof data.propertyLastTenantMonths === 'number' ? data.propertyLastTenantMonths : null
         );
+        setPropertyAirFiltersTotal(
+          typeof data.propertyAirFiltersTotal === 'number' ? data.propertyAirFiltersTotal : null
+        );
+        setPropertyAirFiltersType1(typeof data.propertyAirFiltersType1 === 'string' ? data.propertyAirFiltersType1 : null);
+        setPropertyAirFiltersType2(typeof data.propertyAirFiltersType2 === 'string' ? data.propertyAirFiltersType2 : null);
+        setPropertyAirFiltersType3(typeof data.propertyAirFiltersType3 === 'string' ? data.propertyAirFiltersType3 : null);
+        setPropertySepticFee(
+          typeof data.propertySepticFee === 'number' ? data.propertySepticFee : null
+        );
+        setFilterSizeOptions(Array.isArray(data.filterSizeOptions) ? data.filterSizeOptions : []);
         setExistingAnswers(data.answers || []);
 
         // Now load the template questions
@@ -365,6 +381,12 @@ export default function ExistingInspection() {
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
           lastTenantMonths={propertyLastTenantMonths}
+          propertyAirFiltersTotal={propertyAirFiltersTotal}
+          propertyAirFiltersType1={propertyAirFiltersType1}
+          propertyAirFiltersType2={propertyAirFiltersType2}
+          propertyAirFiltersType3={propertyAirFiltersType3}
+          propertySepticFee={propertySepticFee}
+          filterSizeOptions={filterSizeOptions}
           inspectionStatus={inspection.status}
           inspectionRegion={inspection.regionSnapshot || ''}
           sectionListJson={inspection.sectionListJson}

@@ -14,28 +14,15 @@
 import { useState } from 'react';
 import {
   FINAL_CHECKLIST, type FcQuestion, type FcAddLineRule,
+  type FcAnswerState, type FcAnswers,
 } from '@/lib/finalChecklist';
 import { titleCase } from '@/lib/titleCase';
+
+export type { FcAnswerState, FcAnswers } from '@/lib/finalChecklist';
 import { ListPicker } from '@/components/ListPicker';
 import { WheelPicker } from '@/components/WheelPicker';
 import { CameraCapture } from '@/components/CameraCapture';
 import { displayImageSrc } from '@/lib/photoDisplay';
-
-/** Per-question answer. A union-ish bag — only the fields relevant to the
- *  question's type are used. The parent persists these as `qa` answers. */
-export interface FcAnswerState {
-  value?: string;                        // single_select / device pick
-  note?: string;
-  photoUrls?: string[];                  // single_select action photos
-  quantity?: number | null;             // number type
-  count?: number | null;                // countOnValues follow-up
-  device?: Record<string, string>;      // device sub-field values (status/serial/location/notes)
-  filterSizes?: string[];               // one selection per filter
-  stickerPhotos?: Record<string, string[]>; // photo_set, keyed by photo id
-  added?: { externalId: string; costLabel: string } | null; // an auto-added line
-  declined?: boolean;                    // chose "Not Needed"
-}
-export type FcAnswers = Record<string, FcAnswerState>;
 
 interface Props {
   answers: FcAnswers;

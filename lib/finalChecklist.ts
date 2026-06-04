@@ -107,6 +107,89 @@ const t = (pct: number): Pick<FcAddLineRule, 'vendor' | 'quantity' | 'tenantBill
   vendor: FC_DEFAULT_VENDOR, quantity: 1, tenantBillBackPercent: pct,
 });
 
+/** Per-question answer held by the renderer + persisted (as a JSON blob in one
+ *  `qa` answer record). Only the fields relevant to a question's type are used. */
+export interface FcAnswerState {
+  value?: string;
+  note?: string;
+  photoUrls?: string[];
+  quantity?: number | null;
+  count?: number | null;
+  device?: Record<string, string>;
+  filterSizes?: string[];
+  stickerPhotos?: Record<string, string[]>;
+  added?: { externalId: string; costLabel: string } | null;
+  declined?: boolean;
+}
+export type FcAnswers = Record<string, FcAnswerState>;
+
+export interface FcCompletionCtx {
+  /** property septic_fee — gates the conditional septic question's visibility. */
+  septicFee: number | null;
+  /** property air_filters___total_quantity — the effective qty when unanswered. */
+  airQtyPrefill: number | null;
+  /** Whether the HubSpot field exposes any filter-size options. When false we
+   *  don't hard-require filter sizes (otherwise Submit could never unlock). */
+  filterOptionsAvailable: boolean;
+  /** property air_filters___type__1/2/3 — count as answered when prefilled. */
+  filterPrefills: (string | null)[];
+}
+
+/** How many filter-size pickers are in play given the answered/prefilled qty. */
+export function fcFilterCount(a: FcAnswers, airQtyPrefill: number | null): number {
+  const q = a['fc_air_filters_qty']?.quantity ?? airQtyPrefill ?? 1;
+  return Math.max(1, Math.min(3, Number(q) || 1));
+}
+
+/** True only when every required (and visible) checklist item is satisfied —
+ *  including that each line-item prompt has been explicitly accepted or declined.
+ *  Drives the Submit hard-gate. */
+export function isFinalChecklistComplete(a: FcAnswers, ctx: FcCompletionCtx): boolean {
+  for (const section of FINAL_CHECKLIST) {
+    for (const q of section.questions) {
+      if (q.showWhenProperty) {
+        const v = ctx.septicFee ?? 0;            // only septic uses showWhenProperty today
+        if (!(v > (q.showWhenProperty.gt ?? 0))) continue; // hidden → not required
+      }
+      const ans = a[q.id] || {};
+      if (q.type === 'device_subform') {
+        if (q.required && !ans.value) return false;
+        const dev = (q.devices || []).find((d) => d.value === ans.value);
+        if (dev?.fields) {
+          for (const f of dev.fields) {
+            if (f.required && !((ans.device?.[f.id] || '').trim())) return false;
+          }
+        }
+      } else if (q.type === 'number') {
+        // The visible default (prefill or min) counts as the answer so an
+        // untouched-but-displayed value doesn't silently block Submit.
+        const eff = ans.quantity ?? ctx.airQtyPrefill ?? (q.min ?? null);
+        if (q.required && eff == null) return false;
+      } else if (q.type === 'filter_sizes') {
+        if (!ctx.filterOptionsAvailable) continue; // can't require what can't be picked
+        const count = fcFilterCount(a, ctx.airQtyPrefill);
+        const sizes = ans.filterSizes || [];
+        for (let i = 0; i < count; i++) {
+          if (!((sizes[i] || ctx.filterPrefills[i] || '').trim())) return false;
+        }
+      } else if (q.type === 'photo_set') {
+        for (const p of (q.photos || [])) {
+          if (p.required && !((ans.stickerPhotos?.[p.id] || []).length)) return false;
+        }
+      } else { // single_select
+        if (q.required && !ans.value) return false;
+        if ((q.photoRequiredOnValues || []).includes(ans.value || '') && !((ans.photoUrls || []).length)) return false;
+        if ((q.noteRequiredOnValues || []).includes(ans.value || '') && !((ans.note || '').trim())) return false;
+        const addRule = (q.addLineOnValues || []).find((r) => r.value === ans.value);
+        if (addRule && !ans.added && !ans.declined) return false;
+        const cnt = (q.countOnValues || []).find((c) => c.value === ans.value);
+        if (cnt && ans.count == null) return false;
+      }
+    }
+  }
+  return true;
+}
+
 export const FINAL_CHECKLIST: FcSection[] = [
   {
     id: 'smart_home_tech',
