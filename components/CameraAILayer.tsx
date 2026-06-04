@@ -224,6 +224,8 @@ export function CameraAILayer(props: Props) {
   // inspector sees the AI grabbing room photos and doesn't re-shoot them.
   const [flashKey, setFlashKey] = useState(0);
   const [savedShot, setSavedShot] = useState<{ key: number; url: string; roomName: string; count: number } | null>(null);
+  // Tapped a call-out's photo to validate it full-screen.
+  const [zoomUrl, setZoomUrl] = useState<string | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Quick "Added ✓" confirmation that pops then fizzles out on Add.
   const [addedFx, setAddedFx] = useState<{ key: number; label: string } | null>(null);
@@ -746,7 +748,9 @@ export function CameraAILayer(props: Props) {
       const incoming: LiveSuggestion[] = Array.isArray(d.suggestions) ? d.suggestions : [];
       const fresh = incoming.filter((s) => s.lineItemCode && !seen.codes.has(s.lineItemCode));
       if (fresh.length) {
-        const batchStill = AUTO_PHOTO ? await captureStill(true, 'call-out') : undefined;
+        // Grab the frame the AI is calling out so it appears on the chip (and
+        // tags to the line on Add) — the inspector can tap it to validate.
+        const batchStill = await captureStill(true, 'call-out');
         const seeds: Record<string, ChipEdit> = {};
         for (const s of fresh) {
           seen.codes.add(s.lineItemCode);
@@ -945,8 +949,10 @@ export function CameraAILayer(props: Props) {
               className="flex items-start gap-2 w-full text-left -m-1 p-1 rounded-lg hover:bg-gray-50 active:bg-gray-100"
             >
               {s.stillUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={displayImageSrc(s.stillUrl)} alt="" className="w-11 h-11 object-cover rounded border border-gray-200 shrink-0" />
+                <button type="button" onClick={(e) => { e.stopPropagation(); setZoomUrl(s.stillUrl!); }} className="shrink-0" aria-label="View the photo for this call-out">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={displayImageSrc(s.stillUrl)} alt="" className="w-11 h-11 object-cover rounded border border-gray-200" />
+                </button>
               )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -1028,6 +1034,16 @@ export function CameraAILayer(props: Props) {
           );
         })}
       </div>
+
+      {/* Tap a call-out's photo to validate it full-screen; tap anywhere to close. */}
+      {zoomUrl && (
+        <div className="pointer-events-auto fixed inset-0 z-[70] bg-black/90 flex items-center justify-center" onClick={() => setZoomUrl(null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={displayImageSrc(zoomUrl)} alt="" className="max-w-full max-h-full object-contain" />
+          <button type="button" onClick={() => setZoomUrl(null)} aria-label="Close"
+            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/60 text-white text-2xl leading-none flex items-center justify-center">×</button>
+        </div>
+      )}
 
       {/* Full "Add Line Item" editor — the SAME component the manual rate-card
           form uses (category / sub / item / qty / vendor / tenant % / vendor $),
