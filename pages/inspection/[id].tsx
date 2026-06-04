@@ -345,11 +345,12 @@ export default function ExistingInspection() {
               )}
             </div>
 
-            {/* Right: Re-Open for Edits (secondary, outlined) */}
+            {/* Right: Re-Open for Edits (secondary, plain text link — underlines
+                on hover and while pressed, no box). */}
             {isCompleted ? (
               <button
                 onClick={handleReopen}
-                className="text-xs sm:text-sm text-brand border border-brand hover:bg-brand/5 font-heading font-semibold px-2.5 sm:px-3 py-1.5 rounded-lg whitespace-nowrap shrink-0"
+                className="text-xs sm:text-sm text-brand font-heading font-semibold whitespace-nowrap shrink-0 bg-transparent border-0 p-0 cursor-pointer hover:underline active:underline underline-offset-2"
               >
                 <span className="sm:hidden">Re-Open</span>
                 <span className="hidden sm:inline">Re-Open for Edits</span>
