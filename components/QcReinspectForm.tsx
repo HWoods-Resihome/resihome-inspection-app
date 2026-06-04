@@ -87,7 +87,7 @@ export function QcReinspectForm(props: Props) {
   const [sourceName, setSourceName] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<'pass' | 'fail' | ''>('');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<null | { verdict: string; passCount: number; failCount: number; pdf: { name: string; url: string } }>(null);
+  const [result, setResult] = useState<null | { verdict: string; passCount: number; failCount: number; pdf: { name: string; url: string }; resultSync?: { verdictSynced: boolean; inspectionResultSynced: boolean; fields: string[] } }>(null);
   const [cameraKey, setCameraKey] = useState<string | null>(null);
   // Photo viewer (swipe / markup / delete / tag-to-line / video). `phase`
   // distinguishes the read-only source "before" photos from editable "after".
@@ -923,6 +923,12 @@ export function QcReinspectForm(props: Props) {
               {result.verdict === 'pass' ? 'QC Passed' : 'QC Failed'}
             </div>
             <div className="text-sm text-gray-600 mb-4">{result.passCount} passed &middot; {result.failCount} failed</div>
+            {result.resultSync && !result.resultSync.verdictSynced && (
+              <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
+                Heads up: the report saved, but the overall verdict couldn’t be written to the inspection
+                record (the QC result fields aren’t set up in HubSpot yet). Ask an admin to provision them.
+              </div>
+            )}
             <a
               href={result.pdf.url}
               target="_blank"

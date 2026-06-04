@@ -210,7 +210,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // Persist verdict + counts + status + PDF url. Defensive fallback if the
-    // QC schema fields aren't present yet.
+    // QC schema fields aren't present yet. We TRACK what actually persisted so
+    // the response can confirm the verdict synced (instead of silently dropping
+    // it) — the client surfaces a warning if it didn't.
     const nowIso = new Date().toISOString();
     const fullUpdate: Record<string, any> = {
       status: 'completed',
@@ -223,8 +225,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       pdf_master_url: pdfUrl,
       pdf_generated_at: nowIso,
     };
+    let verdictSynced = false;          // qc_verdict + qc_pass_count + qc_fail_count
+    let inspectionResultSynced = false; // the standardized inspection_result enum
     try {
       await updateInspection(id, fullUpdate);
+      verdictSynced = true;
+      inspectionResultSynced = true;
     } catch (e: any) {
       const msg = String(e?.message || e);
       if (msg.includes('PROPERTY_DOESNT_EXIST') || (msg.includes('Property') && msg.includes('does not exist'))) {
@@ -234,8 +240,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         try {
           const { inspection_result, ...withoutResult } = fullUpdate;
           await updateInspection(id, withoutResult);
+          verdictSynced = true; // qc_verdict + counts persisted; inspection_result missing
+          console.warn('[qc-finalize] inspection_result is missing — run scripts/rate_card_phase5/phase5_step2_add_inspection_result.py. qc_verdict + counts DID persist.');
         } catch (e2: any) {
-          console.warn('[qc-finalize] QC props still missing — run phase5_step1/step2. Falling back to status-only.');
+          console.warn('[qc-finalize] QC result props missing — run phase5_step1_add_qc_fields.py + phase5_step2_add_inspection_result.py. Verdict NOT persisted (status-only fallback).');
           await updateInspection(id, { status: 'completed', completed_at: nowIso, pdf_attachment_url: pdfUrl });
         }
       } else {
@@ -269,6 +277,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       passCount,
       failCount,
       pdf: { name: filename, url: pdfUrl },
+      // Confirms the overall Pass/Fail synced to the inspection object. If
+      // verdictSynced is false, the HubSpot QC properties are missing (run the
+      // phase5 scripts); the client surfaces this so it isn't lost silently.
+      resultSync: {
+        verdictSynced,
+        inspectionResultSynced,
+        fields: verdictSynced
+          ? ['qc_verdict', 'qc_pass_count', 'qc_fail_count', ...(inspectionResultSynced ? ['inspection_result'] : [])]
+          : [],
+      },
     });
   } catch (e: any) {
     console.error(`[qc-finalize] failed:`, e);
