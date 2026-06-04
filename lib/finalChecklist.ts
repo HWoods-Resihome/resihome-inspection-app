@@ -152,6 +152,29 @@ export function fcFilterCount(a: FcAnswers, airQtyPrefill: number | null): numbe
   return Math.max(1, Math.min(3, Number(q) || 1));
 }
 
+/** Every catalog line-item code the Final Checklist can auto-add (from its
+ *  add-line rules). These are hardcoded here, so a catalog edit/rename can
+ *  silently orphan an FC "add line" button. Validate them against the live
+ *  catalog (see /api/admin/config-check and the finalize warning). */
+export function fcReferencedLineCodes(): string[] {
+  const codes = new Set<string>();
+  for (const section of FINAL_CHECKLIST) {
+    for (const q of section.questions) {
+      for (const r of (q.addLineOnValues || [])) {
+        if (r.rule?.lineItemCode) codes.add(r.rule.lineItemCode);
+      }
+    }
+  }
+  return [...codes];
+}
+
+/** Subset of fcReferencedLineCodes() that are NOT present in the given catalog
+ *  (a set/array of live line-item codes). Empty array = all FC codes resolve. */
+export function fcMissingLineCodes(catalogCodes: Set<string> | string[]): string[] {
+  const present = catalogCodes instanceof Set ? catalogCodes : new Set(catalogCodes);
+  return fcReferencedLineCodes().filter((c) => !present.has(c));
+}
+
 /** Whether a question is currently shown (respects conditional visibility). */
 export function fcQuestionVisible(q: FcQuestion, ctx: FcCompletionCtx): boolean {
   if (q.showWhenProperty) {

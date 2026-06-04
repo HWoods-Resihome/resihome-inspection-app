@@ -110,6 +110,57 @@ async function hubspotFetch(path: string, init: RequestInit = {}): Promise<any> 
   const url = `${API_BASE}${path}`;
   const method = init.method || 'GET';
 
+  // Request governor: fail fast while the circuit breaker is open, and bound the
+  // number of in-flight HubSpot calls per instance. HubSpot is the backbone for
+  // ~100 concurrent inspectors; without this, a HubSpot incident lets requests
+  // pile up unbounded (exhausting sockets/memory) and keeps hammering an API
+  // that's already struggling. See hsAcquire / circuit-breaker helpers above.
+  if (hsBreakerOpenUntil && Date.now() < hsBreakerOpenUntil) {
+    const err = new Error('Upstream temporarily unavailable (circuit open)');
+    (err as any).status = 503;
+    throw err;
+  }
+  await hsAcquire();
+  try {
+    return await hubspotFetchInner(url, method, path, init);
+  } finally {
+    hsRelease();
+  }
+}
+
+// ---- HubSpot request governor (per-instance) ------------------------------
+// Concurrency cap: hand a fixed number of slots out, queue the rest. Env-tunable.
+const HS_MAX_CONCURRENT = Math.max(1, Number(process.env.HUBSPOT_MAX_CONCURRENT) || 8);
+let hsActive = 0;
+const hsWaiters: Array<() => void> = [];
+async function hsAcquire(): Promise<void> {
+  if (hsActive < HS_MAX_CONCURRENT) { hsActive++; return; }
+  // No free slot — wait. The releaser hands its slot directly to us (it does NOT
+  // decrement), so hsActive stays accurate without a race.
+  await new Promise<void>((resolve) => hsWaiters.push(resolve));
+}
+function hsRelease(): void {
+  const next = hsWaiters.shift();
+  if (next) next();        // transfer the slot to the next waiter
+  else hsActive--;         // nobody waiting — free the slot
+}
+// Circuit breaker: after N consecutive HARD failures (retries already exhausted),
+// open for a short cooldown so we stop hammering a down API and fail fast instead.
+// Any success closes it. Threshold is high so normal load can't trip it.
+const HS_BREAKER_THRESHOLD = Math.max(2, Number(process.env.HUBSPOT_BREAKER_THRESHOLD) || 10);
+const HS_BREAKER_COOLDOWN_MS = Math.max(1000, Number(process.env.HUBSPOT_BREAKER_COOLDOWN_MS) || 10_000);
+let hsConsecutiveFailures = 0;
+let hsBreakerOpenUntil = 0;
+function hsNoteSuccess(): void { hsConsecutiveFailures = 0; hsBreakerOpenUntil = 0; }
+function hsNoteFailure(): void {
+  hsConsecutiveFailures++;
+  if (hsConsecutiveFailures >= HS_BREAKER_THRESHOLD) {
+    hsBreakerOpenUntil = Date.now() + HS_BREAKER_COOLDOWN_MS;
+    console.warn(`[hubspotFetch] circuit OPEN after ${hsConsecutiveFailures} consecutive failures — failing fast for ${HS_BREAKER_COOLDOWN_MS}ms`);
+  }
+}
+
+async function hubspotFetchInner(url: string, method: string, path: string, init: RequestInit): Promise<any> {
   // Retry on 429 (rate limit) with exponential backoff. HubSpot's secondly
   // limit (~10 req/sec) can be hit when paginating the 853-row catalog or
   // when multiple browser tabs fire concurrent loads.
@@ -157,13 +208,16 @@ async function hubspotFetch(path: string, init: RequestInit = {}): Promise<any> 
       lastError = new Error(`Upstream request failed (${res.status})`);
       (lastError as any).status = res.status;
       (lastError as any).detail = text.slice(0, 500);
+      hsNoteFailure();
       throw lastError;
     }
-    if (res.status === 204) return null;
+    if (res.status === 204) { hsNoteSuccess(); return null; }
+    hsNoteSuccess();
     return res.json();
   }
 
   // All retries exhausted on 429
+  hsNoteFailure();
   throw lastError || new Error('Upstream request failed after retries (rate limited)');
 }
 

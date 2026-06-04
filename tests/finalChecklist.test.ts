@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   finalChecklistGap, isFinalChecklistComplete,
   finalChecklistAnswerRecords, summarizeFinalChecklist,
+  fcReferencedLineCodes, fcMissingLineCodes,
   type FcAnswers, type FcCompletionCtx,
 } from '@/lib/finalChecklist';
 
@@ -112,5 +113,22 @@ describe('finalChecklistAnswerRecords (structured HubSpot projection)', () => {
     const summaryRows = summarizeFinalChecklist(a, baseCtx).flatMap((g) => g.rows);
     // The PDF summary and the structured records render the SAME value strings.
     expect(recs.map((r) => r.value).sort()).toEqual(summaryRows.map((r) => r.value).sort());
+  });
+});
+
+describe('Final Checklist catalog-code drift guard', () => {
+  it('lists every hardcoded add-line code', () => {
+    const codes = fcReferencedLineCodes();
+    // The known FC add-line rules (see FINAL_CHECKLIST).
+    expect(codes).toEqual(expect.arrayContaining(['GADRL1037', 'CARPL1047', 'HVACL1603', 'SPTCL1003']));
+    expect(new Set(codes).size).toBe(codes.length); // de-duped
+  });
+
+  it('flags codes missing from the live catalog, and none when all present', () => {
+    const all = new Set(fcReferencedLineCodes());
+    expect(fcMissingLineCodes(all)).toEqual([]);                 // all present → none missing
+    all.delete('GADRL1037');
+    expect(fcMissingLineCodes(all)).toEqual(['GADRL1037']);      // removed code surfaces
+    expect(fcMissingLineCodes([])).toEqual(fcReferencedLineCodes()); // empty catalog → all missing
   });
 });

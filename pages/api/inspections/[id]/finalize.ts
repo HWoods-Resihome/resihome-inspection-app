@@ -45,7 +45,7 @@ import { getGmailRefreshToken, encryptToken } from '@/lib/gmailAuth';
 import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, type CreateTicketResult } from '@/lib/maintenanceAi';
 import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
-import { summarizeFinalChecklist, finalChecklistAnswerRecords, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
+import { summarizeFinalChecklist, finalChecklistAnswerRecords, fcMissingLineCodes, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
 
 export const config = {
   api: {
@@ -156,11 +156,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const priorStatus = (inspection.status || '').trim().toLowerCase();
     const isRefinalize = priorStatus === 'completed' || priorStatus === 'complete' || priorStatus === 'submitted';
 
+    // Partial-failure resumability: finalize fires several IRREVERSIBLE outbound
+    // steps (create maintenance ticket, send the damages email). If a previous
+    // attempt completed those but died before flipping status to 'completed',
+    // a retry would DUPLICATE them (isRefinalize is false because status is
+    // still pending). So we read the per-step stamps and skip anything already
+    // done. `hbmm_ticket_id` is an existing property; `finalize_email_sent_at`
+    // is read/written best-effort — if it isn't on the schema yet, the read is
+    // empty and we behave exactly as before (create the property to activate
+    // full email-resume). See scripts/ for adding the property.
+    const resumeStamps = await readInspectionProps(id, ['hbmm_ticket_id', 'finalize_email_sent_at']).catch(() => ({} as any));
+    const ticketAlreadyCreated = !!String(resumeStamps?.hbmm_ticket_id || '').trim();
+    const emailAlreadySent = !!String(resumeStamps?.finalize_email_sent_at || '').trim();
+
     const [answers, regions, catalog] = await Promise.all([
       fetchAnswersForInspection(id),
       getCachedRegions(),
       getCachedCatalog(),
     ]);
+
+    // Code↔catalog drift guard: the Final Checklist auto-add buttons reference
+    // hardcoded catalog codes. If a catalog rename/removal orphaned one, log it
+    // loudly here (and /api/admin/config-check surfaces it on demand). Cheap and
+    // non-blocking — it just makes a silent breakage visible.
+    if (inspection.templateType === 'pm_scope_rate_card') {
+      const missingFcCodes = fcMissingLineCodes(new Set(catalog.map((c) => c.lineItemCode)));
+      if (missingFcCodes.length) {
+        console.warn(`[finalize] WARN: Final Checklist references catalog codes missing from the live catalog: ${missingFcCodes.join(', ')} — those FC add-line buttons are broken.`);
+      }
+    }
 
     // ---- 2. Build the section list (using stored section_list_json) ----
     const sectionInstances: SectionInstance[] = resolveSections(
@@ -678,7 +702,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // finalize; no-ops until MAINTENANCE_AI_API_KEY is set. Skipped on re-finalize
     // so a reopen doesn't create duplicate tickets.
     let ticketResult: CreateTicketResult | null = null;
-    if (!isRefinalize) {
+    if (ticketAlreadyCreated) {
+      // A prior (possibly failed) attempt already created the ticket — don't
+      // make a duplicate. Reconstruct the result from the stored id.
+      const existingTicketId = Number(String(resumeStamps?.hbmm_ticket_id || '').trim());
+      console.log(`[finalize] maintenance ticket already created (#${existingTicketId}) — skipping re-create.`);
+      ticketResult = { ok: true, configured: true, ticketId: Number.isFinite(existingTicketId) ? existingTicketId : undefined } as CreateTicketResult;
+    } else if (!isRefinalize) {
       try {
         const hbmmId = Number(inspectionData.propertyHbmmId || '');
         if (!inspectionData.propertyHbmmId || !Number.isFinite(hbmmId)) {
@@ -721,6 +751,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         sent: false,
         reason: 'refinalize_skipped',
         message: 'Email not re-sent because this inspection was already completed.',
+      } as any;
+    } else if (emailAlreadySent) {
+      // A prior (failed) attempt already sent the damages email — don't re-send.
+      emailResult = {
+        sent: false,
+        reason: 'already_sent',
+        message: 'Email already sent on a previous finalize attempt; not re-sending.',
       } as any;
     } else {
     try {
@@ -789,6 +826,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
 
       emailResult = await sendInspectionEmail(payload, session.email, req);
+      // Stamp that the email actually went out, so a later partial-failure retry
+      // (status not yet flipped) won't re-send it. Best-effort: if the property
+      // isn't on the schema the write is swallowed and we simply lose resume for
+      // email (current behavior) — create `finalize_email_sent_at` to enable it.
+      if (emailResult?.sent) {
+        try { await updateInspection(id, { finalize_email_sent_at: new Date().toISOString() }); }
+        catch (e) { console.warn('[finalize] could not store finalize_email_sent_at (create the property to enable email resume):', e); }
+      }
     } catch (e: any) {
       console.error('[finalize] email send threw (caught, finalize continues):', e);
       emailResult = {
