@@ -386,16 +386,19 @@ export function PdfHeaderStrip(props: {
  * thumbnail in a PDF viewer opens the full-resolution image in the user's
  * browser. Compatible with all major PDF viewers (Acrobat, Preview, Chrome).
  */
-// Each photo links to the in-app gallery viewer (left/right across ALL the
-// inspection's photos) instead of the raw file — so clicking a photo in any PDF
-// opens a browsable gallery. The gallery base is supplied PER RENDER through
-// React context (PdfGalleryBaseProvider, set inside each Document), so multiple
-// PDFs can render CONCURRENTLY without clobbering each other's base — the global
-// below is only a legacy fallback for callers not yet wrapped in the provider.
-const PdfGalleryBaseContext = React.createContext<string | undefined>(undefined);
-/** Wrap a Document's children so its photos link to this gallery base. */
-export function PdfGalleryBaseProvider(props: { base: string | undefined; children: React.ReactNode }) {
-  return <PdfGalleryBaseContext.Provider value={props.base}>{props.children}</PdfGalleryBaseContext.Provider>;
+// Per-render context: the gallery base (photo links) AND a map of downscaled
+// thumbnails to EMBED. Supplied inside each Document (PdfGalleryBaseProvider) so
+// concurrent renders don't clobber each other. Embedding the stored ~1280px/600KB
+// photos into the tiny 90×65pt cells made finalized PDFs tens of MB and slow to
+// scroll; `embedded[posterUrl]` holds a small JPEG data URI to draw instead (the
+// link still points at the full-size gallery). The global below is a legacy
+// fallback for callers not yet wrapped in the provider (e.g. the QC PDF).
+interface PdfRenderCtx { galleryBase?: string; embedded?: Record<string, string>; }
+const PdfGalleryBaseContext = React.createContext<PdfRenderCtx>({});
+/** Wrap a Document's children so its photos link to this gallery base and embed
+ *  the supplied downscaled thumbnails. */
+export function PdfGalleryBaseProvider(props: { base?: string; embedded?: Record<string, string>; children: React.ReactNode }) {
+  return <PdfGalleryBaseContext.Provider value={{ galleryBase: props.base, embedded: props.embedded }}>{props.children}</PdfGalleryBaseContext.Provider>;
 }
 // Legacy module-level fallback (used by any render path not yet wrapped in the
 // provider). Set before renderToBuffer; the context value takes precedence.
@@ -406,7 +409,7 @@ export function setPdfPhotoGalleryBase(base: string | undefined) { _photoGallery
 
 export function PdfSectionPhotos(props: { photoUrls: string[] }) {
   // Prefer the per-render context base; fall back to the legacy global.
-  const ctxBase = React.useContext(PdfGalleryBaseContext);
+  const { galleryBase: ctxBase, embedded } = React.useContext(PdfGalleryBaseContext);
   const galleryBase = ctxBase ?? _photoGalleryBase;
   if (props.photoUrls.length === 0) return null;
   return (
@@ -416,6 +419,9 @@ export function PdfSectionPhotos(props: { photoUrls: string[] }) {
         const poster = getPosterUrl(entry);
         const video = isVideoEntry(entry) ? getVideoUrl(entry) : '';
         const fileHref = video || poster;
+        // EMBED the downscaled thumbnail when we have one (keeps the PDF small);
+        // otherwise fall back to the full-size poster URL.
+        const imgSrc = (embedded && embedded[poster]) || poster;
         // Gallery link (starts at this photo) when a base is set; else the file.
         // Join correctly whether the base already carries query params (per-PDF
         // scoping, e.g. ?k=vendor&v=slug).
@@ -424,7 +430,7 @@ export function PdfSectionPhotos(props: { photoUrls: string[] }) {
         return (
           <Link key={`${entry}-${i}`} src={href} style={pdfStyles.photoCell}>
             {/* eslint-disable-next-line jsx-a11y/alt-text */}
-            <Image src={poster} style={pdfStyles.photoCellImage} />
+            <Image src={imgSrc} style={pdfStyles.photoCellImage} />
             {video ? <Text style={pdfStyles.videoBadge}>VIDEO</Text> : null}
           </Link>
         );
@@ -533,4 +539,9 @@ export interface PdfBuildContext {
    *  https://resiwalk.com/d/{id}/photos/{sig}). When set, PDF photos link here
    *  (browsable left/right) instead of the raw file. */
   photoGalleryBase?: string;
+  /** Map of full-size photo (poster) URL → small embedded JPEG data URI. Built
+   *  once per finalize (lib/pdfImages.buildEmbeddedPhotoMap) so the PDF embeds
+   *  lightweight thumbnails instead of the stored ~1280px photos — keeps the file
+   *  small and smooth to scroll. Absent entries fall back to the full URL. */
+  embeddedPhotoByUrl?: Record<string, string>;
 }

@@ -58,7 +58,7 @@ function VendorDoc(props: {
       author="ResiHome"
       subject={docTitle}
     >
-      <PdfGalleryBaseProvider base={galleryBase}>
+      <PdfGalleryBaseProvider base={galleryBase} embedded={ctx.embeddedPhotoByUrl}>
       <Page size="LETTER" style={pdfStyles.page} wrap>
         <PdfHeaderStrip
           docTitle={docTitle}

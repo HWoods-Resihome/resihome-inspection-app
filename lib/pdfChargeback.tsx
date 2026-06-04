@@ -58,7 +58,7 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
       author="ResiHome"
       subject="Tenant Chargeback"
     >
-      <PdfGalleryBaseProvider base={ctx.photoGalleryBase}>
+      <PdfGalleryBaseProvider base={ctx.photoGalleryBase} embedded={ctx.embeddedPhotoByUrl}>
       <Page size="LETTER" style={pdfStyles.page} wrap>
         <PdfHeaderStrip
           docTitle={`Tenant Chargeback — ${ctx.templateLabel}`}

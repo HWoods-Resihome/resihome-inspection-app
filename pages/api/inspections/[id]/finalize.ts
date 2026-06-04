@@ -45,6 +45,7 @@ import { getGmailRefreshToken, encryptToken } from '@/lib/gmailAuth';
 import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, type CreateTicketResult } from '@/lib/maintenanceAi';
 import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
+import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
 import { summarizeFinalChecklist, finalChecklistAnswerRecords, fcMissingLineCodes, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
 
 export const config = {
@@ -474,6 +475,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       inspectionData.propertyStateCode,
       inspection.regionSnapshot,
     );
+
+    // ---- 3b. Downscale every embedded photo ONCE ----
+    // The cells are tiny (90×65pt) but photos are stored at ~1280px/600KB —
+    // embedding them full-size made finalized PDFs tens of MB and slow to scroll.
+    // Fetch + shrink each unique photo to a small thumbnail data URI up front and
+    // hand the map to every PDF (the photo LINK still points at the full gallery).
+    // Best-effort: on failure the map is partial/empty and the renderer falls back
+    // to the full URL, so a hiccup never blocks finalize.
+    try {
+      const photoEntries: string[] = [];
+      for (const g of sectionGroups.values()) {
+        photoEntries.push(...(g.photoUrls || []));
+        for (const l of g.lines) if (l.afterPhotoUrls?.length) photoEntries.push(...l.afterPhotoUrls);
+      }
+      if (photoEntries.length > 0) {
+        ctx.embeddedPhotoByUrl = await buildEmbeddedPhotoMap(photoEntries);
+      }
+    } catch (e) {
+      console.warn('[finalize] photo downscale pre-pass failed (embedding full-size):', e);
+    }
 
     // ---- 4. Render PDFs ----
     // Render the Master FIRST and alone. Two reasons: (1) it always exists, so

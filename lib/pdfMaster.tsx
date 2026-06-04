@@ -57,7 +57,7 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
       author="ResiHome"
       subject="Rate Card Inspection Report"
     >
-      <PdfGalleryBaseProvider base={ctx.photoGalleryBase}>
+      <PdfGalleryBaseProvider base={ctx.photoGalleryBase} embedded={ctx.embeddedPhotoByUrl}>
       <Page size="LETTER" style={pdfStyles.page} wrap>
         <PdfHeaderStrip
           docTitle={`${ctx.templateLabel} - Master`}
