@@ -31,6 +31,10 @@ export interface AiAdjustment {
   /** The line is in the wrong room. With a resolved target, the inspector can
    *  move it instead of removing it. */
   wrongRoom?: boolean;
+  /** Deterministic "the scope has NO line of this category anywhere" check. The
+   *  inspector validates: Approve = none needed, or Decline → add items via the
+   *  manual line-item editor. No line target; produces no automatic change. */
+  missingCategory?: 'paint' | 'cleaning';
   /** Snapshot of the line as it is now (for display on edit/remove). */
   current?: {
     description?: string;

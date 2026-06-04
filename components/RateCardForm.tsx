@@ -146,6 +146,21 @@ function friendlyQtyUnit(qty: number, meas: string): string {
   return friendly ? `${n} ${friendly}` : n;
 }
 
+// A deterministic AI-review check: "the scope has NO line of this category
+// anywhere." The inspector validates (Approve = none needed, or Decline → add).
+function missingCategoryCheck(kind: 'paint' | 'cleaning'): AiAdjustment {
+  const label = kind === 'paint' ? 'Paint' : 'Cleaning';
+  return {
+    id: `missing_${kind}`,
+    type: 'add',
+    sectionId: '',
+    missingCategory: kind,
+    title: `No ${label} Lines in This Scope`,
+    rationale: `This scope has no ${label.toLowerCase()} line items in any room. Confirm none are needed for this turn, or add them.`,
+    severity: 'medium',
+  };
+}
+
 export function RateCardForm(props: RateCardFormProps) {
   const dialog = useAppDialog();
   const flashApi = useFlash();
@@ -2340,6 +2355,20 @@ export function RateCardForm(props: RateCardFormProps) {
     }
     setAiLoading(false);
     setAiStreaming(false);
+    // Deterministic safety checks (scope-wide): if there's NO paint and/or NO
+    // cleaning line anywhere, append a validation item so the inspector confirms
+    // none are needed (or adds them). Only when the review itself succeeded.
+    if (!lastErr) {
+      const hasCat = (re: RegExp) => Object.values(linesBySectionRef.current).some((arr) =>
+        (arr || []).some((l) => { const it = catalog.find((c) => c.lineItemCode === l.lineItemCode); return !!it && re.test(it.category || ''); }));
+      const extra: AiAdjustment[] = [];
+      if (!hasCat(/paint/i)) extra.push(missingCategoryCheck('paint'));
+      if (!hasCat(/clean/i)) extra.push(missingCategoryCheck('cleaning'));
+      if (extra.length) setAiAdjustments((prev) => {
+        const have = new Set(prev.map((p) => p.id));
+        return [...prev, ...extra.filter((e) => !have.has(e.id))];
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, props.inspectionRecordId, props.bedrooms, props.bathrooms, props.squareFootage, props.lastTenantMonths, inspectionRegion]);
 
@@ -2383,6 +2412,8 @@ export function RateCardForm(props: RateCardFormProps) {
       const archives: string[] = [];
 
       for (const a of approved) {
+        // missingCategory checks are acknowledgements only — no line change.
+        if (a.missingCategory) continue;
         const sec = sections.find((s) => s.id === a.sectionId);
         // Wrong-room: MOVE the line to the chosen room (keep the same record).
         // No-op if the inspector left it in its current room.
@@ -2528,6 +2559,24 @@ export function RateCardForm(props: RateCardFormProps) {
   // room AND tag them onto the flagged line. Returns true once a photo is added.
   const aiPhotoTargetRef = useRef<{ sectionId: string; lineExternalId?: string; resolve: (ok: boolean) => void } | null>(null);
   const [aiCameraTarget, setAiCameraTarget] = useState<{ sectionId: string; lineExternalId?: string } | null>(null);
+
+  // AI review "Decline — Add Items": open the manual line-item editor (added to
+  // Whole House). Resolves with the count added so the review item can mark
+  // itself resolved and the inspector returns to the checklist.
+  const [aiAddItemsOpen, setAiAddItemsOpen] = useState(false);
+  const aiAddItemsResolveRef = useRef<((n: number) => void) | null>(null);
+  const addLineItemsForReview = useCallback((_a: AiAdjustment): Promise<number> => {
+    return new Promise<number>((resolve) => {
+      aiAddItemsResolveRef.current = resolve;
+      setAiAddItemsOpen(true);
+    });
+  }, []);
+  function finishAiAddItems(count: number) {
+    const resolve = aiAddItemsResolveRef.current;
+    aiAddItemsResolveRef.current = null;
+    setAiAddItemsOpen(false);
+    resolve?.(count);
+  }
 
   // In-app camera for capturing AFTER photos on an Internal Resolution line.
   // Opening it is triggered from the line card's After Photos "+"; on Done the
@@ -3691,12 +3740,40 @@ export function RateCardForm(props: RateCardFormProps) {
         onApply={(approved) => applyApproved(approved)}
         previewTenantDollars={previewTenantDollars}
         onAddPhoto={addPhotoForAdjustment}
+        onAddLineItems={addLineItemsForReview}
         onIgnore={(a) => { if (a.lineExternalId) addIgnoredPhotoLine(props.inspectionRecordId, a.lineExternalId); }}
         initialDecisions={aiDecisions}
         onDecisionsChange={setAiDecisions}
         rooms={sections.map((s) => ({ id: s.id, name: s.displayName || s.label }))}
-        cameraOpen={!!aiCameraTarget}
+        cameraOpen={!!aiCameraTarget || aiAddItemsOpen}
       />
+      {/* AI review "Decline — Add Items": the manual Add Line Item editor, added
+          to Whole House. The review modal hides while it's open (cameraOpen). */}
+      {aiAddItemsOpen && (() => {
+        const wh = fcWholeHouseSection() || sections[0];
+        if (!wh) { finishAiAddItems(0); return null; }
+        return (
+          <table className="absolute w-0 h-0 overflow-hidden">
+            <tbody>
+              <EditableLineRow
+                mobile
+                startInEditMode
+                line={null}
+                catalog={catalog}
+                regions={regions}
+                inspectionRegion={inspectionRegion}
+                section={wh.label}
+                location={wh.location || ''}
+                tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
+                autoSfQuantity={/whole\s*house/i.test(wh.label) && props.squareFootage ? props.squareFootage : null}
+                onSave={(line) => { void handleSaveLineForSection(wh.id, line); finishAiAddItems(1); }}
+                onDelete={() => finishAiAddItems(0)}
+                onDiscardNew={() => finishAiAddItems(0)}
+              />
+            </tbody>
+          </table>
+        );
+      })()}
       {/* In-app camera for the review popup's "Add photo" (same as the Take
           button): single room, captured photo auto-attaches to the room + tags
           the flagged line. The review modal hides while this is open. */}
@@ -3812,6 +3889,7 @@ export function RateCardForm(props: RateCardFormProps) {
           || cameraOverlayOpen
           || aiModalOpen          // AI review popup
           || aiCameraTarget !== null // AI review's in-app camera
+          || aiAddItemsOpen          // AI review's "Add Items" line editor
           || afterCameraTarget !== null // Internal Resolution after-photo camera
           || (cameraOpen && aiCameraMode); // All-in-one AI camera owns its own always-listening mic
         const hidden = overlayOpen && !voiceEngaged;

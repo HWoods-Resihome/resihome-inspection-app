@@ -22,6 +22,9 @@ interface Props {
   // For needsPhoto suggestions: capture a photo of the damage and attach it to
   // the room + line. Resolves true if a photo was added.
   onAddPhoto?: (a: AiAdjustment) => Promise<boolean>;
+  // For missingCategory checks ("Decline — Add Items"): open the manual line-item
+  // editor. Resolves with the number of lines added (0 if cancelled).
+  onAddLineItems?: (a: AiAdjustment) => Promise<number>;
   // Permanently dismiss a photo-gap flag so future reviews don't re-raise it.
   onIgnore?: (a: AiAdjustment) => void;
   // Persisted approve/decline decisions (restored across reload) + change report.
@@ -55,13 +58,16 @@ const SEV: Record<string, string> = {
   low: 'bg-gray-400',
 };
 
-export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars, onAddPhoto, onIgnore, initialDecisions, onDecisionsChange, rooms, cameraOpen }: Props) {
+export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars, onAddPhoto, onAddLineItems, onIgnore, initialDecisions, onDecisionsChange, rooms, cameraOpen }: Props) {
   const [decisions, setDecisions] = useState<Record<string, Decision>>(() => initialDecisions || {});
   // Report decision changes up so they can be persisted across reload.
   useEffect(() => { onDecisionsChange?.(decisions); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [decisions]);
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [photoAdded, setPhotoAdded] = useState<Record<string, boolean>>({});
   const [addingPhoto, setAddingPhoto] = useState<string | null>(null);
+  // missingCategory checks: how many lines the inspector added, and which is busy.
+  const [linesAdded, setLinesAdded] = useState<Record<string, number>>({});
+  const [addingItems, setAddingItems] = useState<string | null>(null);
 
   // Friendly, cycling status shown the instant the review opens (before the
   // first suggestion streams in) so the inspector gets immediate feedback.
@@ -83,7 +89,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
   // Reset decisions/edits only when a NEW review run begins (loading flips
   // true) — NOT on every streamed append, which previously wiped a decision the
   // inspector made mid-stream (the "had to tap Decline twice" glitch).
-  useEffect(() => { if (loading) { setDecisions({}); setEdits({}); setPhotoAdded({}); } }, [loading]);
+  useEffect(() => { if (loading) { setDecisions({}); setEdits({}); setPhotoAdded({}); setLinesAdded({}); setAddingItems(null); } }, [loading]);
 
   const allDecided = adjustments.every((a) => decisions[a.id]);
   const approvedCount = adjustments.filter((a) => decisions[a.id] === 'approve').length;
@@ -120,7 +126,12 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
 
   const setAll = (d: Decision) => {
     const next: Record<string, Decision> = {};
-    for (const a of adjustments) next[a.id] = d;
+    for (const a of adjustments) {
+      // missingCategory checks must be resolved individually (Approve = none
+      // needed, or Decline → add items) — never bulk-set.
+      if (a.missingCategory) { if (decisions[a.id]) next[a.id] = decisions[a.id]; continue; }
+      next[a.id] = d;
+    }
     setDecisions(next);
   };
 
@@ -204,7 +215,42 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                             <div className="min-w-0">
                               <div className="text-xs text-gray-600 mt-1 leading-snug">{a.rationale}</div>
 
-                              {a.needsPhoto ? (
+                              {a.missingCategory ? (
+                                /* Deterministic "no <category> lines anywhere" check. Approve =
+                                   none required; Decline → add items via the manual editor. */
+                                (() => {
+                                  const label = a.missingCategory === 'paint' ? 'Paint' : 'Cleaning';
+                                  if (linesAdded[a.id]) {
+                                    return <div className="text-xs text-emerald-700 font-heading font-semibold mt-2">✓ {linesAdded[a.id]} {label.toLowerCase()} line{linesAdded[a.id] === 1 ? '' : 's'} added</div>;
+                                  }
+                                  return (
+                                    <div className="mt-2">
+                                      <div className="flex gap-2 flex-wrap">
+                                        <button type="button" onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'approve' }))}
+                                          className={`px-3 py-1.5 text-xs font-heading font-semibold rounded-md border ${d === 'approve' ? 'bg-brand text-white border-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`}>
+                                          Approve — No Items Required
+                                        </button>
+                                        <button type="button" disabled={addingItems === a.id}
+                                          onClick={async () => {
+                                            if (!onAddLineItems) return;
+                                            setAddingItems(a.id);
+                                            const n = await onAddLineItems(a).catch(() => 0);
+                                            setAddingItems(null);
+                                            if (n > 0) { setLinesAdded((m) => ({ ...m, [a.id]: n })); setDecisions((m) => ({ ...m, [a.id]: 'decline' })); }
+                                          }}
+                                          className={`px-3 py-1.5 text-xs font-heading font-semibold rounded-md border disabled:opacity-50 ${d === 'decline' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
+                                          {addingItems === a.id ? 'Opening…' : 'Decline — Add Items'}
+                                        </button>
+                                      </div>
+                                      {/* Descriptions below the options. */}
+                                      <div className="mt-2 space-y-0.5 text-[11px] text-gray-500 leading-snug">
+                                        <div><span className="font-semibold text-gray-700">Approve</span> — confirm no {label.toLowerCase()} is needed for this turn.</div>
+                                        <div><span className="font-semibold text-gray-700">Decline — Add Items</span> — open the line-item editor to add {label.toLowerCase()} line(s), then come back here.</div>
+                                      </div>
+                                    </div>
+                                  );
+                                })()
+                              ) : a.needsPhoto ? (
                                 /* Photo evidence gap: add a photo of the damage (attaches to
                                    the room + this line) OR remove the line — not approve/decline. */
                                 <>
