@@ -141,6 +141,66 @@ export function fcFilterCount(a: FcAnswers, airQtyPrefill: number | null): numbe
   return Math.max(1, Math.min(3, Number(q) || 1));
 }
 
+/** Build a human-readable summary of the checklist for the Master PDF. Renders
+ *  each visible question as one label/value row (Title Case, prefilled values
+ *  included). Empty sections are dropped. */
+export function summarizeFinalChecklist(
+  a: FcAnswers,
+  ctx: FcCompletionCtx,
+): { name: string; rows: { label: string; value: string }[] }[] {
+  const out: { name: string; rows: { label: string; value: string }[] }[] = [];
+  for (const section of FINAL_CHECKLIST) {
+    const rows: { label: string; value: string }[] = [];
+    for (const q of section.questions) {
+      if (q.showWhenProperty) {
+        const v = ctx.septicFee ?? 0;
+        if (!(v > (q.showWhenProperty.gt ?? 0))) continue;
+      }
+      const ans = a[q.id] || {};
+      let value = '';
+      if (q.type === 'device_subform') {
+        if (!ans.value) { value = '—'; }
+        else {
+          const dev = (q.devices || []).find((d) => d.value === ans.value);
+          const parts: string[] = [];
+          for (const f of (dev?.fields || [])) {
+            const fv = (ans.device?.[f.id] || '').trim();
+            if (fv) parts.push(`${f.label}: ${fv}`);
+          }
+          value = parts.length ? `${ans.value} (${parts.join(', ')})` : ans.value;
+        }
+      } else if (q.type === 'number') {
+        const eff = ans.quantity ?? ctx.airQtyPrefill ?? q.min ?? null;
+        value = eff == null ? '—' : String(eff);
+      } else if (q.type === 'filter_sizes') {
+        const count = fcFilterCount(a, ctx.airQtyPrefill);
+        const sizes: string[] = [];
+        for (let i = 0; i < count; i++) {
+          const s = (ans.filterSizes?.[i] || ctx.filterPrefills[i] || '').trim();
+          if (s) sizes.push(s);
+        }
+        value = sizes.length ? sizes.join(', ') : '—';
+      } else if (q.type === 'photo_set') {
+        value = (q.photos || [])
+          .map((p) => `${p.label}: ${((ans.stickerPhotos?.[p.id] || []).length) ? '✓' : '—'}`)
+          .join('  ·  ');
+      } else { // single_select
+        value = ans.value || '—';
+        const extras: string[] = [];
+        const cnt = (q.countOnValues || []).find((c) => c.value === ans.value);
+        if (cnt && ans.count != null) extras.push(`${cnt.label} ${ans.count}`);
+        if ((ans.photoUrls || []).length) extras.push(`Photo ✓`);
+        if (ans.note) extras.push(`Note: ${ans.note}`);
+        if (ans.added) extras.push(`Added line`);
+        if (extras.length) value += ` — ${extras.join(' · ')}`;
+      }
+      rows.push({ label: q.label, value });
+    }
+    if (rows.length) out.push({ name: section.name, rows });
+  }
+  return out;
+}
+
 /** True only when every required (and visible) checklist item is satisfied —
  *  including that each line-item prompt has been explicitly accepted or declined.
  *  Drives the Submit hard-gate. */

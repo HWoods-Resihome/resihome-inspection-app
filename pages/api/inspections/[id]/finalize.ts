@@ -43,6 +43,7 @@ import { getGmailRefreshToken, encryptToken } from '@/lib/gmailAuth';
 import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, type CreateTicketResult } from '@/lib/maintenanceAi';
 import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
+import { summarizeFinalChecklist, type FcAnswers } from '@/lib/finalChecklist';
 
 export const config = {
   api: {
@@ -340,6 +341,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // the same short label shown in the selector and on the cards.
     const templateLabel = templateLabelFor(inspection.templateType) || 'Rate Card';
 
+    // Final Checklist (scope only) → Master PDF Q&A block. Read the single qa
+    // record (JSON in note) and summarize it for display.
+    let finalChecklistGroups: { name: string; rows: { label: string; value: string }[] }[] | undefined;
+    if (inspection.templateType === 'pm_scope_rate_card') {
+      const fcRec = answers.find((a) => a.answerType === 'qa' && a.questionIdExternal === 'fc__all');
+      let fcAnswers: FcAnswers = {};
+      if (fcRec?.note) { try { fcAnswers = JSON.parse(fcRec.note); } catch { fcAnswers = {}; } }
+      finalChecklistGroups = summarizeFinalChecklist(fcAnswers, {
+        septicFee: inspectionData.propertySepticFee ?? null,
+        airQtyPrefill: inspectionData.propertyAirFiltersTotal ?? null,
+        filterOptionsAvailable: true,
+        filterPrefills: [
+          inspectionData.propertyAirFiltersType1 ?? null,
+          inspectionData.propertyAirFiltersType2 ?? null,
+          inspectionData.propertyAirFiltersType3 ?? null,
+        ],
+      });
+    }
+
     const ctx: PdfBuildContext = {
       inspectionRecordId: id,
       templateLabel,
@@ -358,6 +378,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Preserve the section instance ordering
       sections: sectionInstances.map((s) => sectionGroups.get(s.id)!).filter(Boolean),
       grandTotals: { vendor: grandVendor, client: grandClient, tenant: grandTenant, lineCount: grandLineCount },
+      finalChecklist: finalChecklistGroups,
     };
 
     // Resolve the state code once: prefer property.state_code, else first two

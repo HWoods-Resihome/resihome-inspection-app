@@ -499,4 +499,7 @@ export interface PdfBuildContext {
   approvedAtIso?: string | null;
   sections: PdfSectionGroup[];
   grandTotals: { vendor: number; client: number; tenant: number; lineCount: number };
+  /** Final Checklist Q&A — rendered on the MASTER pdf only. Each section is a
+   *  group of label/value rows. Absent/empty on non-scope templates. */
+  finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
 }
