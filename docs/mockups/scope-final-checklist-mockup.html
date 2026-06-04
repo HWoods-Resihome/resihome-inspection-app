@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ResiWALK — Scope Final Checklist (mockup)</title>
+<style>
+  :root{
+    --brand:#ff0060; --brand-dark:#d60052; --brand-soft:#ffe7f0;
+    --ink:#15151f; --muted:#6b7280; --line:#e5e7eb;
+    --g50:#f9fafb; --g100:#f3f4f6; --g700:#374151;
+    --amber-bg:#fffbeb; --amber-bd:#fcd34d; --amber-tx:#92400e;
+    --em-bg:#ecfdf5; --em-bd:#6ee7b7; --em-tx:#047857;
+    --sky-bg:#eff6ff; --sky-bd:#bfdbfe; --sky-tx:#1d4ed8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#eceef2;color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:24px 12px 60px;}
+  .wrap{max-width:980px;margin:0 auto;}
+  .legend{max-width:430px;margin:0 auto 18px;background:#fff;border:1px solid var(--line);
+    border-radius:14px;padding:14px 16px;font-size:12.5px;line-height:1.5;color:var(--muted);box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .legend b{color:var(--ink)}
+  .legend .swatch{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:middle;margin-right:5px}
+  .phone{max-width:430px;margin:0 auto;background:#fff;border-radius:22px;
+    box-shadow:0 12px 40px rgba(0,0,0,.16);overflow:hidden;border:1px solid #dfe2e8}
+
+  /* section header bar (matches the rate-card form section style) */
+  .form-head{padding:16px 18px;border-bottom:1px solid var(--line);background:#fff}
+  .form-head .eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--brand);font-weight:800}
+  .form-head h1{margin:3px 0 2px;font-size:18px;font-weight:800;letter-spacing:-.01em}
+  .form-head p{margin:0;font-size:12px;color:var(--muted)}
+
+  .section{border-bottom:8px solid #f1f2f5}
+  .sec-title{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:12px 18px;background:var(--g50);border-bottom:1px solid var(--line)}
+  .sec-title .name{font-weight:800;font-size:14px}
+  .sec-title .count{font-size:11px;color:var(--muted)}
+  .sec-title .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--brand);margin-right:7px;vertical-align:middle}
+
+  .q{padding:16px 18px;border-top:1px solid #f1f2f5}
+  .q:first-child{border-top:none}
+  .qhead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:9px}
+  .qlabel{font-weight:700;font-size:13.5px;line-height:1.35}
+  .req{color:var(--brand);margin-left:3px}
+  .help{font-size:11.5px;color:var(--muted);font-style:italic;margin:-3px 0 9px}
+
+  .np{flex:none;display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:999px;
+    font-size:11.5px;font-weight:700;background:var(--g100);color:var(--muted);border:none;cursor:default}
+  .np.on{background:var(--g700);color:#fff}
+  .np.ring{box-shadow:0 0 0 2px rgba(255,0,96,.35)}
+  .np svg{width:13px;height:13px}
+
+  /* pills */
+  .pills{display:flex;flex-wrap:wrap;gap:7px}
+  .pill{font-size:12px;font-weight:700;padding:7px 14px;border-radius:999px;border:2px solid var(--line);
+    background:#fff;color:var(--ink);cursor:default;white-space:nowrap}
+  .pill.sel{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .pill.sel.neutral{background:var(--g700);border-color:var(--g700)}
+
+  /* picker (ListPicker / scroll-wheel look) */
+  .picker{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;max-width:280px;
+    background:var(--g100);border-radius:11px;padding:11px 13px;font-size:13px;font-weight:600}
+  .picker .v{color:var(--ink)}
+  .picker .chev{color:#9aa1ab}
+  .picker.wheel{background:#fff;border:1px solid var(--line)}
+  .wheelhint{font-size:10.5px;color:#9aa1ab;margin-top:3px}
+
+  /* number stepper */
+  .num{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:11px;overflow:hidden}
+  .num button{width:38px;height:40px;border:none;background:var(--g50);font-size:18px;color:var(--g700);cursor:default}
+  .num input{width:54px;height:40px;border:none;text-align:center;font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+
+  /* inline text field */
+  .field label{display:block;font-size:11px;font-weight:700;color:var(--g700);margin:0 0 4px}
+  .field .ctl{width:100%;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 11px;font-size:13px}
+  .field .ctl.ph{color:#9aa1ab}
+  .req-tag{color:var(--brand);font-weight:700;font-size:10.5px}
+  .opt-tag{color:#9aa1ab;font-weight:600;font-size:10.5px}
+
+  /* optional / action panel */
+  .panel{margin-top:12px;padding:12px;border-radius:11px;border:1px solid var(--line);background:var(--g50)}
+  .panel.action{background:var(--amber-bg);border-color:var(--amber-bd)}
+  .panel .ptitle{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:9px}
+  .panel.action .ptitle{color:var(--amber-tx)}
+  .panel .stack>*{margin-top:10px}
+  .panel .stack>*:first-child{margin-top:0}
+
+  /* photos */
+  .photos{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
+  .thumb{width:58px;height:58px;border-radius:8px;background:#e9ebef;display:flex;align-items:center;justify-content:center;color:#aab0ba}
+  .addphoto{width:58px;height:58px;border-radius:8px;border:2px dashed var(--amber-bd);color:#c08a1a;
+    display:flex;align-items:center;justify-content:center;font-size:22px;background:#fff}
+  .btn-cam{display:inline-flex;align-items:center;gap:7px;background:var(--brand);color:#fff;font-weight:700;
+    font-size:12.5px;padding:8px 12px;border-radius:8px}
+  .btn-file{display:inline-flex;align-items:center;gap:7px;background:var(--brand-soft);color:var(--brand);
+    font-weight:700;font-size:12.5px;padding:8px 12px;border-radius:8px}
+  .btn-cam svg,.btn-file svg{width:14px;height:14px}
+
+  /* sub-card (smart device, label stickers) */
+  .subcard{margin-top:10px;border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff}
+  .subcard .sc-head{display:flex;align-items:center;justify-content:space-between;font-weight:800;font-size:12.5px;margin-bottom:10px}
+  .subcard .sc-head .tag{font-size:10px;font-weight:800;color:#fff;background:#7c3aed;border-radius:5px;padding:2px 6px;text-transform:uppercase;letter-spacing:.04em}
+
+  /* line-item prompt */
+  .lineprompt{margin-top:12px;border-radius:12px;border:1px solid var(--sky-bd);background:var(--sky-bg);padding:12px}
+  .lineprompt .lp-row{display:flex;gap:10px;align-items:flex-start}
+  .lineprompt .lp-ico{flex:none;width:26px;height:26px;border-radius:7px;background:#dbeafe;color:var(--sky-tx);
+    display:flex;align-items:center;justify-content:center;font-weight:800}
+  .lineprompt .lp-txt{font-size:12.5px;color:#1e3a8a;line-height:1.45}
+  .lineprompt .lp-txt b{color:#1e3a8a}
+  .lineprompt .lp-actions{display:flex;gap:8px;margin-top:11px}
+  .lp-add{background:var(--brand);color:#fff;font-weight:700;font-size:12.5px;padding:8px 14px;border-radius:8px}
+  .lp-skip{background:#fff;border:1px solid var(--line);color:var(--g700);font-weight:700;font-size:12.5px;padding:8px 14px;border-radius:8px}
+
+  .added{margin-top:12px;border-radius:12px;border:1px solid var(--em-bd);background:var(--em-bg);padding:11px 12px;
+    display:flex;align-items:center;gap:10px}
+  .added .ck{flex:none;width:24px;height:24px;border-radius:50%;background:var(--em-tx);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
+  .added .ad-txt{font-size:12.5px;color:#065f46;line-height:1.4}
+  .added .ad-txt .meta{color:#10906a;font-weight:600}
+  .added .undo{margin-left:auto;font-size:11.5px;color:#10906a;text-decoration:underline}
+
+  /* behavior callout (NOT part of UI — explains logic for review) */
+  .note{margin:10px 18px 0;padding:8px 11px;border:1px dashed #c7ccd4;border-radius:9px;background:#fcfcfd;
+    font-size:11px;color:#7a818c;line-height:1.45}
+  .note b{color:#5a616c}
+  .note .k{color:var(--brand);font-weight:700}
+
+  /* footer submit */
+  .footer{padding:14px 18px;background:var(--g50);border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .footer .stat{font-size:11.5px;color:var(--muted)}
+  .footer .submit{background:#d9dbe0;color:#8b9099;font-weight:800;font-size:13px;padding:11px 18px;border-radius:10px}
+  .conditional-flag{font-size:10px;font-weight:800;color:#7c3aed;background:#f3e8ff;border-radius:5px;padding:2px 7px;text-transform:uppercase;letter-spacing:.04em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="legend">
+    <b>Static mockup — Scope “Final Checklist” section.</b> Lives at the very bottom of the scope rate-card form, styled like the inspector question form. The dashed grey boxes labelled <b>“Behavior”</b> are notes for you — they are NOT part of the UI.<br><br>
+    <span class="swatch" style="background:var(--sky-bg);border:1px solid var(--sky-bd)"></span>Blue = “add a line item?” prompt &nbsp;
+    <span class="swatch" style="background:var(--em-bg);border:1px solid var(--em-bd)"></span>Green = line added to Whole House &nbsp;
+    <span class="swatch" style="background:var(--amber-bg);border:1px solid var(--amber-bd)"></span>Amber = action required (photo/note)
+  </div>
+
+  <div class="phone">
+
+    <!-- Form header -->
+    <div class="form-head">
+      <div class="eyebrow">✦ Final Checklist</div>
+      <h1>Property Systems &amp; Final Checklist</h1>
+      <p>Required · appears on the Master PDF. Items you flag here can add line items to the scope.</p>
+    </div>
+
+    <!-- 1. SMART HOME TECH -->
+    <div class="section">
+      <div class="sec-title"><span class="name"><span class="dot"></span>Smart Home Tech</span><span class="count">1 of 2 answered</span></div>
+
+      <div class="q">
+        <div class="qhead">
+          <div class="qlabel">Pick the type of device(s) present<span class="req">*</span></div>
+          <button class="np"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="14" height="11" rx="2"/><circle cx="9" cy="11.5" r="2.2"/></svg>Notes/Photos</button>
+        </div>
+        <div class="pills">
+          <span class="pill sel">Bluetooth Lock</span>
+          <span class="pill sel">Smart Home Hub</span>
+          <span class="pill">No Smart Devices</span>
+        </div>
+
+        <!-- Bluetooth Lock sub-card -->
+        <div class="subcard">
+          <div class="sc-head"><span>Bluetooth Lock</span><span class="tag">Device</span></div>
+          <div style="font-size:11px;font-weight:700;color:var(--g700);margin-bottom:5px">Status</div>
+          <div class="pills" style="margin-bottom:11px"><span class="pill sel">Online</span><span class="pill">Offline</span></div>
+          <div class="field" style="margin-bottom:10px">
+            <label>Serial number <span class="req-tag">(required)</span></label>
+            <div class="ctl">BL-482-13907</div>
+          </div>
+          <div class="field">
+            <label>Notes <span class="opt-tag">(optional)</span></label>
+            <div class="ctl ph">e.g. front door deadbolt</div>
+          </div>
+        </div>
+
+        <!-- Smart Home Hub sub-card -->
+        <div class="subcard">
+          <div class="sc-head"><span>Smart Home Hub</span><span class="tag">Device</span></div>
+          <div style="font-size:11px;font-weight:700;color:var(--g700);margin-bottom:5px">Status</div>
+          <div class="pills" style="margin-bottom:11px"><span class="pill sel">Online</span><span class="pill">Offline</span></div>
+          <div class="field">
+            <label>Location of hub <span class="req-tag">(required)</span></label>
+            <div class="ctl">Hallway closet — top shelf</div>
+          </div>
+        </div>
+      </div>
+      <div class="note"><b>Behavior:</b> <span class="k">multi-select</span> — choosing a device reveals its own sub-card. Selecting <b>“No Smart Devices”</b> is exclusive (clears + hides the others). Open question for you: can there be more than one of a device (e.g. two locks)?</div>
+    </div>
+
+    <!-- 2. GARAGE REMOTE -->
+    <div class="section">
+      <div class="sec-title"><span class="name"><span class="dot"></span>Access &amp; Keys</span><span class="count">1 of 2 answered</span></div>
+
+      <div class="q">
+        <div class="qhead"><div class="qlabel">Garage remote present?<span class="req">*</span></div>
+          <button class="np ring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="14" height="11" rx="2"/><circle cx="9" cy="11.5" r="2.2"/></svg>Notes/Photos</button></div>
+        <div class="pills"><span class="pill">Yes</span><span class="pill sel neutral">No</span><span class="pill">N/A</span></div>
+
+        <!-- answered "No" -> line already auto-added to Whole House -->
+        <div class="added">
+          <span class="ck">✓</span>
+          <div class="ad-txt"><b>Universal Garage Remotes</b> added to <b>Whole House</b><br><span class="meta">Vendor 1 · Qty 1 · 100% tenant · $—</span></div>
+          <span class="undo">Undo</span>
+        </div>
+      </div>
+      <div class="note"><b>Behavior:</b> on <b>“No”</b>, we check the <span class="k">whole inspection by exact catalog code</span>. Not found → auto-add <b>Universal Garage Remotes</b> to Whole House with defaults (shown above), behaves like any other line on the vendor/chargeback PDFs. On <b>“Yes”</b> → amber panel requiring a photo + note of where remotes are left (see Mailbox below).</div>
+
+      <div class="q">
+        <div class="qhead"><div class="qlabel">Mailbox keys present?<span class="req">*</span></div>
+          <button class="np on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="14" height="11" rx="2"/><circle cx="9" cy="11.5" r="2.2"/></svg>Notes/Photos</button></div>
+        <div class="pills"><span class="pill sel">Yes</span><span class="pill">No</span><span class="pill">N/A</span></div>
+
+        <!-- answered "Yes" -> action required panel -->
+        <div class="panel action">
+          <div class="ptitle">Action required</div>
+          <div class="stack">
+            <div class="field"><label style="color:var(--amber-tx)">Where are they left? <span class="req-tag">(required)</span></label><div class="ctl">Kitchen drawer left of sink</div></div>
+            <div>
+              <div style="font-size:11px;font-weight:700;color:var(--amber-tx);margin-bottom:4px">Photo <span class="req-tag">(required)</span></div>
+              <div class="photos">
+                <div class="thumb"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><circle cx="12" cy="12.5" r="3.2"/></svg></div>
+                <button class="btn-cam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>Take photo</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="note"><b>Behavior:</b> on <b>“No”</b> → prompt to add <b>Replace Mailbox Key</b> (same as garage). On <b>“Yes”</b> → require photo + note of where keys are left (shown).</div>
+    </div>
+
+    <!-- 3. HVAC -->
+    <div class="section">
+      <div class="sec-title"><span class="name"><span class="dot"></span>HVAC</span><span class="count">0 of 2 answered</span></div>
+
+      <div class="q">
+        <div class="qhead"><div class="qlabel">HVAC functioning?<span class="req">*</span></div>
+          <button class="np"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="14" height="11" rx="2"/><circle cx="9" cy="11.5" r="2.2"/></svg>Notes/Photos</button></div>
+        <div class="pills"><span class="pill">Yes</span><span class="pill sel neutral">No</span></div>
+
+        <!-- "No" -> prompt still open (Add line / Not needed) -->
+        <div class="lineprompt">
+          <div class="lp-row">
+            <span class="lp-ico">+</span>
+            <div class="lp-txt">No <b>HVAC Service Clean Top Off</b> line found anywhere in this scope. Add it under <b>Whole House</b>?</div>
+          </div>
+          <div class="lp-actions"><span class="lp-add">Add line</span><span class="lp-skip">Not needed</span></div>
+        </div>
+      </div>
+
+      <div class="q">
+        <div class="qhead"><div class="qlabel">Label sticker photos<span class="req">*</span></div></div>
+        <div class="help">Photograph the applied ResiHome label on each unit.</div>
+        <div class="subcard" style="padding:0;border:none;margin-top:2px">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px">
+            <div style="text-align:center"><div class="addphoto" style="margin:0 auto">+</div><div style="font-size:10.5px;color:var(--muted);margin-top:5px">Air Handler <span class="req">*</span></div></div>
+            <div style="text-align:center"><div class="addphoto" style="margin:0 auto">+</div><div style="font-size:10.5px;color:var(--muted);margin-top:5px">Outside Condenser <span class="req">*</span></div></div>
+            <div style="text-align:center"><div class="addphoto" style="margin:0 auto">+</div><div style="font-size:10.5px;color:var(--muted);margin-top:5px">Water Heater <span class="req">*</span></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="note"><b>Behavior:</b> on <b>“No”</b> → prompt to add <b>HVAC Service Clean Top Off</b>. Label sticker = three required photos. Open Qs: is HVAC Yes/No only (no N/A)? Are the 3 stickers always required, or only when functioning = Yes?</div>
+    </div>
+
+    <!-- 4. AIR FILTERS -->
+    <div class="section">
+      <div class="sec-title"><span class="name"><span class="dot"></span>Air Filters</span><span class="count">3 of 3 answered</span></div>
+
+      <div class="q">
+        <div class="qhead"><div class="qlabel">Air filters — total quantity<span class="req">*</span></div></div>
+        <div class="help">Pre-filled from the property record — confirm or correct (whole number, 1–3).</div>
+        <div class="num"><button>–</button><input value="2" readonly /><button>+</button></div>
+      </div>
+
+      <div class="q">
+        <div class="qhead"><div class="qlabel">Filter size #1<span class="req">*</span></div></div>
+        <div class="picker wheel"><span class="v">20 × 25 × 1</span><span class="chev">▾</span></div>
+        <div class="wheelhint">⟳ scroll-wheel · pre-filled from property</div>
+      </div>
+      <div class="q">
+        <div class="qhead"><div class="qlabel">Filter size #2<span class="req">*</span></div></div>
+        <div class="picker wheel"><span class="v">16 × 20 × 1</span><span class="chev">▾</span></div>
+        <div class="wheelhint">⟳ scroll-wheel · pre-filled from property</div>
+      </div>
+      <div class="note"><b>Behavior:</b> quantity (<span class="k">air_filters___total_quantity</span>) drives how many size pickers appear. Qty 2 → sizes #1–#2 (shown); a 3rd appears at qty 3. Sizes pre-fill from <span class="k">air_filters___type__1/2/3</span>. Open Q: full list of selectable sizes for the wheel?</div>
+    </div>
+
+    <!-- 5. UTILITIES -->
+    <div class="section">
+      <div class="sec-title"><span class="name"><span class="dot"></span>Utilities</span><span class="count">3 of 5 answered</span></div>
+
+      <div class="q"><div class="qhead"><div class="qlabel">Electric<span class="req">*</span></div></div>
+        <div class="pills"><span class="pill sel">On</span><span class="pill">Off</span></div></div>
+      <div class="q"><div class="qhead"><div class="qlabel">Water<span class="req">*</span></div></div>
+        <div class="pills"><span class="pill sel">On</span><span class="pill">Off</span></div></div>
+      <div class="q"><div class="qhead"><div class="qlabel">Gas<span class="req">*</span></div></div>
+        <div class="pills"><span class="pill sel">On</span><span class="pill">Off</span><span class="pill">N/A</span></div></div>
+
+      <div class="q"><div class="qhead"><div class="qlabel">Trash bins<span class="req">*</span></div></div>
+        <div class="pills"><span class="pill sel">Present</span><span class="pill">Missing</span></div>
+        <div class="field" style="margin-top:11px;max-width:200px"><label>How many bins? <span class="req-tag">(required)</span></label><div class="num"><button>–</button><input value="2" readonly /><button>+</button></div></div>
+      </div>
+
+      <div class="q">
+        <div class="qhead"><div class="qlabel">Septic system<span class="req">*</span></div><span class="conditional-flag">conditional</span></div>
+        <div class="help">Shown because this property has a septic fee on file.</div>
+        <div class="pills"><span class="pill sel neutral">Needs pump-out</span><span class="pill">OK</span></div>
+        <div class="lineprompt">
+          <div class="lp-row"><span class="lp-ico">+</span><div class="lp-txt">No <b>Septic Pump Out</b> line found anywhere in this scope. Add it under <b>Whole House</b>?</div></div>
+          <div class="lp-actions"><span class="lp-add">Add line</span><span class="lp-skip">Not needed</span></div>
+        </div>
+      </div>
+      <div class="note"><b>Behavior:</b> Septic row only renders when property <span class="k">septic_fee &gt; 0</span>. “Present” trash bins reveals a count field. Open Q: do On/Off or “Missing” bins ever spawn a line item, or are they status-only?</div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <div class="stat"><b style="color:var(--brand)">4 required items left</b> · finish to submit</div>
+      <div class="submit">Submit for Approval</div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
