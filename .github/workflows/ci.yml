@@ -1,0 +1,61 @@
+name: CI
+
+# Quality gate. `main` auto-deploys to resiwalk.com, so a bad push ships
+# straight to live inspectors. This runs the same checks we run locally —
+# typecheck + build + tests — on every PR and on pushes to main, so broken
+# code is caught BEFORE it reaches production. Pair this with a branch
+# protection rule requiring "build-test" to pass before merging to main.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the native-parity diff has a base
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      # Informational, never blocks: reminds reviewers when a web change touches a
+      # device capability / deep link / Capacitor plugin that needs a matching
+      # native update (see CLAUDE.md). Emits GitHub warning annotations.
+      - name: Web↔native parity reminder
+        if: always()
+        continue-on-error: true
+        env:
+          BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD~1' }}
+        run: npm run check:native-parity
+
+      # Lint is advisory (don't fail the gate on pre-existing lint debt).
+      - name: Lint (advisory)
+        if: always()
+        continue-on-error: true
+        run: npm run lint

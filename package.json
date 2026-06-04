@@ -7,8 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:native-parity": "node scripts/check-native-parity.mjs"
   },
   "dependencies": {
     "@capacitor/app": "^6.0.1",
