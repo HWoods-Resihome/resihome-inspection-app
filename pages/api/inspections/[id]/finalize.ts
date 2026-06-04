@@ -23,7 +23,9 @@ import {
   updateInspection,
   answerHasAfterPhotoProperty,
   stampFirstCompleted,
+  upsertAnswers,
 } from '@/lib/hubspot';
+import { buildQaAnswerProps } from '@/lib/answerProps';
 import { isInternalResolution } from '@/lib/vendors';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
@@ -43,7 +45,7 @@ import { getGmailRefreshToken, encryptToken } from '@/lib/gmailAuth';
 import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, type CreateTicketResult } from '@/lib/maintenanceAi';
 import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
-import { summarizeFinalChecklist, type FcAnswers } from '@/lib/finalChecklist';
+import { summarizeFinalChecklist, finalChecklistAnswerRecords, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
 
 export const config = {
   api: {
@@ -376,16 +378,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const templateLabel = templateLabelFor(inspection.templateType) || 'Rate Card';
 
     // Final Checklist (scope only) → Master PDF Q&A block. Read the single qa
-    // record (JSON in note) and summarize it for display.
+    // record (JSON in note) and summarize it for display. The parsed answers +
+    // completion context are hoisted so step 6c can ALSO materialize each item
+    // as its own structured HubSpot answer record (the fc__all blob stays the
+    // form's working store; these are an idempotent reporting projection).
     let finalChecklistGroups: { name: string; rows: { label: string; value: string }[] }[] | undefined;
+    let fcAnswers: FcAnswers | null = null;
+    let fcCtx: FcCompletionCtx | null = null;
     // Only render the block when this inspection actually has checklist data.
     // Pre-existing reports (pending approval / completed before this feature)
     // have no fc__all record → no block, so they're unaffected.
     const fcRec = answers.find((a) => a.answerType === 'qa' && a.questionIdExternal === 'fc__all');
     if (inspection.templateType === 'pm_scope_rate_card' && fcRec?.note) {
-      let fcAnswers: FcAnswers = {};
-      try { fcAnswers = JSON.parse(fcRec.note); } catch { fcAnswers = {}; }
-      finalChecklistGroups = summarizeFinalChecklist(fcAnswers, {
+      let parsed: FcAnswers = {};
+      try { parsed = JSON.parse(fcRec.note); } catch { parsed = {}; }
+      fcAnswers = parsed;
+      fcCtx = {
         septicFee: inspectionData.propertySepticFee ?? null,
         airQtyPrefill: inspectionData.propertyAirFiltersTotal ?? null,
         filterOptionsAvailable: true,
@@ -394,7 +402,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           inspectionData.propertyAirFiltersType2 ?? null,
           inspectionData.propertyAirFiltersType3 ?? null,
         ],
-      });
+      };
+      finalChecklistGroups = summarizeFinalChecklist(parsed, fcCtx);
     }
 
     // Signed gallery base so every PDF's photos link to a browsable in-app
@@ -628,6 +637,39 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     // Stamp the FIRST completion timestamp (kept even if re-finalized later).
     await stampFirstCompleted(id, nowIso);
+
+    // ---- 6c. Materialize the Final Checklist as structured answer records ----
+    // The form persists the whole checklist as ONE opaque qa blob (fc__all) so it
+    // can round-trip the rich state offline. For HubSpot REPORTING we also emit
+    // one qa answer record per visible checklist item — each with a readable
+    // value (identical to the PDF) plus the raw per-question state in `note`.
+    // Idempotent via a stable external id (FC-<inspId>-<questionId>), so a
+    // re-finalize updates them in place. Best-effort: it NEVER blocks finalize.
+    if (fcAnswers && fcCtx) {
+      try {
+        const existingByExt = new Map(answers.map((x) => [x.answerIdExternal, x.recordId]));
+        const fcUpserts = finalChecklistAnswerRecords(fcAnswers, fcCtx).map((rec) => {
+          const answerIdExternal = `FC-${id}-${rec.questionId}`;
+          return {
+            recordId: existingByExt.get(answerIdExternal),
+            answerProps: buildQaAnswerProps({
+              answerIdExternal,
+              inspectionIdExternal: inspection.inspectionIdExternal || '',
+              questionIdExternal: rec.questionId,
+              questionText: rec.questionText,
+              section: `Final Checklist · ${rec.sectionName}`,
+              summaryInstanceLabel: '',
+              answerValue: rec.value,
+              note: JSON.stringify(rec.state || {}),
+            }, { isScope: true }),
+            questionHubspotRecordId: null,
+          };
+        });
+        if (fcUpserts.length > 0) await upsertAnswers(id, fcUpserts);
+      } catch (e) {
+        console.warn('[finalize] Final Checklist structured-answer materialization failed (non-fatal):', e);
+      }
+    }
 
     // ---- 7. Create a maintenance ticket (best-effort, first finalize only) ----
     // Runs BEFORE the email so its pass/fail + ticket link can be reported there.

@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { finalChecklistGap, isFinalChecklistComplete, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
+import {
+  finalChecklistGap, isFinalChecklistComplete,
+  finalChecklistAnswerRecords, summarizeFinalChecklist,
+  type FcAnswers, type FcCompletionCtx,
+} from '@/lib/finalChecklist';
 
 const baseCtx: FcCompletionCtx = {
   septicFee: 0,                  // septic hidden → not required
@@ -70,5 +74,43 @@ describe('finalChecklistGap', () => {
     const a = complete(); // no septic answer
     expect(finalChecklistGap(a, baseCtx)).toBeNull(); // hidden when fee 0
     expect(finalChecklistGap(a, { ...baseCtx, septicFee: 50 })).toContain('Septic'); // now required
+  });
+});
+
+describe('finalChecklistAnswerRecords (structured HubSpot projection)', () => {
+  it('emits one record per visible question, with readable values', () => {
+    const recs = finalChecklistAnswerRecords(complete(), baseCtx);
+    const byId = Object.fromEntries(recs.map((r) => [r.questionId, r]));
+
+    // Septic is hidden (fee 0), so it must NOT be materialized.
+    expect(byId.fc_septic).toBeUndefined();
+    // Every visible question gets exactly one record.
+    expect(recs.filter((r) => r.questionId === 'fc_electric')).toHaveLength(1);
+
+    // Readable values match what the PDF/screen show.
+    expect(byId.fc_electric.value).toBe('On');
+    expect(byId.fc_air_filters_qty.value).toBe('2');
+    expect(byId.fc_label_stickers.value).toContain('Air Handler: ✓');
+    // Device sub-form flattens into "Type (Field: v, …)".
+    expect(byId.fc_smart_home_device.value).toBe('No Smart Devices');
+    // Each record carries section metadata + the raw state for fidelity.
+    expect(byId.fc_electric.sectionName).toBe('Utilities');
+    expect(byId.fc_electric.state).toEqual({ value: 'On' });
+  });
+
+  it('shows septic as its own record once the property has a septic fee', () => {
+    const a = complete(); a.fc_septic = { value: 'OK' };
+    const recs = finalChecklistAnswerRecords(a, { ...baseCtx, septicFee: 50 });
+    const septic = recs.find((r) => r.questionId === 'fc_septic');
+    expect(septic?.value).toBe('OK');
+    expect(septic?.sectionName).toBe('Utilities');
+  });
+
+  it('stays consistent with the PDF summary (same values, same visibility)', () => {
+    const a = complete();
+    const recs = finalChecklistAnswerRecords(a, baseCtx);
+    const summaryRows = summarizeFinalChecklist(a, baseCtx).flatMap((g) => g.rows);
+    // The PDF summary and the structured records render the SAME value strings.
+    expect(recs.map((r) => r.value).sort()).toEqual(summaryRows.map((r) => r.value).sort());
   });
 });

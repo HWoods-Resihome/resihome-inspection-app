@@ -152,6 +152,95 @@ export function fcFilterCount(a: FcAnswers, airQtyPrefill: number | null): numbe
   return Math.max(1, Math.min(3, Number(q) || 1));
 }
 
+/** Whether a question is currently shown (respects conditional visibility). */
+export function fcQuestionVisible(q: FcQuestion, ctx: FcCompletionCtx): boolean {
+  if (q.showWhenProperty) {
+    const v = ctx.septicFee ?? 0;
+    return v > (q.showWhenProperty.gt ?? 0);
+  }
+  return true;
+}
+
+/** Render ONE question's answer as a human-readable string. The screen summary,
+ *  the Master PDF, and the per-question HubSpot records all go through this, so
+ *  the displayed value can never drift between them. `a` is the full answers map
+ *  (needed for the dependent filter-size count). */
+export function fcRenderValue(
+  q: FcQuestion,
+  ans: FcAnswerState,
+  a: FcAnswers,
+  ctx: FcCompletionCtx,
+): string {
+  if (q.type === 'device_subform') {
+    if (!ans.value) return '—';
+    const dev = (q.devices || []).find((d) => d.value === ans.value);
+    const parts: string[] = [];
+    for (const f of (dev?.fields || [])) {
+      const fv = (ans.device?.[f.id] || '').trim();
+      if (fv) parts.push(`${f.label}: ${fv}`);
+    }
+    return parts.length ? `${ans.value} (${parts.join(', ')})` : ans.value;
+  } else if (q.type === 'number') {
+    const eff = ans.quantity ?? ctx.airQtyPrefill ?? q.min ?? null;
+    return eff == null ? '—' : String(eff);
+  } else if (q.type === 'filter_sizes') {
+    const count = fcFilterCount(a, ctx.airQtyPrefill);
+    const sizes: string[] = [];
+    for (let i = 0; i < count; i++) {
+      let s = (ans.filterSizes?.[i] || ctx.filterPrefills[i] || '').trim();
+      if (s === FC_FILTER_OTHER) s = (ans.filterSizesOther?.[i] || '').trim();
+      if (s) sizes.push(s);
+    }
+    return sizes.length ? sizes.join(', ') : '—';
+  } else if (q.type === 'photo_set') {
+    return (q.photos || [])
+      .map((p) => `${p.label}: ${((ans.stickerPhotos?.[p.id] || []).length) ? '✓' : '—'}`)
+      .join('  ·  ');
+  } else { // single_select
+    let value = ans.value || '—';
+    const extras: string[] = [];
+    const cnt = (q.countOnValues || []).find((c) => c.value === ans.value);
+    if (cnt && ans.count != null) extras.push(`${cnt.label} ${ans.count}`);
+    if ((ans.photoUrls || []).length) extras.push(`Photo ✓`);
+    if (ans.note) extras.push(`Note: ${ans.note}`);
+    if (ans.added) extras.push(`Added line`);
+    if (extras.length) value += ` — ${extras.join(' · ')}`;
+    return value;
+  }
+}
+
+/** One structured, reportable record per VISIBLE checklist question. This is the
+ *  basis for persisting each item as its own HubSpot answer object (at finalize)
+ *  instead of one opaque JSON blob — so each Final Checklist item is queryable in
+ *  HubSpot reporting. `state` is the raw per-question answer (for fidelity). */
+export interface FcAnswerRecord {
+  questionId: string;
+  questionText: string;
+  sectionId: string;
+  sectionName: string;
+  value: string;        // human-readable (same as the PDF/screen)
+  state: FcAnswerState; // raw per-question answer
+}
+
+export function finalChecklistAnswerRecords(a: FcAnswers, ctx: FcCompletionCtx): FcAnswerRecord[] {
+  const out: FcAnswerRecord[] = [];
+  for (const section of FINAL_CHECKLIST) {
+    for (const q of section.questions) {
+      if (!fcQuestionVisible(q, ctx)) continue;
+      const ans = a[q.id] || {};
+      out.push({
+        questionId: q.id,
+        questionText: q.label,
+        sectionId: section.id,
+        sectionName: section.name,
+        value: fcRenderValue(q, ans, a, ctx),
+        state: ans,
+      });
+    }
+  }
+  return out;
+}
+
 /** Build a human-readable summary of the checklist for the Master PDF. Renders
  *  each visible question as one label/value row (Title Case, prefilled values
  *  included). Empty sections are dropped. */
@@ -163,50 +252,8 @@ export function summarizeFinalChecklist(
   for (const section of FINAL_CHECKLIST) {
     const rows: { label: string; value: string }[] = [];
     for (const q of section.questions) {
-      if (q.showWhenProperty) {
-        const v = ctx.septicFee ?? 0;
-        if (!(v > (q.showWhenProperty.gt ?? 0))) continue;
-      }
-      const ans = a[q.id] || {};
-      let value = '';
-      if (q.type === 'device_subform') {
-        if (!ans.value) { value = '—'; }
-        else {
-          const dev = (q.devices || []).find((d) => d.value === ans.value);
-          const parts: string[] = [];
-          for (const f of (dev?.fields || [])) {
-            const fv = (ans.device?.[f.id] || '').trim();
-            if (fv) parts.push(`${f.label}: ${fv}`);
-          }
-          value = parts.length ? `${ans.value} (${parts.join(', ')})` : ans.value;
-        }
-      } else if (q.type === 'number') {
-        const eff = ans.quantity ?? ctx.airQtyPrefill ?? q.min ?? null;
-        value = eff == null ? '—' : String(eff);
-      } else if (q.type === 'filter_sizes') {
-        const count = fcFilterCount(a, ctx.airQtyPrefill);
-        const sizes: string[] = [];
-        for (let i = 0; i < count; i++) {
-          let s = (ans.filterSizes?.[i] || ctx.filterPrefills[i] || '').trim();
-          if (s === FC_FILTER_OTHER) s = (ans.filterSizesOther?.[i] || '').trim();
-          if (s) sizes.push(s);
-        }
-        value = sizes.length ? sizes.join(', ') : '—';
-      } else if (q.type === 'photo_set') {
-        value = (q.photos || [])
-          .map((p) => `${p.label}: ${((ans.stickerPhotos?.[p.id] || []).length) ? '✓' : '—'}`)
-          .join('  ·  ');
-      } else { // single_select
-        value = ans.value || '—';
-        const extras: string[] = [];
-        const cnt = (q.countOnValues || []).find((c) => c.value === ans.value);
-        if (cnt && ans.count != null) extras.push(`${cnt.label} ${ans.count}`);
-        if ((ans.photoUrls || []).length) extras.push(`Photo ✓`);
-        if (ans.note) extras.push(`Note: ${ans.note}`);
-        if (ans.added) extras.push(`Added line`);
-        if (extras.length) value += ` — ${extras.join(' · ')}`;
-      }
-      rows.push({ label: q.label, value });
+      if (!fcQuestionVisible(q, ctx)) continue;
+      rows.push({ label: q.label, value: fcRenderValue(q, a[q.id] || {}, a, ctx) });
     }
     if (rows.length) out.push({ name: section.name, rows });
   }
@@ -220,10 +267,7 @@ export function summarizeFinalChecklist(
 export function finalChecklistGap(a: FcAnswers, ctx: FcCompletionCtx): string | null {
   for (const section of FINAL_CHECKLIST) {
     for (const q of section.questions) {
-      if (q.showWhenProperty) {
-        const v = ctx.septicFee ?? 0;
-        if (!(v > (q.showWhenProperty.gt ?? 0))) continue;
-      }
+      if (!fcQuestionVisible(q, ctx)) continue;
       const ans = a[q.id] || {};
       const where = `${section.name} · ${q.label}`;
       if (q.type === 'device_subform') {
