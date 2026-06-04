@@ -84,15 +84,14 @@ export function FinalChecklist(props: Props) {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={displayImageSrc(u)} alt="" onClick={() => openLightbox(camKey, i)}
               title="Tap to view, mark up, or delete"
-              className="w-14 h-14 object-cover rounded-lg border border-gray-200 cursor-pointer" />
+              className="w-14 h-14 object-cover rounded border border-gray-200 cursor-pointer" />
             {!readOnly && (
-              // Quick delete. Positioned INSIDE the photo's top-right corner (not a
-              // negative offset) so it can never be clipped by the grid/section and
-              // is always visible on the thumbnail. White ring for contrast on any
-              // photo; stopPropagation so the tap deletes instead of opening the viewer.
+              // Quick delete — same size / formatting / corner position as the room
+              // section photo strip (RateCardForm) so the × is consistent everywhere.
+              // stopPropagation so the tap deletes instead of opening the viewer.
               <button type="button" aria-label="Delete photo"
                 onClick={(e) => { e.stopPropagation(); removePhoto(camKey, i); }}
-                className="absolute top-0.5 right-0.5 z-10 w-5 h-5 rounded-full bg-ink/90 text-white ring-2 ring-white shadow text-xs leading-none flex items-center justify-center active:bg-red-600">&times;</button>
+                className="absolute -top-1 -right-1 bg-ink text-white text-xs w-4 h-4 rounded-full leading-none flex items-center justify-center hover:bg-brand">&times;</button>
             )}
           </div>
         ))}

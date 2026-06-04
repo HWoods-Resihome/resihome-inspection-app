@@ -237,6 +237,14 @@ export function RateCardForm(props: RateCardFormProps) {
     for (const c of catalog) m.set(c.lineItemCode, c);
     return m;
   }, [catalog]);
+  // Fresh handle to the code→item map for callbacks that run outside the render
+  // closure (notably the AI-review deterministic "missing category" checks). The
+  // runAiReview callback does NOT list catalog in its deps, so without this it
+  // could read the empty map captured before the catalog loaded — which made
+  // every lookup miss and falsely flagged BOTH Paint and Cleaning as missing
+  // even when those lines were present.
+  const catalogByCodeRef = useRef(catalogByCode);
+  useEffect(() => { catalogByCodeRef.current = catalogByCode; }, [catalogByCode]);
   const inspectionRegion = props.inspectionRegion || '';
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
@@ -2460,15 +2468,26 @@ export function RateCardForm(props: RateCardFormProps) {
     // cleaning line anywhere, append a validation item so the inspector confirms
     // none are needed (or adds them). Only when the review itself succeeded.
     if (!lastErr) {
-      const hasCat = (re: RegExp) => Object.values(linesBySectionRef.current).some((arr) =>
-        (arr || []).some((l) => { const it = catalogByCode.get(l.lineItemCode); return !!it && re.test(it.category || ''); }));
-      const extra: AiAdjustment[] = [];
-      if (!hasCat(/paint/i)) extra.push(missingCategoryCheck('paint'));
-      if (!hasCat(/clean/i)) extra.push(missingCategoryCheck('cleaning'));
-      if (extra.length) setAiAdjustments((prev) => {
-        const have = new Set(prev.map((p) => p.id));
-        return [...prev, ...extra.filter((e) => !have.has(e.id))];
-      });
+      // Use the live catalog map (ref), not the closure copy. If the catalog
+      // hasn't loaded we can't classify any line — skip the check entirely
+      // rather than wrongly report every category as missing. The "Unit Turns
+      // (Paint/Clean/Minor Repairs)" category satisfies BOTH paint and clean.
+      const cat = catalogByCodeRef.current;
+      if (cat.size > 0) {
+        const hasCat = (re: RegExp) => Object.values(linesBySectionRef.current).some((arr) =>
+          (arr || []).some((l) => {
+            const it = cat.get(l.lineItemCode);
+            if (!it) return false;
+            return re.test(it.category || '') || re.test(it.subcategory || '');
+          }));
+        const extra: AiAdjustment[] = [];
+        if (!hasCat(/paint/i)) extra.push(missingCategoryCheck('paint'));
+        if (!hasCat(/clean/i)) extra.push(missingCategoryCheck('cleaning'));
+        if (extra.length) setAiAdjustments((prev) => {
+          const have = new Set(prev.map((p) => p.id));
+          return [...prev, ...extra.filter((e) => !have.has(e.id))];
+        });
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, props.inspectionRecordId, props.bedrooms, props.bathrooms, props.squareFootage, props.lastTenantMonths, inspectionRegion]);
