@@ -92,6 +92,9 @@ interface Props {
   // The camera's shared stream (video + audio in AI mode). We pull the mic from
   // here instead of opening a second getUserMedia — one stream = reliable voice.
   getStream: () => MediaStream | null;
+  // Live digital-zoom factor of the shared camera (1 = none). Captures crop to it
+  // so AI stills/frames match the pinch-zoomed preview.
+  getZoom?: () => number;
   // Epoch ms of the last manual shutter press (0 if none) — gates the auto-still.
   getLastManualCaptureAt: () => number;
   getActiveRoom: () => ActiveRoom | null;
@@ -126,7 +129,18 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 export function CameraAILayer(props: Props) {
-  const { enabled, videoRef, getStream, getLastManualCaptureAt, getActiveRoom, rooms, onNavigateRoom, region, catalog, regions, tenantMonths, addressSnapshot, propertyRecordId, uploadPhoto, onAddLine, onStill, onStatus } = props;
+  const { enabled, videoRef, getStream, getZoom, getLastManualCaptureAt, getActiveRoom, rooms, onNavigateRoom, region, catalog, regions, tenantMonths, addressSnapshot, propertyRecordId, uploadPhoto, onAddLine, onStill, onStatus } = props;
+  // Center-crop the current video frame into ctx by the live digital-zoom factor,
+  // so AI frames + saved stills match the pinch-zoomed preview.
+  const drawZoomedFrame = (ctx: CanvasRenderingContext2D, v: HTMLVideoElement, dw: number, dh: number) => {
+    const z = getZoom ? getZoom() : 1;
+    if (z > 1.001) {
+      const sw = v.videoWidth / z, sh = v.videoHeight / z;
+      ctx.drawImage(v, (v.videoWidth - sw) / 2, (v.videoHeight - sh) / 2, sw, sh, 0, 0, dw, dh);
+    } else {
+      ctx.drawImage(v, 0, 0, dw, dh);
+    }
+  };
 
   // Kept fresh each render so the once-wired audio loop / inference timers read
   // current rooms + callbacks instead of their first-render closures.
@@ -630,7 +644,7 @@ export function CameraAILayer(props: Props) {
     const w = Math.round(v.videoWidth * scale), h = Math.round(v.videoHeight * scale);
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const ctx = c.getContext('2d'); if (!ctx) return null;
-    ctx.drawImage(v, 0, 0, w, h);
+    drawZoomedFrame(ctx, v, w, h);
     return c.toDataURL('image/jpeg', 0.6).split(',')[1] || null;
   }
   // addToRoom=false → capture a still ONLY for a call-out card (uploaded, tags
@@ -644,7 +658,7 @@ export function CameraAILayer(props: Props) {
     if (addToRoom && !force && (roomStillCountRef.current[room.id] || 0) >= MAX_ROOM_STILLS) return undefined;
     const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
     const ctx = c.getContext('2d'); if (!ctx) return undefined;
-    ctx.drawImage(v, 0, 0, c.width, c.height);
+    drawZoomedFrame(ctx, v, c.width, c.height);
     drawEvidenceStamp(ctx, c.width, c.height, stampLinesRef.current);
     if (addToRoom) {
       // Fire the shutter flash the instant we grab the frame — immediate feedback.

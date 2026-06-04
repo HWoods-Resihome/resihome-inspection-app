@@ -419,14 +419,33 @@ export function CameraCapture({
   //      so global pinch-zoom / accessibility is unaffected elsewhere.
   // Single-finger taps/drags (shutter, slide-to-zoom, the reference-photo strip's
   // horizontal scroll) are untouched.
+  // The PAGE must never zoom while the camera is open — a pinch should zoom the
+  // CAMERA (handled by the pinch handler below), not scale the whole screen out
+  // of reach. Every browser engine needs a different lever, so we pull them all:
+  //   • iOS WebKit (Safari AND Chrome — Chrome on iOS is WebKit): preventDefault
+  //     the gesture* events (pinch) and a fast second tap (double-tap zoom).
+  //   • Android Chrome: pinch is a 2-finger touchmove — preventDefault it; and
+  //     `user-scalable=no` in the viewport is honored here (and in the native
+  //     WKWebView), so lock it while open and restore on close.
+  // One-finger scrolling (the reference-photo strip) is untouched: we only block
+  // multi-touch moves and rapid double-taps.
   useEffect(() => {
     if (!isOpen) return;
+    const opts = { passive: false } as AddEventListenerOptions;
     const preventGesture = (e: Event) => { e.preventDefault(); };
-    const preventPinchMove = (e: TouchEvent) => { if (e.touches.length > 1) e.preventDefault(); };
-    document.addEventListener('gesturestart', preventGesture as EventListener, { passive: false });
-    document.addEventListener('gesturechange', preventGesture as EventListener, { passive: false });
-    document.addEventListener('gestureend', preventGesture as EventListener, { passive: false });
-    document.addEventListener('touchmove', preventPinchMove, { passive: false });
+    const preventMultiTouch = (e: TouchEvent) => { if (e.touches.length > 1) e.preventDefault(); };
+    let lastTouchEnd = 0;
+    const preventDoubleTap = (e: TouchEvent) => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 300) e.preventDefault(); // swallow the 2nd tap of a double-tap-zoom
+      lastTouchEnd = now;
+    };
+    document.addEventListener('gesturestart', preventGesture as EventListener, opts);
+    document.addEventListener('gesturechange', preventGesture as EventListener, opts);
+    document.addEventListener('gestureend', preventGesture as EventListener, opts);
+    document.addEventListener('touchstart', preventMultiTouch, opts);
+    document.addEventListener('touchmove', preventMultiTouch, opts);
+    document.addEventListener('touchend', preventDoubleTap, opts);
     const vp = typeof document !== 'undefined' ? document.querySelector('meta[name=viewport]') : null;
     const prevVp = vp?.getAttribute('content') ?? null;
     if (vp) vp.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
@@ -434,10 +453,33 @@ export function CameraCapture({
       document.removeEventListener('gesturestart', preventGesture as EventListener);
       document.removeEventListener('gesturechange', preventGesture as EventListener);
       document.removeEventListener('gestureend', preventGesture as EventListener);
-      document.removeEventListener('touchmove', preventPinchMove);
+      document.removeEventListener('touchstart', preventMultiTouch);
+      document.removeEventListener('touchmove', preventMultiTouch);
+      document.removeEventListener('touchend', preventDoubleTap);
       if (vp) vp.setAttribute('content', prevVp ?? 'width=device-width, initial-scale=1');
     };
   }, [isOpen]);
+
+  // Pinch-to-zoom the CAMERA (digital zoom, driven into the same `zoom` state the
+  // slide-to-zoom uses). Reading the two-finger distance works identically on iOS
+  // Safari/Chrome and Android Chrome; the page-zoom guard above stops the browser
+  // from also zooming. capturePhoto / video record / the AI still all crop to this
+  // factor so the captured image matches the zoomed preview.
+  const pinchRef = useRef<{ startDist: number; startZoom: number } | null>(null);
+  const touchDist = (t: React.TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const onViewportTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) pinchRef.current = { startDist: touchDist(e.touches) || 1, startZoom: zoomRef.current };
+  };
+  const onViewportTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && pinchRef.current) {
+      const z = Math.max(1, Math.min(MAX_ZOOM, pinchRef.current.startZoom * (touchDist(e.touches) / pinchRef.current.startDist)));
+      zoomRef.current = z;
+      setZoom(z);
+    }
+  };
+  const onViewportTouchEnd = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) pinchRef.current = null;
+  };
 
   // Resume after backgrounding. When the tab is hidden (user switches apps /
   // locks the phone / changes tabs), the browser stops the camera tracks, so on
@@ -876,7 +918,15 @@ export function CameraCapture({
         setBusy(false);
         return;
       }
-      ctx.drawImage(video, 0, 0, vw, vh);
+      // Center-crop by the live digital-zoom factor so the photo matches the
+      // (CSS-scaled) zoomed preview the inspector framed.
+      const z = zoomRef.current;
+      if (z > 1.001) {
+        const sw = vw / z, sh = vh / z;
+        ctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, vw, vh);
+      } else {
+        ctx.drawImage(video, 0, 0, vw, vh);
+      }
       // Burn the evidence stamp (address / timestamp / GPS coordinates) into the
       // frame. Coordinates are recorded as-is; no address-match verdict.
       const stampLines: StampLine[] = [];
@@ -1113,6 +1163,7 @@ export function CameraCapture({
           enabled={aiOn}
           videoRef={videoRef}
           getStream={() => streamRef.current}
+          getZoom={() => zoomRef.current}
           getLastManualCaptureAt={() => lastManualCaptureRef.current}
           onStatus={setAiStatus}
           getActiveRoom={() => {
@@ -1386,7 +1437,9 @@ export function CameraCapture({
       )}
 
       {/* Camera viewport */}
-      <div className="flex-1 relative bg-black overflow-hidden">
+      <div className="flex-1 relative bg-black overflow-hidden"
+        onTouchStart={onViewportTouchStart} onTouchMove={onViewportTouchMove}
+        onTouchEnd={onViewportTouchEnd} onTouchCancel={onViewportTouchEnd}>
         {permissionState === 'denied' || permissionState === 'unsupported' ? (
           <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
             <div className="text-white max-w-sm">

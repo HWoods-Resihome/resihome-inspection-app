@@ -975,10 +975,13 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
             if (supported) setTimeout(() => { startListeningRef.current(); }, 0);
             else void startAudioCapture(); // iOS push-to-talk: start recording now
           }}
-          // Disabled until warm-up completes, so the inspector never talks into a
-          // cold pipeline. Stays enabled offline so they can still open the panel
-          // to type / see the offline notice.
-          disabled={disabled || (online && !warmedUp)}
+          // Disabled until warm-up completes for the Web-Speech path (so the
+          // inspector never talks into a cold pipeline). On iOS push-to-talk
+          // (!supported) we DON'T gate on warm-up: the first tap must open the
+          // panel AND start the mic immediately — warming the agent isn't needed
+          // until after they've spoken. Stays enabled offline (to type / read the
+          // offline notice).
+          disabled={disabled || (online && !warmedUp && supported)}
           aria-label={online && !warmedUp ? 'Voice Assistant — getting ready…' : 'Talk to the Voice Assistant'}
           className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-brand text-white hover:bg-brand-dark shadow disabled:opacity-50 transition-opacity"
         >
