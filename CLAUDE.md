@@ -57,6 +57,13 @@ is needed** — it flows through `server.url` on the next deploy.
 - Don't bundle secrets into the native project. Don't force-push. Native work
   lands on `chore/native-oauth-outbound` (not `main`) until native+web are merged.
 
+## Working agreement (owner directive)
+- **Ship web work straight to `main` for every ask** — commit and `git push origin
+  main` once `npx tsc --noEmit` + `npm run build` pass. `main` auto-deploys to
+  Vercel and the native shell picks it up via `server.url`, so this is the
+  default delivery path (no feature-branch hand-off needed). Native-only changes
+  still land on `chore/native-oauth-outbound` per the hard rule above.
+
 ## Build / verify
 - Web: `npx tsc --noEmit` + `npm run build` before committing.
 - Native: `cd mobile && npm install && npx cap sync android`, open
