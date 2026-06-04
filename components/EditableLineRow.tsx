@@ -264,7 +264,11 @@ function PhotoChipRow({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onAdd!(); }}
-            className="w-12 h-12 rounded border-2 border-dashed border-amber-300 text-amber-500 hover:border-amber-400 hover:text-amber-600 flex items-center justify-center"
+            className={`w-12 h-12 rounded border-2 border-dashed flex items-center justify-center ${
+              required
+                ? 'border-amber-300 text-amber-500 hover:border-amber-400 hover:text-amber-600'
+                : 'border-gray-300 text-gray-400 hover:border-gray-400 hover:text-gray-500'
+            }`}
             title="Take an after photo (in-app camera)"
             aria-label="Add after photo"
           >
