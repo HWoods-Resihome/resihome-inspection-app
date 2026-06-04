@@ -860,10 +860,15 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     abortRef.current = null;
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
     try { recogRef.current?.abort?.(); } catch { /* noop */ }
+    // Stop any in-progress push-to-talk recording and release the reused mic
+    // stream so the OS mic indicator clears once the inspector closes voice.
+    try { if (audioRecorderRef.current?.state !== 'inactive') audioRecorderRef.current?.stop(); } catch { /* noop */ }
+    releaseAudioStream();
     listeningRef.current = false;
     startingRef.current = false;
     setListening(false);
     setBusy(false);
+    setRecordingAudio(false);
     setStreamingText('');
   }, [open]);
 
@@ -891,14 +896,22 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   async function startAudioCapture() {
     if (recordingAudio || transcribing || disabled) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioStreamRef.current = stream;
+      // Reuse a live mic stream across utterances so the browser only prompts
+      // ONCE per voice session. A fresh getUserMedia on every tap is what makes
+      // iOS Safari/Chrome re-ask "Allow microphone?" each time. We acquire once,
+      // keep it warm while the panel is open, and release it on close.
+      let stream = audioStreamRef.current;
+      const live = !!stream && stream.getAudioTracks().some((t) => t.readyState === 'live');
+      if (!live) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioStreamRef.current = stream;
+      }
       const mime = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']
         .find((m) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported?.(m)) || '';
       audioMimeRef.current = mime || 'audio/mp4';
       let rec: MediaRecorder;
-      try { rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream); }
-      catch { rec = new MediaRecorder(stream); }
+      try { rec = mime ? new MediaRecorder(stream!, { mimeType: mime }) : new MediaRecorder(stream!); }
+      catch { rec = new MediaRecorder(stream!); }
       audioChunksRef.current = [];
       rec.ondataavailable = (e) => { if (e.data && e.data.size) audioChunksRef.current.push(e.data); };
       rec.onstop = () => { void transcribeAndSubmit(); };
@@ -907,8 +920,14 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       rec.start();
       setRecordingAudio(true);
     } catch {
-      setError('Microphone access is needed. Allow it in Safari settings and try again.');
+      setError('Microphone access is needed. Allow it in your browser settings and try again.');
     }
+  }
+
+  // Free the reused mic stream (called when the voice panel closes / unmounts).
+  function releaseAudioStream() {
+    const s = audioStreamRef.current;
+    if (s) { try { s.getTracks().forEach((t) => t.stop()); } catch { /* noop */ } audioStreamRef.current = null; }
   }
 
   function stopAudioCapture() {
@@ -919,9 +938,10 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
 
   async function transcribeAndSubmit() {
     const chunks = audioChunksRef.current; audioChunksRef.current = [];
-    const stream = audioStreamRef.current;
-    if (stream) { stream.getTracks().forEach((t) => t.stop()); audioStreamRef.current = null; }
     audioRecorderRef.current = null;
+    // Keep the mic stream ALIVE for the next utterance (don't stop its tracks) —
+    // releaseAudioStream() frees it when the panel closes. This is what avoids the
+    // repeat "Allow microphone?" prompt on every tap.
     if (!chunks.length) return;
     const type = (audioMimeRef.current || 'audio/mp4').split(';')[0];
     const blob = new Blob(chunks, { type });
