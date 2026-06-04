@@ -404,7 +404,10 @@ export function PdfSectionPhotos(props: { photoUrls: string[] }) {
         const video = isVideoEntry(entry) ? getVideoUrl(entry) : '';
         const fileHref = video || poster;
         // Gallery link (starts at this photo) when a base is set; else the file.
-        const href = _photoGalleryBase ? `${_photoGalleryBase}?u=${encodeURIComponent(entry)}` : fileHref;
+        // Join correctly whether the base already carries query params (per-PDF
+        // scoping, e.g. ?k=vendor&v=slug).
+        const sep = _photoGalleryBase && _photoGalleryBase.includes('?') ? '&' : '?';
+        const href = _photoGalleryBase ? `${_photoGalleryBase}${sep}u=${encodeURIComponent(entry)}` : fileHref;
         return (
           <Link key={`${entry}-${i}`} src={href} style={pdfStyles.photoCell}>
             {/* eslint-disable-next-line jsx-a11y/alt-text */}

@@ -19,6 +19,7 @@ import {
   type PdfSectionGroup,
 } from './pdfShared';
 import { vendorGetsOwnPdf } from './vendors';
+import { slugifyVendor } from '@/lib/shortLinks';
 
 // Vendor column layout (Vendor-focused, no Client/Tenant):
 //   Cat 12 | Sub 12 | Description 55 | Qty 6 | Unit 5 | Ven$ 10
@@ -183,6 +184,9 @@ export async function renderVendorPdfs(ctx: PdfBuildContext): Promise<Map<string
     // Some vendors (e.g. Eviction Vendor (Past)) don't get their own packet —
     // their lines still ride the Master + Tenant Chargeback PDFs.
     if (!vendorGetsOwnPdf(vendor)) continue;
+    // Scope this vendor's gallery to its own photos (section photos + this
+    // vendor's line after-photos).
+    setPdfPhotoGalleryBase(ctx.photoGalleryBase ? `${ctx.photoGalleryBase}?k=vendor&v=${slugifyVendor(vendor)}` : undefined);
     const buf = await renderToBuffer(
       <VendorDoc
         ctx={ctx}

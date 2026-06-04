@@ -205,10 +205,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
+    // Grouping/integrity guard: count how many rate-card lines we couldn't place
+    // (no matching section, or catalog miss). A non-trivial drop rate means a
+    // grouping/catalog regression — we log loudly and surface it in the response.
+    let totalLineAnswers = 0;
+    let droppedNoSection = 0;
+    let droppedCatalogMiss = 0;
+    const droppedDetail: string[] = [];
+
     for (const ans of answers) {
       if (ans.answerType === 'rate_card_line' && ans.rateCardLine) {
+        totalLineAnswers++;
         const s = resolveSection(ans.section, ans.location);
         if (!s) {
+          droppedNoSection++;
+          if (droppedDetail.length < 20) droppedDetail.push(`no-section: ${ans.rateCardLine.lineItemCode} (section="${ans.section}" location="${ans.location}")`);
           console.warn(`[finalize] no section for answer ${ans.answerIdExternal} (section="${ans.section}" location="${ans.location}")`);
           continue;
         }
@@ -218,6 +229,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const rc = ans.rateCardLine;
         const catalogItem = catalog.find((c) => c.lineItemCode === rc.lineItemCode);
         if (!catalogItem) {
+          droppedCatalogMiss++;
+          if (droppedDetail.length < 20) droppedDetail.push(`catalog-miss: ${rc.lineItemCode}`);
           console.warn(`[finalize] catalog miss for ${rc.lineItemCode}; skipping line`);
           continue;
         }
@@ -300,6 +313,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({
         error: 'Cannot finalize: no line items have been added to this inspection.',
       });
+    }
+
+    // Early-warning guard: if a meaningful share of lines couldn't be placed, a
+    // grouping/catalog regression likely shipped. Log loudly (and we attach the
+    // summary to the response below). Threshold kept low so it can't go unnoticed.
+    const droppedTotal = droppedNoSection + droppedCatalogMiss;
+    const dropRate = totalLineAnswers > 0 ? droppedTotal / totalLineAnswers : 0;
+    let groupingWarning: { totalLines: number; dropped: number; droppedNoSection: number; droppedCatalogMiss: number; dropRate: number; sample: string[] } | null = null;
+    if (droppedTotal > 0) {
+      groupingWarning = {
+        totalLines: totalLineAnswers, dropped: droppedTotal,
+        droppedNoSection, droppedCatalogMiss,
+        dropRate: Math.round(dropRate * 1000) / 1000,
+        sample: droppedDetail,
+      };
+      const sev = dropRate >= 0.1 ? 'ERROR' : 'warn';
+      console.warn(`[finalize] ${sev}: ${droppedTotal}/${totalLineAnswers} lines dropped (${Math.round(dropRate * 100)}%) — ${droppedNoSection} no-section, ${droppedCatalogMiss} catalog-miss. Sample: ${droppedDetail.join(' | ')}`);
     }
 
     // Per-line Internal Resolution timing: "Complete Later" lines are exempt
@@ -783,6 +813,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         tenant: ctx.grandTotals.tenant,
         lineCount: ctx.grandTotals.lineCount,
       },
+      lineGroupingWarning: groupingWarning,
     });
   } catch (e: any) {
     const elapsed = Date.now() - t0;

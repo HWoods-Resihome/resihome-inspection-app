@@ -2173,14 +2173,17 @@ export function RateCardForm(props: RateCardFormProps) {
      props.propertyAirFiltersType1, props.propertyAirFiltersType2, props.propertyAirFiltersType3, linesBySection],
   );
   const finalChecklistComplete = fcGap === null;
-  // The Final Checklist only applies to EDITABLE scope inspections (scheduled /
-  // in-progress + all future). Inspections already in pending approval or
-  // completed are EXEMPT — the section is hidden and never gates them.
+  // The Final Checklist is EDITABLE + gates Submit only for scheduled/in-progress
+  // (+ all future) scope inspections. It's also shown READ-ONLY during pending
+  // approval — but only when the inspection actually has checklist data, so
+  // inspections that predate the feature stay exempt. Completed/cancelled hide it.
   const fcStatusLower = (props.inspectionStatus || '').toLowerCase();
-  const fcApplies = isScopeTemplate
+  const fcEditable = isScopeTemplate
     && fcStatusLower !== 'pending_approval'
     && fcStatusLower !== 'completed' && fcStatusLower !== 'complete'
     && fcStatusLower !== 'cancelled';
+  const fcHasData = Object.keys(fcAnswers).length > 0;
+  const fcVisible = fcEditable || (isScopeTemplate && fcStatusLower === 'pending_approval' && fcHasData);
   // Load any persisted "passed" marker for this inspection on mount.
   useEffect(() => {
     setReviewedHash(getPassedReviewHash(props.inspectionRecordId));
@@ -2774,7 +2777,7 @@ export function RateCardForm(props: RateCardFormProps) {
     // AI-Review gate at finalize, so the check always happens before PDFs.
     // Final Checklist hard-gate (scope, first submit only): every required item
     // must be complete, and each line-item prompt accepted or declined.
-    if (fcApplies && fcGap) {
+    if (fcEditable && fcGap) {
       void dialog.alert(`Finish the Final Checklist before submitting:\n\n• ${fcGap}`);
       return;
     }
@@ -2992,7 +2995,7 @@ export function RateCardForm(props: RateCardFormProps) {
 
   // Collapse/expand-all: mirrors the per-section isOpen logic (undefined =
   // default-open when the section has content).
-  const anySectionOpen = (fcApplies && fcOpen) || sections.some((s) => {
+  const anySectionOpen = (fcVisible && fcOpen) || sections.some((s) => {
     const uc = expanded[s.id];
     return uc !== undefined
       ? uc
@@ -3001,7 +3004,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // Global Expand/Collapse-all also drives the Final Checklist bubble.
   const setAllSections = (open: boolean) => {
     setExpanded(Object.fromEntries(sections.map((s) => [s.id, open])));
-    if (fcApplies) setFcOpen(open);
+    if (fcVisible) setFcOpen(open);
   };
 
   // ----- Render --------------------------------------------------------
@@ -3654,7 +3657,7 @@ export function RateCardForm(props: RateCardFormProps) {
         {/* Final Checklist — another room-style bubble at the very end of the
             scope form. Editable scope inspections only (scheduled/in-progress +
             future); pending-approval and completed are exempt. */}
-        {fcApplies && (
+        {fcVisible && (
           <FinalChecklist
             answers={fcAnswers}
             onPatch={handleFcPatch}
@@ -3669,7 +3672,7 @@ export function RateCardForm(props: RateCardFormProps) {
             onCameraOverlayChange={setCameraOverlayOpen}
             open={fcOpen}
             onToggleOpen={() => setFcOpen((o) => !o)}
-            readOnly={!!props.readOnly}
+            readOnly={!fcEditable || !!props.readOnly}
           />
         )}
       </div>
@@ -3692,14 +3695,14 @@ export function RateCardForm(props: RateCardFormProps) {
               showCancelInspection={!!props.onCancelInspection}
               submitLabel={submitLabel}
               submitLabelShort={submitLabelShort}
-              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || aiApplying || (pendingSync + pendingPhotos) > 0 || selfApprovalLocked || (fcApplies && !finalChecklistComplete)}
+              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || aiApplying || (pendingSync + pendingPhotos) > 0 || selfApprovalLocked || (fcEditable && !finalChecklistComplete)}
               submitTitle={
                 props.readOnly ? undefined
                 : saveStatus.kind === 'saving' ? 'Saving — wait a moment, then submit.'
                 : finalizing ? 'Finalizing…'
                 : aiApplying ? 'Applying AI review…'
                 : (pendingSync + pendingPhotos) > 0 ? 'Waiting for offline changes to finish syncing.'
-                : (fcApplies && fcGap) ? `Finish the Final Checklist — ${fcGap}`
+                : (fcEditable && fcGap) ? `Finish the Final Checklist — ${fcGap}`
                 : (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !reviewValid) ? 'Run the AI Review before submitting.'
                 : undefined
               }
