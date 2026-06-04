@@ -1223,6 +1223,13 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
    *  (`hbmm_property_id` on the HubSpot property). Used as `propertyId` when
    *  creating a maintenance ticket. null when unset. */
   propertyHbmmId: string | null;
+  /** Final Checklist: confirmed air-filter qty/types (write-back enabled) and
+   *  the septic fee that gates the conditional septic question. */
+  propertyAirFiltersTotal: number | null;
+  propertyAirFiltersType1: string | null;
+  propertyAirFiltersType2: string | null;
+  propertyAirFiltersType3: string | null;
+  propertySepticFee: number | null;
 } | null> {
   const { inspection: typeId, property: propertyTypeId } = typeIds();
   const properties = [
@@ -1265,6 +1272,11 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     let propertyLastPrimaryTenant: string | null = null;
     let propertyLastTenantMonths: number | null = null;
     let propertyHbmmId: string | null = null;
+    let propertyAirFiltersTotal: number | null = null;
+    let propertyAirFiltersType1: string | null = null;
+    let propertyAirFiltersType2: string | null = null;
+    let propertyAirFiltersType3: string | null = null;
+    let propertySepticFee: number | null = null;
     if (propertyIdRef) {
       // ISOLATED fetch for the (possibly not-yet-created) tenant-occupancy field.
       // Kept separate from the extras batch below so that, if HubSpot 400s on an
@@ -1289,6 +1301,10 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
           // Numeric Property ID in the ResiCap/Ameritrust Maintenance system —
           // used as `propertyId` when creating a maintenance ticket at finalize.
           'hbmm_property_id',
+          // Final Checklist: air-filter qty/types (write-back enabled) + septic gate.
+          'air_filters___total_quantity',
+          'air_filters___type__1', 'air_filters___type__2', 'air_filters___type__3',
+          'septic_fee',
         ];
         const propQs = propProps.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
         const propResp = await hubspotFetch(
@@ -1307,6 +1323,17 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         propertyEntityId = (pp.entity_id || '').toString().trim() || null;
         propertyLastPrimaryTenant = (pp.last_primary_tenant || '').toString().trim() || null;
         propertyHbmmId = (pp.hbmm_property_id || '').toString().trim() || null;
+        if (pp.air_filters___total_quantity != null && pp.air_filters___total_quantity !== '') {
+          const n = Number(pp.air_filters___total_quantity);
+          if (Number.isFinite(n)) propertyAirFiltersTotal = n;
+        }
+        propertyAirFiltersType1 = (pp.air_filters___type__1 || '').toString().trim() || null;
+        propertyAirFiltersType2 = (pp.air_filters___type__2 || '').toString().trim() || null;
+        propertyAirFiltersType3 = (pp.air_filters___type__3 || '').toString().trim() || null;
+        if (pp.septic_fee != null && pp.septic_fee !== '') {
+          const n = Number(pp.septic_fee);
+          if (Number.isFinite(n)) propertySepticFee = n;
+        }
       } catch (e: any) {
         console.warn(`[fetchInspectionWithPropertyRef] could not fetch property ${propertyIdRef} extras:`, String(e).slice(0, 200));
       }
@@ -1362,6 +1389,11 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       propertyLastPrimaryTenant,
       propertyLastTenantMonths,
       propertyHbmmId,
+      propertyAirFiltersTotal,
+      propertyAirFiltersType1,
+      propertyAirFiltersType2,
+      propertyAirFiltersType3,
+      propertySepticFee,
     };
   } catch (e: any) {
     if (String(e).includes('404')) return null;
@@ -1548,6 +1580,39 @@ export async function updateInspection(recordId: string, props: Record<string, a
     method: 'PATCH',
     body: JSON.stringify({ properties: props }),
   });
+}
+
+/**
+ * Update a Property record's properties. Used by the Final Checklist to write
+ * back the confirmed air-filter quantity/types onto the property object.
+ */
+export async function updateProperty(recordId: string, props: Record<string, any>): Promise<void> {
+  const { property: typeId } = typeIds();
+  await hubspotFetch(`/crm/v3/objects/${typeId}/${recordId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ properties: props }),
+  });
+}
+
+/**
+ * Read the enumeration (dropdown) option labels defined on a Property field —
+ * used to populate the air-filter size scroll-wheels straight from HubSpot so
+ * they stay in sync with the field's configured options. Returns [] on any
+ * error so the caller can fall back gracefully.
+ */
+export async function fetchPropertyFieldOptions(fieldName: string): Promise<string[]> {
+  const { property: typeId } = typeIds();
+  try {
+    const resp = await hubspotFetch(`/crm/v3/properties/${typeId}/${encodeURIComponent(fieldName)}`);
+    const options = Array.isArray(resp.options) ? resp.options : [];
+    return options
+      .filter((o: any) => o && o.hidden !== true)
+      .map((o: any) => String(o.label ?? o.value ?? '').trim())
+      .filter(Boolean);
+  } catch (e: any) {
+    console.warn(`[fetchPropertyFieldOptions] ${fieldName} unavailable:`, String(e).slice(0, 160));
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------

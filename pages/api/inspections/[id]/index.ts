@@ -5,6 +5,7 @@ import {
   fetchInspectionById,
   updateInspection,
   answerHasAfterPhotoProperty,
+  fetchPropertyFieldOptions,
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { buildShortLink } from '@/lib/shortLinks';
@@ -49,12 +50,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         vendors,
       };
 
+      // Final Checklist (scope only): pull the air-filter size dropdown options
+      // live from the HubSpot field definitions so the scroll-wheels stay in
+      // sync with HubSpot. Union the three type fields' options, sorted ascending.
+      let filterSizeOptions: string[] = [];
+      if (data.inspection.templateType === 'pm_scope_rate_card') {
+        try {
+          const lists = await Promise.all([
+            fetchPropertyFieldOptions('air_filters___type__1'),
+            fetchPropertyFieldOptions('air_filters___type__2'),
+            fetchPropertyFieldOptions('air_filters___type__3'),
+          ]);
+          const set = new Set<string>();
+          for (const l of lists) for (const o of l) set.add(o);
+          filterSizeOptions = Array.from(set).sort((a, b) =>
+            a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' }));
+        } catch { filterSizeOptions = []; }
+      }
+
       return res.status(200).json({
         inspection: data.inspection,
         propertyRecordId: data.propertyIdRef,
         propertySquareFootage: data.propertySquareFootage,
         propertyZip: data.propertyZip,
         propertyLastTenantMonths: data.propertyLastTenantMonths,
+        propertyAirFiltersTotal: data.propertyAirFiltersTotal,
+        propertyAirFiltersType1: data.propertyAirFiltersType1,
+        propertyAirFiltersType2: data.propertyAirFiltersType2,
+        propertyAirFiltersType3: data.propertyAirFiltersType3,
+        propertySepticFee: data.propertySepticFee,
+        filterSizeOptions,
         shareLinks,
         answers,
         // The Internal Resolution after-photo requirement is live only once the
