@@ -36,6 +36,9 @@ interface Props {
   lineExists?: (lineItemCode: string) => boolean;
   onAddLine?: (rule: FcAddLineRule, questionId: string) => Promise<{ externalId: string; costLabel: string } | null>;
   onUndoLine?: (externalId: string, questionId: string) => void;
+  /** Remove EVERY line in the scope matching this catalog code (wherever it
+   *  lives) — used to delete a suggested line that already exists. */
+  onRemoveLineByCode?: (lineItemCode: string, questionId: string) => void;
   /** Notify the parent when our camera overlay opens/closes (hides the floating mic). */
   onCameraOverlayChange?: (open: boolean) => void;
   /** Outer collapse, controlled by the parent so the form's Expand/Collapse-all reaches it. */
@@ -145,13 +148,13 @@ export function FinalChecklist(props: Props) {
     // compact: wrap (no horizontal scroll) + smaller font, for long option sets
     // like the device types. Default: single line that scrolls if needed.
     return (
-      <div className={compact ? 'flex flex-wrap gap-1.5' : 'flex gap-1.5 overflow-x-auto pb-0.5'} style={compact ? undefined : { scrollbarWidth: 'none' }}>
+      <div className={compact ? 'flex flex-wrap gap-1' : 'flex gap-1.5 overflow-x-auto pb-0.5'} style={compact ? undefined : { scrollbarWidth: 'none' }}>
         {(options || []).map((o) => {
           const sel = value === o;
           return (
             <button key={o} type="button" disabled={readOnly} onClick={() => onPick(o)}
               className={`shrink-0 whitespace-nowrap font-heading font-semibold rounded-full border-2 transition
-                ${compact ? 'text-[11px] px-2.5 py-1' : 'text-xs px-3.5 py-1.5'}
+                ${compact ? 'text-[10px] px-2 py-1' : 'text-xs px-3.5 py-1.5'}
                 ${sel ? 'bg-brand text-white border-brand shadow-sm' : 'bg-white text-ink border-gray-300 hover:border-brand/50'}`}>
               {titleCase(o)}
             </button>
@@ -192,7 +195,18 @@ export function FinalChecklist(props: Props) {
       );
     }
     if (alreadyInScope) {
-      return <div className="mt-3 text-[12px] text-gray-500">✓ <span className="font-medium">{titleCase(rule.label)}</span> already in this scope.</div>;
+      return (
+        <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 flex items-center gap-2.5">
+          <span className="shrink-0 w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[13px] font-bold">✓</span>
+          <div className="text-[12.5px] text-gray-700 leading-tight">
+            <span className="font-semibold">{titleCase(rule.label)}</span> already in this scope.
+          </div>
+          {!readOnly && props.onRemoveLineByCode && (
+            <button type="button" onClick={() => props.onRemoveLineByCode!(rule.lineItemCode, q.id)}
+              className="ml-auto shrink-0 text-[11.5px] text-red-600 underline">Remove</button>
+          )}
+        </div>
+      );
     }
     return (
       <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3">
@@ -277,12 +291,12 @@ export function FinalChecklist(props: Props) {
     const atMin = v <= min;
     const atMax = max != null && v >= max;
     return (
-      <div className="inline-flex items-stretch border border-gray-300 rounded-xl overflow-hidden select-none h-12">
+      <div className="inline-flex items-stretch border border-gray-300 rounded-lg overflow-hidden select-none h-9">
         <button type="button" disabled={readOnly || atMin} onClick={() => step(-1)} aria-label="Decrease"
-          className="w-16 bg-gray-50 active:bg-gray-100 text-2xl text-gray-600 flex items-center justify-center disabled:opacity-30">–</button>
-        <div className="w-16 flex items-center justify-center text-lg font-semibold tabular-nums border-x border-gray-200">{value ?? ''}</div>
+          className="w-10 bg-gray-50 active:bg-gray-100 text-lg text-gray-600 flex items-center justify-center disabled:opacity-30">–</button>
+        <div className="w-11 flex items-center justify-center text-sm font-semibold tabular-nums border-x border-gray-200">{value ?? ''}</div>
         <button type="button" disabled={readOnly || atMax} onClick={() => step(1)} aria-label="Increase"
-          className="w-16 bg-gray-50 active:bg-gray-100 text-2xl text-gray-600 flex items-center justify-center disabled:opacity-30">+</button>
+          className="w-10 bg-gray-50 active:bg-gray-100 text-lg text-gray-600 flex items-center justify-center disabled:opacity-30">+</button>
       </div>
     );
   }

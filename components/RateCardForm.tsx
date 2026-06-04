@@ -1463,6 +1463,21 @@ export function RateCardForm(props: RateCardFormProps) {
     if (wh) void handleDeleteLine(wh.id, externalId);
   }
 
+  // Remove EVERY line in the scope with this catalog code, wherever it lives.
+  // Used by the Final Checklist's "Remove" action when a suggested line (e.g. the
+  // HVAC Service Clean) already exists — including ones added manually elsewhere,
+  // which handleFcUndoLine (Whole House only) wouldn't reach. Snapshot the targets
+  // first, then delete, so we don't mutate while iterating.
+  function handleFcRemoveByCode(lineItemCode: string) {
+    const targets: Array<{ sectionId: string; externalId: string }> = [];
+    for (const [sectionId, arr] of Object.entries(linesBySection)) {
+      for (const l of arr) {
+        if (l.lineItemCode === lineItemCode) targets.push({ sectionId, externalId: l.externalId });
+      }
+    }
+    for (const t of targets) void handleDeleteLine(t.sectionId, t.externalId);
+  }
+
   // The pending new row was discarded (user pressed Esc or blurred with empty fields).
   function handleDiscardNew(sectionId: string) {
     setPendingNewBySection((p) => {
@@ -3750,6 +3765,7 @@ export function RateCardForm(props: RateCardFormProps) {
             lineExists={fcLineExists}
             onAddLine={handleFcAddLine}
             onUndoLine={(externalId) => handleFcUndoLine(externalId)}
+            onRemoveLineByCode={handleFcRemoveByCode}
             onCameraOverlayChange={setCameraOverlayOpen}
             open={fcOpen}
             onToggleOpen={() => setFcOpen((o) => !o)}
