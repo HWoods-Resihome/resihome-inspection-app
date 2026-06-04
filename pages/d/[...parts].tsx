@@ -147,6 +147,13 @@ function PhotoGallery({ photos, start }: { photos: string[]; start: string }) {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={photos[i]} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
       <div style={{ position: 'absolute', top: 12, left: 0, right: 0, textAlign: 'center', color: '#fff', font: '600 13px sans-serif', opacity: 0.85 }}>{i + 1} / {photos.length}</div>
+      {/* Close → back to the PDF (the page the photo link came from). */}
+      <button
+        onClick={() => { if (typeof window !== 'undefined') { if (window.history.length > 1) window.history.back(); else window.close(); } }}
+        aria-label="Back to PDF"
+        title="Back to PDF"
+        style={{ position: 'absolute', top: 10, right: 12, width: 40, height: 40, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 24, lineHeight: '38px' }}
+      >×</button>
       {i > 0 && (
         <button onClick={prev} aria-label="Previous" style={navBtn('left')}>‹</button>
       )}
