@@ -313,7 +313,14 @@ export function FinalChecklist(props: Props) {
     if (!r) return null;
     return (
       <div className="mt-2.5 flex gap-2.5 items-center rounded-xl border border-brand/20 bg-brand/5 px-3 py-2.5">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-brand"><circle cx="12" cy="12" r="9" /><path d="M12 8h.01M11 12h1v4h1" /></svg>
+        {/* Standard "info" glyph: dot on top + vertical stem = a clear lowercase i.
+            Round caps make the dot render as a dot (the old hand-rolled path drew
+            a malformed hook). */}
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-brand" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="11" x2="12" y2="16" />
+          <line x1="12" y1="8" x2="12.01" y2="8" />
+        </svg>
         <div className="text-[12px] font-medium text-brand-dark leading-snug">{r.text}</div>
       </div>
     );
