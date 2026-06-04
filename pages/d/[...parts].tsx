@@ -11,7 +11,8 @@
 import type { GetServerSideProps } from 'next';
 import { Readable } from 'stream';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { readInspectionProps, fetchAnswersForInspection } from '@/lib/hubspot';
+import { readInspectionProps, fetchAnswersForInspection, fetchInspectionById } from '@/lib/hubspot';
+import { resolveSections } from '@/lib/sections';
 import { verifyShareSig, slugifyVendor, SHARE_TYPE_TO_PROP, type ShareDocType } from '@/lib/shortLinks';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -41,16 +42,37 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     // (left/right), starting at the clicked one. The signed link grants access,
     // so external email recipients (no login) can use it.
     if ((type as string) === 'photos') {
-      const answers = await fetchAnswersForInspection(id).catch(() => [] as any[]);
-      const seen = new Set<string>();
-      const photos: string[] = [];
-      // Mirror the photos the PDFs actually render: the per-section photos
-      // (section_photo answers). Excludes line-tagged photos so the gallery
-      // count matches what's shown on the PDF.
+      // Mirror the PDF EXACTLY: the per-section photos (section_photo answers),
+      // grouped + ordered by the same section list the PDF renders — so the
+      // first PDF photo is gallery #1 and the count matches. Uses the same
+      // section-resolution as finalize (label||location; location-only only for
+      // repeating rooms — static rooms share location "").
+      const [insp, answers] = await Promise.all([
+        fetchInspectionById(id).catch(() => null),
+        fetchAnswersForInspection(id).catch(() => [] as any[]),
+      ]);
+      const sections = resolveSections(insp?.sectionListJson, insp?.bedroomsAtInspection || 0, insp?.bathroomsAtInspection || 0);
+      const lookup = new Map<string, { id: string }>();
+      for (const s of sections) {
+        lookup.set(`${s.label}||${s.location}`, s);
+        if (s.location) lookup.set(s.location, s);
+      }
+      const bySection = new Map<string, string[]>();
       for (const a of (answers as any[]) || []) {
         if (a.answerType !== 'section_photo') continue;
+        const s = lookup.get(`${a.section}||${a.location}`) || (a.location ? lookup.get(a.location) : undefined);
+        if (!s) continue;
+        const arr = bySection.get(s.id) || [];
         for (const u of [...(a.photoUrls || []), ...(a.afterPhotoUrls || [])]) {
-          if (typeof u === 'string' && u && !u.startsWith('blob:') && !seen.has(u)) { seen.add(u); photos.push(u); }
+          if (typeof u === 'string' && u && !u.startsWith('blob:')) arr.push(u);
+        }
+        bySection.set(s.id, arr);
+      }
+      const seen = new Set<string>();
+      const photos: string[] = [];
+      for (const s of sections) {
+        for (const u of (bySection.get(s.id) || [])) {
+          if (!seen.has(u)) { seen.add(u); photos.push(u); }
         }
       }
       const start = typeof ctx.query.u === 'string' ? ctx.query.u : '';
