@@ -1581,6 +1581,37 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
 /**
  * Update an Inspection record's properties (status, etc.).
  */
+/**
+ * List the HubSpot record ids of every COMPLETED scope (pm_scope_rate_card)
+ * inspection. Used by the bulk "regenerate PDFs" admin tool to retrofit the
+ * photo-gallery links into existing PDFs (by re-finalizing each).
+ */
+export async function listCompletedScopeInspectionIds(): Promise<string[]> {
+  const { inspection: typeId } = typeIds();
+  const ids: string[] = [];
+  let after: string | undefined;
+  do {
+    const body: any = {
+      filterGroups: [{
+        filters: [
+          { propertyName: 'status', operator: 'EQ', value: 'completed' },
+          { propertyName: 'template_type', operator: 'EQ', value: 'pm_scope_rate_card' },
+        ],
+      }],
+      properties: ['inspection_id_external'],
+      limit: 100,
+    };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    for (const r of resp.results || []) ids.push(String(r.id));
+    after = resp.paging?.next?.after;
+  } while (after);
+  return ids;
+}
+
 export async function updateInspection(recordId: string, props: Record<string, any>): Promise<void> {
   const { inspection: typeId } = typeIds();
   await hubspotFetch(`/crm/v3/objects/${typeId}/${recordId}`, {
