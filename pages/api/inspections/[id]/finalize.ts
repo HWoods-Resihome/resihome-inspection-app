@@ -174,12 +174,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // would silently drop those lines from the finalized PDFs.
     const sectionLookup = new Map<string, SectionInstance>();
     for (const s of sectionInstances) {
-      // Primary key: location only.
-      sectionLookup.set(s.location, s);
-      // Secondary key for legacy answers saved before this fix: also accept
-      // label||location combos. Harmless duplicate when both are set.
+      // Unique key per instance: label + location.
       sectionLookup.set(`${s.label}||${s.location}`, s);
+      // Location-only key ONLY for repeating sections (non-empty location, e.g.
+      // "Bedroom 1") so a renamed bedroom/bathroom still matches. Static, non-
+      // repeating sections (Yard, Kitchen, Whole House, …) have location "" —
+      // NEVER key on "" or every static section collides onto the last one
+      // (which dumped all their lines + photos into Smart Home / Locks).
+      if (s.location) sectionLookup.set(s.location, s);
     }
+    // Resolve the section for an answer: prefer the unique label||location key,
+    // then fall back to location-only (repeating, renamed sections only).
+    const resolveSection = (section: string, location: string): SectionInstance | undefined =>
+      sectionLookup.get(`${section}||${location}`) || (location ? sectionLookup.get(location) : undefined);
 
     // ---- 3. Build PdfSectionGroup[] with re-computed math ----
     // We re-run the math here using current rates so PDFs always reflect the
@@ -200,10 +207,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     for (const ans of answers) {
       if (ans.answerType === 'rate_card_line' && ans.rateCardLine) {
-        // Prefer location-only match (works even if section was renamed);
-        // fall back to label||location for very old answers that didn't
-        // populate location.
-        const s = sectionLookup.get(ans.location) || sectionLookup.get(`${ans.section}||${ans.location}`);
+        const s = resolveSection(ans.section, ans.location);
         if (!s) {
           console.warn(`[finalize] no section for answer ${ans.answerIdExternal} (section="${ans.section}" location="${ans.location}")`);
           continue;
@@ -272,7 +276,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         group.clientTotal += roundMoney(calc.clientCost);
         group.tenantTotal += roundMoney(calc.tenantCost);
       } else if (ans.answerType === 'section_photo') {
-        const s = sectionLookup.get(ans.location) || sectionLookup.get(`${ans.section}||${ans.location}`);
+        const s = resolveSection(ans.section, ans.location);
         if (!s) continue;
         const group = sectionGroups.get(s.id);
         if (!group) continue;

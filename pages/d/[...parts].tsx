@@ -44,7 +44,11 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       const answers = await fetchAnswersForInspection(id).catch(() => [] as any[]);
       const seen = new Set<string>();
       const photos: string[] = [];
+      // Mirror the photos the PDFs actually render: the per-section photos
+      // (section_photo answers). Excludes line-tagged photos so the gallery
+      // count matches what's shown on the PDF.
       for (const a of (answers as any[]) || []) {
+        if (a.answerType !== 'section_photo') continue;
         for (const u of [...(a.photoUrls || []), ...(a.afterPhotoUrls || [])]) {
           if (typeof u === 'string' && u && !u.startsWith('blob:') && !seen.has(u)) { seen.add(u); photos.push(u); }
         }
