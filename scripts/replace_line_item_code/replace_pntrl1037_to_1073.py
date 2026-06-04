@@ -2,6 +2,9 @@
 One-time data migration: replace the old paint line-item code PNTRL1037 with
 PNTRL1073 on every historical inspection_answer rate-card line.
 
+SELF-CONTAINED — no other project files are needed. Just Python 3.8+ and a
+HubSpot private-app token.
+
 What it does
 ------------
   • Finds all inspection_answer records where rate_card_line_item_code == PNTRL1037.
@@ -19,37 +22,175 @@ Idempotent: re-running finds nothing left to change.
 
 Usage
 -----
-    python replace_pntrl1037_to_1073.py            # DRY RUN — prints what would change
-    python replace_pntrl1037_to_1073.py --apply    # writes the changes
+    # 1) set your token (use the SANDBOX token first, then prod when ready)
+    export HUBSPOT_TOKEN=pat-xxxxxxxx           # macOS/Linux
+    #   setx HUBSPOT_TOKEN "pat-xxxxxxxx"        # Windows (new shell after)
 
-Env: HUBSPOT_TOKEN (or HUBSPOT_SANDBOX_TOKEN / .env.local), same as the phase1 scripts.
-Point the token at whichever portal (sandbox vs prod) you intend to migrate.
+    # 2) dry run — prints exactly what WOULD change, writes nothing
+    python replace_pntrl1037_to_1073.py
+
+    # 3) apply — writes the changes
+    python replace_pntrl1037_to_1073.py --apply
+
+It also reads HUBSPOT_SANDBOX_TOKEN / HUBSPOT_PRIVATE_APP_TOKEN, and falls back
+to a .env.local file (walking up from this script) — same convention as the
+other scripts in this repo.
 """
 from __future__ import annotations
+import json
 import os
 import sys
+import time
+import urllib.request
+import urllib.error
 
-# Reuse the shared phase1 HubSpot helpers.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rate_card_phase1"))
-from _hubspot_helpers import (  # noqa: E402
-    get_object_type_id, get_property, hs_post, hs_patch,
-    fetch_all_records, search_records, wait_a_moment,
-)
-
+# --------------------------------------------------------------------------
+# Config
+# --------------------------------------------------------------------------
 OLD_CODE = "PNTRL1037"
 NEW_CODE = "PNTRL1073"
 INSPECTION_ANSWER = "inspection_answer"
 CATALOG = "rate_card_line_item"
+API_BASE = "https://api.hubapi.com"
 DESC_FIELDS = ["line_item_code", "labor_short_description", "labor_subtext", "labor_full_description"]
 
 
+# --------------------------------------------------------------------------
+# Token + low-level HTTP
+# --------------------------------------------------------------------------
+def get_token() -> str:
+    for var in ("HUBSPOT_SANDBOX_TOKEN", "HUBSPOT_TOKEN", "HUBSPOT_PRIVATE_APP_TOKEN"):
+        v = os.environ.get(var)
+        if v and v.strip() and not v.strip().startswith("<"):
+            return v.strip().strip('"').strip("'")
+    # Fallback: .env.local walking up from this file.
+    here = os.path.dirname(os.path.abspath(__file__))
+    cur = here
+    for _ in range(6):
+        env_path = os.path.join(cur, ".env.local")
+        if os.path.exists(env_path):
+            with open(env_path, encoding="utf-8-sig") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, val = line.split("=", 1)
+                    if k.strip() in ("HUBSPOT_SANDBOX_TOKEN", "HUBSPOT_TOKEN", "HUBSPOT_PRIVATE_APP_TOKEN"):
+                        val = val.strip().strip('"').strip("'")
+                        if val and not val.startswith("<"):
+                            print(f"  [token] loaded from {env_path}")
+                            return val
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    print("ERROR: HubSpot token not found. Set HUBSPOT_TOKEN (or HUBSPOT_SANDBOX_TOKEN).", file=sys.stderr)
+    sys.exit(1)
+
+
+_TOKEN = None
+
+
+def _request(method: str, path: str, body: dict | None = None) -> dict:
+    global _TOKEN
+    if _TOKEN is None:
+        _TOKEN = get_token()
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(API_BASE + path, data=data, method=method)
+    req.add_header("Authorization", f"Bearer {_TOKEN}")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/json")
+    # Retry transient errors politely.
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                raw = resp.read().decode("utf-8")
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8") if e.fp else ""
+            if e.code in (429, 502, 503, 504) and attempt < 4:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise RuntimeError(f"HTTP {e.code} {method} {path}: {raw}") from e
+    raise RuntimeError(f"giving up on {method} {path}")
+
+
+def hs_get(path: str) -> dict:
+    return _request("GET", path)
+
+
+def hs_post(path: str, body: dict) -> dict:
+    return _request("POST", path, body)
+
+
+def hs_patch(path: str, body: dict) -> dict:
+    return _request("PATCH", path, body)
+
+
+# --------------------------------------------------------------------------
+# Object-type + record helpers
+# --------------------------------------------------------------------------
+_TYPE_IDS: dict[str, str] = {}
+
+
+def get_object_type_id(name: str) -> str:
+    if name in _TYPE_IDS:
+        return _TYPE_IDS[name]
+    needle = name.lower()
+    schemas = hs_get("/crm/v3/schemas").get("results", [])
+    for s in schemas:
+        labels = s.get("labels") or {}
+        fqn = (s.get("fullyQualifiedName") or "").lower()
+        if ((s.get("name") or "").lower() == needle
+                or (labels.get("singular") or "").lower() == needle
+                or (labels.get("plural") or "").lower() == needle
+                or fqn.endswith("_" + needle) or fqn == needle):
+            tid = s.get("objectTypeId") or s["id"]
+            _TYPE_IDS[name] = tid
+            return tid
+    raise RuntimeError(f"Custom object schema '{name}' not found in this portal.")
+
+
+def search_eq(object_type: str, prop: str, value: str, properties: list[str]) -> list[dict]:
+    """Page through every record where prop == value."""
+    type_id = get_object_type_id(object_type)
+    out, after = [], None
+    while True:
+        body = {
+            "filterGroups": [{"filters": [{"propertyName": prop, "operator": "EQ", "value": value}]}],
+            "properties": properties,
+            "limit": 100,
+        }
+        if after:
+            body["after"] = after
+        resp = hs_post(f"/crm/v3/objects/{type_id}/search", body)
+        out.extend(resp.get("results", []))
+        after = (resp.get("paging") or {}).get("next", {}).get("after")
+        if not after:
+            break
+        time.sleep(0.2)
+    return out
+
+
+def get_property(object_type: str, prop: str) -> dict | None:
+    type_id = get_object_type_id(object_type)
+    try:
+        return hs_get(f"/crm/v3/properties/{type_id}/{prop}")
+    except RuntimeError as e:
+        if "404" in str(e):
+            return None
+        raise
+
+
+# --------------------------------------------------------------------------
+# Catalog description helpers (to realign answer_value safely)
+# --------------------------------------------------------------------------
 def catalog_record(code: str) -> dict | None:
-    recs = search_records(CATALOG, "line_item_code", code, DESC_FIELDS + ["is_active"])
+    recs = search_eq(CATALOG, "line_item_code", code, DESC_FIELDS + ["is_active"])
     return recs[0] if recs else None
 
 
 def old_descriptions(rec: dict | None) -> set[str]:
-    """Every catalog description string a stored answer_value could equal."""
     out: set[str] = set()
     if not rec:
         return out
@@ -70,6 +211,9 @@ def preferred_description(rec: dict | None) -> str:
         or (p.get("labor_short_description") or "").strip()
 
 
+# --------------------------------------------------------------------------
+# Main
+# --------------------------------------------------------------------------
 def main():
     apply = "--apply" in sys.argv
     print("=" * 70)
@@ -79,19 +223,16 @@ def main():
     old_rec = catalog_record(OLD_CODE)
     new_rec = catalog_record(NEW_CODE)
     if not new_rec:
-        print(f"WARNING: catalog has no {NEW_CODE}. Codes will still be swapped, but "
-              f"answer_value won't be realigned and the picker may show a blank item.")
+        print(f"WARNING: catalog has no {NEW_CODE}. Codes will still swap, but answer_value "
+              f"won't be realigned and the picker may show a blank item.")
     old_descs = old_descriptions(old_rec)
     new_pref = preferred_description(new_rec)
     print(f"  old catalog descriptions to realign: {sorted(old_descs) or '(none / catalog item missing)'}")
     print(f"  new preferred description:           {new_pref!r}")
 
     type_id = get_object_type_id(INSPECTION_ANSWER)
-    matches = fetch_all_records(
-        INSPECTION_ANSWER,
-        ["rate_card_line_item_code", "answer_value", "answer_summary"],
-        extra_filter={"filters": [{"propertyName": "rate_card_line_item_code", "operator": "EQ", "value": OLD_CODE}]},
-    )
+    matches = search_eq(INSPECTION_ANSWER, "rate_card_line_item_code", OLD_CODE,
+                        ["rate_card_line_item_code", "answer_value", "answer_summary"])
     print(f"\nFound {len(matches)} answer record(s) with {OLD_CODE}.")
 
     inputs = []
@@ -115,11 +256,11 @@ def main():
     for i in range(0, len(inputs), 100):
         chunk = inputs[i:i + 100]
         hs_post(f"/crm/v3/objects/{type_id}/batch/update", {"inputs": chunk})
-        wait_a_moment(0.4)
+        time.sleep(0.4)
         print(f"  ... updated {i + len(chunk)} of {len(inputs)}")
 
     # 2) Deactivate the old catalog code so it can't be selected again.
-    if old_rec and (old_rec.get("properties", {}).get("is_active") not in ("false", False)):
+    if old_rec and str(old_rec.get("properties", {}).get("is_active")).lower() != "false":
         if get_property(CATALOG, "is_active"):
             cat_type = get_object_type_id(CATALOG)
             hs_patch(f"/crm/v3/objects/{cat_type}/{old_rec['id']}", {"properties": {"is_active": "false"}})
