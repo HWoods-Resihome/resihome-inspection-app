@@ -23,6 +23,10 @@ export default function RegeneratePdfsPage() {
   const [failCount, setFailCount] = useState(0);
   const [log, setLog] = useState<LogLine[]>([]);
   const cancelRef = useRef(false);
+  const resultsRef = useRef<LogLine[]>([]); // full results (for CSV)
+
+  const CONCURRENCY = 3;
+  const MAX_RETRY = 2;
 
   useEffect(() => {
     (async () => {
@@ -37,30 +41,67 @@ export default function RegeneratePdfsPage() {
     })();
   }, []);
 
+  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  // One inspection, with auto-retry on transient (5xx / network) failures.
+  async function finalizeOne(id: string): Promise<LogLine> {
+    for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
+      try {
+        const r = await fetch(`/api/inspections/${id}/finalize`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+        });
+        const d = await r.json().catch(() => ({} as any));
+        if (r.ok) {
+          const w = d.lineGroupingWarning;
+          return { id, ok: true, msg: w ? `ok — ⚠ ${w.dropped}/${w.totalLines} lines dropped` : 'ok' };
+        }
+        // 4xx = not retryable (bad data); 5xx = retry.
+        if (r.status >= 500 && attempt < MAX_RETRY) { await delay(800 * (attempt + 1)); continue; }
+        return { id, ok: false, msg: (d.error || `HTTP ${r.status}`).toString().slice(0, 200) };
+      } catch (e: any) {
+        if (attempt < MAX_RETRY) { await delay(800 * (attempt + 1)); continue; }
+        return { id, ok: false, msg: String(e?.message || e).slice(0, 200) };
+      }
+    }
+    return { id, ok: false, msg: 'failed after retries' };
+  }
+
   async function run(limit?: number) {
     if (!ids || running) return;
     const list = typeof limit === 'number' ? ids.slice(0, limit) : ids;
     setRunning(true);
     cancelRef.current = false;
     setDone(0); setOkCount(0); setFailCount(0); setLog([]);
-    for (let i = 0; i < list.length; i++) {
-      if (cancelRef.current) break;
-      const id = list[i];
-      try {
-        const r = await fetch(`/api/inspections/${id}/finalize`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
-        });
-        const d = await r.json().catch(() => ({}));
-        if (r.ok) { setOkCount((n) => n + 1); setLog((l) => [{ id, ok: true, msg: 'PDFs regenerated' }, ...l].slice(0, 200)); }
-        else { setFailCount((n) => n + 1); setLog((l) => [{ id, ok: false, msg: d.error || `HTTP ${r.status}` }, ...l].slice(0, 200)); }
-      } catch (e: any) {
-        setFailCount((n) => n + 1);
-        setLog((l) => [{ id, ok: false, msg: String(e?.message || e).slice(0, 160) }, ...l].slice(0, 200));
+    resultsRef.current = [];
+
+    // Bounded concurrency pool — a few in flight at once (faster) without
+    // hammering HubSpot. Auto-retry per item inside finalizeOne.
+    let next = 0;
+    const worker = async () => {
+      while (!cancelRef.current) {
+        const idx = next++;
+        if (idx >= list.length) return;
+        const res = await finalizeOne(list[idx]);
+        resultsRef.current.push(res);
+        if (res.ok) setOkCount((n) => n + 1); else setFailCount((n) => n + 1);
+        setLog((l) => [res, ...l].slice(0, 300));
+        setDone((n) => n + 1);
+        await delay(150); // small breather
       }
-      setDone((n) => n + 1);
-      await new Promise((res) => setTimeout(res, 400)); // be polite to HubSpot
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, list.length) }, worker));
     setRunning(false);
+  }
+
+  function downloadCsv() {
+    const rows = [['inspection_id', 'status', 'message'], ...resultsRef.current.map((r) => [r.id, r.ok ? 'ok' : 'failed', r.msg])];
+    const csv = rows.map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `regenerate-pdfs-results-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
   if (error) {
@@ -101,7 +142,14 @@ export default function RegeneratePdfsPage() {
                   Stop
                 </button>
               )}
+              {!running && done > 0 && (
+                <button type="button" onClick={downloadCsv}
+                  className="text-sm font-heading font-semibold px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100">
+                  Download CSV
+                </button>
+              )}
             </div>
+            <p className="text-[12px] text-gray-400 mt-2">Runs {CONCURRENCY} at a time, auto-retries transient failures up to {MAX_RETRY}×. A ⚠ in the log means that inspection finalized but some lines didn’t place — investigate it.</p>
 
             {(running || done > 0) && (
               <div className="mt-5">
