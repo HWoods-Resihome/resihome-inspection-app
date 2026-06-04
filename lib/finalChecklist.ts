@@ -78,6 +78,7 @@ export interface FcQuestion {
 
   // --- photo / note requirements (single_select) ---
   photoRequiredOnValues?: string[];
+  photoHint?: string;              // guidance shown under the "Photo (Required)" prompt (what to capture)
   noteRequiredOnValues?: string[];
   notePrompt?: string;             // label for the required note ("Where Are They Left?")
 
@@ -460,19 +461,22 @@ export const FINAL_CHECKLIST: FcSection[] = [
       // Utilities: if a meter is shut OFF, require a photo of the meter AND the
       // meter number so the turn team / next tenant can have it reconnected.
       { id: 'fc_electric', label: 'Electric', type: 'single_select', options: ['On', 'Off'], required: true,
-        photoRequiredOnValues: ['Off'], noteRequiredOnValues: ['Off'], notePrompt: 'Meter Number' },
+        photoRequiredOnValues: ['Off'], photoHint: 'Photo of the meter (showing the reading).',
+        noteRequiredOnValues: ['Off'], notePrompt: 'Meter Number' },
       { id: 'fc_water', label: 'Water', type: 'single_select', options: ['On', 'Off'], required: true,
-        photoRequiredOnValues: ['Off'], noteRequiredOnValues: ['Off'], notePrompt: 'Meter Number' },
+        photoRequiredOnValues: ['Off'], photoHint: 'Photo of the meter (showing the reading).',
+        noteRequiredOnValues: ['Off'], notePrompt: 'Meter Number' },
       { id: 'fc_gas', label: 'Gas', type: 'single_select', options: ['On', 'Off', 'N/A'], required: true,
-        photoRequiredOnValues: ['Off'], noteRequiredOnValues: ['Off'], notePrompt: 'Meter Number' },
+        photoRequiredOnValues: ['Off'], photoHint: 'Photo of the meter (showing the reading).',
+        noteRequiredOnValues: ['Off'], notePrompt: 'Meter Number' },
       {
         id: 'fc_trash_bins',
         label: 'Trash Bins',
         type: 'single_select',
         options: ['Present', 'Missing', 'N/A'],
         required: true,
-        help: 'Photograph the bins with the trash provider’s logo visible on the bin.',
         photoRequiredOnValues: ['Present'],
+        photoHint: 'Photograph the bins with the trash provider’s logo visible on the bin.',
         countOnValues: [{ value: 'Present', label: 'How Many Bins?', min: 1, max: 5 }],
         reminderOnValues: [{
           value: 'Present',

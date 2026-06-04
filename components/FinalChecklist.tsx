@@ -59,6 +59,13 @@ const num = (v: unknown): number | null => {
 // it rides along in the same answers map that's JSON-persisted with the rest.
 const FC_FINAL_NOTES_ID = 'fc_inspector_final_notes';
 
+// Dismiss the on-screen keyboard when the inspector hits Enter / Go / Done. On a
+// textarea this means Enter closes the keyboard instead of inserting a newline
+// (per owner request that every field dismiss on Enter/Go).
+function blurOnEnter(e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+  if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+}
+
 export function FinalChecklist(props: Props) {
   const { answers, onPatch, readOnly } = props;
   const [openInternal, setOpenInternal] = useState(true);
@@ -303,12 +310,14 @@ export function FinalChecklist(props: Props) {
           <div className="mb-2.5">
             <label className="block text-[11px] font-heading font-bold text-amber-800 mb-1">{titleCase(q.notePrompt || 'Note')} <span className="text-brand">(Required)</span></label>
             <textarea value={a.note || ''} disabled={readOnly} onChange={(e) => onPatch(q.id, { note: e.target.value })} rows={2}
+              onKeyDown={blurOnEnter}
               className="w-full text-sm rounded-md px-2 py-1.5 bg-white border border-gray-300 focus-brand" />
           </div>
         )}
         {needPhoto && (
           <div>
             <div className="text-[11px] font-heading font-bold text-amber-800 mb-1">Photo <span className="text-brand">(Required)</span></div>
+            {q.photoHint && <p className="text-[11px] text-amber-800/80 italic mb-1.5">{q.photoHint}</p>}
             <PhotoStrip urls={a.photoUrls || []} camKey={`${q.id}:photo`} required />
           </div>
         )}
@@ -385,6 +394,7 @@ export function FinalChecklist(props: Props) {
                   {f.type === 'single_select'
                     ? <Pills options={f.options} value={a.device?.[f.id]} onPick={(v) => onPatch(q.id, { device: { ...(a.device || {}), [f.id]: v } })} />
                     : <input type="text" disabled={readOnly} value={a.device?.[f.id] || ''} onChange={(e) => onPatch(q.id, { device: { ...(a.device || {}), [f.id]: e.target.value } })}
+                        enterKeyHint="done" onKeyDown={blurOnEnter}
                         className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus-brand" />}
                 </div>
               ))}
@@ -432,6 +442,7 @@ export function FinalChecklist(props: Props) {
                     value={others[i] || ''}
                     onChange={(e) => { const next = [...others]; next[i] = e.target.value; onPatch(q.id, { filterSizesOther: next }); }}
                     placeholder="Enter the filter size (e.g. 14 × 30 × 1)"
+                    enterKeyHint="done" onKeyDown={blurOnEnter}
                     className="mt-2 w-full max-w-[260px] bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus-brand"
                   />
                 )}
@@ -459,14 +470,20 @@ export function FinalChecklist(props: Props) {
       );
     }
 
-    // single_select
+    // single_select.
+    // NOTE: ActionPanel/CountField/Reminder/AddLineArea are invoked as FUNCTIONS,
+    // not as <Component/> elements. They're defined inside this component, so a
+    // new function identity is created on every render — rendering them as JSX
+    // makes React treat them as a new type each render and REMOUNT them, which
+    // destroyed the note <textarea> (in ActionPanel) and dropped keyboard focus
+    // on every keystroke. Calling them inlines their output into the stable tree.
     return (
       <>
-        <Pills options={q.options} value={a.value} onPick={(v) => pickSingle(q, v)} />
-        <ActionPanel q={q} />
-        <CountField q={q} />
-        <Reminder q={q} />
-        <AddLineArea q={q} />
+        {Pills({ options: q.options, value: a.value, onPick: (v) => pickSingle(q, v) })}
+        {ActionPanel({ q })}
+        {CountField({ q })}
+        {Reminder({ q })}
+        {AddLineArea({ q })}
       </>
     );
   }
@@ -551,6 +568,7 @@ export function FinalChecklist(props: Props) {
               onChange={(e) => onPatch(FC_FINAL_NOTES_ID, { note: e.target.value })}
               rows={3}
               placeholder="Anything the approver should know about this turn (optional)…"
+              onKeyDown={blurOnEnter}
               className="w-full text-sm rounded-md px-2 py-1.5 bg-white border border-gray-300 focus-brand disabled:bg-gray-50 disabled:text-gray-500"
             />
           </div>
