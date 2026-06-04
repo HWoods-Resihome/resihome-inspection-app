@@ -9,7 +9,20 @@ import { initErrorReporting } from '@/lib/clientErrorReporter';
 import { installSessionGuard } from '@/lib/sessionGuard';
 import { registerServiceWorker } from '@/lib/useAppUpdate';
 import { installOAuthBridge } from '@/lib/nativeBridge';
+import { Raleway } from 'next/font/google';
 import '../styles/globals.css';
+
+// Self-hosted Raleway (was a render-blocking Google Fonts @import in globals.css).
+// next/font downloads + inlines the font at build time and exposes it as the
+// --font-raleway CSS variable, which Tailwind's `font-heading` resolves. Removes
+// the runtime CDN round-trips on every cold load (better first paint + no CLS).
+const raleway = Raleway({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  display: 'swap',
+  variable: '--font-raleway',
+  fallback: ['Arial', 'sans-serif'],
+});
 
 export default function App({ Component, pageProps }: AppProps) {
   useEffect(() => {
@@ -31,12 +44,17 @@ export default function App({ Component, pageProps }: AppProps) {
             (accessibility). Individual pages no longer set their own. */}
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
-      <AppDialogProvider>
-        <FlashProvider>
-          <FieldStatusOverlays />
-          <Component {...pageProps} />
-        </FlashProvider>
-      </AppDialogProvider>
+      {/* `display:contents` so this wrapper exposes --font-raleway to the whole
+          tree without introducing a layout box (full-height page layouts are
+          unaffected). */}
+      <div className={raleway.variable} style={{ display: 'contents' }}>
+        <AppDialogProvider>
+          <FlashProvider>
+            <FieldStatusOverlays />
+            <Component {...pageProps} />
+          </FlashProvider>
+        </AppDialogProvider>
+      </div>
     </ErrorBoundary>
   );
 }

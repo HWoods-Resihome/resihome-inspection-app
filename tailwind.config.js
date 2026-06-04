@@ -38,8 +38,9 @@ module.exports = {
         },
       },
       fontFamily: {
-        // Raleway for headers; Arial for body per brand guidelines
-        heading: ['Raleway', 'Arial', 'sans-serif'],
+        // Raleway (self-hosted via next/font → --font-raleway) for headers;
+        // Arial for body per brand guidelines.
+        heading: ['var(--font-raleway)', 'Arial', 'sans-serif'],
         body: ['Arial', 'system-ui', 'sans-serif'],
       },
     },

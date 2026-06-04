@@ -2,8 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Raleway from Google Fonts; Arial is system-default */
-@import url('https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700;800&display=swap');
+/* Raleway is self-hosted via next/font (see pages/_app.tsx → --font-raleway).
+   Body default is Arial; headings use the Raleway variable. */
 
 html, body, #__next {
   height: 100%;
@@ -61,7 +61,7 @@ button, a, [role="button"], summary, input, select, textarea {
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: 'Raleway', Arial, sans-serif;
+  font-family: var(--font-raleway), Arial, sans-serif;
   font-weight: 700;
   letter-spacing: -0.01em;
 }
