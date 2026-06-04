@@ -39,6 +39,9 @@ const SILENCE_HANG_MS = 900;
 const MAX_UTTER_MS = 9000;
 const IDLE_RESTART_MS = 5000;
 const MAX_ROOM_STILLS = 12;
+// Dead-zone resilience: voice clips that can't reach Whisper while offline are
+// banked and retried on reconnect (bounded so a long outage can't blow up memory).
+const MAX_PENDING_CLIPS = 8;
 // Auto-still is now a FALLBACK: it only fires when the inspector has gone idle
 // (no manual shutter, no AI still, no chip) for this long — so supplemental
 // photos fill gaps instead of firing every few seconds.
@@ -160,7 +163,16 @@ export function CameraAILayer(props: Props) {
     uploadPhotoRef.current = uploadPhoto; onStillRef.current = onStill; onAddLineRef.current = onAddLine;
     getStreamRef.current = getStream; getLastManualCaptureAtRef.current = getLastManualCaptureAt;
     tenantMonthsRef.current = tenantMonths;
+    drainRef.current = drainPendingClips; // keep the reconnect drainer current (no stale closure)
   });
+
+  // When service returns, finish out any voice call-outs banked during a dead
+  // zone. Wired once; calls drainRef so it always runs the latest drainer.
+  useEffect(() => {
+    const onOnline = () => { drainRef.current(); };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, []);
 
   const openRef = useRef(false);
   const inFlight = useRef(false);
@@ -176,6 +188,14 @@ export function CameraAILayer(props: Props) {
   // hallucinate stock phrases ("bye bye", "thank you") on silence.
   const audioCtxRef = useRef<AudioContext | null>(null);
   const monitorRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Dead-zone resilience: voice clips banked while offline + a guard so only one
+  // drain runs at a time. drainRef always points at the latest drain fn so the
+  // window 'online' listener (wired once) never calls a stale closure.
+  const pendingClipsRef = useRef<Blob[]>([]);
+  const drainingClipsRef = useRef(false);
+  const drainRef = useRef<() => void>(() => {});
+  const [pendingClips, setPendingClips] = useState(0);
 
   const stampLinesRef = useRef<StampLine[]>([]);
   const transcriptBufRef = useRef('');
@@ -400,40 +420,86 @@ export function CameraAILayer(props: Props) {
     if (Object.keys(freq).length === 1 && JUNK_TOKENS.has(maxTok)) return true;
     return false;
   }
+  // Send ONE clip to Whisper → transcript. Throws on a network / transient (5xx,
+  // 429) failure so the caller can bank + retry; a 4xx is permanent (swallowed).
+  async function sendClipForText(blob: Blob): Promise<string> {
+    const base64 = await blobToBase64(blob);
+    const r = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base64, mime: (blob.type || 'audio/mp4').split(';')[0] }) });
+    if (!r.ok) {
+      if (r.status >= 500 || r.status === 429) throw new Error(`stt ${r.status}`); // transient → retry
+      const e = await r.json().catch(() => ({}));
+      dbg(`stt ✗ ${r.status} ${String(e?.error || '').slice(0, 40)}`);
+      setErrText(`Voice ${r.status}: ${String(e?.error || '').slice(0, 50)}`);
+      return '';
+    }
+    const d = await r.json();
+    return String(d.text || '').trim();
+  }
+
+  // Route a transcript: a room-nav command, or a work call-out (buffer + infer).
+  function handleTranscript(txt: string) {
+    if (!txt) { dbg('stt: (empty)'); return; }
+    if (isNoise(txt)) { dbg(`stt: noise “${txt.slice(0, 24)}”`); return; }
+    dbg(`stt ✓ “${txt.slice(0, 32)}”`);
+    setErrText('');
+    // Try room navigation against a short rolling window (commands split across
+    // clips). If it navigates, treat the window as consumed and DON'T feed it to
+    // the work endpoint (otherwise "move to the kitchen" becomes a bogus line).
+    const now = Date.now();
+    navRecentRef.current = [...navRecentRef.current.filter((e) => now - e.t < 8000), { t: now, text: txt }];
+    const navWindow = navRecentRef.current.map((e) => e.text).join(' ');
+    if (maybeNavigate(navWindow)) { navRecentRef.current = []; return; }
+    transcriptBufRef.current += txt + ' ';
+    // Fire inference immediately so the card appears right after you speak.
+    if (!inFlight.current && openRef.current) void runInference();
+  }
+
+  // Bank a clip we couldn't send (offline / transient) for retry on reconnect.
+  function enqueueClip(blob: Blob) {
+    const q = pendingClipsRef.current;
+    q.push(blob);
+    while (q.length > MAX_PENDING_CLIPS) q.shift(); // bound memory over a long outage
+    setPendingClips(q.length);
+    setErrText(`Offline — ${q.length} voice call-out${q.length === 1 ? '' : 's'} saved, will finish when you're back online`);
+  }
+
+  // Drain banked clips in order once we're back online. Stops (keeping the queue)
+  // the moment a send fails again, so nothing is lost across repeated dead zones.
+  async function drainPendingClips() {
+    if (drainingClipsRef.current) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (!pendingClipsRef.current.length) return;
+    drainingClipsRef.current = true;
+    try {
+      while (pendingClipsRef.current.length && openRef.current && !(typeof navigator !== 'undefined' && navigator.onLine === false)) {
+        const blob = pendingClipsRef.current[0];
+        let txt = '';
+        try { txt = await sendClipForText(blob); }
+        catch { break; } // still unreachable — leave the queue for the next attempt
+        pendingClipsRef.current.shift();
+        setPendingClips(pendingClipsRef.current.length);
+        handleTranscript(txt);
+      }
+      if (!pendingClipsRef.current.length) setErrText('');
+    } finally { drainingClipsRef.current = false; }
+  }
+
   async function transcribeChunk(blob: Blob) {
+    // Known offline → bank immediately (don't even attempt the fetch).
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { enqueueClip(blob); return; }
     try {
       setTranscribing(true);
-      const base64 = await blobToBase64(blob);
-      const r = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base64, mime: (blob.type || 'audio/mp4').split(';')[0] }) });
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({}));
-        dbg(`stt ✗ ${r.status} ${String(e?.error || '').slice(0, 40)}`);
-        setErrText(`Voice ${r.status}: ${String(e?.error || '').slice(0, 50)}`);
-        return;
-      }
-      const d = await r.json();
-      const txt = String(d.text || '').trim();
-      if (!txt) { dbg('stt: (empty)'); return; }
-      if (isNoise(txt)) { dbg(`stt: noise “${txt.slice(0, 24)}”`); return; }
-      dbg(`stt ✓ “${txt.slice(0, 32)}”`);
-      setErrText('');
-      // NB: we intentionally do NOT echo the raw transcript to the status line —
-      // flipping between the quote and "Processing" read like an error. The card
-      // is the confirmation. heardText is reserved for nav / no-match messages.
-      // Try room navigation against a short rolling window (commands split across
-      // clips). If it navigates, treat the window as consumed and DON'T feed it to
-      // the work endpoint (otherwise "move to the kitchen" becomes a bogus line).
-      const now = Date.now();
-      navRecentRef.current = [...navRecentRef.current.filter((e) => now - e.t < 8000), { t: now, text: txt }];
-      const navWindow = navRecentRef.current.map((e) => e.text).join(' ');
-      if (maybeNavigate(navWindow)) { navRecentRef.current = []; return; }
-      transcriptBufRef.current += txt + ' ';
-      // Fire inference immediately so the card appears right after you speak,
-      // instead of waiting for the next fixed tick. (Guarded by inFlight.)
-      if (!inFlight.current && openRef.current) void runInference();
+      const txt = await sendClipForText(blob);
+      handleTranscript(txt);
     } catch (e: any) {
-      dbg(`stt err ${String(e?.message || e).slice(0, 30)}`);
-    } finally { setTranscribing(false); }
+      // Network / transient failure (dead zone) → bank for retry on reconnect so
+      // the call-out still "finishes out" instead of being lost.
+      enqueueClip(blob);
+      dbg(`stt queued ${String(e?.message || e).slice(0, 24)}`);
+    } finally {
+      setTranscribing(false);
+      void drainPendingClips(); // opportunistic catch-up if service just returned
+    }
   }
 
   // ---- voice room navigation ("go to kitchen", "walking into bedroom 1") ----
@@ -686,6 +752,10 @@ export function CameraAILayer(props: Props) {
   // ---- inference ----
   async function runInference() {
     if (inFlight.current || !openRef.current) return;
+    // Offline: don't burn the periodic vision tick on a fetch that will fail —
+    // voice call-outs are banked as clips (transcribeChunk) and replayed on
+    // reconnect, so nothing is lost. Try to drain anything already queued.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { void drainPendingClips(); return; }
     const room = getActiveRoomRef.current();
     if (!room) { setErrText('No active room'); return; }
     const newText = transcriptBufRef.current.trim();
@@ -902,6 +972,15 @@ export function CameraAILayer(props: Props) {
 
       {/* Saved-thumbnail toast — confirms the AI just saved a room photo so the
           inspector knows it's covered and won't re-shoot the same view. */}
+      {/* Dead-zone indicator: voice call-outs banked offline, auto-finished on reconnect. */}
+      {pendingClips > 0 && (
+        <div className="fixed left-1/2 -translate-x-1/2 top-20 z-40 pointer-events-none">
+          <div className="flex items-center gap-1.5 bg-amber-500/90 text-black rounded-full px-3 py-1 text-[11px] font-heading font-semibold shadow">
+            <span className="w-1.5 h-1.5 rounded-full bg-black/70 animate-pulse" />
+            {pendingClips} voice call-out{pendingClips === 1 ? '' : 's'} saved · finishing when back online
+          </div>
+        </div>
+      )}
       {savedShot && (
         <div key={savedShot.key} className="fixed left-1/2 -translate-x-1/2 top-28 z-40 pointer-events-none animate-shotSaved">
           <div className="flex items-center gap-2 bg-black/75 text-white rounded-xl pl-2 pr-3 py-2 shadow-lg">
@@ -995,7 +1074,7 @@ export function CameraAILayer(props: Props) {
                 Vendor + Tenant % use the branded ListPicker / WheelPicker (same
                 as the manual line card). Vendor $ shows the live formula cost. */}
             {(() => { const vc = vendorCostFor(s, e); const vcFormula = vendorCostFor(s, { ...e, vendorCost: '' }); const overridden = e.vendorCost.trim() !== ''; return (
-            <div className="mt-2 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1.5 text-[12px]">
+            <div className="mt-2 flex flex-nowrap items-center justify-between gap-x-1.5 text-[11px] whitespace-nowrap overflow-hidden">
               {/* Qty — tap to edit; full value pre-selected; Done/Enter or blur keeps it. */}
               {editing && editing.id === s.id && editing.field === 'qty' ? (
                 <input autoFocus type="text" inputMode="decimal" enterKeyHint="done" value={draft}
@@ -1003,25 +1082,22 @@ export function CameraAILayer(props: Props) {
                   onChange={(ev) => setDraft(ev.target.value.replace(/[^0-9.]/g, ''))}
                   onBlur={() => { setEdit(s.id, { qty: draft }); setEditing(null); }}
                   onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); setEdit(s.id, { qty: draft }); setEditing(null); } else if (ev.key === 'Escape') { setEditing(null); } }}
-                  className="h-7 w-16 bg-gray-100 rounded-lg px-2 text-[12px] outline-none ring-2 ring-brand/40" />
+                  className="h-7 w-14 bg-gray-100 rounded-lg px-2 text-[11px] outline-none ring-2 ring-brand/40 shrink-0" />
               ) : (
-                <button onClick={() => openEdit(s.id, 'qty', e.qty)} className="text-gray-500">
+                <button onClick={() => openEdit(s.id, 'qty', e.qty)} className="text-gray-500 shrink-0">
                   Qty <span className="text-gray-900 font-semibold tabular-nums">{e.qty ? (formatQty(Number(e.qty)) || e.qty) : (s.needsMeasurement ? '—' : '1')}</span>{unitAbbr ? ` ${unitAbbr}` : ''}
                 </button>
               )}
-              <span className="text-gray-300">·</span>
               {/* Vendor — branded ListPicker */}
               <ListPicker value={e.vendor} options={VENDORS.map((v) => ({ value: v, label: v }))}
                 onChange={(v) => setEdit(s.id, { vendor: v })} ariaLabel="Vendor" large
-                className="inline-flex items-center gap-0.5 text-gray-900 font-semibold max-w-[150px]" />
-              <span className="text-gray-300">·</span>
+                className="inline-flex items-center gap-0.5 text-gray-900 font-semibold max-w-[88px] shrink" />
               {/* Tenant % — branded WheelPicker */}
-              <span className="inline-flex items-center text-gray-500">Tenant&nbsp;
+              <span className="inline-flex items-center text-gray-500 shrink-0">Tenant&nbsp;
                 <WheelPicker value={e.tenantPct || '100'} options={TENANT_PCT_OPTIONS.map((p) => ({ value: String(p), label: `${p}%` }))}
                   onChange={(v) => setEdit(s.id, { tenantPct: v })} ariaLabel="Tenant %" large
                   className="inline-flex items-center gap-0.5 text-gray-900 font-semibold" />
               </span>
-              <span className="text-gray-300">·</span>
               {/* Vendor $ — live formula cost; tap to override. Done/Enter keeps the
                   override; tapping out (blur) reverts to the formula value. */}
               {editing && editing.id === s.id && editing.field === 'vendorCost' ? (
@@ -1031,10 +1107,10 @@ export function CameraAILayer(props: Props) {
                   onBlur={() => setEditing(null)} /* revert: don't commit on tap-out */
                   onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); setEdit(s.id, { vendorCost: draft }); setEditing(null); } else if (ev.key === 'Escape') { setEditing(null); } }}
                   placeholder={vcFormula != null ? money2(vcFormula) : 'auto'}
-                  className="h-7 w-24 bg-gray-100 rounded-lg px-2 text-[12px] outline-none ring-2 ring-brand/40" />
+                  className="h-7 w-20 bg-gray-100 rounded-lg px-2 text-[11px] outline-none ring-2 ring-brand/40 shrink-0" />
               ) : (
-                <button onClick={() => openEdit(s.id, 'vendorCost', e.vendorCost)} className="text-gray-500">
-                  Vendor $ <span className="text-gray-900 font-semibold">{vc != null ? `$${money2(vc)}` : '—'}</span>
+                <button onClick={() => openEdit(s.id, 'vendorCost', e.vendorCost)} className="text-gray-500 shrink-0">
+                  Vendor <span className="text-gray-900 font-semibold">{vc != null ? `$${money2(vc)}` : '—'}</span>
                   {overridden && <span className="text-brand"> ✎</span>}
                 </button>
               )}
