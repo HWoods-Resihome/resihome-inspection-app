@@ -2073,6 +2073,48 @@ export async function backfillBillingFields(opts: { after?: string; max?: number
 
 
 /**
+ * Backfill `resiwalk_inspection_url` on existing inspections (the live deep link
+ * `<origin>/inspection/<recordId>`). Idempotent — skips records already set to
+ * the same URL. Paginated like backfillBillingFields: processes up to `max`
+ * records from the optional `after` cursor and returns `nextAfter` (null = done).
+ */
+export async function backfillInspectionUrls(opts: { after?: string; max?: number; origin: string }): Promise<{ processed: number; updated: number; skipped: number; errors: number; nextAfter: string | null }> {
+  const { inspection: typeId } = typeIds();
+  const max = opts.max ?? 1000;
+  const origin = opts.origin.replace(/\/+$/, '');
+  let after = opts.after;
+  let processed = 0, updated = 0, skipped = 0, errors = 0;
+
+  while (processed < max) {
+    const body: any = { filterGroups: [], properties: ['resiwalk_inspection_url'], limit: 100 };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    const results = resp.results || [];
+    for (const r of results) {
+      processed++;
+      try {
+        const want = `${origin}/inspection/${r.id}`;
+        const existing = (r.properties?.resiwalk_inspection_url || '').toString().trim();
+        if (existing === want) { skipped++; continue; }
+        await updateInspection(r.id, { resiwalk_inspection_url: want });
+        updated++;
+      } catch (e) {
+        errors++;
+        console.warn(`[inspection-url-backfill] record ${r.id} failed:`, e);
+      }
+      await new Promise((res) => setTimeout(res, 90)); // polite to the API
+    }
+    after = resp.paging?.next?.after;
+    if (!after) return { processed, updated, skipped, errors, nextAfter: null };
+    if (processed >= max) return { processed, updated, skipped, errors, nextAfter: after };
+  }
+  return { processed, updated, skipped, errors, nextAfter: after || null };
+}
+
+/**
  * Stamp the inspection's "last edited" timestamp. Called on every edit (answers,
  * photos, rate-card lines) so the list can sort by most-recently-touched.
  *

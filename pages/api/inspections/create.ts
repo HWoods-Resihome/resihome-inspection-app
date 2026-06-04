@@ -1,7 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields } from '@/lib/hubspot';
+import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
+import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -158,6 +159,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         console.error(`QC line copy failed for inspection ${inspectionId}:`, e);
         // Don't fail the create — the QC exists; the form will just show no
         // lines and the user can retry/reopen. Surface a soft warning.
+      }
+    }
+
+    // Stamp the live deep link onto the inspection so HubSpot has a one-tap URL
+    // to open it. Needs the new record id, so it's a post-create update.
+    // Best-effort: never block creation if the property is missing.
+    try {
+      await updateInspection(inspectionId, { resiwalk_inspection_url: inspectionUrl(inspectionId, reqOriginOf(req)) });
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      if (!(msg.includes('PROPERTY_DOESNT_EXIST') || (msg.includes('Property') && msg.includes('does not exist')))) {
+        console.warn(`[create] resiwalk_inspection_url write failed for ${inspectionId}:`, msg);
       }
     }
 
