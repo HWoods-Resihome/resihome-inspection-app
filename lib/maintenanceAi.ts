@@ -124,6 +124,28 @@ export interface CreateTicketInput {
 }
 
 /**
+ * Backup path: explicitly set a ticket's type after creation, for environments
+ * that ignore ticketTypeId on the create call. Best-effort — the caller wraps
+ * this in try/catch and never fails the finalize over it.
+ *
+ * Endpoint/field are the documented ones (PUT /ticket/{id} with ticketTypeId);
+ * overridable via MAINTENANCE_AI_TICKET_UPDATE_METHOD if the API differs.
+ */
+async function updateTicketType(baseUrl: string, version: string, apiKey: string, ticketId: number, ticketTypeId: number): Promise<void> {
+  const method = (process.env.MAINTENANCE_AI_TICKET_UPDATE_METHOD || 'PUT').trim().toUpperCase();
+  const resp = await fetch(`${baseUrl}/api/external/${version}/ticket/${ticketId}`, {
+    method,
+    headers: { 'x-api-key': apiKey, 'x-request-id': genRequestId(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ticketId, ticketTypeId }),
+  });
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => '');
+    throw new Error(`HTTP ${resp.status} ${t.slice(0, 160)}`);
+  }
+  console.log(`[maintenanceAi] ticket #${ticketId} type set to ${ticketTypeId} via ${method} (backup).`);
+}
+
+/**
  * Create a maintenance ticket. Never throws — returns a result object the caller
  * can surface (finalize logs/response or the admin test button).
  */
@@ -174,7 +196,15 @@ export async function createMaintenanceTicket(input: CreateTicketInput): Promise
 
     if (resp.ok) {
       const ticketId = json?.data?.ticketId;
-      return { ok: true, configured: true, status, requestId, ticketId: typeof ticketId === 'number' ? ticketId : undefined };
+      const tid = typeof ticketId === 'number' ? ticketId : undefined;
+      // Backup: some environments don't honor ticketTypeId on CREATE, so the
+      // ticket lands as a default Maintenance type. Best-effort: explicitly set
+      // the type via an update so it ends up as Turnkey (1828). Never fatal.
+      if (tid) {
+        try { await updateTicketType(baseUrl, version, apiKey, tid, body.ticketTypeId); }
+        catch (e: any) { console.warn('[maintenanceAi] ticket type update (backup) failed:', String(e?.message || e).slice(0, 200)); }
+      }
+      return { ok: true, configured: true, status, requestId, ticketId: tid };
     }
 
     // 202 = idempotency replay/in-progress; treat as non-fatal but not "ok".

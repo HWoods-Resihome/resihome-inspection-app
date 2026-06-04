@@ -193,7 +193,7 @@ export function CameraAILayer(props: Props) {
     const line = `${new Date().toLocaleTimeString('en-US', { hour12: false })} ${s}`;
     // eslint-disable-next-line no-console
     console.log('[AICam]', line);
-    setDbgLines((p) => [...p.slice(-11), line]);
+    setDbgLines((p) => [...p.slice(-5), line]); // keep the last ~6 so the HUD stays short
   }
 
   const [listening, setListening] = useState(false);

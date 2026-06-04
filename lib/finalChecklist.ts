@@ -210,55 +210,62 @@ export function summarizeFinalChecklist(
   return out;
 }
 
-/** True only when every required (and visible) checklist item is satisfied —
- *  including that each line-item prompt has been explicitly accepted or declined.
- *  Drives the Submit hard-gate. */
-export function isFinalChecklistComplete(a: FcAnswers, ctx: FcCompletionCtx): boolean {
+/** The first unmet (visible, required) checklist item, described for the user
+ *  (e.g. "HVAC & Air Filters · Label Sticker Photos: add the Air Handler photo").
+ *  Returns null when the checklist is complete. Single source of truth for both
+ *  the completeness gate and the submit tooltip/flash. */
+export function finalChecklistGap(a: FcAnswers, ctx: FcCompletionCtx): string | null {
   for (const section of FINAL_CHECKLIST) {
     for (const q of section.questions) {
       if (q.showWhenProperty) {
-        const v = ctx.septicFee ?? 0;            // only septic uses showWhenProperty today
-        if (!(v > (q.showWhenProperty.gt ?? 0))) continue; // hidden → not required
+        const v = ctx.septicFee ?? 0;
+        if (!(v > (q.showWhenProperty.gt ?? 0))) continue;
       }
       const ans = a[q.id] || {};
+      const where = `${section.name} · ${q.label}`;
       if (q.type === 'device_subform') {
-        if (q.required && !ans.value) return false;
+        if (q.required && !ans.value) return `${where}: choose a device type`;
         const dev = (q.devices || []).find((d) => d.value === ans.value);
         if (dev?.fields) {
           for (const f of dev.fields) {
-            if (f.required && !((ans.device?.[f.id] || '').trim())) return false;
+            if (f.required && !((ans.device?.[f.id] || '').trim())) return `${where}: ${f.label} required`;
           }
         }
       } else if (q.type === 'number') {
-        // The visible default (prefill or min) counts as the answer so an
-        // untouched-but-displayed value doesn't silently block Submit.
-        const eff = ans.quantity ?? ctx.airQtyPrefill ?? (q.min ?? null);
-        if (q.required && eff == null) return false;
+        const eff = ans.quantity ?? ctx.airQtyPrefill ?? q.min ?? null;
+        if (q.required && eff == null) return `${where}: enter a value`;
       } else if (q.type === 'filter_sizes') {
-        if (!ctx.filterOptionsAvailable) continue; // can't require what can't be picked
+        if (!ctx.filterOptionsAvailable) continue;
         const count = fcFilterCount(a, ctx.airQtyPrefill);
         const sizes = ans.filterSizes || [];
         for (let i = 0; i < count; i++) {
           const sel = (sizes[i] || ctx.filterPrefills[i] || '').trim();
-          if (!sel) return false;
-          if (sel === FC_FILTER_OTHER && !((ans.filterSizesOther?.[i] || '').trim())) return false;
+          if (!sel) return `${where}: select Filter Size #${i + 1}`;
+          if (sel === FC_FILTER_OTHER && !((ans.filterSizesOther?.[i] || '').trim())) return `${where}: enter the custom Filter Size #${i + 1}`;
         }
       } else if (q.type === 'photo_set') {
         for (const p of (q.photos || [])) {
-          if (p.required && !((ans.stickerPhotos?.[p.id] || []).length)) return false;
+          if (p.required && !((ans.stickerPhotos?.[p.id] || []).length)) return `${where}: add the ${p.label} photo`;
         }
       } else { // single_select
-        if (q.required && !ans.value) return false;
-        if ((q.photoRequiredOnValues || []).includes(ans.value || '') && !((ans.photoUrls || []).length)) return false;
-        if ((q.noteRequiredOnValues || []).includes(ans.value || '') && !((ans.note || '').trim())) return false;
-        const addRule = (q.addLineOnValues || []).find((r) => r.value === ans.value);
-        if (addRule && !ans.added && !ans.declined) return false;
+        if (q.required && !ans.value) return `${where}: choose an answer`;
+        if ((q.photoRequiredOnValues || []).includes(ans.value || '') && !((ans.photoUrls || []).length)) return `${where}: add a photo`;
+        if ((q.noteRequiredOnValues || []).includes(ans.value || '') && !((ans.note || '').trim())) return `${where}: add a note`;
         const cnt = (q.countOnValues || []).find((c) => c.value === ans.value);
-        if (cnt && ans.count == null) return false;
+        if (cnt && ans.count == null) return `${where}: ${cnt.label}`;
+        const addRule = (q.addLineOnValues || []).find((r) => r.value === ans.value);
+        if (addRule && !ans.added && !ans.declined) return `${where}: add or decline the suggested line`;
       }
     }
   }
-  return true;
+  return null;
+}
+
+/** True only when every required (and visible) checklist item is satisfied —
+ *  including that each line-item prompt has been explicitly accepted or declined.
+ *  Derived from finalChecklistGap so the gate and the message can never diverge. */
+export function isFinalChecklistComplete(a: FcAnswers, ctx: FcCompletionCtx): boolean {
+  return finalChecklistGap(a, ctx) === null;
 }
 
 export const FINAL_CHECKLIST: FcSection[] = [

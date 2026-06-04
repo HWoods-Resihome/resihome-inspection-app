@@ -232,7 +232,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           tenantStr = `${l.tenantBillBackPercent}% tenant = ${money(c.tenantCost)}`;
           if (/paint/i.test(item.category)) paintTotal += c.clientCost;
         } catch { /* noop */ }
-        rows.push(`    - id=${l.externalId} | ${item.laborShortDescription} [${item.category}/${item.subcategory}, ${item.laborMeas}] | qty ${l.quantity} | ${tenantStr} | ${costStr} | vendor: ${l.assignedTo || 'Vendor 1'}${l.note ? ` | note: ${l.note}` : ''}`);
+        const bidTag = item.isBidItem
+          ? ` | BID ITEM (${l.customVendorCost != null ? 'vendor cost set' : 'vendor cost NOT set'})`
+          : '';
+        rows.push(`    - id=${l.externalId} | ${item.laborShortDescription} [${item.category}/${item.subcategory}, ${item.laborMeas}] | qty ${l.quantity} | ${tenantStr} | ${costStr} | vendor: ${l.assignedTo || 'Vendor 1'}${bidTag}${l.note ? ` | note: ${l.note}` : ''}`);
       }
       if (rows.length) scopeBlocks.push(`  Room "${s.name}" (id=${s.id}):\n${rows.join('\n')}`);
     }

@@ -12,7 +12,7 @@ import type { TemplateType, RateCardLineItem, RegionRate, RateCardLineInput } fr
 import { EditableLineRow } from '@/components/EditableLineRow';
 import { FinalChecklist } from '@/components/FinalChecklist';
 import {
-  isFinalChecklistComplete,
+  finalChecklistGap,
   type FcAnswers, type FcAnswerState, type FcAddLineRule,
 } from '@/lib/finalChecklist';
 import { buildSectionPhotoAnswerProps, buildQaAnswerProps } from '@/lib/answerProps';
@@ -2159,8 +2159,10 @@ export function RateCardForm(props: RateCardFormProps) {
   // Review is valid only while the scope it passed against is unchanged.
   const reviewValid = reviewedHash !== null && reviewedHash === currentScopeHash;
   // Final Checklist completeness — gates Submit (scope only) just like AI review.
-  const finalChecklistComplete = useMemo(
-    () => isFinalChecklistComplete(fcAnswers, {
+  // The first unmet checklist item (descriptive), or null when complete. Single
+  // source for both the gate and the submit tooltip/flash so they can't diverge.
+  const fcGap = useMemo(
+    () => finalChecklistGap(fcAnswers, {
       septicFee: props.propertySepticFee ?? null,
       airQtyPrefill: props.propertyAirFiltersTotal ?? null,
       filterOptionsAvailable: (props.filterSizeOptions?.length ?? 0) > 0,
@@ -2169,6 +2171,7 @@ export function RateCardForm(props: RateCardFormProps) {
     [fcAnswers, props.propertySepticFee, props.propertyAirFiltersTotal, props.filterSizeOptions,
      props.propertyAirFiltersType1, props.propertyAirFiltersType2, props.propertyAirFiltersType3],
   );
+  const finalChecklistComplete = fcGap === null;
   // The Final Checklist only applies to EDITABLE scope inspections (scheduled /
   // in-progress + all future). Inspections already in pending approval or
   // completed are EXEMPT — the section is hidden and never gates them.
@@ -2770,8 +2773,8 @@ export function RateCardForm(props: RateCardFormProps) {
     // AI-Review gate at finalize, so the check always happens before PDFs.
     // Final Checklist hard-gate (scope, first submit only): every required item
     // must be complete, and each line-item prompt accepted or declined.
-    if (fcApplies && !finalChecklistComplete) {
-      void dialog.alert('Please complete the Final Checklist at the bottom of the form before submitting for approval.');
+    if (fcApplies && fcGap) {
+      void dialog.alert(`Finish the Final Checklist before submitting:\n\n• ${fcGap}`);
       return;
     }
     if (props.templateType === 'pm_scope_rate_card' && props.inspectionStatus !== 'pending_approval' && !reviewValid) {
@@ -3695,7 +3698,7 @@ export function RateCardForm(props: RateCardFormProps) {
                 : finalizing ? 'Finalizing…'
                 : aiApplying ? 'Applying AI review…'
                 : (pendingSync + pendingPhotos) > 0 ? 'Waiting for offline changes to finish syncing.'
-                : (fcApplies && !finalChecklistComplete) ? 'Complete the Final Checklist at the bottom (every required item) before submitting.'
+                : (fcApplies && fcGap) ? `Finish the Final Checklist — ${fcGap}`
                 : (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !reviewValid) ? 'Run the AI Review before submitting.'
                 : undefined
               }

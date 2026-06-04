@@ -74,8 +74,27 @@ export function PhotoLightbox({
 
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
-  const prev = () => setIndex((i) => (i > 0 ? i - 1 : i));
-  const next = () => setIndex((i) => (i < photos.length - 1 ? i + 1 : i));
+  // Continuous navigation across rooms: stepping past the end of one room jumps
+  // to the first photo of the next room with photos (and prev → last of the
+  // previous). Only the very first photo of the first room and the very last
+  // photo of the last room have no arrow.
+  const orderedGroups = groups.map((g) => g.id).filter((id) => (photosByGroup[id]?.length || 0) > 0);
+  const gPos = orderedGroups.indexOf(groupId);
+  const canPrev = index > 0 || gPos > 0;
+  const canNext = index < photos.length - 1 || (gPos >= 0 && gPos < orderedGroups.length - 1);
+  const prev = () => {
+    if (index > 0) { setIndex((i) => i - 1); return; }
+    if (gPos > 0) {
+      const pg = orderedGroups[gPos - 1];
+      setGroupId(pg); setIndex(Math.max(0, (photosByGroup[pg]?.length || 1) - 1)); setDragPx(0);
+    }
+  };
+  const next = () => {
+    if (index < photos.length - 1) { setIndex((i) => i + 1); return; }
+    if (gPos >= 0 && gPos < orderedGroups.length - 1) {
+      setGroupId(orderedGroups[gPos + 1]); setIndex(0); setDragPx(0);
+    }
+  };
 
   function showToast(msg: string) {
     setToast(msg);
@@ -96,8 +115,8 @@ export function PhotoLightbox({
   function onPointerUp() {
     if (dragStartX.current == null) { setDragging(false); return; }
     const threshold = Math.min(80, (cw || 300) * 0.18);
-    if (dragPx < -threshold && index < photos.length - 1) setIndex((i) => i + 1);
-    else if (dragPx > threshold && index > 0) setIndex((i) => i - 1);
+    if (dragPx < -threshold) next();        // crosses into the next room at the end
+    else if (dragPx > threshold) prev();    // crosses into the previous room at the start
     dragStartX.current = null;
     pointerIdRef.current = null;
     setDragPx(0);
@@ -182,11 +201,11 @@ export function PhotoLightbox({
           ))}
         </div>
 
-        {index > 0 && (
+        {canPrev && (
           <button type="button" onClick={prev} onPointerDown={(e) => e.stopPropagation()} aria-label="Previous"
             className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 text-white text-2xl leading-none flex items-center justify-center">‹</button>
         )}
-        {index < photos.length - 1 && (
+        {canNext && (
           <button type="button" onClick={next} onPointerDown={(e) => e.stopPropagation()} aria-label="Next"
             className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 text-white text-2xl leading-none flex items-center justify-center">›</button>
         )}
