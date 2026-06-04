@@ -14,10 +14,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { readKnowledgeEntries, addKnowledgeEntry } from '@/lib/hubspot';
+import { isKnowledgeAdmin } from '@/lib/aiKnowledgeAccess';
 
-function isAdmin(email: string): boolean {
-  return /@resihome\.com$/i.test(email || '');
-}
+const isAdmin = isKnowledgeAdmin;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);

@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { isKnowledgeAdmin } from '@/lib/aiKnowledgeAccess';
 
 interface Entry {
   id: string;
@@ -40,7 +41,7 @@ export default function AiKnowledgePage() {
     fetch('/api/auth/me')
       .then((r) => r.json())
       .then((data) => {
-        const admin = !!data.authenticated && /@resihome\.com$/i.test(data.user?.email || '');
+        const admin = !!data.authenticated && isKnowledgeAdmin(data.user?.email);
         setIsAdmin(admin);
         setAuthChecked(true);
         if (!data.authenticated) router.replace('/login');

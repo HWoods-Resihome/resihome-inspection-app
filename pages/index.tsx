@@ -7,6 +7,7 @@ import type { InspectionSummary } from '@/lib/types';
 import { InspectionCard } from '@/components/InspectionCard';
 import { ListPicker } from '@/components/ListPicker';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
+import { isKnowledgeAdmin } from '@/lib/aiKnowledgeAccess';
 
 interface MeUser { userId: string; email: string; name: string; }
 
@@ -383,8 +384,9 @@ export default function Home() {
               <span className="font-heading font-bold text-base text-brand">New Inspection</span>
             </Link>
 
-            {/* Admin: AI knowledge base (field-trained live-camera guidance). */}
-            {me && /@resihome\.com$/i.test(me.email) && (
+            {/* Admin: AI knowledge base (field-trained live-camera guidance).
+                Curation is limited to the AI_KNOWLEDGE_ADMINS allowlist. */}
+            {me && isKnowledgeAdmin(me.email) && (
               <Link
                 href="/ai-knowledge"
                 className="mt-2 flex items-center gap-2 text-white/90 hover:text-white text-sm font-heading font-semibold"

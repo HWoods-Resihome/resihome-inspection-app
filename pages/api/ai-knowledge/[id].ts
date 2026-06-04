@@ -9,11 +9,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { updateKnowledgeEntry, deleteKnowledgeEntry } from '@/lib/hubspot';
+import { isKnowledgeAdmin } from '@/lib/aiKnowledgeAccess';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
-  if (!/@resihome\.com$/i.test(session.email)) return res.status(403).json({ error: 'Admin only.' });
+  if (!isKnowledgeAdmin(session.email)) return res.status(403).json({ error: 'Admin only.' });
 
   const { id } = req.query;
   if (!id || typeof id !== 'string') return res.status(400).json({ error: 'Missing entry id' });
