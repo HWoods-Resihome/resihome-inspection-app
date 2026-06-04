@@ -9,13 +9,18 @@ export default function Document() {
             worker (registered in _app) provides the offline shell. */}
         <link rel="manifest" href="/manifest.webmanifest" />
         <meta name="theme-color" content="#ff0060" />
-        {/* Browser-tab (favicon) icon — the ResiWALK house + footprint mark. The
-            SVG is the brand-pink house+footprint that fills the tab; PNGs are
-            fallbacks for browsers that don't take SVG favicons. */}
-        <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=3" />
-        <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=3" />
-        <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png?v=3" />
-        <link rel="shortcut icon" href="/favicon.svg?v=3" />
+        {/* Browser-tab (favicon) icon — the ResiWALK house + footprint mark in
+            brand pink on a TRANSPARENT background. The SVG is what modern browsers
+            use; the favicon-*.png are transparent PNG fallbacks for the rare
+            browser that can't render an SVG favicon. (The solid-pink-tile
+            icon-192/icon-512/apple-touch icons are the installed-app + home-screen
+            icons — those keep a background on purpose; transparency renders black
+            on iOS and breaks the maskable safe-zone.) */}
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=4" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=4" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png?v=4" />
+        <link rel="icon" type="image/png" sizes="512x512" href="/favicon-512.png?v=4" />
+        <link rel="shortcut icon" href="/favicon.svg?v=4" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
