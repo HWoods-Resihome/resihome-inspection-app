@@ -174,7 +174,8 @@ export interface SubmitResult {
 
 /**
  * A single line from the rate_card_line_item catalog object in HubSpot.
- * 853 of these exist after the Phase 1 loader runs.
+ * The catalog is ~1,000+ active items and grows over time; nothing in the app
+ * hardcodes that count (the fetch paginates until exhausted).
  */
 export interface RateCardLineItem {
   recordId: string;                  // HubSpot record id

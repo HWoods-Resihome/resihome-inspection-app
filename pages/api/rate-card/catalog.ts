@@ -6,7 +6,8 @@ import type { RateCardLineItem } from '@/lib/types';
 /**
  * GET /api/rate-card/catalog
  *
- * Returns the full catalog (~853 items) for the line item picker modal.
+ * Returns the full catalog (~1,000+ active items, and growing) for the line-item
+ * picker modal. Size is dynamic — the upstream fetch paginates with no cap.
  *
  * Caching:
  *   - In-memory per server instance, 60-minute TTL.
@@ -56,7 +57,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const fresh = CACHE && (now - CACHE.fetchedAt) < TTL_MS && !refresh;
 
   // Let the browser reuse the (large) catalog response across quick form
-  // re-mounts instead of re-downloading ~850 rows each time. Private (it's
+  // re-mounts instead of re-downloading the full catalog each time. Private (it's
   // behind auth) and short, with stale-while-revalidate so an expiry never
   // blocks the picker. A catalog edit still propagates within ~2 min, and
   // ?refresh=1 bypasses it. Skipped on a forced refresh.
@@ -96,8 +97,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 /**
  * Helper exported for server-side use (finalize, qc-finalize, rate-card-lines)
- * so they reuse this 60-minute cache instead of re-paginating the full ~850-row
- * catalog on every call. Mirrors getCachedRegions.
+ * so they reuse this 60-minute cache instead of re-paginating the full catalog
+ * on every call. Mirrors getCachedRegions.
  */
 export async function getCachedCatalog(forceRefresh = false): Promise<RateCardLineItem[]> {
   const now = Date.now();

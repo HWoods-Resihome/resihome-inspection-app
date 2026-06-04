@@ -3,13 +3,15 @@
 // Semantic catalog matching for the voice line-item assistant (Scope only).
 //
 // COST MODEL (the whole point of this design):
-//   - The 853-row catalog is embedded ONCE per catalog_version, then cached
-//     (in-memory + a /tmp JSON file). Re-embedding only happens when the
-//     catalog changes. ~26K tokens total => a fraction of a cent, once.
+//   - The full catalog (~1,000+ rows, and growing) is embedded ONCE per version,
+//     then cached (in-memory + a /tmp JSON file). The version key includes the
+//     item COUNT (see catalogVersion below), so ADDING or removing items
+//     auto-invalidates the cache and re-embeds — no manual step. A fraction of a
+//     cent, once per change.
 //   - Per spoken utterance we embed ONE short phrase (~10 tokens, effectively
 //     free) and do an in-memory cosine search. No per-utterance catalog cost.
-//   - The LLM then sees only the top-K candidates (default 10), never all 853,
-//     which keeps the (more expensive) Claude call small.
+//   - The LLM then sees only the top-K candidates (default 10), never the whole
+//     catalog, which keeps the (more expensive) Claude call small.
 //
 // Provider: Voyage AI (Anthropic's recommended embeddings partner).
 //   Env: VOYAGE_API_KEY. Model: voyage-3-lite (cheap, strong for retrieval).
@@ -112,8 +114,8 @@ async function voyageEmbed(texts: string[], inputType: 'document' | 'query'): Pr
 }
 
 // Embed the full catalog (batched). Called once per version on a cache miss.
-// Batches run IN PARALLEL so a cold instance (which must re-embed all ~850
-// rows before the first voice request can match) finishes in roughly one
+// Batches run IN PARALLEL so a cold instance (which must re-embed the full
+// catalog before the first voice request can match) finishes in roughly one
 // round-trip instead of seven sequential ones — the main cause of the slow
 // "first request".
 async function embedCatalog(items: RateCardLineItem[]): Promise<Map<string, number[]>> {

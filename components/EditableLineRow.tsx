@@ -50,7 +50,7 @@ interface Props {
   catalog: RateCardLineItem[];
   // O(1) code→item lookup over the same catalog. Optional: when the parent
   // already has one (the rate-card form), pass it so each row doesn't linear-scan
-  // 853 rows on every render; otherwise the row derives one from `catalog`.
+  // the whole catalog on every render; otherwise the row derives one from `catalog`.
   catalogByCode?: Map<string, RateCardLineItem>;
   regions: RegionRate[];
   inspectionRegion: string;

@@ -162,7 +162,7 @@ function hsNoteFailure(): void {
 
 async function hubspotFetchInner(url: string, method: string, path: string, init: RequestInit): Promise<any> {
   // Retry on 429 (rate limit) with exponential backoff. HubSpot's secondly
-  // limit (~10 req/sec) can be hit when paginating the 853-row catalog or
+  // limit (~10 req/sec) can be hit when paginating the (1,000+ row) catalog or
   // when multiple browser tabs fire concurrent loads.
   // We retry up to 4 times total (initial + 3 retries) with backoffs:
   //   250ms -> 750ms -> 2000ms -> 5000ms
@@ -2367,7 +2367,11 @@ export async function archiveAnswers(answerRecordIds: string[]): Promise<void> {
 import type { RateCardLineItem, RegionRate } from './types';
 
 /**
- * Fetch all active rate_card_line_item records (the 853-item catalog).
+ * Fetch ALL active rate_card_line_item records (the live catalog — ~1,000+ items
+ * and growing). Pagination is unbounded (loops on `after` until exhausted), so
+ * there is NO hardcoded size cap: additions/removals in HubSpot flow through
+ * automatically. (HubSpot's Search API paginates up to 10,000 results total —
+ * well above the current size; revisit only if the catalog ever nears that.)
  *
  * Pages through search results (HubSpot caps at 100 per page).
  * Use only inside the cached API layer in /api/rate-card/catalog — do NOT call

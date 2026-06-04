@@ -228,9 +228,10 @@ export function RateCardForm(props: RateCardFormProps) {
   // ----- Catalog + regions ---------------------------------------------
   const [catalog, setCatalog] = useState<RateCardLineItem[]>([]);
   const [regions, setRegions] = useState<RegionRate[]>([]);
-  // O(1) code→item lookup, built once per catalog load. The catalog has ~853
-  // rows; resolving line items with catalog.find() inside the per-render totals/
-  // breakdown loops was O(lines × 853) on every keystroke. Use this Map instead.
+  // O(1) code→item lookup, built once per catalog load. The catalog has ~1,000+
+  // rows (and grows); resolving line items with catalog.find() inside the
+  // per-render totals/breakdown loops was O(lines × catalog) on every keystroke.
+  // Use this Map instead. Rebuilds automatically whenever `catalog` changes.
   const catalogByCode = useMemo(() => {
     const m = new Map<string, RateCardLineItem>();
     for (const c of catalog) m.set(c.lineItemCode, c);

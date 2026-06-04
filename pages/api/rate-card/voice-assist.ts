@@ -12,7 +12,7 @@
 //     { type: 'proposal', line, summary }   -> a complete RateCardLineInput to confirm
 //     { type: 'message', text }             -> plain reply (e.g. "couldn't match that")
 //
-// COST: Claude only ever sees the top-K candidate lines (not all 853), and the
+// COST: Claude only ever sees the top-K candidate lines (not the whole catalog), and the
 // catalog embeddings are built once per version (see lib/voiceCatalogMatch.ts).
 //
 // The route NEVER saves anything. The client shows the proposal as a draft row;
