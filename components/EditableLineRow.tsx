@@ -48,6 +48,10 @@ interface Props {
   // Line data and metadata
   line: RateCardLineInput | null;       // null means "brand new, unsaved"
   catalog: RateCardLineItem[];
+  // O(1) code→item lookup over the same catalog. Optional: when the parent
+  // already has one (the rate-card form), pass it so each row doesn't linear-scan
+  // 853 rows on every render; otherwise the row derives one from `catalog`.
+  catalogByCode?: Map<string, RateCardLineItem>;
   regions: RegionRate[];
   inspectionRegion: string;
   // Section context (used when saving a new row)
@@ -285,11 +289,19 @@ function PhotoChipRow({
 
 export function EditableLineRow(props: Props) {
   const {
-    line, catalog, regions, inspectionRegion,
+    line, catalog, catalogByCode: catalogByCodeProp, regions, inspectionRegion,
     section, location, readOnly, startInEditMode, mobile,
     onSave, onDelete, onDiscardNew, autoSfQuantity, tenantMonths, afterPhotosEnabled,
     onCaptureAfterPhotos, onOpenAfterPhoto,
   } = props;
+
+  // Use the parent-supplied code→item Map when present (the rate-card form passes
+  // one); otherwise derive it from `catalog` so standalone callers still get O(1)
+  // lookups instead of linear scans.
+  const byCode = useMemo(
+    () => catalogByCodeProp ?? new Map(catalog.map((c) => [c.lineItemCode, c])),
+    [catalogByCodeProp, catalog],
+  );
 
   // -------------------------------------------------------------------
   // Mode state
@@ -346,7 +358,7 @@ export function EditableLineRow(props: Props) {
   // or on first mount of an existing line.
   useEffect(() => {
     if (!line?.lineItemCode || catalog.length === 0) return;
-    const item = catalog.find((c) => c.lineItemCode === line.lineItemCode);
+    const item = byCode.get(line.lineItemCode);
     if (item) {
       setCategory(item.category);
       setSubcategory(item.subcategory);
@@ -396,8 +408,8 @@ export function EditableLineRow(props: Props) {
 
   const selectedItem: RateCardLineItem | null = useMemo(() => {
     if (!lineItemCode) return null;
-    return catalog.find((c) => c.lineItemCode === lineItemCode) || null;
-  }, [catalog, lineItemCode]);
+    return byCode.get(lineItemCode) || null;
+  }, [byCode, lineItemCode]);
 
   // Whole House + SF item on a NEW row: default the quantity to the property
   // square footage (instead of 1) so the inspector doesn't have to type it.
@@ -480,7 +492,7 @@ export function EditableLineRow(props: Props) {
   function handleLineItemChange(code: string) {
     setLineItemCode(code);
     if (code) {
-      const item = catalog.find((c) => c.lineItemCode === code);
+      const item = byCode.get(code);
       if (item) {
         setCategory(item.category);
         setSubcategory(item.subcategory);
@@ -611,7 +623,7 @@ export function EditableLineRow(props: Props) {
     // Keep the description-reset effect from wiping the restored override.
     lastDescItemRef.current = line?.lineItemCode || null;
     descTouchedRef.current = !!line?.customLaborFullDescription;
-    const item = line?.lineItemCode ? catalog.find((c) => c.lineItemCode === line.lineItemCode) : null;
+    const item = line?.lineItemCode ? byCode.get(line.lineItemCode) : null;
     setCategory(item?.category || '');
     setSubcategory(item?.subcategory || '');
     setIsEditing(false);

@@ -228,6 +228,14 @@ export function RateCardForm(props: RateCardFormProps) {
   // ----- Catalog + regions ---------------------------------------------
   const [catalog, setCatalog] = useState<RateCardLineItem[]>([]);
   const [regions, setRegions] = useState<RegionRate[]>([]);
+  // O(1) code→item lookup, built once per catalog load. The catalog has ~853
+  // rows; resolving line items with catalog.find() inside the per-render totals/
+  // breakdown loops was O(lines × 853) on every keystroke. Use this Map instead.
+  const catalogByCode = useMemo(() => {
+    const m = new Map<string, RateCardLineItem>();
+    for (const c of catalog) m.set(c.lineItemCode, c);
+    return m;
+  }, [catalog]);
   const inspectionRegion = props.inspectionRegion || '';
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
@@ -684,7 +692,7 @@ export function RateCardForm(props: RateCardFormProps) {
             // — the catalog subtext/short description (default) or an inspector
             // override. Treat it as an override only if it differs from BOTH the
             // short description and the preferred catalog description (subtext).
-            const catalogItem = catalog.find((c) => c.lineItemCode === rc.lineItemCode);
+            const catalogItem = catalogByCode.get(rc.lineItemCode);
             const storedDesc = rc.customLaborFullDescription || '';
             const catalogShort = catalogItem?.laborShortDescription || '';
             const catalogPreferred = (catalogItem?.laborSubtext && catalogItem.laborSubtext.trim())
@@ -769,7 +777,7 @@ export function RateCardForm(props: RateCardFormProps) {
       for (const [sid, lines] of Object.entries(bySection)) {
         next[sid] = lines.map((l) => {
           if (!l.customLaborFullDescription) return l;
-          const item = catalog.find((c) => c.lineItemCode === l.lineItemCode);
+          const item = catalogByCode.get(l.lineItemCode);
           if (!item) return l;
           const short = item.laborShortDescription || '';
           const preferred = (item.laborSubtext && item.laborSubtext.trim()) || item.laborFullDescription || '';
@@ -1186,7 +1194,7 @@ export function RateCardForm(props: RateCardFormProps) {
       props.squareFootage > 0 &&
       (line.quantity == null || line.quantity === 1)
     ) {
-      const item = catalog.find((c) => c.lineItemCode === line.lineItemCode);
+      const item = catalogByCode.get(line.lineItemCode);
       if (item && /^sf$/i.test((item.laborMeas || '').trim())) {
         line = { ...line, quantity: props.squareFootage };
       }
@@ -1417,7 +1425,7 @@ export function RateCardForm(props: RateCardFormProps) {
   async function handleFcAddLine(rule: FcAddLineRule): Promise<{ externalId: string; costLabel: string } | null> {
     const ready = await ensureDataLoaded();
     if (!ready) return null;
-    const item = catalog.find((c) => c.lineItemCode === rule.lineItemCode);
+    const item = catalogByCode.get(rule.lineItemCode);
     if (!item) { void dialog.alert(`Couldn't find "${rule.label}" (${rule.lineItemCode}) in the rate card catalog.`); return null; }
     const wh = fcWholeHouseSection();
     if (!wh) { void dialog.alert('No Whole House section found to add the line to.'); return null; }
@@ -1976,7 +1984,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // Short label for a line (catalog description), used in the tag picker + the
   // line-photo lightbox header.
   function lineLabel(line: RateCardLineInput): string {
-    const item = catalog.find((c) => c.lineItemCode === line.lineItemCode);
+    const item = catalogByCode.get(line.lineItemCode);
     return item?.laborShortDescription || line.lineItemCode;
   }
 
@@ -2125,7 +2133,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // ----- Math helpers --------------------------------------------------
 
   function totalsFor(line: RateCardLineInput) {
-    const item = catalog.find((c) => c.lineItemCode === line.lineItemCode);
+    const item = catalogByCode.get(line.lineItemCode);
     if (!item || regions.length === 0) return null;
     try {
       return calculateLine(item, inspectionRegion, regions, {
@@ -2203,7 +2211,7 @@ export function RateCardForm(props: RateCardFormProps) {
     const map = new Map<string, CatGroup>();
     for (const s of sections) {
       for (const line of (linesBySection[s.id] || [])) {
-        const item = catalog.find((c) => c.lineItemCode === line.lineItemCode);
+        const item = catalogByCode.get(line.lineItemCode);
         const category = (item?.category || '').trim() || 'Uncategorized';
         const calc = totalsFor(line);
         const v = calc ? roundMoney(calc.vendorCost) : 0;
@@ -2437,7 +2445,7 @@ export function RateCardForm(props: RateCardFormProps) {
     // none are needed (or adds them). Only when the review itself succeeded.
     if (!lastErr) {
       const hasCat = (re: RegExp) => Object.values(linesBySectionRef.current).some((arr) =>
-        (arr || []).some((l) => { const it = catalog.find((c) => c.lineItemCode === l.lineItemCode); return !!it && re.test(it.category || ''); }));
+        (arr || []).some((l) => { const it = catalogByCode.get(l.lineItemCode); return !!it && re.test(it.category || ''); }));
       const extra: AiAdjustment[] = [];
       if (!hasCat(/paint/i)) extra.push(missingCategoryCheck('paint'));
       if (!hasCat(/clean/i)) extra.push(missingCategoryCheck('cleaning'));
@@ -2454,7 +2462,7 @@ export function RateCardForm(props: RateCardFormProps) {
   const previewTenantDollars = useCallback((a: AiAdjustment, o: { tenantPct?: number; quantity?: number }): number | undefined => {
     const code = a.suggested?.lineItemCode || a.current?.lineItemCode;
     if (!code) return undefined;
-    const item = catalog.find((c) => c.lineItemCode === code);
+    const item = catalogByCode.get(code);
     if (!item) return undefined;
     const existing = a.lineExternalId ? (linesBySectionRef.current[a.sectionId] || []).find((l) => l.externalId === a.lineExternalId) : undefined;
     const qty = o.quantity ?? a.suggested?.quantity ?? existing?.quantity ?? 1;
@@ -2814,7 +2822,7 @@ export function RateCardForm(props: RateCardFormProps) {
           // "Complete Later" defers the work, so it's exempt at finalize.
           const timing = resolutionTimings[line.externalId] || 'now';
           if (isInternalResolution(line.assignedTo) && timing === 'now' && (line.afterPhotoUrls?.length ?? 0) === 0) {
-            const desc = catalog.find((c) => c.lineItemCode === line.lineItemCode)?.laborShortDescription || line.lineItemCode;
+            const desc = catalogByCode.get(line.lineItemCode)?.laborShortDescription || line.lineItemCode;
             missingAfter.push(`${s.displayName}: ${desc}`);
           }
         }
@@ -3651,6 +3659,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               key={line.externalId}
                               line={line}
                               catalog={catalog}
+                              catalogByCode={catalogByCode}
                               regions={regions}
                               inspectionRegion={inspectionRegion}
                               section={s.label}
@@ -3683,6 +3692,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               key={`__new__${s.id}_${newRowNonce[s.id] || 0}`}
                               line={null}
                               catalog={catalog}
+                              catalogByCode={catalogByCode}
                               regions={regions}
                               inspectionRegion={inspectionRegion}
                               section={s.label}
@@ -3837,6 +3847,7 @@ export function RateCardForm(props: RateCardFormProps) {
                 startInEditMode
                 line={null}
                 catalog={catalog}
+                catalogByCode={catalogByCode}
                 regions={regions}
                 inspectionRegion={inspectionRegion}
                 section={wh.label}
