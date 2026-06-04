@@ -86,8 +86,11 @@ export function FinalChecklist(props: Props) {
               title="Tap to view, mark up, or delete"
               className="w-14 h-14 object-cover rounded-lg border border-gray-200 cursor-pointer" />
             {!readOnly && (
-              <button type="button" onClick={() => removePhoto(camKey, i)}
-                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-ink text-white text-xs leading-none flex items-center justify-center">&times;</button>
+              // Quick delete — bigger tap target + white ring so it's obvious on
+              // any photo, and stopPropagation so the tap never opens the viewer.
+              <button type="button" aria-label="Delete photo"
+                onClick={(e) => { e.stopPropagation(); removePhoto(camKey, i); }}
+                className="absolute -top-2 -right-2 z-10 w-6 h-6 rounded-full bg-ink text-white ring-2 ring-white shadow-md text-sm leading-none flex items-center justify-center active:bg-red-600">&times;</button>
             )}
           </div>
         ))}
