@@ -411,11 +411,14 @@ export function CameraCapture({
   // iOS pinch-zoom guard. While the camera is open, iOS Safari / WKWebView
   // treats a pinch as a PAGE zoom — it scales the whole screen, pushing the
   // shutter out of reach so the inspector can't take a photo (and the same
-  // happens over the video recorder). `touch-action: none` isn't honored for
-  // pinch on iOS, so we preventDefault the Safari gesture* events and any
-  // multi-touch move while the overlay is open. This blocks only page zoom;
-  // single-finger taps/drags (shutter, slide-to-zoom, the reference-photo
-  // strip's horizontal scroll) are untouched.
+  // happens over the video recorder, and over the AI-camera overlay this hosts).
+  // Two layers, because neither alone is reliable on iOS:
+  //   1. preventDefault the Safari gesture* events + any multi-touch move.
+  //   2. Lock the viewport to maximum-scale=1 ONLY while open (the native
+  //      WKWebView honors this even when (1) doesn't), then restore it on close
+  //      so global pinch-zoom / accessibility is unaffected elsewhere.
+  // Single-finger taps/drags (shutter, slide-to-zoom, the reference-photo strip's
+  // horizontal scroll) are untouched.
   useEffect(() => {
     if (!isOpen) return;
     const preventGesture = (e: Event) => { e.preventDefault(); };
@@ -424,11 +427,15 @@ export function CameraCapture({
     document.addEventListener('gesturechange', preventGesture as EventListener, { passive: false });
     document.addEventListener('gestureend', preventGesture as EventListener, { passive: false });
     document.addEventListener('touchmove', preventPinchMove, { passive: false });
+    const vp = typeof document !== 'undefined' ? document.querySelector('meta[name=viewport]') : null;
+    const prevVp = vp?.getAttribute('content') ?? null;
+    if (vp) vp.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
     return () => {
       document.removeEventListener('gesturestart', preventGesture as EventListener);
       document.removeEventListener('gesturechange', preventGesture as EventListener);
       document.removeEventListener('gestureend', preventGesture as EventListener);
       document.removeEventListener('touchmove', preventPinchMove);
+      if (vp) vp.setAttribute('content', prevVp ?? 'width=device-width, initial-scale=1');
     };
   }, [isOpen]);
 

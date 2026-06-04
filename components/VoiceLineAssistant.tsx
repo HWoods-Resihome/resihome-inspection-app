@@ -962,14 +962,18 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
             setOpen(true);
             // Pre-warm TTS on this user gesture (a silent utterance; some engines
             // block speech before a gesture), then — since the pipeline is already
-            // primed — open the mic immediately.
+            // primed — open the mic immediately. The tap IS the user gesture iOS
+            // requires to grant the mic, so we start capturing right here: one tap
+            // opens the panel AND the mic, no second tap-and-hold needed.
             try {
               if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
                 const u = new SpeechSynthesisUtterance(' '); u.volume = 0;
                 window.speechSynthesis.speak(u);
               }
             } catch { /* noop */ }
-            if (supported && online) setTimeout(() => { startListeningRef.current(); }, 0);
+            if (!online) return;
+            if (supported) setTimeout(() => { startListeningRef.current(); }, 0);
+            else void startAudioCapture(); // iOS push-to-talk: start recording now
           }}
           // Disabled until warm-up completes, so the inspector never talks into a
           // cold pipeline. Stays enabled offline so they can still open the panel
@@ -1009,10 +1013,10 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       {pushToTalk && online && (
         <p className="text-xs text-gray-500 mb-2">
           {recordingAudio
-            ? 'Listening… release the mic when you’re done.'
+            ? 'Listening… tap the mic again when you’re done.'
             : transcribing
               ? 'Transcribing…'
-              : 'Tap and hold the mic below to talk (or type a request).'}
+              : 'Tap the mic below to talk (or type a request).'}
         </p>
       )}
 
@@ -1122,17 +1126,16 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
           <span className="absolute inset-0 rounded-full bg-red-500/60 animate-ping" />
         )}
         {pushToTalk ? (
-          // iOS Safari (no Web Speech API): press-and-hold to record, release to
-          // transcribe via /api/transcribe, then run the normal line flow.
+          // iOS Safari (no Web Speech API): TAP to start recording (the mic opens
+          // immediately), TAP again to stop + transcribe via /api/transcribe, then
+          // run the normal line flow. Tap-to-toggle (not press-and-hold) so a
+          // single tap auto-opens the mic and the inspector can talk hands-free.
           <button
             type="button"
-            onPointerDown={(e) => { if (!online) return; e.preventDefault(); try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* noop */ } void startAudioCapture(); }}
-            onPointerUp={(e) => { e.preventDefault(); stopAudioCapture(); }}
-            onPointerCancel={() => stopAudioCapture()}
+            onClick={() => { if (!online) return; if (recordingAudio) { stopAudioCapture(); return; } void startAudioCapture(); }}
             onContextMenu={(e) => e.preventDefault()}
             disabled={transcribing || disabled || !online}
-            style={{ touchAction: 'none' }}
-            aria-label={recordingAudio ? 'Release to send' : 'Hold to talk'}
+            aria-label={recordingAudio ? 'Tap to stop and send' : 'Tap to talk'}
             className={`relative inline-flex items-center justify-center w-11 h-11 rounded-full text-white shadow disabled:opacity-50 transition-transform select-none ${recordingAudio ? 'bg-red-600 scale-110' : 'bg-brand hover:bg-brand-dark ring-2 ring-brand/40'}`}
           >
             {transcribing ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <MicIcon className="w-5 h-5" />}

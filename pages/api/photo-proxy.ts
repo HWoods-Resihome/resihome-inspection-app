@@ -22,19 +22,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(403).json({ error: 'Host not allowed' });
   }
   try {
-    // SSRF hardening: don't auto-follow redirects to an unvalidated host, and
-    // cap the upstream fetch so a slow origin can't tie up the function.
+    // SSRF hardening: follow redirects (HubSpot file URLs commonly 302 to a CDN
+    // host — rejecting that broke markup/preview of freshly-uploaded photos: the
+    // annotator showed "Couldn't open this photo for markup"), but re-validate
+    // the FINAL resolved host is still an allowed HubSpot host. Cap the upstream
+    // fetch so a slow origin can't tie up the function.
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 15000);
     let upstream: Response;
     try {
-      upstream = await fetch(u.toString(), { redirect: 'manual', signal: ctrl.signal });
+      upstream = await fetch(u.toString(), { redirect: 'follow', signal: ctrl.signal });
     } finally {
       clearTimeout(to);
     }
-    if (upstream.status >= 300 && upstream.status < 400) {
-      return res.status(502).json({ error: 'Upstream redirect not allowed' });
-    }
+    // Reject if a redirect carried us off an allowed host.
+    try {
+      const finalHost = new URL(upstream.url || u.toString()).hostname;
+      if (!ALLOWED_HOST_RE.test(finalHost)) {
+        return res.status(403).json({ error: 'Redirected to a host that is not allowed' });
+      }
+    } catch { /* no resolvable final URL — fall through to the status check */ }
     if (!upstream.ok) return res.status(upstream.status).json({ error: `Upstream ${upstream.status}` });
     const ct = (upstream.headers.get('content-type') || '').toLowerCase();
     const buf = Buffer.from(await upstream.arrayBuffer());
