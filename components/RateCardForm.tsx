@@ -2148,6 +2148,14 @@ export function RateCardForm(props: RateCardFormProps) {
     [fcAnswers, props.propertySepticFee, props.propertyAirFiltersTotal, props.filterSizeOptions,
      props.propertyAirFiltersType1, props.propertyAirFiltersType2, props.propertyAirFiltersType3],
   );
+  // The Final Checklist only applies to EDITABLE scope inspections (scheduled /
+  // in-progress + all future). Inspections already in pending approval or
+  // completed are EXEMPT — the section is hidden and never gates them.
+  const fcStatusLower = (props.inspectionStatus || '').toLowerCase();
+  const fcApplies = isScopeTemplate
+    && fcStatusLower !== 'pending_approval'
+    && fcStatusLower !== 'completed' && fcStatusLower !== 'complete'
+    && fcStatusLower !== 'cancelled';
   // Load any persisted "passed" marker for this inspection on mount.
   useEffect(() => {
     setReviewedHash(getPassedReviewHash(props.inspectionRecordId));
@@ -2707,7 +2715,7 @@ export function RateCardForm(props: RateCardFormProps) {
     // AI-Review gate at finalize, so the check always happens before PDFs.
     // Final Checklist hard-gate (scope, first submit only): every required item
     // must be complete, and each line-item prompt accepted or declined.
-    if (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !finalChecklistComplete) {
+    if (fcApplies && !finalChecklistComplete) {
       void dialog.alert('Please complete the Final Checklist at the bottom of the form before submitting for approval.');
       return;
     }
@@ -3582,8 +3590,9 @@ export function RateCardForm(props: RateCardFormProps) {
         })}
 
         {/* Final Checklist — another room-style bubble at the very end of the
-            scope form (scope only). Inside the same container so spacing matches. */}
-        {isScopeTemplate && (
+            scope form. Editable scope inspections only (scheduled/in-progress +
+            future); pending-approval and completed are exempt. */}
+        {fcApplies && (
           <FinalChecklist
             answers={fcAnswers}
             onPatch={handleFcPatch}
@@ -3619,14 +3628,14 @@ export function RateCardForm(props: RateCardFormProps) {
               showCancelInspection={!!props.onCancelInspection}
               submitLabel={submitLabel}
               submitLabelShort={submitLabelShort}
-              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || aiApplying || (pendingSync + pendingPhotos) > 0 || selfApprovalLocked || (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !finalChecklistComplete)}
+              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || aiApplying || (pendingSync + pendingPhotos) > 0 || selfApprovalLocked || (fcApplies && !finalChecklistComplete)}
               submitTitle={
                 props.readOnly ? undefined
                 : saveStatus.kind === 'saving' ? 'Saving — wait a moment, then submit.'
                 : finalizing ? 'Finalizing…'
                 : aiApplying ? 'Applying AI review…'
                 : (pendingSync + pendingPhotos) > 0 ? 'Waiting for offline changes to finish syncing.'
-                : (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !finalChecklistComplete) ? 'Complete the Final Checklist at the bottom (every required item) before submitting.'
+                : (fcApplies && !finalChecklistComplete) ? 'Complete the Final Checklist at the bottom (every required item) before submitting.'
                 : (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !reviewValid) ? 'Run the AI Review before submitting.'
                 : undefined
               }

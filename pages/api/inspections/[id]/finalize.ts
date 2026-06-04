@@ -344,10 +344,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Final Checklist (scope only) → Master PDF Q&A block. Read the single qa
     // record (JSON in note) and summarize it for display.
     let finalChecklistGroups: { name: string; rows: { label: string; value: string }[] }[] | undefined;
-    if (inspection.templateType === 'pm_scope_rate_card') {
-      const fcRec = answers.find((a) => a.answerType === 'qa' && a.questionIdExternal === 'fc__all');
+    // Only render the block when this inspection actually has checklist data.
+    // Pre-existing reports (pending approval / completed before this feature)
+    // have no fc__all record → no block, so they're unaffected.
+    const fcRec = answers.find((a) => a.answerType === 'qa' && a.questionIdExternal === 'fc__all');
+    if (inspection.templateType === 'pm_scope_rate_card' && fcRec?.note) {
       let fcAnswers: FcAnswers = {};
-      if (fcRec?.note) { try { fcAnswers = JSON.parse(fcRec.note); } catch { fcAnswers = {}; } }
+      try { fcAnswers = JSON.parse(fcRec.note); } catch { fcAnswers = {}; }
       finalChecklistGroups = summarizeFinalChecklist(fcAnswers, {
         septicFee: inspectionData.propertySepticFee ?? null,
         airQtyPrefill: inspectionData.propertyAirFiltersTotal ?? null,
@@ -435,7 +438,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Only generated if there are chargeback lines. Pulled property fields
     // (entity_id, last_primary_tenant, address, city, state_code, zip_code)
     // come from inspectionData. Missing fields render as blank cells.
-    const chargebackXlsxBuf = await renderChargebackXlsx(ctx, {
+    //
+    // Re-finalize of a previously-completed scope ONLY refreshes the PDFs: the
+    // xlsx is NOT regenerated and NOT re-dropped to SFTP (and the email +
+    // maintenance ticket are already skipped below). A re-save just makes the
+    // PDFs latest — nothing outbound fires again.
+    const chargebackXlsxBuf = isRefinalize ? null : await renderChargebackXlsx(ctx, {
       entityId: inspectionData.propertyEntityId || '',
       primaryTenantName: inspectionData.propertyLastPrimaryTenant || '',
       addressStreet: inspectionData.propertyAddressStreet || '',
@@ -535,14 +543,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       completed_at: nowIso,
       pdf_master_url: masterUrl,
       pdf_chargeback_url: chargebackUrl || '',
-      pdf_chargeback_xlsx_url: chargebackXlsxUrl || '',
       pdf_vendor_urls_json: JSON.stringify(vendorUrls),
       pdf_generated_at: nowIso,
       // Clean short links (run scripts/short_links to create these properties).
       link_master: shareMasterUrl || '',
       link_chargeback: shareChargebackUrl || '',
-      link_xlsx: shareXlsxUrl || '',
       link_vendors_json: JSON.stringify(shareVendorLinks),
+      // xlsx is generated + SFTP-dropped on the FIRST finalize only; a re-finalize
+      // leaves the stored xlsx url/link untouched (no regen, no re-drop).
+      ...(!isRefinalize ? { pdf_chargeback_xlsx_url: chargebackXlsxUrl || '', link_xlsx: shareXlsxUrl || '' } : {}),
       // Approver stamp (the finalize IS the approval). Set on first finalize so
       // a later regeneration doesn't overwrite the original approver.
       // Approver stamp (the finalize IS the approval). approved_at is a HubSpot
