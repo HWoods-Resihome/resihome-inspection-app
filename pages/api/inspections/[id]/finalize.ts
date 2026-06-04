@@ -648,6 +648,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           city: inspectionData.propertyCity || '',
           stateCode: resolvedStateCode,
           zipCode: inspectionData.propertyZip || '',
+          teamGroupEmail: inspectionData.propertyTeamGroupEmail,
         },
         links: { appUrl, hubspotUrl },
         // CC the inspector (from the HubSpot inspection record) on the finalize

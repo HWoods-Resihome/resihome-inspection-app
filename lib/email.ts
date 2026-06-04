@@ -26,6 +26,9 @@ export interface PropertyContact {
   city: string;
   stateCode: string;
   zipCode: string;
+  /** Property's team_group_email — the preferred CC. Falls back to the
+   *  team{STATE}@resihome.com convention when absent/invalid. */
+  teamGroupEmail?: string | null;
 }
 
 /** URLs the user might want to follow from the email. */
@@ -438,7 +441,9 @@ export function composeInspectionEmail(args: {
   // Recipients
   const to = [SODA_EMAIL];
   const cc: string[] = [];
-  const teamEmail = buildTeamEmail(prop.stateCode);
+  // Prefer the property's team_group_email; fall back to team{STATE}@resihome.com.
+  const groupEmail = (prop.teamGroupEmail || '').trim();
+  const teamEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(groupEmail) ? groupEmail : buildTeamEmail(prop.stateCode);
   if (teamEmail) cc.push(teamEmail);
 
   // CC the inspector (from HubSpot) so they receive a copy of their own

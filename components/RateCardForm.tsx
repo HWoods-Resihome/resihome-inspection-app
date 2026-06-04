@@ -2167,9 +2167,10 @@ export function RateCardForm(props: RateCardFormProps) {
       airQtyPrefill: props.propertyAirFiltersTotal ?? null,
       filterOptionsAvailable: (props.filterSizeOptions?.length ?? 0) > 0,
       filterPrefills: [props.propertyAirFiltersType1 ?? null, props.propertyAirFiltersType2 ?? null, props.propertyAirFiltersType3 ?? null],
+      lineExists: fcLineExists,
     }),
     [fcAnswers, props.propertySepticFee, props.propertyAirFiltersTotal, props.filterSizeOptions,
-     props.propertyAirFiltersType1, props.propertyAirFiltersType2, props.propertyAirFiltersType3],
+     props.propertyAirFiltersType1, props.propertyAirFiltersType2, props.propertyAirFiltersType3, linesBySection],
   );
   const finalChecklistComplete = fcGap === null;
   // The Final Checklist only applies to EDITABLE scope inspections (scheduled /

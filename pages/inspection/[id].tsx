@@ -311,14 +311,14 @@ export default function ExistingInspection() {
           {/* Symmetrical 3-zone header, aligned to the same max-width container
               as the page content below: status (left) · downloads (center) ·
               Re-Open (right). */}
-          <div className="max-w-7xl mx-auto px-5 sm:px-6 flex items-center justify-between gap-3 flex-wrap">
-            {/* Left: status */}
-            <span className="text-sm text-amber-900 font-heading font-semibold">
-              {isCompleted ? 'This Inspection is Completed.' : 'This Inspection is Cancelled.'}
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 flex items-center justify-between gap-2 flex-nowrap">
+            {/* Left: status — single line on every width. */}
+            <span className="text-xs sm:text-sm text-amber-900 font-heading font-semibold whitespace-nowrap shrink-0">
+              {isCompleted ? 'Inspection Completed' : 'Inspection Cancelled'}
             </span>
 
             {/* Center: download options (brand-colored to match the scheme) */}
-            <div className="flex items-center justify-center gap-2 flex-wrap">
+            <div className="flex items-center justify-center gap-2 min-w-0">
               {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
                 <CompletedPdfMenu inspection={inspection} shareLinks={shareLinks} />
               )}
@@ -341,9 +341,10 @@ export default function ExistingInspection() {
             {isCompleted ? (
               <button
                 onClick={handleReopen}
-                className="text-sm text-brand border border-brand hover:bg-brand/5 font-heading font-semibold px-3 py-1.5 rounded-lg"
+                className="text-xs sm:text-sm text-brand border border-brand hover:bg-brand/5 font-heading font-semibold px-2.5 sm:px-3 py-1.5 rounded-lg whitespace-nowrap shrink-0"
               >
-                Re-Open for Edits
+                <span className="sm:hidden">Re-Open</span>
+                <span className="hidden sm:inline">Re-Open for Edits</span>
               </button>
             ) : <span />}
           </div>

@@ -141,6 +141,9 @@ export interface FcCompletionCtx {
   filterOptionsAvailable: boolean;
   /** property air_filters___type__1/2/3 — count as answered when prefilled. */
   filterPrefills: (string | null)[];
+  /** True if a line with this catalog code already exists anywhere in the scope.
+   *  When it does, the add-line prompt is auto-satisfied (no approve/decline). */
+  lineExists?: (lineItemCode: string) => boolean;
 }
 
 /** How many filter-size pickers are in play given the answered/prefilled qty. */
@@ -254,7 +257,9 @@ export function finalChecklistGap(a: FcAnswers, ctx: FcCompletionCtx): string | 
         const cnt = (q.countOnValues || []).find((c) => c.value === ans.value);
         if (cnt && ans.count == null) return `${where}: ${cnt.label}`;
         const addRule = (q.addLineOnValues || []).find((r) => r.value === ans.value);
-        if (addRule && !ans.added && !ans.declined) return `${where}: add or decline the suggested line`;
+        if (addRule && !ans.added && !ans.declined && !ctx.lineExists?.(addRule.rule.lineItemCode)) {
+          return `${where}: add or decline the suggested line`;
+        }
       }
     }
   }

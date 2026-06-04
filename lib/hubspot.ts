@@ -1230,6 +1230,8 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   propertyAirFiltersType2: string | null;
   propertyAirFiltersType3: string | null;
   propertySepticFee: number | null;
+  /** Property's team_group_email — preferred finalize CC. */
+  propertyTeamGroupEmail: string | null;
 } | null> {
   const { inspection: typeId, property: propertyTypeId } = typeIds();
   const properties = [
@@ -1277,6 +1279,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     let propertyAirFiltersType2: string | null = null;
     let propertyAirFiltersType3: string | null = null;
     let propertySepticFee: number | null = null;
+    let propertyTeamGroupEmail: string | null = null;
     if (propertyIdRef) {
       // ISOLATED fetch for the (possibly not-yet-created) tenant-occupancy field.
       // Kept separate from the extras batch below so that, if HubSpot 400s on an
@@ -1305,6 +1308,8 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
           'air_filters___total_quantity',
           'air_filters___type__1', 'air_filters___type__2', 'air_filters___type__3',
           'septic_fee',
+          // Preferred email CC for finalize (falls back to team{STATE}@resihome.com).
+          'team_group_email',
         ];
         const propQs = propProps.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
         const propResp = await hubspotFetch(
@@ -1334,6 +1339,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
           const n = Number(pp.septic_fee);
           if (Number.isFinite(n)) propertySepticFee = n;
         }
+        propertyTeamGroupEmail = (pp.team_group_email || '').toString().trim() || null;
       } catch (e: any) {
         console.warn(`[fetchInspectionWithPropertyRef] could not fetch property ${propertyIdRef} extras:`, String(e).slice(0, 200));
       }
@@ -1394,6 +1400,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       propertyAirFiltersType2,
       propertyAirFiltersType3,
       propertySepticFee,
+      propertyTeamGroupEmail,
     };
   } catch (e: any) {
     if (String(e).includes('404')) return null;
