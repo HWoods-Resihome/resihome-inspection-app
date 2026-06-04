@@ -139,14 +139,17 @@ export function FinalChecklist(props: Props) {
   }
 
   // ---- small renderers ----
-  function Pills({ options, value, onPick }: { options?: string[]; value?: string; onPick: (v: string) => void }) {
+  function Pills({ options, value, onPick, compact }: { options?: string[]; value?: string; onPick: (v: string) => void; compact?: boolean }) {
+    // compact: wrap (no horizontal scroll) + smaller font, for long option sets
+    // like the device types. Default: single line that scrolls if needed.
     return (
-      <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: 'none' }}>
+      <div className={compact ? 'flex flex-wrap gap-1.5' : 'flex gap-1.5 overflow-x-auto pb-0.5'} style={compact ? undefined : { scrollbarWidth: 'none' }}>
         {(options || []).map((o) => {
           const sel = value === o;
           return (
             <button key={o} type="button" disabled={readOnly} onClick={() => onPick(o)}
-              className={`shrink-0 whitespace-nowrap text-xs font-heading font-semibold px-3.5 py-1.5 rounded-full border-2 transition
+              className={`shrink-0 whitespace-nowrap font-heading font-semibold rounded-full border-2 transition
+                ${compact ? 'text-[11px] px-2.5 py-1' : 'text-xs px-3.5 py-1.5'}
                 ${sel ? 'bg-brand text-white border-brand shadow-sm' : 'bg-white text-ink border-gray-300 hover:border-brand/50'}`}>
               {titleCase(o)}
             </button>
@@ -172,6 +175,17 @@ export function FinalChecklist(props: Props) {
             <div className="text-emerald-700 font-medium">Vendor 1 · Qty {rule.quantity} · {rule.tenantBillBackPercent}% Tenant · <span className="font-bold">{a.added.costLabel}</span></div>
           </div>
           {!readOnly && <button type="button" onClick={() => undoAdd(q)} className="ml-auto text-[11.5px] text-emerald-700 underline">Undo</button>}
+        </div>
+      );
+    }
+    if (a.declined) {
+      return (
+        <div className="mt-3 rounded-xl border border-gray-300 bg-gray-100 px-3 py-2.5 flex items-center gap-2.5">
+          <span className="shrink-0 w-6 h-6 rounded-full bg-gray-500 text-white flex items-center justify-center text-[12px] font-bold">✕</span>
+          <div className="text-[12.5px] text-gray-700 leading-tight">
+            Add <span className="font-semibold">{titleCase(rule.label)}</span> — declined<div className="text-gray-500">Not added to the scope.</div>
+          </div>
+          {!readOnly && <button type="button" onClick={() => onPatch(q.id, { declined: false })} className="ml-auto text-[11.5px] text-gray-600 underline">Undo</button>}
         </div>
       );
     }
@@ -279,7 +293,7 @@ export function FinalChecklist(props: Props) {
       const picked = devices.find((d) => d.value === a.value);
       return (
         <>
-          <Pills options={devices.map((d) => d.value)} value={a.value} onPick={(v) => onPatch(q.id, { value: v, device: {} })} />
+          <Pills compact options={devices.map((d) => d.value)} value={a.value} onPick={(v) => onPatch(q.id, { value: v, device: {} })} />
           {picked && picked.fields && (
             <div className="mt-2.5 border border-gray-200 rounded-xl p-3">
               <div className="flex items-center justify-between font-heading font-bold text-[12.5px] mb-2.5">

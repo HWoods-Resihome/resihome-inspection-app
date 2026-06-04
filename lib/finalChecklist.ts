@@ -268,7 +268,7 @@ export const FINAL_CHECKLIST: FcSection[] = [
     questions: [
       {
         id: 'fc_smart_home_device',
-        label: 'Pick the Type of Device',
+        label: 'Device Type',
         type: 'device_subform',
         required: true,
         devices: [
@@ -387,6 +387,7 @@ export const FINAL_CHECKLIST: FcSection[] = [
         type: 'single_select',
         options: ['Present', 'Missing', 'N/A'],
         required: true,
+        photoRequiredOnValues: ['Present'],
         countOnValues: [{ value: 'Present', label: 'How Many Bins?', min: 1, max: 5 }],
         reminderOnValues: [{
           value: 'Present',
