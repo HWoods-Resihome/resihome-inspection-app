@@ -1,0 +1,257 @@
+/**
+ * Final Checklist — the spec/config for the "✦ Final Checklist" section that
+ * renders at the very bottom of the scope rate-card form.
+ *
+ * This module is the SINGLE SOURCE OF TRUTH for the section: question text,
+ * options, required flags, the answer→add-line rules, property bindings, and
+ * conditional visibility. The renderer (components/FinalChecklist.tsx — added in
+ * a later build phase) consumes this; the Master PDF Q&A block is built from the
+ * same definitions so screen and PDF never drift.
+ *
+ * Behaviors the generic question engine can't express (and why this lives in
+ * code): device sub-forms, dependent filter dropdowns prefilled from property
+ * fields, "on value → offer/auto-add a Whole-House line item", conditional
+ * visibility on a property field, the trash-bin reminder, and the optional
+ * septic add.
+ *
+ * Answers persist as inspection_answer records with answerType 'qa' (reusing the
+ * existing /api/inspections/[id]/answers endpoint). Line items spawned here are
+ * normal rate_card_line records routed to the Whole House section, so they flow
+ * onto the vendor/chargeback/master PDFs like any other line.
+ */
+
+/** Vendor default for every auto-added Final-Checklist line. */
+export const FC_DEFAULT_VENDOR = 'Vendor 1';
+
+/** A rule that adds a catalog line to Whole House when a question hits a value.
+ *  `shortDescription` is matched to the live catalog by exact laborShortDescription
+ *  (trimmed, case-insensitive) and resolved to its stable lineItemCode at runtime. */
+export interface FcAddLineRule {
+  shortDescription: string;        // catalog laborShortDescription to match
+  vendor: string;                  // FC_DEFAULT_VENDOR
+  quantity: number;                // default qty (1)
+  tenantBillBackPercent: number;   // 100 (remotes/keys) | 0 (hvac/septic)
+  /** When true, the prompt is framed as an OPTIONAL add (septic). Otherwise it's
+   *  the recommended action for that answer (still declinable via "Not Needed"). */
+  optional?: boolean;
+}
+
+export type FcQuestionType =
+  | 'single_select'   // pill choices (always one line)
+  | 'device_subform'  // smart-home: pick one device → its sub-fields
+  | 'number'          // quantity stepper (prefilled from property)
+  | 'filter_sizes'    // N dependent scroll-wheels, N = the quantity answer
+  | 'photo_set';      // a fixed set of required photos (label stickers)
+
+/** Sub-field shown inside a smart-home device card. */
+export interface FcDeviceField {
+  id: string;
+  label: string;
+  type: 'single_select' | 'text';
+  options?: string[];
+  required?: boolean;
+}
+
+export interface FcDevice {
+  /** The option label the inspector picks (also the device card title). */
+  value: string;
+  /** null = a terminal "none" choice (e.g. "No Smart Devices") with no sub-fields. */
+  fields: FcDeviceField[] | null;
+}
+
+export interface FcQuestion {
+  id: string;                      // stable answer key (questionIdExternal)
+  label: string;
+  type: FcQuestionType;
+  required: boolean;
+  help?: string;
+  options?: string[];              // for single_select
+
+  // --- smart-home device sub-forms ---
+  devices?: FcDevice[];
+
+  // --- photo / note requirements (single_select) ---
+  photoRequiredOnValues?: string[];
+  noteRequiredOnValues?: string[];
+  notePrompt?: string;             // label for the required note ("Where Are They Left?")
+
+  // --- answer → add a Whole-House line item ---
+  addLineOnValues?: { value: string; rule: FcAddLineRule }[];
+
+  // --- a small reminder banner shown when answered with these values ---
+  reminderOnValues?: { value: string; text: string }[];
+
+  // --- a follow-up count field shown when answered with these values ---
+  countOnValues?: { value: string; label: string; min?: number; max?: number }[];
+
+  // --- property bindings ---
+  prefillProperty?: string;        // property field to prefill from
+  optionsFromProperty?: string;    // pull dependent-dropdown options from this property field
+  min?: number;
+  max?: number;
+
+  // --- conditional visibility on a property field ---
+  showWhenProperty?: { field: string; gt?: number };
+
+  // --- photo_set ---
+  photos?: { id: string; label: string; required: boolean }[];
+}
+
+export interface FcSection {
+  id: string;
+  name: string;
+  questions: FcQuestion[];
+}
+
+const t = (pct: number): Pick<FcAddLineRule, 'vendor' | 'quantity' | 'tenantBillBackPercent'> => ({
+  vendor: FC_DEFAULT_VENDOR, quantity: 1, tenantBillBackPercent: pct,
+});
+
+export const FINAL_CHECKLIST: FcSection[] = [
+  {
+    id: 'smart_home_tech',
+    name: 'Smart Home Tech',
+    questions: [
+      {
+        id: 'fc_smart_home_device',
+        label: 'Pick the Type of Device',
+        type: 'device_subform',
+        required: true,
+        devices: [
+          {
+            value: 'Bluetooth Lock',
+            fields: [
+              { id: 'status', label: 'Status', type: 'single_select', options: ['Online', 'Offline'], required: true },
+              { id: 'serial', label: 'Serial Number', type: 'text', required: true },
+              { id: 'notes', label: 'Notes', type: 'text', required: false },
+            ],
+          },
+          {
+            value: 'Smart Home Hub',
+            fields: [
+              { id: 'status', label: 'Status', type: 'single_select', options: ['Online', 'Offline'], required: true },
+              { id: 'location', label: 'Location of Hub', type: 'text', required: true },
+            ],
+          },
+          { value: 'No Smart Devices', fields: null },
+        ],
+      },
+    ],
+  },
+
+  {
+    id: 'access_keys',
+    name: 'Access & Keys',
+    questions: [
+      {
+        id: 'fc_garage_remote',
+        label: 'Garage Remote Present?',
+        type: 'single_select',
+        options: ['Yes', 'No', 'N/A'],
+        required: true,
+        photoRequiredOnValues: ['Yes'],
+        noteRequiredOnValues: ['Yes'],
+        notePrompt: 'Where Are They Left?',
+        addLineOnValues: [
+          { value: 'No', rule: { shortDescription: 'Universal Garage Remotes', ...t(100) } },
+        ],
+      },
+      {
+        id: 'fc_mailbox_keys',
+        label: 'Mailbox Keys Present?',
+        type: 'single_select',
+        options: ['Yes', 'No', 'N/A'],
+        required: true,
+        photoRequiredOnValues: ['Yes'],
+        noteRequiredOnValues: ['Yes'],
+        notePrompt: 'Where Are They Left?',
+        addLineOnValues: [
+          { value: 'No', rule: { shortDescription: 'Replace Mailbox Key', ...t(100) } },
+        ],
+      },
+    ],
+  },
+
+  {
+    id: 'hvac_air_filters',
+    name: 'HVAC & Air Filters',
+    questions: [
+      {
+        id: 'fc_hvac_functioning',
+        label: 'HVAC Functioning?',
+        type: 'single_select',
+        options: ['Yes', 'No'],
+        required: true,
+        addLineOnValues: [
+          { value: 'No', rule: { shortDescription: 'HVAC Service Clean Top Off', ...t(0) } },
+        ],
+      },
+      {
+        id: 'fc_label_stickers',
+        label: 'Label Sticker Photos',
+        type: 'photo_set',
+        required: true,
+        help: 'Photograph the Applied ResiHome Label on Each Unit.',
+        photos: [
+          { id: 'air_handler', label: 'Air Handler', required: true },
+          { id: 'outside_condenser', label: 'Outside Condenser', required: true },
+          { id: 'water_heater', label: 'Water Heater', required: true },
+        ],
+      },
+      {
+        id: 'fc_air_filters_qty',
+        label: 'Air Filters — Total Quantity',
+        type: 'number',
+        required: true,
+        help: 'Pre-Filled From the Property Record — Confirm or Correct (Whole Number, 1–3).',
+        prefillProperty: 'air_filters___total_quantity',
+        min: 1,
+        max: 3,
+      },
+      {
+        id: 'fc_filter_sizes',
+        label: 'Filter Size',
+        type: 'filter_sizes',
+        required: true,
+        // count driven by fc_air_filters_qty; one wheel per filter, prefilled from
+        // air_filters___type__1 / __2 / __3, options pulled from those fields.
+        optionsFromProperty: 'air_filters___type__',
+        prefillProperty: 'air_filters___type__',
+      },
+    ],
+  },
+
+  {
+    id: 'utilities',
+    name: 'Utilities',
+    questions: [
+      { id: 'fc_electric', label: 'Electric', type: 'single_select', options: ['On', 'Off'], required: true },
+      { id: 'fc_water', label: 'Water', type: 'single_select', options: ['On', 'Off'], required: true },
+      { id: 'fc_gas', label: 'Gas', type: 'single_select', options: ['On', 'Off', 'N/A'], required: true },
+      {
+        id: 'fc_trash_bins',
+        label: 'Trash Bins',
+        type: 'single_select',
+        options: ['Present', 'Missing', 'N/A'],
+        required: true,
+        countOnValues: [{ value: 'Present', label: 'How Many Bins?', min: 1 }],
+        reminderOnValues: [{
+          value: 'Present',
+          text: 'Reminder: If the bins are empty, please move them to the side of the home or inside the garage before you leave.',
+        }],
+      },
+      {
+        id: 'fc_septic',
+        label: 'Septic System',
+        type: 'single_select',
+        options: ['Needs Pump-Out', 'OK'],
+        required: true,
+        help: 'Shown Because This Property Has a Septic Fee on File.',
+        showWhenProperty: { field: 'septic_fee', gt: 0 },
+        addLineOnValues: [
+          { value: 'Needs Pump-Out', rule: { shortDescription: 'Septic Pump Out', ...t(0), optional: true } },
+        ],
+      },
+    ],
+  },
+];
