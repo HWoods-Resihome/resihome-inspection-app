@@ -84,6 +84,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const id = String(req.query.id || '');
   if (!id) return res.status(400).json({ error: 'Missing inspection id' });
 
+  // "Regenerate PDFs only" mode (the /admin/regenerate-pdfs tool). Rebuilds +
+  // uploads the PDFs and refreshes their stored URLs IN PLACE, but PRESERVES the
+  // inspection's current status and skips ALL outbound side effects (no email,
+  // ticket, SFTP, approver stamp, status flip). This makes it safe to run on
+  // submitted / pending_approval reports — it never completes them, bypasses
+  // approval, or re-sends emails — as well as completed ones.
+  const regenerateOnly = !!(req.body || {}).regenerateOnly;
+
   // ONE preflight read of every inspection property the pre-flight gates need —
   // the self-approval lockout, the durable cross-instance lock, and the
   // partial-failure resume stamps — instead of three sequential HubSpot reads.
@@ -100,7 +108,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // can't finalize it themselves for SELF_APPROVAL_LOCK_MS — a second reviewer
   // must approve (or they wait it out). Any OTHER user can finalize immediately.
   const SELF_APPROVAL_LOCK_MS = 5 * 60 * 1000;
-  {
+  if (!regenerateOnly) {
     const submitter = String(preflight?.submitted_by_email || '').trim().toLowerCase();
     // submitted_at is a datetime (epoch-ms) but older records may hold an ISO
     // string — handle both.
@@ -162,7 +170,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // being regenerated after a reopen). We still regenerate PDFs, but we do
     // NOT re-send the damages email — that would duplicate it to soda@ + team.
     const priorStatus = (inspection.status || '').trim().toLowerCase();
-    const isRefinalize = priorStatus === 'completed' || priorStatus === 'complete' || priorStatus === 'submitted';
+    // regenerateOnly is treated as a re-finalize for the purpose of skipping the
+    // one-time outbound steps (email / ticket / SFTP / xlsx / approver stamp).
+    const isRefinalize = regenerateOnly
+      || priorStatus === 'completed' || priorStatus === 'complete' || priorStatus === 'submitted';
 
     // Partial-failure resumability: finalize fires several IRREVERSIBLE outbound
     // steps (create maintenance ticket, send the damages email). If a previous
@@ -654,8 +665,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // completely blocked.
     const nowIso = new Date().toISOString();
     const fullUpdate: Record<string, any> = {
-      status: 'completed',
-      completed_at: nowIso,
+      // regenerateOnly refreshes the PDFs in place — keep the CURRENT status
+      // (never flip submitted/pending_approval to completed, and don't stamp a
+      // completion time). A normal finalize sets completed.
+      ...(regenerateOnly ? {} : { status: 'completed', completed_at: nowIso }),
       pdf_master_url: masterUrl,
       pdf_chargeback_url: chargebackUrl || '',
       pdf_vendor_urls_json: JSON.stringify(vendorUrls),
@@ -682,13 +695,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // PDFs are still available to the client via the response below.
       if (msg.includes('PROPERTY_DOESNT_EXIST') || msg.includes('Property') && msg.includes('does not exist')) {
         console.warn('[finalize] pdf_*/link_* properties not on schema — run scripts/rate_card_phase4 + scripts/short_links. Falling back to status-only update.');
-        await updateInspection(id, { status: 'completed', completed_at: nowIso });
+        // regenerateOnly must NOT change status even in the fallback.
+        if (!regenerateOnly) await updateInspection(id, { status: 'completed', completed_at: nowIso });
       } else {
         throw e;
       }
     }
     // Stamp the FIRST completion timestamp (kept even if re-finalized later).
-    await stampFirstCompleted(id, nowIso);
+    // Skipped for regenerateOnly — it isn't a completion.
+    if (!regenerateOnly) await stampFirstCompleted(id, nowIso);
 
     // ---- 6c. Materialize the Final Checklist as structured answer records ----
     // The form persists the whole checklist as ONE opaque qa blob (fc__all) so it

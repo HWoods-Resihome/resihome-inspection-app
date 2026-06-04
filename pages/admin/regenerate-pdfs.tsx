@@ -48,7 +48,10 @@ export default function RegeneratePdfsPage() {
     for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
       try {
         const r = await fetch(`/api/inspections/${id}/finalize`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+          // regenerateOnly: rebuild + reupload the PDFs IN PLACE — never changes
+          // status (won't complete a pending report or bypass approval) and sends
+          // no email/ticket. Safe across submitted/pending/completed.
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ regenerateOnly: true }),
         });
         const d = await r.json().catch(() => ({} as any));
         if (r.ok) {
@@ -115,19 +118,21 @@ export default function RegeneratePdfsPage() {
     <div className="min-h-screen bg-gray-50">
       <Head><title>Regenerate PDFs</title></Head>
       <div className="max-w-2xl mx-auto px-5 py-6">
-        <h1 className="font-heading font-extrabold text-xl text-ink">Regenerate Completed PDFs</h1>
+        <h1 className="font-heading font-extrabold text-xl text-ink">Regenerate PDFs</h1>
         <p className="text-sm text-gray-600 mt-1 leading-relaxed">
-          Re-finalizes every completed scope inspection to add the browsable photo gallery to its PDFs.
-          Re-finalize only regenerates the PDFs — no email, ticket, xlsx, or SFTP. Keep this tab open
-          while it runs.
+          Regenerates the PDFs for every <b>submitted</b>, <b>pending-approval</b>, and <b>completed</b>
+          scope inspection (e.g. to retrofit the browsable photo gallery and the lighter downscaled
+          photos). Runs in <b>regenerate-only</b> mode: it refreshes the PDFs in place and <b>never</b>
+          changes an inspection's status, bypasses approval, or sends any email/ticket. Keep this tab
+          open while it runs.
         </p>
 
         {ids === null ? (
-          <div className="mt-6 text-sm text-gray-500">Loading completed inspections…</div>
+          <div className="mt-6 text-sm text-gray-500">Loading inspections…</div>
         ) : (
           <>
             <div className="mt-5 flex items-center gap-3 flex-wrap">
-              <span className="text-sm text-gray-700"><b>{total}</b> completed scope inspections found.</span>
+              <span className="text-sm text-gray-700"><b>{total}</b> scope inspections found (submitted · pending approval · completed).</span>
               <button type="button" disabled={running || total === 0} onClick={() => run(3)}
                 className="text-sm font-heading font-semibold px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-40">
                 Run test (first 3)

@@ -1651,19 +1651,23 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
  * inspection. Used by the bulk "regenerate PDFs" admin tool to retrofit the
  * photo-gallery links into existing PDFs (by re-finalizing each).
  */
-export async function listCompletedScopeInspectionIds(): Promise<string[]> {
+export async function listRegenerableScopeInspectionIds(): Promise<Array<{ id: string; status: string }>> {
   const { inspection: typeId } = typeIds();
-  const ids: string[] = [];
+  const out: Array<{ id: string; status: string }> = [];
   let after: string | undefined;
   do {
     const body: any = {
       filterGroups: [{
         filters: [
-          { propertyName: 'status', operator: 'EQ', value: 'completed' },
+          // Reports whose PDFs can be (re)generated: submitted, pending approval,
+          // and completed scope inspections. The /admin/regenerate-pdfs tool runs
+          // these in regenerate-only mode, which refreshes the PDFs in place
+          // WITHOUT changing status or sending any email/ticket.
+          { propertyName: 'status', operator: 'IN', values: ['submitted', 'pending_approval', 'completed'] },
           { propertyName: 'template_type', operator: 'EQ', value: 'pm_scope_rate_card' },
         ],
       }],
-      properties: ['inspection_id_external'],
+      properties: ['inspection_id_external', 'status'],
       limit: 100,
     };
     if (after) body.after = after;
@@ -1671,10 +1675,10 @@ export async function listCompletedScopeInspectionIds(): Promise<string[]> {
       method: 'POST',
       body: JSON.stringify(body),
     });
-    for (const r of resp.results || []) ids.push(String(r.id));
+    for (const r of resp.results || []) out.push({ id: String(r.id), status: String(r.properties?.status || '') });
     after = resp.paging?.next?.after;
   } while (after);
-  return ids;
+  return out;
 }
 
 export async function updateInspection(recordId: string, props: Record<string, any>): Promise<void> {
