@@ -19,6 +19,7 @@ import { titleCase } from '@/lib/titleCase';
 import { ListPicker } from '@/components/ListPicker';
 import { WheelPicker } from '@/components/WheelPicker';
 import { CameraCapture } from '@/components/CameraCapture';
+import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { displayImageSrc } from '@/lib/photoDisplay';
 
 export type { FcAnswerState, FcAnswers } from '@/lib/finalChecklist';
@@ -61,6 +62,11 @@ export function FinalChecklist(props: Props) {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
   const [camFor, setCamFor] = useState<string | null>(null);
   const [busyAdd, setBusyAdd] = useState<string | null>(null);
+  // Full-screen viewer for FC photos: { groupId: "qid:key", index }. Lets the
+  // inspector tap a photo to open it, swipe/arrow left-right across ALL Final
+  // Checklist photos, mark it up, or delete it — the same PhotoLightbox the rooms
+  // use.
+  const [lbox, setLbox] = useState<{ groupId: string; index: number } | null>(null);
 
   const ans = (id: string): FcAnswerState => answers[id] || {};
   const setCamera = (key: string | null) => { setCamFor(key); props.onCameraOverlayChange?.(key !== null); };
@@ -76,7 +82,9 @@ export function FinalChecklist(props: Props) {
         {urls.map((u, i) => (
           <div key={`${u}-${i}`} className="relative">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={displayImageSrc(u)} alt="" className="w-14 h-14 object-cover rounded-lg border border-gray-200" />
+            <img src={displayImageSrc(u)} alt="" onClick={() => openLightbox(camKey, i)}
+              title="Tap to view, mark up, or delete"
+              className="w-14 h-14 object-cover rounded-lg border border-gray-200 cursor-pointer" />
             {!readOnly && (
               <button type="button" onClick={() => removePhoto(camKey, i)}
                 className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-ink text-white text-xs leading-none flex items-center justify-center">&times;</button>
@@ -109,6 +117,45 @@ export function FinalChecklist(props: Props) {
   }
   function removePhoto(camKey: string, idx: number) {
     setPhotoList(camKey, getPhotoList(camKey).filter((_, i) => i !== idx));
+  }
+  // Mark-up: the annotator hands back a new file; upload it and swap it in place.
+  async function replacePhoto(camKey: string, idx: number, file: File) {
+    try {
+      const url = await props.uploadPhoto(file, camKey);
+      const list = getPhotoList(camKey);
+      if (idx >= 0 && idx < list.length) {
+        const next = [...list]; next[idx] = url; setPhotoList(camKey, next);
+      }
+    } catch { /* upload failed — keep the original */ }
+  }
+  function openLightbox(camKey: string, idx: number) {
+    setLbox({ groupId: camKey, index: idx });
+    props.onCameraOverlayChange?.(true); // hide the floating mic behind the viewer
+  }
+  function closeLightbox() {
+    setLbox(null);
+    props.onCameraOverlayChange?.(false);
+  }
+  // Every FC photo location that currently holds at least one photo, in document
+  // order — the navigable set for the lightbox. Group id is the "qid:key" camKey
+  // (the same key getPhotoList/setPhotoList understand).
+  function photoGroups(): { id: string; name: string }[] {
+    const groups: { id: string; name: string }[] = [];
+    for (const section of FINAL_CHECKLIST) {
+      for (const q of section.questions) {
+        if (!visible(q)) continue;
+        const a = ans(q.id);
+        if ((a.photoUrls || []).length > 0) groups.push({ id: `${q.id}:photo`, name: titleCase(q.label) });
+        if (q.type === 'photo_set') {
+          for (const p of (q.photos || [])) {
+            if (((a.stickerPhotos || {})[p.id] || []).length > 0) {
+              groups.push({ id: `${q.id}:${p.id}`, name: `${titleCase(q.label)} — ${titleCase(p.label)}` });
+            }
+          }
+        }
+      }
+    }
+    return groups;
   }
 
   // ---- add-line prompt handling ----
@@ -490,6 +537,27 @@ export function FinalChecklist(props: Props) {
           setCamera(null);
         }}
       />
+
+      {/* Full-screen viewer for every Final Checklist photo: swipe/arrow across
+          all of them, mark up, or delete — same component the rooms use. */}
+      {lbox && (() => {
+        const groups = photoGroups();
+        const photosByGroup = Object.fromEntries(groups.map((g) => [g.id, getPhotoList(g.id)]));
+        // If the tapped group somehow isn't in the set (shouldn't happen), bail.
+        if (!photosByGroup[lbox.groupId]) return null;
+        return (
+          <PhotoLightbox
+            groups={groups}
+            photosByGroup={photosByGroup}
+            initialGroupId={lbox.groupId}
+            initialIndex={lbox.index}
+            readOnly={readOnly}
+            onClose={closeLightbox}
+            onDelete={(gid, idx) => removePhoto(gid, idx)}
+            onReplace={(gid, idx, file) => { void replacePhoto(gid, idx, file); }}
+          />
+        );
+      })()}
     </section>
   );
 }
