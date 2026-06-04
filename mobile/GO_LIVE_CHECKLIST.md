@@ -19,13 +19,11 @@ config, permissions, branding, store metadata).
   Info.plist additions, step-by-step build README. `@capacitor/ios` dep present.
 
 ## ⛳ Decisions / remaining work before store submit
-1. **`server.url` → `https://resiwalk.com`** (ONE line in `capacitor.config.ts`,
-   then `npx cap sync`). Currently the Vercel URL. Flip this ONLY once
-   resiwalk.com has cleared Google Safe Browsing (otherwise the app loads a
-   warning page). This is the single most important go-live toggle — confirm
-   Safe Browsing status first. allowNavigation already lists resiwalk.com.
-   - Keep `PUBLIC_APP_ORIGIN=https://resiwalk.com` set on Vercel so the
-     `resiwalk_inspection_url` links match the domain the apps load.
+1. ✅ **`server.url` → `https://resiwalk.com`** — DONE (Safe Browsing cleared).
+   Run `npx cap sync` and rebuild both apps so the change takes effect.
+   - Set `PUBLIC_APP_ORIGIN=https://resiwalk.com` on Vercel so every new
+     `resiwalk_inspection_url` is minted on the canonical domain regardless of
+     where it's created. (Backfill already normalized the existing catalog.)
 2. **iOS build** — follow `ios-pending/README.md` on a Mac (generate, add the
    WebViewController, Info.plist, icon/splash, sign, TestFlight).
 3. **Android release build** — Android Studio (Gradle JDK = embedded JBR 21),

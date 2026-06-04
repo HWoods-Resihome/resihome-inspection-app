@@ -9,10 +9,9 @@ import type { CapacitorConfig } from '@capacitor/cli';
 // and validates native packaging, camera permissions, and store review before
 // any offline work begins (see PATH_B_ANALYSIS.md, Phase 7, Stage 0).
 //
-// When resiwalk.com clears Google Safe Browsing review, change `server.url`
-// to https://resiwalk.com and re-run `npx cap sync`. Until then we point at the
-// working Vercel URL (the native shell has no address bar, so the domain is
-// invisible to end users anyway).
+// resiwalk.com has cleared Google Safe Browsing, so `server.url` points at the
+// canonical domain. The Vercel URL stays in allowNavigation as a fallback host.
+// After any change here, re-run `npx cap sync` and rebuild the native apps.
 //
 // IMPORTANT — OAuth: Google blocks OAuth inside embedded webviews
 // ("disallowed_useragent"). Sign-in must open in the SYSTEM browser and return
@@ -25,8 +24,8 @@ const config: CapacitorConfig = {
   // page shown if the device is offline at launch (server.url unreachable).
   webDir: 'www',
   server: {
-    // The live web app. Switch to https://resiwalk.com after Safe Browsing clears.
-    url: 'https://resihome-inspection-app.vercel.app',
+    // The live web app — canonical domain (Safe Browsing cleared).
+    url: 'https://resiwalk.com',
     // Allow the webview to navigate to these hosts without treating them as
     // external (so in-app navigation stays in the webview). OAuth hosts are
     // intentionally NOT here — those open in the system browser.
