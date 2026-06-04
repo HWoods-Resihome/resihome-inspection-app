@@ -633,24 +633,30 @@ export function CameraAILayer(props: Props) {
     ctx.drawImage(v, 0, 0, w, h);
     return c.toDataURL('image/jpeg', 0.6).split(',')[1] || null;
   }
-  async function captureStill(force: boolean, reason = 'still'): Promise<string | undefined> {
+  // addToRoom=false → capture a still ONLY for a call-out card (uploaded, tags
+  // to the line on Add) WITHOUT adding it to the room's section photos, bumping
+  // the room count, flashing the shutter, or popping the saved toast. Used for
+  // per-call-out evidence so call-outs don't flood the room's section photos.
+  async function captureStill(force: boolean, reason = 'still', addToRoom = true): Promise<string | undefined> {
     const v = videoRef.current;
     const room = getActiveRoomRef.current();
     if (!openRef.current || !v || !v.videoWidth || !room) return undefined;
-    if (!force && (roomStillCountRef.current[room.id] || 0) >= MAX_ROOM_STILLS) return undefined;
+    if (addToRoom && !force && (roomStillCountRef.current[room.id] || 0) >= MAX_ROOM_STILLS) return undefined;
     const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
     const ctx = c.getContext('2d'); if (!ctx) return undefined;
     ctx.drawImage(v, 0, 0, c.width, c.height);
     drawEvidenceStamp(ctx, c.width, c.height, stampLinesRef.current);
-    // Fire the shutter flash the instant we grab the frame — immediate feedback,
-    // before the (slower) upload round-trip.
-    setFlashKey((k) => k + 1);
-    lastAiStillAtRef.current = Date.now(); // counts as activity → throttles fallback
+    if (addToRoom) {
+      // Fire the shutter flash the instant we grab the frame — immediate feedback.
+      setFlashKey((k) => k + 1);
+      lastAiStillAtRef.current = Date.now(); // counts as activity → throttles fallback
+    }
     const blob = await new Promise<Blob | null>((res) => c.toBlob((b) => res(b), 'image/jpeg', 0.8));
     if (!blob) return undefined;
     try {
       const url = await uploadPhotoRef.current(new File([blob], `ai_${Date.now()}.jpg`, { type: 'image/jpeg' }));
       if (!openRef.current) return undefined;
+      if (!addToRoom) { dbg(`📸 ${reason} (card only)`); return url; }
       const count = (roomStillCountRef.current[room.id] || 0) + 1;
       roomStillCountRef.current[room.id] = count;
       onStillRef.current(room.id, url);
@@ -749,8 +755,8 @@ export function CameraAILayer(props: Props) {
       const fresh = incoming.filter((s) => s.lineItemCode && !seen.codes.has(s.lineItemCode));
       if (fresh.length) {
         // Grab the frame the AI is calling out so it appears on the chip (and
-        // tags to the line on Add) — the inspector can tap it to validate.
-        const batchStill = await captureStill(true, 'call-out');
+        // tags to the line on Add) — card-only, so it doesn't flood room photos.
+        const batchStill = await captureStill(true, 'call-out', false);
         const seeds: Record<string, ChipEdit> = {};
         for (const s of fresh) {
           seen.codes.add(s.lineItemCode);
