@@ -83,18 +83,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const id = String(req.query.id || '');
   if (!id) return res.status(400).json({ error: 'Missing inspection id' });
 
+  // ONE preflight read of every inspection property the pre-flight gates need —
+  // the self-approval lockout, the durable cross-instance lock, and the
+  // partial-failure resume stamps — instead of three sequential HubSpot reads.
+  // Fail-open: on any read error each gate below behaves as if its property was
+  // absent (exactly the prior per-gate try/catch behavior).
+  const preflightProps = ['submitted_by_email', 'submitted_at', 'hbmm_ticket_id', 'finalize_email_sent_at'];
+  if (FINALIZE_LOCK_PROP) preflightProps.push(FINALIZE_LOCK_PROP);
+  const preflight: Record<string, any> | null = await readInspectionProps(id, preflightProps).catch((e) => {
+    console.warn('[finalize] preflight property read failed (gates fail open):', e);
+    return {};
+  });
+
   // Self-approval lockout: the person who submitted an inspection for approval
   // can't finalize it themselves for SELF_APPROVAL_LOCK_MS — a second reviewer
   // must approve (or they wait it out). Any OTHER user can finalize immediately.
-  // Best-effort/fails-open: if the tracking properties don't exist or can't be
-  // read, finalize proceeds as normal.
   const SELF_APPROVAL_LOCK_MS = 5 * 60 * 1000;
-  try {
-    const guard = await readInspectionProps(id, ['submitted_by_email', 'submitted_at']);
-    const submitter = String(guard?.submitted_by_email || '').trim().toLowerCase();
+  {
+    const submitter = String(preflight?.submitted_by_email || '').trim().toLowerCase();
     // submitted_at is a datetime (epoch-ms) but older records may hold an ISO
     // string — handle both.
-    const submittedRaw = String(guard?.submitted_at || '').trim();
+    const submittedRaw = String(preflight?.submitted_at || '').trim();
     const submittedMs = submittedRaw ? (/^\d+$/.test(submittedRaw) ? Number(submittedRaw) : (Date.parse(submittedRaw) || 0)) : 0;
     if (submitter && submitter === session.email.trim().toLowerCase() && submittedMs) {
       const elapsed = Date.now() - submittedMs;
@@ -106,8 +115,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         });
       }
     }
-  } catch (e) {
-    console.warn('[finalize] self-approval lockout check skipped:', e);
   }
 
   const lockNow = Date.now();
@@ -122,8 +129,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   let durableLockHeld = false;
   if (FINALIZE_LOCK_PROP) {
     try {
-      const props = await readInspectionProps(id, [FINALIZE_LOCK_PROP]);
-      const prev = props?.[FINALIZE_LOCK_PROP];
+      // Reuse the preflight read (no second round-trip) for the lock value.
+      const prev = preflight?.[FINALIZE_LOCK_PROP];
       const prevMs = prev ? Date.parse(String(prev)) || Number(prev) || 0 : 0;
       if (prevMs && lockNow - prevMs < FINALIZE_LOCK_MS) {
         inFlightFinalize.delete(id);
@@ -164,10 +171,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // done. `hbmm_ticket_id` is an existing property; `finalize_email_sent_at`
     // is read/written best-effort — if it isn't on the schema yet, the read is
     // empty and we behave exactly as before (create the property to activate
-    // full email-resume). See scripts/ for adding the property.
-    const resumeStamps = await readInspectionProps(id, ['hbmm_ticket_id', 'finalize_email_sent_at']).catch(() => ({} as any));
-    const ticketAlreadyCreated = !!String(resumeStamps?.hbmm_ticket_id || '').trim();
-    const emailAlreadySent = !!String(resumeStamps?.finalize_email_sent_at || '').trim();
+    // full email-resume). See scripts/ for adding the property. Values come from
+    // the single preflight read above (no extra round-trip).
+    const ticketAlreadyCreated = !!String(preflight?.hbmm_ticket_id || '').trim();
+    const emailAlreadySent = !!String(preflight?.finalize_email_sent_at || '').trim();
 
     const [answers, regions, catalog] = await Promise.all([
       fetchAnswersForInspection(id),
@@ -705,7 +712,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (ticketAlreadyCreated) {
       // A prior (possibly failed) attempt already created the ticket — don't
       // make a duplicate. Reconstruct the result from the stored id.
-      const existingTicketId = Number(String(resumeStamps?.hbmm_ticket_id || '').trim());
+      const existingTicketId = Number(String(preflight?.hbmm_ticket_id || '').trim());
       console.log(`[finalize] maintenance ticket already created (#${existingTicketId}) — skipping re-create.`);
       ticketResult = { ok: true, configured: true, ticketId: Number.isFinite(existingTicketId) ? existingTicketId : undefined } as CreateTicketResult;
     } else if (!isRefinalize) {

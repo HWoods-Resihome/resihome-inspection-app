@@ -55,6 +55,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const now = Date.now();
   const fresh = CACHE && (now - CACHE.fetchedAt) < TTL_MS && !refresh;
 
+  // Let the browser reuse the (large) catalog response across quick form
+  // re-mounts instead of re-downloading ~850 rows each time. Private (it's
+  // behind auth) and short, with stale-while-revalidate so an expiry never
+  // blocks the picker. A catalog edit still propagates within ~2 min, and
+  // ?refresh=1 bypasses it. Skipped on a forced refresh.
+  if (!refresh) {
+    res.setHeader('Cache-Control', 'private, max-age=120, stale-while-revalidate=600');
+  }
+
   if (fresh) {
     return res.status(200).json({
       items: CACHE!.data,

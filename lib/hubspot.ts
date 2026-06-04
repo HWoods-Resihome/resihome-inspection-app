@@ -2432,13 +2432,12 @@ export async function fetchRateCardCatalog(): Promise<RateCardLineItem[]> {
       });
     }
     after = resp.paging?.next?.after;
-    // Throttle pagination: HubSpot's secondly limit is ~10 req/sec across the
-    // whole portal. With 9 pages of 100 items in this catalog, blasting them
-    // back-to-back can blow the limit if any other request is concurrent.
-    // 150ms = ~6 req/sec max, leaving headroom.
-    if (after) {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
+    // No artificial per-page throttle. The catalog's ~9 pages are fetched
+    // sequentially (each await serializes the next), and rate-limit protection
+    // now lives centrally in hubspotFetch: the request governor caps in-flight
+    // concurrency and 429s are retried with backoff. The old unconditional 150ms
+    // sleep added ~1.3s of pure wait to every cold catalog load for no benefit
+    // the governor doesn't already provide.
   } while (after);
   return out;
 }
