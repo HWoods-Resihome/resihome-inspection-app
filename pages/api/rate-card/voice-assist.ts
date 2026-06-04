@@ -21,6 +21,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { recordAiUsage } from '@/lib/aiUsage';
 import { matchCatalog, getCatalogEmbeddings } from '@/lib/voiceCatalogMatch';
 import { aliasFor } from '@/lib/voiceAliases';
 import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
@@ -119,6 +120,9 @@ async function streamAnthropic(
   const blocks: any[] = [];
   let stopReason: string | null = null;
   const toolJsonByIndex: Record<number, string> = {};
+  // Usage accrues across SSE events: message_start carries input_tokens, the
+  // final message_delta carries the cumulative output_tokens.
+  let usageIn = 0, usageOut = 0;
 
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
@@ -139,7 +143,10 @@ async function streamAnthropic(
       let ev: any;
       try { ev = JSON.parse(json); } catch { continue; }
 
-      if (ev.type === 'content_block_start') {
+      if (ev.type === 'message_start') {
+        const u = ev.message?.usage;
+        if (u) { usageIn += (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0); usageOut += u.output_tokens || 0; }
+      } else if (ev.type === 'content_block_start') {
         const cb = ev.content_block;
         if (cb?.type === 'text') blocks[ev.index] = { type: 'text', text: '' };
         else if (cb?.type === 'tool_use') {
@@ -162,9 +169,11 @@ async function streamAnthropic(
         }
       } else if (ev.type === 'message_delta') {
         if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
+        if (ev.usage?.output_tokens != null) usageOut = ev.usage.output_tokens; // cumulative
       }
     }
   }
+  recordAiUsage({ source: 'voice_assist', model: String(payload?.model || MODEL_SMART), inputTokens: usageIn, outputTokens: usageOut });
   // Compact any holes left by index gaps.
   return { content: blocks.filter(Boolean), stopReason };
 }

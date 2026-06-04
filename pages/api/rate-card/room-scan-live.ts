@@ -17,6 +17,7 @@ import { matchCatalog } from '@/lib/voiceCatalogMatch';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
 import { VENDORS } from '@/lib/vendors';
+import { recordAiUsage } from '@/lib/aiUsage';
 
 export const config = {
   maxDuration: 30,
@@ -219,6 +220,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       throw new Error(`Live vision failed ${resp.status}: ${t.slice(0, 160)}`);
     }
     const data = await resp.json();
+    recordAiUsage({ source: 'room_scan_live', model: MODEL_FAST, inputTokens: data?.usage?.input_tokens, outputTokens: data?.usage?.output_tokens });
     const content: any[] = data.content || [];
     const suggestUses = content.filter((c: any) => c.type === 'tool_use' && c.name === 'suggest_line');
     const editUses = content.filter((c: any) => c.type === 'tool_use' && c.name === 'edit_line');

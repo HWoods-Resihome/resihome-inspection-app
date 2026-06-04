@@ -17,6 +17,7 @@
 import type { RateCardLineItem } from './types';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { recordAiUsage } from './aiUsage';
 
 const VOYAGE_URL = 'https://api.voyageai.com/v1/embeddings';
 const VOYAGE_MODEL = 'voyage-3-lite';
@@ -100,6 +101,8 @@ async function voyageEmbed(texts: string[], inputType: 'document' | 'query'): Pr
     throw new Error(`Voyage embeddings failed ${res.status}: ${t.slice(0, 300)}`);
   }
   const data = await res.json();
+  // Track embedding spend (input-only). Cheap, but the dashboard should see it.
+  try { recordAiUsage({ source: 'embeddings', model: 'voyage', inputTokens: Number(data?.usage?.total_tokens) || 0 }); } catch { /* noop */ }
   // Voyage returns { data: [{ embedding: number[], index }], ... }
   const out: number[][] = new Array(texts.length);
   for (const row of data.data || []) {

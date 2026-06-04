@@ -22,6 +22,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { matchCatalog } from '@/lib/voiceCatalogMatch';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
+import { recordAiUsage } from '@/lib/aiUsage';
 
 export const config = {
   // Vision over several frames takes a while; allow headroom. Frames arrive as
@@ -173,6 +174,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       throw new Error(`Vision call failed ${resp.status}: ${t.slice(0, 200)}`);
     }
     const data = await resp.json();
+    recordAiUsage({ source: 'room_scan', model: MODEL, inputTokens: data?.usage?.input_tokens, outputTokens: data?.usage?.output_tokens });
     const toolUses: any[] = (data.content || []).filter((c: any) => c.type === 'tool_use' && c.name === 'suggest_line');
 
     // Resolve each suggestion to a real catalog code + unit, applying the same

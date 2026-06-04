@@ -11,6 +11,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { recordAiUsage, estimateWhisperCostUSD } from '@/lib/aiUsage';
 
 export const config = {
   api: {
@@ -54,6 +55,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     form.append('file', new Blob([buf], { type: contentType }), `audio.${ext}`);
     form.append('model', 'whisper-1');
     form.append('language', 'en');
+    // verbose_json adds `duration` (seconds of audio) — used for cost tracking.
+    // `text` is still present, so the response handling below is unchanged.
+    form.append('response_format', 'verbose_json');
     // Vocabulary biasing — nudges Whisper toward inspection/construction terms
     // (e.g. "mist match") instead of plausible-sounding everyday words.
     if (prompt && typeof prompt === 'string') form.append('prompt', prompt.slice(0, 800));
@@ -69,6 +73,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(502).json({ error: `Transcription failed (${r.status}).` });
     }
     const d = await r.json();
+    const seconds = Number(d?.duration);
+    recordAiUsage({ source: 'transcribe', model: 'whisper', costUSD: estimateWhisperCostUSD(isFinite(seconds) ? seconds : 0) });
     return res.status(200).json({ text: String(d.text || '').trim() });
   } catch (e: any) {
     console.error('POST /api/transcribe failed:', e);
