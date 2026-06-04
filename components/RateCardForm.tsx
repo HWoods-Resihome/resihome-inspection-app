@@ -3650,6 +3650,7 @@ export function RateCardForm(props: RateCardFormProps) {
                 : (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !reviewValid) ? 'Run the AI Review before submitting.'
                 : undefined
               }
+              onBlockedSubmit={(reason) => flashApi.flash(reason, 'info', 6000)}
               selfApprovalLocked={selfApprovalLocked}
               onCancelInspection={handleCancelInspectionClick}
               onSaveAndClose={handleSaveAndClose}
@@ -4159,6 +4160,8 @@ function TerminalActions(props: {
   submitDisabled: boolean;
   /** Hover tooltip explaining WHY submit is disabled (the unmet gate). */
   submitTitle?: string;
+  /** Tapping the greyed submit (mobile has no hover) flashes the reason. */
+  onBlockedSubmit?: (reason: string) => void;
   /** When the submitter is inside their (hidden) self-approval window: animate
    *  Save & Close (the only valid move) and explain why Finalize is greyed.
    *  We deliberately DON'T surface a countdown — to the submitter it reads as a
@@ -4201,24 +4204,32 @@ function TerminalActions(props: {
         {/* Right: AI Review icon (with status kicker) + Submit / Finalize */}
         <div className="flex-1 flex justify-end items-center gap-2 min-w-0">
           {props.aiSlot}
-          {/* Wrapping span carries the tooltip so it shows on hover even while
-              the button is disabled (disabled buttons swallow their own title). */}
-          <span
-            className="inline-flex"
-            title={locked
+          {/* Submit. When blocked we DON'T use the native `disabled` attribute —
+              we keep it tappable so a tap (mobile has no hover) flashes the gate
+              message; desktop still gets the hover tooltip via the wrapping span. */}
+          {(() => {
+            const blockedMsg = locked
               ? `You submitted this for approval, so you can't approve it yourself — a second reviewer must finalize it. Use Save & Close.`
-              : (props.submitDisabled ? props.submitTitle : undefined)}
-          >
-            <button
-              type="button"
-              onClick={props.onSubmit}
-              disabled={props.submitDisabled}
-              className="px-4 sm:px-6 py-2.5 text-sm bg-white border border-brand text-brand font-semibold rounded-lg hover:bg-brand hover:text-white active:bg-brand-dark active:border-brand-dark active:text-white transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed whitespace-nowrap"
-            >
-              <span className="sm:hidden">{props.submitLabelShort || props.submitLabel}</span>
-              <span className="hidden sm:inline">{props.submitLabel}</span>
-            </button>
-          </span>
+              : (props.submitTitle || 'Finish the required steps before you can submit.');
+            const blocked = props.submitDisabled;
+            return (
+              <span className="inline-flex" title={blocked ? blockedMsg : undefined}>
+                <button
+                  type="button"
+                  aria-disabled={blocked}
+                  onClick={() => { if (blocked) { props.onBlockedSubmit?.(blockedMsg); return; } props.onSubmit(); }}
+                  className={`px-4 sm:px-6 py-2.5 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                    blocked
+                      ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                      : 'bg-white border border-brand text-brand hover:bg-brand hover:text-white active:bg-brand-dark active:border-brand-dark active:text-white'
+                  }`}
+                >
+                  <span className="sm:hidden">{props.submitLabelShort || props.submitLabel}</span>
+                  <span className="hidden sm:inline">{props.submitLabel}</span>
+                </button>
+              </span>
+            );
+          })()}
         </div>
       </div>
     </div>
