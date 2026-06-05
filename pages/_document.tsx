@@ -21,7 +21,7 @@ export default function Document() {
         <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png?v=5" />
         <link rel="icon" type="image/png" sizes="512x512" href="/favicon-512.png?v=5" />
         <link rel="shortcut icon" href="/favicon.svg?v=5" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="ResiWalk" />
