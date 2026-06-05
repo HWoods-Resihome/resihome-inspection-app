@@ -800,9 +800,10 @@ export function QuestionForm({
               instanceKey: inst.instanceKey,
             };
           }
-          // Assigned To validation: only if the question supports it.
+          // Assigned To validation: only if the question supports it AND this
+          // isn't a plainStyle template (vendor assignment is Scope-only there).
           // useEffect in QuestionItem auto-defaults to "Vendor 1", so this is a backstop.
-          if (q.hasAssignedTo && !a.assignedTo?.trim()) {
+          if (!scopeStyle && q.hasAssignedTo && !a.assignedTo?.trim()) {
             return {
               message: `Assigned To required: ${locTag}${q.questionText}`,
               scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
@@ -1026,21 +1027,6 @@ export function QuestionForm({
             </div>
           </div>
           <div className="flex items-start gap-3 ml-3 shrink-0">
-            {sectionInstances.length > 1 && (
-              <button
-                type="button"
-                onClick={() => setAllCollapsed(!anySectionOpen)}
-                className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-500 hover:text-gray-800 transition-colors shrink-0 self-center"
-                title={anySectionOpen ? 'Collapse all sections' : 'Expand all sections'}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                     className={`transition-transform ${anySectionOpen ? '' : 'rotate-180'}`}>
-                  <polyline points="18 15 12 9 6 15" />
-                </svg>
-                <span className="hidden sm:inline">{anySectionOpen ? 'Collapse all' : 'Expand all'}</span>
-              </button>
-            )}
             <div className="text-right">
               <div className="text-base font-heading font-bold text-brand">{totalCompleted}/{totalQuestions}</div>
               <div className="text-xs text-gray-500 uppercase tracking-wider">answered</div>
@@ -1087,6 +1073,24 @@ export function QuestionForm({
       </header>
 
       <div className="max-w-3xl mx-auto px-4 py-6 pb-32">
+        {/* Collapse / Expand all — top-right, just above the sections. */}
+        {sectionInstances.length > 1 && (
+          <div className="flex justify-end mb-2">
+            <button
+              type="button"
+              onClick={() => setAllCollapsed(!anySectionOpen)}
+              className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-500 hover:text-gray-800 transition-colors"
+              title={anySectionOpen ? 'Collapse all sections' : 'Expand all sections'}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                   className={`transition-transform ${anySectionOpen ? '' : 'rotate-180'}`}>
+                <polyline points="18 15 12 9 6 15" />
+              </svg>
+              {anySectionOpen ? 'Collapse all' : 'Expand all'}
+            </button>
+          </div>
+        )}
         {sectionInstances.map((inst) => {
           const prog = sectionProgress[inst.instanceKey];
           const sectionPhotoUrls = sectionPhotos[inst.instanceKey] || [];
@@ -1131,8 +1135,9 @@ export function QuestionForm({
 
               {!isCollapsed && (
                 <div className="bg-white border-x border-b border-gray-200 divide-y divide-gray-100">
-                  {/* Section photos — compact single-row layout (matches RateCardForm) */}
-                  <div className={`px-3 py-1.5 ${photosMissing && !scopeStyle ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                  {/* Section photos — compact single-row layout (matches RateCardForm).
+                      The amber highlight for missing required photos stays. */}
+                  <div className={`px-3 py-1.5 ${photosMissing ? 'bg-amber-50' : 'bg-gray-50'}`}>
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-baseline gap-2 min-w-0">
                         <button

@@ -37,10 +37,11 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
   const hasContent = !!answer.note || answer.photoUrls.length > 0 || answer.quantity != null;
   const panelOpen = answer.optionalPanelOpen || triggered || hasContent;
 
-  // Auto-default assignedTo to "Vendor 1" when the question supports it and is triggered.
-  // Inspector can change to other vendors via the dropdown.
+  // Auto-default assignedTo to "Vendor 1" when the question supports it and is
+  // triggered. Skipped for plainStyle (1099/occupancy/community) templates —
+  // vendor assignment is strictly a Scope Rate Card concept there.
   useEffect(() => {
-    if (triggered && question.hasAssignedTo && !answer.assignedTo) {
+    if (!plainStyle && triggered && question.hasAssignedTo && !answer.assignedTo) {
       onUpdate({ assignedTo: 'Vendor 1' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,9 +205,11 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             />
           </div>
 
-          {/* Assigned To: visible when triggered AND the question supports it (has_assigned_to=true).
+          {/* Assigned To: visible when triggered AND the question supports it
+              (has_assigned_to=true). Hidden for plainStyle templates — vendor
+              assignment is strictly a Scope Rate Card thing.
               Ordered ABOVE Quantity per Hayden's request. */}
-          {triggered && question.hasAssignedTo && (() => {
+          {!plainStyle && triggered && question.hasAssignedTo && (() => {
             // Build the visible options list:
             //   1) Start from question.assignedToOptions (HubSpot data) OR the hardcoded fallback
             //   2) Strip "None" (case-insensitive) - it's not a valid action assignment

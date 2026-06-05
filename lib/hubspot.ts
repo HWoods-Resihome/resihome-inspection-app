@@ -1491,7 +1491,7 @@ async function listingStatusProp(): Promise<string | null> {
     const props: any[] = schema?.properties || [];
     const names = new Set(props.map((p) => p.name));
     if (override && names.has(override)) { _listingStatusProp = override; return override; }
-    const prefer = ['listing_status', 'status', 'hs_pipeline_stage'];
+    const prefer = ['published', 'listing_status', 'status', 'hs_pipeline_stage'];
     let pick = prefer.find((n) => names.has(n));
     if (!pick) pick = props.find((p) => /status|stage|state/i.test(`${p.name} ${p.label || ''}`))?.name;
     _listingStatusProp = pick || null;
@@ -1568,12 +1568,18 @@ export async function fetchActiveListingForProperty(
       }
       return r.created;
     };
+    // `published` is the status field. It may be a boolean ("true"/"false") or a
+    // status string — treat any of those as published.
+    const isPublished = (v: string) => {
+      const s = v.trim().toLowerCase();
+      return s === 'true' || s === 'yes' || s === '1' || /publish/i.test(s);
+    };
     const byRecencyDesc = (a: Row, b: Row) => recency(b) - recency(a);
-    const published = rows.filter((r) => /publish/i.test(r.status)).sort(byRecencyDesc);
-    const deposit = rows.filter((r) => /deposit/i.test(r.status)).sort(byRecencyDesc);
-    // With a status field, only published/deposit qualify. If we couldn't resolve
-    // a status field at all, fall back to the most recent listing.
-    const pick = published[0] || deposit[0] || (statusProp ? null : rows.slice().sort(byRecencyDesc)[0]);
+    const published = rows.filter((r) => isPublished(r.status)).sort(byRecencyDesc);
+    const rest = rows.filter((r) => !isPublished(r.status)).sort(byRecencyDesc);
+    // Most recent published listing; otherwise the most recent un-published one
+    // (in practice the deposit-taken / pending listings).
+    const pick = published[0] || rest[0];
     if (!pick) return null;
     return { listingPrice: pick.price, listingDate: formatListingDate(pick.date) };
   } catch (e) {
