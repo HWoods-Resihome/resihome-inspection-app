@@ -6,6 +6,7 @@ import {
   touchInspection,
   fetchInspectionById,
   fetchAnswersForInspection,
+  recomputeInspectionTotals,
   type AnswerUpsert,
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -288,6 +289,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     // Stamp "last edited" so the list can sort by most-recently-touched.
     await touchInspection(inspectionRecordId).catch(() => { /* non-fatal */ });
+
+    // Keep the inspection's rolled-up cost totals (total_vendor/client/tenant_cost)
+    // in sync with the current scope after this add/edit/delete. Best-effort —
+    // never fail the save over the summary write.
+    await recomputeInspectionTotals(inspectionRecordId).catch((e) => {
+      console.warn(`[rate-card-lines] totals recompute failed for ${inspectionRecordId} (non-fatal):`, e);
+    });
 
     // Stitch the math result back to each saved record so the client can update
     // its UI without re-fetching.

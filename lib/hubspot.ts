@@ -2115,6 +2115,89 @@ export async function backfillInspectionUrls(opts: { after?: string; max?: numbe
 }
 
 /**
+ * Recompute the inspection-wide cost totals from its rate-card lines and write
+ * them to `total_vendor_cost` / `total_client_cost` / `total_tenant_cost` on the
+ * inspection. Sums the per-line stored totals (the exact numbers the form + PDFs
+ * show), so the inspection object always reflects the current scope — through
+ * editing, approval, and finalize. Best-effort on the write (tolerates the
+ * properties not existing yet); never throws. Returns the totals + line count.
+ *
+ * Call after any change to an inspection's rate-card lines (save/archive) and at
+ * finalize. `skipIfNoLines` avoids stamping 0 onto non-scope inspections during
+ * the backfill (the live save path leaves it false so deleting the last line
+ * correctly writes 0).
+ */
+export async function recomputeInspectionTotals(
+  inspectionId: string,
+  opts: { skipIfNoLines?: boolean } = {},
+): Promise<{ vendor: number; client: number; tenant: number; lineCount: number; wrote: boolean }> {
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const answers = await fetchAnswersForInspection(inspectionId);
+  let vendor = 0, client = 0, tenant = 0, lineCount = 0;
+  for (const a of answers) {
+    if (a.answerType !== 'rate_card_line' || !a.rateCardLine) continue;
+    const rc = a.rateCardLine;
+    vendor += round2(Number(rc.vendorCost) || 0);
+    client += round2(Number(rc.clientCost) || 0);
+    tenant += round2(Number(rc.tenantCost) || 0);
+    lineCount++;
+  }
+  vendor = round2(vendor); client = round2(client); tenant = round2(tenant);
+  if (lineCount === 0 && opts.skipIfNoLines) return { vendor, client, tenant, lineCount, wrote: false };
+  try {
+    await updateInspection(inspectionId, {
+      total_vendor_cost: vendor,
+      total_client_cost: client,
+      total_tenant_cost: tenant,
+    });
+    return { vendor, client, tenant, lineCount, wrote: true };
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    if (!(msg.includes('PROPERTY_DOESNT_EXIST') || (msg.includes('Property') && msg.includes('does not exist')))) {
+      console.warn(`[recomputeInspectionTotals] write failed for ${inspectionId}:`, msg);
+    }
+    return { vendor, client, tenant, lineCount, wrote: false };
+  }
+}
+
+/**
+ * Backfill `total_vendor_cost` / `total_client_cost` / `total_tenant_cost` across
+ * existing inspections. Paginated like the other backfills; skips inspections
+ * with no rate-card lines (so questionnaires aren't stamped with 0s).
+ */
+export async function backfillInspectionTotals(opts: { after?: string; max?: number } = {}): Promise<{ processed: number; updated: number; skipped: number; errors: number; nextAfter: string | null }> {
+  const { inspection: typeId } = typeIds();
+  const max = opts.max ?? 1000;
+  let after = opts.after;
+  let processed = 0, updated = 0, skipped = 0, errors = 0;
+
+  while (processed < max) {
+    const body: any = { filterGroups: [], properties: ['template_type'], limit: 100 };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    const results = resp.results || [];
+    for (const r of results) {
+      processed++;
+      try {
+        const out = await recomputeInspectionTotals(r.id, { skipIfNoLines: true });
+        if (out.wrote) updated++; else skipped++;
+      } catch (e) {
+        errors++;
+        console.warn(`[inspection-totals-backfill] record ${r.id} failed:`, e);
+      }
+      await new Promise((res) => setTimeout(res, 110)); // polite to the API
+    }
+    after = resp.paging?.next?.after;
+    if (!after) return { processed, updated, skipped, errors, nextAfter: null };
+    if (processed >= max) return { processed, updated, skipped, errors, nextAfter: after };
+  }
+  return { processed, updated, skipped, errors, nextAfter: after || null };
+}
+
+/**
  * Stamp the inspection's "last edited" timestamp. Called on every edit (answers,
  * photos, rate-card lines) so the list can sort by most-recently-touched.
  *

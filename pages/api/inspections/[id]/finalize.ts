@@ -663,6 +663,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // (never flip submitted/pending_approval to completed, and don't stamp a
       // completion time). A normal finalize sets completed.
       ...(regenerateOnly ? {} : { status: 'completed', completed_at: nowIso }),
+      // Rolled-up scope totals — keep the inspection object authoritative at the
+      // moment of approval/finalize (also kept live on every edit via
+      // recomputeInspectionTotals in the line-save endpoint).
+      total_vendor_cost: ctx.grandTotals.vendor,
+      total_client_cost: ctx.grandTotals.client,
+      total_tenant_cost: ctx.grandTotals.tenant,
       pdf_master_url: masterUrl,
       pdf_chargeback_url: chargebackUrl || '',
       pdf_vendor_urls_json: JSON.stringify(vendorUrls),
