@@ -347,7 +347,7 @@ export default function Home() {
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src="/app-icon.svg"
-                  alt="ResiWALK"
+                  alt="ResiWalk"
                   className="h-11 w-11 object-cover shrink-0"
                 />
                 <div className="min-w-0">

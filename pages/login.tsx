@@ -74,7 +74,7 @@ export default function LoginPage() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/resiwalk-logo.svg"
-              alt="ResiWALK"
+              alt="ResiWalk"
               className="w-full max-w-[300px] object-contain mb-2"
             />
             <p className="text-sm text-gray-500 font-heading uppercase tracking-widest">

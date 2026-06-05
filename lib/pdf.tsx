@@ -340,7 +340,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
       subject={`Inspection: ${data.propertyAddress}`}
     >
       <Page size="LETTER" style={styles.page} wrap>
-        {/* Brand header (hot pink) with the ResiWALK house+footprint logo */}
+        {/* Brand header (hot pink) with the ResiWalk house+footprint logo */}
         <View style={styles.header} fixed={false}>
           {brandLogoDataUri() ? <Image src={brandLogoDataUri()} style={styles.headerLogo} /> : null}
           <View>

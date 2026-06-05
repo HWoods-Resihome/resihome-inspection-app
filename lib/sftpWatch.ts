@@ -17,9 +17,10 @@ import { sendReplyEmailWithToken } from '@/lib/gmail';
 import { withSftpClient, listSftpDir, downloadSftpFile, type SftpEntry } from '@/lib/sftp';
 import { readSftpWatchQueue, writeSftpWatchQueue, updateInspection } from '@/lib/hubspot';
 
-// How long after a drop we keep checking. The importer runs every ~5 min (on
-// the 3 and 8 marks), so ~10 min guarantees we see at least one full cycle.
-export const WATCH_WINDOW_MS = 10 * 60 * 1000;
+// How long after a drop we keep checking. The importer runs every ~5 min, but
+// some errors only surface after a full import attempt, so we watch for 20 min
+// (the cron sweeps every minute) to comfortably cover multiple cycles.
+export const WATCH_WINDOW_MS = 20 * 60 * 1000;
 // Files modified before (dropTime - slack) can't be ours — ignore them so we
 // never match a stale error file from a previous import of the same address.
 const DROP_SLACK_MS = 90 * 1000;
@@ -110,8 +111,9 @@ export async function enqueueSftpWatch(watch: SftpWatch): Promise<void> {
   }
 }
 
-function buildErrorEmail(watch: SftpWatch, errorNames: string[]) {
-  const subject = /^re:/i.test(watch.reply.subject) ? watch.reply.subject : `Re: ${watch.reply.subject}`;
+function buildErrorEmail(watch: SftpWatch, errorNames: string[], threaded = true) {
+  const base = watch.reply.subject || `Tenant Chargeback Import error`;
+  const subject = threaded ? (/^re:/i.test(base) ? base : `Re: ${base}`) : base;
   const list = errorNames.map((n) => `• ${n}`).join('\n');
   const listHtml = errorNames.map((n) => `<li>${n}</li>`).join('');
   const textBody =
@@ -120,14 +122,14 @@ function buildErrorEmail(watch: SftpWatch, errorNames: string[]) {
     `Dropped file: ${watch.droppedFilename}\n` +
     `Error file(s) attached:\n${list}\n\n` +
     `Please review the attached error file(s) and re-submit the corrected import.\n\n` +
-    `— ResiWALK automated SFTP monitor`;
+    `— ResiWalk automated SFTP monitor`;
   const htmlBody =
     `<p>Heads up — the <strong>Tenant Chargeback Import</strong> for this inspection did <strong>not</strong> process successfully.</p>` +
     `<p>The file was dropped to the SFTP but the importer moved it to the <strong>Errors</strong> folder.</p>` +
     `<p><strong>Dropped file:</strong> ${watch.droppedFilename}<br/><strong>Error file(s) attached:</strong></p>` +
     `<ul>${listHtml}</ul>` +
     `<p>Please review the attached error file(s) and re-submit the corrected import.</p>` +
-    `<p style="color:#888;font-size:12px">— ResiWALK automated SFTP monitor</p>`;
+    `<p style="color:#888;font-size:12px">— ResiWalk automated SFTP monitor</p>`;
   return { subject, textBody, htmlBody };
 }
 
@@ -184,27 +186,39 @@ export async function runSftpWatchSweep(): Promise<SweepResult> {
           }
         }
         const errNames = matchedErrors.map((e) => e.name);
-        const token = decryptToken(w.encToken);
-        if (!token) {
-          notes.push(`${w.inspectionId}: cannot send (token decrypt failed) — dropping watch`);
+        const token = w.encToken ? decryptToken(w.encToken) : '';
+        // Recipients: the original thread's recipients, else whoever we banked
+        // (submitter). Plus an optional ops inbox so an error is never missed.
+        const opsCc = (process.env.SFTP_ERROR_NOTIFY || '').split(',').map((s) => s.trim()).filter(Boolean);
+        const to = (w.reply.to && w.reply.to.length) ? w.reply.to : [];
+        const cc = Array.from(new Set([...(w.reply.cc || []), ...opsCc]));
+        const canEmail = !!token && (to.length > 0 || cc.length > 0);
+        if (!canEmail) {
+          // No way to email (no Gmail token, or nobody to send to) — STILL flag
+          // it in HubSpot so the error is never lost, then drop the watch.
           errored++;
-          await recordSftpResult(w.inspectionId, 'errored', `error file(s): ${errNames.join(', ')}; reply not sent (token unavailable)`);
-          continue; // drop it; we can't recover the token
+          const why = !token ? 'no Gmail token' : 'no recipient';
+          notes.push(`${w.inspectionId}: error file(s) found but not emailed (${why}) — recorded in HubSpot`);
+          await recordSftpResult(w.inspectionId, 'errored', `error file(s): ${errNames.join(', ')}; not emailed (${why})`);
+          continue;
         }
-        const { subject, textBody, htmlBody } = buildErrorEmail(w, errNames);
+        // Reply in the original thread when we have it; otherwise send a fresh
+        // standalone notification (still attaches the error file).
+        const threaded = !!(w.reply.messageId || w.reply.threadId);
+        const { subject, textBody, htmlBody } = buildErrorEmail(w, errNames, threaded);
         const sent = await sendReplyEmailWithToken({
           refreshToken: token,
           fromEmail: w.reply.fromEmail,
-          to: w.reply.to,
-          cc: w.reply.cc,
+          to,
+          cc,
           subject, htmlBody, textBody,
-          inReplyToMessageId: w.reply.messageId,
+          inReplyToMessageId: w.reply.messageId || undefined,
           threadId: w.reply.threadId,
           attachments,
         });
         if (sent.sent) {
           errored++;
-          notes.push(`${w.inspectionId}: error reply sent (${matchedErrors.length} file(s))`);
+          notes.push(`${w.inspectionId}: error ${threaded ? 'reply' : 'email'} sent (${matchedErrors.length} file(s))`);
           await recordSftpResult(w.inspectionId, 'errored', errNames.join(', '));
         } else {
           // Send failed — keep the watch (within window) to retry next sweep.

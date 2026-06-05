@@ -1,30 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * InstallButton — shows ONLY when Chrome actually has the native install prompt
- * to offer, and tapping it fires THAT (the real device pop-up). No custom
- * fallback dialog: a website can't conjure the native prompt, so when Chrome
- * isn't offering it (e.g. the PWA is still installed, or running as the app) the
- * button simply isn't shown. It returns automatically once Chrome re-offers
- * (after a FULL uninstall).
+ * InstallButton — always shown (unless already running as the installed app).
+ * Tapping it fires the real device install prompt when Chrome has one ready; if
+ * Chrome has nothing to offer (e.g. the app is still installed), the button just
+ * hides itself for the rest of this session. No custom popup.
  */
 type BIP = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> };
 
 export function InstallButton({ className }: { className?: string }) {
   const deferredRef = useRef<BIP | null>(null);
-  const [canInstall, setCanInstall] = useState(false);
+  const [hidden, setHidden] = useState(false);
 
   useEffect(() => {
     const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches === true
       || (navigator as any).standalone === true;
-    if (standalone) return; // running as the installed app
+    if (standalone) { setHidden(true); return; } // already the installed app
 
-    const pick = () => { const e = (window as any).__bipEvent as BIP | undefined; if (e) { deferredRef.current = e; setCanInstall(true); } };
+    const pick = () => { const e = (window as any).__bipEvent as BIP | undefined; if (e) deferredRef.current = e; };
     pick(); // event may have fired before mount (captured early in _document)
 
-    const onBip = (e: Event) => { e.preventDefault(); (window as any).__bipEvent = e; deferredRef.current = e as BIP; setCanInstall(true); };
+    const onBip = (e: Event) => { e.preventDefault(); (window as any).__bipEvent = e; deferredRef.current = e as BIP; };
     const onReady = () => pick();
-    const onInstalled = () => { deferredRef.current = null; (window as any).__bipEvent = null; setCanInstall(false); };
+    const onInstalled = () => { deferredRef.current = null; (window as any).__bipEvent = null; setHidden(true); };
     window.addEventListener('beforeinstallprompt', onBip);
     window.addEventListener('bip-ready', onReady);
     window.addEventListener('appinstalled', onInstalled);
@@ -35,16 +33,20 @@ export function InstallButton({ className }: { className?: string }) {
     };
   }, []);
 
-  if (!canInstall) return null;
+  if (hidden) return null;
 
   const onClick = async () => {
     const d = deferredRef.current;
-    if (!d) { setCanInstall(false); return; }
-    try {
-      d.prompt(); // ← the actual native device install pop-up
-      const { outcome } = await d.userChoice;
-      if (outcome === 'accepted') { deferredRef.current = null; (window as any).__bipEvent = null; setCanInstall(false); }
-    } catch { /* noop */ }
+    if (d) {
+      try {
+        d.prompt(); // the real device install pop-up
+        const { outcome } = await d.userChoice;
+        if (outcome === 'accepted') { deferredRef.current = null; (window as any).__bipEvent = null; setHidden(true); }
+      } catch { setHidden(true); }
+      return;
+    }
+    // Chrome has no prompt to offer right now → disappear for this session.
+    setHidden(true);
   };
 
   return (

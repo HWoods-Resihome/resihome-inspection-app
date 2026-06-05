@@ -9,7 +9,7 @@ export default function Document() {
             worker (registered in _app) provides the offline shell. */}
         <link rel="manifest" href="/manifest.webmanifest" />
         <meta name="theme-color" content="#ff0060" />
-        {/* Browser-tab (favicon) icon — the ResiWALK house + footprint mark in
+        {/* Browser-tab (favicon) icon — the ResiWalk house + footprint mark in
             brand pink on a TRANSPARENT background. The SVG is what modern browsers
             use; the favicon-*.png are transparent PNG fallbacks for the rare
             browser that can't render an SVG favicon. (The solid-pink-tile

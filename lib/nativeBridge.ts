@@ -1,6 +1,6 @@
 // lib/nativeBridge.ts
 //
-// Gated native-only OAuth bridge for the ResiWALK Capacitor shell.
+// Gated native-only OAuth bridge for the ResiWalk Capacitor shell.
 //
 // WHY: Google blocks OAuth inside embedded webviews (`disallowed_useragent`), so
 // the Google step must run in the SYSTEM browser. But on Android the resulting

@@ -895,34 +895,42 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // everything needed to act later: a successful drop, a sent email we can
     // thread a reply to, and the sender's Gmail token to send it.
     try {
-      if (chargebackXlsxBuf && sftpResult?.ok && emailResult?.sent && emailResult.messageId) {
+      // Arm the watch for EVERY successful drop — not only when the finalize
+      // email sent. A pre-check/import error must never be silently missed.
+      // If the email sent, we reply in that thread; otherwise the sweep sends a
+      // standalone notification to the submitter. With no Gmail token at all, the
+      // sweep still records the error on the inspection in HubSpot.
+      if (chargebackXlsxBuf && sftpResult?.ok) {
         const refreshToken = getGmailRefreshToken(req);
-        if (refreshToken) {
-          const droppedAt = Date.now();
-          await enqueueSftpWatch({
-            id: `${id}-${droppedAt}`,
-            inspectionId: id,
-            droppedFilename: chargebackXlsxFilename,
-            addressKey: safeAddress,
-            droppedAt,
-            watchUntil: droppedAt + WATCH_WINDOW_MS,
-            reply: {
-              to: emailResult.recipients?.to || [],
-              cc: emailResult.recipients?.cc || [],
-              subject: emailResult.subject || 'Inspection',
-              messageId: emailResult.messageId,
-              threadId: emailResult.threadId,
-              fromEmail: session.email,
-            },
-            encToken: encryptToken(refreshToken),
-          });
-          // Mark it pending so the outcome is visible in HubSpot while we watch.
-          try {
-            await updateInspection(id, { sftp_import_result: 'pending', sftp_import_checked_at: droppedAt });
-          } catch { /* properties may not exist yet — non-fatal */ }
-        } else {
-          console.warn('[finalize] SFTP watch skipped — no Gmail token to send a later error reply.');
+        const droppedAt = Date.now();
+        const submitter = String(preflight?.submitted_by_email || '').trim();
+        const replyTo = (emailResult?.sent && emailResult.recipients?.to?.length)
+          ? emailResult.recipients.to
+          : [submitter || session.email].filter(Boolean);
+        await enqueueSftpWatch({
+          id: `${id}-${droppedAt}`,
+          inspectionId: id,
+          droppedFilename: chargebackXlsxFilename,
+          addressKey: safeAddress,
+          droppedAt,
+          watchUntil: droppedAt + WATCH_WINDOW_MS,
+          reply: {
+            to: replyTo,
+            cc: (emailResult?.sent && emailResult.recipients?.cc) || [],
+            subject: emailResult?.subject || `Tenant Chargeback Import — ${safeAddress}`,
+            messageId: (emailResult?.sent && emailResult.messageId) || '',
+            threadId: (emailResult?.sent && emailResult.threadId) || undefined,
+            fromEmail: session.email,
+          },
+          encToken: refreshToken ? encryptToken(refreshToken) : '',
+        });
+        if (!refreshToken) {
+          console.warn('[finalize] SFTP watch armed WITHOUT a Gmail token — import errors will be recorded in HubSpot but not emailed.');
         }
+        // Mark it pending so the outcome is visible in HubSpot while we watch.
+        try {
+          await updateInspection(id, { sftp_import_result: 'pending', sftp_import_checked_at: droppedAt });
+        } catch { /* properties may not exist yet — non-fatal */ }
       }
     } catch (e) {
       console.warn('[finalize] could not enqueue SFTP watch (non-fatal):', e);
