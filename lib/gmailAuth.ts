@@ -100,6 +100,29 @@ export function getGmailOAuthConfig(): GmailOAuthConfig | null {
   return { clientId, clientSecret, redirectUri };
 }
 
+/**
+ * OAuth config for EXTERNAL (1099) users — a SEPARATE Google OAuth client whose
+ * consent screen is "External" and which requests identity-only scopes (no Gmail
+ * send / restricted scope, so no Google verification is needed). This is what
+ * lets non-Workspace Google accounts sign in even though the internal app may be
+ * "Internal"-only. Register the SAME callback redirect URI in both apps.
+ *
+ * Falls back to the internal config when the external app isn't configured yet,
+ * so login keeps working as a single app until you set the external env vars.
+ */
+export function getExternalOAuthConfig(): GmailOAuthConfig | null {
+  const clientId = process.env.GOOGLE_EXTERNAL_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_EXTERNAL_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_EXTERNAL_REDIRECT_URI || process.env.GMAIL_REDIRECT_URI;
+  if (!clientId || !clientSecret || !redirectUri) return getGmailOAuthConfig();
+  return { clientId, clientSecret, redirectUri };
+}
+
+/** Pick the OAuth client to use for a login, by whether the user is external. */
+export function getLoginOAuthConfig(isExternal: boolean): GmailOAuthConfig | null {
+  return isExternal ? getExternalOAuthConfig() : getGmailOAuthConfig();
+}
+
 export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 // Identity scopes — let us read which Google account actually authenticated so
 // we can verify it matches the email the user typed on the login page.

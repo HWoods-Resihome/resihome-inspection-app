@@ -9,7 +9,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { fetchUsers } from '@/lib/hubspot';
-import { getGmailOAuthConfig, buildGmailConsentUrl, LOGIN_SCOPES, IDENTITY_SCOPES, GMAIL_TOKEN_COOKIE } from '@/lib/gmailAuth';
+import { getLoginOAuthConfig, buildGmailConsentUrl, LOGIN_SCOPES, IDENTITY_SCOPES, GMAIL_TOKEN_COOKIE } from '@/lib/gmailAuth';
 import { isInternalEmail } from '@/lib/userAccess';
 import { randomBytes } from 'crypto';
 import { serialize } from 'cookie';
@@ -23,7 +23,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  const cfg = getGmailOAuthConfig();
+  // External (1099) users sign in through the SEPARATE External OAuth app
+  // (identity-only, non-Workspace-allowed); internal users use the main app.
+  const external = !isInternalEmail(email);
+  const cfg = getLoginOAuthConfig(external);
   if (!cfg) {
     res.redirect(302, '/login?error=google_not_configured');
     return;
@@ -76,7 +79,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // Internal users also get the Gmail-send scope so they can send inspection
   // emails. (The Gmail send scope is what makes the OAuth app "restricted"; only
   // internal sign-ins exercise it.)
-  const external = !isInternalEmail(email);
   const hasGmailToken = !!req.cookies?.[GMAIL_TOKEN_COOKIE];
   const url = buildGmailConsentUrl(cfg, {
     state,

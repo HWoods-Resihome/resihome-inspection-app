@@ -13,11 +13,13 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest, createSessionCookie, createOAuthExchangeToken } from '@/lib/auth';
 import {
   getGmailOAuthConfig,
+  getLoginOAuthConfig,
   exchangeCodeForRefreshToken,
   gmailTokenCookie,
   emailFromIdToken,
 } from '@/lib/gmailAuth';
 import { fetchUsers } from '@/lib/hubspot';
+import { isInternalEmail } from '@/lib/userAccess';
 import { parse, serialize } from 'cookie';
 
 const LOGIN_STATE_COOKIE = 'resihome_login_oauth_state';
@@ -71,10 +73,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!expectedCsrf || expectedCsrf !== csrf) return fail('google_state_mismatch');
     if (!claimedEmail) return fail('google_state_mismatch');
 
+    // The code must be exchanged with the SAME OAuth client that issued it.
+    // External logins start on the External app, so pick the client by the
+    // claimed email's domain (mirrors google-login.ts).
+    const externalLogin = !isInternalEmail(claimedEmail);
+    const loginCfg = getLoginOAuthConfig(externalLogin) || cfg;
+
     let verifiedEmail: string | null = null;
     let refreshToken: string | null = null;
     try {
-      const r = await exchangeCodeForRefreshToken(cfg, code);
+      const r = await exchangeCodeForRefreshToken(loginCfg, code);
       refreshToken = r.refreshToken;
       verifiedEmail = r.idToken ? emailFromIdToken(r.idToken) : null;
     } catch (e) {
