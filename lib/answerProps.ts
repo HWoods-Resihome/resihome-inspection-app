@@ -68,14 +68,19 @@ export function buildQaAnswerProps(
     question_id_external: f.questionIdExternal,
   };
   if (f.location) props.location = f.location;
-  if (f.note) props.note = f.note;
+  // Write note/photos whenever the caller PROVIDES them (even when empty) so
+  // CLEARING a note or deleting every photo actually persists. HubSpot PATCH
+  // only updates included properties, so omitting the field on an empty value
+  // would leave the old value intact — the "deleted photos reappear on reload"
+  // bug. `null`/`undefined` means "not managed here", so we leave it untouched.
+  if (f.note != null) props.note = f.note;
   // Scope-only properties — never written on non-Scope templates.
   if (opts.isScope) {
     if (f.quantity != null) props.quantity = f.quantity;
     if (f.assignedTo) props.assigned_to = f.assignedTo;
   }
-  if (f.photoUrls && f.photoUrls.length) {
-    props.photo_urls = joinPhotoUrls(f.photoUrls);
+  if (f.photoUrls != null) {
+    props.photo_urls = joinPhotoUrls(f.photoUrls); // '' clears all photos
     props.photo_count = f.photoUrls.length;
   }
   return props;
