@@ -212,6 +212,11 @@ export function CameraAILayer(props: Props) {
   const seenByRoomRef = useRef<Record<string, { codes: Set<string>; descs: Set<string> }>>({});
   const roomStillCountRef = useRef<Record<string, number>>({});
   const chipsRef = useRef<LiveSuggestion[]>([]);
+  // In-flight call-out still uploads, keyed by chip id. The chip renders the
+  // instant the AI calls something out; the photo uploads in the BACKGROUND and
+  // its URL is patched on when ready. Add awaits this so the photo is never lost
+  // even if the inspector taps Add before the upload finishes.
+  const stillUploadRef = useRef<Record<string, Promise<string | undefined>>>({});
   // Active room id. Ref drives the poll's change-detection (no stale closure);
   // state drives the render filter. We NEVER clear chips on room change — chips
   // are kept per-room and filtered by activeId, so an in-flight inference can't
@@ -840,19 +845,30 @@ export function CameraAILayer(props: Props) {
       const incoming: LiveSuggestion[] = Array.isArray(d.suggestions) ? d.suggestions : [];
       const fresh = incoming.filter((s) => s.lineItemCode && !seen.codes.has(s.lineItemCode));
       if (fresh.length) {
-        // Grab the frame the AI is calling out so it appears on the chip (and
-        // tags to the line on Add) — card-only, so it doesn't flood room photos.
-        const batchStill = await captureStill(true, 'call-out', false);
+        // Render the call-out card(s) IMMEDIATELY — don't block visualization on
+        // the photo upload. The card is the deliverable; the still is supporting
+        // evidence and can attach a beat later.
         const seeds: Record<string, ChipEdit> = {};
         for (const s of fresh) {
           seen.codes.add(s.lineItemCode);
           seen.descs.add(s.description);
           s.roomId = room.id;
-          s.stillUrl = batchStill;
           seeds[s.id] = seedEdit(s);
         }
         setEditById((m) => ({ ...m, ...seeds }));
         setChips((cur) => [...cur, ...fresh]);
+        // Grab + upload the call-out frame in the BACKGROUND, then patch its URL
+        // onto the chips (thumbnail) and the suggestion objects (so Add tags it to
+        // the line). The upload promise is tracked per-chip so Add can await it.
+        const freshIds = fresh.map((f) => f.id);
+        const stillP = captureStill(true, 'call-out', false).then((url) => {
+          if (url && openRef.current) {
+            for (const f of fresh) f.stillUrl = url;
+            setChips((cur) => cur.map((c) => (freshIds.includes(c.id) ? { ...c, stillUrl: url } : c)));
+          }
+          return url;
+        });
+        for (const id of freshIds) stillUploadRef.current[id] = stillP;
       }
 
       // The model heard/saw something but it didn't map to a catalog item — tell
@@ -875,13 +891,23 @@ export function CameraAILayer(props: Props) {
 
   // ---- chip actions ----
   function editOf(s: LiveSuggestion): ChipEdit { return editById[s.id] || seedEdit(s); }
-  function addChip(s: LiveSuggestion) {
+  // The call-out still uploads in the background; if Add fires before it lands,
+  // briefly await the in-flight upload so the photo is tagged to the line. Resolves
+  // immediately once the URL is already on the suggestion (the common case).
+  async function resolveStill(s: LiveSuggestion): Promise<string | undefined> {
+    if (s.stillUrl) return s.stillUrl;
+    const p = stillUploadRef.current[s.id];
+    if (!p) return undefined;
+    try { const url = await p; if (url) s.stillUrl = url; return url; } catch { return undefined; }
+  }
+  async function addChip(s: LiveSuggestion) {
     const e = editOf(s);
     let qty: number;
     if (s.needsMeasurement) { const v = Number(e.qty); if (!isFinite(v) || v <= 0) return; qty = v; }
     else { const v = Number(e.qty); qty = isFinite(v) && v > 0 ? v : (s.quantity ?? 1); }
     const tenant = Math.max(0, Math.min(100, Math.round(Number(e.tenantPct))));
     const vCost = Number(e.vendorCost);
+    const still = await resolveStill(s);
     const line: RateCardLineInput = {
       externalId: genId(), section: '', location: '',
       lineItemCode: s.lineItemCode, quantity: qty,
@@ -889,7 +915,7 @@ export function CameraAILayer(props: Props) {
       assignedTo: e.vendor || s.suggestedVendor || 'Vendor 1',
       note: '', customLaborRate: null, customAdjustedMaterialCost: null,
       customVendorCost: (isFinite(vCost) && e.vendorCost.trim() !== '') ? vCost : null,
-      photoUrls: s.stillUrl ? [s.stillUrl] : [],
+      photoUrls: still ? [still] : [],
     };
     onAddLineRef.current(s.roomId, line);
     dbg(`✚ added ${s.lineItemCode} q${qty} ${line.assignedTo}`);
@@ -898,9 +924,11 @@ export function CameraAILayer(props: Props) {
     if (addedTimer.current) clearTimeout(addedTimer.current);
     addedTimer.current = setTimeout(() => setAddedFx(null), 1150);
     setChips((cur) => cur.filter((c) => c.id !== s.id));
+    delete stillUploadRef.current[s.id];
   }
   function dismissChip(s: LiveSuggestion) {
     setChips((cur) => cur.filter((c) => c.id !== s.id));
+    delete stillUploadRef.current[s.id];
   }
 
   // Build the line a tapped suggestion seeds the full editor with — using the
@@ -930,7 +958,13 @@ export function CameraAILayer(props: Props) {
     setEditorState({ chip: s, line: chipToSeedLine(s) });
   }
   // Commit from the full editor: add to the chip's room, confirm, drop the chip.
-  function commitEditor(chip: LiveSuggestion, line: RateCardLineInput) {
+  async function commitEditor(chip: LiveSuggestion, line: RateCardLineInput) {
+    // The editor seeds its line at open time; if the call-out still hadn't
+    // uploaded yet, attach it now so the photo isn't lost.
+    if (!line.photoUrls || line.photoUrls.length === 0) {
+      const still = await resolveStill(chip);
+      if (still) line = { ...line, photoUrls: [still] };
+    }
     onAddLineRef.current(chip.roomId, line);
     dbg(`✚ added (editor) ${line.lineItemCode} q${line.quantity} ${line.assignedTo}`);
     setAddedFx({ key: Date.now(), label: chip.description });

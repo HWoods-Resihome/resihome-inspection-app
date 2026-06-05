@@ -304,6 +304,10 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   // Silence timer + accumulated final transcript across pauses.
   const silenceTimerRef = useRef<any>(null);
   const finalTranscriptRef = useRef('');
+  // Guard so an utterance is submitted exactly once — we now submit the instant a
+  // FINAL result arrives (onresult) rather than waiting for the recognizer's
+  // teardown (onend), shaving the trailing gap; onend/stop then no-op.
+  const utteranceSubmittedRef = useRef(false);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   // Holds the latest startListening so TTS-onend can trigger it without stale closures.
   const startListeningRef = useRef<() => void>(() => {});
@@ -706,6 +710,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     recogRef.current = recog;
     startingRef.current = true;
     finalTranscriptRef.current = '';
+    utteranceSubmittedRef.current = false;
     // Optimistically reflect the listening state so the UI ("Listening…" + the
     // pulsing mic) updates the instant the inspector taps, rather than waiting
     // for the engine's onstart, which can lag noticeably on mobile.
@@ -726,7 +731,17 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       // Android duplication. onend will submit it.
       const last = ev.results[ev.results.length - 1];
       const text = (last && last[0]?.transcript ? String(last[0].transcript) : '').trim();
-      if (text) finalTranscriptRef.current = text;
+      if (!text) return;
+      finalTranscriptRef.current = text;
+      // interimResults=false + continuous=false → this IS the final utterance.
+      // Submit and tear down NOW rather than waiting for onend (which the engine
+      // fires a beat later), cutting the dead time before the request goes out.
+      if (!utteranceSubmittedRef.current) {
+        utteranceSubmittedRef.current = true;
+        finalTranscriptRef.current = '';
+        try { recogRef.current?.stop(); } catch { /* onend will still fire */ }
+        submitUtterance(text);
+      }
     };
     recog.onerror = (ev: any) => {
       startingRef.current = false;
@@ -759,10 +774,11 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       setListening(false);
       clearSilence();
       // The recognizer ended (utterance complete, since continuous=false).
-      // Submit whatever we captured.
+      // Submit whatever we captured — unless onresult already did (the common
+      // path now), in which case this is a no-op.
       const captured = finalTranscriptRef.current.trim();
       finalTranscriptRef.current = '';
-      if (captured) submitUtterance(captured);
+      if (captured && !utteranceSubmittedRef.current) { utteranceSubmittedRef.current = true; submitUtterance(captured); }
     };
 
     try {
@@ -780,10 +796,11 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     startingRef.current = false;
     listeningRef.current = false;
     setListening(false);
-    // If the inspector tapped stop after speaking, submit what we captured.
+    // If the inspector tapped stop after speaking, submit what we captured
+    // (unless onresult already submitted this utterance).
     const captured = finalTranscriptRef.current.trim();
     finalTranscriptRef.current = '';
-    if (captured) submitUtterance(captured);
+    if (captured && !utteranceSubmittedRef.current) { utteranceSubmittedRef.current = true; submitUtterance(captured); }
   }, [submitUtterance]);
 
   // Keep the ref pointing at the latest startListening so TTS-onend (which

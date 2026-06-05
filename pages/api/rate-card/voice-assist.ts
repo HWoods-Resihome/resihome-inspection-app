@@ -532,6 +532,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // model, and if the fast model is unsure and calls search_catalog, the next
     // round escalates to smart automatically.
     let simpleConfidentAdd = false;
+    // FAST-PATH target (latency): when a single utterance maps to ONE dominantly-
+    // matched EA fixture with no stated quantity and no special-case category,
+    // there is nothing for the model to decide — we propose it directly and skip
+    // the model round entirely. Stays null (→ normal model flow) for anything with
+    // any ambiguity; see the eligibility gate below.
+    let fastAddItem: RateCardLineItem | null = null;
     try {
       const lastMsg = clientMessages[clientMessages.length - 1];
       const utter = lastMsg && lastMsg.role === 'user' ? String(lastMsg.content || '') : '';
@@ -562,6 +568,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
         preSearchConfidentCount = blocks.length;
         simpleConfidentAdd = queries.length === 1 && blocks.length === 1;
+
+        // FAST-PATH eligibility (skip the model). Strictly additive: every guard
+        // must hold or we leave fastAddItem null and run the normal model flow.
+        // The bar is deliberately high because a voice add auto-commits (no
+        // confirm): one dominant match, an EA/count unit (no measurement needed),
+        // no stated number, and none of the categories that carry special rules
+        // (size tiers, stairs, depreciation, trash-out, bid items, room routing).
+        if (simpleConfidentAdd && !looksLikeEdit) {
+          const r0 = matches[0]?.r;
+          const top = r0?.candidates?.[0];
+          const second = r0?.candidates?.[1];
+          const item = top?.item;
+          const dominant = !!r0 && r0.topScore >= 0.60 && (!second || (top!.score - second.score) >= 0.04);
+          const unit = (item?.laborMeas || '').trim().toUpperCase();
+          const isMeasured = unit === 'SF' || unit === 'LF' || unit === 'SY';
+          const desc = item?.laborShortDescription || '';
+          // Categories/phrasings that need the model's judgement — never fast-path.
+          const specialItem = /\bstair|trash|debris|haul|dumpster|roll.?off|container|\bclean\b|carpet|\bpaint\b|flooring|vinyl|\blvp\b|blind/i.test(`${desc} ${item?.category || ''}`);
+          const hasNumber = /\b(\d|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|dozen|couple|few|several|both|pair|multiple)\b/i.test(utter);
+          const mentionsBid = /\bbid\b/i.test(utter);
+          const mentionsOtherRoom = rooms.some((rm) => rm.name && utter.toLowerCase().includes(rm.name.toLowerCase()));
+          const wholeHouse = /\b(whole|full)\s*house\b/i.test(`${desc} ${activeSection} ${body.section || ''}`);
+          if (item && dominant && !isMeasured && !item.isBidItem && !specialItem
+              && !hasNumber && !mentionsBid && !mentionsOtherRoom && !wholeHouse) {
+            fastAddItem = item;
+          }
+        }
         if (blocks.length) {
           preSearchBlock = [
             ``,
@@ -582,6 +615,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       { type: 'text', text: SYSTEM_RULES, cache_control: { type: 'ephemeral' } },
       { type: 'text', text: dynamicText },
     ];
+
+    // FAST-PATH: propose the single dominant EA match directly and end the turn,
+    // skipping the model round-trip entirely (the dominant latency on a simple
+    // add). All accuracy-critical gating was applied above; this mirrors the EA
+    // branch of emitAdd. The client renders the card optimistically and speaks
+    // the confirmation, exactly as it would for a model-emitted proposal.
+    if (fastAddItem) {
+      const item = fastAddItem;
+      const depKind = depKindForCategory(item.category, item.laborShortDescription);
+      let pct = depKind ? depreciationTenantPct(depKind, tenantMonths) : 100;
+      pct = Math.max(0, Math.min(100, Math.round(pct / 5) * 5));
+      const line: RateCardLineInput = {
+        externalId: `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        section: activeSection, location: activeLocation, lineItemCode: item.lineItemCode,
+        quantity: 1, tenantBillBackPercent: pct, assignedTo: 'Vendor 1',
+        note: '', photoUrls: [],
+      };
+      sse(res, 'proposal', { action: 'add', line, summary: lineToSummary(item, 1, 'Vendor 1', pct, region, regions), spokenSummary: item.laborShortDescription, awaitingReply: false });
+      sse(res, 'done', {});
+      return res.end();
+    }
 
     // One-time guardrail: if the model asks a question without first proposing
     // the items pre-search already matched confidently, we nudge it once to
