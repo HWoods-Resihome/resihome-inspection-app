@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { updateInspection, fetchInspectionById, stampFirstCompleted } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
+import { externalWriteDenial } from '@/lib/inspectionGuard';
 
 /**
  * Finalize an existing inspection. All answers should already be saved via
@@ -20,6 +21,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!id || typeof id !== 'string') {
     return res.status(400).json({ error: 'Missing inspection id' });
   }
+
+  // External (1099) users: only their 1099 inspections, and not once completed.
+  const denial = await externalWriteDenial(session.email, id);
+  if (denial) return res.status(403).json({ error: denial });
 
   try {
     const body = req.body || {};

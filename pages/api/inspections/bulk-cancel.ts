@@ -6,6 +6,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { isExternalEmail } from '@/lib/userAccess';
 import { fetchInspectionById, updateInspection } from '@/lib/hubspot';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 
@@ -17,6 +18,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const session = await getSessionFromRequest(req);
   if (!session) {
     res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
+  // Cancelling inspections is an internal management action — not for external
+  // (1099) users.
+  if (isExternalEmail(session.email)) {
+    res.status(403).json({ error: 'Your account can’t cancel inspections.' });
     return;
   }
 

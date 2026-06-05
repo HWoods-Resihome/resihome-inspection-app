@@ -9,6 +9,7 @@ import {
   recomputeInspectionTotals,
   type AnswerUpsert,
 } from '@/lib/hubspot';
+import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { getSessionFromRequest } from '@/lib/auth';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
@@ -64,6 +65,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!inspectionRecordId || typeof inspectionRecordId !== 'string') {
     return res.status(400).json({ error: 'Missing inspection id' });
   }
+
+  // Rate Card is internal-only; external (1099) users are denied (defense-in-depth).
+  const xDenial = await externalWriteDenial(session.email, inspectionRecordId);
+  if (xDenial) return res.status(403).json({ error: xDenial });
 
   try {
     const body = req.body as BodyShape;

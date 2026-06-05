@@ -12,6 +12,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { externalWriteDenial } from '@/lib/inspectionGuard';
 import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
@@ -48,6 +49,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(400).json({ error: 'Missing inspection id' });
     return;
   }
+
+  // QC is internal-only; deny external (1099) users (defense-in-depth).
+  const xDenial = await externalWriteDenial(session.email, id);
+  if (xDenial) { res.status(403).json({ error: xDenial }); return; }
 
   const verdict = (req.body?.verdict || '').toString().toLowerCase();
   if (verdict !== 'pass' && verdict !== 'fail') {

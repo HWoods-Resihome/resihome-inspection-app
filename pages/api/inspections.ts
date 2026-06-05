@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { fetchInspections } from '@/lib/hubspot';
+import { isExternalEmail, EXTERNAL_TEMPLATE } from '@/lib/userAccess';
 import type { InspectionSummary } from '@/lib/types';
 
 /**
@@ -68,7 +69,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const search = typeof req.query.search === 'string' ? req.query.search : '';
   const refresh = String(req.query.refresh || '') === '1';
   try {
-    const inspections = await load(search, refresh);
+    let inspections = await load(search, refresh);
+    // External (1099) users only see 1099-type inspections.
+    if (isExternalEmail(session.email)) {
+      inspections = inspections.filter((i) => String(i.templateType || '') === EXTERNAL_TEMPLATE);
+    }
     return res.status(200).json({ inspections });
   } catch (e: any) {
     console.error('GET /api/inspections failed:', e);

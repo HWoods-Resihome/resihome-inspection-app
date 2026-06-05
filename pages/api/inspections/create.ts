@@ -3,6 +3,7 @@ import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, 
 import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
+import { externalAccessDenial } from '@/lib/userAccess';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -51,6 +52,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!body || !body.templateType || !body.propertyRecordId) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
+
+    // External (1099) users may only create the 1099 template.
+    const denial = externalAccessDenial(session.email, body.templateType, { write: true });
+    if (denial) return res.status(403).json({ error: denial });
 
     const externalId = `INSP-${nowIso().slice(0, 10)}-${shortId().slice(0, 8)}`;
 

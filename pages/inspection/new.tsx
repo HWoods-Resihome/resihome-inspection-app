@@ -8,6 +8,7 @@ import type {
 } from '@/lib/types';
 import { Combobox } from '@/components/Combobox';
 import { loadCachedProperties, saveCachedProperties } from '@/lib/offlineCache';
+import { EXTERNAL_TEMPLATE } from '@/lib/userAccess';
 
 type Stage = 'setup' | 'loading_questions' | 'error';
 
@@ -54,6 +55,8 @@ export default function NewInspection() {
   // Logged-in user is the inspector. Fetched once from /api/auth/me.
   const [sessionUser, setSessionUser] = useState<{ userId: string; email: string; name: string } | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
+  // External (1099) users may only create the 1099 template.
+  const [isExternal, setIsExternal] = useState(false);
 
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateType | ''>('');
   const [selectedPropertyId, setSelectedPropertyId] = useState('');
@@ -139,6 +142,11 @@ export default function NewInspection() {
       .then((r) => r.json())
       .then((data) => {
         if (data.authenticated) setSessionUser(data.user);
+        if (data.isExternal) {
+          setIsExternal(true);
+          // External users can only create the 1099 template — pre-select it.
+          setSelectedTemplate(EXTERNAL_TEMPLATE);
+        }
       })
       .catch(() => {})
       .finally(() => setSessionLoading(false));
@@ -233,8 +241,11 @@ export default function NewInspection() {
     return () => { cancelled = true; };
   }, [isQcTemplate, selectedPropertyId]);
   const templateOptions = useMemo(
-    () => TEMPLATE_OPTIONS.map((t) => ({ value: t.value, label: t.label, sublabel: t.sublabel, group: t.group })),
-    []
+    () => TEMPLATE_OPTIONS
+      // External (1099) users only see the 1099 template.
+      .filter((t) => !isExternal || t.value === EXTERNAL_TEMPLATE)
+      .map((t) => ({ value: t.value, label: t.label, sublabel: t.sublabel, group: t.group })),
+    [isExternal]
   );
 
   const setupReady = !!selectedTemplate

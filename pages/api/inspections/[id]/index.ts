@@ -9,6 +9,7 @@ import {
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { buildShortLink } from '@/lib/shortLinks';
+import { externalAccessDenial } from '@/lib/userAccess';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -23,6 +24,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       const data = await fetchInspectionWithPropertyRef(id);
       if (!data) return res.status(404).json({ error: 'Inspection not found' });
+      // External (1099) users can only open 1099-type inspections.
+      const denial = externalAccessDenial(session.email, data.inspection.templateType);
+      if (denial) return res.status(403).json({ error: denial });
       const answers = await fetchAnswersForInspection(id);
 
       // Clean short links (resolve to the real files via /d/...) for whatever

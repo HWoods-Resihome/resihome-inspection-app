@@ -27,6 +27,7 @@ import {
 } from '@/lib/hubspot';
 import { buildQaAnswerProps } from '@/lib/answerProps';
 import { isFinalizeAdmin } from '@/lib/finalizeAccess';
+import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { isInternalResolution } from '@/lib/vendors';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
@@ -84,6 +85,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const id = String(req.query.id || '');
   if (!id) return res.status(400).json({ error: 'Missing inspection id' });
+
+  // Rate Card finalize is internal-only; deny external (1099) users (defense-in-depth).
+  {
+    const xDenial = await externalWriteDenial(session.email, id);
+    if (xDenial) return res.status(403).json({ error: xDenial });
+  }
 
   // "Regenerate PDFs only" mode (the /admin/regenerate-pdfs tool). Rebuilds +
   // uploads the PDFs and refreshes their stored URLs IN PLACE, but PRESERVES the

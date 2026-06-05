@@ -43,6 +43,7 @@ export default function ExistingInspection() {
   // submission; a second reviewer must — unless this user is a finalize admin).
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [isFinalizeAdmin, setIsFinalizeAdmin] = useState(false);
+  const [isExternal, setIsExternal] = useState(false);
   useEffect(() => {
     let cancelled = false;
     fetch('/api/auth/me')
@@ -51,6 +52,7 @@ export default function ExistingInspection() {
         if (cancelled || !d) return;
         if (d.user?.email) setCurrentUserEmail(String(d.user.email));
         setIsFinalizeAdmin(!!d.isFinalizeAdmin);
+        setIsExternal(!!d.isExternal);
       })
       .catch(() => { /* non-fatal: lockout still enforced server-side */ });
     return () => { cancelled = true; };
@@ -352,8 +354,9 @@ export default function ExistingInspection() {
             </div>
 
             {/* Right: Re-Open for Edits (secondary, plain text link — underlines
-                on hover and while pressed, no box). */}
-            {isCompleted ? (
+                on hover and while pressed, no box). Hidden for external (1099)
+                users — they can't edit completed inspections. */}
+            {isCompleted && !isExternal ? (
               <button
                 onClick={handleReopen}
                 className="text-xs sm:text-sm text-brand font-heading font-semibold whitespace-nowrap shrink-0 bg-transparent border-0 p-0 cursor-pointer hover:underline active:underline underline-offset-2"
