@@ -69,7 +69,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       pm_community_inspection: 'Community / Visit Inspection',
       pm_vacancy_occupancy_check: 'Vacancy / Occupancy Check',
       qc_new_construction_rrqc: 'New Construction RRQC',
-      leasing_agent_1099_property_inspection: '1099 Leasing Agent Property Inspection',
+      leasing_agent_1099_property_inspection: '1099 Leasing Agent Inspection',
     };
     const today = nowIso().slice(0, 10);
     const inspectionName = isRateCard

@@ -31,7 +31,7 @@ const TEMPLATE_OPTIONS: { value: TemplateType; label: string; sublabel: string; 
   { value: 'pm_turn_reinspect_qc',                      group: 'Turn', label: 'Turn Re-Inspect QC',              sublabel: 'Validate vendor work against a Scope Rate Card' },
   { value: 'pm_community_inspection',                   group: 'PM',   label: 'Community / Visit Inspection',    sublabel: 'Community grounds, amenities, signage' },
   { value: 'pm_vacancy_occupancy_check',                group: 'PM',   label: 'Vacancy / Occupancy Check',       sublabel: 'Quick visit to confirm vacancy/security' },
-  { value: 'leasing_agent_1099_property_inspection',    group: '1099', label: 'Leasing Agent Property Inspection', sublabel: 'Pre-tour assessment by leasing agent' },
+  { value: 'leasing_agent_1099_property_inspection',    group: '1099', label: 'Leasing Agent Inspection',          sublabel: 'Pre-tour assessment by leasing agent' },
   { value: 'qc_new_construction_rrqc',                  group: 'QC',   label: 'New Construction RRQC',           sublabel: 'Rent-ready QC for new construction' },
 ];
 

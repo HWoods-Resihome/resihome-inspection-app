@@ -12,7 +12,7 @@ const TEMPLATE_LABELS: Record<string, string> = {
   pm_turn_reinspect_qc: 'Turn Re-Inspect QC',
   pm_community_inspection: 'Community / Visit Inspection',
   pm_vacancy_occupancy_check: 'Vacancy / Occupancy Check',
-  leasing_agent_1099_property_inspection: 'Leasing Agent Property Inspection',
+  leasing_agent_1099_property_inspection: 'Leasing Agent Inspection',
   qc_new_construction_rrqc: 'New Construction RRQC',
   // Legacy template types — retired from new inspections but kept so historical
   // records still show a clean label.
