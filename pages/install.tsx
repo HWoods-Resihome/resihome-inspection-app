@@ -102,15 +102,20 @@ export default function InstallPage() {
     }
     out.push({ id: 'icons', label: 'App icons load', ok: iconsOk, detail: iconDetail });
 
-    // 6. Install prompt available (the definitive signal it's installable)
+    // 6. Install prompt available (Chrome's automatic one-tap signal). IMPORTANT:
+    // Chrome suppresses this event for fully-installable sites too — if it was
+    // dismissed before, on low page engagement, or if already installed. So when
+    // the four hard criteria all pass, the app IS installable; point at the menu.
     const hasPrompt = !!(window.__bipEvent) || canPrompt;
+    const hardReady = out.filter((c) => ['https', 'sw', 'manifest', 'icons'].includes(c.id)).every((c) => c.ok === true);
     out.push({
       id: 'prompt',
-      label: 'Chrome reports it installable',
-      ok: isStandalone ? true : (hasPrompt ? true : null),
-      detail: isStandalone ? 'Already installed.' : hasPrompt
-        ? 'Ready — tap Install below.'
-        : 'Waiting for Chrome’s install signal. If everything above is ✓, give it a few seconds / interact with the page, then re-check.',
+      label: 'Installable on this device',
+      ok: isStandalone ? true : (hasPrompt || hardReady ? true : null),
+      detail: isStandalone ? 'Already installed.'
+        : hasPrompt ? 'Ready — tap Install above.'
+        : hardReady ? 'All requirements pass ✓. If the Install button does nothing, Chrome has just suppressed its auto-prompt — install from the ⋮ menu → “Install app”. It will be the real app, not a shortcut.'
+        : 'Waiting — fix the items above first.',
     });
 
     setChecks(out);
@@ -152,7 +157,7 @@ export default function InstallPage() {
     const b = br.current;
     if (b.inApp) return 'Open this page in Chrome (or Safari on iPhone) first — in-app browsers can’t install apps. Tap the ⋯ menu and choose “Open in browser”.';
     if (b.isIOS) return 'On iPhone/iPad: tap the Share button (□↑) in Safari, then “Add to Home Screen”.';
-    if (b.isAndroid) return 'On Android: tap Chrome’s ⋮ menu (top-right), then “Install app” (or “Add to home screen”). If it only offers a plain shortcut, run the check below — something above is ✗.';
+    if (b.isAndroid) return 'On Android: tap Chrome’s ⋮ menu (top-right), then “Install app” (or “Add to home screen”). With the checks below all green this installs the REAL app. If it still only makes a shortcut: delete any old ResiWALK shortcut, then Chrome ⋮ → Settings → Site settings → resiwalk.com → Clear & reset, reload this page, and use the ⋮ menu again.';
     return 'Use Chrome on Android or Safari on iPhone to install. On desktop Chrome, use the install icon in the address bar.';
   };
 
