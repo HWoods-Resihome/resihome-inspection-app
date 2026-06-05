@@ -12,7 +12,7 @@
  *     IndexedDB queues; caching API responses would serve stale data.
  */
 
-const CACHE = 'resiwalk-shell-v1';
+const CACHE = 'resiwalk-shell-v2';
 const NAV_FALLBACK = '/';
 
 self.addEventListener('install', () => {
@@ -138,7 +138,7 @@ async function uploadQueuedPhotosInBackground() {
 function isStaticAsset(url) {
   return (
     url.pathname.startsWith('/_next/static/') ||
-    /\.(?:js|css|woff2?|ttf|otf|png|jpe?g|svg|gif|webp|ico|webmanifest)$/i.test(url.pathname)
+    /\.(?:js|css|woff2?|ttf|otf|png|jpe?g|svg|gif|webp|ico)$/i.test(url.pathname)
   );
 }
 
@@ -149,6 +149,10 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // leave cross-origin alone
   if (url.pathname.startsWith('/api/')) return;     // never cache API
+  // NEVER intercept the manifest or the SW itself — they must always come
+  // straight from the network. A cached/stale (or HTML) response here breaks
+  // Chrome's installability check (manifest must parse as JSON).
+  if (url.pathname === '/manifest.webmanifest' || url.pathname === '/sw.js') return;
 
   // Navigations: network-first with a cached fallback so offline reloads work.
   if (req.mode === 'navigate') {
