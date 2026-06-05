@@ -6,6 +6,7 @@ import {
   updateInspection,
   answerHasAfterPhotoProperty,
   fetchPropertyFieldOptions,
+  fetchActiveListingForProperty,
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { buildShortLink } from '@/lib/shortLinks';
@@ -27,7 +28,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // External (1099) users can only open 1099-type inspections.
       const denial = externalAccessDenial(session.email, data.inspection.templateType);
       if (denial) return res.status(403).json({ error: denial });
-      const answers = await fetchAnswersForInspection(id);
+      // Answers + the property's active listing (best-effort) in parallel.
+      const [answers, listing] = await Promise.all([
+        fetchAnswersForInspection(id),
+        data.propertyIdRef
+          ? fetchActiveListingForProperty(data.propertyIdRef).catch(() => null)
+          : Promise.resolve(null),
+      ]);
 
       // Clean short links (resolve to the real files via /d/...) for whatever
       // PDFs this inspection has — works for ALL templates: Rate Card
@@ -83,6 +90,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         propertyAirFiltersType2: data.propertyAirFiltersType2,
         propertyAirFiltersType3: data.propertyAirFiltersType3,
         propertySepticFee: data.propertySepticFee,
+        listingPrice: listing?.listingPrice ?? null,
+        listingDate: listing?.listingDate ?? null,
         filterSizeOptions,
         shareLinks,
         answers,

@@ -31,6 +31,12 @@ type Props = {
   squareFootage?: number | null;
   /** Inspection's region snapshot (used in the header subtitle). */
   inspectionRegion?: string;
+  /** Most-recent active listing price + listing date for the property, shown in
+   *  the header. Pulled from the most recent published listing (or, if none is
+   *  published, the most recent in "deposit taken"). Optional — omitted if the
+   *  property has no qualifying listing or the listing object isn't configured. */
+  listingPrice?: number | null;
+  listingDate?: string | null;
   onSubmit: (answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>) => void;
   onCancel: () => void;
 
@@ -111,16 +117,32 @@ function slugify(s: string): string {
 
 export function QuestionForm({
   questions, templateType, templateLabel, inspectorName, propertyName, propertyRecordId,
-  bedrooms, bathrooms, squareFootage, inspectionRegion, onSubmit, onCancel,
+  bedrooms, bathrooms, squareFootage, inspectionRegion, listingPrice, listingDate, onSubmit, onCancel,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
 }: Props) {
   const dialog = useAppDialog();
+  // These three Q&A templates get the Scope-Rate-Card-style treatment (logo
+  // header, plain Action Required styling, single Take button, no default
+  // answers, collapse/expand-all, no Cancel button). RRQC (also rendered by this
+  // component) keeps its existing behavior, so everything is gated on this flag.
+  const scopeStyle =
+    templateType === 'leasing_agent_1099_property_inspection' ||
+    templateType === 'pm_vacancy_occupancy_check' ||
+    templateType === 'pm_community_inspection';
+  // The 1099 template drops the HAP section entirely.
+  const formQuestions = useMemo(
+    () =>
+      templateType === 'leasing_agent_1099_property_inspection'
+        ? questions.filter((q) => !/\bhap\b/i.test(q.section))
+        : questions,
+    [questions, templateType]
+  );
   // Build the list of section instances. Repeating sections expand into multiple.
   const sectionInstances: SectionInstance[] = useMemo(() => {
     // First group questions by base section
     const bySection = new Map<string, { sectionOrder: number; questions: Question[] }>();
-    for (const q of questions) {
+    for (const q of formQuestions) {
       if (!bySection.has(q.section)) {
         bySection.set(q.section, { sectionOrder: q.sectionOrder, questions: [] });
       }
@@ -210,7 +232,7 @@ export function QuestionForm({
     });
 
     return out;
-  }, [questions, bedrooms, bathrooms]);
+  }, [formQuestions, bedrooms, bathrooms]);
 
   // Helper: derive instanceKey from a saved answer's `location` field.
   // Inverse of how the form builds location during submit.
@@ -242,7 +264,9 @@ export function QuestionForm({
           questionText: q.questionText,
           section: q.section,
           location: inst.location,
-          answerValue: q.defaultValue || '',
+          // scopeStyle templates start with NO pre-filled answer — the inspector
+          // must make every selection explicitly (no silent defaults).
+          answerValue: scopeStyle ? '' : (q.defaultValue || ''),
           note: '',
           quantity: null,
           photoUrls: [],
@@ -403,7 +427,7 @@ export function QuestionForm({
       const a = answers[key];
       if (!a) continue;
       // Find the question to get the HubSpot record ID
-      const q = questions.find((x) => x.questionIdExternal === a.questionIdExternal);
+      const q = formQuestions.find((x) => x.questionIdExternal === a.questionIdExternal);
       if (!q) continue;
       const [, instanceKey] = key.split('::');
       initial.push({
@@ -454,6 +478,12 @@ export function QuestionForm({
       next.delete(instanceKey);
       return next;
     });
+  }
+
+  // Collapse / expand ALL sections at once (mirrors the Scope Rate Card control).
+  const anySectionOpen = sectionInstances.some((inst) => !collapsed.has(inst.instanceKey));
+  function setAllCollapsed(openAll: boolean) {
+    setCollapsed(openAll ? new Set() : new Set(sectionInstances.map((inst) => inst.instanceKey)));
   }
 
   function updateAnswer(key: string, patch: Partial<AnswerInput>) {
@@ -903,7 +933,7 @@ export function QuestionForm({
 
     // For non-Scope: ensure triggered answers get quantity=1 if not set
     const finalAnswers = Object.values(answers).map((a) => {
-      const q = questions.find((x) => x.questionIdExternal === a.questionIdExternal);
+      const q = formQuestions.find((x) => x.questionIdExternal === a.questionIdExternal);
       const isTriggered = !!q && !!a.answerValue && q.noteRequiredOnValues.includes(a.answerValue);
       let finalQuantity = a.quantity;
       if (isTriggered && (finalQuantity == null || Number.isNaN(finalQuantity))) {
@@ -949,7 +979,13 @@ export function QuestionForm({
       {/* Sticky header */}
       <header className="sticky top-0 z-10 bg-white border-b-2 border-brand shadow-sm">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 flex items-center gap-2.5">
+            {/* ResiWalk logo — mirrors the Scope Rate Card header. */}
+            {scopeStyle && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src="/app-icon-light.svg" alt="ResiWalk" className="h-9 w-9 object-cover shrink-0" />
+            )}
+            <div className="min-w-0">
             <div className="text-sm font-heading font-semibold text-ink truncate">{propertyName}</div>
             <div className="text-xs text-gray-500 truncate">
               {templateLabel} &middot; {inspectorName} &middot; {bedrooms}BR / {bathrooms}BA
@@ -958,6 +994,19 @@ export function QuestionForm({
               )}
               {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
             </div>
+            {/* Listing price + date (most recent active/published listing). */}
+            {(typeof listingPrice === 'number' && listingPrice > 0) || listingDate ? (
+              <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
+                {typeof listingPrice === 'number' && listingPrice > 0 && (
+                  <span>Listing ${listingPrice.toLocaleString()}</span>
+                )}
+                {listingDate && (
+                  <span className="text-gray-500 font-normal">
+                    {typeof listingPrice === 'number' && listingPrice > 0 ? ' · ' : ''}Listed {listingDate}
+                  </span>
+                )}
+              </div>
+            ) : null}
             {pdfUrl && (
               <a
                 href={pdfUrl}
@@ -974,8 +1023,24 @@ export function QuestionForm({
                 View PDF Report
               </a>
             )}
+            </div>
           </div>
           <div className="flex items-start gap-3 ml-3 shrink-0">
+            {sectionInstances.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setAllCollapsed(!anySectionOpen)}
+                className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-500 hover:text-gray-800 transition-colors shrink-0 self-center"
+                title={anySectionOpen ? 'Collapse all sections' : 'Expand all sections'}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                     className={`transition-transform ${anySectionOpen ? '' : 'rotate-180'}`}>
+                  <polyline points="18 15 12 9 6 15" />
+                </svg>
+                <span className="hidden sm:inline">{anySectionOpen ? 'Collapse all' : 'Expand all'}</span>
+              </button>
+            )}
             <div className="text-right">
               <div className="text-base font-heading font-bold text-brand">{totalCompleted}/{totalQuestions}</div>
               <div className="text-xs text-gray-500 uppercase tracking-wider">answered</div>
@@ -1067,7 +1132,7 @@ export function QuestionForm({
               {!isCollapsed && (
                 <div className="bg-white border-x border-b border-gray-200 divide-y divide-gray-100">
                   {/* Section photos — compact single-row layout (matches RateCardForm) */}
-                  <div className={`px-3 py-1.5 ${photosMissing ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                  <div className={`px-3 py-1.5 ${photosMissing && !scopeStyle ? 'bg-amber-50' : 'bg-gray-50'}`}>
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-baseline gap-2 min-w-0">
                         <button
@@ -1110,6 +1175,9 @@ export function QuestionForm({
                             </svg>
                             Take
                           </button>
+                          {/* scopeStyle: single Take button (the in-app camera also
+                              covers gallery selection), matching the Scope Rate Card. */}
+                          {!scopeStyle && (
                           <label className={`inline-flex items-center gap-1 text-xs bg-brand/10 text-brand font-semibold py-1 px-2 rounded hover:bg-brand/20 ${
                             uploadingSection?.instanceKey === inst.instanceKey ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
                           }`}>
@@ -1128,6 +1196,7 @@ export function QuestionForm({
                               className="hidden"
                             />
                           </label>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1177,6 +1246,7 @@ export function QuestionForm({
                           uploadPhoto={(file) => uploadPhotoOrQueue(file, inspectionRecordId, key)}
                           propertyName={propertyName}
                           propertyRecordId={propertyRecordId}
+                          plainStyle={scopeStyle}
                         />
                       </div>
                     );
@@ -1196,8 +1266,10 @@ export function QuestionForm({
           used in RateCardForm so behavior is consistent across templates. */}
       <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand px-3 sm:p-4 py-2.5 shadow-lg">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-2">
+          {/* scopeStyle templates drop the destructive Cancel button; the
+              Save & Close / Submit group moves over to fill the bar. */}
           <div className="shrink-0">
-            {!readOnly && onCancelInspection && (
+            {!readOnly && onCancelInspection && !scopeStyle && (
               <button
                 type="button"
                 onClick={onCancelInspection}

@@ -68,6 +68,8 @@ export default function ExistingInspection() {
   const [propertyAirFiltersType2, setPropertyAirFiltersType2] = useState<string | null>(null);
   const [propertyAirFiltersType3, setPropertyAirFiltersType3] = useState<string | null>(null);
   const [propertySepticFee, setPropertySepticFee] = useState<number | null>(null);
+  const [listingPrice, setListingPrice] = useState<number | null>(null);
+  const [listingDate, setListingDate] = useState<string | null>(null);
   const [filterSizeOptions, setFilterSizeOptions] = useState<string[]>([]);
   const [existingAnswers, setExistingAnswers] = useState<SavedAnswer[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -106,6 +108,8 @@ export default function ExistingInspection() {
         setPropertySepticFee(
           typeof data.propertySepticFee === 'number' ? data.propertySepticFee : null
         );
+        setListingPrice(typeof data.listingPrice === 'number' ? data.listingPrice : null);
+        setListingDate(typeof data.listingDate === 'string' ? data.listingDate : null);
         setFilterSizeOptions(Array.isArray(data.filterSizeOptions) ? data.filterSizeOptions : []);
         setExistingAnswers(data.answers || []);
 
@@ -431,6 +435,8 @@ export default function ExistingInspection() {
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
           inspectionRegion={inspection.regionSnapshot || ''}
+          listingPrice={listingPrice}
+          listingDate={listingDate}
           onSubmit={handleSubmit}
           onCancel={() => router.push('/')}
           inspectionRecordId={inspectionId}

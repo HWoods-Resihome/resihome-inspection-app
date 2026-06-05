@@ -20,9 +20,13 @@ type Props = {
   uploadPhoto: (file: File) => Promise<string>;
   propertyName?: string;
   propertyRecordId?: string;
+  /** Scope-Rate-Card-style: Action Required uses a white background with an amber
+   *  border (no yellow fill) and photos use a single in-app "Take" button (no
+   *  separate Choose Files). Used by the 1099 / occupancy / community templates. */
+  plainStyle?: boolean;
 };
 
-export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName, propertyRecordId }: Props) {
+export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName, propertyRecordId, plainStyle }: Props) {
   const dialog = useAppDialog();
   const triggered = !!answer.answerValue && question.noteRequiredOnValues.includes(answer.answerValue);
 
@@ -160,8 +164,10 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
 
       {/* Combined notes/photos panel */}
       {panelOpen && (
-        <div className={`mt-3 p-3 rounded-lg space-y-3 border ${
-          triggered ? 'bg-amber-50 border-amber-300' : 'bg-gray-50 border-gray-200'
+        <div className={`mt-3 p-3 rounded-lg space-y-3 ${
+          triggered
+            ? (plainStyle ? 'bg-white border-2 border-amber-300' : 'bg-amber-50 border border-amber-300')
+            : 'bg-gray-50 border border-gray-200'
         }`}>
           <div className="flex items-center justify-between">
             <span className={`text-xs font-heading font-bold uppercase tracking-wider ${
@@ -252,7 +258,9 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                 </svg>
                 Take Photos
               </button>
-              {/* Choose Files: existing native file input */}
+              {/* Choose Files: native file input. Hidden for plainStyle templates,
+                  which use a single in-app Take button (the camera covers gallery). */}
+              {!plainStyle && (
               <label className="inline-flex items-center gap-1.5 text-sm bg-brand/10 text-brand font-heading font-semibold py-1.5 px-3 rounded cursor-pointer hover:bg-brand/20">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -270,6 +278,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                   className="hidden"
                 />
               </label>
+              )}
             </div>
             {uploadProgress && (
               <div className="text-xs text-brand mt-1 font-heading font-semibold">

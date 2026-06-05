@@ -1462,6 +1462,126 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   }
 }
 
+// ── Listing lookup (inspection header) ───────────────────────────────────────
+// The most-recent ACTIVE listing for a property, used to show the asking price +
+// listing date in the inspection header. Preference order:
+//   1) most recent PUBLISHED listing; else
+//   2) most recent listing in DEPOSIT TAKEN.
+// "Most recent" = newest listing_date (falling back to hs_createdate). Everything
+// is best-effort: any miss returns null so the header simply omits the line.
+//
+// Config (env, all optional):
+//   HUBSPOT_LISTING_TYPE_ID      listing object type id (default 2-11465597)
+//   HUBSPOT_LISTING_STATUS_PROP  status property internal name (auto-discovered if unset)
+let _listingTypeId: string | undefined;
+function listingTypeId(): string {
+  if (!_listingTypeId) _listingTypeId = normalizeTypeId(process.env.HUBSPOT_LISTING_TYPE_ID) || '2-11465597';
+  return _listingTypeId;
+}
+
+// Discover the listing object's status-like property once (cached). We can't
+// blindly request an unknown property (HubSpot 400s), so we read the schema and
+// pick the env override, a common name, or any property that looks like a status.
+let _listingStatusProp: string | null | undefined;
+async function listingStatusProp(): Promise<string | null> {
+  if (_listingStatusProp !== undefined) return _listingStatusProp;
+  const override = (process.env.HUBSPOT_LISTING_STATUS_PROP || '').trim();
+  try {
+    const schema = await hubspotFetch(`/crm/v3/schemas/${listingTypeId()}`);
+    const props: any[] = schema?.properties || [];
+    const names = new Set(props.map((p) => p.name));
+    if (override && names.has(override)) { _listingStatusProp = override; return override; }
+    const prefer = ['listing_status', 'status', 'hs_pipeline_stage'];
+    let pick = prefer.find((n) => names.has(n));
+    if (!pick) pick = props.find((p) => /status|stage|state/i.test(`${p.name} ${p.label || ''}`))?.name;
+    _listingStatusProp = pick || null;
+  } catch {
+    _listingStatusProp = override || null;
+  }
+  return _listingStatusProp;
+}
+
+// Format a HubSpot date value (epoch-ms string or ISO) to a short M/D/YYYY string.
+function formatListingDate(raw: any): string | null {
+  if (raw == null || raw === '') return null;
+  const s = String(raw);
+  const t = /^\d+$/.test(s) ? Number(s) : Date.parse(s);
+  if (!isFinite(t) || isNaN(t)) return null;
+  const d = new Date(t);
+  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+}
+
+export async function fetchActiveListingForProperty(
+  propertyRecordId: string
+): Promise<{ listingPrice: number | null; listingDate: string | null } | null> {
+  if (!propertyRecordId) return null;
+  const tids = typeIds();
+  const lid = listingTypeId();
+  try {
+    // 1) Listing records associated to this property.
+    const ids: string[] = [];
+    let after: string | undefined;
+    let pages = 0;
+    do {
+      const qs = new URLSearchParams({ limit: '100' });
+      if (after) qs.set('after', after);
+      const resp = await hubspotFetch(
+        `/crm/v4/objects/${tids.property}/${propertyRecordId}/associations/${lid}?${qs.toString()}`
+      );
+      for (const r of resp.results || []) { const id = r.toObjectId ?? r.id; if (id != null) ids.push(String(id)); }
+      after = resp.paging?.next?.after;
+    } while (after && ++pages < 20);
+    if (!ids.length) return null;
+
+    // 2) Batch-read price/date/status for each listing.
+    const statusProp = await listingStatusProp();
+    const wantProps = ['listing_price', 'listing_date', 'hs_createdate'];
+    if (statusProp) wantProps.push(statusProp);
+    type Row = { price: number | null; date: any; created: number; status: string };
+    const rows: Row[] = [];
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const resp = await hubspotFetch(`/crm/v3/objects/${lid}/batch/read`, {
+        method: 'POST',
+        body: JSON.stringify({ properties: wantProps, inputs: chunk.map((id) => ({ id })) }),
+      });
+      for (const rec of resp.results || []) {
+        const p = rec.properties || {};
+        const priceRaw = p.listing_price;
+        const price = priceRaw != null && priceRaw !== '' && isFinite(Number(priceRaw)) ? Number(priceRaw) : null;
+        const createdMs = p.hs_createdate ? Date.parse(p.hs_createdate) : 0;
+        rows.push({
+          price,
+          date: p.listing_date ?? null,
+          created: isNaN(createdMs) ? 0 : createdMs,
+          status: statusProp ? String(p[statusProp] ?? '') : '',
+        });
+      }
+    }
+    if (!rows.length) return null;
+
+    const recency = (r: Row) => {
+      if (r.date != null && r.date !== '') {
+        const s = String(r.date);
+        const t = /^\d+$/.test(s) ? Number(s) : Date.parse(s);
+        if (isFinite(t) && !isNaN(t)) return t;
+      }
+      return r.created;
+    };
+    const byRecencyDesc = (a: Row, b: Row) => recency(b) - recency(a);
+    const published = rows.filter((r) => /publish/i.test(r.status)).sort(byRecencyDesc);
+    const deposit = rows.filter((r) => /deposit/i.test(r.status)).sort(byRecencyDesc);
+    // With a status field, only published/deposit qualify. If we couldn't resolve
+    // a status field at all, fall back to the most recent listing.
+    const pick = published[0] || deposit[0] || (statusProp ? null : rows.slice().sort(byRecencyDesc)[0]);
+    if (!pick) return null;
+    return { listingPrice: pick.price, listingDate: formatListingDate(pick.date) };
+  } catch (e) {
+    console.warn('[listing] lookup failed:', e);
+    return null;
+  }
+}
+
 /**
  * Fetch all Answer records associated with an Inspection.
  * Uses the date-based associations API to find linked answers, then batch-reads
