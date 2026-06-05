@@ -89,6 +89,27 @@ export default function InstallPage() {
     } catch (e: any) { manifestDetail = 'Parse failed: ' + String(e?.message || e).slice(0, 80); }
     out.push({ id: 'manifest', label: 'Valid web app manifest', ok: manifestOk, detail: manifestDetail });
 
+    // Manifest reachable WITHOUT login — the make-or-break check for Android.
+    // Chrome mints the installed app (a WebAPK) via Google's server, which
+    // fetches the manifest with NO cookies. If our auth gate redirects that
+    // anonymous request to /login, minting fails and Chrome falls back to a
+    // plain shortcut that opens in a browser tab — even though every other
+    // check above is green (the logged-in browser fetch succeeds). We replay
+    // the anonymous fetch here so that failure is visible on-device.
+    let anonOk = false; let anonDetail = '';
+    try {
+      const r = await fetch('/manifest.webmanifest', { cache: 'no-store', credentials: 'omit', redirect: 'follow' });
+      const ct = r.headers.get('content-type') || '';
+      if (r.redirected || /text\/html/i.test(ct)) {
+        anonDetail = 'Redirected to login when fetched without a session — WebAPK minting will fail and you’ll get a shortcut, not the real app.';
+      } else {
+        const txt = await r.text();
+        try { JSON.parse(txt); anonOk = true; anonDetail = 'Public — Google’s WebAPK server can read it.'; }
+        catch { anonDetail = 'Returned non-JSON without a session (likely a login page) — WebAPK minting will fail.'; }
+      }
+    } catch (e: any) { anonDetail = 'Anonymous fetch failed: ' + String(e?.message || e).slice(0, 80); }
+    out.push({ id: 'manifestPublic', label: 'Manifest public to the installer (no login)', ok: anonOk, detail: anonDetail });
+
     // Icons load.
     let iconsOk = false; let iconDetail = 'No icons.';
     if (iconSrcs.length) {
@@ -99,7 +120,7 @@ export default function InstallPage() {
     out.push({ id: 'icons', label: 'App icons load', ok: iconsOk, detail: iconDetail });
 
     const hasPrompt = !!(window.__bipEvent) || canPrompt;
-    const hardReady = out.filter((c) => ['https', 'sw', 'manifest', 'icons'].includes(c.id)).every((c) => c.ok === true);
+    const hardReady = out.filter((c) => ['https', 'sw', 'manifest', 'manifestPublic', 'icons'].includes(c.id)).every((c) => c.ok === true);
     out.push({ id: 'prompt', label: 'Installable on this device', ok: isStandalone ? true : (hasPrompt || hardReady ? true : null),
       detail: isStandalone ? 'Already installed.' : hasPrompt ? 'Ready — tap Install above.'
         : hardReady ? 'All requirements pass ✓. If Install does nothing, Chrome suppressed the prompt — install from ⋮ menu → “Install app”.'

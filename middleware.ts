@@ -5,6 +5,13 @@ const PUBLIC_PATHS = new Set<string>([
   '/login',
   // PWA install + on-device diagnostics page — reachable without a session.
   '/install',
+  // PWA manifest MUST be public. Android Chrome mints the installed app (a
+  // WebAPK) via Google's WebAPK server, which fetches this file with NO cookies.
+  // If it's auth-gated it gets the /login redirect instead of the manifest,
+  // minting fails, and Chrome silently falls back to a plain home-screen
+  // shortcut that opens in a browser tab ("it's just a web page"). The icons
+  // (.png) and /sw.js (.js) are already public via isStaticAsset().
+  '/manifest.webmanifest',
   '/api/auth/login',
   '/api/auth/logout',
   // Pre-auth Google sign-in: these run before a session exists. The callback
@@ -35,7 +42,8 @@ function isStaticAsset(pathname: string): boolean {
     pathname.endsWith('.jpg') ||
     pathname.endsWith('.svg') ||
     pathname.endsWith('.css') ||
-    pathname.endsWith('.js')
+    pathname.endsWith('.js') ||
+    pathname.endsWith('.webmanifest')
   );
 }
 
