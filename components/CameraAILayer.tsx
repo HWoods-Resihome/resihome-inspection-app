@@ -20,7 +20,7 @@ import {
   drawEvidenceStamp, buildStampLines, getGeoFix, resolvePropertyRefCoords, type StampLine,
 } from '@/lib/evidenceStamp';
 import type { RateCardLineInput, RateCardLineItem, RegionRate } from '@/lib/types';
-import { VENDORS } from '@/lib/vendors';
+import { VENDORS, defaultVendorForCode } from '@/lib/vendors';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { ListPicker } from '@/components/ListPicker';
 import { WheelPicker } from '@/components/WheelPicker';
@@ -83,7 +83,9 @@ function seedEdit(s: LiveSuggestion): ChipEdit {
     qty: s.needsMeasurement
       ? (s.estimatedQuantity && s.estimatedQuantity > 0 ? String(s.estimatedQuantity) : '')
       : String(s.quantity ?? 1),
-    vendor: s.suggestedVendor || 'Vendor 1',
+    // Per-code default vendor (eviction codes / flooring) wins over the AI's
+    // suggestion and the generic default; still editable on the chip.
+    vendor: defaultVendorForCode(s.lineItemCode) || s.suggestedVendor || 'Vendor 1',
     tenantPct: String(s.tenantBillBackPercent ?? 100),
     vendorCost: '',
   };

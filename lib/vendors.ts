@@ -28,6 +28,25 @@ export const VENDORS: string[] = [
 // so they REQUIRE after-photos (proof the work was completed) before finalize.
 export const INTERNAL_RESOLUTION_VENDOR = 'Internal Resolution';
 
+// Per-catalog-code DEFAULT vendor. When a NEW line with one of these codes is
+// added, its vendor pre-selects to the mapped vendor instead of the generic
+// "Vendor 1" — the inspector can still change it. Matched case-insensitively.
+// To add a rule, drop a code → vendor entry here (the vendor must be in VENDORS).
+const CODE_VENDOR_DEFAULTS: Record<string, string> = {
+  // Eviction trash-out / cleanouts → the eviction vendor.
+  TRSHL1041: 'Eviction Vendor (Past)',
+  TRSHL1039: 'Eviction Vendor (Past)',
+  TRSHL1015: 'Eviction Vendor (Past)',
+  // Flooring → Vendor 2.
+  FLORL1011: 'Vendor 2',
+};
+
+/** The default vendor for a catalog code, or null if it has no special rule. */
+export function defaultVendorForCode(lineItemCode: string | null | undefined): string | null {
+  const c = (lineItemCode || '').trim().toUpperCase();
+  return CODE_VENDOR_DEFAULTS[c] || null;
+}
+
 /** True when a line's vendor is the in-house Internal Resolution team. */
 export function isInternalResolution(vendor: string | null | undefined): boolean {
   return (vendor || '').trim().toLowerCase() === 'internal resolution';

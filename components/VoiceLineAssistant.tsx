@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RateCardLineInput, RateCardLineItem } from '@/lib/types';
+import { defaultVendorForCode } from '@/lib/vendors';
 
 // A room the assistant can work on / navigate to.
 export interface AssistantSection {
@@ -471,6 +472,12 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               // proposals can arrive in one turn.
               const line: RateCardLineInput = data.line;
               const action = data.action === 'edit' ? 'edit' : 'add';
+              // Per-code default vendor on NEW voice-added lines (eviction codes /
+              // flooring) — overrides the agent's vendor; inspector can change it.
+              if (action === 'add') {
+                const dv = defaultVendorForCode(line.lineItemCode);
+                if (dv) line.assignedTo = dv;
+              }
               const spokenLabel = data.spokenSummary || data.summary;
               const verb = action === 'edit' ? 'Updated' : 'Added';
               // Route order: (1) a per-line room the server resolved for THIS
