@@ -1271,8 +1271,8 @@ export function QuestionForm({
           used in RateCardForm so behavior is consistent across templates. */}
       <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand px-3 sm:p-4 py-2.5 shadow-lg">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-2">
-          {/* scopeStyle templates drop the destructive Cancel button; the
-              Save & Close / Submit group moves over to fill the bar. */}
+          {/* scopeStyle templates drop the destructive Cancel button and move
+              Save & Close to the LEFT (Submit stays on the right). */}
           <div className="shrink-0">
             {!readOnly && onCancelInspection && !scopeStyle && (
               <button
@@ -1284,9 +1284,26 @@ export function QuestionForm({
                 Cancel
               </button>
             )}
+            {!readOnly && scopeStyle && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await autosave.flush(true);
+                  } catch (e) {
+                    console.error('Save & Close: flush failed', e);
+                  }
+                  onCancel();
+                }}
+                className="px-2.5 sm:px-3 py-2.5 sm:py-3 border border-emerald-300 rounded-lg hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 font-heading font-semibold text-emerald-700 text-xs sm:text-sm transition-colors whitespace-nowrap"
+                title="Save any pending changes and return to the inspection list. Inspection stays In Progress."
+              >
+                Save &amp; Close
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2 justify-end shrink-0">
-            {!readOnly && (
+            {!readOnly && !scopeStyle && (
               <button
                 type="button"
                 onClick={async () => {
