@@ -3,6 +3,9 @@ import { jwtVerify } from 'jose';
 
 const PUBLIC_PATHS = new Set<string>([
   '/login',
+  // PWA install + on-device diagnostics page — must be reachable without a
+  // session so it can be opened/installed before signing in.
+  '/install',
   '/api/auth/login',
   '/api/auth/logout',
   // Pre-auth Google sign-in: these run before a session exists. The callback
