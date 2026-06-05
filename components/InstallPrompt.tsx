@@ -32,19 +32,31 @@ export function InstallPrompt() {
     if (isStandalone()) return; // already installed → nothing to offer
     try { if (localStorage.getItem(DISMISS_KEY)) return; } catch { /* storage off */ }
 
+    // The event may have ALREADY fired and been stashed by the early-capture
+    // script in _document (it often fires before React hydrates). Pick it up.
+    const pickUp = () => {
+      const ev = (window as any).__bipEvent as BIPEvent | undefined;
+      if (ev) { deferredRef.current = ev; setShow(true); }
+    };
+    pickUp();
+
     const onBeforeInstall = (e: Event) => {
       e.preventDefault();              // stop Chrome's default mini-infobar
       deferredRef.current = e as BIPEvent;
+      (window as any).__bipEvent = e;
       setShow(true);
     };
     const onInstalled = () => {
       deferredRef.current = null;
+      (window as any).__bipEvent = null;
       setShow(false);
       try { localStorage.setItem(DISMISS_KEY, '1'); } catch { /* noop */ }
     };
-    window.addEventListener('beforeinstallprompt', onBeforeInstall);
+    window.addEventListener('bip-ready', pickUp);          // early-capture signal
+    window.addEventListener('beforeinstallprompt', onBeforeInstall); // direct (fallback)
     window.addEventListener('appinstalled', onInstalled);
     return () => {
+      window.removeEventListener('bip-ready', pickUp);
       window.removeEventListener('beforeinstallprompt', onBeforeInstall);
       window.removeEventListener('appinstalled', onInstalled);
     };
