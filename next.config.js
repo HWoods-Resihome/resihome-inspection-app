@@ -31,6 +31,27 @@ const nextConfig = {
     // SHA keeps the login footer readable.
     NEXT_PUBLIC_APP_VERSION: (process.env.VERCEL_GIT_COMMIT_SHA || pkg.version).slice(0, 7),
   },
+  async headers() {
+    return [
+      {
+        // Serve the PWA manifest with the correct content-type so Android Chrome
+        // reliably parses it for installability (some hosts default .webmanifest
+        // to text/plain, which can trip the install check).
+        source: '/manifest.webmanifest',
+        headers: [{ key: 'Content-Type', value: 'application/manifest+json; charset=utf-8' }],
+      },
+      {
+        // The service worker must be served from the root scope and never cached
+        // stale, so a new SW is picked up promptly.
+        source: '/sw.js',
+        headers: [
+          { key: 'Content-Type', value: 'application/javascript; charset=utf-8' },
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
+          { key: 'Service-Worker-Allowed', value: '/' },
+        ],
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;

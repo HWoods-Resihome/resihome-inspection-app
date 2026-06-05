@@ -5,6 +5,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AppDialogProvider } from '@/components/AppDialog';
 import { FlashProvider } from '@/components/Flash';
 import { FieldStatusOverlays } from '@/components/FieldStatusOverlays';
+import { InstallPrompt } from '@/components/InstallPrompt';
 import { initErrorReporting } from '@/lib/clientErrorReporter';
 import { installSessionGuard } from '@/lib/sessionGuard';
 import { registerServiceWorker } from '@/lib/useAppUpdate';
@@ -52,6 +53,7 @@ export default function App({ Component, pageProps }: AppProps) {
           <FlashProvider>
             <FieldStatusOverlays />
             <Component {...pageProps} />
+            <InstallPrompt />
           </FlashProvider>
         </AppDialogProvider>
       </div>
