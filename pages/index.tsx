@@ -8,6 +8,7 @@ import { InspectionCard } from '@/components/InspectionCard';
 import { ListPicker } from '@/components/ListPicker';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
 import { isKnowledgeAdmin } from '@/lib/aiKnowledgeAccess';
+import { InstallButton } from '@/components/InstallButton';
 
 interface MeUser { userId: string; email: string; name: string; }
 
@@ -396,15 +397,9 @@ export default function Home() {
               </Link>
             )}
 
-            {/* Install the PWA to the home screen (real standalone app). The
-                /install page also self-diagnoses installability on-device. */}
-            <Link
-              href="/install"
-              className="mt-2 flex items-center gap-2 text-white/90 hover:text-white text-sm font-heading font-semibold"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M5 21h14" /></svg>
-              Install app
-            </Link>
+            {/* Install the PWA to the home screen (real standalone app). Fires
+                Chrome's install prompt directly; auto-hides once installed. */}
+            <InstallButton className="mt-2 flex items-center gap-2 text-white/90 hover:text-white text-sm font-heading font-semibold" />
           </div>
         </header>
 

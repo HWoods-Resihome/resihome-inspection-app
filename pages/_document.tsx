@@ -27,8 +27,8 @@ export default function Document() {
         <meta name="apple-mobile-web-app-title" content="ResiWalk" />
         {/* Capture Chrome's install event AS EARLY AS POSSIBLE — it can fire
             before React hydrates, in which case a listener added later misses it
-            and the in-app Install banner never shows. We stash it on window and
-            notify the InstallPrompt component (which reads it on mount). */}
+            and the Install button never appears. We stash it on window and notify
+            the InstallButton (which reads it on mount). */}
         <script
           dangerouslySetInnerHTML={{
             __html:
