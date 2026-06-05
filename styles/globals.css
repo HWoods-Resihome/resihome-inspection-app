@@ -10,6 +10,9 @@ html, body, #__next {
 }
 
 html {
+  /* Light-only app. Opting in to a light color-scheme keeps mobile browsers'
+     auto/forced dark mode from inverting the brand colors and logo. */
+  color-scheme: light;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;

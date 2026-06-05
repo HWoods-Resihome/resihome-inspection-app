@@ -9,6 +9,10 @@ export default function Document() {
             worker (registered in _app) provides the offline shell. */}
         <link rel="manifest" href="/manifest.webmanifest" />
         <meta name="theme-color" content="#ff0060" />
+        {/* The app is designed light-only. Declaring a light color-scheme stops
+            Android Chrome / iOS "force dark" from auto-inverting the brand-pink
+            header, white cards, and logo into muddy darks. */}
+        <meta name="color-scheme" content="light" />
         {/* Browser-tab (favicon) icon — the ResiWalk house + footprint mark in
             brand pink on a TRANSPARENT background. The SVG is what modern browsers
             use; the favicon-*.png are transparent PNG fallbacks for the rare
