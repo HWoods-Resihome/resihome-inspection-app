@@ -38,6 +38,7 @@ export default function InstallPage() {
   const [canPrompt, setCanPrompt] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [det, setDet] = useState<Record<string, string>>({});
   const deferredRef = useRef<Window['__bipEvent'] | null>(null);
   const br = useRef(detectBrowser());
 
@@ -60,18 +61,35 @@ export default function InstallPage() {
     const https = typeof location !== 'undefined' && (location.protocol === 'https:' || location.hostname === 'localhost');
     out.push({ id: 'https', label: 'Served over HTTPS', ok: https, detail: https ? 'Secure connection.' : 'PWAs require https — open the site at https://resiwalk.com.' });
 
-    // 3. Service worker — actively register, then confirm it's in control.
+    // 2b. Browser context — in-app browsers and Incognito/Private tabs can't
+    // install PWAs no matter what else passes.
+    out.push({ id: 'ctx', label: 'Installable browser context', ok: br.current.inApp ? false : true,
+      detail: br.current.inApp
+        ? 'This is an in-app browser (opened inside another app) — it can’t install apps. Tap ⋯ → “Open in Chrome”.'
+        : 'Standard tab. NOTE: Incognito / Private tabs cannot install PWAs — if you’re in one, switch to a normal Chrome tab.' });
+
+    // 3. Service worker — register, then confirm it actually CONTROLS this page
+    // (Chrome's install check needs a CONTROLLING SW, not just an active one). If
+    // it's active but not controlling yet, a one-time reload makes it claim the
+    // page so Chrome re-evaluates with the SW in control.
     let swOk = false; let swDetail = 'Service worker not supported by this browser.';
     if ('serviceWorker' in navigator) {
       try {
         await navigator.serviceWorker.register('/sw.js');
         const reg = await navigator.serviceWorker.ready.catch(() => null as any);
         const controller = navigator.serviceWorker.controller;
-        swOk = !!(reg && (reg.active || controller));
-        swDetail = swOk ? 'Active and in control.' : 'Registered — reload once so it takes control, then re-check.';
+        if (reg?.active && !controller && typeof sessionStorage !== 'undefined' && !sessionStorage.getItem('rw_sw_reload')) {
+          sessionStorage.setItem('rw_sw_reload', '1');
+          location.reload(); // gain control, then Chrome re-checks installability
+          return;
+        }
+        swOk = !!controller;
+        swDetail = controller ? 'Active and controlling this page.'
+          : reg?.active ? 'Active but NOT controlling this page — close every resiwalk.com tab, fully reopen, then re-check.'
+          : 'Registered but not active yet — reload.';
       } catch (e: any) { swDetail = 'Failed to register: ' + String(e?.message || e).slice(0, 80); }
     }
-    out.push({ id: 'sw', label: 'Offline service worker active', ok: swOk, detail: swDetail });
+    out.push({ id: 'sw', label: 'Service worker controlling the page', ok: swOk, detail: swDetail });
 
     // 4. Manifest — fetch + parse + validate.
     let manifestOk = false; let manifestDetail = ''; let iconSrcs: string[] = [];
@@ -120,6 +138,20 @@ export default function InstallPage() {
 
     setChecks(out);
     if (window.__bipEvent) { deferredRef.current = window.__bipEvent; setCanPrompt(true); }
+
+    // Raw signals — the definitive truth for diagnosing when checks disagree with
+    // Chrome (screenshot this if install still won't work).
+    let quota = 'n/a';
+    try { const est = await (navigator as any).storage?.estimate?.(); if (est?.quota) quota = Math.round(est.quota / 1048576) + ' MB'; } catch { /* noop */ }
+    setDet({
+      browser: br.current.name,
+      controllingSW: navigator.serviceWorker?.controller ? 'yes' : 'NO',
+      installApi: ('onbeforeinstallprompt' in window) ? 'yes' : 'NO',
+      promptFired: window.__bipEvent ? 'yes' : 'no',
+      displayMode: window.matchMedia?.('(display-mode: standalone)')?.matches ? 'standalone' : 'browser',
+      storageQuota: quota,
+      ua: navigator.userAgent,
+    });
   }, [canPrompt]);
 
   useEffect(() => {
@@ -214,6 +246,22 @@ export default function InstallPage() {
           <p className="text-[11px] text-gray-400 mt-4">
             Detected: {br.current.name}{br.current.inApp ? ' · in-app browser' : ''}. A shortcut you added before won’t upgrade — delete it and install from here.
           </p>
+
+          {/* Raw signals — screenshot this if install still won't work. */}
+          {Object.keys(det).length > 0 && (
+            <details className="mt-4">
+              <summary className="text-xs font-heading font-semibold text-gray-600 cursor-pointer">Technical details (screenshot &amp; send if stuck)</summary>
+              <div className="mt-2 rounded-lg bg-gray-900 text-gray-100 text-[10.5px] leading-relaxed font-mono p-3 break-words">
+                <div>browser: {det.browser}</div>
+                <div>controllingSW: {det.controllingSW}</div>
+                <div>installApi: {det.installApi}</div>
+                <div>promptFired: {det.promptFired}</div>
+                <div>displayMode: {det.displayMode}</div>
+                <div>storageQuota: {det.storageQuota}</div>
+                <div className="mt-1 text-gray-400">ua: {det.ua}</div>
+              </div>
+            </details>
+          )}
         </div>
       </div>
     </div>
