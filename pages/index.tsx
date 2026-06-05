@@ -38,6 +38,12 @@ export default function Home() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [cancelBusy, setCancelBusy] = useState(false);
 
+  // Pagination — show a page of cards at a time so the initial render stays
+  // snappy even with hundreds of inspections. Default 20 per page; user can
+  // bump to 50 / 100 and page forward/back.
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [page, setPage] = useState<number>(1);
+
   useEffect(() => {
     fetch('/api/auth/me')
       .then((r) => r.json())
@@ -203,6 +209,21 @@ export default function Home() {
     return copy;
   }, [filtered, sortField, sortDir]);
 
+  // Snap back to page 1 whenever the result set's shape changes (new filter,
+  // search, sort, or page size) so the user isn't stranded on an empty page.
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, inspectorFilter, templateFilter, sortField, sortDir, pageSize]);
+
+  // Page math. currentPage is clamped in case the list shrank beneath `page`.
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const paged = useMemo(
+    () => sorted.slice(pageStart, pageStart + pageSize),
+    [sorted, pageStart, pageSize]
+  );
+
   // Count by status for filter chips. Cancelled inspections are excluded
   // from the app, so they don't count toward any chip (including "All").
   const counts = useMemo(() => {
@@ -247,10 +268,10 @@ export default function Home() {
     setSelectedIds(ins && isSelectable(ins) ? new Set([recordId]) : new Set());
   }
 
-  // Select / clear all currently-visible selectable inspections.
+  // Select / clear all currently-visible selectable inspections (current page).
   const selectableVisible = useMemo(
-    () => sorted.filter(isSelectable),
-    [sorted]
+    () => paged.filter(isSelectable),
+    [paged]
   );
   const allVisibleSelected = selectableVisible.length > 0
     && selectableVisible.every((i) => selectedIds.has(i.recordId));
@@ -334,7 +355,13 @@ export default function Home() {
       <Head>
         <title>ResiHome Inspection</title>
       </Head>
-      <main className="min-h-screen bg-gray-50">
+      {/* On desktop the page becomes a fixed-height flex column: the header +
+          filters are frozen at the top, only the card list scrolls, and the
+          pagination bar is frozen at the bottom. On mobile it's normal document
+          flow (everything scrolls together). */}
+      <main className="min-h-screen bg-gray-50 md:h-screen md:min-h-0 md:flex md:flex-col md:overflow-hidden">
+        {/* Frozen top region (desktop): header + search + filters + bulk bar */}
+        <div className="md:shrink-0">
         {/* Pink branded header */}
         <header className="bg-brand text-white">
           <div className="max-w-3xl mx-auto px-4 pt-4 pb-5">
@@ -508,7 +535,11 @@ export default function Home() {
 
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="text-xs text-gray-500 font-heading">
-              {loading ? 'Loading...' : `${sorted.length} of ${counts.all} inspection${counts.all === 1 ? '' : 's'}`}
+              {loading
+                ? 'Loading...'
+                : sorted.length === 0
+                ? `0 of ${counts.all} inspection${counts.all === 1 ? '' : 's'}`
+                : `Showing ${pageStart + 1}–${Math.min(pageStart + pageSize, sorted.length)} of ${sorted.length}`}
             </div>
             {!loading && !error && inspections.length > 0 && (
               selectMode ? (
@@ -559,8 +590,10 @@ export default function Home() {
             </div>
           </div>
         )}
+        </div>{/* end frozen top region */}
 
-        {/* Inspection list */}
+        {/* Inspection list — the only scrolling region on desktop */}
+        <div className="md:flex-1 md:min-h-0 md:overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 pb-12">
           {loading && (
             <div className="text-sm text-gray-500 text-center py-8">Loading inspections...</div>
@@ -582,7 +615,7 @@ export default function Home() {
               )}
             </div>
           )}
-          {sorted.map((i) => (
+          {paged.map((i) => (
             <InspectionCard
               key={i.recordId}
               inspection={i}
@@ -594,6 +627,50 @@ export default function Home() {
             />
           ))}
         </div>
+        </div>{/* end scrolling card region */}
+
+        {/* Pagination bar — frozen at the bottom on desktop, in-flow on mobile.
+            Per-page selector (20/50/100) + Back/Next. Hidden while loading,
+            erroring, or when there are no results. */}
+        {!loading && !error && sorted.length > 0 && (
+          <div className="md:shrink-0 bg-white border-t border-gray-200">
+            <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs text-gray-500 font-heading whitespace-nowrap">Per page</span>
+                <ListPicker
+                  value={String(pageSize)}
+                  options={[{ value: '20', label: '20' }, { value: '50', label: '50' }, { value: '100', label: '100' }]}
+                  onChange={(v) => setPageSize(Number(v))}
+                  ariaLabel="Inspections per page"
+                  className="text-xs font-heading font-semibold pl-2.5 pr-2 py-1.5 border border-gray-300 rounded-md bg-white flex items-center gap-1 text-gray-700 hover:border-brand/50"
+                />
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage <= 1}
+                  className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-3 py-1.5 border border-gray-300 rounded-md bg-white disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+                  Back
+                </button>
+                <span className="text-xs font-heading text-gray-600 whitespace-nowrap">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages}
+                  className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-3 py-1.5 border border-gray-300 rounded-md bg-white disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  Next
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </>
   );
