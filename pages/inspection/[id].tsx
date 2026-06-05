@@ -327,14 +327,15 @@ export default function ExistingInspection() {
           {/* Symmetrical 3-zone header, aligned to the same max-width container
               as the page content below: status (left) · downloads (center) ·
               Re-Open (right). */}
-          <div className="max-w-7xl mx-auto px-3 sm:px-6 flex items-center justify-between gap-2 flex-nowrap">
-            {/* Left: status — single line on every width. */}
-            <span className="text-xs sm:text-sm text-amber-900 font-heading font-semibold whitespace-nowrap shrink-0">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 flex items-center gap-2 flex-nowrap">
+            {/* Left zone: status. Equal flex-basis with the right zone so the
+                center button stays truly centered regardless of text width. */}
+            <span className="flex-1 min-w-0 truncate text-xs sm:text-sm text-amber-900 font-heading font-semibold">
               {isCompleted ? 'Inspection Completed' : 'Inspection Cancelled'}
             </span>
 
             {/* Center: download options (brand-colored to match the scheme) */}
-            <div className="flex items-center justify-center gap-2 min-w-0">
+            <div className="flex items-center justify-center gap-2 shrink-0">
               {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
                 <CompletedPdfMenu inspection={inspection} shareLinks={shareLinks} />
               )}
@@ -359,12 +360,12 @@ export default function ExistingInspection() {
             {isCompleted && !isExternal ? (
               <button
                 onClick={handleReopen}
-                className="text-xs sm:text-sm text-brand font-heading font-semibold whitespace-nowrap shrink-0 bg-transparent border-0 p-0 cursor-pointer hover:underline active:underline underline-offset-2"
+                className="flex-1 min-w-0 text-right text-xs sm:text-sm text-brand font-heading font-semibold whitespace-nowrap bg-transparent border-0 p-0 cursor-pointer hover:underline active:underline underline-offset-2"
               >
                 <span className="sm:hidden">Re-Open</span>
                 <span className="hidden sm:inline">Re-Open for Edits</span>
               </button>
-            ) : <span />}
+            ) : <span className="flex-1 min-w-0" />}
           </div>
         </div>
       )}
