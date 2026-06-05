@@ -187,9 +187,17 @@ export default function AiKnowledgePage() {
                       <div className="text-[11px] text-gray-500 truncate">
                         {(e.addedByName || e.addedByEmail || 'Unknown')}{e.createdAt ? ` · ${fmtDate(e.createdAt)}` : ''}{e.updatedAt ? ' · edited' : ''}
                       </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <button type="button" onClick={() => { setEditingId(e.id); setDraft(e.text); }} className="text-xs font-heading font-semibold text-brand hover:underline">Edit</button>
-                        <button type="button" onClick={() => remove(e.id)} className="text-xs font-heading font-semibold text-rose-600 hover:underline">Delete</button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button type="button" onClick={() => { setEditingId(e.id); setDraft(e.text); }}
+                          className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md px-2.5 py-1">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                          Edit
+                        </button>
+                        <button type="button" onClick={() => remove(e.id)}
+                          className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-md px-2.5 py-1">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
+                          Delete
+                        </button>
                       </div>
                     </div>
                   </>
