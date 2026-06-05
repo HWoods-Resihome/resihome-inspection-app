@@ -1,35 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
-import { useAppDialog } from '@/components/AppDialog';
 
 /**
- * InstallButton — always-available install entry point.
- *
- * It stays visible whenever you're NOT already running the installed app
- * (display-mode: standalone), so you can always (re)install. On tap:
- *   - if Chrome handed us its install prompt → fire it (one-tap install);
- *   - else → explain exactly why and how (the prompt only fires when the app is
- *     installable AND not already installed). The #1 gotcha: removing the home-
- *     screen icon doesn't uninstall the PWA — the app is still installed, so
- *     Chrome won't re-offer until it's FULLY uninstalled.
+ * InstallButton — shows ONLY when Chrome actually has the native install prompt
+ * to offer, and tapping it fires THAT (the real device pop-up). No custom
+ * fallback dialog: a website can't conjure the native prompt, so when Chrome
+ * isn't offering it (e.g. the PWA is still installed, or running as the app) the
+ * button simply isn't shown. It returns automatically once Chrome re-offers
+ * (after a FULL uninstall).
  */
 type BIP = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> };
 
 export function InstallButton({ className }: { className?: string }) {
-  const dialog = useAppDialog();
   const deferredRef = useRef<BIP | null>(null);
-  const [hidden, setHidden] = useState(false);
+  const [canInstall, setCanInstall] = useState(false);
 
   useEffect(() => {
     const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches === true
       || (navigator as any).standalone === true;
-    if (standalone) { setHidden(true); return; } // already running as the app
+    if (standalone) return; // running as the installed app
 
-    const pick = () => { const e = (window as any).__bipEvent as BIP | undefined; if (e) deferredRef.current = e; };
+    const pick = () => { const e = (window as any).__bipEvent as BIP | undefined; if (e) { deferredRef.current = e; setCanInstall(true); } };
     pick(); // event may have fired before mount (captured early in _document)
 
-    const onBip = (e: Event) => { e.preventDefault(); (window as any).__bipEvent = e; deferredRef.current = e as BIP; };
+    const onBip = (e: Event) => { e.preventDefault(); (window as any).__bipEvent = e; deferredRef.current = e as BIP; setCanInstall(true); };
     const onReady = () => pick();
-    const onInstalled = () => { deferredRef.current = null; (window as any).__bipEvent = null; setHidden(true); };
+    const onInstalled = () => { deferredRef.current = null; (window as any).__bipEvent = null; setCanInstall(false); };
     window.addEventListener('beforeinstallprompt', onBip);
     window.addEventListener('bip-ready', onReady);
     window.addEventListener('appinstalled', onInstalled);
@@ -40,33 +35,16 @@ export function InstallButton({ className }: { className?: string }) {
     };
   }, []);
 
-  if (hidden) return null;
+  if (!canInstall) return null;
 
   const onClick = async () => {
     const d = deferredRef.current;
-    if (d) {
-      try {
-        d.prompt();
-        const { outcome } = await d.userChoice;
-        if (outcome === 'accepted') { deferredRef.current = null; (window as any).__bipEvent = null; setHidden(true); }
-      } catch { /* noop */ }
-      return;
-    }
-    // No prompt available — tell the user precisely why.
-    let installed = false;
-    try { const apps = await (navigator as any).getInstalledRelatedApps?.(); installed = !!(apps && apps.length); } catch { /* unsupported */ }
-    if (installed) {
-      await dialog.alert(
-        'ResiWALK looks like it’s still installed on this device, so the browser won’t offer to install it again.\n\n'
-        + 'Removing the home-screen icon doesn’t uninstall it. To fully uninstall: long-press the ResiWALK icon → App info → Uninstall (or Settings → Apps → ResiWalk → Uninstall).\n\n'
-        + 'Then reload this page and tap Install app again.'
-      );
-    } else {
-      await dialog.alert(
-        'To install ResiWALK:\n\n• Open Chrome’s ⋮ menu (top-right)\n• Tap “Install app” (or “Add to home screen”)\n\n'
-        + 'If you don’t see it yet, wait a few seconds, reload, and try the menu again.'
-      );
-    }
+    if (!d) { setCanInstall(false); return; }
+    try {
+      d.prompt(); // ← the actual native device install pop-up
+      const { outcome } = await d.userChoice;
+      if (outcome === 'accepted') { deferredRef.current = null; (window as any).__bipEvent = null; setCanInstall(false); }
+    } catch { /* noop */ }
   };
 
   return (
