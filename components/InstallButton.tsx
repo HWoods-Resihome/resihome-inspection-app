@@ -1,38 +1,35 @@
 import { useEffect, useRef, useState } from 'react';
+import { useAppDialog } from '@/components/AppDialog';
 
 /**
- * InstallButton — fires Chrome's install prompt directly (no secondary page).
+ * InstallButton — always-available install entry point.
  *
- * Shows ONLY when Chrome currently has an install prompt to offer, which is the
- * self-correcting signal for "installable & not already installed":
- *   - Not installed + installable → Chrome fires `beforeinstallprompt` → shown.
- *   - Already installed → Chrome does NOT fire it → hidden (also hidden when the
- *     page is opened as the installed app, i.e. display-mode: standalone).
- *   - User uninstalls → Chrome fires it again on the next visit → button RETURNS.
- *
- * (Earlier this used a sticky localStorage "installed" flag, which never cleared
- * on uninstall and wrongly hid the button forever — removed.)
+ * It stays visible whenever you're NOT already running the installed app
+ * (display-mode: standalone), so you can always (re)install. On tap:
+ *   - if Chrome handed us its install prompt → fire it (one-tap install);
+ *   - else → explain exactly why and how (the prompt only fires when the app is
+ *     installable AND not already installed). The #1 gotcha: removing the home-
+ *     screen icon doesn't uninstall the PWA — the app is still installed, so
+ *     Chrome won't re-offer until it's FULLY uninstalled.
  */
 type BIP = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> };
 
 export function InstallButton({ className }: { className?: string }) {
+  const dialog = useAppDialog();
   const deferredRef = useRef<BIP | null>(null);
-  const [canInstall, setCanInstall] = useState(false);
+  const [hidden, setHidden] = useState(false);
 
   useEffect(() => {
     const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches === true
       || (navigator as any).standalone === true;
-    if (standalone) return; // running as the installed app → never show
+    if (standalone) { setHidden(true); return; } // already running as the app
 
-    const pick = () => {
-      const e = (window as any).__bipEvent as BIP | undefined;
-      if (e) { deferredRef.current = e; setCanInstall(true); }
-    };
+    const pick = () => { const e = (window as any).__bipEvent as BIP | undefined; if (e) deferredRef.current = e; };
     pick(); // event may have fired before mount (captured early in _document)
 
-    const onBip = (e: Event) => { e.preventDefault(); (window as any).__bipEvent = e; deferredRef.current = e as BIP; setCanInstall(true); };
+    const onBip = (e: Event) => { e.preventDefault(); (window as any).__bipEvent = e; deferredRef.current = e as BIP; };
     const onReady = () => pick();
-    const onInstalled = () => { deferredRef.current = null; (window as any).__bipEvent = null; setCanInstall(false); };
+    const onInstalled = () => { deferredRef.current = null; (window as any).__bipEvent = null; setHidden(true); };
     window.addEventListener('beforeinstallprompt', onBip);
     window.addEventListener('bip-ready', onReady);
     window.addEventListener('appinstalled', onInstalled);
@@ -43,16 +40,33 @@ export function InstallButton({ className }: { className?: string }) {
     };
   }, []);
 
-  if (!canInstall) return null;
+  if (hidden) return null;
 
   const onClick = async () => {
     const d = deferredRef.current;
-    if (!d) { setCanInstall(false); return; }
-    try {
-      d.prompt();
-      const { outcome } = await d.userChoice;
-      if (outcome === 'accepted') { deferredRef.current = null; (window as any).__bipEvent = null; setCanInstall(false); }
-    } catch { /* noop */ }
+    if (d) {
+      try {
+        d.prompt();
+        const { outcome } = await d.userChoice;
+        if (outcome === 'accepted') { deferredRef.current = null; (window as any).__bipEvent = null; setHidden(true); }
+      } catch { /* noop */ }
+      return;
+    }
+    // No prompt available — tell the user precisely why.
+    let installed = false;
+    try { const apps = await (navigator as any).getInstalledRelatedApps?.(); installed = !!(apps && apps.length); } catch { /* unsupported */ }
+    if (installed) {
+      await dialog.alert(
+        'ResiWALK looks like it’s still installed on this device, so the browser won’t offer to install it again.\n\n'
+        + 'Removing the home-screen icon doesn’t uninstall it. To fully uninstall: long-press the ResiWALK icon → App info → Uninstall (or Settings → Apps → ResiWalk → Uninstall).\n\n'
+        + 'Then reload this page and tap Install app again.'
+      );
+    } else {
+      await dialog.alert(
+        'To install ResiWALK:\n\n• Open Chrome’s ⋮ menu (top-right)\n• Tap “Install app” (or “Add to home screen”)\n\n'
+        + 'If you don’t see it yet, wait a few seconds, reload, and try the menu again.'
+      );
+    }
   };
 
   return (
