@@ -15,6 +15,10 @@ const hasMediaDevices = typeof navigator !== 'undefined'
   && !!navigator.mediaDevices?.getUserMedia;
 import { useAutosave, type SaveState } from '@/lib/useAutosave';
 import { buildQaAnswerProps, buildSectionPhotoAnswerProps } from '@/lib/answerProps';
+import {
+  isHvacSection, isSmartHomeSection, buildHvacQuestions, buildSmartHomeQuestions,
+  type WidgetMetaMap,
+} from '@/lib/scopeWidgetSections';
 
 type Props = {
   questions: Question[];
@@ -37,6 +41,14 @@ type Props = {
    *  property has no qualifying listing or the listing object isn't configured. */
   listingPrice?: number | null;
   listingDate?: string | null;
+  /** Property air-filter fields — prefill the HVAC widget and are written back
+   *  to the property as the inspector confirms/corrects them. */
+  propertyAirFiltersTotal?: number | null;
+  propertyAirFiltersType1?: string | null;
+  propertyAirFiltersType2?: string | null;
+  propertyAirFiltersType3?: string | null;
+  /** Air-filter size dropdown options (from the HubSpot property field defs). */
+  filterSizeOptions?: string[];
   onSubmit: (answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>) => void;
   onCancel: () => void;
 
@@ -120,6 +132,8 @@ export function QuestionForm({
   bedrooms, bathrooms, squareFootage, inspectionRegion, listingPrice, listingDate, onSubmit, onCancel,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
+  propertyAirFiltersTotal, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
+  filterSizeOptions,
 }: Props) {
   const dialog = useAppDialog();
   // These three Q&A templates get the Scope-Rate-Card-style treatment (logo
@@ -130,14 +144,44 @@ export function QuestionForm({
     templateType === 'leasing_agent_1099_property_inspection' ||
     templateType === 'pm_vacancy_occupancy_check' ||
     templateType === 'pm_community_inspection';
-  // The 1099 template drops the HAP section entirely.
-  const formQuestions = useMemo(
-    () =>
-      templateType === 'leasing_agent_1099_property_inspection'
-        ? questions.filter((q) => !/\bhap\b/i.test(q.section))
-        : questions,
-    [questions, templateType]
-  );
+  // Property values used to prefill the HVAC air-filter widget.
+  const propertyValues = useMemo<Record<string, string>>(() => ({
+    air_filters___total_quantity: propertyAirFiltersTotal != null ? String(propertyAirFiltersTotal) : '',
+    air_filters___type__1: propertyAirFiltersType1 || '',
+    air_filters___type__2: propertyAirFiltersType2 || '',
+    air_filters___type__3: propertyAirFiltersType3 || '',
+  }), [propertyAirFiltersTotal, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3]);
+
+  // Transform the raw questions:
+  //   - 1099 drops the HAP section entirely
+  //   - the HVAC and Smart Home sections (HubSpot-defined) are intercepted and
+  //     replaced by the Scope-style widget questions (lib/scopeWidgetSections),
+  //     preserving the original section name + order. The HubSpot question
+  //     records are left untouched; we just render these instead.
+  const { formQuestions, widgetMeta } = useMemo(() => {
+    const base = templateType === 'leasing_agent_1099_property_inspection'
+      ? questions.filter((q) => !/\bhap\b/i.test(q.section))
+      : questions;
+    const meta: WidgetMetaMap = {};
+    const passthrough: Question[] = [];
+    let hvac: { name: string; order: number } | null = null;
+    let smart: { name: string; order: number } | null = null;
+    for (const q of base) {
+      if (isHvacSection(q.section)) { if (!hvac) hvac = { name: q.section, order: q.sectionOrder }; continue; }
+      if (isSmartHomeSection(q.section)) { if (!smart) smart = { name: q.section, order: q.sectionOrder }; continue; }
+      passthrough.push(q);
+    }
+    const out = [...passthrough];
+    if (hvac) {
+      const built = buildHvacQuestions(hvac.name, hvac.order, filterSizeOptions || []);
+      out.push(...built.questions); Object.assign(meta, built.meta);
+    }
+    if (smart) {
+      const built = buildSmartHomeQuestions(smart.name, smart.order);
+      out.push(...built.questions); Object.assign(meta, built.meta);
+    }
+    return { formQuestions: out, widgetMeta: meta };
+  }, [questions, templateType, filterSizeOptions]);
   // Build the list of section instances. Repeating sections expand into multiple.
   const sectionInstances: SectionInstance[] = useMemo(() => {
     // First group questions by base section
@@ -265,8 +309,13 @@ export function QuestionForm({
           section: q.section,
           location: inst.location,
           // scopeStyle templates start with NO pre-filled answer — the inspector
-          // must make every selection explicitly (no silent defaults).
-          answerValue: scopeStyle ? '' : (q.defaultValue || ''),
+          // must make every selection explicitly (no silent defaults). EXCEPTION:
+          // HVAC air-filter widget fields prefill from the property record.
+          answerValue: (() => {
+            const wm = widgetMeta[q.questionIdExternal];
+            if (wm?.prefillFrom) { const pv = propertyValues[wm.prefillFrom]; if (pv) return pv; }
+            return scopeStyle ? '' : (q.defaultValue || '');
+          })(),
           note: '',
           quantity: null,
           photoUrls: [],
@@ -764,6 +813,67 @@ export function QuestionForm({
     return () => { window.removeEventListener('online', onOnline); clearInterval(iv); };
   }, [readOnly]);
 
+  // Synthetic HVAC/Smart Home widget fields show conditionally:
+  //  - showWhen: visible only when a sibling answer has one of the values
+  //  - filterIndex: a filter-size field — visible only when the confirmed
+  //    air-filter quantity is >= its index.
+  // Non-widget questions (no meta) are always visible.
+  function isWidgetVisible(qid: string, instanceKey: string): boolean {
+    const meta = widgetMeta[qid];
+    if (!meta) return true;
+    if (meta.showWhen) {
+      const sib = answers[answerKey(meta.showWhen.questionId, instanceKey)];
+      return !!sib && meta.showWhen.values.includes(sib.answerValue);
+    }
+    if (meta.filterIndex) {
+      const qa = answers[answerKey('fc_air_filters_qty', instanceKey)];
+      const qn = qa ? parseInt(qa.answerValue, 10) : NaN;
+      return meta.filterIndex <= (Number.isFinite(qn) ? qn : 0);
+    }
+    return true;
+  }
+
+  // First answer for a synthetic widget question (single, non-repeating section).
+  const findAnswerByQid = (qid: string) => {
+    const prefix = `${qid}::`;
+    const k = Object.keys(answers).find((key) => key.startsWith(prefix));
+    return k ? answers[k] : undefined;
+  };
+
+  // Two-way sync: as the inspector confirms/corrects the air-filter quantity and
+  // sizes in the HVAC widget, write them back onto the Property object (debounced)
+  // so the property record stays current. Sizes beyond the quantity are cleared.
+  // Seed the baseline to the property's CURRENT air-filter values so the prefill
+  // (which equals them) doesn't trigger a redundant write on load — only the
+  // inspector actually changing a value syncs back.
+  const airSyncRef = useRef<string>((() => {
+    const qty = propertyValues.air_filters___total_quantity || '';
+    const qn = parseInt(qty, 10);
+    const n = Number.isFinite(qn) ? Math.max(0, Math.min(3, qn)) : 3;
+    const types = [1, 2, 3].map((i) => (i <= n ? (propertyValues[`air_filters___type__${i}`] || '') : ''));
+    return JSON.stringify({ qty, types });
+  })());
+  useEffect(() => {
+    if (readOnly || !propertyRecordId || !widgetMeta['fc_air_filters_qty']) return;
+    const qty = (findAnswerByQid('fc_air_filters_qty')?.answerValue || '').trim();
+    const qn = parseInt(qty, 10);
+    const n = Number.isFinite(qn) ? Math.max(0, Math.min(3, qn)) : 3;
+    const types = [1, 2, 3].map((i) => (i <= n ? (findAnswerByQid(`fc_filter_size_${i}`)?.answerValue || '').trim() : ''));
+    if (!qty && !types.some(Boolean)) return;
+    const sig = JSON.stringify({ qty, types });
+    if (sig === airSyncRef.current) return;
+    const t = setTimeout(() => {
+      airSyncRef.current = sig;
+      fetch(`/api/properties/${propertyRecordId}/air-filters`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ totalQuantity: qty || undefined, types }),
+      }).catch(() => { /* best-effort; the answer records still hold the truth */ });
+    }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answers, readOnly, propertyRecordId]);
+
   function scrollToAndFlash(domId: string, instanceKey?: string) {
     if (typeof document === 'undefined') return;
     if (instanceKey) expandSection(instanceKey);
@@ -782,10 +892,20 @@ export function QuestionForm({
     for (const inst of sectionInstances) {
       // Per-question validations
       for (const q of inst.questions) {
+        // Hidden conditional widget fields aren't required.
+        if (!isWidgetVisible(q.questionIdExternal, inst.instanceKey)) continue;
         const key = answerKey(q.questionIdExternal, inst.instanceKey);
         const a = answers[key];
         const locTag = inst.location ? `${inst.location} -> ` : `${inst.displayName} -> `;
-        if (q.isRequired && (!a || !a.answerValue)) {
+        if (q.isRequired && q.responseType === 'photo_only') {
+          if (!a || (a.photoUrls?.length || 0) === 0) {
+            return {
+              message: `Photo required: ${locTag}${q.questionText}`,
+              scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
+              instanceKey: inst.instanceKey,
+            };
+          }
+        } else if (q.isRequired && (!a || !a.answerValue)) {
           return {
             message: `Required: ${locTag}${q.questionText}`,
             scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
@@ -962,15 +1082,21 @@ export function QuestionForm({
     const out: Record<string, { completed: number; total: number }> = {};
     for (const inst of sectionInstances) {
       let completed = 0;
+      let total = 0;
       for (const q of inst.questions) {
-        const key = answerKey(q.questionIdExternal, inst.instanceKey);
-        const a = answers[key];
-        if (a && a.answerValue) completed++;
+        if (!isWidgetVisible(q.questionIdExternal, inst.instanceKey)) continue;
+        total++;
+        const a = answers[answerKey(q.questionIdExternal, inst.instanceKey)];
+        const done = q.responseType === 'photo_only'
+          ? (a?.photoUrls?.length || 0) > 0
+          : !!a?.answerValue;
+        if (done) completed++;
       }
-      out[inst.instanceKey] = { completed, total: inst.questions.length };
+      out[inst.instanceKey] = { completed, total };
     }
     return out;
-  }, [sectionInstances, answers]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionInstances, answers, widgetMeta]);
 
   const totalCompleted = Object.values(sectionProgress).reduce((acc, s) => acc + s.completed, 0);
   const totalQuestions = Object.values(sectionProgress).reduce((acc, s) => acc + s.total, 0);
@@ -1239,8 +1365,9 @@ export function QuestionForm({
                     )}
                   </div>
 
-                  {/* Questions for this instance */}
-                  {inst.questions.map((q) => {
+                  {/* Questions for this instance (hidden conditional widget
+                      fields are filtered out). */}
+                  {inst.questions.filter((q) => isWidgetVisible(q.questionIdExternal, inst.instanceKey)).map((q) => {
                     const key = answerKey(q.questionIdExternal, inst.instanceKey);
                     return (
                       <div key={key} id={`q-${inst.instanceKey}-${q.questionIdExternal}`} className="scroll-mt-24">

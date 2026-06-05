@@ -437,6 +437,11 @@ export default function ExistingInspection() {
           inspectionRegion={inspection.regionSnapshot || ''}
           listingPrice={listingPrice}
           listingDate={listingDate}
+          propertyAirFiltersTotal={propertyAirFiltersTotal}
+          propertyAirFiltersType1={propertyAirFiltersType1}
+          propertyAirFiltersType2={propertyAirFiltersType2}
+          propertyAirFiltersType3={propertyAirFiltersType3}
+          filterSizeOptions={filterSizeOptions}
           onSubmit={handleSubmit}
           onCancel={() => router.push('/')}
           inspectionRecordId={inspectionId}

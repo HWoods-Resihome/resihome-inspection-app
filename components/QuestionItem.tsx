@@ -124,6 +124,94 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
     onUpdate({ optionalPanelOpen: !panelOpen });
   }
 
+  // photo_only: the photo capture IS the answer (e.g. HVAC label-sticker shots).
+  // Render a streamlined required-photo block — no value input, no panel toggle.
+  if (question.responseType === 'photo_only') {
+    return (
+      <div className="p-4" data-question-id={question.questionIdExternal}>
+        <label className="block font-heading font-semibold text-ink text-sm mb-1">
+          {question.questionText}
+          {question.isRequired && <span className="text-brand ml-1">*</span>}
+        </label>
+        {question.helpText && (
+          <p className="text-xs text-gray-500 mb-2 italic">{question.helpText}</p>
+        )}
+        <div className="flex flex-wrap gap-2 items-center">
+          <button
+            type="button"
+            onClick={() => setCameraOpen(true)}
+            disabled={!!uploadProgress || !hasMediaDevices}
+            className="inline-flex items-center gap-1.5 text-sm bg-brand text-white font-heading font-semibold py-1.5 px-3 rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
+            title={hasMediaDevices ? 'Take photos with the in-app camera' : 'Camera not supported in this browser'}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+            Take Photos
+          </button>
+          {!plainStyle && (
+            <label className="inline-flex items-center gap-1.5 text-sm bg-brand/10 text-brand font-heading font-semibold py-1.5 px-3 rounded cursor-pointer hover:bg-brand/20">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              Choose Files
+              <input type="file" accept="image/*" multiple className="hidden"
+                onChange={(e) => handlePhotoUpload(e.target.files)} disabled={!!uploadProgress} />
+            </label>
+          )}
+        </div>
+        {uploadProgress && (
+          <div className="text-xs text-brand mt-1 font-heading font-semibold">
+            Uploading {uploadProgress.current} of {uploadProgress.total}...
+          </div>
+        )}
+        <CameraCapture
+          isOpen={cameraOpen}
+          addressSnapshot={propertyName}
+          propertyRecordId={propertyRecordId}
+          onClose={() => setCameraOpen(false)}
+          uploadPhoto={uploadPhoto}
+          onComplete={(urls) => {
+            setCameraOpen(false);
+            if (urls.length > 0) onUpdate({ photoUrls: [...answer.photoUrls, ...urls] });
+          }}
+        />
+        {answer.photoUrls.length > 0 && (
+          <div className="grid grid-cols-4 gap-2 mt-2">
+            {answer.photoUrls.map((url, idx) => (
+              <div key={`${url}-${idx}`} className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={displayImageSrc(url)} alt="" onClick={() => setLightboxIndex(idx)}
+                  className="w-full h-16 object-cover rounded cursor-pointer" />
+                {url.startsWith('blob:') && (
+                  <span className="absolute bottom-0 inset-x-0 bg-amber-500/95 text-white text-[8px] font-heading font-bold text-center leading-tight py-0.5 rounded-b pointer-events-none" title="Saved Offline · Will Sync When Online">Saved Offline</span>
+                )}
+                <button type="button" onClick={() => removePhoto(idx)}
+                  className="absolute -top-1 -right-1 bg-ink text-white text-xs w-5 h-5 rounded-full leading-none flex items-center justify-center hover:bg-brand transition">&times;</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {lightboxIndex !== null && answer.photoUrls.length > 0 && (
+          <PhotoLightbox
+            groups={[{ id: 'q', name: 'Photos' }]}
+            photosByGroup={{ q: answer.photoUrls }}
+            initialGroupId="q"
+            initialIndex={Math.min(lightboxIndex, answer.photoUrls.length - 1)}
+            onClose={() => setLightboxIndex(null)}
+            onDelete={(_g, i) => removePhoto(i)}
+            onReplace={(_g, i, file) => replacePhoto(i, file)}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="p-4" data-question-id={question.questionIdExternal}>
       {/* Question text + Notes/Photos toggle button */}

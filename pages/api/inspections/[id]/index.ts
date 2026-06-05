@@ -64,8 +64,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Final Checklist (scope only): pull the air-filter size dropdown options
       // live from the HubSpot field definitions so the scroll-wheels stay in
       // sync with HubSpot. Union the three type fields' options, sorted ascending.
+      // Computed for Scope AND the question-form templates (their HVAC widget
+      // uses the same air-filter size options). Skipped only for QC turn-reinspect
+      // (no air-filter section).
       let filterSizeOptions: string[] = [];
-      if (data.inspection.templateType === 'pm_scope_rate_card') {
+      if (data.inspection.templateType !== 'pm_turn_reinspect_qc') {
         try {
           const lists = await Promise.all([
             fetchPropertyFieldOptions('air_filters___type__1'),
