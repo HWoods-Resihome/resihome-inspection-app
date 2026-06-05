@@ -55,6 +55,12 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // Public marketing/legal pages for the "ResiWalk - 1099" Google OAuth app
+  // (home, privacy, terms) — must be reachable WITHOUT login for verification.
+  if (pathname === '/1099' || pathname.startsWith('/1099/')) {
+    return NextResponse.next();
+  }
+
   // Short share-link resolver (/d/...) is public: it only 302-redirects to an
   // already-public HubSpot file URL, and the link itself is HMAC-signed.
   if (pathname.startsWith('/d/')) {
