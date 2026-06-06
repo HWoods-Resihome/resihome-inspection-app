@@ -1220,7 +1220,6 @@ export function QuestionForm({
               {squareFootage != null && squareFootage > 0 && (
                 <span> &middot; {squareFootage.toLocaleString()} sqft</span>
               )}
-              {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
             </div>
             {/* Listing price + date (most recent active/published listing). */}
             {(typeof listingPrice === 'number' && listingPrice > 0) || listingDate ? (
@@ -1253,13 +1252,10 @@ export function QuestionForm({
             )}
             </div>
           </div>
-          <div className="flex items-start gap-3 ml-3 shrink-0">
-            <div className="text-right">
-              <div className="text-base font-heading font-bold text-brand">{totalCompleted}/{totalQuestions}</div>
-              <div className="text-xs text-gray-500 uppercase tracking-wider">answered</div>
-            </div>
-            {/* Back button — flushes pending edits (when editable) then exits,
-                same as Save & Close. Shown for every status. */}
+          {/* Right side is just Back now — the answered counter moved to the
+              row above the sections, so the property text gets the full width
+              (no wrap / truncation from a squeezed column). */}
+          <div className="shrink-0 ml-3">
             <button
               type="button"
               onClick={async () => {
@@ -1301,8 +1297,13 @@ export function QuestionForm({
 
       <div className="lz-content max-w-3xl mx-auto px-4 py-6 pb-32">
         {/* Collapse / Expand all — top-right, just above the sections. */}
-        {sectionInstances.length > 1 && (
-          <div className="flex justify-end mb-2">
+        {/* Answered counter (moved off the header so the property text gets full
+            width) on the left; Collapse/Expand-all on the right. */}
+        <div className="flex items-center justify-between mb-2 gap-3">
+          <span className="text-xs font-heading font-semibold text-gray-600">
+            <span className="text-brand">{totalCompleted}/{totalQuestions}</span> answered
+          </span>
+          {sectionInstances.length > 1 && (
             <button
               type="button"
               onClick={() => setAllCollapsed(!anySectionOpen)}
@@ -1316,8 +1317,8 @@ export function QuestionForm({
               </svg>
               {anySectionOpen ? 'Collapse all' : 'Expand all'}
             </button>
-          </div>
-        )}
+          )}
+        </div>
         {sectionInstances.map((inst) => {
           const prog = sectionProgress[inst.instanceKey];
           const sectionPhotoUrls = sectionPhotos[inst.instanceKey] || [];
