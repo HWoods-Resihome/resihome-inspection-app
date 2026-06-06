@@ -148,13 +148,14 @@ const MAX_CAPTURE_EDGE = 2560;
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
 const JPEG_QUALITY = 0.92;
-// Saved-photo ceiling. ImageCapture.takePhoto() returns the FULL sensor frame
-// (often 12MP / 4–7MB) — overkill for the PDF (520px thumbnail) and heavy for
-// field uploads + storage. We downscale the saved photo to this long edge
-// (~6–7MP at 4:3) at PHOTO_SAVE_QUALITY: still native-grade sharp + zoomable,
-// but ~1.5–2.5MB instead of 5–7MB.
-const MAX_SAVE_EDGE = 3000;
-const PHOTO_SAVE_QUALITY = 0.86;
+// Saved-photo ceiling. Inspectors need to ZOOM INTO the evidence (serial #s,
+// hairline cracks), so we preserve essentially the full sensor frame — 4096px
+// covers a typical 12MP phone (4032×3024) with no meaningful downscale — at a
+// high quality so fine detail survives compression. The PDF is unaffected
+// either way (it embeds a 520px thumbnail). Files land ~3–5MB; the only cost is
+// field upload bandwidth, which we accept for the detail.
+const MAX_SAVE_EDGE = 4096;
+const PHOTO_SAVE_QUALITY = 0.9;
 
 // Photo geostamp proximity check: how close (meters) the device GPS must be to
 // the property's reference location to stamp a ✓ rather than a ✗. Generous by
