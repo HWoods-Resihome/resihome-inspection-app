@@ -203,6 +203,10 @@ export function CameraCapture({
 }: Props) {
   const dialog = useAppDialog();
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // The camera viewport container (untransformed) — tap-to-focus measures
+  // against this, not the CSS-zoom-scaled <video>, so focus + the reticle stay
+  // correct at any zoom level.
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   // Last time the inspector pressed the shutter (manual capture). The AI auto-
   // still fallback reads this so it only fills gaps when nobody's shooting.
   const lastManualCaptureRef = useRef(0);
@@ -478,14 +482,26 @@ export function CameraCapture({
   // the reticle still gives feedback there. Reverts to continuous AF after a
   // moment so the preview doesn't stay locked on that spot.
   const focusAt = useCallback((clientX: number, clientY: number) => {
-    const el = videoRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
+    // Measure against the viewport container (NOT the <video>, which is scaled by
+    // the CSS digital zoom — its bounding box would throw off both the focus
+    // point and the reticle).
+    const box = viewportRef.current;
+    if (!box) return;
+    const rect = box.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
-    const nx = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const ny = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    const px = clientX - rect.left;
+    const py = clientY - rect.top;
+    // Viewport-normalized tap (0..1).
+    const vx = Math.max(0, Math.min(1, px / rect.width));
+    const vy = Math.max(0, Math.min(1, py / rect.height));
+    // Correct for digital zoom: the preview is scaled about its center, so the
+    // viewport shows only the central 1/zoom of the frame. Map the tap back into
+    // full-frame coordinates so focus lands where the inspector actually tapped.
+    const z = zoomRef.current || 1;
+    const nx = Math.max(0, Math.min(1, 0.5 + (vx - 0.5) / z));
+    const ny = Math.max(0, Math.min(1, 0.5 + (vy - 0.5) / z));
     const key = Date.now();
-    setFocusPt({ x: clientX - rect.left, y: clientY - rect.top, key });
+    setFocusPt({ x: px, y: py, key });
     window.setTimeout(() => setFocusPt((p) => (p && p.key === key ? null : p)), 900);
     const track = streamRef.current?.getVideoTracks?.()[0];
     if (!track) return;
@@ -1529,7 +1545,7 @@ export function CameraCapture({
       )}
 
       {/* Camera viewport */}
-      <div className="flex-1 relative bg-black overflow-hidden"
+      <div ref={viewportRef} className="flex-1 relative bg-black overflow-hidden"
         onTouchStart={onViewportTouchStart} onTouchMove={onViewportTouchMove}
         onTouchEnd={onViewportTouchEnd} onTouchCancel={onViewportTouchEnd}>
         {permissionState === 'denied' || permissionState === 'unsupported' ? (
