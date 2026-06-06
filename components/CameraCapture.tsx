@@ -466,19 +466,76 @@ export function CameraCapture({
   // from also zooming. capturePhoto / video record / the AI still all crop to this
   // factor so the captured image matches the zoomed preview.
   const pinchRef = useRef<{ startDist: number; startZoom: number } | null>(null);
+  // Single-finger tap tracking for tap-to-focus (distinct from pinch + slides).
+  const tapRef = useRef<{ x: number; y: number; t: number; moved: boolean; target: EventTarget | null } | null>(null);
+  // Brief focus reticle at the tapped point (screen coords within the viewport).
+  const [focusPt, setFocusPt] = useState<{ x: number; y: number; key: number } | null>(null);
   const touchDist = (t: React.TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+  // Tap-to-focus. Drives the camera's focus (and exposure) to the tapped point
+  // via the non-standard `pointsOfInterest` constraint — supported on Android
+  // Chrome; iOS Safari/Chrome ignore it but autofocus continuously anyway, so
+  // the reticle still gives feedback there. Reverts to continuous AF after a
+  // moment so the preview doesn't stay locked on that spot.
+  const focusAt = useCallback((clientX: number, clientY: number) => {
+    const el = videoRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const nx = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const ny = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    const key = Date.now();
+    setFocusPt({ x: clientX - rect.left, y: clientY - rect.top, key });
+    window.setTimeout(() => setFocusPt((p) => (p && p.key === key ? null : p)), 900);
+    const track = streamRef.current?.getVideoTracks?.()[0];
+    if (!track) return;
+    try {
+      const caps: any = track.getCapabilities?.() || {};
+      const adv: any[] = [];
+      if ('pointsOfInterest' in caps) adv.push({ pointsOfInterest: [{ x: nx, y: ny }] });
+      if (Array.isArray(caps.focusMode) && caps.focusMode.includes('single-shot')) adv.push({ focusMode: 'single-shot' });
+      else if (Array.isArray(caps.focusMode) && caps.focusMode.includes('manual')) adv.push({ focusMode: 'manual' });
+      if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous')) adv.push({ exposureMode: 'continuous' });
+      if (!adv.length) return; // device exposes no focus controls — iOS path
+      (track.applyConstraints as any)({ advanced: adv }).catch(() => { /* unsupported */ });
+      // Return to continuous AF so a later scene change still refocuses.
+      window.setTimeout(() => {
+        if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
+          (track.applyConstraints as any)({ advanced: [{ focusMode: 'continuous' }] }).catch(() => { /* noop */ });
+        }
+      }, 2500);
+    } catch { /* best-effort */ }
+  }, []);
+
   const onViewportTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 2) pinchRef.current = { startDist: touchDist(e.touches) || 1, startZoom: zoomRef.current };
+    if (e.touches.length === 2) {
+      pinchRef.current = { startDist: touchDist(e.touches) || 1, startZoom: zoomRef.current };
+      tapRef.current = null; // a two-finger gesture is never a focus tap
+    } else if (e.touches.length === 1) {
+      const t = e.touches[0];
+      tapRef.current = { x: t.clientX, y: t.clientY, t: Date.now(), moved: false, target: e.target };
+    }
   };
   const onViewportTouchMove = (e: React.TouchEvent) => {
     if (e.touches.length === 2 && pinchRef.current) {
       const z = Math.max(1, Math.min(MAX_ZOOM, pinchRef.current.startZoom * (touchDist(e.touches) / pinchRef.current.startDist)));
       zoomRef.current = z;
       setZoom(z);
+    } else if (tapRef.current && e.touches.length === 1) {
+      const t = e.touches[0];
+      if (Math.hypot(t.clientX - tapRef.current.x, t.clientY - tapRef.current.y) > 12) tapRef.current.moved = true;
     }
   };
   const onViewportTouchEnd = (e: React.TouchEvent) => {
     if (e.touches.length < 2) pinchRef.current = null;
+    const tp = tapRef.current;
+    tapRef.current = null;
+    // A clean single tap directly on the preview (not a control button, not a
+    // drag, not the tail of a pinch) → focus there.
+    if (tp && !tp.moved && e.touches.length === 0 && (Date.now() - tp.t) < 400 && tp.target === videoRef.current) {
+      const ct = e.changedTouches[0];
+      if (ct) focusAt(ct.clientX, ct.clientY);
+    }
   };
 
   // Resume after backgrounding. When the tab is hidden (user switches apps /
@@ -1513,6 +1570,15 @@ export function CameraCapture({
               className="absolute inset-0 w-full h-full object-cover"
               style={zoom > 1 ? { transform: `scale(${zoom})`, transformOrigin: 'center', transition: 'transform 60ms linear' } : undefined}
             />
+            {/* Tap-to-focus reticle */}
+            {focusPt && (
+              <span
+                key={focusPt.key}
+                className="pointer-events-none absolute z-20 w-[72px] h-[72px] -ml-9 -mt-9 rounded-full border-2 border-white/95 shadow-[0_0_0_1px_rgba(0,0,0,0.35)] animate-cameraFocus"
+                style={{ left: focusPt.x, top: focusPt.y }}
+                aria-hidden
+              />
+            )}
             {permissionState === 'pending' && (
               <div className="absolute inset-0 flex items-center justify-center text-white">
                 <div className="text-sm font-heading">Starting camera&hellip;</div>

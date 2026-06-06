@@ -131,6 +131,14 @@ h1, h2, h3, h4, h5, h6 {
   100% { opacity: 0; }
 }
 .animate-shutterFlash { animation: shutterFlash 380ms ease-out forwards; }
+/* Tap-to-focus reticle: a ring that snaps in, pulses, then fades. */
+@keyframes cameraFocus {
+  0% { opacity: 0; transform: scale(1.45); }
+  18% { opacity: 1; transform: scale(1); }
+  60% { opacity: 1; transform: scale(0.92); }
+  100% { opacity: 0; transform: scale(0.92); }
+}
+.animate-cameraFocus { animation: cameraFocus 900ms ease-out forwards; }
 /* The saved thumbnail flies up briefly then settles, like a camera roll grab. */
 @keyframes shotSaved {
   0% { opacity: 0; transform: translateY(10px) scale(0.9); }
