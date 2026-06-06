@@ -134,13 +134,20 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.restore();
 }
 
-// Target capture resolution: 1920x1440 (4:3). Browser may downgrade if
-// the device can't do it, that's OK.
-const CAPTURE_WIDTH = 1920;
-const CAPTURE_HEIGHT = 1440;
+// Target capture resolution (4:3). We ASK high here and then push the live
+// track toward the device's max (capped at MAX_CAPTURE_EDGE) after acquisition
+// — sharper preview AND sharper photos, closer to the native camera. The
+// browser downgrades if the device can't do it, which is fine.
+const CAPTURE_WIDTH = 2560;
+const CAPTURE_HEIGHT = 1920;
+// Ceiling for the post-acquisition resolution bump so we don't request an
+// absurd sensor-max (e.g. 4000px+) that would lag the live preview on mid
+// phones. ~2560-wide (≈5MP at 4:3) is high quality and smooth.
+const MAX_CAPTURE_EDGE = 2560;
 
-// JPEG quality (0..1). 0.88 is a good balance of file size vs visual quality.
-const JPEG_QUALITY = 0.88;
+// JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
+// zoomed/cropped) at a still-reasonable file size.
+const JPEG_QUALITY = 0.92;
 
 // Photo geostamp proximity check: how close (meters) the device GPS must be to
 // the property's reference location to stamp a ✓ rather than a ✗. Generous by
@@ -439,6 +446,27 @@ export function CameraCapture({
       };
       detectZoom();
       [600, 1500, 2800].forEach((ms) => setTimeout(detectZoom, ms));
+      // Push the track to the device's highest resolution (capped) so the
+      // preview and captured photos are as sharp as the native camera. Many
+      // devices hand getUserMedia a conservative size; this requests the max.
+      const bumpResolution = () => {
+        try {
+          const track = streamRef.current?.getVideoTracks?.()[0];
+          const caps: any = track?.getCapabilities?.() || {};
+          if (typeof caps.width?.max === 'number' && typeof caps.height?.max === 'number') {
+            const w = Math.min(caps.width.max, MAX_CAPTURE_EDGE);
+            const h = Math.min(caps.height.max, Math.round(MAX_CAPTURE_EDGE * 0.75));
+            const cur = track?.getSettings?.() as any;
+            // Only re-apply if we're currently below the target (avoid needless
+            // reconfigure / preview flicker).
+            if (!cur || (cur.width || 0) < w - 32) {
+              (track!.applyConstraints as any)({ width: { ideal: w }, height: { ideal: h } }).catch(() => { /* device fixed res */ });
+            }
+          }
+        } catch { /* best-effort */ }
+      };
+      bumpResolution();
+      setTimeout(bumpResolution, 900);
       setPermissionState('granted');
       setPermissionError('');
     } catch (e: any) {
