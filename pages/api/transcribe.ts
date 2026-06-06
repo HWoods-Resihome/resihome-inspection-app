@@ -30,6 +30,16 @@ const OPENAI_URL = 'https://api.openai.com/v1/audio/transcriptions';
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
+  // Warm-up ping: prime the OpenAI TLS/connection pool so the first real
+  // transcription (iOS/Safari Whisper path) doesn't pay the handshake. Cheap,
+  // best-effort; fired by the shared AI warm-up on login / inspection open.
+  if (req.method === 'GET') {
+    try {
+      const k = process.env.OPENAI_API_KEY;
+      if (k) await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${k}` } }).then((r) => r.body?.cancel?.()).catch(() => {});
+    } catch { /* non-fatal */ }
+    return res.status(200).json({ ok: true });
+  }
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed' });

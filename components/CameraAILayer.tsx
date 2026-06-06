@@ -26,6 +26,7 @@ import { ListPicker } from '@/components/ListPicker';
 import { WheelPicker } from '@/components/WheelPicker';
 import { EditableLineRow } from '@/components/EditableLineRow';
 import { formatQty } from '@/lib/photoUpload';
+import { preferWhisper, getRecognition } from '@/lib/speech';
 
 const TENANT_PCT_OPTIONS = Array.from({ length: 21 }, (_, i) => i * 5); // 0..100 step 5
 
@@ -35,7 +36,7 @@ const AUDIO_CHUNK_MS = 2800; // fallback fixed-clip length when VAD is unavailab
 // Voice-activity endpointing: cut the utterance once the inspector has been quiet
 // for SILENCE_HANG_MS (a short buffer so mini "umm…" pauses don't split a phrase),
 // with a hard safety cap and an idle-restart to drop silent buffers.
-const SILENCE_HANG_MS = 900;
+const SILENCE_HANG_MS = 600;
 const MAX_UTTER_MS = 9000;
 const IDLE_RESTART_MS = 5000;
 const MAX_ROOM_STILLS = 12;
@@ -190,6 +191,14 @@ export function CameraAILayer(props: Props) {
   // hallucinate stock phrases ("bye bye", "thank you") on silence.
   const audioCtxRef = useRef<AudioContext | null>(null);
   const monitorRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // On-device Web Speech (Android/desktop Chrome): transcribes locally with no
+  // audio upload / Whisper round-trip — the same fast path the floating mic uses.
+  // recognitionRef holds the live recognizer; speechActiveRef keeps the
+  // hands-free loop restarting; speechGotResultRef gates the auto-fallback to the
+  // Whisper pipeline if Web Speech errors out before ever producing a transcript.
+  const recognitionRef = useRef<any>(null);
+  const speechActiveRef = useRef(false);
+  const speechGotResultRef = useRef(false);
 
   // Dead-zone resilience: voice clips banked while offline + a guard so only one
   // drain runs at a time. drainRef always points at the latest drain fn so the
@@ -331,7 +340,9 @@ export function CameraAILayer(props: Props) {
         getGeoFix(),
       ]);
       stampLinesRef.current = buildStampLines(addressSnapshot, fix, ref);
-      await startAudioLoop();
+      // Prefer on-device Web Speech (instant, no upload); fall back to the
+      // MediaRecorder → Whisper loop where it's unavailable/unreliable.
+      if (!startSpeechLoop()) await startAudioLoop();
       inferTimer.current = setInterval(() => { void runInference(); }, INFER_INTERVAL_MS);
       // Auto-still FALLBACK (disabled while AUTO_PHOTO is off): only when idle.
       if (AUTO_PHOTO) stillTimer.current = setInterval(() => { void maybeAutoStill(); }, AUTO_CHECK_MS);
@@ -343,6 +354,7 @@ export function CameraAILayer(props: Props) {
       if (savedTimer.current) clearTimeout(savedTimer.current);
       if (addedTimer.current) clearTimeout(addedTimer.current);
       if (workTimer.current) clearTimeout(workTimer.current);
+      stopSpeechLoop();
       stopAudioLoop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -596,6 +608,65 @@ export function CameraAILayer(props: Props) {
     if (st.length) return st;
     return ownAudioRef.current?.getAudioTracks().filter((t) => t.readyState === 'live') || [];
   }
+  // On-device speech recognition (no upload, no Whisper round-trip). Returns
+  // true if it started; false (or a later fatal error) falls back to the
+  // MediaRecorder → Whisper pipeline so iOS/Safari and locked-down WebViews
+  // still work. Hands-free: restarts itself after each utterance while open.
+  function startSpeechLoop(): boolean {
+    if (preferWhisper()) return false;
+    const recog = getRecognition();
+    if (!recog) return false;
+
+    const fallback = () => {
+      // Web Speech is unusable here — tear it down and switch to Whisper.
+      stopSpeechLoop();
+      if (openRef.current) void startAudioLoop();
+    };
+
+    recognitionRef.current = recog;
+    speechActiveRef.current = true;
+    speechGotResultRef.current = false;
+    setListening(true);
+
+    recog.onresult = (ev: any) => {
+      const last = ev.results[ev.results.length - 1];
+      const text = (last && last[0]?.transcript ? String(last[0].transcript) : '').trim();
+      if (!text) return;
+      speechGotResultRef.current = true;
+      // Fire the work pipeline IMMEDIATELY — no encode, no upload, no Whisper.
+      handleTranscript(text);
+    };
+    recog.onerror = (ev: any) => {
+      const code = ev?.error;
+      dbg(`speech err ${String(code || '').slice(0, 24)}`);
+      // Benign: 'no-speech' / 'aborted' end the utterance; onend restarts us.
+      if (code === 'no-speech' || code === 'aborted') return;
+      // Fatal capture/availability errors before we ever heard anything → the
+      // engine can't run on this device; switch to the Whisper pipeline so voice
+      // never silently dies.
+      if (!speechGotResultRef.current && (code === 'audio-capture' || code === 'not-allowed' || code === 'service-not-allowed' || code === 'network')) {
+        fallback();
+      }
+    };
+    recog.onend = () => {
+      // continuous=false ends after each utterance; restart to stay hands-free.
+      if (!speechActiveRef.current || !openRef.current) return;
+      try { recog.start(); }
+      catch { setTimeout(() => { if (speechActiveRef.current && openRef.current) { try { recog.start(); } catch { /* noop */ } } }, 250); }
+    };
+
+    try { recog.start(); }
+    catch { stopSpeechLoop(); return false; }
+    dbg('mic ✓ web-speech (on-device)');
+    return true;
+  }
+  function stopSpeechLoop() {
+    speechActiveRef.current = false;
+    const r = recognitionRef.current;
+    recognitionRef.current = null;
+    if (r) { try { r.onresult = null; r.onerror = null; r.onend = null; r.abort?.(); } catch { /* noop */ } }
+  }
+
   async function startAudioLoop() {
     // Wait briefly for the camera's shared audio (the combined getUserMedia may
     // still be resolving); only open our own mic if it never appears.

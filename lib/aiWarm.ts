@@ -52,6 +52,8 @@ export function warmAi(force = false): Promise<void> {
     await Promise.allSettled([
       fetch('/api/rate-card/voice-assist', { method: 'GET' }).catch(() => {}),
       fetch('/api/rate-card/room-scan-live', { method: 'GET' }).catch(() => {}),
+      // Warms the OpenAI TLS pool for the Whisper transcription path (iOS/Safari).
+      fetch('/api/transcribe', { method: 'GET' }).catch(() => {}),
     ]);
     warmedAt = Date.now();
     try { window.sessionStorage.setItem('ai_warmed_at', String(warmedAt)); } catch { /* noop */ }
