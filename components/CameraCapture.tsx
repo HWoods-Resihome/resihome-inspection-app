@@ -582,6 +582,36 @@ export function CameraCapture({
     };
   }, [isOpen, startStream]);
 
+  // Lock the page behind the camera while it's open. Without this the
+  // inspection underneath stays scrollable, so on mobile it scrolls up through
+  // the full-screen camera (you could see the form below it). Freezing the
+  // body + html overflow keeps the camera the only thing on screen.
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+    const body = document.body;
+    const html = document.documentElement;
+    const prev = {
+      bodyOverflow: body.style.overflow,
+      bodyTouch: body.style.touchAction,
+      bodyPos: body.style.position,
+      bodyW: body.style.width,
+      htmlOverflow: html.style.overflow,
+      overscroll: (html.style as any).overscrollBehavior,
+    };
+    body.style.overflow = 'hidden';
+    body.style.touchAction = 'none';
+    html.style.overflow = 'hidden';
+    (html.style as any).overscrollBehavior = 'none';
+    return () => {
+      body.style.overflow = prev.bodyOverflow;
+      body.style.touchAction = prev.bodyTouch;
+      body.style.position = prev.bodyPos;
+      body.style.width = prev.bodyW;
+      html.style.overflow = prev.htmlOverflow;
+      (html.style as any).overscrollBehavior = prev.overscroll;
+    };
+  }, [isOpen]);
+
   // Re-fit the live preview on rotation / resize. Several mobile browsers
   // (notably iOS Safari + iOS Chrome, and some Android WebViews / the native
   // shell) DON'T recompute a <video>'s object-fit paint box when the device
@@ -1269,7 +1299,7 @@ export function CameraCapture({
   const failedCount = items.filter((it) => it.status === 'failed').length;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col select-none animate-fadeIn">
+    <div className="fixed inset-0 z-50 h-[100dvh] bg-black flex flex-col select-none overflow-hidden overscroll-none animate-fadeIn">
       {/* AI assist (Beta) — overlay that reads this camera's video + its own mic. */}
       {aiAssist && onAiAddLine && (
         <CameraAILayer
