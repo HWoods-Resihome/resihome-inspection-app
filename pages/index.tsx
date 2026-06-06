@@ -71,6 +71,25 @@ export default function Home() {
     return () => { clearTimeout(timer); ctrl.abort(); };
   }, []);
 
+  // Pre-warm the AI assistants from the HOME screen — the first authenticated
+  // page after login — so the heavy cold-start work (catalog embeddings, the
+  // Voyage query path, and priming Anthropic's TLS + server-side prompt cache)
+  // is already done by the time the inspector opens ANY inspection and taps the
+  // mic or the AI camera. Previously this only kicked off once an inspection
+  // loaded, so the very first AI interaction paid the full cold-start tax.
+  // Fire-and-forget, online only; the per-inspection warm-ups remain as a
+  // backstop in case the inspector lingers here past the cache TTL.
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    // Stagger slightly so it doesn't contend with the initial inspections fetch
+    // + catalog warm above for the first paint's bandwidth.
+    const t = setTimeout(() => {
+      void fetch('/api/rate-card/voice-assist', { method: 'GET' }).catch(() => {});
+      void fetch('/api/rate-card/room-scan-live', { method: 'GET' }).catch(() => {});
+    }, 400);
+    return () => clearTimeout(t);
+  }, []);
+
   // Keep the latest search term in a ref so refetch-on-focus / post-action
   // reloads honor the active search instead of resetting to the default list.
   const searchRef = useRef('');
