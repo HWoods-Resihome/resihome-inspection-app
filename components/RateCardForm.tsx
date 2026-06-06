@@ -3589,17 +3589,21 @@ export function RateCardForm(props: RateCardFormProps) {
                         <div className="flex gap-2 items-center shrink-0">
                           {/* Single capture entry: the AI camera (live call-out
                               chips as you talk and pan, plus auto-stamped room
-                              stills). Labeled "Take" with the AI spark; disabled
-                              only until the AI layer has warmed up. */}
+                              stills). Opens IMMEDIATELY — never gated on warm-up
+                              or connectivity. Warm-up only speeds the first AI
+                              suggestion; the camera + shutter work cold/offline
+                              (offline shots are cached and synced later), and the
+                              AI layer degrades gracefully (banks voice, retries).
+                              A tiny spark→spinner just hints AI is still warming. */}
                           <button
                             type="button"
                             onClick={() => { setAiCameraMode(true); setCameraSectionId(s.id); }}
-                            disabled={isUploadingHere || !aiCamWarmed}
+                            disabled={isUploadingHere}
                             className="inline-flex items-center gap-1 text-xs bg-violet-600 text-white font-semibold py-1 px-2.5 rounded hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-opacity"
-                            title={aiCamWarmed ? 'Take — AI camera with live call-outs as you talk and pan' : 'Take — getting the AI camera ready…'}
+                            title={aiCamWarmed ? 'Take — AI camera with live call-outs as you talk and pan' : 'Take — AI camera (warming up; opens now, AI ready in a moment)'}
                           >
                             {!aiCamWarmed ? (
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="animate-spin opacity-80"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
                             ) : (
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" />

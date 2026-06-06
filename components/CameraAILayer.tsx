@@ -1047,7 +1047,10 @@ export function CameraAILayer(props: Props) {
     }
     onAddLineRef.current(chip.roomId, line);
     dbg(`✚ added (editor) ${line.lineItemCode} q${line.quantity} ${line.assignedTo}`);
-    setAddedFx({ key: Date.now(), label: chip.description });
+    // Reflect the ACTUAL item added (the editor may have changed it), not the
+    // original suggestion's text.
+    const addedItem = catalog.find((c) => c.lineItemCode === line.lineItemCode);
+    setAddedFx({ key: Date.now(), label: addedItem?.laborShortDescription || chip.description });
     if (addedTimer.current) clearTimeout(addedTimer.current);
     addedTimer.current = setTimeout(() => setAddedFx(null), 1150);
     setChips((cur) => cur.filter((c) => c.id !== chip.id));
