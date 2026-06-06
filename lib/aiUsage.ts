@@ -39,6 +39,16 @@ export function estimateWhisperCostUSD(seconds: number): number {
   return (Math.max(0, seconds) / 60) * 0.006;
 }
 
+/**
+ * Per-minute cost for the speech-to-text model in use. whisper-1 ≈ $0.006/min;
+ * gpt-4o-mini-transcribe ≈ $0.003/min; gpt-4o-transcribe ≈ $0.006/min. The newer
+ * models return no `duration`, so callers pass an estimated clip length.
+ */
+export function estimateTranscribeCostUSD(model: string, seconds: number): number {
+  const perMin = /mini-transcribe/.test(model) ? 0.003 : 0.006;
+  return (Math.max(0, seconds) / 60) * perMin;
+}
+
 // ---- per-instance running daily aggregate ----
 type Bucket = { calls: number; inputTokens: number; outputTokens: number; costUSD: number };
 const INSTANCE_ID = Math.random().toString(36).slice(2, 10);

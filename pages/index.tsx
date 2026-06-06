@@ -8,6 +8,7 @@ import { InspectionCard } from '@/components/InspectionCard';
 import { ListPicker } from '@/components/ListPicker';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
 import { isKnowledgeAdmin } from '@/lib/aiKnowledgeAccess';
+import { warmAi } from '@/lib/aiWarm';
 
 interface MeUser { userId: string; email: string; name: string; }
 
@@ -82,11 +83,10 @@ export default function Home() {
   useEffect(() => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
     // Stagger slightly so it doesn't contend with the initial inspections fetch
-    // + catalog warm above for the first paint's bandwidth.
-    const t = setTimeout(() => {
-      void fetch('/api/rate-card/voice-assist', { method: 'GET' }).catch(() => {});
-      void fetch('/api/rate-card/room-scan-live', { method: 'GET' }).catch(() => {});
-    }, 400);
+    // + catalog warm above for the first paint's bandwidth. warmAi() records the
+    // session-level warm flag so the mic / AI-camera buttons enable INSTANTLY on
+    // inspection open (no redundant warm-up round-trip there).
+    const t = setTimeout(() => { void warmAi(); }, 400);
     return () => clearTimeout(t);
   }, []);
 

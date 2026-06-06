@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RateCardLineInput, RateCardLineItem } from '@/lib/types';
 import { defaultVendorForCode } from '@/lib/vendors';
+import { isAiWarm, warmAi } from '@/lib/aiWarm';
 
 // A room the assistant can work on / navigate to.
 export interface AssistantSection {
@@ -281,7 +282,9 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   const [warming, setWarming] = useState(false);
   // True only once warm-up has fully COMPLETED (distinct from "not warming",
   // which is also the pre-open state) — drives auto-start + the mic gating.
-  const [warmedUp, setWarmedUp] = useState(false);
+  // Seed from the session-level flag: if the home screen (or a prior inspection)
+  // already warmed the AI, the mic is usable IMMEDIATELY — no "getting ready…".
+  const [warmedUp, setWarmedUp] = useState(() => isAiWarm());
   // Voice needs the network (cloud STT + the reasoning agent), so it can't run
   // offline. Track connectivity to degrade gracefully and auto-reactivate.
   const [online, setOnline] = useState(true);
@@ -356,9 +359,12 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     if (warmStartedRef.current || !online) return;
     warmStartedRef.current = true;
     let cancelled = false;
-    setWarming(true);
+    // Only show the "getting ready…" ramp if we're NOT already warm from the home
+    // screen / a prior inspection. When warm, the mic is enabled instantly and we
+    // still call warmAi() (no-op unless the prompt cache went stale) in the bg.
+    if (!isAiWarm()) setWarming(true);
     (async () => {
-      try { await fetch('/api/rate-card/voice-assist', { method: 'GET' }); } catch { /* non-fatal */ }
+      await warmAi();
       // Load the TTS voice list now too (cheap, no audio).
       try { if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.getVoices(); } catch { /* noop */ }
       if (!cancelled) { setWarming(false); setWarmedUp(true); }

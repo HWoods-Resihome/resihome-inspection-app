@@ -219,6 +219,64 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ? `${SYSTEM}\n\nOPERATOR KNOWLEDGE BASE — house rules from inspectors. Treat these as authoritative guidance; apply them when relevant to your call-outs and edits:\n${kb}`
       : SYSTEM;
 
+    // Dedup by CODE only (the client also filters by code). A new item that
+    // merely shares wording with a prior one must still surface, so descriptions
+    // are NOT used to drop items. activeIds gate which pending items may be edited.
+    const seenCodeSet = new Set(seenCodes);
+    const activeIds = new Set(active.map((a) => String(a.id)));
+    let outIdx = 0;
+
+    // Shape a resolved catalog item into the client suggestion the chip binds to.
+    const buildSuggestionObj = (inp: any, resolved: any) => {
+      const { item, unit, isMeasured, isWholeHouse, tenantPct, measurementUnit } = resolved;
+      const quantityStated = inp.quantityStated === true && typeof inp.quantity === 'number' && isFinite(inp.quantity);
+      const needsMeasurement = isMeasured && !isWholeHouse && !quantityStated;
+      const quantity = quantityStated ? Number(inp.quantity) : (needsMeasurement ? null : 1);
+      const rawEst = Number(inp.estimatedQuantity);
+      const estimatedQuantity = (needsMeasurement && isFinite(rawEst) && rawEst > 0) ? Math.min(100000, Math.round(rawEst)) : null;
+      return {
+        id: `LIVE-${Date.now()}-${outIdx++}`,
+        description: item.laborShortDescription,
+        lineItemCode: item.lineItemCode,
+        category: item.category,
+        subcategory: item.subcategory,
+        unit, quantity, needsMeasurement, measurementUnit, estimatedQuantity,
+        suggestedVendor: 'Vendor 1',
+        tenantBillBackPercent: tenantPct,
+        rationale: String(inp.rationale || '').slice(0, 160),
+        confidence: (inp.confidence === 'high' || inp.confidence === 'low') ? inp.confidence : 'medium',
+      };
+    };
+
+    // Shape an edit_line tool call (+ optionally a re-resolved scope item) into a
+    // client edit patch, or null if it amends nothing / targets an unknown item.
+    const buildEditObj = (inp: any, scopeResolved: any) => {
+      const targetId = String(inp.targetId || '');
+      if (!activeIds.has(targetId)) return null;
+      const edit: any = { targetId };
+      if (typeof inp.quantity === 'number' && isFinite(inp.quantity) && inp.quantity > 0) edit.quantity = inp.quantity;
+      if (typeof inp.tenantPct === 'number' && isFinite(inp.tenantPct)) edit.tenantBillBackPercent = Math.max(0, Math.min(100, Math.round(inp.tenantPct)));
+      if (typeof inp.vendor === 'string' && inp.vendor.trim()) {
+        const vq = inp.vendor.trim().toLowerCase();
+        const v = VENDORS.find((x) => x.toLowerCase() === vq) || VENDORS.find((x) => x.toLowerCase().includes(vq));
+        if (v) edit.vendor = v;
+      }
+      if (typeof inp.scopeQuery === 'string' && inp.scopeQuery.trim() && scopeResolved) {
+        const r = scopeResolved;
+        edit.lineItemCode = r.item.lineItemCode;
+        edit.description = r.item.laborShortDescription;
+        edit.category = r.item.category;
+        edit.subcategory = r.item.subcategory;
+        edit.unit = r.unit;
+        edit.needsMeasurement = r.isMeasured && !r.isWholeHouse;
+        edit.measurementUnit = r.measurementUnit;
+        edit.tenantBillBackPercent = edit.tenantBillBackPercent ?? r.tenantPct;
+      }
+      return Object.keys(edit).length > 1 ? edit : null;
+    };
+
+    const wantStream = body.stream === true || body.stream === 'true';
+
     const resp = await fetch(ANTHROPIC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey(), 'anthropic-version': '2023-06-01' },
@@ -232,28 +290,105 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // text-only voice pass + strong prompt is enough for real work items.
         tool_choice: { type: 'auto' },
         messages: [{ role: 'user', content: userContent }],
+        ...(wantStream ? { stream: true } : {}),
       }),
     });
     if (!resp.ok) {
       const t = await resp.text().catch(() => '');
       throw new Error(`Live vision failed ${resp.status}: ${t.slice(0, 160)}`);
     }
+
+    // ---------------- STREAMING PATH (SSE) ----------------
+    // Mirror the voice path: stream the model and emit each call-out the INSTANT
+    // its tool block completes + resolves against the catalog — so chips pop in
+    // one-by-one as the inspector talks instead of all at once after the full
+    // response. Catalog resolves run concurrently and overlap generation.
+    if (wantStream && resp.body) {
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      (res as any).flushHeaders?.();
+      const send = (event: string, data: any) => {
+        try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* client gone */ }
+      };
+
+      let usageIn = 0, usageOut = 0;
+      const pending: Promise<void>[] = [];
+      const blocks: Record<number, { name: string; json: string }> = {};
+
+      // A tool block just completed — resolve + emit it without waiting on the rest.
+      const handleBlock = (b: { name: string; json: string }) => {
+        let inp: any = {};
+        try { inp = b.json ? JSON.parse(b.json) : {}; } catch { inp = {}; }
+        if (b.name === 'suggest_line') {
+          pending.push(
+            resolveItem(String(inp.query || ''), String(inp.category || ''), hasVoice).then((resolved) => {
+              if (!resolved) { if (inp.query) send('unmatched', { query: String(inp.query).slice(0, 40) }); return; }
+              const code = resolved.item.lineItemCode.toLowerCase();
+              if (seenCodeSet.has(code)) return;           // microtask-atomic: no race
+              seenCodeSet.add(code);
+              send('suggestion', buildSuggestionObj(inp, resolved));
+            }).catch(() => {}),
+          );
+        } else if (b.name === 'edit_line') {
+          const sq = inp.scopeQuery;
+          const sp = (typeof sq === 'string' && sq.trim()) ? resolveItem(sq, '') : Promise.resolve(null);
+          pending.push(sp.then((sr) => { const e = buildEditObj(inp, sr); if (e) send('edit', e); }).catch(() => {}));
+        }
+      };
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const json = trimmed.slice(5).trim();
+            if (!json || json === '[DONE]') continue;
+            let ev: any;
+            try { ev = JSON.parse(json); } catch { continue; }
+            if (ev.type === 'message_start') {
+              const u = ev.message?.usage;
+              if (u) { usageIn += (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0); usageOut += u.output_tokens || 0; }
+            } else if (ev.type === 'content_block_start') {
+              if (ev.content_block?.type === 'tool_use') blocks[ev.index] = { name: ev.content_block.name, json: '' };
+            } else if (ev.type === 'content_block_delta') {
+              if (ev.delta?.type === 'input_json_delta' && blocks[ev.index]) blocks[ev.index].json += ev.delta.partial_json || '';
+            } else if (ev.type === 'content_block_stop') {
+              if (blocks[ev.index]) { handleBlock(blocks[ev.index]); delete blocks[ev.index]; }
+            } else if (ev.type === 'message_delta') {
+              if (ev.usage?.output_tokens) usageOut = ev.usage.output_tokens;
+            }
+          }
+        }
+      } catch { send('error', { error: 'stream interrupted' }); }
+      // Let any in-flight catalog resolutions finish emitting before we close.
+      await Promise.allSettled(pending);
+      recordAiUsage({ source: 'room_scan_live', model: MODEL_FAST, inputTokens: usageIn, outputTokens: usageOut });
+      send('done', {});
+      res.end();
+      return;
+    }
+
+    // ---------------- NON-STREAMING JSON PATH (fallback) ----------------
     const data = await resp.json();
     recordAiUsage({ source: 'room_scan_live', model: MODEL_FAST, inputTokens: data?.usage?.input_tokens, outputTokens: data?.usage?.output_tokens });
     const content: any[] = data.content || [];
     const suggestUses = content.filter((c: any) => c.type === 'tool_use' && c.name === 'suggest_line');
     const editUses = content.filter((c: any) => c.type === 'tool_use' && c.name === 'edit_line');
 
-    // --- new suggestions ---
-    // Dedup by CODE only (the client also filters by code). Descriptions are NOT
-    // used to drop items — a new item that merely shares wording with a prior one
-    // must still surface, not vanish silently.
-    const seenCodeSet = new Set(seenCodes);
     const out: any[] = [];
     const unmatched: string[] = [];
-    // Resolve every suggested phrase against the catalog CONCURRENTLY (each is a
-    // Voyage embedding lookup). Previously these ran one-after-another, adding a
-    // serial Voyage round-trip per suggestion to the tail of every response.
+    // Resolve every suggested phrase against the catalog CONCURRENTLY.
     const suggestResolved = await Promise.all(
       suggestUses.map((u: any) => resolveItem(String(u.input?.query || ''), String(u.input?.category || ''), hasVoice)),
     );
@@ -261,36 +396,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const inp = suggestUses[i].input || {};
       const resolved = suggestResolved[i];
       if (!resolved) { if (inp.query) unmatched.push(String(inp.query).slice(0, 40)); continue; }
-      const { item, unit, isMeasured, isWholeHouse, tenantPct, measurementUnit } = resolved;
-      if (seenCodeSet.has(item.lineItemCode.toLowerCase())) continue;
-      seenCodeSet.add(item.lineItemCode.toLowerCase());
-      const quantityStated = inp.quantityStated === true && typeof inp.quantity === 'number' && isFinite(inp.quantity);
-      const needsMeasurement = isMeasured && !isWholeHouse && !quantityStated;
-      const quantity = quantityStated ? Number(inp.quantity) : (needsMeasurement ? null : 1);
-      const rawEst = Number(inp.estimatedQuantity);
-      const estimatedQuantity = (needsMeasurement && isFinite(rawEst) && rawEst > 0) ? Math.min(100000, Math.round(rawEst)) : null;
-      out.push({
-        id: `LIVE-${Date.now()}-${i}`,
-        description: item.laborShortDescription,
-        lineItemCode: item.lineItemCode,
-        category: item.category,
-        subcategory: item.subcategory,
-        unit,
-        quantity,
-        needsMeasurement,
-        measurementUnit,
-        estimatedQuantity,
-        suggestedVendor: 'Vendor 1',
-        tenantBillBackPercent: tenantPct,
-        rationale: String(inp.rationale || '').slice(0, 160),
-        confidence: (inp.confidence === 'high' || inp.confidence === 'low') ? inp.confidence : 'medium',
-      });
+      const code = resolved.item.lineItemCode.toLowerCase();
+      if (seenCodeSet.has(code)) continue;
+      seenCodeSet.add(code);
+      out.push(buildSuggestionObj(inp, resolved));
     }
 
-    // --- voice edits to pending items ---
     const edits: any[] = [];
-    const activeIds = new Set(active.map((a) => String(a.id)));
-    // Resolve any scope-change phrases concurrently (same reason as suggestions).
     const editScopeResolved = await Promise.all(
       editUses.map((eu: any) => {
         const sq = eu.input?.scopeQuery;
@@ -298,32 +410,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }),
     );
     for (let ei = 0; ei < editUses.length; ei++) {
-      const eu = editUses[ei];
-      const inp = eu.input || {};
-      const targetId = String(inp.targetId || '');
-      if (!activeIds.has(targetId)) continue;
-      const edit: any = { targetId };
-      if (typeof inp.quantity === 'number' && isFinite(inp.quantity) && inp.quantity > 0) edit.quantity = inp.quantity;
-      if (typeof inp.tenantPct === 'number' && isFinite(inp.tenantPct)) edit.tenantBillBackPercent = Math.max(0, Math.min(100, Math.round(inp.tenantPct)));
-      if (typeof inp.vendor === 'string' && inp.vendor.trim()) {
-        const vq = inp.vendor.trim().toLowerCase();
-        const v = VENDORS.find((x) => x.toLowerCase() === vq) || VENDORS.find((x) => x.toLowerCase().includes(vq));
-        if (v) edit.vendor = v;
-      }
-      if (typeof inp.scopeQuery === 'string' && inp.scopeQuery.trim()) {
-        const r = editScopeResolved[ei];
-        if (r) {
-          edit.lineItemCode = r.item.lineItemCode;
-          edit.description = r.item.laborShortDescription;
-          edit.category = r.item.category;
-          edit.subcategory = r.item.subcategory;
-          edit.unit = r.unit;
-          edit.needsMeasurement = r.isMeasured && !r.isWholeHouse;
-          edit.measurementUnit = r.measurementUnit;
-          edit.tenantBillBackPercent = edit.tenantBillBackPercent ?? r.tenantPct;
-        }
-      }
-      if (Object.keys(edit).length > 1) edits.push(edit);
+      const e = buildEditObj(editUses[ei].input || {}, editScopeResolved[ei]);
+      if (e) edits.push(e);
     }
 
     return res.status(200).json({ suggestions: out, edits, unmatched });

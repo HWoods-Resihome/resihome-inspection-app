@@ -19,6 +19,7 @@ import { buildSectionPhotoAnswerProps, buildQaAnswerProps } from '@/lib/answerPr
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { isInternalResolution, VENDORS, defaultVendorForCode } from '@/lib/vendors';
+import { isAiWarm, warmAi } from '@/lib/aiWarm';
 import { ListPicker } from '@/components/ListPicker';
 import { getResolutionTimings, setResolutionTiming } from '@/lib/resolutionTiming';
 import { AiReviewModal } from '@/components/AiReviewModal';
@@ -362,14 +363,16 @@ export function RateCardForm(props: RateCardFormProps) {
   // AI camera warm-up: prime catalog embeddings + Haiku (same cold-start work the
   // mic button does) so the first spoken call-out is fast. The Beta button stays
   // disabled until this completes, exactly like the floating mic.
-  const [aiCamWarmed, setAiCamWarmed] = useState(false);
+  // Seed from the session-level flag so the Beta button is usable immediately if
+  // the home screen / mic already warmed the AI — no redundant "getting ready…".
+  const [aiCamWarmed, setAiCamWarmed] = useState(() => isAiWarm());
   const aiCamWarmStartedRef = useRef(false);
   useEffect(() => {
     if (aiCamWarmStartedRef.current || !online) return;
     if (props.readOnly || props.templateType !== 'pm_scope_rate_card') return;
     aiCamWarmStartedRef.current = true;
     (async () => {
-      try { await fetch('/api/rate-card/room-scan-live', { method: 'GET' }); } catch { /* non-fatal */ }
+      await warmAi(); // de-duped; no-op unless cold/stale
       setAiCamWarmed(true); // set even on failure so the button can't get stuck
     })();
   }, [online, props.readOnly, props.templateType]);

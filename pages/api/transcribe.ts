@@ -11,7 +11,11 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { recordAiUsage, estimateWhisperCostUSD } from '@/lib/aiUsage';
+import { recordAiUsage, estimateTranscribeCostUSD } from '@/lib/aiUsage';
+
+// gpt-4o-mini-transcribe is faster + more accurate than whisper-1 for short
+// speech clips (and cheaper). Overridable via env for a no-deploy rollback.
+const STT_MODEL = process.env.TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe';
 
 export const config = {
   api: {
@@ -53,12 +57,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const form = new FormData();
     form.append('file', new Blob([buf], { type: contentType }), `audio.${ext}`);
-    form.append('model', 'whisper-1');
+    form.append('model', STT_MODEL);
     form.append('language', 'en');
-    // verbose_json adds `duration` (seconds of audio) — used for cost tracking.
-    // `text` is still present, so the response handling below is unchanged.
-    form.append('response_format', 'verbose_json');
-    // Vocabulary biasing — nudges Whisper toward inspection/construction terms
+    // The gpt-4o transcribe models support only `json` / `text` (no verbose_json),
+    // so we don't get an exact `duration` back — cost is estimated from the clip
+    // size below. whisper-1 still supports verbose_json if rolled back via env.
+    form.append('response_format', /whisper/.test(STT_MODEL) ? 'verbose_json' : 'json');
+    // Vocabulary biasing — nudges the model toward inspection/construction terms
     // (e.g. "mist match") instead of plausible-sounding everyday words.
     if (prompt && typeof prompt === 'string') form.append('prompt', prompt.slice(0, 800));
 
@@ -73,8 +78,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(502).json({ error: `Transcription failed (${r.status}).` });
     }
     const d = await r.json();
-    const seconds = Number(d?.duration);
-    recordAiUsage({ source: 'transcribe', model: 'whisper', costUSD: estimateWhisperCostUSD(isFinite(seconds) ? seconds : 0) });
+    // Use the exact duration when present (verbose_json), else estimate from the
+    // compressed clip size (~32 kbps speech) — telemetry only, not billed.
+    const seconds = Number.isFinite(Number(d?.duration)) ? Number(d.duration) : buf.length / 4000;
+    recordAiUsage({ source: 'transcribe', model: STT_MODEL, costUSD: estimateTranscribeCostUSD(STT_MODEL, seconds) });
     return res.status(200).json({ text: String(d.text || '').trim() });
   } catch (e: any) {
     console.error('POST /api/transcribe failed:', e);

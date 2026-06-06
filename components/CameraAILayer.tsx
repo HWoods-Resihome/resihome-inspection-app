@@ -800,6 +800,10 @@ export function CameraAILayer(props: Props) {
           seenCodes: Array.from(seen.codes),
           active: chipsRef.current.filter((c) => c.roomId === room.id).map((c) => ({ id: c.id, description: c.description, unit: c.unit })),
           frame: b64 || '',
+          // Stream the response (SSE) so each call-out chip pops in the instant
+          // the model finishes that item — like the home-screen mic — instead of
+          // waiting for the whole batch.
+          stream: true,
         }),
       });
       if (!openRef.current) return;
@@ -810,74 +814,101 @@ export function CameraAILayer(props: Props) {
         setErrText(`AI ${r.status}: ${String(e?.error || '').slice(0, 80) || 'request failed'}`);
         return;
       }
-      const d = await r.json();
       setErrText('');
-      commitContext();
-      const nS = Array.isArray(d.suggestions) ? d.suggestions.length : 0;
-      const nE = Array.isArray(d.edits) ? d.edits.length : 0;
-      const nU = Array.isArray(d.unmatched) ? d.unmatched.length : 0;
-      dbg(`vision ✓${delta ? ` +voice` : ''} sugg:${nS} edit:${nE} unmatch:${nU}`);
 
-      const editList: any[] = Array.isArray(d.edits) ? d.edits : [];
-      if (editList.length) {
+      // One supporting still per inference cycle, shared across its call-outs —
+      // captured lazily on the FIRST suggestion so silent/no-op ticks cost nothing.
+      let cycleStillP: Promise<string | undefined> | null = null;
+      const ensureStill = () => (cycleStillP ??= captureStill(true, 'call-out', false));
+
+      let nSugg = 0, nEdit = 0;
+      const unmatchedList: string[] = [];
+
+      // Add a single streamed suggestion as soon as it arrives.
+      const applySuggestion = (s: LiveSuggestion) => {
+        if (!s || !s.lineItemCode || seen.codes.has(s.lineItemCode)) return;
+        seen.codes.add(s.lineItemCode);
+        seen.descs.add(s.description);
+        s.roomId = room.id;
+        nSugg++;
+        setEditById((m) => ({ ...m, [s.id]: seedEdit(s) }));
+        setChips((cur) => [...cur, s]);
+        // Attach the call-out still in the BACKGROUND; the chip is the deliverable.
+        const p = ensureStill().then((url) => {
+          if (url && openRef.current) {
+            s.stillUrl = url;
+            setChips((cur) => cur.map((c) => (c.id === s.id ? { ...c, stillUrl: url } : c)));
+          }
+          return url;
+        });
+        stillUploadRef.current[s.id] = p;
+      };
+
+      // Apply a single streamed voice edit to its pending chip.
+      const applyEdit = (e: any) => {
+        if (!e || !e.targetId) return;
+        nEdit++;
         setChips((cur) => cur.map((c) => {
-          const e = editList.find((x) => x.targetId === c.id);
-          if (!e) return c;
+          if (e.targetId !== c.id) return c;
           const nc = { ...c };
           if (e.lineItemCode) { nc.lineItemCode = e.lineItemCode; nc.description = e.description || nc.description; nc.category = e.category || nc.category; nc.subcategory = e.subcategory ?? nc.subcategory; nc.unit = e.unit || nc.unit; nc.needsMeasurement = !!e.needsMeasurement; nc.measurementUnit = e.measurementUnit || ''; }
           return nc;
         }));
-        // Voice amendments write into the same editById the card binds to.
         setEditById((m) => {
-          const n = { ...m };
-          for (const e of editList) {
-            const cur = n[e.targetId] || EMPTY_EDIT;
-            const patch: ChipEdit = { ...cur };
-            if (e.vendor) patch.vendor = e.vendor;
-            if (typeof e.tenantBillBackPercent === 'number') patch.tenantPct = String(e.tenantBillBackPercent);
-            if (typeof e.quantity === 'number') patch.qty = String(e.quantity);
-            n[e.targetId] = patch;
-          }
-          return n;
+          const cur = m[e.targetId] || EMPTY_EDIT;
+          const patch: ChipEdit = { ...cur };
+          if (e.vendor) patch.vendor = e.vendor;
+          if (typeof e.tenantBillBackPercent === 'number') patch.tenantPct = String(e.tenantBillBackPercent);
+          if (typeof e.quantity === 'number') patch.qty = String(e.quantity);
+          return { ...m, [e.targetId]: patch };
         });
-        const ed = editList[0];
-        dbg(`edit ${ed.vendor ? `vendor=${ed.vendor}` : ''}${typeof ed.quantity === 'number' ? ` qty=${ed.quantity}` : ''}${typeof ed.tenantBillBackPercent === 'number' ? ` tenant=${ed.tenantBillBackPercent}` : ''}`.trim());
+        dbg(`edit ${e.vendor ? `vendor=${e.vendor}` : ''}${typeof e.quantity === 'number' ? ` qty=${e.quantity}` : ''}${typeof e.tenantBillBackPercent === 'number' ? ` tenant=${e.tenantBillBackPercent}` : ''}`.trim());
+      };
+
+      // ---- read the SSE stream, dispatching events as they land ----
+      const reader = r.body?.getReader();
+      if (reader) {
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let evName = '';
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!openRef.current) { try { await reader.cancel(); } catch { /* noop */ } break; }
+          buffer += decoder.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, nl).replace(/\r$/, '');
+            buffer = buffer.slice(nl + 1);
+            if (line.startsWith('event:')) { evName = line.slice(6).trim(); continue; }
+            if (!line.startsWith('data:')) continue;
+            const payload = line.slice(5).trim();
+            if (!payload) continue;
+            let obj: any;
+            try { obj = JSON.parse(payload); } catch { continue; }
+            if (evName === 'suggestion') applySuggestion(obj as LiveSuggestion);
+            else if (evName === 'edit') applyEdit(obj);
+            else if (evName === 'unmatched') { if (obj?.query) unmatchedList.push(String(obj.query)); }
+          }
+        }
+      } else {
+        // Defensive fallback: no stream body (shouldn't happen) — parse as JSON.
+        const d = await r.json().catch(() => ({}));
+        for (const e of (Array.isArray(d.edits) ? d.edits : [])) applyEdit(e);
+        for (const s of (Array.isArray(d.suggestions) ? d.suggestions : [])) applySuggestion(s);
+        for (const u of (Array.isArray(d.unmatched) ? d.unmatched : [])) unmatchedList.push(String(u));
       }
 
-      const incoming: LiveSuggestion[] = Array.isArray(d.suggestions) ? d.suggestions : [];
-      const fresh = incoming.filter((s) => s.lineItemCode && !seen.codes.has(s.lineItemCode));
-      if (fresh.length) {
-        // Render the call-out card(s) IMMEDIATELY — don't block visualization on
-        // the photo upload. The card is the deliverable; the still is supporting
-        // evidence and can attach a beat later.
-        const seeds: Record<string, ChipEdit> = {};
-        for (const s of fresh) {
-          seen.codes.add(s.lineItemCode);
-          seen.descs.add(s.description);
-          s.roomId = room.id;
-          seeds[s.id] = seedEdit(s);
-        }
-        setEditById((m) => ({ ...m, ...seeds }));
-        setChips((cur) => [...cur, ...fresh]);
-        // Grab + upload the call-out frame in the BACKGROUND, then patch its URL
-        // onto the chips (thumbnail) and the suggestion objects (so Add tags it to
-        // the line). The upload promise is tracked per-chip so Add can await it.
-        const freshIds = fresh.map((f) => f.id);
-        const stillP = captureStill(true, 'call-out', false).then((url) => {
-          if (url && openRef.current) {
-            for (const f of fresh) f.stillUrl = url;
-            setChips((cur) => cur.map((c) => (freshIds.includes(c.id) ? { ...c, stillUrl: url } : c)));
-          }
-          return url;
-        });
-        for (const id of freshIds) stillUploadRef.current[id] = stillP;
-      }
+      // Stream finished cleanly — commit this utterance to context for the next
+      // tick and report the tally.
+      commitContext();
+      dbg(`vision ✓${delta ? ` +voice` : ''} sugg:${nSugg} edit:${nEdit} unmatch:${unmatchedList.length}`);
 
       // The model heard/saw something but it didn't map to a catalog item — tell
       // the inspector instead of silently dropping it.
-      const unmatched: string[] = Array.isArray(d.unmatched) ? d.unmatched : [];
-      if (!fresh.length && !editList.length && unmatched.length) {
-        setHeardText(`No catalog match for “${unmatched[0]}” — try naming the work`);
+      if (!nSugg && !nEdit && unmatchedList.length) {
+        setHeardText(`No catalog match for “${unmatchedList[0]}” — try naming the work`);
       }
     } catch (e: any) {
       rebufferOnFail();
