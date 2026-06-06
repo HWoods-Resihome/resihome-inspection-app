@@ -292,6 +292,16 @@ export function CameraCapture({
   // latest value without depending on state closures.
   const itemsRef = useRef<CaptureItem[]>([]);
   useEffect(() => { itemsRef.current = items; }, [items]);
+  // Captured-photo strip auto-scroll: always reveal the LATEST shot (appended at
+  // the end) as photos come in — horizontally in portrait, vertically in
+  // landscape. Setting both axes is safe; the non-scrollable one clamps to 0.
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    el.scrollTo({ left: el.scrollWidth, top: el.scrollHeight, behavior: 'smooth' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
 
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
   // Multiple back lenses (ultra-wide / wide / tele) are SEPARATE camera devices,
@@ -1165,33 +1175,23 @@ export function CameraCapture({
     for (const f of picked) enqueueFile(f);
   }, [enqueueFile, maxPhotos]);
 
-  const capturePhoto = useCallback(async () => {
-    if (busy) return;
-    if (items.length >= maxPhotos) {
+  const capturePhoto = useCallback(() => {
+    // Count from the ref so rapid taps see the live total (state can lag a frame).
+    if (itemsRef.current.length >= maxPhotos) {
       void dialog.alert(`You can capture up to ${maxPhotos} photos per session. Tap Done to finish.`);
       return;
     }
     const video = videoRef.current;
-    if (!video || video.readyState < 2) {
-      // Video not ready yet; let the user try again in a moment
-      return;
-    }
-    setBusy(true);
+    if (!video || video.readyState < 2) return; // not ready; try again in a moment
+    // IMPORTANT: do NOT set `busy` here. The shutter must stay enabled so the
+    // inspector can fire rapid shots. We grab the frame SYNCHRONOUSLY (fast),
+    // then encode + upload in the BACKGROUND via canvas.toBlob (which encodes
+    // off the main thread) — so there's no greyed-out button between shots.
     try {
-      // Grab the live PREVIEW frame — instant, so the shutter stays snappy and
-      // rapid taps work. We deliberately do NOT use ImageCapture.takePhoto():
-      // it freezes/reconfigures the camera on every shot and blocks rapid
-      // capture. The preview track is already requested at high resolution, so
-      // the frame is plenty sharp.
       const src: CanvasImageSource = video;
       const srcW = video.videoWidth;
       const srcH = video.videoHeight;
-      if (!srcW || !srcH) {
-        setBusy(false);
-        return;
-      }
-      // Cap the saved photo's long edge (harmless headroom — the preview track
-      // is already ≤ this). Keeps any unusually large frame in check.
+      if (!srcW || !srcH) return;
       const longEdge = Math.max(srcW, srcH);
       const scale = Math.min(1, MAX_SAVE_EDGE / longEdge);
       const vw = Math.max(1, Math.round(srcW * scale));
@@ -1200,15 +1200,10 @@ export function CameraCapture({
       canvas.width = vw;
       canvas.height = vh;
       const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        setBusy(false);
-        return;
-      }
+      if (!ctx) return;
       ctx.imageSmoothingQuality = 'high';
       // Center-crop by the live DIGITAL zoom factor (effZoom()===1 when the
-      // sensor is doing the zoom, so a hardware-zoomed frame is used as-is;
-      // only the digital-zoom fallback crops here), scaling the source into the
-      // (capped) output canvas.
+      // sensor is doing the zoom, so a hardware-zoomed frame is used as-is).
       const z = effZoom();
       if (z > 1.001) {
         const sw = srcW / z, sh = srcH / z;
@@ -1216,34 +1211,26 @@ export function CameraCapture({
       } else {
         ctx.drawImage(src, 0, 0, srcW, srcH, 0, 0, vw, vh);
       }
-      // Burn the evidence stamp (address / timestamp / GPS coordinates) into the
-      // frame. Coordinates are recorded as-is; no address-match verdict.
+      // Evidence stamp (address / timestamp / GPS). Recorded as-is.
       const stampLines: StampLine[] = [];
       if (addressSnapshot) stampLines.push({ text: addressSnapshot });
       stampLines.push({ text: new Date().toLocaleString() });
       stampLines.push(...buildGeoStampLines());
       drawEvidenceStamp(ctx, vw, vh, stampLines);
-      // Convert to JPEG blob (saved-photo quality — slightly below the preview
-      // const since this is a high-resolution still being uploaded from the field).
-      const blob: Blob | null = await new Promise((resolve) => {
-        canvas.toBlob((b) => resolve(b), 'image/jpeg', PHOTO_SAVE_QUALITY);
-      });
-      if (!blob) {
-        setBusy(false);
-        return;
-      }
-      const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const file = new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' });
-      enqueueFile(file);
-      // Mark manual-capture activity so the AI layer's auto-still fallback stays
-      // quiet while the inspector is actively shooting their own photos.
+      // Keep the AI auto-still fallback quiet while the inspector shoots.
       lastManualCaptureRef.current = Date.now();
+      // Encode + enqueue in the background — never awaited, so the shutter is
+      // instantly ready for the next shot.
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const file = new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' });
+        enqueueFile(file);
+      }, 'image/jpeg', PHOTO_SAVE_QUALITY);
     } catch (e: any) {
       console.error('Capture error:', e);
-    } finally {
-      setBusy(false);
     }
-  }, [busy, items.length, maxPhotos, enqueueFile, addressSnapshot, buildGeoStampLines]);
+  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines]);
 
   // ----- Per-photo retake/delete -----
 
@@ -1932,7 +1919,7 @@ export function CameraCapture({
           that fills the height and scrolls vertically — so 12+ shots stack and
           scroll instead of running off the side. */}
       {items.length > 0 && (
-        <div className={`bg-black/80 ${isLandscape ? 'overflow-y-auto w-[88px] shrink-0 px-2 py-2 min-h-0' : 'overflow-x-auto px-3 py-2'}`}>
+        <div ref={stripRef} className={`bg-black/80 ${isLandscape ? 'overflow-y-auto w-[88px] shrink-0 px-2 py-2 min-h-0' : 'overflow-x-auto px-3 py-2'}`}>
           <div className={`flex gap-2 ${isLandscape ? 'flex-col items-center' : ''}`}>
             {items.map((it) => (
               <div key={it.id} className="relative shrink-0">
