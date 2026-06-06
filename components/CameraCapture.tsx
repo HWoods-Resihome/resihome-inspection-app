@@ -701,6 +701,20 @@ export function CameraCapture({
     };
   }, [isOpen]);
 
+  // Track landscape so the header can collapse its two rows into ONE slim bar
+  // (Cancel · nav · AI status · controls) — in landscape vertical space is
+  // precious, and there's plenty of width to hold it all on a single line.
+  const [isLandscape, setIsLandscape] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(orientation: landscape)');
+    const apply = () => setIsLandscape(mq.matches);
+    apply();
+    mq.addEventListener?.('change', apply);
+    window.addEventListener('resize', apply);
+    return () => { mq.removeEventListener?.('change', apply); window.removeEventListener('resize', apply); };
+  }, []);
+
   // While the camera is open, keep a fresh GPS fix so each shot can be stamped.
   // Best-effort: if the user denies location or it's unavailable, we just stamp
   // address + time without coordinates.
@@ -1352,6 +1366,54 @@ export function CameraCapture({
   const uploadingCount = items.filter((it) => it.status === 'uploading').length;
   const failedCount = items.filter((it) => it.status === 'failed').length;
 
+  // AI status (dot + text) and the Teach/Turn controls — shared so they can sit
+  // either on their own row (portrait) or inline on the top bar (landscape).
+  const aiStatusContent = (
+    <div className="text-[12px] flex items-center gap-1.5 min-w-0">
+      {aiOn ? (
+        <>
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+            aiStatus?.tone === 'err' ? 'bg-rose-400'
+              : aiStatus?.tone === 'think' ? 'bg-violet-400 animate-pulse'
+              : aiStatus?.tone === 'heard' ? 'bg-emerald-400 animate-pulse'
+              : aiStatus?.tone === 'listen' ? 'bg-emerald-400 animate-pulse'
+              : 'bg-white/40'}`} />
+          <span className={`truncate ${aiStatus?.tone === 'err' ? 'text-rose-200' : aiStatus?.tone === 'heard' ? 'italic text-emerald-200' : 'text-white/90'}`}>
+            {aiStatus?.text || 'Starting AI assist…'}
+          </span>
+        </>
+      ) : (
+        <>
+          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-white/40" />
+          <span className="truncate text-white/70">AI paused — voice &amp; call-outs off</span>
+        </>
+      )}
+    </div>
+  );
+  const aiButtons = (
+    <div className="flex items-center gap-2 shrink-0">
+      {/* Teach the AI — record a voice tip that trains the live knowledge base. */}
+      <button
+        type="button"
+        onClick={() => setKbTrainerOpen(true)}
+        className="inline-flex items-center gap-1 text-[11px] font-heading font-semibold px-2.5 py-1 rounded-full border border-white/30 text-white/90 hover:bg-white/10 transition-colors"
+        aria-label="Teach the AI"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></svg>
+        Teach AI
+      </button>
+      {/* Toggle the AI voice + live call-outs on/off (e.g. on low service). */}
+      <button
+        type="button"
+        onClick={() => setAiOn((v) => !v)}
+        className={`text-[11px] font-heading font-semibold px-2.5 py-1 rounded-full border transition-colors ${aiOn ? 'border-white/30 text-white/90 hover:bg-white/10' : 'border-violet-400 bg-violet-600 text-white'}`}
+        aria-pressed={aiOn}
+      >
+        {aiOn ? 'Turn AI off' : 'Turn AI on'}
+      </button>
+    </div>
+  );
+
   return (
     <div ref={rootRef} className="fixed inset-0 z-50 h-[100dvh] bg-black flex flex-col select-none overflow-hidden overscroll-none animate-fadeIn">
       {/* AI assist (Beta) — overlay that reads this camera's video + its own mic. */}
@@ -1412,55 +1474,26 @@ export function CameraCapture({
             {failedCount > 0 && ` · ${failedCount} failed`}
           </div>
         )}
-        <div className="w-14 shrink-0" aria-hidden />
+        {/* Landscape: the AI status + controls ride on THIS row (no second row),
+            so the header stays a single slim bar. Portrait keeps the spacer
+            (the AI strip renders as its own row below). */}
+        {aiAssist && isLandscape ? (
+          <div className="flex items-center gap-2 shrink-0 min-w-0 max-w-[55%]">
+            {aiStatusContent}
+            {aiButtons}
+          </div>
+        ) : (
+          <div className="w-14 shrink-0" aria-hidden />
+        )}
       </div>
 
-      {/* AI-assist status strip — lives in the black header (below the title),
-          out of the live image, so the inspector always sees Listening/Thinking
-          /transcript without it covering the camera. */}
-      {aiAssist && (
+      {/* AI-assist status strip — its OWN row in portrait (width is tight there);
+          in landscape it's merged into the top bar above. Out of the live image,
+          so the inspector always sees Listening/Thinking/transcript. */}
+      {aiAssist && !isLandscape && (
         <div className="lz-head bg-black/75 text-white px-4 py-0.5 flex items-center justify-between gap-2 border-b border-white/10">
-          <div className="text-[12px] flex items-center gap-1.5 min-w-0">
-            {aiOn ? (
-              <>
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                  aiStatus?.tone === 'err' ? 'bg-rose-400'
-                    : aiStatus?.tone === 'think' ? 'bg-violet-400 animate-pulse'
-                    : aiStatus?.tone === 'heard' ? 'bg-emerald-400 animate-pulse'
-                    : aiStatus?.tone === 'listen' ? 'bg-emerald-400 animate-pulse'
-                    : 'bg-white/40'}`} />
-                <span className={`truncate ${aiStatus?.tone === 'err' ? 'text-rose-200' : aiStatus?.tone === 'heard' ? 'italic text-emerald-200' : 'text-white/90'}`}>
-                  {aiStatus?.text || 'Starting AI assist…'}
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-white/40" />
-                <span className="text-white/70">AI paused — voice &amp; call-outs off</span>
-              </>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Teach the AI — record a voice tip that trains the live knowledge base. */}
-            <button
-              type="button"
-              onClick={() => setKbTrainerOpen(true)}
-              className="inline-flex items-center gap-1 text-[11px] font-heading font-semibold px-2.5 py-1 rounded-full border border-white/30 text-white/90 hover:bg-white/10 transition-colors"
-              aria-label="Teach the AI"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></svg>
-              Teach AI
-            </button>
-            {/* Toggle the AI voice + live call-outs on/off (e.g. on low service). */}
-            <button
-              type="button"
-              onClick={() => setAiOn((v) => !v)}
-              className={`text-[11px] font-heading font-semibold px-2.5 py-1 rounded-full border transition-colors ${aiOn ? 'border-white/30 text-white/90 hover:bg-white/10' : 'border-violet-400 bg-violet-600 text-white'}`}
-              aria-pressed={aiOn}
-            >
-              {aiOn ? 'Turn AI off' : 'Turn AI on'}
-            </button>
-          </div>
+          {aiStatusContent}
+          {aiButtons}
         </div>
       )}
 
