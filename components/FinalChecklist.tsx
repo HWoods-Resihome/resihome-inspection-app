@@ -11,9 +11,9 @@
 
 import { useEffect, useState } from 'react';
 import {
-  FINAL_CHECKLIST, FC_FILTER_OTHER,
+  FINAL_CHECKLIST, FC_FILTER_OTHER, fcSectionCounts,
   type FcQuestion, type FcAddLineRule,
-  type FcAnswerState, type FcAnswers,
+  type FcAnswerState, type FcAnswers, type FcCompletionCtx,
 } from '@/lib/finalChecklist';
 import { titleCase } from '@/lib/titleCase';
 import { ListPicker } from '@/components/ListPicker';
@@ -106,6 +106,19 @@ export function FinalChecklist(props: Props) {
   const sections = props.only ? FINAL_CHECKLIST.filter((s) => props.only!.includes(s.id)) : FINAL_CHECKLIST;
   const allSubsOpen = sections.every((s) => openSections[s.id] ?? true);
   const setAllSubs = (v: boolean) => setOpenSections(Object.fromEntries(sections.map((s) => [s.id, v])));
+
+  // Completion context for the per-section "X/Y" pills (built from props).
+  const countCtx: FcCompletionCtx = {
+    septicFee: num(props.propertyValues?.septic_fee),
+    airQtyPrefill: num(props.propertyValues?.air_filters___total_quantity),
+    filterOptionsAvailable: (props.filterSizeOptions?.length || 0) > 0,
+    filterPrefills: [
+      (props.propertyValues?.air_filters___type__1 as string) || null,
+      (props.propertyValues?.air_filters___type__2 as string) || null,
+      (props.propertyValues?.air_filters___type__3 as string) || null,
+    ],
+  };
+  const skipLineRules = !props.onAddLine;
 
   // ---- shared photo strip (standardized yellow dashed "+" add box) ----
   function PhotoStrip({ urls, camKey, required, center }: { urls: string[]; camKey: string; required?: boolean; center?: boolean }) {
@@ -538,7 +551,10 @@ export function FinalChecklist(props: Props) {
           className={`shrink-0 transition-transform ${sopen ? 'rotate-90' : ''}`}>
           <polyline points="9 18 15 12 9 6" />
         </svg>
-        <h2 className="font-heading font-bold text-lg truncate min-w-0">{titleCase(section.name)}</h2>
+        <h2 className="font-heading font-bold text-lg truncate min-w-0 flex-1">{titleCase(section.name)}</h2>
+        {(() => { const c = fcSectionCounts(answers, countCtx, section.id, { skipLineRules }); return (
+          <span className="shrink-0 text-sm bg-brand text-white font-heading font-semibold px-2.5 py-0.5 rounded-full">{c.completed}/{c.total}</span>
+        ); })()}
       </button>
     ) : (
       <button

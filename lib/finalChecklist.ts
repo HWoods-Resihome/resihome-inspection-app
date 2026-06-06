@@ -288,51 +288,83 @@ export function summarizeFinalChecklist(
  *  (e.g. "HVAC & Air Filters · Label Sticker Photos: add the Air Handler photo").
  *  Returns null when the checklist is complete. Single source of truth for both
  *  the completeness gate and the submit tooltip/flash. */
+// Per-question completeness. Returns the short reason it's INCOMPLETE, or null
+// when satisfied. Shared by the submit gate and the section progress counts so
+// they can never diverge.
+function fcQuestionGap(
+  q: FcQuestion, ans: FcAnswerState, ctx: FcCompletionCtx, a: FcAnswers,
+  opts?: { skipLineRules?: boolean }
+): string | null {
+  if (q.type === 'device_subform') {
+    if (q.required && !ans.value) return 'choose a device type';
+    const dev = (q.devices || []).find((d) => d.value === ans.value);
+    if (dev?.fields) for (const f of dev.fields) {
+      if (f.required && !((ans.device?.[f.id] || '').trim())) return `${f.label} required`;
+    }
+    return null;
+  }
+  if (q.type === 'number') {
+    const eff = ans.quantity ?? ctx.airQtyPrefill ?? q.min ?? null;
+    if (q.required && eff == null) return 'enter a value';
+    return null;
+  }
+  if (q.type === 'filter_sizes') {
+    if (!ctx.filterOptionsAvailable) return null;
+    const count = fcFilterCount(a, ctx.airQtyPrefill);
+    const sizes = ans.filterSizes || [];
+    for (let i = 0; i < count; i++) {
+      const sel = (sizes[i] || ctx.filterPrefills[i] || '').trim();
+      if (!sel) return `select Filter Size #${i + 1}`;
+      if (sel === FC_FILTER_OTHER && !((ans.filterSizesOther?.[i] || '').trim())) return `enter the custom Filter Size #${i + 1}`;
+    }
+    return null;
+  }
+  if (q.type === 'photo_set') {
+    for (const p of (q.photos || [])) {
+      if (p.required && !((ans.stickerPhotos?.[p.id] || []).length)) return `add the ${p.label} photo`;
+    }
+    return null;
+  }
+  // single_select
+  if (q.required && !ans.value) return 'choose an answer';
+  if ((q.photoRequiredOnValues || []).includes(ans.value || '') && !((ans.photoUrls || []).length)) return 'add a photo';
+  if ((q.noteRequiredOnValues || []).includes(ans.value || '') && !((ans.note || '').trim())) return 'add a note';
+  const cnt = (q.countOnValues || []).find((c) => c.value === ans.value);
+  if (cnt && ans.count == null) return cnt.label;
+  const addRule = (q.addLineOnValues || []).find((r) => r.value === ans.value);
+  if (addRule && !opts?.skipLineRules && !ans.added && !ans.declined && !ctx.lineExists?.(addRule.rule.lineItemCode)) {
+    return 'add or decline the suggested line';
+  }
+  return null;
+}
+
 export function finalChecklistGap(a: FcAnswers, ctx: FcCompletionCtx, opts?: { onlySectionIds?: string[]; skipLineRules?: boolean }): string | null {
   for (const section of FINAL_CHECKLIST) {
     if (opts?.onlySectionIds && !opts.onlySectionIds.includes(section.id)) continue;
     for (const q of section.questions) {
       if (!fcQuestionVisible(q, ctx)) continue;
-      const ans = a[q.id] || {};
-      const where = `${section.name} · ${q.label}`;
-      if (q.type === 'device_subform') {
-        if (q.required && !ans.value) return `${where}: choose a device type`;
-        const dev = (q.devices || []).find((d) => d.value === ans.value);
-        if (dev?.fields) {
-          for (const f of dev.fields) {
-            if (f.required && !((ans.device?.[f.id] || '').trim())) return `${where}: ${f.label} required`;
-          }
-        }
-      } else if (q.type === 'number') {
-        const eff = ans.quantity ?? ctx.airQtyPrefill ?? q.min ?? null;
-        if (q.required && eff == null) return `${where}: enter a value`;
-      } else if (q.type === 'filter_sizes') {
-        if (!ctx.filterOptionsAvailable) continue;
-        const count = fcFilterCount(a, ctx.airQtyPrefill);
-        const sizes = ans.filterSizes || [];
-        for (let i = 0; i < count; i++) {
-          const sel = (sizes[i] || ctx.filterPrefills[i] || '').trim();
-          if (!sel) return `${where}: select Filter Size #${i + 1}`;
-          if (sel === FC_FILTER_OTHER && !((ans.filterSizesOther?.[i] || '').trim())) return `${where}: enter the custom Filter Size #${i + 1}`;
-        }
-      } else if (q.type === 'photo_set') {
-        for (const p of (q.photos || [])) {
-          if (p.required && !((ans.stickerPhotos?.[p.id] || []).length)) return `${where}: add the ${p.label} photo`;
-        }
-      } else { // single_select
-        if (q.required && !ans.value) return `${where}: choose an answer`;
-        if ((q.photoRequiredOnValues || []).includes(ans.value || '') && !((ans.photoUrls || []).length)) return `${where}: add a photo`;
-        if ((q.noteRequiredOnValues || []).includes(ans.value || '') && !((ans.note || '').trim())) return `${where}: add a note`;
-        const cnt = (q.countOnValues || []).find((c) => c.value === ans.value);
-        if (cnt && ans.count == null) return `${where}: ${cnt.label}`;
-        const addRule = (q.addLineOnValues || []).find((r) => r.value === ans.value);
-        if (addRule && !opts?.skipLineRules && !ans.added && !ans.declined && !ctx.lineExists?.(addRule.rule.lineItemCode)) {
-          return `${where}: add or decline the suggested line`;
-        }
-      }
+      const g = fcQuestionGap(q, a[q.id] || {}, ctx, a, opts);
+      if (g) return `${section.name} · ${q.label}: ${g}`;
     }
   }
   return null;
+}
+
+/** Answered/total counts for one Final Checklist section (visible questions
+ *  only) — drives the "X/Y" pill and the form's header total. */
+export function fcSectionCounts(
+  a: FcAnswers, ctx: FcCompletionCtx, sectionId: string,
+  opts?: { skipLineRules?: boolean }
+): { completed: number; total: number } {
+  const section = FINAL_CHECKLIST.find((s) => s.id === sectionId);
+  if (!section) return { completed: 0, total: 0 };
+  let completed = 0, total = 0;
+  for (const q of section.questions) {
+    if (!fcQuestionVisible(q, ctx)) continue;
+    total++;
+    if (!fcQuestionGap(q, a[q.id] || {}, ctx, a, opts)) completed++;
+  }
+  return { completed, total };
 }
 
 /** True only when every required (and visible) checklist item is satisfied —

@@ -18,7 +18,7 @@ import { buildQaAnswerProps, buildSectionPhotoAnswerProps } from '@/lib/answerPr
 import { isHvacSection, isSmartHomeSection } from '@/lib/scopeWidgetSections';
 import { FinalChecklist } from '@/components/FinalChecklist';
 import {
-  finalChecklistGap,
+  finalChecklistGap, fcSectionCounts,
   type FcAnswers, type FcAnswerState, type FcCompletionCtx,
 } from '@/lib/finalChecklist';
 
@@ -1150,8 +1150,16 @@ export function QuestionForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionInstances, answers]);
 
-  const totalCompleted = Object.values(sectionProgress).reduce((acc, s) => acc + s.completed, 0);
-  const totalQuestions = Object.values(sectionProgress).reduce((acc, s) => acc + s.total, 0);
+  // Roll the reused Scope sections (HVAC/Smart Home/Utilities) into the header
+  // total alongside the question sections.
+  const fcTotals = scopeStyle
+    ? FC_ONLY.reduce((acc, id) => {
+        const c = fcSectionCounts(fcAnswers, fcCtx, id, { skipLineRules: true });
+        return { completed: acc.completed + c.completed, total: acc.total + c.total };
+      }, { completed: 0, total: 0 })
+    : { completed: 0, total: 0 };
+  const totalCompleted = Object.values(sectionProgress).reduce((acc, s) => acc + s.completed, 0) + fcTotals.completed;
+  const totalQuestions = Object.values(sectionProgress).reduce((acc, s) => acc + s.total, 0) + fcTotals.total;
 
   // The Review/Sign-off/Summary section (if any) renders LAST — after the reused
   // Scope HVAC/Smart Home/Utilities bubbles. (After the cleanup these merge into
@@ -1204,8 +1212,10 @@ export function QuestionForm({
               </button>
             )}
             <div className="min-w-0">
+            {/* Property name shows in full (wraps); the secondary meta + listing
+                stay one line each so the header stays compact. */}
             <div className="text-sm font-heading font-semibold text-ink break-words">{propertyName}</div>
-            <div className="text-xs text-gray-500 break-words">
+            <div className="text-xs text-gray-500 truncate">
               {templateLabel} &middot; {inspectorName} &middot; {bedrooms}BR / {bathrooms}BA
               {squareFootage != null && squareFootage > 0 && (
                 <span> &middot; {squareFootage.toLocaleString()} sqft</span>
@@ -1214,7 +1224,7 @@ export function QuestionForm({
             </div>
             {/* Listing price + date (most recent active/published listing). */}
             {(typeof listingPrice === 'number' && listingPrice > 0) || listingDate ? (
-              <div className="text-xs text-emerald-700 font-heading font-semibold break-words">
+              <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
                 {typeof listingPrice === 'number' && listingPrice > 0 && (
                   <span>Listing ${listingPrice.toLocaleString()}</span>
                 )}
