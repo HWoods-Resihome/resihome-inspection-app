@@ -59,6 +59,20 @@ async function verifySession(token: string, secret: Uint8Array): Promise<boolean
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  // Already signed in AND hitting the login page → skip it, go straight to the
+  // app. If the session is missing/expired, fall through to the normal login.
+  if (pathname === '/login') {
+    const token = req.cookies.get('resihome_session')?.value;
+    const secret = process.env.SESSION_SECRET;
+    if (token && secret && (await verifySession(token, new TextEncoder().encode(secret)))) {
+      const url = req.nextUrl.clone();
+      url.pathname = '/';
+      url.search = '';
+      return NextResponse.redirect(url);
+    }
+    return NextResponse.next();
+  }
+
   if (PUBLIC_PATHS.has(pathname) || isStaticAsset(pathname)) {
     return NextResponse.next();
   }
