@@ -15,10 +15,12 @@ export const config = { maxDuration: 60 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // Auth: Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`. Also accept
-  // `?key=` for manual/local triggering. If CRON_SECRET isn't set, refuse
-  // (so the endpoint can't be hit anonymously in production).
+  // `?key=` for manual/local triggering. If CRON_SECRET isn't set we can't
+  // authenticate the run, so we SKIP the sweep (a safe no-op) and return 200 —
+  // returning 503 every minute just spammed the logs with a false "error". Set
+  // CRON_SECRET in Vercel to actually enable the SFTP watch sweep.
   const secret = process.env.CRON_SECRET || '';
-  if (!secret) return res.status(503).json({ error: 'CRON_SECRET not configured.' });
+  if (!secret) return res.status(200).json({ ok: true, skipped: true, reason: 'CRON_SECRET not configured — SFTP watch sweep disabled.' });
   const auth = req.headers.authorization || '';
   const provided = auth.startsWith('Bearer ') ? auth.slice(7) : (typeof req.query.key === 'string' ? req.query.key : '');
   if (provided !== secret) return res.status(401).json({ error: 'Unauthorized' });
