@@ -1047,7 +1047,7 @@ export function CameraAILayer(props: Props) {
       {/* On-device debug HUD (mic → Whisper → vision). Hidden unless DEBUG_DEFAULT
           is flipped on; dbg() still logs to the console either way. */}
       {dbgOn && (
-        <div className="absolute left-2 top-[220px] z-40 w-[190px] bg-black/78 rounded-lg p-2 text-[9px] leading-[1.35] text-emerald-200 font-mono pointer-events-auto shadow-lg">
+        <div className="absolute left-2 top-[84px] z-40 w-[190px] bg-black/78 rounded-lg p-2 text-[9px] leading-[1.35] text-emerald-200 font-mono pointer-events-auto shadow-lg">
           <div className="flex items-center justify-between mb-1">
             <span className="text-white font-bold">AI DEBUG</span>
             <button onClick={() => setDbgOn(false)} className="text-white/70 px-1">✕</button>
@@ -1059,7 +1059,7 @@ export function CameraAILayer(props: Props) {
         </div>
       )}
       {DEBUG_DEFAULT && !dbgOn && (
-        <button onClick={() => setDbgOn(true)} className="absolute left-2 top-[220px] z-40 pointer-events-auto bg-black/60 rounded-full w-7 h-7 text-sm">🐞</button>
+        <button onClick={() => setDbgOn(true)} className="absolute left-2 top-[84px] z-40 pointer-events-auto bg-black/60 rounded-full w-7 h-7 text-sm">🐞</button>
       )}
 
       {/* Chip tray — floats above the camera controls. Each card has inline

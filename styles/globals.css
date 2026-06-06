@@ -156,6 +156,19 @@ h1, h2, h3, h4, h5, h6 {
   .lz-hide { display: none !important; }
   /* Camera shutter: shrink a touch so the control bar doesn't eat the preview. */
   .lz-shutter { width: 3rem !important; height: 3rem !important; border-width: 3px !important; }
+  /* Camera in landscape: dock the controls as a VERTICAL RAIL on the right so the
+     live preview gets the full height instead of a squeezed strip. */
+  .lz-camera-body { flex-direction: row !important; }
+  .lz-rail {
+    flex-direction: column !important;
+    width: auto !important;
+    gap: 1.1rem !important;
+    padding: 0.5rem 0.6rem !important;
+    justify-content: center !important;
+    align-self: stretch !important;
+  }
+  /* Done joins the rail's column flow instead of being pinned bottom-right. */
+  .lz-done { position: static !important; transform: none !important; right: auto !important; top: auto !important; }
 }
 
 /* The Home "frozen" layout (sticky header + footer, only the list scrolls) must
