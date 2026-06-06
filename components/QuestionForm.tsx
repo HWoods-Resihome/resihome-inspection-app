@@ -1211,8 +1211,9 @@ export function QuestionForm({
           <div className="min-w-0 flex-1">
             {/* Full address on ONE line (scrolls horizontally if very long). */}
             <div className="text-sm font-heading font-semibold text-ink whitespace-nowrap overflow-x-auto" style={{ scrollbarWidth: 'none' }}>{propertyName}</div>
-            {/* Sub-lines on the left; Back to their right, below the address. */}
-            <div className="flex items-start justify-between gap-3">
+            {/* Sub-lines on the left; Back to their right, vertically centered
+                against all three sub-lines. */}
+            <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-xs text-gray-500 truncate">{templateLabel} &middot; {inspectorName}</div>
                 <div className="text-xs text-gray-500 truncate">
