@@ -1194,8 +1194,8 @@ export function QuestionForm({
     <main className="min-h-screen bg-white">
       {/* Sticky header */}
       <header className="sticky top-0 z-10 bg-white border-b-2 border-brand shadow-sm">
-        <div className="lz-head max-w-3xl mx-auto px-4 py-3">
-          <div className="flex items-center gap-2.5">
+        <div className="lz-head max-w-3xl mx-auto px-4 py-3 flex items-start justify-between">
+          <div className="min-w-0 flex-1 flex items-center gap-2.5">
             {/* ResiWalk logo — mirrors the Scope Rate Card header. */}
             {scopeStyle && (
               // eslint-disable-next-line @next/next/no-img-element
@@ -1253,9 +1253,9 @@ export function QuestionForm({
             )}
             </div>
           </div>
-          {/* Back on its own row at the bottom of the header, right-aligned, so
-              the address line above keeps the full width on one line. */}
-          <div className="flex justify-end mt-1.5">
+          {/* Back stays on the same (top) row to keep the header tight; the
+              address beside it is a single non-wrapping line (scrolls if long). */}
+          <div className="shrink-0 ml-3">
             <button
               type="button"
               onClick={async () => {
