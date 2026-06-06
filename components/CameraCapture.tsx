@@ -209,6 +209,9 @@ export function CameraCapture({
   // against this, not the CSS-zoom-scaled <video>, so focus + the reticle stay
   // correct at any zoom level.
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  // The full-screen camera root — used to request the Fullscreen API so the
+  // mobile browser's URL bar gets out of the way in landscape.
+  const rootRef = useRef<HTMLDivElement | null>(null);
   // Last time the inspector pressed the shutter (manual capture). The AI auto-
   // still fallback reads this so it only fills gaps when nobody's shooting.
   const lastManualCaptureRef = useRef(0);
@@ -626,6 +629,36 @@ export function CameraCapture({
     return () => {
       meta?.setAttribute('content', prev);
       setNativeStatusBarColor(prev);
+    };
+  }, [isOpen]);
+
+  // Go fullscreen while the camera is open so the mobile browser's URL bar
+  // disappears (it otherwise eats a big strip in landscape — our fixed overlay
+  // locks scrolling, so the browser never auto-hides it) and the preview gets
+  // the ENTIRE screen instead of a squeezed, cut-off strip. Android Chrome
+  // honors element fullscreen; iOS Safari doesn't support it for non-video
+  // elements, so there it simply stays as-is (the header tightening still
+  // helps). Fullscreen needs a user gesture, so we attempt immediately AND
+  // retry on the first touch inside the camera. Exited on close.
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+    const enter = () => {
+      if (document.fullscreenElement) return;
+      const el: any = rootRef.current || document.documentElement;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen;
+      if (!req) return;
+      try { const p = req.call(el); if (p && p.catch) p.catch(() => {}); } catch { /* blocked → retry on touch */ }
+    };
+    enter();
+    const onGesture = () => enter();
+    window.addEventListener('pointerdown', onGesture, { once: true });
+    window.addEventListener('touchend', onGesture, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', onGesture);
+      window.removeEventListener('touchend', onGesture);
+      if (document.fullscreenElement) {
+        try { (document.exitFullscreen || (document as any).webkitExitFullscreen)?.call(document); } catch { /* noop */ }
+      }
     };
   }, [isOpen]);
 
@@ -1316,7 +1349,7 @@ export function CameraCapture({
   const failedCount = items.filter((it) => it.status === 'failed').length;
 
   return (
-    <div className="fixed inset-0 z-50 h-[100dvh] bg-black flex flex-col select-none overflow-hidden overscroll-none animate-fadeIn">
+    <div ref={rootRef} className="fixed inset-0 z-50 h-[100dvh] bg-black flex flex-col select-none overflow-hidden overscroll-none animate-fadeIn">
       {/* AI assist (Beta) — overlay that reads this camera's video + its own mic. */}
       {aiAssist && onAiAddLine && (
         <CameraAILayer
