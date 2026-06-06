@@ -370,12 +370,15 @@ export default function Home() {
                 {/* App icon — white house + footprint on a brand-pink tile that
                     matches the header. Edge-to-edge (no rounding) so it reads as
                     part of the header rather than a separate chip. */}
+                {/* Logo → home (already here; kept clickable for consistency). */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src="/app-icon.svg"
-                  alt="ResiWalk"
-                  className="h-11 w-11 object-cover shrink-0"
-                />
+                <Link href="/" aria-label="Home" className="shrink-0">
+                  <img
+                    src="/app-icon.svg"
+                    alt="ResiWalk"
+                    className="h-11 w-11 object-cover"
+                  />
+                </Link>
                 <div className="min-w-0">
                   <h1 className="font-heading font-extrabold text-lg tracking-tight">
                     Field Inspections

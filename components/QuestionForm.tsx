@@ -1110,7 +1110,16 @@ export function QuestionForm({
             {/* ResiWalk logo — mirrors the Scope Rate Card header. */}
             {scopeStyle && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src="/app-icon-light.svg" alt="ResiWalk" className="h-9 w-9 object-cover shrink-0" />
+              <button
+                type="button"
+                onClick={async () => { if (!readOnly) { try { await autosave.flush(true); } catch { /* leave anyway */ } } onCancel(); }}
+                aria-label="Back to inspections"
+                title="Back to inspections"
+                className="shrink-0"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/app-icon-light.svg" alt="ResiWalk" className="h-9 w-9 object-cover" />
+              </button>
             )}
             <div className="min-w-0">
             <div className="text-sm font-heading font-semibold text-ink truncate">{propertyName}</div>

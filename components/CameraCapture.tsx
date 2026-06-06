@@ -6,6 +6,7 @@ import { uploadVideo } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
 import { CameraAILayer } from '@/components/CameraAILayer';
 import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
+import { useBackToClose } from '@/lib/useBackToClose';
 import type { RateCardLineInput, RateCardLineItem, RegionRate } from '@/lib/types';
 
 /**
@@ -1218,6 +1219,10 @@ export function CameraCapture({
     stopStream();
     onClose();
   }, [items, stopStream, onClose]);
+
+  // Android back / back-swipe closes the camera and returns to the inspection
+  // (keeping the captured photos), instead of leaving the page.
+  useBackToClose(isOpen, () => { void handleDone(); });
 
   const flipCamera = useCallback(() => {
     setFacing((f) => (f === 'environment' ? 'user' : 'environment'));

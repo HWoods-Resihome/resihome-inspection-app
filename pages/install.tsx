@@ -172,8 +172,9 @@ export default function InstallPage() {
       <Head><title>Install ResiWalk</title><meta name="robots" content="noindex" /></Head>
       <div className="max-w-md mx-auto px-5 py-8">
         <div className="flex items-center gap-3 mb-5">
+          {/* Logo → app home. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/icon-192.png" alt="ResiWalk" className="w-14 h-14 rounded-2xl shadow" />
+          <a href="/" aria-label="Go to home" title="Home"><img src="/icon-192.png" alt="ResiWalk" className="w-14 h-14 rounded-2xl shadow" /></a>
           <div>
             <h1 className="text-xl font-heading font-bold">Install ResiWalk</h1>
             <p className="text-sm text-gray-500">Add the app to your home screen — full-screen &amp; offline-ready.</p>
