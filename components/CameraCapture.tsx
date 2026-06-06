@@ -632,29 +632,10 @@ export function CameraCapture({
     };
   }, [isOpen]);
 
-  // NOTE: the camera no longer requests fullscreen itself. The whole-app
-  // auto-fullscreen (lib/autoFullscreen, fired on the first tap) already takes
-  // the app fullscreen ONCE and keeps it there, so the camera opens fullscreen
-  // without a second requestFullscreen — which is what made the browser's
-  // "you are in full screen" toast pop on every camera open. Entering once per
-  // load shows that toast at most once.
-
-  // Android/Chrome consume the FIRST back press to EXIT fullscreen (no popstate
-  // fires), which otherwise leaves the camera open but un-fullscreened — the
-  // inspector has to press back a SECOND time to actually close it. Translate
-  // that fullscreen-exit into a normal overlay back (pop the entry useBackToClose
-  // pushed) so a SINGLE back closes the camera. autoFullscreen re-arms on the
-  // exit, so the next tap restores fullscreen.
-  useEffect(() => {
-    if (!isOpen || typeof document === 'undefined') return;
-    const onFsChange = () => {
-      if (!document.fullscreenElement) {
-        try { window.history.back(); } catch { /* popstate path will still close it */ }
-      }
-    };
-    document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
-  }, [isOpen]);
+  // NOTE: fullscreen is intentionally NOT used on web (it caused the browser's
+  // "you are in full screen" toast and made the back gesture exit fullscreen
+  // instead of closing the camera). Back closes the camera via useBackToClose's
+  // history entry; a chrome-free experience comes from installing the PWA.
 
   // Re-fit the live preview on rotation / resize. Several mobile browsers
   // (notably iOS Safari + iOS Chrome, and some Android WebViews / the native

@@ -9,7 +9,6 @@ import { initErrorReporting } from '@/lib/clientErrorReporter';
 import { installSessionGuard } from '@/lib/sessionGuard';
 import { registerServiceWorker } from '@/lib/useAppUpdate';
 import { installOAuthBridge } from '@/lib/nativeBridge';
-import { installAutoFullscreen } from '@/lib/autoFullscreen';
 import { Raleway } from 'next/font/google';
 import '../styles/globals.css';
 
@@ -40,9 +39,6 @@ export default function App({ Component, pageProps }: AppProps) {
     // Capacitor.isNativePlatform() internally), so web behavior is unchanged —
     // this just enables the deep-link return inside the Capacitor app.
     void installOAuthBridge();
-    // Web: take the whole app fullscreen on the first tap (mobile browsers only)
-    // so the URL/chrome bars stop eating space. No-op on desktop / installed PWA.
-    installAutoFullscreen();
   }, []);
 
   return (
