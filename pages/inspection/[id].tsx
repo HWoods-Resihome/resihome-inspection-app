@@ -437,6 +437,8 @@ export default function ExistingInspection() {
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
           inspectionRegion={inspection.regionSnapshot || ''}
+          status={inspection.status}
+          submittedAt={inspection.submittedAt}
           listingPrice={listingPrice}
           listingDate={listingDate}
           propertyAirFiltersTotal={propertyAirFiltersTotal}

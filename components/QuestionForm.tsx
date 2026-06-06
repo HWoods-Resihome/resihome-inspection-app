@@ -37,6 +37,10 @@ type Props = {
   squareFootage?: number | null;
   /** Inspection's region snapshot (used in the header subtitle). */
   inspectionRegion?: string;
+  /** Inspection status + submitted timestamp — drive the header status badge and
+   *  the (conditional) "Submitted" stamp, matching the Scope header. */
+  status?: string;
+  submittedAt?: string | null;
   /** Most-recent active listing price + listing date for the property, shown in
    *  the header. Pulled from the most recent published listing (or, if none is
    *  published, the most recent in "deposit taken"). Optional — omitted if the
@@ -71,6 +75,26 @@ type Props = {
   // -- Called when user clicks Cancel Inspection (different from form Cancel/Exit)
   onCancelInspection?: () => void;
 };
+
+// Status pill (mirrors the Scope Rate Card header).
+function statusBadge(status?: string): { label: string; color: string } | null {
+  switch ((status || '').trim().toLowerCase()) {
+    case 'scheduled': return { label: 'Scheduled', color: 'bg-blue-100 text-blue-800 border-blue-200' };
+    case 'in progress': case 'in-progress': case 'in_progress': return { label: 'In Progress', color: 'bg-amber-100 text-amber-800 border-amber-200' };
+    case 'pending approval': case 'pending_approval': case 'pending-approval': case 'pendingapproval': return { label: 'Pending Approval', color: 'bg-purple-100 text-purple-800 border-purple-200' };
+    case 'completed': case 'complete': case 'submitted': return { label: 'Completed', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+    case 'cancelled': case 'canceled': return { label: 'Cancelled', color: 'bg-gray-100 text-gray-700 border-gray-200' };
+    default: return null;
+  }
+}
+// Format an ISO/epoch timestamp to M/D/YYYY (header "Submitted" stamp).
+function fmtStamp(v?: string | null): string {
+  if (!v) return '';
+  const t = /^\d+$/.test(v) ? Number(v) : Date.parse(v);
+  if (!isFinite(t) || isNaN(t)) return '';
+  const d = new Date(t);
+  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+}
 
 // Sections that do NOT require a section photo.
 function sectionPhotosExempt(sectionName: string, sectionOrder: number): boolean {
@@ -131,7 +155,7 @@ function slugify(s: string): string {
 
 export function QuestionForm({
   questions, templateType, templateLabel, inspectorName, propertyName, propertyRecordId,
-  bedrooms, bathrooms, squareFootage, inspectionRegion, listingPrice, listingDate, onSubmit, onCancel,
+  bedrooms, bathrooms, squareFootage, inspectionRegion, status, submittedAt, listingPrice, listingDate, onSubmit, onCancel,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
   propertyAirFiltersTotal, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
@@ -1190,81 +1214,102 @@ export function QuestionForm({
   const smartFc = scopeStyle && yardKey ? makeFc(['smart_home_tech']) : null;
   const bottomFc = scopeStyle ? makeFc(yardKey ? ['hvac_air_filters', 'utilities'] : FC_ONLY) : null;
 
+  // Header status badge + "Submitted" stamp (only while actually submitted).
+  const headerBadge = statusBadge(status);
+  const isSubmittedState = (() => {
+    const s = (status || '').toLowerCase().replace(/[ -]/g, '_');
+    return s === 'pending_approval' || s === 'completed' || s === 'complete';
+  })();
+
   return (
     <main className="min-h-screen bg-white">
       {/* Sticky header */}
       <header className="sticky top-0 z-10 bg-white border-b-2 border-brand shadow-sm">
-        <div className="lz-head max-w-3xl mx-auto px-4 py-3 flex items-start gap-2.5">
-          {/* ResiWalk logo → back to inspections (saves first). */}
-          {scopeStyle && (
-            <button
-              type="button"
-              onClick={async () => { if (!readOnly) { try { await autosave.flush(true); } catch { /* leave anyway */ } } onCancel(); }}
-              aria-label="Back to inspections"
-              title="Back to inspections"
-              className="shrink-0"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
-            </button>
-          )}
-          <div className="min-w-0 flex-1">
-            {/* Full address on ONE line (scrolls horizontally if very long). */}
-            <div className="text-sm font-heading font-semibold text-ink whitespace-nowrap overflow-x-auto" style={{ scrollbarWidth: 'none' }}>{propertyName}</div>
-            {/* Sub-lines on the left; Back to their right, vertically centered
-                against all three sub-lines. */}
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-xs text-gray-500 truncate">{templateLabel} &middot; {inspectorName}</div>
-                <div className="text-xs text-gray-500 truncate">
-                  {bedrooms}BR / {bathrooms}BA
-                  {squareFootage != null && squareFootage > 0 && (
-                    <span> &middot; {squareFootage.toLocaleString()} sqft</span>
-                  )}
-                </div>
-                {(typeof listingPrice === 'number' && listingPrice > 0) || listingDate ? (
-                  <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
-                    {typeof listingPrice === 'number' && listingPrice > 0 && (
-                      <span>Listing ${listingPrice.toLocaleString()}</span>
-                    )}
-                    {listingDate && (
-                      <span className="text-gray-500 font-normal">
-                        {typeof listingPrice === 'number' && listingPrice > 0 ? ' · ' : ''}Listed {listingDate}
-                      </span>
-                    )}
-                  </div>
-                ) : null}
-                {pdfUrl && (
-                  <a
-                    href={pdfUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline"
-                    title="Open the generated inspection report (opens in a new tab)"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <polyline points="14 2 14 8 20 8" />
-                    </svg>
-                    View PDF Report
-                  </a>
+        <div className="lz-head max-w-3xl mx-auto px-4 py-3">
+          {/* Top: template title + status badge, Back on the right (Scope style). */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
+                <h1 className="text-lg sm:text-xl font-heading font-bold text-gray-900 leading-tight">{templateLabel}</h1>
+                {headerBadge && (
+                  <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${headerBadge.color}`}>{headerBadge.label}</span>
                 )}
               </div>
-              {/* Back — to the right of the sub-lines, below the address. */}
+              <div className="text-xs text-gray-500 mt-0.5">
+                Inspector: {inspectorName}
+                {isSubmittedState && fmtStamp(submittedAt) && (
+                  <span className="text-gray-400">{'  ·  '}{fmtStamp(submittedAt)} Submitted</span>
+                )}
+              </div>
+            </div>
+            {/* Back — saves pending edits then exits. */}
+            <button
+              type="button"
+              onClick={async () => {
+                if (!readOnly) {
+                  try { await autosave.flush(true); } catch (e) { console.error('Back: flush failed', e); }
+                }
+                onCancel();
+              }}
+              className="shrink-0 inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
+              title="Save and go back"
+            >
+              <span aria-hidden>←</span> Back
+            </button>
+          </div>
+
+          {/* Identity row: logo + address + meta + listing (mirrors Scope). */}
+          <div className="flex items-center gap-2.5 mt-2">
+            {scopeStyle && (
               <button
                 type="button"
-                onClick={async () => {
-                  if (!readOnly) {
-                    try { await autosave.flush(true); } catch (e) { console.error('Back: flush failed', e); }
-                  }
-                  onCancel();
-                }}
-                className="shrink-0 inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
-                title="Save and go back"
+                onClick={async () => { if (!readOnly) { try { await autosave.flush(true); } catch { /* leave anyway */ } } onCancel(); }}
+                aria-label="Back to inspections"
+                title="Back to inspections"
+                className="shrink-0"
               >
-                <span aria-hidden>←</span> Back
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
               </button>
+            )}
+            <div className="min-w-0 flex-1">
+              {/* Full address on ONE line (scrolls horizontally if very long). */}
+              <div className="text-sm font-heading font-semibold text-ink whitespace-nowrap overflow-x-auto" style={{ scrollbarWidth: 'none' }}>{propertyName}</div>
+              <div className="text-xs text-gray-500 truncate">
+                {bedrooms} bed / {bathrooms} bath
+                {squareFootage != null && squareFootage > 0 && (
+                  <span> &middot; {squareFootage.toLocaleString()} sqft</span>
+                )}
+                {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
+              </div>
+              {(typeof listingPrice === 'number' && listingPrice > 0) || listingDate ? (
+                <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
+                  {typeof listingPrice === 'number' && listingPrice > 0 && (
+                    <span>Listing ${listingPrice.toLocaleString()}</span>
+                  )}
+                  {listingDate && (
+                    <span className="text-gray-500 font-normal">
+                      {typeof listingPrice === 'number' && listingPrice > 0 ? ' · ' : ''}Listed {listingDate}
+                    </span>
+                  )}
+                </div>
+              ) : null}
+              {pdfUrl && (
+                <a
+                  href={pdfUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline"
+                  title="Open the generated inspection report (opens in a new tab)"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                  View PDF Report
+                </a>
+              )}
             </div>
           </div>
         </div>
