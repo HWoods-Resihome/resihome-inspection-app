@@ -252,6 +252,41 @@ export function CameraAILayer(props: Props) {
     window.addEventListener('resize', apply);
     return () => { mq.removeEventListener?.('change', apply); window.removeEventListener('resize', apply); };
   }, []);
+
+  // EXACT placement: measure the live-preview element's box so the call-out
+  // cards span precisely the camera section and stop exactly where the photo
+  // column / control rail begin — no estimated offsets. The video fills the
+  // viewport (absolute inset-0), so its rect IS the camera section. A
+  // ResizeObserver re-measures whenever the layout shifts (photo column appears,
+  // rotation, rail resize), and we convert to screen-edge insets the fixed
+  // overlay can position against.
+  const [vpInsets, setVpInsets] = useState<{ left: number; width: number; bottom: number; height: number } | null>(null);
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined') return;
+    const measure = () => {
+      const el = videoRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) return;
+      setVpInsets({ left: r.left, width: r.width, bottom: window.innerHeight - r.bottom, height: r.height });
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    const t1 = setTimeout(measure, 250);
+    const t2 = setTimeout(measure, 700);
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && videoRef.current) {
+      ro = new ResizeObserver(measure);
+      ro.observe(videoRef.current);
+    }
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+      clearTimeout(t1); clearTimeout(t2);
+      ro?.disconnect();
+    };
+  }, [enabled, videoRef]);
   // "Working" lingers ~1.4s past the last transcribe/inference so the status
   // doesn't flicker back to "Listening" in the gaps between clips — it reads as
   // one continuous "Processing…" until the work actually settles.
@@ -1110,15 +1145,22 @@ export function CameraAILayer(props: Props) {
       {/* Chip tray — floats above the camera controls. Each card has inline
           qty / vendor / tenant% / vendor$ controls so the inspector (or voice)
           can adjust BEFORE adding. */}
-      <div className={`pointer-events-none absolute space-y-2 overflow-y-auto ${
-        isLandscape
-          // Landscape: anchored to the very bottom and confined to the LEFT
-          // (camera) area — the right ~184px holds the photo column + rail, so
-          // we stop short of it and never cover them.
-          ? 'left-2 right-[184px] bottom-2 max-h-[78vh]'
-          // Portrait: full-width tray floating above the bottom control bar.
-          : 'left-0 right-0 bottom-28 px-3 max-h-[52vh]'
-      }`}>
+      <div
+        className={`pointer-events-none absolute space-y-2 overflow-y-auto ${
+          isLandscape
+            // Landscape: exact viewport box (inline style below). Until the first
+            // measurement lands, fall back to a safe inset for one frame.
+            ? (vpInsets ? '' : 'left-2 right-[184px] bottom-2 max-h-[78vh]')
+            // Portrait: full-width tray floating above the bottom control bar.
+            : 'left-0 right-0 bottom-28 px-3 max-h-[52vh]'
+        }`}
+        style={isLandscape && vpInsets ? {
+          left: Math.round(vpInsets.left) + 8,
+          width: Math.max(160, Math.round(vpInsets.width) - 16),
+          bottom: Math.max(0, Math.round(vpInsets.bottom)) + 8,
+          maxHeight: Math.max(120, Math.round(vpInsets.height) - 16),
+        } : undefined}
+      >
         {visibleChips.map((s) => {
           const e = editOf(s);
           const addDisabled = s.needsMeasurement && !(Number(e.qty) > 0);

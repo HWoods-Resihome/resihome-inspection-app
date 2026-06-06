@@ -1910,7 +1910,7 @@ export function CameraCapture({
           type="button"
           onClick={openGallery}
           disabled={busy}
-          className="flex flex-col items-center gap-1 text-white/90 disabled:opacity-40"
+          className="relative flex flex-col items-center text-white/90 disabled:opacity-40"
           aria-label="Choose photos from your gallery"
           title="Upload photos from your gallery"
         >
@@ -1921,7 +1921,9 @@ export function CameraCapture({
               <polyline points="21 15 16 10 5 21" />
             </svg>
           </span>
-          <span className="text-[10px] font-heading">Gallery</span>
+          {/* Label sits OUTSIDE layout flow so the icon — not the icon+label box —
+              is what aligns with the shutter / Mark / Done. */}
+          <span className="absolute top-full mt-0.5 text-[10px] font-heading">Gallery</span>
         </button>
 
         <button
@@ -1953,7 +1955,7 @@ export function CameraCapture({
           type="button"
           onClick={() => { const last = [...items].reverse().find((p) => p.kind !== 'video'); if (last) setAnnotatingId(last.id); }}
           disabled={items.filter((p) => p.kind !== 'video').length === 0}
-          className="flex flex-col items-center gap-1 text-white/90 disabled:opacity-30"
+          className="relative flex flex-col items-center text-white/90 disabled:opacity-30"
           aria-label="Mark up the last photo"
           title="Draw on the last photo (arrow, circle, pen)"
         >
@@ -1965,7 +1967,7 @@ export function CameraCapture({
               <circle cx="11" cy="11" r="2" />
             </svg>
           </span>
-          <span className="text-[10px] font-heading">Mark</span>
+          <span className="absolute top-full mt-0.5 text-[10px] font-heading">Mark</span>
         </button>
 
         {/* Done — bottom-right of the shutter line (moved from the top bar). */}
