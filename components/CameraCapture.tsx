@@ -148,6 +148,13 @@ const MAX_CAPTURE_EDGE = 2560;
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
 const JPEG_QUALITY = 0.92;
+// Saved-photo ceiling. ImageCapture.takePhoto() returns the FULL sensor frame
+// (often 12MP / 4–7MB) — overkill for the PDF (520px thumbnail) and heavy for
+// field uploads + storage. We downscale the saved photo to this long edge
+// (~6–7MP at 4:3) at PHOTO_SAVE_QUALITY: still native-grade sharp + zoomable,
+// but ~1.5–2.5MB instead of 5–7MB.
+const MAX_SAVE_EDGE = 3000;
+const PHOTO_SAVE_QUALITY = 0.86;
 
 // Photo geostamp proximity check: how close (meters) the device GPS must be to
 // the property's reference location to stamp a ✓ rather than a ✗. Generous by
@@ -1217,13 +1224,21 @@ export function CameraCapture({
       } catch { bitmap = null; /* fall back to the preview frame */ }
 
       const src: CanvasImageSource = bitmap || video;
-      const vw = bitmap ? bitmap.width : video.videoWidth;
-      const vh = bitmap ? bitmap.height : video.videoHeight;
-      if (!vw || !vh) {
+      const srcW = bitmap ? bitmap.width : video.videoWidth;
+      const srcH = bitmap ? bitmap.height : video.videoHeight;
+      if (!srcW || !srcH) {
         bitmap?.close?.();
         setBusy(false);
         return;
       }
+      // Cap the SAVED photo's long edge. A full-sensor takePhoto() can be 12MP+
+      // (4–7MB) which bloats field uploads + HubSpot storage for no real benefit
+      // (the PDF embeds a 520px thumbnail, and ~6–7MP is plenty to zoom into
+      // detail). The downscale keeps native-grade sharpness at a sane file size.
+      const longEdge = Math.max(srcW, srcH);
+      const scale = Math.min(1, MAX_SAVE_EDGE / longEdge);
+      const vw = Math.max(1, Math.round(srcW * scale));
+      const vh = Math.max(1, Math.round(srcH * scale));
       const canvas = document.createElement('canvas');
       canvas.width = vw;
       canvas.height = vh;
@@ -1233,15 +1248,17 @@ export function CameraCapture({
         setBusy(false);
         return;
       }
+      ctx.imageSmoothingQuality = 'high';
       // Center-crop by the live DIGITAL zoom factor (effZoom()===1 when the
       // sensor is doing the zoom — incl. a hardware-zoomed takePhoto — so it's
-      // used as-is; only the digital-zoom fallback crops here).
+      // used as-is; only the digital-zoom fallback crops here), scaling the
+      // source into the (capped) output canvas.
       const z = effZoom();
       if (z > 1.001) {
-        const sw = vw / z, sh = vh / z;
-        ctx.drawImage(src, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, vw, vh);
+        const sw = srcW / z, sh = srcH / z;
+        ctx.drawImage(src, (srcW - sw) / 2, (srcH - sh) / 2, sw, sh, 0, 0, vw, vh);
       } else {
-        ctx.drawImage(src, 0, 0, vw, vh);
+        ctx.drawImage(src, 0, 0, srcW, srcH, 0, 0, vw, vh);
       }
       bitmap?.close?.();
       // Burn the evidence stamp (address / timestamp / GPS coordinates) into the
@@ -1251,9 +1268,10 @@ export function CameraCapture({
       stampLines.push({ text: new Date().toLocaleString() });
       stampLines.push(...buildGeoStampLines());
       drawEvidenceStamp(ctx, vw, vh, stampLines);
-      // Convert to JPEG blob
+      // Convert to JPEG blob (saved-photo quality — slightly below the preview
+      // const since this is a high-resolution still being uploaded from the field).
       const blob: Blob | null = await new Promise((resolve) => {
-        canvas.toBlob((b) => resolve(b), 'image/jpeg', JPEG_QUALITY);
+        canvas.toBlob((b) => resolve(b), 'image/jpeg', PHOTO_SAVE_QUALITY);
       });
       if (!blob) {
         setBusy(false);
