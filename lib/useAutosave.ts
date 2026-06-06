@@ -28,6 +28,7 @@ export type SaveState =
   | { kind: 'dirty' }                    // user typed but debounce not elapsed
   | { kind: 'saving' }                   // POST in flight
   | { kind: 'saved'; at: number }        // last save succeeded
+  | { kind: 'offline' }                  // no connection — waiting to reconnect
   | { kind: 'error'; message: string };  // last save failed
 
 interface Options {
@@ -48,6 +49,10 @@ interface Options {
 
 const DEBOUNCE_MS = 800;
 const CHECK_INTERVAL_MS = 400;
+// After a failed save, wait before retrying so the indicator doesn't flicker
+// saving→error→saving every tick. Backoff grows with consecutive failures.
+const ERROR_BACKOFF_BASE_MS = 3000;
+const ERROR_BACKOFF_MAX_MS = 30000;
 
 export function useAutosave(opts: Options) {
   const { inspectionRecordId, inspectionExternalId, onSaveSuccess, onFirstSave, disabled, isScope } = opts;
@@ -61,6 +66,9 @@ export function useAutosave(opts: Options) {
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
   const [hasEverSaved, setHasEverSaved] = useState(false);
   const inFlightRef = useRef(false);
+  // Retry backoff after failures so we don't hammer the network (esp. offline).
+  const consecutiveErrorsRef = useRef(0);
+  const errorBackoffUntilRef = useRef(0);
 
   // Mark an answer as edited. The state map is updated and dirtySince timestamp set.
   const noteEdit = useCallback((key: string, answer: AnswerInput, questionHubspotRecordId: string, instanceKey: string) => {
@@ -134,6 +142,20 @@ export function useAutosave(opts: Options) {
       if (!anyDirty && saveState.kind === 'dirty') {
         setSaveState({ kind: 'idle' });
       }
+      return false;
+    }
+
+    // Offline: don't repeatedly fire the network (which would flicker the
+    // indicator every tick). Show a steady "offline" state and wait for the
+    // `online` event (or the next forced flush) to retry.
+    if (!forceAll && typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setSaveState((s) => (s.kind === 'offline' ? s : { kind: 'offline' }));
+      return false;
+    }
+
+    // Error backoff: after a failed save, hold off retrying until the backoff
+    // window elapses so the user doesn't see it firing constantly.
+    if (!forceAll && now < errorBackoffUntilRef.current) {
       return false;
     }
 
@@ -214,6 +236,10 @@ export function useAutosave(opts: Options) {
       // Remove archived from archive queue
       for (const a of toArchive) archiveQueueRef.current.delete(a);
 
+      // Success — clear any retry backoff.
+      consecutiveErrorsRef.current = 0;
+      errorBackoffUntilRef.current = 0;
+
       onSaveSuccess?.(updatedKeys);
       if (willBumpStatus) {
         onFirstSave?.();
@@ -229,7 +255,21 @@ export function useAutosave(opts: Options) {
       }
       return true;
     } catch (e: any) {
-      setSaveState({ kind: 'error', message: e.message || String(e) });
+      // Schedule a backoff so the next ticks don't immediately retry and flicker
+      // the indicator. Grows with consecutive failures (capped).
+      consecutiveErrorsRef.current += 1;
+      const backoff = Math.min(
+        ERROR_BACKOFF_MAX_MS,
+        ERROR_BACKOFF_BASE_MS * 2 ** (consecutiveErrorsRef.current - 1),
+      );
+      errorBackoffUntilRef.current = Date.now() + backoff;
+      // If the failure is because we're offline, show the calmer "offline"
+      // state instead of a scary "save failed".
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setSaveState({ kind: 'offline' });
+      } else {
+        setSaveState({ kind: 'error', message: e.message || String(e) });
+      }
       console.error('Autosave error:', e);
       return false;
     } finally {
@@ -254,6 +294,19 @@ export function useAutosave(opts: Options) {
       // value typed within the debounce window isn't lost on navigation.
       void flushRef.current(true);
     };
+  }, [disabled]);
+
+  // When connectivity returns, clear the backoff and retry right away so the
+  // queued edits save promptly (rather than waiting out the backoff window).
+  useEffect(() => {
+    if (disabled) return;
+    const onOnline = () => {
+      consecutiveErrorsRef.current = 0;
+      errorBackoffUntilRef.current = 0;
+      void flushRef.current(false);
+    };
+    window.addEventListener('online', onOnline);
+    return () => { window.removeEventListener('online', onOnline); };
   }, [disabled]);
 
   // Best-effort flush when the tab is hidden/closed (mobile app-switch, refresh).

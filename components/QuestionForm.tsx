@@ -1306,24 +1306,6 @@ export function QuestionForm({
             <span aria-hidden>←</span> Back
           </button>
         </div>
-        {/* Save / read-only strip (hidden on short landscape to reclaim space). */}
-        {!readOnly && (
-          <div className="lz-hide mt-2">
-            <SaveIndicator saveState={autosave.saveState} />
-          </div>
-        )}
-        {readOnly && (
-          <div className="lz-hide mt-2">
-            <div className="inline-flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 border border-gray-200 px-2 py-1 rounded-full">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
-              <span>Read-only (Completed)</span>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Frozen header — logo + address + status + meta. The ONLY thing pinned
@@ -1374,6 +1356,25 @@ export function QuestionForm({
               ) : null}
             </div>
           </div>
+          {/* Save / read-only strip — back in the frozen header (hidden on short
+              landscape to reclaim space). */}
+          {!readOnly && (
+            <div className="lz-hide mt-1.5">
+              <SaveIndicator saveState={autosave.saveState} />
+            </div>
+          )}
+          {readOnly && (
+            <div className="lz-hide mt-1.5">
+              <div className="inline-flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 border border-gray-200 px-2 py-1 rounded-full">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                <span>Read-only (Completed)</span>
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
@@ -1784,6 +1785,23 @@ function SaveIndicator({ saveState }: { saveState: SaveState }) {
       </div>
     );
   }
+  if (saveState.kind === 'offline') {
+    return (
+      <div className="inline-flex items-center gap-1.5 text-xs text-gray-500 font-heading font-semibold">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="1" y1="1" x2="23" y2="23" />
+          <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
+          <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
+          <path d="M10.71 5.05A16 16 0 0 1 22.58 9" />
+          <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
+          <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+          <line x1="12" y1="20" x2="12.01" y2="20" />
+        </svg>
+        <span>Offline &mdash; changes will save when reconnected</span>
+      </div>
+    );
+  }
   if (saveState.kind === 'error') {
     return (
       <div className="inline-flex items-center gap-1.5 text-xs text-red-700 font-heading font-semibold">
@@ -1793,7 +1811,7 @@ function SaveIndicator({ saveState }: { saveState: SaveState }) {
           <line x1="12" y1="8" x2="12" y2="12" />
           <line x1="12" y1="16" x2="12.01" y2="16" />
         </svg>
-        <span>Save failed &mdash; will retry</span>
+        <span>Save failed &mdash; will retry shortly</span>
       </div>
     );
   }
