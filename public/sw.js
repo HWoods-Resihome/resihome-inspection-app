@@ -12,7 +12,7 @@
  *     IndexedDB queues; caching API responses would serve stale data.
  */
 
-const CACHE = 'resiwalk-shell-v2';
+const CACHE = 'resiwalk-shell-v3';
 const NAV_FALLBACK = '/';
 
 self.addEventListener('install', () => {
