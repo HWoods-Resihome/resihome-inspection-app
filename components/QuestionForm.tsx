@@ -96,6 +96,46 @@ function fmtStamp(v?: string | null): string {
   return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
 }
 
+// Renders text on a single line, shrinking the font until it fits the
+// available width (down to a floor) so long addresses never wrap. Re-measures
+// when the text or the container width changes.
+function FitText({ text, className, max = 14, min = 11 }: {
+  text: string; className?: string; max?: number; min?: number;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState(max);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => {
+      let s = max;
+      el.style.fontSize = `${s}px`;
+      while (s > min && el.scrollWidth > el.clientWidth) {
+        s -= 0.5;
+        el.style.fontSize = `${s}px`;
+      }
+      setSize(s);
+    };
+    fit();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(fit);
+      ro.observe(el);
+    }
+    return () => { ro?.disconnect(); };
+  }, [text, max, min]);
+  return (
+    <div
+      ref={ref}
+      className={className}
+      style={{ whiteSpace: 'nowrap', overflow: 'hidden', fontSize: `${size}px`, lineHeight: 1.2 }}
+      title={text}
+    >
+      {text}
+    </div>
+  );
+}
+
 // Sections that do NOT require a section photo.
 function sectionPhotosExempt(sectionName: string, sectionOrder: number): boolean {
   if (sectionOrder === 10 || sectionOrder === 190 || sectionOrder === 900 || sectionOrder === 910) return true;
@@ -1223,58 +1263,96 @@ export function QuestionForm({
 
   return (
     <main className="min-h-screen bg-white">
-      {/* Sticky header */}
+      {/* Top block — title + inspector + Back. NOT sticky: scrolls away (Scope style). */}
+      <div className="lz-head max-w-3xl mx-auto px-4 pt-3 pb-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg sm:text-xl font-heading font-bold text-gray-900 leading-tight truncate">{templateLabel}</h1>
+            <div className="text-xs text-gray-500 mt-0.5">
+              Inspector: {inspectorName}
+              {isSubmittedState && fmtStamp(submittedAt) && (
+                <span className="text-gray-400">{'  ·  '}{fmtStamp(submittedAt)} Submitted</span>
+              )}
+            </div>
+            {pdfUrl && (
+              <a
+                href={pdfUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline"
+                title="Open the generated inspection report (opens in a new tab)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                View PDF Report
+              </a>
+            )}
+          </div>
+          {/* Back — saves pending edits then exits. */}
+          <button
+            type="button"
+            onClick={async () => {
+              if (!readOnly) {
+                try { await autosave.flush(true); } catch (e) { console.error('Back: flush failed', e); }
+              }
+              onCancel();
+            }}
+            className="shrink-0 inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
+            title="Save and go back"
+          >
+            <span aria-hidden>←</span> Back
+          </button>
+        </div>
+        {/* Save / read-only strip (hidden on short landscape to reclaim space). */}
+        {!readOnly && (
+          <div className="lz-hide mt-2">
+            <SaveIndicator saveState={autosave.saveState} />
+          </div>
+        )}
+        {readOnly && (
+          <div className="lz-hide mt-2">
+            <div className="inline-flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 border border-gray-200 px-2 py-1 rounded-full">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              <span>Read-only (Completed)</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Frozen header — logo + address + status + meta. The ONLY thing pinned
+          on scroll (mirrors the Scope rate-card sticky header). */}
       <header className="sticky top-0 z-10 bg-white border-b-2 border-brand shadow-sm">
-        <div className="lz-head max-w-3xl mx-auto px-4 py-3">
-          {/* Top: template title + status badge, Back on the right (Scope style). */}
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
-                <h1 className="text-lg sm:text-xl font-heading font-bold text-gray-900 leading-tight">{templateLabel}</h1>
+        <div className="max-w-3xl mx-auto px-4 py-2">
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={async () => { if (!readOnly) { try { await autosave.flush(true); } catch { /* leave anyway */ } } onCancel(); }}
+              aria-label="Back to inspections"
+              title="Back to inspections"
+              className="shrink-0"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
+            </button>
+            <div className="min-w-0 flex-1">
+              {/* Address + status on ONE line — never wraps; the address font
+                  shrinks to fit the available width, the badge stays fixed. */}
+              <div className="flex items-center gap-2">
+                <FitText
+                  text={propertyName}
+                  className="font-heading font-semibold text-ink flex-1 min-w-0"
+                />
                 {headerBadge && (
                   <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${headerBadge.color}`}>{headerBadge.label}</span>
                 )}
               </div>
-              <div className="text-xs text-gray-500 mt-0.5">
-                Inspector: {inspectorName}
-                {isSubmittedState && fmtStamp(submittedAt) && (
-                  <span className="text-gray-400">{'  ·  '}{fmtStamp(submittedAt)} Submitted</span>
-                )}
-              </div>
-            </div>
-            {/* Back — saves pending edits then exits. */}
-            <button
-              type="button"
-              onClick={async () => {
-                if (!readOnly) {
-                  try { await autosave.flush(true); } catch (e) { console.error('Back: flush failed', e); }
-                }
-                onCancel();
-              }}
-              className="shrink-0 inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
-              title="Save and go back"
-            >
-              <span aria-hidden>←</span> Back
-            </button>
-          </div>
-
-          {/* Identity row: logo + address + meta + listing (mirrors Scope). */}
-          <div className="flex items-center gap-2.5 mt-2">
-            {scopeStyle && (
-              <button
-                type="button"
-                onClick={async () => { if (!readOnly) { try { await autosave.flush(true); } catch { /* leave anyway */ } } onCancel(); }}
-                aria-label="Back to inspections"
-                title="Back to inspections"
-                className="shrink-0"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
-              </button>
-            )}
-            <div className="min-w-0 flex-1">
-              {/* Full address on ONE line (scrolls horizontally if very long). */}
-              <div className="text-sm font-heading font-semibold text-ink whitespace-nowrap overflow-x-auto" style={{ scrollbarWidth: 'none' }}>{propertyName}</div>
               <div className="text-xs text-gray-500 truncate">
                 {bedrooms} bed / {bathrooms} bath
                 {squareFootage != null && squareFootage > 0 && (
@@ -1294,43 +1372,9 @@ export function QuestionForm({
                   )}
                 </div>
               ) : null}
-              {pdfUrl && (
-                <a
-                  href={pdfUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline"
-                  title="Open the generated inspection report (opens in a new tab)"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                  </svg>
-                  View PDF Report
-                </a>
-              )}
             </div>
           </div>
         </div>
-        {/* Save indicator strip (hidden on short landscape to reclaim space). */}
-        {!readOnly && (
-          <div className="lz-hide max-w-3xl mx-auto px-4 pb-2">
-            <SaveIndicator saveState={autosave.saveState} />
-          </div>
-        )}
-        {readOnly && (
-          <div className="lz-hide max-w-3xl mx-auto px-4 pb-2">
-            <div className="inline-flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 border border-gray-200 px-2 py-1 rounded-full">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
-              <span>Read-only (Completed)</span>
-            </div>
-          </div>
-        )}
       </header>
 
       <div className="lz-content max-w-3xl mx-auto px-4 py-6 pb-32">
