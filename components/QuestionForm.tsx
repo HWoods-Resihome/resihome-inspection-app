@@ -1194,8 +1194,8 @@ export function QuestionForm({
     <main className="min-h-screen bg-white">
       {/* Sticky header */}
       <header className="sticky top-0 z-10 bg-white border-b-2 border-brand shadow-sm">
-        <div className="lz-head max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="min-w-0 flex-1 flex items-center gap-2.5">
+        <div className="lz-head max-w-3xl mx-auto px-4 py-3">
+          <div className="flex items-center gap-2.5">
             {/* ResiWalk logo — mirrors the Scope Rate Card header. */}
             {scopeStyle && (
               // eslint-disable-next-line @next/next/no-img-element
@@ -1211,10 +1211,10 @@ export function QuestionForm({
                 <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
               </button>
             )}
-            <div className="min-w-0">
-            {/* Property name shows in full (wraps); the secondary meta + listing
-                stay one line each so the header stays compact. */}
-            <div className="text-sm font-heading font-semibold text-ink break-words">{propertyName}</div>
+            <div className="min-w-0 flex-1">
+            {/* Full address on ONE line (scrolls horizontally if very long rather
+                than wrapping or truncating). */}
+            <div className="text-sm font-heading font-semibold text-ink whitespace-nowrap overflow-x-auto" style={{ scrollbarWidth: 'none' }}>{propertyName}</div>
             <div className="text-xs text-gray-500 truncate">{templateLabel} &middot; {inspectorName}</div>
             <div className="text-xs text-gray-500 truncate">
               {bedrooms}BR / {bathrooms}BA
@@ -1253,10 +1253,9 @@ export function QuestionForm({
             )}
             </div>
           </div>
-          {/* Right side is just Back now — the answered counter moved to the
-              row above the sections, so the property text gets the full width
-              (no wrap / truncation from a squeezed column). */}
-          <div className="shrink-0 ml-3">
+          {/* Back on its own row at the bottom of the header, right-aligned, so
+              the address line above keeps the full width on one line. */}
+          <div className="flex justify-end mt-1.5">
             <button
               type="button"
               onClick={async () => {
