@@ -183,7 +183,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const depKind = depKindForCategory(item.category, item.laborShortDescription);
       const tenantPct = depKind ? depreciationTenantPct(depKind, tenantMonths) : 100;
       const measurementUnit = isMeasured && !isWholeHouse ? (unit === 'SF' ? 'square feet' : unit === 'LF' ? 'linear feet' : 'square yards') : '';
-      return { item, unit, isMeasured, isWholeHouse, tenantPct, measurementUnit };
+      return { item, unit, isMeasured, isWholeHouse, tenantPct, measurementUnit, topScore: match.topScore, confident: match.confident };
     };
 
     // When the inspector SPOKE, we run a TEXT-ONLY pass (no frame). An image
@@ -316,6 +316,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       let usageIn = 0, usageOut = 0;
       const pending: Promise<void>[] = [];
       const blocks: Record<number, { name: string; json: string }> = {};
+
+      // ---- QUALITY-SAFE FAST PATH ----
+      // Front-run a chip ONLY for a single, near-certain EA call-out so it
+      // appears at Voyage speed instead of waiting on the model's first token.
+      // This NEVER replaces the model: the full model run continues below and is
+      // authoritative — it would resolve this same clear phrase to this same
+      // high-confidence code (so it de-dupes by code), while everything else
+      // (defect→repair translations, measured items needing an estimate, edits,
+      // and any compound/ambiguous phrase) still waits for the model exactly as
+      // before. Guards keep the false-positive risk at zero:
+      //   • voice tick only, and a SINGLE phrase (no "and"/comma compounds)
+      //   • no edit/amend language (those must go through the model)
+      //   • the matcher reports `confident` AND clears an extra-high score floor
+      //   • EA / count item only (measured items defer to the model's estimate)
+      //   • code not already on screen (seenCodes already covers pending chips)
+      const FAST_FLOOR = 0.62;
+      const isSinglePhrase = !/\b(and|also|then|plus)\b|[,;]/i.test(transcriptDelta);
+      const looksLikeEdit = /\b(make it|change it|change that|instead|assign|percent|that one|this one|actually|no\s)\b|%/i.test(transcriptDelta);
+      if (hasVoice && isSinglePhrase && !looksLikeEdit) {
+        pending.push((async () => {
+          try {
+            const r = await resolveItem(transcriptDelta, '', true);
+            if (!r || !r.confident || (r.topScore ?? 0) < FAST_FLOOR) return;  // not near-certain → let the model decide
+            if (r.isMeasured && !r.isWholeHouse) return;                        // measured → model provides the estimate
+            const code = r.item.lineItemCode.toLowerCase();
+            if (seenCodeSet.has(code)) return;                                  // already on screen / pending
+            seenCodeSet.add(code);
+            send('suggestion', buildSuggestionObj({ query: transcriptDelta, quantityStated: false, rationale: 'Heard call-out', confidence: 'high' }, r));
+          } catch { /* fall through — the model run still covers it */ }
+        })());
+      }
 
       // A tool block just completed — resolve + emit it without waiting on the rest.
       const handleBlock = (b: { name: string; json: string }) => {
