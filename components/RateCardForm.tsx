@@ -89,6 +89,10 @@ interface RateCardFormProps {
    *  `last_tenant_time_in_home_months` on the property). Drives AI-review
    *  depreciation. null/absent → AI review defaults to 12. */
   lastTenantMonths?: number | null;
+  /** Most-recent active listing price + date, shown in the header (same as the
+   *  question templates). Optional. */
+  listingPrice?: number | null;
+  listingDate?: string | null;
   /** Final Checklist: air-filter qty/types (prefilled + written back) + septic
    *  fee (gates the conditional septic question), and the live filter-size
    *  dropdown options pulled from the HubSpot field. All optional. */
@@ -3122,7 +3126,9 @@ export function RateCardForm(props: RateCardFormProps) {
             </div>
             <div className="text-xs text-gray-500 mt-0.5">
               Inspector: {props.inspectorName}
-              {fmtStamp(props.submittedAt) && (
+              {/* Only show "Submitted" while it's actually in a submitted state —
+                  if it was reopened back to In Progress, drop the stamp. */}
+              {(liveStatus === 'pending_approval' || liveStatus === 'completed') && fmtStamp(props.submittedAt) && (
                 <span className="text-gray-400">{'  ·  '}{fmtStamp(props.submittedAt)} Submitted</span>
               )}
             </div>
@@ -3283,9 +3289,6 @@ export function RateCardForm(props: RateCardFormProps) {
               {props.squareFootage != null && props.squareFootage > 0 && (
                 <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
               )}
-              {/* Months in home (depreciation field); falls back to 12 like the
-                  schedule does, so it always shows. */}
-              <span> &middot; {(typeof props.lastTenantMonths === 'number' && props.lastTenantMonths > 0) ? props.lastTenantMonths : 12} months</span>
               {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
               {!inspectionRegion && <span className="text-yellow-700"> &middot; fallback (GA: Atlanta)</span>}
               {saveStatus.kind === 'saving' && <span className="text-brand font-semibold"> &middot; Saving...</span>}
@@ -3301,6 +3304,20 @@ export function RateCardForm(props: RateCardFormProps) {
                 </button>
               )}
             </div>
+            {/* Listing price + date (most recent active/published listing) — same
+                as the question templates. */}
+            {(typeof props.listingPrice === 'number' && props.listingPrice > 0) || props.listingDate ? (
+              <div className="text-[11px] text-emerald-700 font-semibold truncate">
+                {typeof props.listingPrice === 'number' && props.listingPrice > 0 && (
+                  <span>Listing ${props.listingPrice.toLocaleString()}</span>
+                )}
+                {props.listingDate && (
+                  <span className="text-gray-500 font-normal">
+                    {typeof props.listingPrice === 'number' && props.listingPrice > 0 ? ' · ' : ''}Listed {props.listingDate}
+                  </span>
+                )}
+              </div>
+            ) : null}
             {/* Total client $ across lines assigned to Internal Resolution. */}
             <div className="text-[11px] text-gray-500 truncate">
               Internal Resolution: ${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

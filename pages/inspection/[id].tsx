@@ -405,6 +405,8 @@ export default function ExistingInspection() {
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
+          listingPrice={listingPrice}
+          listingDate={listingDate}
           lastTenantMonths={propertyLastTenantMonths}
           propertyAirFiltersTotal={propertyAirFiltersTotal}
           propertyAirFiltersType1={propertyAirFiltersType1}
