@@ -1194,85 +1194,77 @@ export function QuestionForm({
     <main className="min-h-screen bg-white">
       {/* Sticky header */}
       <header className="sticky top-0 z-10 bg-white border-b-2 border-brand shadow-sm">
-        <div className="lz-head max-w-3xl mx-auto px-4 py-3 flex items-start justify-between">
-          <div className="min-w-0 flex-1 flex items-center gap-2.5">
-            {/* ResiWalk logo — mirrors the Scope Rate Card header. */}
-            {scopeStyle && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <button
-                type="button"
-                onClick={async () => { if (!readOnly) { try { await autosave.flush(true); } catch { /* leave anyway */ } } onCancel(); }}
-                aria-label="Back to inspections"
-                title="Back to inspections"
-                className="shrink-0"
-              >
-                {/* Transparent pink mark (no white tile) so it blends on the light header. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
-              </button>
-            )}
-            <div className="min-w-0 flex-1">
-            {/* Full address on ONE line (scrolls horizontally if very long rather
-                than wrapping or truncating). */}
-            <div className="text-sm font-heading font-semibold text-ink whitespace-nowrap overflow-x-auto" style={{ scrollbarWidth: 'none' }}>{propertyName}</div>
-            <div className="text-xs text-gray-500 truncate">{templateLabel} &middot; {inspectorName}</div>
-            <div className="text-xs text-gray-500 truncate">
-              {bedrooms}BR / {bathrooms}BA
-              {squareFootage != null && squareFootage > 0 && (
-                <span> &middot; {squareFootage.toLocaleString()} sqft</span>
-              )}
-            </div>
-            {/* Listing price + date (most recent active/published listing). */}
-            {(typeof listingPrice === 'number' && listingPrice > 0) || listingDate ? (
-              <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
-                {typeof listingPrice === 'number' && listingPrice > 0 && (
-                  <span>Listing ${listingPrice.toLocaleString()}</span>
-                )}
-                {listingDate && (
-                  <span className="text-gray-500 font-normal">
-                    {typeof listingPrice === 'number' && listingPrice > 0 ? ' · ' : ''}Listed {listingDate}
-                  </span>
-                )}
-              </div>
-            ) : null}
-            {pdfUrl && (
-              <a
-                href={pdfUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline"
-                title="Open the generated inspection report (opens in a new tab)"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
-                View PDF Report
-              </a>
-            )}
-            </div>
-          </div>
-          {/* Back stays on the same (top) row to keep the header tight; the
-              address beside it is a single non-wrapping line (scrolls if long). */}
-          <div className="shrink-0 ml-3">
+        <div className="lz-head max-w-3xl mx-auto px-4 py-3 flex items-start gap-2.5">
+          {/* ResiWalk logo → back to inspections (saves first). */}
+          {scopeStyle && (
             <button
               type="button"
-              onClick={async () => {
-                if (!readOnly) {
-                  try {
-                    await autosave.flush(true);
-                  } catch (e) {
-                    console.error('Back: flush failed', e);
-                  }
-                }
-                onCancel();
-              }}
-              className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
-              title="Save and go back"
+              onClick={async () => { if (!readOnly) { try { await autosave.flush(true); } catch { /* leave anyway */ } } onCancel(); }}
+              aria-label="Back to inspections"
+              title="Back to inspections"
+              className="shrink-0"
             >
-              <span aria-hidden>←</span> Back
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
             </button>
+          )}
+          <div className="min-w-0 flex-1">
+            {/* Full address on ONE line (scrolls horizontally if very long). */}
+            <div className="text-sm font-heading font-semibold text-ink whitespace-nowrap overflow-x-auto" style={{ scrollbarWidth: 'none' }}>{propertyName}</div>
+            {/* Sub-lines on the left; Back to their right, below the address. */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs text-gray-500 truncate">{templateLabel} &middot; {inspectorName}</div>
+                <div className="text-xs text-gray-500 truncate">
+                  {bedrooms}BR / {bathrooms}BA
+                  {squareFootage != null && squareFootage > 0 && (
+                    <span> &middot; {squareFootage.toLocaleString()} sqft</span>
+                  )}
+                </div>
+                {(typeof listingPrice === 'number' && listingPrice > 0) || listingDate ? (
+                  <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
+                    {typeof listingPrice === 'number' && listingPrice > 0 && (
+                      <span>Listing ${listingPrice.toLocaleString()}</span>
+                    )}
+                    {listingDate && (
+                      <span className="text-gray-500 font-normal">
+                        {typeof listingPrice === 'number' && listingPrice > 0 ? ' · ' : ''}Listed {listingDate}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
+                {pdfUrl && (
+                  <a
+                    href={pdfUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline"
+                    title="Open the generated inspection report (opens in a new tab)"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                    View PDF Report
+                  </a>
+                )}
+              </div>
+              {/* Back — to the right of the sub-lines, below the address. */}
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!readOnly) {
+                    try { await autosave.flush(true); } catch (e) { console.error('Back: flush failed', e); }
+                  }
+                  onCancel();
+                }}
+                className="shrink-0 inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
+                title="Save and go back"
+              >
+                <span aria-hidden>←</span> Back
+              </button>
+            </div>
           </div>
         </div>
         {/* Save indicator strip (hidden on short landscape to reclaim space). */}
