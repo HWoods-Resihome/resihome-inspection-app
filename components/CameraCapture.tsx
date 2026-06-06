@@ -508,6 +508,41 @@ export function CameraCapture({
     };
   }, [isOpen, startStream]);
 
+  // Re-fit the live preview on rotation / resize. Several mobile browsers
+  // (notably iOS Safari + iOS Chrome, and some Android WebViews / the native
+  // shell) DON'T recompute a <video>'s object-fit paint box when the device
+  // rotates — they keep the pre-rotation sizing, which leaves the picture as a
+  // thin sliver down the middle in landscape. Toggling object-fit forces the UA
+  // to recompute the painted box; a follow-up play() covers browsers that pause
+  // the track across the orientation change. Cross-platform, no visual flash.
+  useEffect(() => {
+    if (!isOpen) return;
+    let raf = 0;
+    const refit = () => {
+      const el = videoRef.current;
+      if (!el) return;
+      cancelAnimationFrame(raf);
+      el.style.objectFit = 'fill';
+      raf = requestAnimationFrame(() => {
+        const v = videoRef.current;
+        if (!v) return;
+        v.style.objectFit = ''; // revert to the Tailwind `object-cover` class
+        if (v.paused) v.play().catch(() => { /* autoplay rejection is non-fatal */ });
+      });
+    };
+    window.addEventListener('orientationchange', refit);
+    window.addEventListener('resize', refit);
+    // Some browsers fire only one of the two, and a touch late — also nudge once
+    // shortly after open so the very first paint is correct.
+    const t = setTimeout(refit, 250);
+    return () => {
+      window.removeEventListener('orientationchange', refit);
+      window.removeEventListener('resize', refit);
+      clearTimeout(t);
+      cancelAnimationFrame(raf);
+    };
+  }, [isOpen]);
+
   // While the camera is open, keep a fresh GPS fix so each shot can be stamped.
   // Best-effort: if the user denies location or it's unavailable, we just stamp
   // address + time without coordinates.
