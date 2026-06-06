@@ -51,6 +51,10 @@ interface Props {
   only?: string[];
   /** Title for the outer bubble (defaults to "Final Checklist"). */
   title?: string;
+  /** Render each subsection as its OWN standalone bubble (no outer "Final
+   *  Checklist" wrapper, no Inspector Final Notes) — used to embed the sections
+   *  into a Q&A form so they look like the form's other sections. */
+  bare?: boolean;
 }
 
 const num = (v: unknown): number | null => {
@@ -502,6 +506,89 @@ export function FinalChecklist(props: Props) {
     return true;
   }
 
+  // One subsection's header + questions. In bare mode each is its OWN bubble
+  // (matching the Q&A form's section style); otherwise it's a row inside the
+  // outer "Final Checklist" bubble.
+  const sectionEls = sections.map((section) => {
+    const qs = section.questions.filter(visible);
+    if (qs.length === 0) return null;
+    const sopen = openSections[section.id] ?? true;
+    const header = (
+      <button
+        type="button"
+        onClick={() => setOpenSections((m) => ({ ...m, [section.id]: !(m[section.id] ?? true) }))}
+        aria-expanded={sopen}
+        className="w-full px-4 py-2.5 bg-gray-50 hover:bg-gray-100 border-b border-gray-200 flex items-center gap-2 text-left"
+      >
+        <span className="font-heading font-bold text-sm text-ink">{titleCase(section.name)}</span>
+        {section.questions.some((q) => q.required) && <span className="text-[11px] text-brand font-semibold">(Required)</span>}
+        <span className="text-gray-400 ml-auto shrink-0">{sopen ? '▾' : '▸'}</span>
+      </button>
+    );
+    const body = sopen && qs.map((q) => (
+      <div key={q.id} className="px-4 py-4 border-t border-gray-100 first:border-t-0">
+        <div className="font-heading font-semibold text-ink text-sm leading-snug mb-2">
+          {titleCase(q.label)}{q.required && <span className="text-brand ml-1">*</span>}
+        </div>
+        {q.help && <p className="text-xs text-gray-500 italic -mt-1 mb-2">{q.help}</p>}
+        {renderQuestion(q)}
+      </div>
+    ));
+    return props.bare ? (
+      <section key={section.id} className="mb-8 rounded-xl border border-gray-200 shadow-md overflow-hidden bg-white">
+        {header}
+        {body}
+      </section>
+    ) : (
+      <div key={section.id} className="border-b border-gray-100 last:border-b-0">
+        {header}
+        {body}
+      </div>
+    );
+  });
+
+  const overlays = (
+    <>
+      {/* one shared camera for every photo field; signals the parent so the
+          floating mic hides while it's open. */}
+      <CameraCapture
+        isOpen={camFor !== null}
+        addressSnapshot={props.propertyName}
+        propertyRecordId={props.propertyRecordId}
+        onClose={() => setCamera(null)}
+        uploadPhoto={(file) => props.uploadPhoto(file, camFor || undefined)}
+        onComplete={(urls) => {
+          if (camFor && urls.length > 0) setPhotoList(camFor, [...getPhotoList(camFor), ...urls]);
+          setCamera(null);
+        }}
+      />
+      {/* Full-screen viewer for every Final Checklist photo. */}
+      {lbox && (() => {
+        const groups = photoGroups();
+        const photosByGroup = Object.fromEntries(groups.map((g) => [g.id, getPhotoList(g.id)]));
+        if (!photosByGroup[lbox.groupId]) return null;
+        return (
+          <PhotoLightbox
+            groups={groups}
+            photosByGroup={photosByGroup}
+            initialGroupId={lbox.groupId}
+            initialIndex={lbox.index}
+            readOnly={readOnly}
+            onClose={closeLightbox}
+            onDelete={(gid, idx) => removePhoto(gid, idx)}
+            onReplace={(gid, idx, file) => { void replacePhoto(gid, idx, file); }}
+          />
+        );
+      })()}
+    </>
+  );
+
+  // Bare: each subsection is its own standalone bubble (no outer wrapper, no
+  // Inspector Final Notes) — used when embedding into the Q&A forms.
+  if (props.bare) {
+    return <>{sectionEls}{overlays}</>;
+  }
+
   return (
     <section className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       {/* Header — title left-aligned like a room name; (Required) beside it; the
@@ -534,37 +621,9 @@ export function FinalChecklist(props: Props) {
             </button>
           </div>
 
-          {sections.map((section) => {
-            const qs = section.questions.filter(visible);
-            if (qs.length === 0) return null;
-            const sopen = openSections[section.id] ?? true;
-            return (
-              <div key={section.id} className="border-b border-gray-100 last:border-b-0">
-                <button
-                  type="button"
-                  onClick={() => setOpenSections((m) => ({ ...m, [section.id]: !(m[section.id] ?? true) }))}
-                  aria-expanded={sopen}
-                  className="w-full px-4 py-2.5 bg-gray-50 hover:bg-gray-100 flex items-center gap-2 text-left"
-                >
-                  <span className="font-heading font-bold text-sm text-ink">{titleCase(section.name)}</span>
-                  <span className="text-gray-400 ml-auto shrink-0">{sopen ? '▾' : '▸'}</span>
-                </button>
-                {sopen && qs.map((q) => (
-                  <div key={q.id} className="px-4 py-4 border-t border-gray-100">
-                    <div className="font-heading font-semibold text-ink text-sm leading-snug mb-2">
-                      {titleCase(q.label)}{q.required && <span className="text-brand ml-1">*</span>}
-                    </div>
-                    {q.help && <p className="text-xs text-gray-500 italic -mt-1 mb-2">{q.help}</p>}
-                    {renderQuestion(q)}
-                  </div>
-                ))}
-              </div>
-            );
-          })}
+          {sectionEls}
 
-          {/* Inspector final notes — free-text and OPTIONAL. Sits at the very
-              bottom of the checklist; visible (read-only) to the reviewer who
-              finalizes. Persists with the rest of the Final Checklist answers. */}
+          {/* Inspector final notes — free-text and OPTIONAL. */}
           <div className="px-4 py-4 border-t border-gray-100">
             <div className="font-heading font-semibold text-ink text-sm leading-snug mb-2">
               Inspector Final Notes <span className="text-gray-400 font-normal">(Optional)</span>
@@ -582,40 +641,7 @@ export function FinalChecklist(props: Props) {
         </>
       )}
 
-      {/* one shared camera for every photo field; signals the parent so the
-          floating mic hides while it's open. */}
-      <CameraCapture
-        isOpen={camFor !== null}
-        addressSnapshot={props.propertyName}
-        propertyRecordId={props.propertyRecordId}
-        onClose={() => setCamera(null)}
-        uploadPhoto={(file) => props.uploadPhoto(file, camFor || undefined)}
-        onComplete={(urls) => {
-          if (camFor && urls.length > 0) setPhotoList(camFor, [...getPhotoList(camFor), ...urls]);
-          setCamera(null);
-        }}
-      />
-
-      {/* Full-screen viewer for every Final Checklist photo: swipe/arrow across
-          all of them, mark up, or delete — same component the rooms use. */}
-      {lbox && (() => {
-        const groups = photoGroups();
-        const photosByGroup = Object.fromEntries(groups.map((g) => [g.id, getPhotoList(g.id)]));
-        // If the tapped group somehow isn't in the set (shouldn't happen), bail.
-        if (!photosByGroup[lbox.groupId]) return null;
-        return (
-          <PhotoLightbox
-            groups={groups}
-            photosByGroup={photosByGroup}
-            initialGroupId={lbox.groupId}
-            initialIndex={lbox.index}
-            readOnly={readOnly}
-            onClose={closeLightbox}
-            onDelete={(gid, idx) => removePhoto(gid, idx)}
-            onReplace={(gid, idx, file) => { void replacePhoto(gid, idx, file); }}
-          />
-        );
-      })()}
+      {overlays}
     </section>
   );
 }

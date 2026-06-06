@@ -416,6 +416,9 @@ export const FINAL_CHECKLIST: FcSection[] = [
         type: 'single_select',
         options: ['Yes', 'No'],
         required: true,
+        // If it's not functioning, capture what's wrong.
+        noteRequiredOnValues: ['No'],
+        notePrompt: 'What is wrong with the HVAC?',
         addLineOnValues: [
           { value: 'No', rule: { lineItemCode: 'HVACL1603', label: 'HVAC Service Clean Top Off', ...t(0) } },
         ],

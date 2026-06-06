@@ -158,7 +158,7 @@ export function QuestionForm({
   // The Q&A templates render the EXACT Scope widgets and persist them the same
   // way the rate card does: one JSON-blob Answer record (answer_id_external
   // FINALCHECKLIST-<id>). No line-item behavior here (no onAddLine).
-  const FC_ONLY = useMemo(() => ['hvac_air_filters', 'smart_home_tech'], []);
+  const FC_ONLY = useMemo(() => ['hvac_air_filters', 'smart_home_tech', 'utilities'], []);
   const [fcAnswers, setFcAnswers] = useState<FcAnswers>({});
   const fcRecordIdRef = useRef<string | null>(null);
   const fcHydratedRef = useRef(false);
@@ -256,8 +256,12 @@ export function QuestionForm({
     const base = templateType === 'leasing_agent_1099_property_inspection'
       ? questions.filter((q) => !/\bhap\b/i.test(q.section))
       : questions;
+    // Strip the HubSpot HVAC, Smart Home, and Safety/Electric sections — they're
+    // replaced by the reused Scope widgets (HVAC & Air Filters, Smart Home, and
+    // Utilities) rendered below.
     return scopeStyle
-      ? base.filter((q) => !isHvacSection(q.section) && !isSmartHomeSection(q.section))
+      ? base.filter((q) => !isHvacSection(q.section) && !isSmartHomeSection(q.section)
+          && !/\b(safety|electric|utilit)/i.test(q.section))
       : base;
   }, [questions, templateType, scopeStyle]);
   // Build the list of section instances. Repeating sections expand into multiple.
@@ -1443,23 +1447,22 @@ export function QuestionForm({
           );
         })}
 
-        {/* HVAC & Air Filters + Smart Home — the exact Scope Rate Card widgets,
-            reused (no line-item behavior). Persisted as one JSON-blob answer. */}
+        {/* HVAC & Air Filters · Smart Home · Utilities — the exact Scope Rate
+            Card widgets, reused (no line-item behavior). Each renders as its own
+            bubble (bare). Persisted as one JSON-blob answer. */}
         {scopeStyle && (
-          <div className="lz-gap mb-8">
-            <FinalChecklist
-              only={FC_ONLY}
-              title="HVAC & Smart Home"
-              answers={fcAnswers}
-              onPatch={onFcPatch}
-              uploadPhoto={(file, fieldKey) => uploadPhotoOrQueue(file, inspectionRecordId, fieldKey || 'fc')}
-              propertyName={propertyName}
-              propertyRecordId={propertyRecordId}
-              propertyValues={propertyValues}
-              filterSizeOptions={filterSizeOptions}
-              readOnly={readOnly}
-            />
-          </div>
+          <FinalChecklist
+            bare
+            only={FC_ONLY}
+            answers={fcAnswers}
+            onPatch={onFcPatch}
+            uploadPhoto={(file, fieldKey) => uploadPhotoOrQueue(file, inspectionRecordId, fieldKey || 'fc')}
+            propertyName={propertyName}
+            propertyRecordId={propertyRecordId}
+            propertyValues={propertyValues}
+            filterSizeOptions={filterSizeOptions}
+            readOnly={readOnly}
+          />
         )}
       </div>
 
