@@ -612,6 +612,18 @@ export function CameraCapture({
     };
   }, [isOpen]);
 
+  // While the camera is open, recolor the status-bar (PWA/Chrome theme-color)
+  // from brand pink to black so it blends into the black camera chrome instead
+  // of showing as a wasted pink band above the header. Restored on close.
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (!meta) return;
+    const prev = meta.getAttribute('content') || '#ff0060';
+    meta.setAttribute('content', '#000000');
+    return () => { meta.setAttribute('content', prev); };
+  }, [isOpen]);
+
   // Re-fit the live preview on rotation / resize. Several mobile browsers
   // (notably iOS Safari + iOS Chrome, and some Android WebViews / the native
   // shell) DON'T recompute a <video>'s object-fit paint box when the device
@@ -1330,7 +1342,7 @@ export function CameraCapture({
       {/* Top bar — ONE row: Cancel · room navigation (or capture count). No
           "Take Photos" title; the room nav lives inline here in portrait AND
           landscape so the chrome stays one slim line. */}
-      <div className="lz-head flex items-center justify-between gap-2 px-3 py-2 bg-black/60 text-white">
+      <div className="lz-head flex items-center justify-between gap-2 px-3 py-1 bg-black/60 text-white">
         <button
           type="button"
           onClick={handleCancel}
@@ -1365,7 +1377,7 @@ export function CameraCapture({
           out of the live image, so the inspector always sees Listening/Thinking
           /transcript without it covering the camera. */}
       {aiAssist && (
-        <div className="lz-head bg-black/75 text-white px-4 py-1.5 flex items-center justify-between gap-2 border-b border-white/10">
+        <div className="lz-head bg-black/75 text-white px-4 py-0.5 flex items-center justify-between gap-2 border-b border-white/10">
           <div className="text-[12px] flex items-center gap-1.5 min-w-0">
             {aiOn ? (
               <>
