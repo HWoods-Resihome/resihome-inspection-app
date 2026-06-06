@@ -339,6 +339,70 @@ export async function fetchQuestionsForTemplate(
   return { questions: out };
 }
 
+// ── Question-record maintenance (admin cleanup) ─────────────────────────────
+export interface RawQuestionRecord {
+  recordId: string;
+  questionIdExternal: string;
+  questionText: string;
+  section: string;
+  sectionOrder: number;
+  applies: string[];
+}
+
+/** Every non-archived inspection_question record (raw), for admin cleanup. */
+export async function listAllQuestionRecords(): Promise<RawQuestionRecord[]> {
+  const { question: typeId } = typeIds();
+  const props = ['question_id_external', 'question_text', 'section', 'section_order', 'applies_to_templates'];
+  const out: RawQuestionRecord[] = [];
+  let after: string | undefined;
+  do {
+    const body: any = { filterGroups: [], properties: props, limit: 100 };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST', body: JSON.stringify(body),
+    });
+    for (const r of resp.results || []) {
+      const p = r.properties || {};
+      out.push({
+        recordId: r.id,
+        questionIdExternal: p.question_id_external || '',
+        questionText: p.question_text || '',
+        section: p.section || '',
+        sectionOrder: Number(p.section_order) || 0,
+        applies: (p.applies_to_templates || '').split('|').map((s: string) => s.trim()).filter(Boolean),
+      });
+    }
+    after = resp.paging?.next?.after;
+  } while (after);
+  return out;
+}
+
+export async function updateQuestionRecord(recordId: string, props: Record<string, any>): Promise<void> {
+  const { question: typeId } = typeIds();
+  await hubspotFetch(`/crm/v3/objects/${typeId}/${recordId}`, {
+    method: 'PATCH', body: JSON.stringify({ properties: props }),
+  });
+}
+
+export async function archiveQuestionRecords(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const { question: typeId } = typeIds();
+  for (let i = 0; i < ids.length; i += HUBSPOT_BATCH_LIMIT) {
+    const chunk = ids.slice(i, i + HUBSPOT_BATCH_LIMIT);
+    await hubspotFetch(`/crm/v3/objects/${typeId}/batch/archive`, {
+      method: 'POST', body: JSON.stringify({ inputs: chunk.map((id) => ({ id })) }),
+    });
+  }
+}
+
+export async function createQuestionRecord(props: Record<string, any>): Promise<string> {
+  const { question: typeId } = typeIds();
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, {
+    method: 'POST', body: JSON.stringify({ properties: props }),
+  });
+  return resp.id;
+}
+
 // Pull bed/bath from a Property record. Field names are bedrooms / bathrooms.
 function pickBedBathFromProps(p: Record<string, any>): { bedrooms?: number | null; bathrooms?: number | null } {
   let bedrooms: number | null = null;

@@ -1149,9 +1149,10 @@ export function QuestionForm({
   const totalCompleted = Object.values(sectionProgress).reduce((acc, s) => acc + s.completed, 0);
   const totalQuestions = Object.values(sectionProgress).reduce((acc, s) => acc + s.total, 0);
 
-  // The "Summary" section (if any) renders LAST — after the reused Scope
-  // HVAC/Smart Home/Utilities bubbles.
-  const firstSummaryKey = sectionInstances.find((i) => /summary/i.test(i.baseSectionName))?.instanceKey;
+  // The Review/Sign-off/Summary section (if any) renders LAST — after the reused
+  // Scope HVAC/Smart Home/Utilities bubbles. (After the cleanup these merge into
+  // one "Review & Sign-Off" section.)
+  const firstSummaryKey = sectionInstances.find((i) => /summary|review|sign.?off/i.test(i.baseSectionName))?.instanceKey;
 
   // The reused Scope sections (HVAC & Air Filters · Smart Home · Utilities),
   // each as its own bubble. Rendered once — just before the Summary section if
