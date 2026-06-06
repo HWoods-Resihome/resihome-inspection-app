@@ -25,6 +25,27 @@ const OAUTH_START_PATH = '/api/auth/google-login';
 
 let installed = false;
 
+// Recolor the NATIVE status bar in the Capacitor shell (Android). The web/PWA
+// status bar is handled separately by swapping the <meta name="theme-color">.
+// Driven through the runtime-registered global plugin (window.Capacitor.Plugins
+// .StatusBar) so we DON'T pull @capacitor/status-bar into the web bundle — the
+// plugin already ships in the native binary (mobile/package.json), and the
+// native app loads this live web app via server.url, so the call resolves there.
+// HARD GATE: no-op in any normal browser (isNativePlatform() === false).
+export function setNativeStatusBarColor(color: string): void {
+  if (typeof window === 'undefined') return;
+  const cap = (window as any).Capacitor;
+  if (!cap?.isNativePlatform?.()) return;
+  const sb = cap.Plugins?.StatusBar;
+  if (!sb) return;
+  try {
+    // Keep light icons (Style.Dark == light content) — both black and brand
+    // pink are dark enough to need them.
+    sb.setBackgroundColor?.({ color });
+    sb.setStyle?.({ style: 'DARK' });
+  } catch { /* iOS no-op / plugin unavailable — fine */ }
+}
+
 export async function installOAuthBridge(): Promise<void> {
   // SSR / non-browser guard.
   if (typeof window === 'undefined') return;

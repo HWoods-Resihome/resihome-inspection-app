@@ -7,6 +7,7 @@ import { makeVideoEntry } from '@/lib/media';
 import { CameraAILayer } from '@/components/CameraAILayer';
 import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
 import { useBackToClose } from '@/lib/useBackToClose';
+import { setNativeStatusBarColor } from '@/lib/nativeBridge';
 import type { RateCardLineInput, RateCardLineItem, RegionRate } from '@/lib/types';
 
 /**
@@ -612,16 +613,20 @@ export function CameraCapture({
     };
   }, [isOpen]);
 
-  // While the camera is open, recolor the status-bar (PWA/Chrome theme-color)
-  // from brand pink to black so it blends into the black camera chrome instead
-  // of showing as a wasted pink band above the header. Restored on close.
+  // While the camera is open, recolor the status bar from brand pink to black so
+  // it blends into the black camera chrome instead of showing as a wasted pink
+  // band above the header. Handles BOTH surfaces: the PWA/browser theme-color
+  // meta AND the native (Capacitor) status bar. Restored on close.
   useEffect(() => {
     if (!isOpen || typeof document === 'undefined') return;
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (!meta) return;
-    const prev = meta.getAttribute('content') || '#ff0060';
-    meta.setAttribute('content', '#000000');
-    return () => { meta.setAttribute('content', prev); };
+    const prev = meta?.getAttribute('content') || '#ff0060';
+    meta?.setAttribute('content', '#000000');
+    setNativeStatusBarColor('#000000');
+    return () => {
+      meta?.setAttribute('content', prev);
+      setNativeStatusBarColor(prev);
+    };
   }, [isOpen]);
 
   // Re-fit the live preview on rotation / resize. Several mobile browsers
