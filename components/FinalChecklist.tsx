@@ -46,6 +46,11 @@ interface Props {
   open?: boolean;
   onToggleOpen?: () => void;
   readOnly?: boolean;
+  /** Render only these section ids (e.g. the Q&A templates reuse just the HVAC +
+   *  Smart Home sections). Omit to render the full checklist. */
+  only?: string[];
+  /** Title for the outer bubble (defaults to "Final Checklist"). */
+  title?: string;
 }
 
 const num = (v: unknown): number | null => {
@@ -83,7 +88,7 @@ export function FinalChecklist(props: Props) {
   const ans = (id: string): FcAnswerState => answers[id] || {};
   const setCamera = (key: string | null) => { setCamFor(key); props.onCameraOverlayChange?.(key !== null); };
 
-  const sections = FINAL_CHECKLIST;
+  const sections = props.only ? FINAL_CHECKLIST.filter((s) => props.only!.includes(s.id)) : FINAL_CHECKLIST;
   const allSubsOpen = sections.every((s) => openSections[s.id] ?? true);
   const setAllSubs = (v: boolean) => setOpenSections(Object.fromEntries(sections.map((s) => [s.id, v])));
 
@@ -228,6 +233,8 @@ export function FinalChecklist(props: Props) {
   }
 
   function AddLineArea({ q }: { q: FcQuestion }) {
+    // No line system in this context (e.g. the Q&A templates) → no add/decline UI.
+    if (!props.onAddLine) return null;
     const a = ans(q.id);
     const match = (q.addLineOnValues || []).find((r) => r.value === a.value);
     if (!match) return null;
@@ -505,7 +512,7 @@ export function FinalChecklist(props: Props) {
         aria-expanded={open}
         className="w-full px-4 py-3 bg-brand/5 hover:bg-brand/10 border-b border-gray-200 flex items-center gap-2 text-left"
       >
-        <span className="font-semibold text-gray-900 text-sm sm:text-base">Final Checklist</span>
+        <span className="font-semibold text-gray-900 text-sm sm:text-base">{props.title || 'Final Checklist'}</span>
         <span className="text-[11px] text-brand font-semibold">(Required)</span>
         <span className="text-gray-400 ml-auto shrink-0">{open ? '▾' : '▸'}</span>
       </button>

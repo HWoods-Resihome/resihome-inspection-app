@@ -3269,10 +3269,12 @@ export function RateCardForm(props: RateCardFormProps) {
             {/* ResiWalk app icon — pink house + footprint on a white tile so the
                 square blends into the light header (vs the white-on-pink tile
                 used on the pink inspections-list header). Edge-to-edge. */}
-            {/* Logo → save & return to the inspections list (flushes first). */}
+            {/* Logo → save & return to the inspections list (flushes first).
+                Transparent pink mark (no white tile) so it blends on the
+                off-white header. */}
             <button type="button" onClick={handleSaveAndClose} aria-label="Back to inspections" title="Back to inspections" className="shrink-0">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/app-icon-light.svg" alt="ResiWalk" className="h-8 w-8 object-cover" />
+              <img src="/favicon.svg" alt="ResiWalk" className="h-8 w-8 object-contain" />
             </button>
             <div className="text-center sm:text-left min-w-0">
             <div className="text-sm font-semibold text-gray-800 truncate">{props.propertyName}</div>

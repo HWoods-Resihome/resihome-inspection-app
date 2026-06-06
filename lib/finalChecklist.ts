@@ -288,8 +288,9 @@ export function summarizeFinalChecklist(
  *  (e.g. "HVAC & Air Filters · Label Sticker Photos: add the Air Handler photo").
  *  Returns null when the checklist is complete. Single source of truth for both
  *  the completeness gate and the submit tooltip/flash. */
-export function finalChecklistGap(a: FcAnswers, ctx: FcCompletionCtx): string | null {
+export function finalChecklistGap(a: FcAnswers, ctx: FcCompletionCtx, opts?: { onlySectionIds?: string[]; skipLineRules?: boolean }): string | null {
   for (const section of FINAL_CHECKLIST) {
+    if (opts?.onlySectionIds && !opts.onlySectionIds.includes(section.id)) continue;
     for (const q of section.questions) {
       if (!fcQuestionVisible(q, ctx)) continue;
       const ans = a[q.id] || {};
@@ -325,7 +326,7 @@ export function finalChecklistGap(a: FcAnswers, ctx: FcCompletionCtx): string | 
         const cnt = (q.countOnValues || []).find((c) => c.value === ans.value);
         if (cnt && ans.count == null) return `${where}: ${cnt.label}`;
         const addRule = (q.addLineOnValues || []).find((r) => r.value === ans.value);
-        if (addRule && !ans.added && !ans.declined && !ctx.lineExists?.(addRule.rule.lineItemCode)) {
+        if (addRule && !opts?.skipLineRules && !ans.added && !ans.declined && !ctx.lineExists?.(addRule.rule.lineItemCode)) {
           return `${where}: add or decline the suggested line`;
         }
       }

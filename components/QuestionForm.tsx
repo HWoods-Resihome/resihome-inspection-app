@@ -15,10 +15,12 @@ const hasMediaDevices = typeof navigator !== 'undefined'
   && !!navigator.mediaDevices?.getUserMedia;
 import { useAutosave, type SaveState } from '@/lib/useAutosave';
 import { buildQaAnswerProps, buildSectionPhotoAnswerProps } from '@/lib/answerProps';
+import { isHvacSection, isSmartHomeSection } from '@/lib/scopeWidgetSections';
+import { FinalChecklist } from '@/components/FinalChecklist';
 import {
-  isHvacSection, isSmartHomeSection, buildHvacQuestions, buildSmartHomeQuestions,
-  type WidgetMetaMap,
-} from '@/lib/scopeWidgetSections';
+  finalChecklistGap,
+  type FcAnswers, type FcAnswerState, type FcCompletionCtx,
+} from '@/lib/finalChecklist';
 
 type Props = {
   questions: Question[];
@@ -152,36 +154,112 @@ export function QuestionForm({
     air_filters___type__3: propertyAirFiltersType3 || '',
   }), [propertyAirFiltersTotal, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3]);
 
+  // ── Reused Scope FinalChecklist (HVAC & Air Filters + Smart Home Tech) ──────
+  // The Q&A templates render the EXACT Scope widgets and persist them the same
+  // way the rate card does: one JSON-blob Answer record (answer_id_external
+  // FINALCHECKLIST-<id>). No line-item behavior here (no onAddLine).
+  const FC_ONLY = useMemo(() => ['hvac_air_filters', 'smart_home_tech'], []);
+  const [fcAnswers, setFcAnswers] = useState<FcAnswers>({});
+  const fcRecordIdRef = useRef<string | null>(null);
+  const fcHydratedRef = useRef(false);
+  const fcSaveTimer = useRef<any>(null);
+
+  // Hydrate the checklist blob from the saved answer on open.
+  useEffect(() => {
+    if (!scopeStyle || fcHydratedRef.current) return;
+    fcHydratedRef.current = true;
+    const blob = (existingAnswers || []).find(
+      (a) => a.questionIdExternal === 'fc__all' || (a.answerIdExternal || '').startsWith('FINALCHECKLIST-')
+    );
+    if (blob) {
+      fcRecordIdRef.current = blob.recordId || null;
+      try { const parsed = JSON.parse(blob.note || '{}'); if (parsed && typeof parsed === 'object') setFcAnswers(parsed); } catch { /* ignore */ }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeStyle]);
+
+  // Strip offline-draft (blob:) photo URLs before persisting.
+  const fcStripBlobs = useCallback((a: FcAnswers): FcAnswers => {
+    const out: FcAnswers = {};
+    for (const [k, v] of Object.entries(a)) {
+      const nv: FcAnswerState = { ...v };
+      if (nv.photoUrls) nv.photoUrls = nv.photoUrls.filter((u) => !u.startsWith('blob:'));
+      if (nv.stickerPhotos) {
+        const sp: Record<string, string[]> = {};
+        for (const [pk, arr] of Object.entries(nv.stickerPhotos)) sp[pk] = (arr || []).filter((u) => !u.startsWith('blob:'));
+        nv.stickerPhotos = sp;
+      }
+      out[k] = nv;
+    }
+    return out;
+  }, []);
+
+  // Persist the checklist as a single JSON-blob answer (mirrors the rate card).
+  const saveFc = useCallback(async (toSave: FcAnswers): Promise<void> => {
+    if (readOnly) return;
+    const body = {
+      upserts: [{
+        recordId: fcRecordIdRef.current || undefined,
+        answerProps: buildQaAnswerProps({
+          answerIdExternal: `FINALCHECKLIST-${inspectionRecordId}`,
+          inspectionIdExternal: inspectionExternalId,
+          questionIdExternal: 'fc__all',
+          questionText: 'HVAC & Smart Home',
+          section: 'HVAC & Smart Home',
+          summaryInstanceLabel: '',
+          answerValue: 'final_checklist',
+          note: JSON.stringify(fcStripBlobs(toSave)),
+        }, { isScope: false }),
+        questionHubspotRecordId: null,
+      }],
+      archives: [] as string[],
+    };
+    try {
+      const r = await fetch(`/api/inspections/${inspectionRecordId}/answers`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, bumpStatusToInProgress: true }),
+      });
+      if (r.ok) { const d = await r.json(); const rid = d.results?.[0]?.recordId; if (rid) fcRecordIdRef.current = rid; }
+    } catch { /* offline — the next save / submit retries */ }
+  }, [readOnly, inspectionRecordId, inspectionExternalId, fcStripBlobs]);
+
+  const onFcPatch = useCallback((questionId: string, patch: Partial<FcAnswerState>) => {
+    if (readOnly) return;
+    setFcAnswers((prev) => {
+      const next = { ...prev, [questionId]: { ...prev[questionId], ...patch } };
+      if (fcSaveTimer.current) clearTimeout(fcSaveTimer.current);
+      fcSaveTimer.current = setTimeout(() => { void saveFc(next); }, 900);
+      return next;
+    });
+    onFirstEdit?.();
+  }, [readOnly, saveFc, onFirstEdit]);
+
+  // Validation context (HVAC + Smart Home only; no septic, no line rules).
+  const fcCtx: FcCompletionCtx = {
+    septicFee: null,
+    airQtyPrefill: propertyAirFiltersTotal ?? null,
+    filterOptionsAvailable: (filterSizeOptions?.length || 0) > 0,
+    filterPrefills: [propertyAirFiltersType1 || null, propertyAirFiltersType2 || null, propertyAirFiltersType3 || null],
+  };
+
   // Transform the raw questions:
   //   - 1099 drops the HAP section entirely
   //   - the HVAC and Smart Home sections (HubSpot-defined) are intercepted and
   //     replaced by the Scope-style widget questions (lib/scopeWidgetSections),
   //     preserving the original section name + order. The HubSpot question
   //     records are left untouched; we just render these instead.
-  const { formQuestions, widgetMeta } = useMemo(() => {
+  //   - the HVAC and Smart Home sections are STRIPPED here and replaced by the
+  //     reused Scope FinalChecklist widgets (rendered after the questions), so
+  //     they mirror the rate card exactly. The HubSpot question records are left
+  //     untouched; we just don't render them.
+  const formQuestions = useMemo(() => {
     const base = templateType === 'leasing_agent_1099_property_inspection'
       ? questions.filter((q) => !/\bhap\b/i.test(q.section))
       : questions;
-    const meta: WidgetMetaMap = {};
-    const passthrough: Question[] = [];
-    let hvac: { name: string; order: number } | null = null;
-    let smart: { name: string; order: number } | null = null;
-    for (const q of base) {
-      if (isHvacSection(q.section)) { if (!hvac) hvac = { name: q.section, order: q.sectionOrder }; continue; }
-      if (isSmartHomeSection(q.section)) { if (!smart) smart = { name: q.section, order: q.sectionOrder }; continue; }
-      passthrough.push(q);
-    }
-    const out = [...passthrough];
-    if (hvac) {
-      const built = buildHvacQuestions(hvac.name, hvac.order, filterSizeOptions || []);
-      out.push(...built.questions); Object.assign(meta, built.meta);
-    }
-    if (smart) {
-      const built = buildSmartHomeQuestions(smart.name, smart.order);
-      out.push(...built.questions); Object.assign(meta, built.meta);
-    }
-    return { formQuestions: out, widgetMeta: meta };
-  }, [questions, templateType, filterSizeOptions]);
+    return scopeStyle
+      ? base.filter((q) => !isHvacSection(q.section) && !isSmartHomeSection(q.section))
+      : base;
+  }, [questions, templateType, scopeStyle]);
   // Build the list of section instances. Repeating sections expand into multiple.
   const sectionInstances: SectionInstance[] = useMemo(() => {
     // First group questions by base section
@@ -309,13 +387,8 @@ export function QuestionForm({
           section: q.section,
           location: inst.location,
           // scopeStyle templates start with NO pre-filled answer — the inspector
-          // must make every selection explicitly (no silent defaults). EXCEPTION:
-          // HVAC air-filter widget fields prefill from the property record.
-          answerValue: (() => {
-            const wm = widgetMeta[q.questionIdExternal];
-            if (wm?.prefillFrom) { const pv = propertyValues[wm.prefillFrom]; if (pv) return pv; }
-            return scopeStyle ? '' : (q.defaultValue || '');
-          })(),
+          // must make every selection explicitly (no silent defaults).
+          answerValue: scopeStyle ? '' : (q.defaultValue || ''),
           note: '',
           quantity: null,
           photoUrls: [],
@@ -813,66 +886,29 @@ export function QuestionForm({
     return () => { window.removeEventListener('online', onOnline); clearInterval(iv); };
   }, [readOnly]);
 
-  // Synthetic HVAC/Smart Home widget fields show conditionally:
-  //  - showWhen: visible only when a sibling answer has one of the values
-  //  - filterIndex: a filter-size field — visible only when the confirmed
-  //    air-filter quantity is >= its index.
-  // Non-widget questions (no meta) are always visible.
-  function isWidgetVisible(qid: string, instanceKey: string): boolean {
-    const meta = widgetMeta[qid];
-    if (!meta) return true;
-    if (meta.showWhen) {
-      const sib = answers[answerKey(meta.showWhen.questionId, instanceKey)];
-      return !!sib && meta.showWhen.values.includes(sib.answerValue);
-    }
-    if (meta.filterIndex) {
-      const qa = answers[answerKey('fc_air_filters_qty', instanceKey)];
-      const qn = qa ? parseInt(qa.answerValue, 10) : NaN;
-      return meta.filterIndex <= (Number.isFinite(qn) ? qn : 0);
-    }
-    return true;
-  }
+  // (Legacy widget visibility — the synthetic HVAC/Smart widgets were replaced
+  // by the reused FinalChecklist, so every remaining question is always shown.)
+  function isWidgetVisible(_qid: string, _instanceKey: string): boolean { return true; }
 
-  // First answer for a synthetic widget question (single, non-repeating section).
-  const findAnswerByQid = (qid: string) => {
-    const prefix = `${qid}::`;
-    const k = Object.keys(answers).find((key) => key.startsWith(prefix));
-    return k ? answers[k] : undefined;
-  };
-
-  // Two-way sync: as the inspector confirms/corrects the air-filter quantity and
-  // sizes in the HVAC widget, write them back onto the Property object (debounced)
-  // so the property record stays current. Sizes beyond the quantity are cleared.
-  // Seed the baseline to the property's CURRENT air-filter values so the prefill
-  // (which equals them) doesn't trigger a redundant write on load — only the
-  // inspector actually changing a value syncs back.
-  const airSyncRef = useRef<string>((() => {
-    const qty = propertyValues.air_filters___total_quantity || '';
-    const qn = parseInt(qty, 10);
-    const n = Number.isFinite(qn) ? Math.max(0, Math.min(3, qn)) : 3;
-    const types = [1, 2, 3].map((i) => (i <= n ? (propertyValues[`air_filters___type__${i}`] || '') : ''));
-    return JSON.stringify({ qty, types });
-  })());
+  // Air-filter writeback: when the inspector changes the HVAC widget's filter
+  // quantity / sizes, sync them onto the Property object (debounced). fcAnswers
+  // starts empty (the widget prefills from the property), so a plain load never
+  // writes — only real edits do. Sizes beyond the quantity are cleared.
   useEffect(() => {
-    if (readOnly || !propertyRecordId || !widgetMeta['fc_air_filters_qty']) return;
-    const qty = (findAnswerByQid('fc_air_filters_qty')?.answerValue || '').trim();
-    const qn = parseInt(qty, 10);
-    const n = Number.isFinite(qn) ? Math.max(0, Math.min(3, qn)) : 3;
-    const types = [1, 2, 3].map((i) => (i <= n ? (findAnswerByQid(`fc_filter_size_${i}`)?.answerValue || '').trim() : ''));
-    if (!qty && !types.some(Boolean)) return;
-    const sig = JSON.stringify({ qty, types });
-    if (sig === airSyncRef.current) return;
+    if (!scopeStyle || readOnly || !propertyRecordId) return;
+    const qn = fcAnswers['fc_air_filters_qty']?.quantity ?? null;
+    const sizes = fcAnswers['fc_filter_sizes']?.filterSizes || [];
+    if (qn == null && !sizes.some(Boolean)) return;
+    const n = qn != null ? Math.max(0, Math.min(3, qn)) : 3;
+    const types = [0, 1, 2].map((i) => (i < n ? (sizes[i] || '') : ''));
     const t = setTimeout(() => {
-      airSyncRef.current = sig;
       fetch(`/api/properties/${propertyRecordId}/air-filters`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ totalQuantity: qty || undefined, types }),
-      }).catch(() => { /* best-effort; the answer records still hold the truth */ });
-    }, 1500);
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ totalQuantity: qn ?? undefined, types }),
+      }).catch(() => { /* best-effort */ });
+    }, 1200);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [answers, readOnly, propertyRecordId]);
+  }, [fcAnswers, scopeStyle, readOnly, propertyRecordId]);
 
   function scrollToAndFlash(domId: string, instanceKey?: string) {
     if (typeof document === 'undefined') return;
@@ -953,6 +989,11 @@ export function QuestionForm({
       await dialog.alert(err.message);
       scrollToAndFlash(err.scrollToDomId, err.instanceKey);
       return;
+    }
+    // HVAC + Smart Home checklist (reused Scope widgets) must be complete.
+    if (scopeStyle) {
+      const gap = finalChecklistGap(fcAnswers, fcCtx, { onlySectionIds: FC_ONLY, skipLineRules: true });
+      if (gap) { await dialog.alert(`Please complete: ${gap}`); return; }
     }
     const totalSectionPhotos = Object.values(sectionPhotos).flat().length;
     const totalQuestionPhotos = Object.values(answers).reduce((acc, a) => acc + a.photoUrls.length, 0);
@@ -1074,6 +1115,9 @@ export function QuestionForm({
       sectionPhotoUrlsForApi[inst.displayName] = urls;
     }
 
+    // Make sure the HVAC/Smart Home checklist blob is persisted before finalize.
+    if (scopeStyle) { try { await saveFc(fcAnswers); } catch { /* surfaced via answers save */ } }
+
     onSubmit(finalAnswers, sectionPhotoUrlsForApi);
   }
 
@@ -1096,7 +1140,7 @@ export function QuestionForm({
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionInstances, answers, widgetMeta]);
+  }, [sectionInstances, answers]);
 
   const totalCompleted = Object.values(sectionProgress).reduce((acc, s) => acc + s.completed, 0);
   const totalQuestions = Object.values(sectionProgress).reduce((acc, s) => acc + s.total, 0);
@@ -1117,8 +1161,9 @@ export function QuestionForm({
                 title="Back to inspections"
                 className="shrink-0"
               >
+                {/* Transparent pink mark (no white tile) so it blends on the light header. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/app-icon-light.svg" alt="ResiWalk" className="h-9 w-9 object-cover" />
+                <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
               </button>
             )}
             <div className="min-w-0">
@@ -1397,6 +1442,25 @@ export function QuestionForm({
             </section>
           );
         })}
+
+        {/* HVAC & Air Filters + Smart Home — the exact Scope Rate Card widgets,
+            reused (no line-item behavior). Persisted as one JSON-blob answer. */}
+        {scopeStyle && (
+          <div className="lz-gap mb-8">
+            <FinalChecklist
+              only={FC_ONLY}
+              title="HVAC & Smart Home"
+              answers={fcAnswers}
+              onPatch={onFcPatch}
+              uploadPhoto={(file, fieldKey) => uploadPhotoOrQueue(file, inspectionRecordId, fieldKey || 'fc')}
+              propertyName={propertyName}
+              propertyRecordId={propertyRecordId}
+              propertyValues={propertyValues}
+              filterSizeOptions={filterSizeOptions}
+              readOnly={readOnly}
+            />
+          </div>
+        )}
       </div>
 
       {/* Sticky submit bar.
