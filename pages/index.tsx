@@ -364,7 +364,7 @@ export default function Home() {
         <div className="md:shrink-0">
         {/* Pink branded header */}
         <header className="bg-brand text-white">
-          <div className="max-w-3xl mx-auto px-4 pt-4 pb-5">
+          <div className="lz-head max-w-3xl mx-auto px-4 pt-4 pb-5">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div className="flex items-center gap-3 min-w-0">
                 {/* App icon — white house + footprint on a brand-pink tile that
@@ -426,7 +426,7 @@ export default function Home() {
         </header>
 
         {/* Search + Filters */}
-        <div className="max-w-3xl mx-auto px-4 pt-4 pb-2">
+        <div className="lz-head max-w-3xl mx-auto px-4 pt-4 pb-2">
           <div className="relative mb-3">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"

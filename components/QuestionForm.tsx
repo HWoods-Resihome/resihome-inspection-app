@@ -1105,7 +1105,7 @@ export function QuestionForm({
     <main className="min-h-screen bg-white">
       {/* Sticky header */}
       <header className="sticky top-0 z-10 bg-white border-b-2 border-brand shadow-sm">
-        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="lz-head max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="min-w-0 flex-1 flex items-center gap-2.5">
             {/* ResiWalk logo — mirrors the Scope Rate Card header. */}
             {scopeStyle && (
@@ -1178,14 +1178,14 @@ export function QuestionForm({
             </button>
           </div>
         </div>
-        {/* Save indicator strip */}
+        {/* Save indicator strip (hidden on short landscape to reclaim space). */}
         {!readOnly && (
-          <div className="max-w-3xl mx-auto px-4 pb-2">
+          <div className="lz-hide max-w-3xl mx-auto px-4 pb-2">
             <SaveIndicator saveState={autosave.saveState} />
           </div>
         )}
         {readOnly && (
-          <div className="max-w-3xl mx-auto px-4 pb-2">
+          <div className="lz-hide max-w-3xl mx-auto px-4 pb-2">
             <div className="inline-flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 border border-gray-200 px-2 py-1 rounded-full">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1198,7 +1198,7 @@ export function QuestionForm({
         )}
       </header>
 
-      <div className="max-w-3xl mx-auto px-4 py-6 pb-32">
+      <div className="lz-content max-w-3xl mx-auto px-4 py-6 pb-32">
         {/* Collapse / Expand all — top-right, just above the sections. */}
         {sectionInstances.length > 1 && (
           <div className="flex justify-end mb-2">
@@ -1226,7 +1226,7 @@ export function QuestionForm({
           const sectionDomId = `section-${inst.instanceKey}`;
 
           return (
-            <section key={inst.instanceKey} id={sectionDomId} className="mb-8 scroll-mt-24 rounded-xl shadow-md overflow-hidden">
+            <section key={inst.instanceKey} id={sectionDomId} className="lz-gap mb-8 scroll-mt-24 rounded-xl shadow-md overflow-hidden">
               {/* Section header (tappable to collapse) */}
               <button
                 type="button"
@@ -1396,7 +1396,7 @@ export function QuestionForm({
           on the right. Save & Close gets a green hover/active style for
           visual reassurance that it's saving work. Matches the same layout
           used in RateCardForm so behavior is consistent across templates. */}
-      <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand px-3 sm:p-4 py-2.5 shadow-lg">
+      <div className="lz-foot fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand px-3 sm:p-4 py-2.5 shadow-lg">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-2">
           {/* scopeStyle templates drop the destructive Cancel button and move
               Save & Close to the LEFT (Submit stays on the right). */}

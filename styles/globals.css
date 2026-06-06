@@ -139,6 +139,22 @@ h1, h2, h3, h4, h5, h6 {
   100% { opacity: 0; transform: scale(0.92); }
 }
 .animate-cameraFocus { animation: cameraFocus 900ms ease-out forwards; }
+
+/* ---- Landscape / short-viewport compaction --------------------------------
+   On short viewports (landscape phones, ≲ 540px tall) reclaim vertical space:
+   slim the sticky header + footer chrome, tighten section spacing, and hide
+   non-essential lines so the scrollable MIDDLE gets the room. Portrait phones,
+   tablets, and desktop are taller than this, so they're unaffected. Pairs with
+   the orientation:any rotation work. */
+@media (max-height: 540px) {
+  .lz-head { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
+  .lz-foot { padding-top: 0.35rem !important; padding-bottom: 0.35rem !important; }
+  /* Content region: less top padding, just enough bottom to clear the slim footer. */
+  .lz-content { padding-top: 0.5rem !important; padding-bottom: 4rem !important; }
+  .lz-gap { margin-bottom: 0.75rem !important; }
+  /* Non-essential rows hidden only when vertical space is scarce. */
+  .lz-hide { display: none !important; }
+}
 /* The saved thumbnail flies up briefly then settles, like a camera roll grab. */
 @keyframes shotSaved {
   0% { opacity: 0; transform: translateY(10px) scale(0.9); }
