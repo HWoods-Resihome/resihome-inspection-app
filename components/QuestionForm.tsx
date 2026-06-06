@@ -1201,6 +1201,9 @@ export function QuestionForm({
       let total = 0;
       for (const q of inst.questions) {
         if (!isWidgetVisible(q.questionIdExternal, inst.instanceKey)) continue;
+        // Optional questions don't count toward the progress total — e.g. the
+        // all-optional Review / Sign-Off section should not show "0/1".
+        if (!q.isRequired) continue;
         total++;
         const a = answers[answerKey(q.questionIdExternal, inst.instanceKey)];
         const done = q.responseType === 'photo_only'
@@ -1448,9 +1451,11 @@ export function QuestionForm({
                   )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0 ml-3">
-                  <span className="text-sm bg-brand text-white font-heading font-semibold px-2.5 py-0.5 rounded-full">
-                    {prog.completed}/{prog.total}
-                  </span>
+                  {prog.total > 0 && (
+                    <span className="text-sm bg-brand text-white font-heading font-semibold px-2.5 py-0.5 rounded-full">
+                      {prog.completed}/{prog.total}
+                    </span>
+                  )}
                 </div>
               </button>
 

@@ -450,7 +450,11 @@ export function FinalChecklist(props: Props) {
       const prefillQty = num(props.propertyValues?.['air_filters___total_quantity']);
       const count = Math.max(1, Math.min(3, qtyAns.quantity ?? prefillQty ?? 1));
       const opts = [
-        ...(props.filterSizeOptions || []).map((o) => ({ value: o, label: o })),
+        // Drop any HubSpot-provided "other/different size" sentinel — we supply
+        // our own single "Different Size" entry below.
+        ...(props.filterSizeOptions || [])
+          .filter((o) => !/different\s+(filter\s+)?size|i\s+have\s+a\s+different/i.test(o))
+          .map((o) => ({ value: o, label: o })),
         { value: FC_FILTER_OTHER, label: FC_FILTER_OTHER },
       ];
       const sizes = a.filterSizes || [];
@@ -463,14 +467,30 @@ export function FinalChecklist(props: Props) {
             return (
               <div key={i}>
                 <div className="text-[11px] font-heading font-bold text-gray-700 mb-1">{`Filter Size #${i + 1}`} <span className="text-brand">(Required)</span></div>
-                <WheelPicker
-                  value={val}
-                  options={opts}
-                  onChange={(v) => { const next = [...sizes]; next[i] = v; onPatch(q.id, { filterSizes: next }); }}
-                  ariaLabel={`Filter Size ${i + 1}`}
-                  large
-                  className="w-full max-w-[260px] bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm flex items-center justify-between"
-                />
+                <div className="flex items-center gap-2 max-w-[260px]">
+                  <WheelPicker
+                    value={val}
+                    options={opts}
+                    onChange={(v) => { const next = [...sizes]; next[i] = v; onPatch(q.id, { filterSizes: next }); }}
+                    ariaLabel={`Filter Size ${i + 1}`}
+                    large
+                    className="flex-1 min-w-0 bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm flex items-center justify-between"
+                  />
+                  {val && !readOnly && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = [...sizes]; next[i] = '';
+                        const no = [...others]; no[i] = '';
+                        onPatch(q.id, { filterSizes: next, filterSizesOther: no });
+                      }}
+                      className="shrink-0 text-xs font-heading font-semibold text-gray-400 hover:text-red-600"
+                      title="Clear this filter size"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
                 {val === FC_FILTER_OTHER && (
                   <input
                     type="text" disabled={readOnly}
