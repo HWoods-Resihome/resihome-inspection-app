@@ -290,6 +290,12 @@ export function CameraCapture({
   useEffect(() => { itemsRef.current = items; }, [items]);
 
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
+  // Multiple back lenses (ultra-wide / wide / tele) are SEPARATE camera devices,
+  // not a sub-1 zoom on the main lens — so to actually "zoom out" to the wide
+  // lens we switch deviceId. backCams holds the selectable back cameras;
+  // lensDeviceId is the chosen one (null = OS default for `facing`).
+  const [backCams, setBackCams] = useState<MediaDeviceInfo[]>([]);
+  const [lensDeviceId, setLensDeviceId] = useState<string | null>(null);
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -339,8 +345,12 @@ export function CameraCapture({
       // track's capabilities (e.g. the front camera usually has no wide/zoom).
       zoomCapsRef.current = null; hwZoomRef.current = false; setHwZoom(false);
       zoomRef.current = 1; setZoom(1);
+      // When a specific back lens is chosen, pin it by deviceId; otherwise let
+      // the OS pick the default for the facing direction.
       const videoConstraint: MediaTrackConstraints = {
-        facingMode: { ideal: facing },
+        ...(lensDeviceId && facing === 'environment'
+          ? { deviceId: { exact: lensDeviceId } }
+          : { facingMode: { ideal: facing } }),
         width: { ideal: CAPTURE_WIDTH },
         height: { ideal: CAPTURE_HEIGHT },
         // A steady 30fps keeps per-frame exposure short → less motion blur when
@@ -467,6 +477,21 @@ export function CameraCapture({
       };
       bumpResolution();
       setTimeout(bumpResolution, 900);
+      // Enumerate the back lenses now that permission is granted (labels are
+      // only populated post-grant). Excludes front + obvious non-imaging sensors
+      // (depth / mono / IR) so the lens switcher only cycles real back cameras.
+      (async () => {
+        try {
+          const devs = await navigator.mediaDevices.enumerateDevices();
+          const vids = devs.filter((d) => d.kind === 'videoinput');
+          let back = vids.filter((d) => /\b(back|rear|environment)\b/i.test(d.label));
+          if (back.length === 0) back = vids.filter((d) => !/front|user|face|selfie/i.test(d.label));
+          back = back.filter((d) => !/depth|mono(chrome)?|tof|infrared|\bir\b/i.test(d.label));
+          const seen = new Set<string>();
+          const uniq = back.filter((d) => d.deviceId && !seen.has(d.deviceId) && (seen.add(d.deviceId), true));
+          setBackCams(uniq);
+        } catch { /* enumerate unavailable — lens switcher just won't show */ }
+      })();
       setPermissionState('granted');
       setPermissionError('');
     } catch (e: any) {
@@ -485,7 +510,7 @@ export function CameraCapture({
         setPermissionError(`Could not access camera: ${e?.message || String(e)}`);
       }
     }
-  }, [facing, stopStream, aiAssist]);
+  }, [facing, lensDeviceId, stopStream, aiAssist]);
 
   // Mount/unmount: start/stop the camera stream
   useEffect(() => {
@@ -496,7 +521,7 @@ export function CameraCapture({
     }
     return () => stopStream();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, facing]);
+  }, [isOpen, facing, lensDeviceId]);
 
   // iOS pinch-zoom guard. While the camera is open, iOS Safari / WKWebView
   // treats a pinch as a PAGE zoom — it scales the whole screen, pushing the
@@ -1408,9 +1433,21 @@ export function CameraCapture({
   useBackToClose(isOpen, () => { void handleDone(); });
 
   const flipCamera = useCallback(() => {
+    setLensDeviceId(null); // back to the default lens for the new facing
     setFacing((f) => (f === 'environment' ? 'user' : 'environment'));
-    // useEffect on [facing] will restart the stream
+    // useEffect on [facing, lensDeviceId] restarts the stream
   }, []);
+
+  // Cycle through the back lenses (ultra-wide / wide / tele) — the real way to
+  // "zoom out" past the main lens. Restarts the stream on the chosen deviceId.
+  const cycleLens = useCallback(() => {
+    setLensDeviceId((cur) => {
+      if (backCams.length < 2) return cur;
+      const idx = cur ? backCams.findIndex((c) => c.deviceId === cur) : 0;
+      const next = backCams[(idx + 1) % backCams.length];
+      return next ? next.deviceId : cur;
+    });
+  }, [backCams]);
 
   const toggleTorch = useCallback(async () => {
     const track = streamRef.current?.getVideoTracks?.()[0];
@@ -1876,6 +1913,26 @@ export function CameraCapture({
                   </svg>
                 </span>
               </button>
+              {/* Lens switcher — cycles the back cameras (ultra-wide / wide /
+                  tele). The numeric badge shows which lens is active. Only shown
+                  on the back camera when the device exposes more than one. */}
+              {facing === 'environment' && backCams.length > 1 && (
+                <button
+                  type="button"
+                  onClick={cycleLens}
+                  className="relative w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center"
+                  aria-label="Switch lens (wide / tele)"
+                  title="Switch lens — tap to cycle the back cameras (e.g. ultra-wide)"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="8" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  <span className="absolute -bottom-0.5 -right-0.5 min-w-[15px] h-[15px] px-0.5 rounded-full bg-white text-black text-[9px] font-heading font-bold flex items-center justify-center ring-1 ring-black/30">
+                    {(lensDeviceId ? backCams.findIndex((c) => c.deviceId === lensDeviceId) : 0) + 1}
+                  </span>
+                </button>
+              )}
               {/* Flip camera */}
               <button
                 type="button"
