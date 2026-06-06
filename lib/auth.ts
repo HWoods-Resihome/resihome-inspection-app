@@ -60,6 +60,10 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
   try {
     const { payload } = await jwtVerify(token, sessionSecret());
     if (!payload.userId || !payload.email || !payload.name) return null;
+    // Defense in depth: a real session token carries NO `typ`. Reject anything
+    // typed (e.g. the short-lived `oauth_exchange` token) so it can never be
+    // replayed as a session cookie — even within its 60s window.
+    if (payload.typ) return null;
     return {
       userId: String(payload.userId),
       email: String(payload.email),

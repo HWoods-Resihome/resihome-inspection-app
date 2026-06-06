@@ -32,7 +32,61 @@ const nextConfig = {
     NEXT_PUBLIC_APP_VERSION: (process.env.VERCEL_GIT_COMMIT_SHA || pkg.version).slice(0, 7),
   },
   async headers() {
+    // Content-Security-Policy — the primary XSS defense. script-src is locked to
+    // 'self' + the ONE known inline script (the PWA install-prompt capture in
+    // _document.tsx, allowed by its sha256 hash); every Next.js script is an
+    // external 'self' chunk and __NEXT_DATA__ is non-executable JSON, so any
+    // INJECTED inline/remote script is blocked. style 'unsafe-inline' is required
+    // (next/font + React inline styles) but style injection is far less dangerous
+    // than script. img/media allow https + data/blob for camera previews and
+    // uploaded photos (Vercel Blob / HubSpot). connect allows https for uploads/
+    // telemetry; with scripts locked down there's no injected code to abuse it.
+    const csp = [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'self'",
+      "form-action 'self'",
+      "script-src 'self' 'sha256-/dzuVKxm5M81HPQdkEs7Ve8QU2pWS3+IIZNtCN40Nns='",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https:",
+      "media-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      "connect-src 'self' https:",
+      "worker-src 'self'",
+      "manifest-src 'self'",
+      "frame-src 'self' blob:",
+      'upgrade-insecure-requests',
+    ].join('; ');
+
+    const securityHeaders = [
+      { key: 'Content-Security-Policy', value: csp },
+      // Force HTTPS for a year (Vercel + the PWA are HTTPS-only). Blocks SSL-strip
+      // / downgrade MITM that could otherwise steal the session on first request.
+      { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+      // Stop MIME-sniffing (e.g. a user-uploaded file being run as a script).
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+      // Clickjacking: no foreign site may frame the app (CSP frame-ancestors is
+      // the modern equivalent; this covers older browsers).
+      { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+      // Don't leak full URLs (which can carry record IDs) to third parties.
+      { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+      // Powerful features: ALLOW the ones the inspection flow needs for this
+      // origin (camera / mic / GPS), and deny the rest outright.
+      { key: 'Permissions-Policy', value: 'camera=(self), microphone=(self), geolocation=(self), payment=(), usb=(), bluetooth=(), serial=(), browsing-topics=()' },
+      // Isolate our browsing context from cross-origin window references (allow
+      // popups for any future OAuth popup; the current flow is full-page).
+      { key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' },
+      // No Adobe cross-domain policy files.
+      { key: 'X-Permitted-Cross-Domain-Policies', value: 'none' },
+    ];
+
     return [
+      {
+        // Apply the security headers to every route.
+        source: '/:path*',
+        headers: securityHeaders,
+      },
       {
         // Serve the PWA manifest with the correct content-type so Android Chrome
         // reliably parses it for installability (some hosts default .webmanifest
