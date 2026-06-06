@@ -1215,8 +1215,9 @@ export function QuestionForm({
             {/* Property name shows in full (wraps); the secondary meta + listing
                 stay one line each so the header stays compact. */}
             <div className="text-sm font-heading font-semibold text-ink break-words">{propertyName}</div>
+            <div className="text-xs text-gray-500 truncate">{templateLabel} &middot; {inspectorName}</div>
             <div className="text-xs text-gray-500 truncate">
-              {templateLabel} &middot; {inspectorName} &middot; {bedrooms}BR / {bathrooms}BA
+              {bedrooms}BR / {bathrooms}BA
               {squareFootage != null && squareFootage > 0 && (
                 <span> &middot; {squareFootage.toLocaleString()} sqft</span>
               )}
