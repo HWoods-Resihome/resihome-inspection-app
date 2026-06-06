@@ -513,7 +513,23 @@ export function FinalChecklist(props: Props) {
     const qs = section.questions.filter(visible);
     if (qs.length === 0) return null;
     const sopen = openSections[section.id] ?? true;
-    const header = (
+    const header = props.bare ? (
+      // Mirror the Q&A form's section header exactly: left rotating chevron,
+      // big bold title, no "(Required)" tag.
+      <button
+        type="button"
+        onClick={() => setOpenSections((m) => ({ ...m, [section.id]: !(m[section.id] ?? true) }))}
+        aria-expanded={sopen}
+        className="w-full bg-gray-50 text-gray-900 border-b border-gray-200 px-4 py-3 flex items-center gap-3 text-left hover:bg-gray-100 transition"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          className={`shrink-0 transition-transform ${sopen ? 'rotate-90' : ''}`}>
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+        <h2 className="font-heading font-bold text-lg truncate">{titleCase(section.name)}</h2>
+      </button>
+    ) : (
       <button
         type="button"
         onClick={() => setOpenSections((m) => ({ ...m, [section.id]: !(m[section.id] ?? true) }))}
@@ -521,7 +537,6 @@ export function FinalChecklist(props: Props) {
         className="w-full px-4 py-2.5 bg-gray-50 hover:bg-gray-100 border-b border-gray-200 flex items-center gap-2 text-left"
       >
         <span className="font-heading font-bold text-sm text-ink">{titleCase(section.name)}</span>
-        {section.questions.some((q) => q.required) && <span className="text-[11px] text-brand font-semibold">(Required)</span>}
         <span className="text-gray-400 ml-auto shrink-0">{sopen ? '▾' : '▸'}</span>
       </button>
     );

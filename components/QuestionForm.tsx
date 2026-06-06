@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
+import { Fragment, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import type { Question, AnswerInput, TemplateType } from '@/lib/types';
 import type { SavedAnswer } from '@/lib/hubspot';
 import { QuestionItem } from './QuestionItem';
@@ -1149,6 +1149,28 @@ export function QuestionForm({
   const totalCompleted = Object.values(sectionProgress).reduce((acc, s) => acc + s.completed, 0);
   const totalQuestions = Object.values(sectionProgress).reduce((acc, s) => acc + s.total, 0);
 
+  // The "Summary" section (if any) renders LAST — after the reused Scope
+  // HVAC/Smart Home/Utilities bubbles.
+  const firstSummaryKey = sectionInstances.find((i) => /summary/i.test(i.baseSectionName))?.instanceKey;
+
+  // The reused Scope sections (HVAC & Air Filters · Smart Home · Utilities),
+  // each as its own bubble. Rendered once — just before the Summary section if
+  // there is one, otherwise after all sections.
+  const fcBlock = scopeStyle ? (
+    <FinalChecklist
+      bare
+      only={FC_ONLY}
+      answers={fcAnswers}
+      onPatch={onFcPatch}
+      uploadPhoto={(file, fieldKey) => uploadPhotoOrQueue(file, inspectionRecordId, fieldKey || 'fc')}
+      propertyName={propertyName}
+      propertyRecordId={propertyRecordId}
+      propertyValues={propertyValues}
+      filterSizeOptions={filterSizeOptions}
+      readOnly={readOnly}
+    />
+  ) : null;
+
   return (
     <main className="min-h-screen bg-white">
       {/* Sticky header */}
@@ -1284,7 +1306,10 @@ export function QuestionForm({
           const sectionDomId = `section-${inst.instanceKey}`;
 
           return (
-            <section key={inst.instanceKey} id={sectionDomId} className="lz-gap mb-8 scroll-mt-24 rounded-xl shadow-md overflow-hidden">
+            <Fragment key={inst.instanceKey}>
+            {/* Reused Scope sections sit just above the Summary section. */}
+            {inst.instanceKey === firstSummaryKey && fcBlock}
+            <section id={sectionDomId} className="lz-gap mb-8 scroll-mt-24 rounded-xl shadow-md overflow-hidden">
               {/* Section header (tappable to collapse) */}
               <button
                 type="button"
@@ -1444,26 +1469,13 @@ export function QuestionForm({
                 </div>
               )}
             </section>
+            </Fragment>
           );
         })}
 
-        {/* HVAC & Air Filters · Smart Home · Utilities — the exact Scope Rate
-            Card widgets, reused (no line-item behavior). Each renders as its own
-            bubble (bare). Persisted as one JSON-blob answer. */}
-        {scopeStyle && (
-          <FinalChecklist
-            bare
-            only={FC_ONLY}
-            answers={fcAnswers}
-            onPatch={onFcPatch}
-            uploadPhoto={(file, fieldKey) => uploadPhotoOrQueue(file, inspectionRecordId, fieldKey || 'fc')}
-            propertyName={propertyName}
-            propertyRecordId={propertyRecordId}
-            propertyValues={propertyValues}
-            filterSizeOptions={filterSizeOptions}
-            readOnly={readOnly}
-          />
-        )}
+        {/* If there's no Summary section, the reused Scope bubbles render here at
+            the bottom; otherwise they were rendered just above Summary. */}
+        {!firstSummaryKey && fcBlock}
       </div>
 
       {/* Sticky submit bar.
