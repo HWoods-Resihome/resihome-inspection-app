@@ -48,6 +48,7 @@ const SYSTEM = [
   'BLINDS: a broken/missing/damaged blind is ALWAYS a FAUX WOOD BLIND replacement — query EXACTLY "replace faux wood blind". NEVER a valance, vertical blind, or wand unless the inspector names that exact part.',
   'MEASURED items (SF/LF): set quantityStated=true + number ONLY if the inspector stated it; otherwise quantityStated=false and give estimatedQuantity — a rough size from the apparent room (a draft the inspector confirms). Never imply precision.',
   'COUNT/EA items: quantity=1, quantityStated=true.',
+  'OUTPUT FORMAT: respond with tool calls ONLY. Never write any prose, preamble, or explanation text — every word slows the inspector down. If there is nothing to add or amend, return no tool calls and no text.',
 ].join('\n');
 
 const EDIT_TOOL = {
@@ -94,15 +95,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // fires this when the camera opens. No vision call, so it's cheap.
   if (req.method === 'GET') {
     try {
-      const catalog = await getCachedCatalog();
+      const [catalog, kb] = await Promise.all([
+        getCachedCatalog(),
+        getKnowledgeBasePromptText().catch(() => ''),
+      ]);
+      const warmSystem = kb
+        ? `${SYSTEM}\n\nOPERATOR KNOWLEDGE BASE — house rules from inspectors. Treat these as authoritative guidance; apply them when relevant to your call-outs and edits:\n${kb}`
+        : SYSTEM;
       await Promise.allSettled([
         matchCatalog('warmup', catalog, { topK: 1 }),
         (async () => {
           try {
+            // Prime the EXACT cache prefix the real POST uses (same tools + same
+            // cached system block) so the inspector's first call-out is a cache HIT.
             await fetch(ANTHROPIC_URL, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey(), 'anthropic-version': '2023-06-01' },
-              body: JSON.stringify({ model: MODEL_FAST, max_tokens: 1, system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: 'ok' }] }),
+              body: JSON.stringify({ model: MODEL_FAST, max_tokens: 1, system: [{ type: 'text', text: warmSystem, cache_control: { type: 'ephemeral' } }], tools: [SUGGEST_TOOL, EDIT_TOOL], messages: [{ role: 'user', content: 'ok' }] }),
             });
           } catch { /* non-fatal */ }
         })(),
@@ -125,24 +134,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const active: Array<{ id: string; description?: string; unit?: string }> =
       Array.isArray(body.active) ? body.active.slice(0, 20) : [];
     const frameB64: string = typeof body.frame === 'string' ? body.frame : '';
-    const wantsVoice = !!String(body.transcriptDelta || '').trim();
-    // The frame is only needed for silent (vision) ticks. Voice ticks run
-    // text-only, so a missing/bad frame there is fine.
-    if (!frameB64 && !wantsVoice) return res.status(400).json({ error: 'No frame.' });
+    // VOICE ticks run TEXT-ONLY — the frame is ignored by the model — so we must
+    // NOT spend time decoding/re-encoding it on the hot call-out path. The image
+    // is only needed (and only processed) on SILENT vision ticks.
+    const hasVoice = !!transcriptDelta;
+    if (!frameB64 && !hasVoice) return res.status(400).json({ error: 'No frame.' });
+    const needImage = !!frameB64 && !hasVoice;
 
-    let imageBlock: any;
-    if (frameB64) {
-      try {
-        const buf = Buffer.from(frameB64, 'base64');
-        const jpeg = await sharp(buf).rotate().resize(FRAME_EDGE, FRAME_EDGE, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 55 }).toBuffer();
-        imageBlock = { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } };
-      } catch {
-        if (!wantsVoice) return res.status(400).json({ error: 'Bad frame.' });
-      }
-    }
-
-    const catalog = await getCachedCatalog();
+    // Fire the cold-start work concurrently instead of serially: catalog (cached),
+    // the operator knowledge base (cached ~60s), and — only when needed — the
+    // Sharp frame re-encode. None of these block one another any more.
+    const [catalog, kb, imageBlock] = await Promise.all([
+      getCachedCatalog(),
+      getKnowledgeBasePromptText().catch(() => ''),
+      (async (): Promise<any> => {
+        if (!needImage) return undefined;
+        try {
+          const buf = Buffer.from(frameB64, 'base64');
+          const jpeg = await sharp(buf).rotate().resize(FRAME_EDGE, FRAME_EDGE, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 55 }).toBuffer();
+          return { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } };
+        } catch { return undefined; }
+      })(),
+    ]);
     if (catalog.length === 0) return res.status(500).json({ error: 'Catalog not loaded.' });
+    // A silent tick whose only frame failed to decode has nothing to analyze.
+    if (!hasVoice && !imageBlock) return res.status(400).json({ error: 'Bad frame.' });
 
     // Resolve a free-text work phrase → real catalog item + computed fields.
     // Applies the confidence floor and the blinds→faux-wood guard.
@@ -174,7 +190,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // model fed an unrelated frame (a road, a hallway) keeps discounting the
     // voice; text-only Haiku obeys the instruction reliably and is faster. The
     // frame is only used on silent ticks for conservative visual call-outs.
-    const hasVoice = !!transcriptDelta;
     const sharedTail =
       (seen.length ? `\nAlready suggested (do NOT repeat): ${seen.join('; ')}` : '') +
       (active.length ? `\nPending items the inspector may amend (use edit_line with the id):\n` + active.map((a) => `  [${a.id}] ${a.description}${a.unit ? ` (${a.unit})` : ''}`).join('\n') : '');
@@ -194,8 +209,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Operator knowledge base — field-trained tips inspectors taught the AI by
     // voice (admin-curated). Appended to the system prompt so call-outs/edits
-    // learn from feedback. Cached ~60s in lib/hubspot so this stays cheap.
-    const kb = await getKnowledgeBasePromptText();
+    // learn from feedback. Fetched in parallel above (cached ~60s).
+    //
+    // The whole system text is sent as ONE cached block (cache_control:ephemeral)
+    // so Anthropic processes the prompt prefix (tools + system) from cache — the
+    // warm-up GET primes the identical prefix. This mirrors the voice path and is
+    // the single biggest TTFT win once the prefix is large enough to cache.
     const systemText = kb
       ? `${SYSTEM}\n\nOPERATOR KNOWLEDGE BASE — house rules from inspectors. Treat these as authoritative guidance; apply them when relevant to your call-outs and edits:\n${kb}`
       : SYSTEM;
@@ -206,7 +225,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       body: JSON.stringify({
         model: MODEL_FAST,
         max_tokens: 900,
-        system: systemText,
+        system: [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }],
         tools: [SUGGEST_TOOL, EDIT_TOOL],
         // Always 'auto': forcing a tool call would turn navigation commands
         // ("move to front entryway") and noise into bogus suggestions. The
@@ -232,9 +251,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const seenCodeSet = new Set(seenCodes);
     const out: any[] = [];
     const unmatched: string[] = [];
+    // Resolve every suggested phrase against the catalog CONCURRENTLY (each is a
+    // Voyage embedding lookup). Previously these ran one-after-another, adding a
+    // serial Voyage round-trip per suggestion to the tail of every response.
+    const suggestResolved = await Promise.all(
+      suggestUses.map((u: any) => resolveItem(String(u.input?.query || ''), String(u.input?.category || ''), hasVoice)),
+    );
     for (let i = 0; i < suggestUses.length; i++) {
       const inp = suggestUses[i].input || {};
-      const resolved = await resolveItem(String(inp.query || ''), String(inp.category || ''), !!transcriptDelta);
+      const resolved = suggestResolved[i];
       if (!resolved) { if (inp.query) unmatched.push(String(inp.query).slice(0, 40)); continue; }
       const { item, unit, isMeasured, isWholeHouse, tenantPct, measurementUnit } = resolved;
       if (seenCodeSet.has(item.lineItemCode.toLowerCase())) continue;
@@ -265,7 +290,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // --- voice edits to pending items ---
     const edits: any[] = [];
     const activeIds = new Set(active.map((a) => String(a.id)));
-    for (const eu of editUses) {
+    // Resolve any scope-change phrases concurrently (same reason as suggestions).
+    const editScopeResolved = await Promise.all(
+      editUses.map((eu: any) => {
+        const sq = eu.input?.scopeQuery;
+        return (typeof sq === 'string' && sq.trim()) ? resolveItem(sq, '') : Promise.resolve(null);
+      }),
+    );
+    for (let ei = 0; ei < editUses.length; ei++) {
+      const eu = editUses[ei];
       const inp = eu.input || {};
       const targetId = String(inp.targetId || '');
       if (!activeIds.has(targetId)) continue;
@@ -278,7 +311,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (v) edit.vendor = v;
       }
       if (typeof inp.scopeQuery === 'string' && inp.scopeQuery.trim()) {
-        const r = await resolveItem(inp.scopeQuery, '');
+        const r = editScopeResolved[ei];
         if (r) {
           edit.lineItemCode = r.item.lineItemCode;
           edit.description = r.item.laborShortDescription;

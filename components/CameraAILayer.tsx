@@ -767,9 +767,11 @@ export function CameraAILayer(props: Props) {
     if (!room) { setErrText('No active room'); return; }
     const newText = transcriptBufRef.current.trim();
     const hasNewVoice = newText.length > 0;
-    const b64 = grabKeyframeB64(KEYFRAME_EDGE);
-    // Voice goes text-only, so a missing frame only blocks SILENT ticks. If the
-    // inspector spoke, proceed even without a usable frame (camera covered/booting).
+    // VOICE ticks run TEXT-ONLY on the server (the frame is ignored), so don't
+    // pay to grab + base64-encode + upload a keyframe we won't use — that's
+    // ~30-50KB and a canvas readback off the hot call-out path. Only grab the
+    // frame on SILENT (vision) ticks.
+    const b64 = hasNewVoice ? '' : grabKeyframeB64(KEYFRAME_EDGE);
     if (!hasNewVoice && !b64) { setErrText('Camera not ready'); return; }
     // Prepend recent context so a phrase split across clips reads complete; only
     // include context when there's NEW speech (silent ticks send no transcript).
