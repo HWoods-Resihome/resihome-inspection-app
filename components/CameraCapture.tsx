@@ -134,26 +134,20 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.restore();
 }
 
-// Target capture resolution (4:3). We ASK high here and then push the live
-// track toward the device's max (capped at MAX_CAPTURE_EDGE) after acquisition
-// — sharper preview AND sharper photos, closer to the native camera. The
-// browser downgrades if the device can't do it, which is fine.
+// Target capture resolution (4:3). High enough for crisp, zoomable evidence
+// (~5MP) while staying smooth for a live preview + RAPID shutter; the browser
+// negotiates down if the device can't do it. We capture from this preview
+// frame (instant) rather than ImageCapture.takePhoto() — takePhoto froze the
+// preview and blocked rapid capture.
 const CAPTURE_WIDTH = 2560;
 const CAPTURE_HEIGHT = 1920;
-// Ceiling for the post-acquisition resolution bump so we don't request an
-// absurd sensor-max (e.g. 4000px+) that would lag the live preview on mid
-// phones. ~2560-wide (≈5MP at 4:3) is high quality and smooth.
-const MAX_CAPTURE_EDGE = 2560;
 
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
 const JPEG_QUALITY = 0.92;
-// Saved-photo ceiling. Inspectors need to ZOOM INTO the evidence (serial #s,
-// hairline cracks), so we preserve essentially the full sensor frame — 4096px
-// covers a typical 12MP phone (4032×3024) with no meaningful downscale — at a
-// high quality so fine detail survives compression. The PDF is unaffected
-// either way (it embeds a 520px thumbnail). Files land ~3–5MB; the only cost is
-// field upload bandwidth, which we accept for the detail.
+// Saved-photo ceiling (long edge). The capture source is the preview frame
+// (≤ CAPTURE_WIDTH), so this is just safety headroom; quality 0.9 keeps zoom-in
+// detail crisp. The PDF is unaffected (it embeds a 520px thumbnail).
 const MAX_SAVE_EDGE = 4096;
 const PHOTO_SAVE_QUALITY = 0.9;
 
@@ -464,27 +458,9 @@ export function CameraCapture({
       };
       detectZoom();
       [600, 1500, 2800].forEach((ms) => setTimeout(detectZoom, ms));
-      // Push the track to the device's highest resolution (capped) so the
-      // preview and captured photos are as sharp as the native camera. Many
-      // devices hand getUserMedia a conservative size; this requests the max.
-      const bumpResolution = () => {
-        try {
-          const track = streamRef.current?.getVideoTracks?.()[0];
-          const caps: any = track?.getCapabilities?.() || {};
-          if (typeof caps.width?.max === 'number' && typeof caps.height?.max === 'number') {
-            const w = Math.min(caps.width.max, MAX_CAPTURE_EDGE);
-            const h = Math.min(caps.height.max, Math.round(MAX_CAPTURE_EDGE * 0.75));
-            const cur = track?.getSettings?.() as any;
-            // Only re-apply if we're currently below the target (avoid needless
-            // reconfigure / preview flicker).
-            if (!cur || (cur.width || 0) < w - 32) {
-              (track!.applyConstraints as any)({ width: { ideal: w }, height: { ideal: h } }).catch(() => { /* device fixed res */ });
-            }
-          }
-        } catch { /* best-effort */ }
-      };
-      bumpResolution();
-      setTimeout(bumpResolution, 900);
+      // (We intentionally do NOT applyConstraints a higher resolution mid-stream
+      // — that reconfigure stutters the live preview. The resolution requested
+      // in getUserMedia above is what we keep.)
       // Enumerate the back lenses now that permission is granted (labels are
       // only populated post-grant). Excludes front + obvious non-imaging sensors
       // (depth / mono / IR) so the lens switcher only cycles real back cameras.
@@ -1200,42 +1176,20 @@ export function CameraCapture({
     }
     setBusy(true);
     try {
-      // Prefer full-sensor-resolution ImageCapture.takePhoto() (Chrome Android)
-      // for native-camera quality — it captures at the photo resolution, far
-      // higher than the ~5MP preview track, and honors the current hardware
-      // zoom. Fall back to grabbing the live <video> frame everywhere it's
-      // unavailable (iOS Safari) or slow. A timeout guards the shutter so a
-      // janky takePhoto can never hang it.
-      let bitmap: ImageBitmap | null = null;
-      try {
-        const track = streamRef.current?.getVideoTracks?.()[0];
-        const ICtor: any = typeof window !== 'undefined' ? (window as any).ImageCapture : null;
-        if (track && ICtor && track.readyState === 'live') {
-          const ic = new ICtor(track);
-          const shot: Blob = await Promise.race([
-            ic.takePhoto() as Promise<Blob>,
-            new Promise<Blob>((_, rej) => setTimeout(() => rej(new Error('takePhoto timeout')), 1800)),
-          ]);
-          if (shot && shot.size > 0) {
-            // imageOrientation:'from-image' bakes in any EXIF rotation so the
-            // saved photo is upright regardless of device orientation.
-            bitmap = await createImageBitmap(shot, { imageOrientation: 'from-image' } as any);
-          }
-        }
-      } catch { bitmap = null; /* fall back to the preview frame */ }
-
-      const src: CanvasImageSource = bitmap || video;
-      const srcW = bitmap ? bitmap.width : video.videoWidth;
-      const srcH = bitmap ? bitmap.height : video.videoHeight;
+      // Grab the live PREVIEW frame — instant, so the shutter stays snappy and
+      // rapid taps work. We deliberately do NOT use ImageCapture.takePhoto():
+      // it freezes/reconfigures the camera on every shot and blocks rapid
+      // capture. The preview track is already requested at high resolution, so
+      // the frame is plenty sharp.
+      const src: CanvasImageSource = video;
+      const srcW = video.videoWidth;
+      const srcH = video.videoHeight;
       if (!srcW || !srcH) {
-        bitmap?.close?.();
         setBusy(false);
         return;
       }
-      // Cap the SAVED photo's long edge. A full-sensor takePhoto() can be 12MP+
-      // (4–7MB) which bloats field uploads + HubSpot storage for no real benefit
-      // (the PDF embeds a 520px thumbnail, and ~6–7MP is plenty to zoom into
-      // detail). The downscale keeps native-grade sharpness at a sane file size.
+      // Cap the saved photo's long edge (harmless headroom — the preview track
+      // is already ≤ this). Keeps any unusually large frame in check.
       const longEdge = Math.max(srcW, srcH);
       const scale = Math.min(1, MAX_SAVE_EDGE / longEdge);
       const vw = Math.max(1, Math.round(srcW * scale));
@@ -1245,15 +1199,14 @@ export function CameraCapture({
       canvas.height = vh;
       const ctx = canvas.getContext('2d');
       if (!ctx) {
-        bitmap?.close?.();
         setBusy(false);
         return;
       }
       ctx.imageSmoothingQuality = 'high';
       // Center-crop by the live DIGITAL zoom factor (effZoom()===1 when the
-      // sensor is doing the zoom — incl. a hardware-zoomed takePhoto — so it's
-      // used as-is; only the digital-zoom fallback crops here), scaling the
-      // source into the (capped) output canvas.
+      // sensor is doing the zoom, so a hardware-zoomed frame is used as-is;
+      // only the digital-zoom fallback crops here), scaling the source into the
+      // (capped) output canvas.
       const z = effZoom();
       if (z > 1.001) {
         const sw = srcW / z, sh = srcH / z;
@@ -1261,7 +1214,6 @@ export function CameraCapture({
       } else {
         ctx.drawImage(src, 0, 0, srcW, srcH, 0, 0, vw, vh);
       }
-      bitmap?.close?.();
       // Burn the evidence stamp (address / timestamp / GPS coordinates) into the
       // frame. Coordinates are recorded as-is; no address-match verdict.
       const stampLines: StampLine[] = [];
