@@ -1153,14 +1153,15 @@ export function QuestionForm({
   // Scope HVAC/Smart Home/Utilities bubbles. (After the cleanup these merge into
   // one "Review & Sign-Off" section.)
   const firstSummaryKey = sectionInstances.find((i) => /summary|review|sign.?off/i.test(i.baseSectionName))?.instanceKey;
+  // Smart Home renders right after the Yard / Exterior section; HVAC + Utilities
+  // stay grouped at the bottom (above Review & Sign-Off).
+  const yardKey = sectionInstances.find((i) => /yard|exterior/i.test(i.baseSectionName))?.instanceKey;
 
-  // The reused Scope sections (HVAC & Air Filters · Smart Home · Utilities),
-  // each as its own bubble. Rendered once — just before the Summary section if
-  // there is one, otherwise after all sections.
-  const fcBlock = scopeStyle ? (
+  // Builder for a reused Scope bubble group (each section its own bubble).
+  const makeFc = (only: string[]) => (
     <FinalChecklist
       bare
-      only={FC_ONLY}
+      only={only}
       answers={fcAnswers}
       onPatch={onFcPatch}
       uploadPhoto={(file, fieldKey) => uploadPhotoOrQueue(file, inspectionRecordId, fieldKey || 'fc')}
@@ -1170,7 +1171,11 @@ export function QuestionForm({
       filterSizeOptions={filterSizeOptions}
       readOnly={readOnly}
     />
-  ) : null;
+  );
+  // Smart Home alone after Yard/Exterior (only when that section exists);
+  // otherwise it falls into the bottom group.
+  const smartFc = scopeStyle && yardKey ? makeFc(['smart_home_tech']) : null;
+  const bottomFc = scopeStyle ? makeFc(yardKey ? ['hvac_air_filters', 'utilities'] : FC_ONLY) : null;
 
   return (
     <main className="min-h-screen bg-white">
@@ -1194,8 +1199,8 @@ export function QuestionForm({
               </button>
             )}
             <div className="min-w-0">
-            <div className="text-sm font-heading font-semibold text-ink truncate">{propertyName}</div>
-            <div className="text-xs text-gray-500 truncate">
+            <div className="text-sm font-heading font-semibold text-ink break-words">{propertyName}</div>
+            <div className="text-xs text-gray-500 break-words">
               {templateLabel} &middot; {inspectorName} &middot; {bedrooms}BR / {bathrooms}BA
               {squareFootage != null && squareFootage > 0 && (
                 <span> &middot; {squareFootage.toLocaleString()} sqft</span>
@@ -1204,7 +1209,7 @@ export function QuestionForm({
             </div>
             {/* Listing price + date (most recent active/published listing). */}
             {(typeof listingPrice === 'number' && listingPrice > 0) || listingDate ? (
-              <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
+              <div className="text-xs text-emerald-700 font-heading font-semibold break-words">
                 {typeof listingPrice === 'number' && listingPrice > 0 && (
                   <span>Listing ${listingPrice.toLocaleString()}</span>
                 )}
@@ -1308,8 +1313,8 @@ export function QuestionForm({
 
           return (
             <Fragment key={inst.instanceKey}>
-            {/* Reused Scope sections sit just above the Summary section. */}
-            {inst.instanceKey === firstSummaryKey && fcBlock}
+            {/* HVAC + Utilities sit just above the Review & Sign-Off section. */}
+            {inst.instanceKey === firstSummaryKey && bottomFc}
             <section id={sectionDomId} className="lz-gap mb-8 scroll-mt-24 rounded-xl shadow-md overflow-hidden">
               {/* Section header (tappable to collapse) */}
               <button
@@ -1470,13 +1475,15 @@ export function QuestionForm({
                 </div>
               )}
             </section>
+            {/* Smart Home renders right after Yard / Exterior. */}
+            {inst.instanceKey === yardKey && smartFc}
             </Fragment>
           );
         })}
 
-        {/* If there's no Summary section, the reused Scope bubbles render here at
-            the bottom; otherwise they were rendered just above Summary. */}
-        {!firstSummaryKey && fcBlock}
+        {/* If there's no Summary section, the bottom group renders here;
+            otherwise it was rendered just above Review & Sign-Off. */}
+        {!firstSummaryKey && bottomFc}
       </div>
 
       {/* Sticky submit bar.

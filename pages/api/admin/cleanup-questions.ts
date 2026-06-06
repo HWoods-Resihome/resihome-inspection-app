@@ -63,10 +63,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // Does an "Additional Notes" question already exist in the merged section
-    // for these templates? If not, we'll create one.
+    // Does a free-text "additional notes / comments" question already exist for
+    // these templates? (You already have "Additional Comments" + "Comments", so
+    // we don't add a duplicate.)
     const hasAdditionalNotes = all.some(
-      (q) => /additional\s*notes/i.test(q.questionText) && q.applies.some((t) => QA_TEMPLATES.includes(t))
+      (q) => /additional\s*(notes|comments)|^\s*comments\s*$/i.test(q.questionText) && q.applies.some((t) => QA_TEMPLATES.includes(t))
     );
 
     const plan = {
