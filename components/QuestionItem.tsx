@@ -476,7 +476,7 @@ function renderInput(
             <button
               type="button"
               key={opt}
-              onClick={() => onUpdate({ answerValue: opt })}
+              onClick={() => onUpdate({ answerValue: selected ? '' : opt })}
               className={`text-xs font-heading font-semibold px-3 py-1.5 rounded-full border-2 transition whitespace-nowrap ${
                 selected
                   ? 'bg-brand text-white border-brand shadow-sm'

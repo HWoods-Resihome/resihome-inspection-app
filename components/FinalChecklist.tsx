@@ -224,7 +224,7 @@ export function FinalChecklist(props: Props) {
         {(options || []).map((o) => {
           const sel = value === o;
           return (
-            <button key={o} type="button" disabled={readOnly} onClick={() => onPick(o)}
+            <button key={o} type="button" disabled={readOnly} onClick={() => onPick(sel ? '' : o)}
               className={`shrink-0 whitespace-nowrap font-heading font-semibold rounded-full border-2 transition
                 ${compact ? 'text-[10px] px-2 py-1' : 'text-xs px-3.5 py-1.5'}
                 ${sel ? 'bg-brand text-white border-brand shadow-sm' : 'bg-white text-ink border-gray-300 hover:border-brand/50'}`}>
@@ -527,7 +527,7 @@ export function FinalChecklist(props: Props) {
           className={`shrink-0 transition-transform ${sopen ? 'rotate-90' : ''}`}>
           <polyline points="9 18 15 12 9 6" />
         </svg>
-        <h2 className="font-heading font-bold text-lg truncate">{titleCase(section.name)}</h2>
+        <h2 className="font-heading font-bold text-lg truncate min-w-0">{titleCase(section.name)}</h2>
       </button>
     ) : (
       <button
