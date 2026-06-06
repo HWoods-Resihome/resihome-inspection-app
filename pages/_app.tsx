@@ -31,10 +31,10 @@ export default function App({ Component, pageProps }: AppProps) {
     initErrorReporting();
     installSessionGuard();
     registerServiceWorker();
-    // Belt-and-suspenders: explicitly release any orientation lock so the app
-    // rotates freely (manifest is orientation:any). No-op / not permitted in
-    // plain browser tabs; only meaningful in the installed PWA / native shell.
-    try { (screen as any)?.orientation?.unlock?.(); } catch { /* unsupported */ }
+    // NOTE: we deliberately do NOT call screen.orientation.unlock() — in the
+    // installed PWA / native shell it forced sensor rotation and overrode the
+    // device's rotation-lock. The manifest's orientation:"any" already allows
+    // rotation while RESPECTING the OS rotation lock, which is what we want.
     // Native-only OAuth bridge. No-op in browsers (checks
     // Capacitor.isNativePlatform() internally), so web behavior is unchanged —
     // this just enables the deep-link return inside the Capacitor app.

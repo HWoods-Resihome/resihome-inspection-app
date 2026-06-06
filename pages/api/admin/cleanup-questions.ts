@@ -30,7 +30,10 @@ const QA_TEMPLATES = [
   'pm_vacancy_occupancy_check',
   'pm_community_inspection',
 ];
-const MERGED_SECTION = 'Review & Sign-Off';
+// `section` is a HubSpot enumeration, so we must merge into an EXISTING option
+// value — "Review / Sign-Off" (the review questions already use it). Creating a
+// new value like "Review & Sign-Off" 400s.
+const MERGED_SECTION = 'Review / Sign-Off';
 const MERGED_ORDER = 9000;
 
 const isReplaced = (s: string) => /hvac|air.?filter|smart.?home|smart.?lock|safety|electric|utilit/i.test(s);
