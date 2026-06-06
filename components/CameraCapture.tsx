@@ -134,13 +134,15 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.restore();
 }
 
-// Target capture resolution (4:3). High enough for crisp, zoomable evidence
-// (~5MP) while staying smooth for a live preview + RAPID shutter; the browser
-// negotiates down if the device can't do it. We capture from this preview
-// frame (instant) rather than ImageCapture.takePhoto() — takePhoto froze the
-// preview and blocked rapid capture.
-const CAPTURE_WIDTH = 2560;
-const CAPTURE_HEIGHT = 1920;
+// Target capture resolution (4:3). Requested HIGH at getUserMedia time (the
+// browser negotiates down if the device can't do it) so the live frame we grab
+// is as detailed as possible — ~11MP where supported. This is set at
+// acquisition only (no mid-stream applyConstraints, which stutters the preview),
+// and capture stays instant: we draw the live frame and let canvas.toBlob encode
+// OFF the main thread, so there's no post-capture freeze and rapid taps work.
+// (We do NOT use ImageCapture.takePhoto() — that's what froze the camera.)
+const CAPTURE_WIDTH = 3840;
+const CAPTURE_HEIGHT = 2880;
 
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
