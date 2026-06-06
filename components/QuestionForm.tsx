@@ -608,8 +608,12 @@ export function QuestionForm({
 
   // Collapse / expand ALL sections at once (mirrors the Scope Rate Card control).
   const anySectionOpen = sectionInstances.some((inst) => !collapsed.has(inst.instanceKey));
+  // Token bumped on every collapse/expand-all so the reused Scope bubbles (which
+  // own their own collapse state) follow the global toggle too.
+  const [fcOpenToken, setFcOpenToken] = useState({ open: true, token: 0 });
   function setAllCollapsed(openAll: boolean) {
     setCollapsed(openAll ? new Set() : new Set(sectionInstances.map((inst) => inst.instanceKey)));
+    setFcOpenToken((t) => ({ open: openAll, token: t.token + 1 }));
   }
 
   function updateAnswer(key: string, patch: Partial<AnswerInput>) {
@@ -1162,6 +1166,7 @@ export function QuestionForm({
     <FinalChecklist
       bare
       only={only}
+      openAllToken={fcOpenToken}
       answers={fcAnswers}
       onPatch={onFcPatch}
       uploadPhoto={(file, fieldKey) => uploadPhotoOrQueue(file, inspectionRecordId, fieldKey || 'fc')}

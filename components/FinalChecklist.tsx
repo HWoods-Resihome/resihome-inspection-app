@@ -9,7 +9,7 @@
  * (Smart Home Tech, …) collapses independently, with its own Expand/Collapse-all.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   FINAL_CHECKLIST, FC_FILTER_OTHER,
   type FcQuestion, type FcAddLineRule,
@@ -55,6 +55,9 @@ interface Props {
    *  Checklist" wrapper, no Inspector Final Notes) — used to embed the sections
    *  into a Q&A form so they look like the form's other sections. */
   bare?: boolean;
+  /** Drives the bare subsections' open/closed state from the parent's global
+   *  Collapse/Expand-all. Bump `token` to force every subsection to `open`. */
+  openAllToken?: { open: boolean; token: number };
 }
 
 const num = (v: unknown): number | null => {
@@ -81,6 +84,14 @@ export function FinalChecklist(props: Props) {
   const open = props.open ?? openInternal;
   const toggleOpen = () => (props.onToggleOpen ? props.onToggleOpen() : setOpenInternal((o) => !o));
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  // When the parent's global Collapse/Expand-all fires, sync every subsection.
+  const openAllToken = props.openAllToken?.token;
+  useEffect(() => {
+    if (props.openAllToken) {
+      setOpenSections(Object.fromEntries(FINAL_CHECKLIST.map((s) => [s.id, props.openAllToken!.open])));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openAllToken]);
   const [camFor, setCamFor] = useState<string | null>(null);
   const [busyAdd, setBusyAdd] = useState<string | null>(null);
   // Full-screen viewer for FC photos: { groupId: "qid:key", index }. Lets the
