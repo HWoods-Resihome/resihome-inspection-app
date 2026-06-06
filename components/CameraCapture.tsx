@@ -1167,9 +1167,35 @@ export function CameraCapture({
     }
     setBusy(true);
     try {
-      const vw = video.videoWidth;
-      const vh = video.videoHeight;
+      // Prefer full-sensor-resolution ImageCapture.takePhoto() (Chrome Android)
+      // for native-camera quality — it captures at the photo resolution, far
+      // higher than the ~5MP preview track, and honors the current hardware
+      // zoom. Fall back to grabbing the live <video> frame everywhere it's
+      // unavailable (iOS Safari) or slow. A timeout guards the shutter so a
+      // janky takePhoto can never hang it.
+      let bitmap: ImageBitmap | null = null;
+      try {
+        const track = streamRef.current?.getVideoTracks?.()[0];
+        const ICtor: any = typeof window !== 'undefined' ? (window as any).ImageCapture : null;
+        if (track && ICtor && track.readyState === 'live') {
+          const ic = new ICtor(track);
+          const shot: Blob = await Promise.race([
+            ic.takePhoto() as Promise<Blob>,
+            new Promise<Blob>((_, rej) => setTimeout(() => rej(new Error('takePhoto timeout')), 1800)),
+          ]);
+          if (shot && shot.size > 0) {
+            // imageOrientation:'from-image' bakes in any EXIF rotation so the
+            // saved photo is upright regardless of device orientation.
+            bitmap = await createImageBitmap(shot, { imageOrientation: 'from-image' } as any);
+          }
+        }
+      } catch { bitmap = null; /* fall back to the preview frame */ }
+
+      const src: CanvasImageSource = bitmap || video;
+      const vw = bitmap ? bitmap.width : video.videoWidth;
+      const vh = bitmap ? bitmap.height : video.videoHeight;
       if (!vw || !vh) {
+        bitmap?.close?.();
         setBusy(false);
         return;
       }
@@ -1178,18 +1204,21 @@ export function CameraCapture({
       canvas.height = vh;
       const ctx = canvas.getContext('2d');
       if (!ctx) {
+        bitmap?.close?.();
         setBusy(false);
         return;
       }
-      // Center-crop by the live digital-zoom factor so the photo matches the
-      // (CSS-scaled) zoomed preview the inspector framed.
+      // Center-crop by the live DIGITAL zoom factor (effZoom()===1 when the
+      // sensor is doing the zoom — incl. a hardware-zoomed takePhoto — so it's
+      // used as-is; only the digital-zoom fallback crops here).
       const z = effZoom();
       if (z > 1.001) {
         const sw = vw / z, sh = vh / z;
-        ctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, vw, vh);
+        ctx.drawImage(src, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, vw, vh);
       } else {
-        ctx.drawImage(video, 0, 0, vw, vh);
+        ctx.drawImage(src, 0, 0, vw, vh);
       }
+      bitmap?.close?.();
       // Burn the evidence stamp (address / timestamp / GPS coordinates) into the
       // frame. Coordinates are recorded as-is; no address-match verdict.
       const stampLines: StampLine[] = [];
