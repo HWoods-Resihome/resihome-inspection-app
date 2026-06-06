@@ -340,7 +340,10 @@ export function RateCardForm(props: RateCardFormProps) {
   // Per-section collapse of the photo strip.
   const [photosCollapsed, setPhotosCollapsed] = useState<Record<string, boolean>>({});
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 640px)');
+    // Use the fit (stacked) line layout on narrow screens AND on short/landscape
+    // phones — otherwise the wide multi-column table overflowed and forced a
+    // horizontal scroll on the line-item cards in landscape.
+    const mq = window.matchMedia('(max-width: 640px), (max-height: 540px)');
     const update = () => setIsMobile(mq.matches);
     update();
     mq.addEventListener('change', update);

@@ -359,9 +359,9 @@ export default function Home() {
           filters are frozen at the top, only the card list scrolls, and the
           pagination bar is frozen at the bottom. On mobile it's normal document
           flow (everything scrolls together). */}
-      <main className="min-h-screen bg-gray-50 md:h-screen md:min-h-0 md:flex md:flex-col md:overflow-hidden">
-        {/* Frozen top region (desktop): header + search + filters + bulk bar */}
-        <div className="md:shrink-0">
+      <main className="frozen-shell min-h-screen bg-gray-50">
+        {/* Frozen top region (large screens only): header + search + filters + bulk bar */}
+        <div className="frozen-top">
         {/* Pink branded header */}
         <header className="bg-brand text-white">
           <div className="lz-head max-w-3xl mx-auto px-4 pt-4 pb-5">
@@ -592,8 +592,8 @@ export default function Home() {
         )}
         </div>{/* end frozen top region */}
 
-        {/* Inspection list — the only scrolling region on desktop */}
-        <div className="md:flex-1 md:min-h-0 md:overflow-y-auto">
+        {/* Inspection list — the only scrolling region on large screens */}
+        <div className="frozen-scroll">
         <div className="max-w-3xl mx-auto px-4 pb-12">
           {loading && (
             <div className="text-sm text-gray-500 text-center py-8">Loading inspections...</div>
@@ -633,7 +633,7 @@ export default function Home() {
             Per-page selector (20/50/100) + Back/Next. Hidden while loading,
             erroring, or when there are no results. */}
         {!loading && !error && sorted.length > 0 && (
-          <div className="md:shrink-0 bg-white border-t border-gray-200">
+          <div className="frozen-foot lz-foot bg-white border-t border-gray-200">
             <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 shrink-0">
                 <span className="text-xs text-gray-500 font-heading whitespace-nowrap">Per page</span>

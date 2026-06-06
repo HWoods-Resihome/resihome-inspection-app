@@ -154,6 +154,20 @@ h1, h2, h3, h4, h5, h6 {
   .lz-gap { margin-bottom: 0.75rem !important; }
   /* Non-essential rows hidden only when vertical space is scarce. */
   .lz-hide { display: none !important; }
+  /* Camera shutter: shrink a touch so the control bar doesn't eat the preview. */
+  .lz-shutter { width: 3rem !important; height: 3rem !important; border-width: 3px !important; }
+}
+
+/* The Home "frozen" layout (sticky header + footer, only the list scrolls) must
+   ONLY apply on genuinely large screens. On a landscape PHONE (wide but short)
+   it would freeze the header tall enough to leave the list zero height — you
+   couldn't scroll to any inspections. Requiring min-height keeps landscape
+   phones on normal document flow (whole page scrolls). */
+@media (min-width: 768px) and (min-height: 640px) {
+  .frozen-shell { height: 100vh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .frozen-top { flex-shrink: 0; }
+  .frozen-scroll { flex: 1 1 0%; min-height: 0; overflow-y: auto; }
+  .frozen-foot { flex-shrink: 0; }
 }
 /* The saved thumbnail flies up briefly then settles, like a camera roll grab. */
 @keyframes shotSaved {

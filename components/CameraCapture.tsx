@@ -1293,7 +1293,7 @@ export function CameraCapture({
         />
       )}
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-black/60 text-white">
+      <div className="lz-head flex items-center justify-between px-4 py-3 bg-black/60 text-white">
         <button
           type="button"
           onClick={handleCancel}
@@ -1792,7 +1792,7 @@ export function CameraCapture({
 
       {/* Shutter row. `relative` so the voice assistant's pop-up panel (anchored
           bottom-full to the mic) floats above this bar and stays on-screen. */}
-      <div className="relative bg-black px-4 py-4 flex items-center justify-center gap-8">
+      <div className="lz-foot relative bg-black px-4 py-4 flex items-center justify-center gap-8">
         {/* Gallery — pick one or more existing photos from the device (replaces
             the separate "Upload" button that used to live on the form). */}
         <button
@@ -1821,7 +1821,7 @@ export function CameraCapture({
           onPointerCancel={onShutterUp}
           onContextMenu={(e) => e.preventDefault()}
           disabled={busy || permissionState !== 'granted'}
-          className={`relative w-16 h-16 rounded-full border-4 disabled:opacity-30 active:scale-95 transition select-none ${
+          className={`lz-shutter relative w-16 h-16 rounded-full border-4 disabled:opacity-30 active:scale-95 transition select-none ${
             recording ? 'bg-red-600 border-red-500 ring-2 ring-red-400 scale-110' : 'bg-white border-white ring-2 ring-white/50'
           }`}
           style={{ touchAction: 'none' }}
