@@ -632,39 +632,12 @@ export function CameraCapture({
     };
   }, [isOpen]);
 
-  // Go fullscreen while the camera is open so the mobile browser's URL bar
-  // disappears (it otherwise eats a big strip in landscape — our fixed overlay
-  // locks scrolling, so the browser never auto-hides it) and the preview gets
-  // the ENTIRE screen instead of a squeezed, cut-off strip. Android Chrome
-  // honors element fullscreen; iOS Safari doesn't support it for non-video
-  // elements, so there it simply stays as-is (the header tightening still
-  // helps). Fullscreen needs a user gesture, so we attempt immediately AND
-  // retry on the first touch inside the camera. Exited on close.
-  useEffect(() => {
-    if (!isOpen || typeof document === 'undefined') return;
-    // Only exit on close if WE entered fullscreen here. If the app was already
-    // fullscreen (the global auto-fullscreen), leave it alone so closing the
-    // camera doesn't kick the whole app out of fullscreen.
-    let weEntered = false;
-    const enter = () => {
-      if (document.fullscreenElement) return;
-      const el: any = rootRef.current || document.documentElement;
-      const req = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen;
-      if (!req) return;
-      try { const p = req.call(el); weEntered = true; if (p && p.catch) p.catch(() => {}); } catch { /* blocked → retry on touch */ }
-    };
-    enter();
-    const onGesture = () => enter();
-    window.addEventListener('pointerdown', onGesture, { once: true });
-    window.addEventListener('touchend', onGesture, { once: true });
-    return () => {
-      window.removeEventListener('pointerdown', onGesture);
-      window.removeEventListener('touchend', onGesture);
-      if (weEntered && document.fullscreenElement) {
-        try { (document.exitFullscreen || (document as any).webkitExitFullscreen)?.call(document); } catch { /* noop */ }
-      }
-    };
-  }, [isOpen]);
+  // NOTE: the camera no longer requests fullscreen itself. The whole-app
+  // auto-fullscreen (lib/autoFullscreen, fired on the first tap) already takes
+  // the app fullscreen ONCE and keeps it there, so the camera opens fullscreen
+  // without a second requestFullscreen — which is what made the browser's
+  // "you are in full screen" toast pop on every camera open. Entering once per
+  // load shows that toast at most once.
 
   // Re-fit the live preview on rotation / resize. Several mobile browsers
   // (notably iOS Safari + iOS Chrome, and some Android WebViews / the native
