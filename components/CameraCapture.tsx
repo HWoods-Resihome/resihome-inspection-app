@@ -1292,29 +1292,45 @@ export function CameraCapture({
           onStill={(sid, url) => onAiStill?.(sid, url)}
         />
       )}
-      {/* Top bar */}
-      <div className="lz-head flex items-center justify-between px-4 py-3 bg-black/60 text-white">
+      {/* Top bar — ONE row: Cancel · room navigation (or capture count). No
+          "Take Photos" title; the room nav lives inline here in portrait AND
+          landscape so the chrome stays one slim line. */}
+      <div className="lz-head flex items-center justify-between gap-2 px-3 py-2 bg-black/60 text-white">
         <button
           type="button"
           onClick={handleCancel}
-          className="text-sm font-heading font-semibold px-3 py-1.5 rounded-md hover:bg-white/10"
+          className="shrink-0 text-sm font-heading font-semibold px-3 py-1.5 rounded-md hover:bg-white/10"
         >
           Cancel
         </button>
-        <div className="text-xs font-heading text-white/80">
-          {items.length === 0 ? 'Take Photos' : `${items.length} captured`}
-          {uploadingCount > 0 && ` · ${uploadingCount} uploading`}
-          {failedCount > 0 && ` · ${failedCount} failed`}
-        </div>
-        {/* Spacer to keep the count centered now that Done moved to the bottom. */}
-        <div className="w-14" aria-hidden />
+        {multiRoom ? (
+          <div className="flex-1 min-w-0 flex items-center justify-center gap-1">
+            <button type="button" onClick={() => goAdjacentRoom(-1)} aria-label="Previous room"
+              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-2xl leading-none shrink-0">‹</button>
+            <button type="button" onClick={() => setRoomMenuOpen((o) => !o)}
+              className="min-w-0 flex items-center justify-center gap-2 px-2 py-1 rounded-md hover:bg-white/10">
+              <span className="font-heading font-semibold truncate">{currentRoom?.name || 'Room'}</span>
+              <span className="text-xs text-white/70 shrink-0">{currentRoom ? `(${currentRoom.photoCount + items.length})` : ''}</span>
+              <span className={`text-[10px] transition-transform ${roomMenuOpen ? 'rotate-180' : ''}`}>▼</span>
+            </button>
+            <button type="button" onClick={() => goAdjacentRoom(1)} aria-label="Next room"
+              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-2xl leading-none shrink-0">›</button>
+          </div>
+        ) : (
+          <div className="flex-1 text-center text-xs font-heading text-white/80 truncate">
+            {items.length > 0 ? `${items.length} captured` : ''}
+            {uploadingCount > 0 && ` · ${uploadingCount} uploading`}
+            {failedCount > 0 && ` · ${failedCount} failed`}
+          </div>
+        )}
+        <div className="w-14 shrink-0" aria-hidden />
       </div>
 
       {/* AI-assist status strip — lives in the black header (below the title),
           out of the live image, so the inspector always sees Listening/Thinking
           /transcript without it covering the camera. */}
       {aiAssist && (
-        <div className="bg-black/75 text-white px-4 py-1.5 flex items-center justify-between gap-2 border-b border-white/10">
+        <div className="lz-head bg-black/75 text-white px-4 py-1.5 flex items-center justify-between gap-2 border-b border-white/10">
           <div className="text-[12px] flex items-center gap-1.5 min-w-0">
             {aiOn ? (
               <>
@@ -1362,43 +1378,11 @@ export function CameraCapture({
       {/* Voice "Teach the AI" trainer — records → transcribes → review → add to KB. */}
       <KnowledgeTrainerModal open={kbTrainerOpen} onClose={() => setKbTrainerOpen(false)} />
 
-      {/* Room switcher (multi-room mode): ‹ Room Name (N) › — name opens a
-          scrollable room list showing photo counts and which rooms still need
-          photos, so the inspector can shoot the whole house without leaving. */}
-      {multiRoom && (
-        <div className="relative bg-black/70 text-white border-b border-white/10">
-          <div className="flex items-center justify-between px-3 py-2 gap-2">
-            <button
-              type="button"
-              onClick={() => goAdjacentRoom(-1)}
-              aria-label="Previous room"
-              className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10 text-2xl leading-none shrink-0"
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              onClick={() => setRoomMenuOpen((o) => !o)}
-              className="flex-1 min-w-0 flex items-center justify-center gap-2 px-3 py-1.5 rounded-md hover:bg-white/10"
-            >
-              <span className="font-heading font-semibold truncate">{currentRoom?.name || 'Room'}</span>
-              <span className="text-xs text-white/70 shrink-0">
-                {currentRoom ? `(${currentRoom.photoCount + items.length})` : ''}
-              </span>
-              <span className={`text-[10px] transition-transform ${roomMenuOpen ? 'rotate-180' : ''}`}>▼</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => goAdjacentRoom(1)}
-              aria-label="Next room"
-              className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10 text-2xl leading-none shrink-0"
-            >
-              ›
-            </button>
-          </div>
-
-          {roomMenuOpen && (
-            <>
+      {/* Room list dropdown — the ‹ Room (N) ▾ › control now lives in the top
+          bar; this just renders the scrollable list, anchored right under it. */}
+      {multiRoom && roomMenuOpen && (
+        <div className="relative text-white">
+          <>
               {/* tap-away backdrop */}
               <button
                 type="button"
@@ -1540,7 +1524,6 @@ export function CameraCapture({
                 )}
               </div>
             </>
-          )}
         </div>
       )}
 
