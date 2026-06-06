@@ -3307,20 +3307,6 @@ export function RateCardForm(props: RateCardFormProps) {
                 </button>
               )}
             </div>
-            {/* Listing price + date (most recent active/published listing) — same
-                as the question templates. */}
-            {(typeof props.listingPrice === 'number' && props.listingPrice > 0) || props.listingDate ? (
-              <div className="text-[11px] text-emerald-700 font-semibold truncate">
-                {typeof props.listingPrice === 'number' && props.listingPrice > 0 && (
-                  <span>Listing ${props.listingPrice.toLocaleString()}</span>
-                )}
-                {props.listingDate && (
-                  <span className="text-gray-500 font-normal">
-                    {typeof props.listingPrice === 'number' && props.listingPrice > 0 ? ' · ' : ''}Listed {props.listingDate}
-                  </span>
-                )}
-              </div>
-            ) : null}
             {/* Total client $ across lines assigned to Internal Resolution. */}
             <div className="text-[11px] text-gray-500 truncate">
               Internal Resolution: ${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

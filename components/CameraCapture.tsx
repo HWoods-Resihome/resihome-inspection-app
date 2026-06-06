@@ -642,12 +642,16 @@ export function CameraCapture({
   // retry on the first touch inside the camera. Exited on close.
   useEffect(() => {
     if (!isOpen || typeof document === 'undefined') return;
+    // Only exit on close if WE entered fullscreen here. If the app was already
+    // fullscreen (the global auto-fullscreen), leave it alone so closing the
+    // camera doesn't kick the whole app out of fullscreen.
+    let weEntered = false;
     const enter = () => {
       if (document.fullscreenElement) return;
       const el: any = rootRef.current || document.documentElement;
       const req = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen;
       if (!req) return;
-      try { const p = req.call(el); if (p && p.catch) p.catch(() => {}); } catch { /* blocked → retry on touch */ }
+      try { const p = req.call(el); weEntered = true; if (p && p.catch) p.catch(() => {}); } catch { /* blocked → retry on touch */ }
     };
     enter();
     const onGesture = () => enter();
@@ -656,7 +660,7 @@ export function CameraCapture({
     return () => {
       window.removeEventListener('pointerdown', onGesture);
       window.removeEventListener('touchend', onGesture);
-      if (document.fullscreenElement) {
+      if (weEntered && document.fullscreenElement) {
         try { (document.exitFullscreen || (document as any).webkitExitFullscreen)?.call(document); } catch { /* noop */ }
       }
     };
