@@ -1812,10 +1812,13 @@ export function CameraCapture({
         )}
       </div>
 
-      {/* Thumbnail strip */}
+      {/* Captured-photo strip. Portrait: a horizontal row under the preview.
+          Landscape: a VERTICAL column between the preview and the control rail
+          that fills the height and scrolls vertically — so 12+ shots stack and
+          scroll instead of running off the side. */}
       {items.length > 0 && (
-        <div className="bg-black/80 px-3 py-2 overflow-x-auto">
-          <div className="flex gap-2">
+        <div className={`bg-black/80 ${isLandscape ? 'overflow-y-auto w-[88px] shrink-0 px-2 py-2 min-h-0' : 'overflow-x-auto px-3 py-2'}`}>
+          <div className={`flex gap-2 ${isLandscape ? 'flex-col items-center' : ''}`}>
             {items.map((it) => (
               <div key={it.id} className="relative shrink-0">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
