@@ -3601,37 +3601,25 @@ export function RateCardForm(props: RateCardFormProps) {
                       </button>
                       {!props.readOnly && (
                         <div className="flex gap-2 items-center shrink-0">
-                          {/* AI Camera (Beta) — opens the full camera with an
-                              always-listening AI layer: real-time call-out chips
-                              as you talk and pan, plus auto-stamped room stills. */}
+                          {/* Single capture entry: the AI camera (live call-out
+                              chips as you talk and pan, plus auto-stamped room
+                              stills). Labeled "Take" with the AI spark; disabled
+                              only until the AI layer has warmed up. */}
                           <button
                             type="button"
                             onClick={() => { setAiCameraMode(true); setCameraSectionId(s.id); }}
                             disabled={isUploadingHere || !aiCamWarmed}
                             className="inline-flex items-center gap-1 text-xs bg-violet-600 text-white font-semibold py-1 px-2.5 rounded hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-opacity"
-                            title={aiCamWarmed ? 'AI Camera (Beta) — full camera with live AI call-outs as you talk and pan' : 'AI Camera (Beta) — getting ready…'}
+                            title={aiCamWarmed ? 'Take — AI camera with live call-outs as you talk and pan' : 'Take — getting the AI camera ready…'}
                           >
                             {!aiCamWarmed ? (
                               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
                             ) : (
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" />
                                 <path d="M19 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" />
                               </svg>
                             )}
-                            AI<span className="text-[9px] font-bold uppercase ml-0.5 opacity-90">Beta</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => { setAiCameraMode(false); setCameraSectionId(s.id); }}
-                            disabled={isUploadingHere}
-                            className="inline-flex items-center gap-1 text-xs bg-brand text-white font-semibold py-1 px-2.5 rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
-                            title="Take or upload photos"
-                          >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                              <circle cx="12" cy="13" r="4" />
-                            </svg>
                             Take
                           </button>
                         </div>
