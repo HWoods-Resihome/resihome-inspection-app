@@ -376,6 +376,20 @@ export function RateCardForm(props: RateCardFormProps) {
       setAiCamWarmed(true); // set even on failure so the button can't get stuck
     })();
   }, [online, props.readOnly, props.templateType]);
+  // One-time border flash the moment warm-up flips the button from plain camera
+  // ("Take") to the AI-hybrid icon — only on a genuine false→true transition
+  // (not when it was already warm from a prior screen).
+  const [warmFlash, setWarmFlash] = useState(false);
+  const prevWarmRef = useRef(aiCamWarmed);
+  useEffect(() => {
+    if (!prevWarmRef.current && aiCamWarmed) {
+      setWarmFlash(true);
+      const t = setTimeout(() => setWarmFlash(false), 1300);
+      prevWarmRef.current = aiCamWarmed;
+      return () => clearTimeout(t);
+    }
+    prevWarmRef.current = aiCamWarmed;
+  }, [aiCamWarmed]);
   // ----- AI scope review -----
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -3587,27 +3601,32 @@ export function RateCardForm(props: RateCardFormProps) {
                       </button>
                       {!props.readOnly && (
                         <div className="flex gap-2 items-center shrink-0">
-                          {/* Single capture entry: the AI camera (live call-out
-                              chips as you talk and pan, plus auto-stamped room
-                              stills). Opens IMMEDIATELY — never gated on warm-up
-                              or connectivity. Warm-up only speeds the first AI
-                              suggestion; the camera + shutter work cold/offline
-                              (offline shots are cached and synced later), and the
-                              AI layer degrades gracefully (banks voice, retries).
-                              A tiny spark→spinner just hints AI is still warming. */}
+                          {/* Single capture entry. Opens IMMEDIATELY — never gated
+                              on warm-up or connectivity (the camera + shutter work
+                              cold/offline; offline shots cache and sync later, and
+                              the AI layer degrades gracefully). Progressive UI: it
+                              starts as a plain "Take" + camera icon, then once
+                              warm-up finishes in the BACKGROUND the border flashes
+                              once and it morphs into the AI camera+spark hybrid. */}
                           <button
                             type="button"
                             onClick={() => { setAiCameraMode(true); setCameraSectionId(s.id); }}
                             disabled={isUploadingHere}
-                            className="inline-flex items-center gap-1 text-xs bg-violet-600 text-white font-semibold py-1 px-2.5 rounded hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-opacity"
-                            title={aiCamWarmed ? 'Take — AI camera with live call-outs as you talk and pan' : 'Take — AI camera (warming up; opens now, AI ready in a moment)'}
+                            className={`inline-flex items-center gap-1 text-xs text-white font-semibold py-1 px-2.5 rounded disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors duration-300 ${aiCamWarmed ? 'bg-violet-600 hover:bg-violet-700' : 'bg-brand hover:bg-brand-dark'} ${warmFlash ? 'animate-borderFlash' : ''}`}
+                            title={aiCamWarmed ? 'Take — AI camera with live call-outs as you talk and pan' : 'Take — opens now; AI call-outs switch on in a moment'}
                           >
-                            {!aiCamWarmed ? (
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="animate-spin opacity-80"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                            {aiCamWarmed ? (
+                              // Camera + AI spark hybrid — AI call-outs are ready.
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3l2-3h5l1.2 1.8" />
+                                <circle cx="11" cy="13.5" r="3.2" />
+                                <path d="M19 2.5l.85 2.15L22 5.5l-2.15.85L19 8.5l-.85-2.15L16 5.5l2.15-.85z" fill="currentColor" stroke="none" />
+                              </svg>
                             ) : (
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" />
-                                <path d="M19 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" />
+                              // Plain camera — AI still warming in the background.
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                                <circle cx="12" cy="13" r="4" />
                               </svg>
                             )}
                             Take

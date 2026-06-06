@@ -201,6 +201,15 @@ h1, h2, h3, h4, h5, h6 {
 }
 .animate-addedPop { animation: addedPop 1150ms ease-out forwards; }
 
+/* One-time "AI ready" flash around the Take button when warm-up completes in
+   the background — a violet ring pulses out twice, then settles. */
+@keyframes borderFlash {
+  0%   { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.75); }
+  60%  { box-shadow: 0 0 0 6px rgba(139, 92, 246, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+}
+.animate-borderFlash { animation: borderFlash 600ms ease-out 2; }
+
 /* Gentle attention pulse for the "Save & Close" button while the submitter is
    inside their self-approval lockout — it's the only valid action, so nudge it.
    Used via Tailwind's arbitrary syntax: animate-[saveNudge_1.4s_ease-in-out_infinite]
