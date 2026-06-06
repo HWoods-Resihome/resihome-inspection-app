@@ -1651,7 +1651,7 @@ export function CameraCapture({
 
       {/* Body: preview + controls. Column in portrait; in landscape it flips to
           a row so the controls become a right-side rail and the preview fills. */}
-      <div className="lz-camera-body flex-1 flex flex-col min-h-0">
+      <div className={`flex-1 flex min-h-0 ${isLandscape ? 'flex-row' : 'flex-col'}`}>
       {/* Camera viewport */}
       <div ref={viewportRef} className="flex-1 relative bg-black overflow-hidden"
         onTouchStart={onViewportTouchStart} onTouchMove={onViewportTouchMove}
@@ -1903,7 +1903,7 @@ export function CameraCapture({
 
       {/* Shutter row. `relative` so the voice assistant's pop-up panel (anchored
           bottom-full to the mic) floats above this bar and stays on-screen. */}
-      <div className="lz-foot lz-rail relative bg-black px-4 py-4 flex items-center justify-center gap-8">
+      <div className={`lz-foot relative bg-black ${isLandscape ? 'self-stretch flex flex-col items-center justify-center gap-6 px-2 py-4' : 'flex items-center justify-center gap-8 px-4 py-4'}`}>
         {/* Gallery — pick one or more existing photos from the device (replaces
             the separate "Upload" button that used to live on the form). */}
         <button
@@ -1972,7 +1972,7 @@ export function CameraCapture({
         <button
           type="button"
           onClick={handleDone}
-          className="lz-done absolute right-4 top-1/2 -translate-y-1/2 text-sm font-heading font-bold px-4 py-2 rounded-md bg-brand text-white hover:bg-brand-dark"
+          className={`text-sm font-heading font-bold px-4 py-2 rounded-md bg-brand text-white hover:bg-brand-dark ${isLandscape ? '' : 'absolute right-4 top-1/2 -translate-y-1/2'}`}
         >
           Done
         </button>

@@ -240,6 +240,18 @@ export function CameraAILayer(props: Props) {
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [scanning, setScanning] = useState(false);
+  // Landscape: confine the call-out cards to the camera viewport (bottom-left)
+  // so they don't overlay the photo column + control rail on the right.
+  const [isLandscape, setIsLandscape] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(orientation: landscape)');
+    const apply = () => setIsLandscape(mq.matches);
+    apply();
+    mq.addEventListener?.('change', apply);
+    window.addEventListener('resize', apply);
+    return () => { mq.removeEventListener?.('change', apply); window.removeEventListener('resize', apply); };
+  }, []);
   // "Working" lingers ~1.4s past the last transcribe/inference so the status
   // doesn't flicker back to "Listening" in the gaps between clips — it reads as
   // one continuous "Processing…" until the work actually settles.
@@ -1098,7 +1110,15 @@ export function CameraAILayer(props: Props) {
       {/* Chip tray — floats above the camera controls. Each card has inline
           qty / vendor / tenant% / vendor$ controls so the inspector (or voice)
           can adjust BEFORE adding. */}
-      <div className="pointer-events-none absolute left-0 right-0 bottom-28 px-3 space-y-2 max-h-[52vh] overflow-y-auto">
+      <div className={`pointer-events-none absolute space-y-2 overflow-y-auto ${
+        isLandscape
+          // Landscape: anchored to the very bottom and confined to the LEFT
+          // (camera) area — the right ~184px holds the photo column + rail, so
+          // we stop short of it and never cover them.
+          ? 'left-2 right-[184px] bottom-2 max-h-[78vh]'
+          // Portrait: full-width tray floating above the bottom control bar.
+          : 'left-0 right-0 bottom-28 px-3 max-h-[52vh]'
+      }`}>
         {visibleChips.map((s) => {
           const e = editOf(s);
           const addDisabled = s.needsMeasurement && !(Number(e.qty) > 0);
