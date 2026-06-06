@@ -639,6 +639,23 @@ export function CameraCapture({
   // "you are in full screen" toast pop on every camera open. Entering once per
   // load shows that toast at most once.
 
+  // Android/Chrome consume the FIRST back press to EXIT fullscreen (no popstate
+  // fires), which otherwise leaves the camera open but un-fullscreened — the
+  // inspector has to press back a SECOND time to actually close it. Translate
+  // that fullscreen-exit into a normal overlay back (pop the entry useBackToClose
+  // pushed) so a SINGLE back closes the camera. autoFullscreen re-arms on the
+  // exit, so the next tap restores fullscreen.
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+    const onFsChange = () => {
+      if (!document.fullscreenElement) {
+        try { window.history.back(); } catch { /* popstate path will still close it */ }
+      }
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, [isOpen]);
+
   // Re-fit the live preview on rotation / resize. Several mobile browsers
   // (notably iOS Safari + iOS Chrome, and some Android WebViews / the native
   // shell) DON'T recompute a <video>'s object-fit paint box when the device

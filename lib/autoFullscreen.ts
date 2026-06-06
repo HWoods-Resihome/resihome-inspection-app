@@ -24,24 +24,35 @@ export function installAutoFullscreen(): void {
   const req: (() => Promise<void> | void) | undefined = el.requestFullscreen || el.webkitRequestFullscreen;
   if (!req) return;
 
-  function cleanup() {
+  let armed = false;
+  function arm() {
+    if (armed || document.fullscreenElement) return;
+    armed = true;
+    window.addEventListener('pointerdown', tryFs, { passive: true });
+    window.addEventListener('keydown', tryFs);
+  }
+  function disarm() {
+    armed = false;
     window.removeEventListener('pointerdown', tryFs);
     window.removeEventListener('keydown', tryFs);
   }
   function tryFs() {
-    if (document.fullscreenElement) { cleanup(); return; }
+    if (document.fullscreenElement) { disarm(); return; }
     try {
       const p = req!.call(el);
       // Stop once we're actually in (success). On a rejected request keep
       // listening so the next gesture can retry.
       if (p && typeof (p as Promise<void>).then === 'function') {
-        (p as Promise<void>).then(cleanup).catch(() => { /* not honored — keep listening */ });
+        (p as Promise<void>).then(disarm).catch(() => { /* not honored — keep listening */ });
       } else {
-        cleanup();
+        disarm();
       }
     } catch { /* keep listening for the next gesture */ }
   }
 
-  window.addEventListener('pointerdown', tryFs, { passive: true });
-  window.addEventListener('keydown', tryFs);
+  // KEEP FULLSCREEN: the browser drops fullscreen on a back gesture / Esc. When
+  // that happens, re-arm so the inspector's very next tap restores it — the app
+  // stays fullscreen across navigation instead of getting stuck with the URL bar.
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) arm(); });
+  arm();
 }
