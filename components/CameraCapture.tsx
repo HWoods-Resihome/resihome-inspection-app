@@ -249,6 +249,32 @@ export function CameraCapture({
   const canvasStreamRef = useRef<MediaStream | null>(null);
   const shutterStartYRef = useRef<number | null>(null);
   const [zoom, setZoom] = useState(1);
+  // Hardware (sensor) zoom capability. On phones with an ultra-wide lens the
+  // reported zoom.min is BELOW 1, so applying it switches to the WIDE lens.
+  // When present we drive the whole zoom range through the hardware track —
+  // giving true optical/sensor zoom AND wide — and skip the CSS digital crop.
+  // iOS Safari doesn't expose it → digital fallback (zoom IN only).
+  const zoomCapsRef = useRef<{ min: number; max: number } | null>(null);
+  const hwZoomRef = useRef(false);
+  const [hwZoom, setHwZoom] = useState(false);
+  // The DIGITAL crop factor the preview/capture/focus should apply: always 1
+  // when the sensor is doing the zoom (so we never double-zoom), else the
+  // current digital zoom.
+  const effZoom = useCallback(() => (hwZoomRef.current ? 1 : (zoomRef.current || 1)), []);
+  // Single zoom setter: clamp to the live range and, when hardware zoom is
+  // available, push it to the sensor (this is what reaches the wide lens).
+  const applyZoom = useCallback((z: number) => {
+    const caps = zoomCapsRef.current;
+    const zMin = caps ? caps.min : 1;
+    const zMax = caps ? caps.max : MAX_ZOOM;
+    const nz = Math.max(zMin, Math.min(zMax, z));
+    zoomRef.current = nz;
+    setZoom(nz);
+    if (caps) {
+      const track = streamRef.current?.getVideoTracks?.()[0];
+      try { (track?.applyConstraints as any)?.({ advanced: [{ zoom: nz }] }); } catch { /* unsupported */ }
+    }
+  }, []);
 
   const [items, setItems] = useState<CaptureItem[]>([]);
   // Mirror items in a ref so async code (handleDone polling) can read the
@@ -302,6 +328,10 @@ export function CameraCapture({
     try {
       // Stop any existing stream before starting a new one (e.g., when switching facing)
       stopStream();
+      // Reset zoom for the new stream; detectZoom() below re-reads the new
+      // track's capabilities (e.g. the front camera usually has no wide/zoom).
+      zoomCapsRef.current = null; hwZoomRef.current = false; setHwZoom(false);
+      zoomRef.current = 1; setZoom(1);
       const videoConstraint: MediaTrackConstraints = {
         facingMode: { ideal: facing },
         width: { ideal: CAPTURE_WIDTH },
@@ -386,6 +416,29 @@ export function CameraCapture({
         videoRef.current.addEventListener('loadedmetadata', () => { checkTorch(); }, { once: true });
       }
       setTimeout(checkTorch, 800);
+      // Detect the sensor's zoom range (capabilities populate late on Android,
+      // like torch). When min < 1 the device has an ultra-wide; driving the
+      // hardware zoom to that min switches to the WIDE lens.
+      const detectZoom = () => {
+        try {
+          const track = streamRef.current?.getVideoTracks?.()[0];
+          const caps: any = track?.getCapabilities?.() || {};
+          const z = caps.zoom;
+          if (z && typeof z.min === 'number' && typeof z.max === 'number' && z.max > z.min) {
+            zoomCapsRef.current = { min: z.min, max: z.max };
+            hwZoomRef.current = true;
+            setHwZoom(true);
+            // Open at 1× (normal) if it's in range, else the nearest bound.
+            const start = Math.max(z.min, Math.min(z.max, 1));
+            zoomRef.current = start; setZoom(start);
+            try { (track!.applyConstraints as any)({ advanced: [{ zoom: start }] }); } catch { /* noop */ }
+          } else if (!zoomCapsRef.current) {
+            hwZoomRef.current = false; setHwZoom(false);
+          }
+        } catch { /* best-effort */ }
+      };
+      detectZoom();
+      [600, 1500, 2800].forEach((ms) => setTimeout(detectZoom, ms));
       setPermissionState('granted');
       setPermissionError('');
     } catch (e: any) {
@@ -502,7 +555,7 @@ export function CameraCapture({
     // Correct for digital zoom: the preview is scaled about its center, so the
     // viewport shows only the central 1/zoom of the frame. Map the tap back into
     // full-frame coordinates so focus lands where the inspector actually tapped.
-    const z = zoomRef.current || 1;
+    const z = effZoom();
     const nx = Math.max(0, Math.min(1, 0.5 + (vx - 0.5) / z));
     const ny = Math.max(0, Math.min(1, 0.5 + (vy - 0.5) / z));
     const key = Date.now();
@@ -539,9 +592,9 @@ export function CameraCapture({
   };
   const onViewportTouchMove = (e: React.TouchEvent) => {
     if (e.touches.length === 2 && pinchRef.current) {
-      const z = Math.max(1, Math.min(MAX_ZOOM, pinchRef.current.startZoom * (touchDist(e.touches) / pinchRef.current.startDist)));
-      zoomRef.current = z;
-      setZoom(z);
+      // Pinch maps to the live range — below 1 reaches the wide lens when the
+      // hardware supports it (applyZoom clamps + pushes to the sensor).
+      applyZoom(pinchRef.current.startZoom * (touchDist(e.touches) / pinchRef.current.startDist));
     } else if (tapRef.current && e.touches.length === 1) {
       const t = e.touches[0];
       if (Math.hypot(t.clientX - tapRef.current.x, t.clientY - tapRef.current.y) > 12) tapRef.current.moved = true;
@@ -923,7 +976,8 @@ export function CameraCapture({
       recordAudioStreamRef.current = null;
     }
     mediaRecorderRef.current = null;
-    zoomRef.current = 1; setZoom(1);
+    // Preserve a hardware/wide zoom across recording; only reset digital zoom.
+    if (!hwZoomRef.current) { zoomRef.current = 1; setZoom(1); }
     if (!chunks.length) return;
     const ext = /mp4/i.test(mime) ? 'mp4' : 'webm';
     const type = (mime.split(';')[0] || `video/${ext}`);
@@ -962,9 +1016,9 @@ export function CameraCapture({
     const cctx = canvas.getContext('2d');
     if (!cctx) return;
     recordCanvasRef.current = canvas;
-    zoomRef.current = 1; setZoom(1);
+    if (!hwZoomRef.current) { zoomRef.current = 1; setZoom(1); }
     const drawFrame = () => {
-      const z = zoomRef.current;
+      const z = effZoom();
       const sw = vw / z, sh = vh / z;
       const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
       try { cctx.drawImage(video, sx, sy, sw, sh, 0, 0, vw, vh); } catch { /* not ready yet */ }
@@ -1011,9 +1065,12 @@ export function CameraCapture({
     // Deadzone so a small wobble doesn't zoom; gentle ramp via ZOOM_DRAG_PX.
     const dy = raw > ZOOM_DEADZONE_PX ? raw - ZOOM_DEADZONE_PX
       : raw < -ZOOM_DEADZONE_PX ? raw + ZOOM_DEADZONE_PX : 0;
-    const z = Math.min(MAX_ZOOM, Math.max(1, 1 + (dy / ZOOM_DRAG_PX) * (MAX_ZOOM - 1)));
-    zoomRef.current = z;
-    setZoom(z);
+    // Drag up zooms in toward max; drag down zooms out toward min (the wide lens
+    // when supported). Anchored at 1× with separate spans either side.
+    const caps = zoomCapsRef.current;
+    const zMin = caps ? caps.min : 1;
+    const zMax = caps ? caps.max : MAX_ZOOM;
+    applyZoom(1 + (dy / ZOOM_DRAG_PX) * (dy >= 0 ? (zMax - 1) : (1 - zMin)));
   }
   function onShutterUp() {
     shutterStartYRef.current = null;
@@ -1098,7 +1155,7 @@ export function CameraCapture({
       }
       // Center-crop by the live digital-zoom factor so the photo matches the
       // (CSS-scaled) zoomed preview the inspector framed.
-      const z = zoomRef.current;
+      const z = effZoom();
       if (z > 1.001) {
         const sw = vw / z, sh = vh / z;
         ctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, vw, vh);
@@ -1393,7 +1450,7 @@ export function CameraCapture({
           enabled={aiOn}
           videoRef={videoRef}
           getStream={() => streamRef.current}
-          getZoom={() => zoomRef.current}
+          getZoom={() => effZoom()}
           getLastManualCaptureAt={() => lastManualCaptureRef.current}
           onStatus={setAiStatus}
           getActiveRoom={() => {
@@ -1663,7 +1720,7 @@ export function CameraCapture({
               playsInline
               muted
               className="absolute inset-0 w-full h-full object-cover"
-              style={zoom > 1 ? { transform: `scale(${zoom})`, transformOrigin: 'center', transition: 'transform 60ms linear' } : undefined}
+              style={(!hwZoom && zoom > 1) ? { transform: `scale(${zoom})`, transformOrigin: 'center', transition: 'transform 60ms linear' } : undefined}
             />
             {/* Tap-to-focus reticle */}
             {focusPt && (
@@ -1728,7 +1785,7 @@ export function CameraCapture({
                   <span className="text-white text-xs font-heading font-semibold tabular-nums">
                     REC {recordSecs}s / {MAX_CLIP_MS / 1000}s
                   </span>
-                  {zoom > 1.02 && (
+                  {Math.abs(zoom - 1) > 0.02 && (
                     <span className="text-white/90 text-xs font-heading tabular-nums border-l border-white/30 pl-2">
                       {zoom.toFixed(1)}×
                     </span>
