@@ -1267,7 +1267,12 @@ export function QuestionForm({
       <div className="lz-head max-w-3xl mx-auto px-4 pt-3 pb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <h1 className="text-lg sm:text-xl font-heading font-bold text-gray-900 leading-tight truncate">{templateLabel}</h1>
+            <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
+              <h1 className="text-lg sm:text-xl font-heading font-bold text-gray-900 leading-tight">{templateLabel}</h1>
+              {headerBadge && (
+                <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${headerBadge.color}`}>{headerBadge.label}</span>
+              )}
+            </div>
             <div className="text-xs text-gray-500 mt-0.5">
               Inspector: {inspectorName}
               {isSubmittedState && fmtStamp(submittedAt) && (
@@ -1324,17 +1329,12 @@ export function QuestionForm({
               <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
             </button>
             <div className="min-w-0 flex-1">
-              {/* Address + status on ONE line — never wraps; the address font
-                  shrinks to fit the available width, the badge stays fixed. */}
-              <div className="flex items-center gap-2">
-                <FitText
-                  text={propertyName}
-                  className="font-heading font-semibold text-ink flex-1 min-w-0"
-                />
-                {headerBadge && (
-                  <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${headerBadge.color}`}>{headerBadge.label}</span>
-                )}
-              </div>
+              {/* Full address on ONE line — never wraps; the font shrinks to fit
+                  the available width. */}
+              <FitText
+                text={propertyName}
+                className="font-heading font-semibold text-ink"
+              />
               <div className="text-xs text-gray-500 truncate">
                 {bedrooms} bed / {bathrooms} bath
                 {squareFootage != null && squareFootage > 0 && (
