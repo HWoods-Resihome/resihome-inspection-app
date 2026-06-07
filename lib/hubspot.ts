@@ -2007,7 +2007,23 @@ export interface AiKnowledgeEntry {
   addedByName?: string;
   createdAt: number;   // epoch ms
   updatedAt?: number;  // epoch ms (set when an admin edits)
+  // Provenance. Absent ⇒ 'inspector' (legacy + inspector/admin-submitted). 'auto'
+  // entries are synthesized by the self-improvement loop from captured feedback;
+  // they live in the same store and feed the same prompt, but admins can review,
+  // edit (which ADOPTS them as 'admin'-owned), or delete (which DISMISSES them).
+  source?: 'inspector' | 'admin' | 'auto';
+  // 'dismissed' tombstones a deleted AUTO entry so the loop won't re-add it; such
+  // entries are hidden from the UI and excluded from the AI prompt.
+  status?: 'active' | 'dismissed';
+  // Stable fingerprint of the learned signal, so regenerating refreshes the same
+  // entry in place rather than duplicating it (auto entries only).
+  signature?: string;
+  // Why the loop wrote this (sample size, example phrases, catalog code) — shown
+  // to admins for context. Auto entries only.
+  meta?: Record<string, string | number | string[] | undefined>;
 }
+
+const MAX_AUTO_ENTRIES = 150; // cap auto entries so they never crowd out human ones
 
 // The admin Agent record id is resolved once and cached (5 min) — it never
 // changes within a deploy, and resolving it costs an Owners + Search round-trip.
@@ -2089,20 +2105,82 @@ export async function addKnowledgeEntry(input: { text: string; addedByEmail: str
   return entry;
 }
 
-/** Admin: edit an entry's text. */
+/** Admin: edit an entry's text. Editing an AUTO entry ADOPTS it as admin-owned
+ *  so the self-improvement loop won't overwrite the curated wording. */
 export async function updateKnowledgeEntry(id: string, text: string): Promise<void> {
   const entries = await readKnowledgeEntries();
   const i = entries.findIndex((e) => e.id === id);
   if (i < 0) throw new Error('Entry not found.');
-  entries[i] = { ...entries[i], text: (text || '').trim().slice(0, 1000), updatedAt: Date.now() };
+  const adopt = entries[i].source === 'auto' ? { source: 'admin' as const } : {};
+  entries[i] = { ...entries[i], text: (text || '').trim().slice(0, 1000), updatedAt: Date.now(), ...adopt };
   await writeKnowledgeEntries(entries);
 }
 
-/** Admin: delete an entry. */
+/** Admin: delete an entry. Deleting an AUTO entry DISMISSES it (a tombstone) so
+ *  the loop won't regenerate it; human entries are removed outright. */
 export async function deleteKnowledgeEntry(id: string): Promise<void> {
   const entries = await readKnowledgeEntries();
-  const next = entries.filter((e) => e.id !== id);
-  await writeKnowledgeEntries(next);
+  const i = entries.findIndex((e) => e.id === id);
+  if (i < 0) return;
+  if (entries[i].source === 'auto') {
+    entries[i] = { ...entries[i], status: 'dismissed', updatedAt: Date.now() };
+    await writeKnowledgeEntries(entries);
+  } else {
+    await writeKnowledgeEntries(entries.filter((e) => e.id !== id));
+  }
+}
+
+/** A learned-knowledge candidate produced by the self-improvement loop. */
+export interface AutoKnowledgeCandidate {
+  signature: string;                 // stable fingerprint of the signal
+  text: string;                      // human-readable guidance
+  meta?: AiKnowledgeEntry['meta'];
+}
+
+/**
+ * Merge synthesized AUTO knowledge into the store. Refreshes an existing auto
+ * entry in place (same signature), respects dismissals, and never touches human
+ * or adopted ('admin') entries. Auto entries are capped so they can't crowd out
+ * human knowledge. Best-effort caller; throws only if the agent record is
+ * missing (so the cron can log it).
+ */
+export async function upsertAutoKnowledgeEntries(candidates: AutoKnowledgeCandidate[]): Promise<{ added: number; refreshed: number; skipped: number }> {
+  const entries = await readKnowledgeEntries();
+  const autoBySig = new Map<string, AiKnowledgeEntry>();
+  for (const e of entries) if (e.source === 'auto' && e.signature) autoBySig.set(e.signature, e);
+
+  let added = 0, refreshed = 0, skipped = 0;
+  const now = Date.now();
+  for (const c of candidates) {
+    const existing = autoBySig.get(c.signature);
+    if (existing) {
+      if (existing.status === 'dismissed') { skipped++; continue; } // admin rejected it
+      existing.text = c.text.slice(0, 1000);
+      existing.meta = c.meta;
+      existing.updatedAt = now;
+      refreshed++;
+    } else {
+      entries.unshift({
+        id: `auto-${c.signature}`,
+        text: c.text.slice(0, 1000),
+        addedByEmail: 'ai@resiwalk',
+        addedByName: 'AI · auto-learned',
+        createdAt: now,
+        source: 'auto',
+        status: 'active',
+        signature: c.signature,
+        meta: c.meta,
+      });
+      added++;
+    }
+  }
+
+  // Keep every human/adopted entry; cap auto entries (newest kept) so the store
+  // stays bounded and human knowledge is never dropped.
+  const humans = entries.filter((e) => (e.source || 'inspector') !== 'auto');
+  const autos = entries.filter((e) => e.source === 'auto').slice(0, MAX_AUTO_ENTRIES);
+  await writeKnowledgeEntries([...autos, ...humans]);
+  return { added, refreshed, skipped };
 }
 
 /**
@@ -2121,7 +2199,7 @@ export async function getKnowledgeBasePromptText(maxChars = 2400): Promise<strin
       _kbEntriesCache = { entries: [], at: Date.now() };
     }
   }
-  const entries = _kbEntriesCache?.entries || [];
+  const entries = (_kbEntriesCache?.entries || []).filter((e) => e.status !== 'dismissed');
   if (!entries.length) return '';
   const lines = entries.map((e) => `- ${String(e.text).replace(/\s+/g, ' ').trim()}`);
   return lines.join('\n').slice(0, maxChars);

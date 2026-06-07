@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { buildLearnedMatchModel, getLearnedMatchModel, isLearningEnabled } from '@/lib/aiLearning';
+import { refreshLearnedKnowledge } from '@/lib/aiKnowledgeLearning';
 
 /**
  * AI self-improvement model admin.
@@ -25,7 +26,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
       const days = Math.max(1, Math.min(365, Number(body.days) || 90));
-      const model = await buildLearnedMatchModel(days);
+      // Refresh BOTH the numeric ranking model and the reviewable learned-
+      // knowledge entries (the latter show up at /ai-knowledge for review/edit/
+      // delete) from the same captured feedback.
+      const [model, knowledge] = await Promise.all([
+        buildLearnedMatchModel(days),
+        refreshLearnedKnowledge(days),
+      ]);
       const codes = Object.keys(model.deltas);
       return res.status(200).json({
         rebuilt: true,
@@ -37,6 +44,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           boosted: codes.filter((c) => model.deltas[c] > 0).length,
           demoted: codes.filter((c) => model.deltas[c] < 0).length,
         },
+        knowledge,
         model,
       });
     }

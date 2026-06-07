@@ -17,6 +17,9 @@ interface Entry {
   addedByName?: string;
   createdAt: number;
   updatedAt?: number;
+  source?: 'inspector' | 'admin' | 'auto';
+  status?: 'active' | 'dismissed';
+  meta?: { code?: string; samples?: number; accepts?: number; rejects?: number; examples?: string[] };
 }
 
 function fmtDate(ms?: number): string {
@@ -54,7 +57,9 @@ export default function AiKnowledgePage() {
       const r = await fetch('/api/ai-knowledge', { cache: 'no-store' });
       const d = await r.json();
       if (!r.ok) { setError(d.error || 'Failed to load'); return; }
-      setEntries(d.entries || []);
+      // Hide dismissed auto entries (tombstones kept server-side so the loop
+      // won't re-add them).
+      setEntries((d.entries || []).filter((e: Entry) => e.status !== 'dismissed'));
       setError(null);
     } catch (e: any) {
       setError(String(e?.message || e));
@@ -132,7 +137,7 @@ export default function AiKnowledgePage() {
 
       <main className="max-w-3xl mx-auto px-4 py-5">
         <p className="text-[13px] text-gray-600 mb-4 leading-snug">
-          Field-trained guidance that the <strong>live in-camera AI</strong> uses for its call-outs and edits. Inspectors add entries by voice (“Teach AI” in the camera); they go live immediately. Edit or delete anything below to curate what the AI learns.
+          Guidance the <strong>AI</strong> uses for its call-outs, edits, and voice matching. Inspectors add entries by voice (“Teach AI” in the camera), and the AI <strong>auto-learns</strong> entries (marked <span className="text-violet-700 font-semibold">✨ AI-learned</span>) from how inspectors accept or reject its suggestions. Edit any entry to adopt and refine it, or delete it to stop the AI using it.
         </p>
 
         {/* Add new */}
@@ -182,10 +187,21 @@ export default function AiKnowledgePage() {
                   </>
                 ) : (
                   <>
+                    {e.source === 'auto' && (
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-heading font-bold uppercase tracking-wide text-violet-700 bg-violet-100 border border-violet-200 rounded-full px-2 py-0.5">✨ AI-learned</span>
+                        {e.meta?.samples != null && (
+                          <span className="text-[10px] text-gray-400" title={(e.meta.examples || []).join(' · ')}>
+                            from {e.meta.samples} decision{e.meta.samples === 1 ? '' : 's'}
+                            {e.meta.accepts != null && e.meta.rejects != null ? ` (${e.meta.accepts}✓ / ${e.meta.rejects}✗)` : ''}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <p className="text-sm text-ink whitespace-pre-wrap">{e.text}</p>
                     <div className="flex items-center justify-between gap-2 mt-2">
                       <div className="text-[11px] text-gray-500 truncate">
-                        {(e.addedByName || e.addedByEmail || 'Unknown')}{e.createdAt ? ` · ${fmtDate(e.createdAt)}` : ''}{e.updatedAt ? ' · edited' : ''}
+                        {(e.addedByName || e.addedByEmail || 'Unknown')}{e.createdAt ? ` · ${fmtDate(e.createdAt)}` : ''}{e.updatedAt ? (e.source === 'auto' ? '' : ' · edited') : ''}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <button type="button" onClick={() => { setEditingId(e.id); setDraft(e.text); }}

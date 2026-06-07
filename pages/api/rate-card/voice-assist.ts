@@ -22,6 +22,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { recordAiUsage } from '@/lib/aiUsage';
+import { getKnowledgeBasePromptText } from '@/lib/hubspot';
 import { matchCatalog, getCatalogEmbeddings } from '@/lib/voiceCatalogMatch';
 import { aliasFor } from '@/lib/voiceAliases';
 import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
@@ -611,8 +612,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // turns, and users), then the per-turn dynamic context + pre-search hints
     // (uncached, since it changes every turn).
     const dynamicText = preSearchBlock ? `${sysContext}\n${preSearchBlock}` : sysContext;
+    // Operator knowledge base — human-authored house rules PLUS the loop's
+    // learned guidance (both live in the same AI Knowledge store). Cached block:
+    // changes slowly, shared across users/turns. Makes the self-learning apply
+    // on the voice surface, where most catalog matching happens.
+    const kb = await getKnowledgeBasePromptText().catch(() => '');
     const systemWithHints = [
       { type: 'text', text: SYSTEM_RULES, cache_control: { type: 'ephemeral' } },
+      ...(kb ? [{ type: 'text', text: `OPERATOR KNOWLEDGE BASE — house rules from inspectors, plus guidance learned from past sessions. Treat as authoritative when relevant to your call-outs and edits:\n${kb}`, cache_control: { type: 'ephemeral' } }] : []),
       { type: 'text', text: dynamicText },
     ];
 
