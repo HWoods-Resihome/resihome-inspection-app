@@ -17,6 +17,7 @@
     "@capacitor/app": "^6.0.1",
     "@capacitor/browser": "^6.0.3",
     "@capacitor/core": "^6.1.2",
+    "@capacitor/push-notifications": "^6.0.5",
     "@react-pdf/renderer": "3.4.5",
     "@sparticuz/chromium": "^131.0.1",
     "@vercel/blob": "^2.4.0",

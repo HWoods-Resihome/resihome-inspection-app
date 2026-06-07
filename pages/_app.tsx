@@ -8,7 +8,7 @@ import { FieldStatusOverlays } from '@/components/FieldStatusOverlays';
 import { initErrorReporting } from '@/lib/clientErrorReporter';
 import { installSessionGuard } from '@/lib/sessionGuard';
 import { registerServiceWorker } from '@/lib/useAppUpdate';
-import { installOAuthBridge } from '@/lib/nativeBridge';
+import { installOAuthBridge, installPushBridge } from '@/lib/nativeBridge';
 import { initPushOnLoad } from '@/lib/pushClient';
 import { Raleway } from 'next/font/google';
 import '../styles/globals.css';
@@ -46,6 +46,9 @@ export default function App({ Component, pageProps }: AppProps) {
     // then keep their subscription fresh. No-op until VAPID env is configured
     // or on browsers without push support. (Native FCM is a separate path.)
     void initPushOnLoad();
+    // Native-only: register the FCM/APNs device token in the Capacitor shell.
+    // No-op in a browser (the PWA path above handles web push).
+    void installPushBridge();
   }, []);
 
   return (

@@ -174,3 +174,55 @@ export async function installOAuthBridge(): Promise<void> {
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// Native push (FCM / APNs) registration bridge.
+//
+// In the Capacitor shell, the @capacitor/push-notifications plugin yields a
+// native device token; we register it with the server (POST /api/push/subscribe
+// platform:'native') so approval alerts reach the installed app via FCM. Web
+// (PWA) push is handled separately by lib/pushClient — this path is native-only
+// and a complete no-op in a normal browser (the isNativePlatform gate).
+// ---------------------------------------------------------------------------
+let pushInstalled = false;
+
+export async function installPushBridge(): Promise<void> {
+  if (typeof window === 'undefined' || pushInstalled) return;
+
+  let Capacitor: typeof import('@capacitor/core').Capacitor;
+  try { ({ Capacitor } = await import('@capacitor/core')); } catch { return; }
+  if (!Capacitor.isNativePlatform()) return; // browser → PWA push path handles it
+
+  let PushNotifications: typeof import('@capacitor/push-notifications').PushNotifications;
+  try { ({ PushNotifications } = await import('@capacitor/push-notifications')); } catch { return; }
+
+  pushInstalled = true;
+
+  const sendToken = (value: string) => {
+    if (!value) return;
+    void fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platform: 'native', token: value }),
+    }).catch(() => { /* best-effort; re-registers next launch */ });
+  };
+
+  try {
+    // Register the token (idempotent server-side) and route notification taps.
+    await PushNotifications.addListener('registration', (t: { value: string }) => sendToken(t.value));
+    await PushNotifications.addListener('registrationError', (e: unknown) => {
+      try { console.warn('[push] native registration error:', e); } catch { /* noop */ }
+    });
+    await PushNotifications.addListener('pushNotificationActionPerformed', (action: any) => {
+      const url = action?.notification?.data?.url;
+      if (typeof url === 'string' && url) window.location.href = url;
+    });
+
+    // Ask for permission (Android 13+ / iOS prompt), then register if granted.
+    let perm = await PushNotifications.checkPermissions();
+    if (perm.receive === 'prompt') perm = await PushNotifications.requestPermissions();
+    if (perm.receive === 'granted') await PushNotifications.register();
+  } catch (e) {
+    try { console.warn('[push] native bridge setup failed:', e); } catch { /* noop */ }
+  }
+}
