@@ -19,6 +19,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { uploadPhoto } from '@/lib/photoUpload';
+import { NumberField } from '@/components/NumberPad';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { extractAudioWav16k } from '@/lib/audioExtract';
 import {
@@ -307,8 +308,8 @@ export function RoomScanModal(props: Props) {
     : c === 'low' ? 'text-amber-700 bg-amber-50' : 'text-sky-700 bg-sky-50';
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center sm:justify-center">
-      <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[92vh] overflow-y-auto shadow-xl">
+    <div data-modal-overlay className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center sm:justify-center transition-[padding] duration-200">
+      <div data-modal-scroll className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[92vh] overflow-y-auto shadow-xl">
         {/* Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between z-10">
           <div className="flex items-center gap-2 min-w-0">
@@ -383,11 +384,11 @@ export function RoomScanModal(props: Props) {
                           {s.needsMeasurement && !state && (
                             <div className="mt-2">
                               <div className="flex items-center gap-2">
-                                <input
-                                  type="text" inputMode="decimal"
+                                <NumberField
                                   value={qtyById[s.id] || ''}
-                                  onChange={(e) => setQtyById((m) => ({ ...m, [s.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
+                                  onChange={(v) => setQtyById((m) => ({ ...m, [s.id]: v }))}
                                   placeholder={`Enter ${s.measurementUnit}`}
+                                  ariaLabel={`Quantity in ${s.measurementUnit}`}
                                   className="h-9 w-32 bg-gray-100 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-violet-300"
                                 />
                                 <span className="text-xs text-gray-500">{s.measurementUnit}</span>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AiAdjustment } from '@/lib/aiReview';
 import { formatQty } from '@/lib/photoUpload';
+import { NumberField } from '@/components/NumberPad';
 
 type Decision = 'approve' | 'decline';
 
@@ -136,7 +137,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
   };
 
   return (
-    <div className={`fixed inset-0 z-[80] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 ${cameraOpen ? 'hidden' : ''}`}>
+    <div data-modal-overlay className={`fixed inset-0 z-[80] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 transition-[padding] duration-200 ${cameraOpen ? 'hidden' : ''}`}>
       <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-2xl max-h-[92vh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-gray-200 flex items-start justify-between gap-3">
@@ -343,20 +344,21 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                         <div className="flex items-end gap-2 flex-wrap">
                                           <label className="text-[11px] text-gray-500">
                                             Tenant %
-                                            <input
-                                              type="number" min={0} max={100} step={5} inputMode="numeric"
+                                            <NumberField
+                                              allowDecimal={false}
                                               value={tenantStr}
-                                              onChange={(e) => setEdit(a.id, { tenantPct: e.target.value })}
+                                              onChange={(v) => setEdit(a.id, { tenantPct: v })}
+                                              ariaLabel="Tenant percent"
                                               className="block w-16 mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded tabular-nums"
                                             />
                                           </label>
                                           <label className="text-[11px] text-gray-500">
                                             Qty{unit ? ` (${unit})` : ''}
-                                            <input
-                                              type="number" min={0} step="any" inputMode="decimal"
+                                            <NumberField
                                               value={qtyStr}
                                               placeholder={/^(SF|LF|SY)$/i.test(unit || '') ? 'enter' : ''}
-                                              onChange={(e) => setEdit(a.id, { quantity: e.target.value })}
+                                              onChange={(v) => setEdit(a.id, { quantity: v })}
+                                              ariaLabel="Quantity"
                                               className="block w-20 mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded tabular-nums"
                                             />
                                           </label>

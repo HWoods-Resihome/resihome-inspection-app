@@ -7,6 +7,7 @@ import type {
   Property, TemplateType, HubSpotUser,
 } from '@/lib/types';
 import { Combobox } from '@/components/Combobox';
+import { NumberField } from '@/components/NumberPad';
 import { loadCachedProperties, saveCachedProperties } from '@/lib/offlineCache';
 import { EXTERNAL_TEMPLATE } from '@/lib/userAccess';
 
@@ -491,28 +492,24 @@ export default function NewInspection() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-heading font-semibold text-ink mb-1.5">Bedrooms</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={20}
-                    value={bedrooms ?? ''}
-                    onChange={(e) => setBedrooms(e.target.value === '' ? null : Number(e.target.value))}
+                  <NumberField
+                    allowDecimal={false}
+                    value={bedrooms != null ? String(bedrooms) : ''}
+                    onChange={(v) => setBedrooms(v === '' ? null : Number(v))}
                     placeholder={selectedPropertyId ? '0' : 'Select property first'}
                     disabled={!selectedPropertyId}
+                    ariaLabel="Bedrooms"
                     className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base disabled:bg-gray-100 disabled:text-gray-400"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-heading font-semibold text-ink mb-1.5">Bathrooms</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={20}
-                    step={0.5}
-                    value={bathrooms ?? ''}
-                    onChange={(e) => setBathrooms(e.target.value === '' ? null : Number(e.target.value))}
+                  <NumberField
+                    value={bathrooms != null ? String(bathrooms) : ''}
+                    onChange={(v) => setBathrooms(v === '' ? null : Number(v))}
                     placeholder={selectedPropertyId ? '0' : 'Select property first'}
                     disabled={!selectedPropertyId}
+                    ariaLabel="Bathrooms"
                     className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base disabled:bg-gray-100 disabled:text-gray-400"
                   />
                 </div>

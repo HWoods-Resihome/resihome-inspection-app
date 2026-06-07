@@ -28,6 +28,7 @@ type NumberFieldProps = {
   placeholder?: string;
   className?: string;
   ariaLabel?: string;
+  disabled?: boolean;
   /** Run when the field gains focus (e.g. clear-on-focus). */
   onFocusField?: () => void;
   /** Run when editing ends (Done / blur) — mirrors the old onBlur. */
@@ -55,27 +56,54 @@ export function NumberField({
   placeholder,
   className,
   ariaLabel,
+  disabled,
   onFocusField,
   onDone,
 }: NumberFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const padRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // Push the field above the keypad when it opens; restore on close.
+  // Make room for the keypad when it opens, then restore on close.
+  //  - Inside a modal (marked [data-modal-overlay] + [data-modal-scroll]): LIFT
+  //    the whole modal above the keypad so its Save/Cancel footer stays visible
+  //    and tappable (otherwise the keypad covers Cancel and a tap there hits the
+  //    keypad instead — making Cancel behave like keeping the edit), and shrink
+  //    the scroll area so the edited field clears the keypad.
+  //  - On a plain page: pad the body so the field can scroll above the keypad.
   useEffect(() => {
     if (!open) return;
     const inp = inputRef.current;
-    const scroller = inp?.closest('[data-modal-scroll]') as HTMLElement | null;
-    const prev = scroller?.style.paddingBottom || '';
-    if (scroller) scroller.style.paddingBottom = '340px';
+    if (!inp) return;
+    const h = (padRef.current?.offsetHeight ?? 300) + 12; // keypad height + gap
+    const overlay = inp.closest('[data-modal-overlay]') as HTMLElement | null;
+    const scroller = inp.closest('[data-modal-scroll]') as HTMLElement | null;
+
+    const restore: Array<() => void> = [];
+    if (overlay) {
+      const prev = overlay.style.paddingBottom;
+      overlay.style.paddingBottom = `${h}px`;
+      restore.push(() => { overlay.style.paddingBottom = prev; });
+    }
+    if (scroller) {
+      const prev = scroller.style.maxHeight;
+      scroller.style.maxHeight = `calc(100dvh - ${h + 16}px)`;
+      restore.push(() => { scroller.style.maxHeight = prev; });
+    }
+    if (!overlay && !scroller) {
+      const prev = document.body.style.paddingBottom;
+      document.body.style.paddingBottom = `${h}px`;
+      restore.push(() => { document.body.style.paddingBottom = prev; });
+    }
+
     const raf = requestAnimationFrame(() =>
-      inp?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
+      inp.scrollIntoView({ block: 'center', behavior: 'smooth' }),
     );
     return () => {
       cancelAnimationFrame(raf);
-      if (scroller) scroller.style.paddingBottom = prev;
+      restore.forEach((fn) => fn());
     };
   }, [open]);
 
@@ -128,9 +156,11 @@ export function NumberField({
         value={value}
         placeholder={placeholder}
         aria-label={ariaLabel}
+        disabled={disabled}
         className={className}
         onChange={(e) => commit(e.target.value)}
         onFocus={() => {
+          if (disabled) return;
           onFocusField?.();
           if (isTouch()) setOpen(true);
         }}
@@ -148,10 +178,13 @@ export function NumberField({
       {mounted && open &&
         createPortal(
           <div
+            ref={padRef}
             data-numberpad
-            className="fixed inset-x-0 bottom-0 z-[70] bg-white border-t border-gray-200 rounded-t-2xl shadow-[0_-8px_24px_rgba(0,0,0,0.12)] px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
-            // Tapping the sheet background must not blur the field either.
+            className="fixed inset-x-0 bottom-0 z-[200] bg-white border-t border-gray-200 rounded-t-2xl shadow-[0_-8px_24px_rgba(0,0,0,0.12)] px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+            // Tapping the sheet background must not blur the field, nor bubble
+            // out to any modal/row click handler.
             onPointerDown={(e) => e.preventDefault()}
+            onClick={(e) => e.stopPropagation()}
             role="group"
             aria-label="Number pad"
           >

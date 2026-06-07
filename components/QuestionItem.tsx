@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Question, AnswerInput } from '@/lib/types';
 import { CameraCapture } from './CameraCapture';
 import { ListPicker } from '@/components/ListPicker';
+import { NumberField } from '@/components/NumberPad';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { useAppDialog } from '@/components/AppDialog';
 import { displayImageSrc } from '@/lib/photoDisplay';
@@ -504,10 +505,10 @@ function renderInput(
 
   if (q.responseType === 'number') {
     return (
-      <input
-        type="number"
+      <NumberField
         value={a.answerValue}
-        onChange={(e) => onUpdate({ answerValue: e.target.value })}
+        onChange={(v) => onUpdate({ answerValue: v })}
+        ariaLabel="Number answer"
         className="focus-brand w-32 text-sm border border-gray-300 rounded-md px-2 py-1.5"
       />
     );

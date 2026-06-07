@@ -807,7 +807,7 @@ export function EditableLineRow(props: Props) {
     return (
       <tr>
         <td colSpan={12} className="p-0">
-          <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center sm:justify-center">
+          <div data-modal-overlay className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center sm:justify-center transition-[padding] duration-200">
             <div data-modal-scroll className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl max-h-[92vh] overflow-y-auto shadow-xl">
               {/* Sticky header with title + close */}
               <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between z-10">
@@ -995,12 +995,12 @@ export function EditableLineRow(props: Props) {
                 {searchFocused && <div style={{ height: '200vh' }} aria-hidden />}
               </div>
 
-              {/* Sticky footer action */}
-              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 flex items-center gap-3">
+              {/* Sticky footer action — slim so it doesn't eat the sheet. */}
+              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-2 flex items-center gap-3">
                 <button
                   type="button"
                   onClick={cancelEdit}
-                  className="flex-1 h-11 rounded-lg border border-gray-300 text-gray-700 font-heading font-semibold"
+                  className="flex-1 h-9 rounded-lg border border-gray-300 text-gray-700 font-heading font-semibold text-sm"
                 >
                   Cancel
                 </button>
@@ -1008,7 +1008,7 @@ export function EditableLineRow(props: Props) {
                   type="button"
                   onClick={() => trySave()}
                   disabled={!isComplete}
-                  className={`flex-1 h-11 rounded-lg font-heading font-bold text-white flex items-center justify-center gap-2 ${
+                  className={`flex-1 h-9 rounded-lg font-heading font-bold text-white text-sm flex items-center justify-center gap-2 ${
                     isComplete ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'
                   }`}
                 >
