@@ -72,11 +72,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       leasing_agent_1099_property_inspection: '1099 Leasing Agent Inspection',
     };
     const today = nowIso().slice(0, 10);
+    // Resolve a clean label for an admin-created custom template (id like
+    // custom_x_ab12) so the inspection name reads nicely.
+    let customLabel = '';
+    if (!isRateCard && !isQc && !TEMPLATE_NAME_PREFIX[body.templateType]) {
+      try {
+        const { getCustomTemplates } = await import('@/lib/formTemplates');
+        customLabel = (await getCustomTemplates()).find((t) => t.id === body.templateType)?.label || '';
+      } catch { /* fall back to prettified id */ }
+    }
     const inspectionName = isRateCard
       ? `Rate Card – ${body.propertyAddressSnapshot} – ${today}`
       : isQc
         ? `Turn Re-Inspect QC – ${body.propertyAddressSnapshot} – ${today}`
-        : `${TEMPLATE_NAME_PREFIX[body.templateType] || properCase(body.templateType)} – ${body.propertyAddressSnapshot} – ${today}`;
+        : `${TEMPLATE_NAME_PREFIX[body.templateType] || customLabel || properCase(body.templateType)} – ${body.propertyAddressSnapshot} – ${today}`;
 
     // HubSpot's scheduled_date is a Date field (not DateTime), so the value MUST be
     // exactly midnight UTC. We send the YYYY-MM-DD string form, which HubSpot interprets

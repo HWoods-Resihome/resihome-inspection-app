@@ -9,7 +9,9 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import type { Question, ResponseType } from '@/lib/types';
-import { EDITABLE_TEMPLATES, RESPONSE_TYPES } from '@/lib/formBuilder';
+import { RESPONSE_TYPES } from '@/lib/formBuilder';
+
+interface TemplateInfo { id: string; label: string; custom: boolean; }
 
 type Draft = {
   questionText: string;
@@ -87,7 +89,8 @@ export default function FormBuilderPage() {
   const router = useRouter();
   const [authChecked, setAuthChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [template, setTemplate] = useState<string>(EDITABLE_TEMPLATES[0].id);
+  const [templates, setTemplates] = useState<TemplateInfo[]>([]);
+  const [template, setTemplate] = useState<string>('');
   const [questions, setQuestions] = useState<Question[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -102,8 +105,51 @@ export default function FormBuilderPage() {
     }).catch(() => setAuthChecked(true));
   }, [router]);
 
+  async function loadTemplates(selectId?: string) {
+    try {
+      const r = await fetch('/api/admin/templates', { cache: 'no-store' });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || 'Failed to load templates'); return; }
+      const list: TemplateInfo[] = d.templates || [];
+      setTemplates(list);
+      setTemplate((cur) => selectId || cur || (list[0]?.id ?? ''));
+    } catch (e: any) { setError(String(e?.message || e)); }
+  }
+  useEffect(() => { if (isAdmin) loadTemplates(); /* eslint-disable-next-line */ }, [isAdmin]);
+
+  async function newTemplate() {
+    const label = window.prompt('New template name (e.g. “Move-Out Walkthrough”):')?.trim();
+    if (!label) return;
+    setBusy(true);
+    try {
+      const r = await fetch('/api/admin/templates', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || 'Create failed'); return; }
+      setError(null);
+      await loadTemplates(d.template?.id);
+    } finally { setBusy(false); }
+  }
+
+  async function removeTemplate() {
+    const t = templates.find((x) => x.id === template);
+    if (!t || !t.custom) return;
+    if (!confirm(`Remove the “${t.label}” template? Its questions stay in HubSpot (archive them first if you want them gone).`)) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/admin/templates/${encodeURIComponent(template)}`, { method: 'DELETE' });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || 'Remove failed'); return; }
+      setError(null);
+      setTemplate('');
+      await loadTemplates();
+    } finally { setBusy(false); }
+  }
+
   async function load() {
     setQuestions(null);
+    if (!template) return;
     try {
       const r = await fetch(`/api/admin/questions?template=${encodeURIComponent(template)}`, { cache: 'no-store' });
       const d = await r.json();
@@ -192,12 +238,20 @@ export default function FormBuilderPage() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-5">
-        <label className="block text-xs font-heading font-semibold text-gray-500 mb-1">Template</label>
+        <div className="flex items-end justify-between gap-2 mb-1">
+          <label className="block text-xs font-heading font-semibold text-gray-500">Template</label>
+          <div className="flex items-center gap-2">
+            {templates.find((t) => t.id === template)?.custom && (
+              <button type="button" onClick={removeTemplate} disabled={busy} className="text-xs font-heading font-semibold text-red-700 hover:underline">Remove template</button>
+            )}
+            <button type="button" onClick={newTemplate} disabled={busy} className="text-xs font-heading font-semibold text-brand hover:underline">+ New template</button>
+          </div>
+        </div>
         <select value={template} onChange={(e) => { setEditingId(null); setAdding(false); setTemplate(e.target.value); }}
           className="focus-brand w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white mb-3">
-          {EDITABLE_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+          {templates.map((t) => <option key={t.id} value={t.id}>{t.label}{t.custom ? ' (custom)' : ''}</option>)}
         </select>
-        <p className="text-[12px] text-gray-500 mb-4">Scope Rate Card and Turn Re-Inspect QC are locked and not editable here. Changes sync to HubSpot and apply to new inspections immediately.</p>
+        <p className="text-[12px] text-gray-500 mb-4">Scope Rate Card and Turn Re-Inspect QC are locked and not editable here. New templates and question changes sync to HubSpot and apply to new inspections immediately.</p>
 
         {error && <div className="mb-4 p-3 bg-rose-50 border border-rose-300 rounded text-sm text-rose-800">{error}</div>}
 

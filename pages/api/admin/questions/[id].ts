@@ -13,10 +13,8 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { getQuestionAppliesToTemplates, updateQuestionRecord, archiveQuestionRecords } from '@/lib/hubspot';
-import {
-  touchesProtectedTemplate, isProtectedTemplate, isEditableTemplate,
-  RESPONSE_TYPE_VALUES, questionInputToProps, type QuestionInput,
-} from '@/lib/formBuilder';
+import { touchesProtectedTemplate, isProtectedTemplate, RESPONSE_TYPE_VALUES, questionInputToProps, type QuestionInput } from '@/lib/formBuilder';
+import { isEditableTemplateAsync } from '@/lib/formTemplates';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -40,9 +38,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(400).json({ error: 'Invalid answer type.' });
       }
       if (input.appliesToTemplates) {
-        if (input.appliesToTemplates.some(isProtectedTemplate)) return res.status(403).json({ error: 'Scope and QC templates are locked.' });
-        if (!input.appliesToTemplates.every(isEditableTemplate)) return res.status(400).json({ error: 'One or more templates are not editable.' });
         if (!input.appliesToTemplates.length) return res.status(400).json({ error: 'A question must belong to at least one template.' });
+        if (input.appliesToTemplates.some(isProtectedTemplate)) return res.status(403).json({ error: 'Scope and QC templates are locked.' });
+        const editable = await Promise.all(input.appliesToTemplates.map((t) => isEditableTemplateAsync(t)));
+        if (!editable.every(Boolean)) return res.status(400).json({ error: 'One or more templates are not editable.' });
       }
       const props = questionInputToProps(input);
       if (Object.keys(props).length === 0) return res.status(400).json({ error: 'Nothing to update.' });

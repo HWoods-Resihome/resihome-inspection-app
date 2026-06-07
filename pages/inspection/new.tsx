@@ -59,7 +59,10 @@ export default function NewInspection() {
   // External (1099) users may only create the 1099 template.
   const [isExternal, setIsExternal] = useState(false);
 
-  const [selectedTemplate, setSelectedTemplate] = useState<TemplateType | ''>('');
+  // String (not TemplateType) so admin-created custom templates are selectable.
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
+  // Admin-created custom templates (from /api/templates), appended to the picker.
+  const [customTemplates, setCustomTemplates] = useState<{ id: string; label: string }[]>([]);
   const [selectedPropertyId, setSelectedPropertyId] = useState('');
   const [bedrooms, setBedrooms] = useState<number | null>(null);
   const [bathrooms, setBathrooms] = useState<number | null>(null);
@@ -153,6 +156,14 @@ export default function NewInspection() {
       .finally(() => setSessionLoading(false));
   }, []);
 
+  // Load admin-created custom templates so they appear in the picker.
+  useEffect(() => {
+    fetch('/api/templates')
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d?.templates)) setCustomTemplates(d.templates); })
+      .catch(() => {});
+  }, []);
+
   // Pin the chosen property the moment it appears in a result page, so it
   // survives later searches that no longer include it (server returns only the
   // current match page). This keeps the selected label, bed/bath, and address
@@ -241,13 +252,15 @@ export default function NewInspection() {
       .finally(() => { if (!cancelled) setSourceLoading(false); });
     return () => { cancelled = true; };
   }, [isQcTemplate, selectedPropertyId]);
-  const templateOptions = useMemo(
-    () => TEMPLATE_OPTIONS
+  const templateOptions = useMemo(() => {
+    const builtIn = TEMPLATE_OPTIONS
       // External (1099) users only see the 1099 template.
       .filter((t) => !isExternal || t.value === EXTERNAL_TEMPLATE)
-      .map((t) => ({ value: t.value, label: t.label, sublabel: t.sublabel, group: t.group })),
-    [isExternal]
-  );
+      .map((t) => ({ value: t.value as string, label: t.label, sublabel: t.sublabel, group: t.group }));
+    if (isExternal) return builtIn; // 1099 users never get custom templates
+    const custom = customTemplates.map((t) => ({ value: t.id, label: t.label, sublabel: 'Custom inspection form', group: 'Custom' }));
+    return [...builtIn, ...custom];
+  }, [isExternal, customTemplates]);
 
   const setupReady = !!selectedTemplate
     && !!selectedPropertyId
@@ -414,7 +427,7 @@ export default function NewInspection() {
                   id="template-cb"
                   options={templateOptions}
                   value={selectedTemplate}
-                  onChange={(v) => setSelectedTemplate(v as TemplateType)}
+                  onChange={(v) => setSelectedTemplate(v)}
                   placeholder="Select template"
                   emptyLabel="No template matches"
                   filled

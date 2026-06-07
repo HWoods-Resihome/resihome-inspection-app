@@ -2304,6 +2304,68 @@ export async function writeAppAdmins(admins: AppAdminRecord[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Custom inspection templates — admin-created question-driven templates, stored
+// as JSON on the same admin Agent record. They appear in the form builder and
+// the New-Inspection picker. (Built-in templates stay in code; Scope/QC are
+// never custom.) See lib/formTemplates + the form builder.
+// ---------------------------------------------------------------------------
+const APP_TEMPLATES_PROP = 'app_templates_json';
+
+export interface AppTemplateRecord {
+  id: string;            // e.g. 'custom_move_out_walkthrough'
+  label: string;
+  createdByEmail?: string;
+  createdAt: number;
+}
+
+export async function readAppTemplates(): Promise<AppTemplateRecord[]> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) return [];
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}?properties=${APP_TEMPLATES_PROP}`);
+    const raw = resp?.properties?.[APP_TEMPLATES_PROP];
+    if (!raw) return [];
+    const parsed = JSON.parse(String(raw));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((t) => t && typeof t.id === 'string' && typeof t.label === 'string')
+      .map((t) => ({ id: String(t.id), label: String(t.label), createdByEmail: t.createdByEmail, createdAt: Number(t.createdAt) || Date.now() }));
+  } catch (e) {
+    console.warn('[app-templates] read failed:', e);
+    return [];
+  }
+}
+
+async function ensureAppTemplatesProperty(): Promise<void> {
+  try { await hubspotFetch(`/crm/v3/properties/${agentTypeId()}/${APP_TEMPLATES_PROP}`); return; } catch { /* create */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${agentTypeId()}`, {
+      method: 'POST',
+      body: JSON.stringify({ name: APP_TEMPLATES_PROP, label: 'App Templates (JSON)', type: 'string', fieldType: 'textarea', groupName: 'ai_knowledge', description: 'Admin-created inspection templates (managed by the app).' }),
+    });
+  } catch (e) {
+    console.warn('[app-templates] could not auto-create property (run scripts/forms/add_template_props.py):', String((e as any)?.message || e).slice(0, 160));
+  }
+}
+
+export async function writeAppTemplates(templates: AppTemplateRecord[]): Promise<void> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) throw new Error('Admin Agent record not found — set AI_KNOWLEDGE_AGENT_RECORD_ID.');
+  const doWrite = () => hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}`, {
+    method: 'PATCH', body: JSON.stringify({ properties: { [APP_TEMPLATES_PROP]: JSON.stringify(templates) } }),
+  });
+  try {
+    await doWrite();
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    if (msg.includes('PROPERTY_DOESNT_EXIST') || (msg.includes('Property') && msg.includes('does not exist'))) {
+      await ensureAppTemplatesProperty();
+      await doWrite();
+    } else { throw e; }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SFTP watch queue — a small singleton JSON array (on the same admin Agent
 // record as the AI knowledge base) of in-flight Tenant Chargeback uploads the
 // background cron is watching for a processed/errored result. Low volume: only

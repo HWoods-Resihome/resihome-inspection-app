@@ -12,10 +12,8 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { fetchQuestionsForTemplate, createQuestionRecord } from '@/lib/hubspot';
-import {
-  isEditableTemplate, isProtectedTemplate, RESPONSE_TYPE_VALUES,
-  questionInputToProps, type QuestionInput,
-} from '@/lib/formBuilder';
+import { isProtectedTemplate, RESPONSE_TYPE_VALUES, questionInputToProps, type QuestionInput } from '@/lib/formBuilder';
+import { isEditableTemplateAsync } from '@/lib/formTemplates';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -25,7 +23,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     if (req.method === 'GET') {
       const template = String(req.query.template || '').trim();
-      if (!isEditableTemplate(template)) return res.status(400).json({ error: 'Unknown or locked template.' });
+      if (!(await isEditableTemplateAsync(template))) return res.status(400).json({ error: 'Unknown or locked template.' });
       const { questions } = await fetchQuestionsForTemplate(template, { includeDisabled: true });
       return res.status(200).json({ template, questions });
     }
@@ -36,7 +34,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!input.questionText || !String(input.questionText).trim()) return res.status(400).json({ error: 'Question text is required.' });
       if (!applies.length) return res.status(400).json({ error: 'Choose at least one template.' });
       if (applies.some(isProtectedTemplate)) return res.status(403).json({ error: 'Scope and QC templates are locked.' });
-      if (!applies.every(isEditableTemplate)) return res.status(400).json({ error: 'One or more templates are not editable.' });
+      const editable = await Promise.all(applies.map((t) => isEditableTemplateAsync(t)));
+      if (!editable.every(Boolean)) return res.status(400).json({ error: 'One or more templates are not editable.' });
       if (input.responseType && !RESPONSE_TYPE_VALUES.includes(input.responseType)) return res.status(400).json({ error: 'Invalid answer type.' });
 
       const externalId = `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
