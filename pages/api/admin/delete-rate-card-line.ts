@@ -26,7 +26,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!/@resihome\.com$/i.test(session.email)) return res.status(403).json({ error: 'Admin only.' });
 
   const apply = req.query.apply === '1';
-  const exactCode = typeof req.query.code === 'string' ? req.query.code.trim() : '';
+  // Accept a single ?code= or a comma-separated ?codes= list (multi-delete).
+  const rawCodes = [req.query.code, req.query.codes]
+    .flatMap((v) => (typeof v === 'string' ? v.split(',') : []))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const codeSet = new Set(rawCodes);
 
   const view = (it: any) => ({
     recordId: it.recordId,
@@ -46,7 +51,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Free-text finder: ?q=touch  (or gallon, paint, mist…) lists matches so you
     // can grab the exact line_item_code, then delete with ?code=<code>&apply=1.
     const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
-    if (q && !exactCode) {
+    if (q && codeSet.size === 0) {
       const matches = catalog.filter((it) => hay(it).includes(q) || it.lineItemCode.toLowerCase().includes(q));
       return res.status(200).json({
         ok: true,
@@ -58,9 +63,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
-    // Target: an exact code, else best-effort "whole house touch up 2-3 gallons".
-    const targets = exactCode
-      ? catalog.filter((it) => it.lineItemCode === exactCode)
+    // Target: explicit code(s), else best-effort "whole house touch up 2-3 gallons".
+    const targets = codeSet.size > 0
+      ? catalog.filter((it) => codeSet.has(it.lineItemCode))
       : catalog.filter((it) => {
           const h = hay(it);
           return /touch.?up/.test(h) && /gallon/.test(h) && /2\s*(?:-|–|—|to)\s*3/.test(h);
