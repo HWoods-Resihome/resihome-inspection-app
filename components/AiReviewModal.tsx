@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AiAdjustment } from '@/lib/aiReview';
 import { formatQty } from '@/lib/photoUpload';
 import { NumberField } from '@/components/NumberPad';
+import { sendAiFeedback, type AiFeedbackEvent } from '@/lib/aiFeedbackClient';
 
 type Decision = 'approve' | 'decline';
 
@@ -31,6 +32,8 @@ interface Props {
   // Persisted approve/decline decisions (restored across reload) + change report.
   initialDecisions?: Record<string, Decision>;
   onDecisionsChange?: (d: Record<string, Decision>) => void;
+  // The inspection these suggestions belong to (tags captured feedback).
+  inspectionId?: string;
   // All rooms, so a wrong-room suggestion can offer a target-room dropdown.
   rooms?: { id: string; name: string }[];
   // Hide (but keep mounted) while the in-app camera is open over it, so the
@@ -59,7 +62,7 @@ const SEV: Record<string, string> = {
   low: 'bg-gray-400',
 };
 
-export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars, onAddPhoto, onAddLineItems, onIgnore, initialDecisions, onDecisionsChange, rooms, cameraOpen }: Props) {
+export function AiReviewModal({ open, loading, streaming, applying, error, summary, adjustments, onClose, onRetry, onApply, previewTenantDollars, onAddPhoto, onAddLineItems, onIgnore, initialDecisions, onDecisionsChange, inspectionId, rooms, cameraOpen }: Props) {
   const [decisions, setDecisions] = useState<Record<string, Decision>>(() => initialDecisions || {});
   // Report decision changes up so they can be persisted across reload.
   useEffect(() => { onDecisionsChange?.(decisions); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [decisions]);
@@ -134,6 +137,48 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
       next[a.id] = d;
     }
     setDecisions(next);
+  };
+
+  // Capture the human's verdict on each suggestion for the AI flywheel. Runs at
+  // the authoritative moment (Apply): we record what the AI proposed alongside
+  // the inspector's final decision and any qty/tenant% correction. Best-effort.
+  const captureFeedback = () => {
+    try {
+      const events: AiFeedbackEvent[] = [];
+      for (const a of adjustments) {
+        const d = decisions[a.id];
+        if (!d) continue;
+        const e = edits[a.id];
+        let correction: AiFeedbackEvent['correction'] | undefined;
+        const tp = e?.tenantPct, q = e?.quantity;
+        if (tp != null && tp !== '' && isFinite(Number(tp))) {
+          correction = { ...(correction || {}), fromTenantPct: a.current?.tenantBillBackPercent, toTenantPct: Number(tp) };
+        }
+        if (q != null && q !== '' && isFinite(Number(q))) {
+          correction = { ...(correction || {}), fromQuantity: a.current?.quantity, toQuantity: Number(q) };
+        }
+        if (e?.moveToSectionId) correction = { ...(correction || {}), movedToSectionId: e.moveToSectionId };
+        // Resolve a precise decision label for wrong-room (move vs remove).
+        const decision: AiFeedbackEvent['decision'] = a.wrongRoom
+          ? (d === 'approve' ? (e?.removeInstead ? 'remove' : 'move') : 'decline')
+          : (d === 'approve' && correction && (correction.toQuantity != null || correction.toTenantPct != null) ? 'edit' : d);
+        events.push({
+          source: 'ai_review',
+          decision,
+          inspectionId,
+          sectionId: a.sectionId,
+          suggestion: {
+            id: a.id,
+            type: a.missingCategory ? `missingCategory:${a.missingCategory}` : a.needsPhoto ? 'needsPhoto' : a.wrongRoom ? 'wrongRoom' : a.type,
+            catalogCode: a.suggested?.lineItemCode || a.current?.lineItemCode,
+            title: a.title,
+            confidence: a.severity,
+          },
+          correction,
+        });
+      }
+      if (events.length) sendAiFeedback(events);
+    } catch { /* never block apply */ }
   };
 
   return (
@@ -414,7 +459,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
             </div>
             <button
               type="button"
-              onClick={() => onApply(approved)}
+              onClick={() => { captureFeedback(); onApply(approved); }}
               disabled={applying || streaming || (adjustments.length > 0 && !allDecided)}
               className="px-4 py-2 text-sm rounded-lg bg-brand text-white font-heading font-semibold hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
             >

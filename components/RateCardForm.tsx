@@ -3876,6 +3876,7 @@ export function RateCardForm(props: RateCardFormProps) {
         onIgnore={(a) => { if (a.lineExternalId) addIgnoredPhotoLine(props.inspectionRecordId, a.lineExternalId); }}
         initialDecisions={aiDecisions}
         onDecisionsChange={setAiDecisions}
+        inspectionId={props.inspectionRecordId}
         rooms={sections.map((s) => ({ id: s.id, name: s.displayName || s.label }))}
         cameraOpen={!!aiCameraTarget || aiAddItemsOpen}
       />
