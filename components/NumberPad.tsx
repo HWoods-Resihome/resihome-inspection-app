@@ -19,6 +19,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useBackToClose } from '@/lib/useBackToClose';
 
 type NumberFieldProps = {
   value: string;
@@ -65,6 +66,10 @@ export function NumberField({
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // Android back / back-swipe (and browser Back) closes the keypad instead of
+  // leaving the page. Blur runs the same close path as Done (onBlur → onDone).
+  useBackToClose(open, () => { inputRef.current?.blur(); });
 
   // Make room for the keypad when it opens, then restore on close.
   //  - Inside a modal (marked [data-modal-overlay] + [data-modal-scroll]): LIFT
