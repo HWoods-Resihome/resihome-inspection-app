@@ -385,18 +385,12 @@ export function CameraCapture({
           : { facingMode: { ideal: facing } }),
         width: { ideal: CAPTURE_WIDTH },
         height: { ideal: CAPTURE_HEIGHT },
-        // A steady 30fps keeps per-frame exposure short → less motion blur when
-        // panning/grabbing rapidly.
-        frameRate: { ideal: 30 },
       };
-      // Best-effort continuous autofocus / auto-exposure / auto-white-balance at
-      // acquisition (non-standard keys; silently ignored where unsupported). We
-      // also re-apply post-acquisition once capabilities are known (below).
-      (videoConstraint as any).advanced = [
-        { focusMode: 'continuous' },
-        { exposureMode: 'continuous' },
-        { whiteBalanceMode: 'continuous' },
-      ];
+      // IMPORTANT: do NOT put `advanced` focus/exposure constraints or a
+      // frameRate here. The browser tries to satisfy them and will switch to
+      // whatever lens can — frequently the ULTRA-WIDE — which made the camera
+      // open on the wide lens. The continuous AF/AE/AWB is applied AFTER
+      // acquisition (applyAutoFocus below) where it can't change the lens.
       // In AI mode we capture audio on the SAME stream so the AI layer can use a
       // single, high-quality mic feed (a separate getUserMedia mic is low-gain /
       // flaky on mobile). If the combined request fails, fall back to video-only
