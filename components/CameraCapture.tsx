@@ -134,14 +134,13 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.restore();
 }
 
-// Target capture resolution (4:3). Kept MODERATE on purpose: requesting a very
-// high resolution makes some Android phones switch to whatever lens/mode can
-// deliver it — often the ULTRA-WIDE — changing the default field of view. This
-// matches the long-standing main-lens behavior. For maximum detail on a
-// deliberate shot, HD mode uses the full photo sensor (ImageCapture.takePhoto)
-// of THIS same lens, so we don't need to over-request the preview resolution.
-const CAPTURE_WIDTH = 1920;
-const CAPTURE_HEIGHT = 1440;
+// Target capture resolution (4:3). Requested HIGH so BOTH the live preview and
+// the captured frame are as sharp/zoomable as possible (the browser negotiates
+// down per device). We grab the live frame on capture (instant — no freeze, no
+// ImageCapture.takePhoto), so the higher track resolution directly raises final
+// photo quality.
+const CAPTURE_WIDTH = 3840;
+const CAPTURE_HEIGHT = 2880;
 
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
@@ -310,31 +309,6 @@ export function CameraCapture({
   const lensDeviceIdRef = useRef<string | null>(null);
   useEffect(() => { lensDeviceIdRef.current = lensDeviceId; }, [lensDeviceId]);
   const lensPinnedRef = useRef(false); // auto-pick the main lens once per session
-  // Optional HD capture. The fast shutter grabs the live preview frame (instant,
-  // rapid) but is capped by the video track resolution. HD mode uses the full
-  // photo sensor via ImageCapture.takePhoto() for deliberate detail shots
-  // (zoom-in evidence) — higher resolution, but slower per shot (it briefly
-  // engages the photo pipeline), so it's OFF by default and one-shot-at-a-time.
-  // Offered only where ImageCapture exists (Chrome/Android; not iOS Safari).
-  const hdAvailable = typeof window !== 'undefined' && typeof (window as any).ImageCapture === 'function';
-  const [hdMode, setHdMode] = useState(false);
-  const hdModeRef = useRef(false);
-  useEffect(() => { hdModeRef.current = hdMode; }, [hdMode]);
-  const hdBusyRef = useRef(false);
-  const [capturingHd, setCapturingHd] = useState(false);
-  // Auto-HD: a zoomed-in shot is almost always a detail shot, so flip HD ON when
-  // the inspector pinches past ~1.1× and OFF when they return to 1×. Crucially
-  // this only fires on threshold CROSSINGS — not on every zoom value — so a
-  // MANUAL toggle holds at a steady zoom (e.g. tiny hardware-zoom jitter at 1×
-  // no longer keeps resetting it off, which made the HD button feel dead).
-  const prevZoomRef = useRef(zoom);
-  useEffect(() => {
-    if (!hdAvailable) return;
-    const was = prevZoomRef.current;
-    prevZoomRef.current = zoom;
-    if (was <= 1.08 && zoom > 1.08) setHdMode(true);        // crossed UP → HD on
-    else if (was > 1.08 && zoom <= 1.08) setHdMode(false);  // crossed DOWN → HD off
-  }, [zoom, hdAvailable]);
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -1251,36 +1225,10 @@ export function CameraCapture({
       }
     };
 
-    // HD mode: deliberate full-sensor shot via ImageCapture.takePhoto(). One at a
-    // time (taps ignored while a takePhoto is in flight); falls back to the live
-    // frame if it fails. NOT used for rapid capture — that's the fast path below.
-    if (hdModeRef.current && hdAvailable) {
-      if (hdBusyRef.current) return;
-      const track = streamRef.current?.getVideoTracks?.()[0];
-      const ICtor: any = (window as any).ImageCapture;
-      if (track && ICtor && track.readyState === 'live') {
-        hdBusyRef.current = true;
-        setCapturingHd(true);
-        const ic = new ICtor(track);
-        (ic.takePhoto() as Promise<Blob>)
-          .then(async (shot) => {
-            if (shot && shot.size > 0) {
-              const bmp = await createImageBitmap(shot, { imageOrientation: 'from-image' } as any);
-              buildAndEnqueue(bmp, bmp.width, bmp.height);
-              bmp.close?.();
-            } else {
-              buildAndEnqueue(video, video.videoWidth, video.videoHeight);
-            }
-          })
-          .catch(() => { buildAndEnqueue(video, video.videoWidth, video.videoHeight); })
-          .finally(() => { hdBusyRef.current = false; setCapturingHd(false); });
-        return;
-      }
-    }
-
-    // Fast path — instant live-frame grab (rapid, no freeze).
+    // Instant live-frame grab (rapid, no freeze). Sharpness comes from the
+    // high-resolution preview track requested in getUserMedia.
     buildAndEnqueue(video, video.videoWidth, video.videoHeight);
-  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines, hdAvailable]);
+  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines]);
 
   // ----- Per-photo retake/delete -----
 
@@ -1891,25 +1839,8 @@ export function CameraCapture({
                 </div>
               </>
             )}
-            {/* Top-right control cluster: HD toggle + phone-camera fallback + flip. */}
+            {/* Top-right control cluster: phone-camera fallback + flip. */}
             <div className="absolute top-3 right-3 flex items-center gap-2">
-              {/* HD capture toggle — full-sensor photos for zoom-in detail
-                  (slower per shot). Default off = fast/rapid. Hidden where
-                  ImageCapture is unavailable (e.g. iOS Safari). */}
-              {hdAvailable && (
-                <button
-                  type="button"
-                  onClick={() => setHdMode((v) => !v)}
-                  aria-pressed={hdMode}
-                  className={`relative w-10 h-10 rounded-full flex items-center justify-center text-[11px] font-heading font-bold transition-colors ${hdMode ? 'bg-white text-black' : 'bg-black/50 text-white'}`}
-                  title={hdMode ? 'HD capture ON — full-resolution detail (auto-on when zoomed; slower per shot)' : 'HD capture OFF — fast, rapid capture. Zoom in or tap for full-resolution detail.'}
-                >
-                  HD
-                  {capturingHd && (
-                    <span className="absolute inset-0 rounded-full ring-2 ring-brand animate-ping" aria-hidden />
-                  )}
-                </button>
-              )}
               {/* Phone camera fallback. The OS camera has its own working flash,
                   so we badge this with a lightning bolt — tapping it is how you
                   get a flash-capable shot (the in-app live flash is unreliable). */}
