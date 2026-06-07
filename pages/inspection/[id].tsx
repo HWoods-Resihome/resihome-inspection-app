@@ -8,6 +8,7 @@ import type {
 } from '@/lib/types';
 import type { SavedAnswer } from '@/lib/hubspot';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
+import { ReassignFormBar } from '@/components/ReassignFormBar';
 
 // The three inspection forms are heavy and MUTUALLY EXCLUSIVE — exactly one
 // renders per inspection (by template type). Load each on demand so a Scope
@@ -426,6 +427,8 @@ export default function ExistingInspection() {
           onCancelInspection={readOnly ? undefined : handleCancelInspection}
         />
       ) : (
+        <>
+        <ReassignFormBar inspectionId={inspectionId} templateType={inspection.templateType} />
         <QuestionForm
           questions={questions}
           propertyRecordId={propertyRecordId}
@@ -455,6 +458,7 @@ export default function ExistingInspection() {
           readOnly={readOnly}
           onCancelInspection={readOnly ? undefined : handleCancelInspection}
         />
+        </>
       )}
     </>
   );
