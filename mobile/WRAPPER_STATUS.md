@@ -339,3 +339,22 @@ cd android && ./gradlew bundleRelease
 - `mobile/android/gradle/wrapper/gradle-wrapper.properties`: Gradle `8.2.1 → 8.9` (JDK 21 support).
 - `mobile/WRAPPER_STATUS.md`: this report.
 - *(uncommitted, gitignored)* `mobile/android/local.properties`: SDK path fixed to forward slashes (per-machine; not for commit).
+
+---
+
+## Plugin added: `@capacitor/keyboard` (keyboard accessory bar control)
+
+**Why:** the web app (Rate Card Quantity field) hides the iOS keyboard accessory
+toolbar (the `< >  Done / AutoFill` bar above the keys) while a number is being
+typed, via `window.Capacitor.Plugins.Keyboard.setAccessoryBarVisible({ isVisible })`
+(see `lib/nativeBridge.ts → setNativeKeyboardAccessoryBarVisible`). The call is
+gated + try/caught, so it's a **no-op until this plugin ships in the native build**
+(and on Android, which has no such bar). Pure web/Android behavior is unchanged.
+
+**Next native build must pick it up:**
+```bash
+cd mobile && npm install && npx cap sync android   # (and ios when it exists)
+```
+`@capacitor/keyboard ^6.0.3` is now in `mobile/package.json` dependencies. The
+accessory bar is iOS-only in Capacitor, so this has effect once the iOS shell is
+built; the Android sync just registers the plugin (harmless).
