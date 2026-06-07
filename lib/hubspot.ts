@@ -2834,16 +2834,14 @@ export async function fetchRateCardLineItemByCode(code: string): Promise<RateCar
 }
 
 /**
- * Remove a rate_card_line_item from the LIVE matrix by setting is_active=false.
- * The catalog fetch filters on is_active='true', so this drops it everywhere —
- * but it's reversible (no data lost) by flipping it back. Admin-tool use only.
+ * Archive (delete) a rate_card_line_item record. This is HubSpot's standard
+ * archive — the record leaves the active object list and the live catalog.
+ * Archived records can still be restored from HubSpot's recycling bin for a
+ * window, but treat this as a real delete. Admin-tool use only.
  */
-export async function deactivateRateCardLineItem(recordId: string): Promise<void> {
+export async function archiveRateCardLineItem(recordId: string): Promise<void> {
   const ids = await rateCardTypeIds();
-  await hubspotFetch(`/crm/v3/objects/${ids.lineItem}/${recordId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ properties: { is_active: 'false' } }),
-  });
+  await hubspotFetch(`/crm/v3/objects/${ids.lineItem}/${recordId}`, { method: 'DELETE' });
 }
 
 /**

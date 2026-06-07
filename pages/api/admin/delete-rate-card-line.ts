@@ -2,9 +2,10 @@
  * GET /api/admin/delete-rate-card-line
  *
  * Removes the "Whole House touch up 2-3 gallons" line item from the live rate-
- * card matrix. "Delete" = set is_active=false, so it drops out of the catalog
- * everywhere (the catalog fetch filters is_active='true') but is reversible (no
- * data destroyed — flip it back in HubSpot to restore).
+ * card matrix. "Delete" = ARCHIVE the HubSpot record (DELETE), so it leaves the
+ * active object list and the live catalog. Archived records sit in HubSpot's
+ * recycling bin and can be restored there for a window, but treat it as a real
+ * delete.
  *
  * SAFE: dry-run by default — open the URL signed in as @resihome.com to see
  * EXACTLY which record(s) it would remove (plus the other whole-house touch-up
@@ -15,7 +16,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { fetchRateCardCatalog, deactivateRateCardLineItem } from '@/lib/hubspot';
+import { fetchRateCardCatalog, archiveRateCardLineItem } from '@/lib/hubspot';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 
 export const config = { maxDuration: 60 };
@@ -97,7 +98,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const errors: any[] = [];
     for (const t of targets) {
       try {
-        await deactivateRateCardLineItem(t.recordId);
+        await archiveRateCardLineItem(t.recordId);
         removed.push(view(t));
       } catch (e: any) {
         errors.push({ ...view(t), error: String(e?.message || e).slice(0, 160) });
