@@ -108,7 +108,7 @@ export default function AdminsPage() {
 
       <main className="max-w-3xl mx-auto px-4 py-5">
         <p className="text-[13px] text-gray-600 mb-4 leading-snug">
-          Admins can curate the <Link href="/ai-knowledge" className="text-brand underline">AI Knowledge base</Link>, use the form builder, and manage this list. <strong>Built-in</strong> admins are permanent; others can be removed.
+          Admins can curate the <Link href="/ai-knowledge" className="text-brand underline">AI Knowledge base</Link>, use the <Link href="/admin/forms" className="text-brand underline">form builder</Link>, and manage this list. <strong>Built-in</strong> admins are permanent; others can be removed. First-time setup: <Link href="/admin/setup" className="text-brand underline">run admin setup</Link>.
         </p>
 
         {/* Add */}

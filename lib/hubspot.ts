@@ -2303,6 +2303,38 @@ export async function writeAppAdmins(admins: AppAdminRecord[]): Promise<void> {
   }
 }
 
+/**
+ * One-click provisioning of the HubSpot properties the new admin features need
+ * (so an admin can run it from /admin/setup instead of the Python scripts).
+ * Idempotent: existing properties are reported as 'exists'. Requires the app's
+ * HubSpot token to have schema-write scope; per-property errors are returned
+ * (never thrown) so the UI can show exactly what succeeded.
+ */
+export async function provisionAppProperties(): Promise<Record<string, string>> {
+  const results: Record<string, string> = {};
+  const agent = agentTypeId();
+  const { question } = typeIds();
+
+  const ensureGroup = async (objType: string, name: string, label: string) => {
+    try { await hubspotFetch(`/crm/v3/properties/${objType}/groups`, { method: 'POST', body: JSON.stringify({ name, label }) }); }
+    catch { /* already exists or no perm — property create will report the real error */ }
+  };
+  const ensureProp = async (objType: string, name: string, def: Record<string, any>) => {
+    try { await hubspotFetch(`/crm/v3/properties/${objType}/${name}`); results[name] = 'exists'; return; }
+    catch { /* missing → create */ }
+    try { await hubspotFetch(`/crm/v3/properties/${objType}`, { method: 'POST', body: JSON.stringify(def) }); results[name] = 'created'; }
+    catch (e: any) { results[name] = 'error: ' + String(e?.message || e).slice(0, 140); }
+  };
+
+  await ensureGroup(agent, 'ai_knowledge', 'AI');
+  await ensureProp(agent, 'app_admins_json', { name: 'app_admins_json', label: 'App Admins (JSON)', type: 'string', fieldType: 'textarea', groupName: 'ai_knowledge' });
+  await ensureProp(agent, 'app_templates_json', { name: 'app_templates_json', label: 'App Templates (JSON)', type: 'string', fieldType: 'textarea', groupName: 'ai_knowledge' });
+  await ensureGroup(question, 'inspection_question_info', 'Question Info');
+  await ensureProp(question, 'is_enabled', { name: 'is_enabled', label: 'Enabled', type: 'bool', fieldType: 'booleancheckbox', groupName: 'inspection_question_info' });
+
+  return results;
+}
+
 // ---------------------------------------------------------------------------
 // Custom inspection templates — admin-created question-driven templates, stored
 // as JSON on the same admin Agent record. They appear in the form builder and
