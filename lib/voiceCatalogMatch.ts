@@ -20,6 +20,7 @@ import type { RateCardLineItem } from './types';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { recordAiUsage } from './aiUsage';
+import { isLearningEnabled, getLearnedMatchModel, learnedDelta } from './aiLearning';
 
 const VOYAGE_URL = 'https://api.voyageai.com/v1/embeddings';
 const VOYAGE_MODEL = 'voyage-3-lite';
@@ -251,6 +252,10 @@ export async function matchCatalog(
   // Map common section words to likely catalog categories for a gentle bias.
   const sectionCats = sectionCategoryHints(opts.sectionName || '');
 
+  // Learned ranking nudges from accumulated human feedback (off unless
+  // AI_LEARNING_ENABLED). Affects RANKING only — never the confidence cosine.
+  const learned = isLearningEnabled() ? await getLearnedMatchModel() : null;
+
   const scored: CandidateMatch[] = [];
   for (const item of items) {
     const v = cache.byCode.get(item.lineItemCode);
@@ -260,6 +265,7 @@ export async function matchCatalog(
     const cat = item.category.toLowerCase();
     if (hint && cat.includes(hint)) score += 0.05;
     if (sectionCats.some((c) => cat.includes(c))) score += 0.03;
+    if (learned) score += learnedDelta(item.lineItemCode, learned);
     // Store the RAW cosine for confidence; biases only affect ranking.
     scored.push({ item, score });
   }
