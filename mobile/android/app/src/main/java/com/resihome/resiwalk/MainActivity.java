@@ -2,7 +2,9 @@ package com.resihome.resiwalk;
 
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.view.View;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 
@@ -42,6 +44,18 @@ public class MainActivity extends BridgeActivity {
 
         // super.onCreate() has already run load(), so the bridge + WebView exist.
         WebView webView = this.bridge.getWebView();
+
+        // Suppress the Android autofill bar (the "passwords / addresses / payment
+        // methods" row that floats above the keyboard) for every field in the
+        // webview. On number fields like the Rate Card Quantity it's pure noise,
+        // and ResiWALK signs in via Google OAuth in the SYSTEM browser — there is
+        // no in-webview password field that benefits from autofill — so turning it
+        // off webview-wide is safe. Marks the WebView and all its web inputs as
+        // not-important-for-autofill (API 26+; older devices just keep default).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            webView.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+        }
+
         webView.setWebViewClient(
             new BridgeWebViewClient(this.bridge) {
                 @Override
