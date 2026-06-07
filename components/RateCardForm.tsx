@@ -32,6 +32,7 @@ import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 // rehydrate paths special-case this id to swap drafts in the checklist JSON.
 const FC_PHOTO_SECTION = '__final_checklist__';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
+import { reportSyncOutcome } from '@/lib/syncTelemetry';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
@@ -966,6 +967,14 @@ export function RateCardForm(props: RateCardFormProps) {
     const stillPending = (outboxRes.remaining || 0) > 0 || (photoRes && (photoRes as any).remaining > 0);
     const err = outboxRes.lastError || (photoRes && (photoRes as any).lastError) || null;
     setLastSyncError(stillPending ? (err || null) : null);
+    // Sync telemetry: surface work that isn't draining (or was permanently
+    // dropped after exhausting retries) in the "stuck work" admin view.
+    reportSyncOutcome({
+      inspectionId: props.inspectionRecordId,
+      outbox: { synced: outboxRes.synced, remaining: outboxRes.remaining, failedPermanently: (outboxRes as any).failedPermanently },
+      photos: photoRes ? { synced: (photoRes as any).synced, remaining: (photoRes as any).remaining, failedPermanently: (photoRes as any).failedPermanently } : undefined,
+      lastError: err,
+    });
     } finally {
       setFlushing(false);
     }
