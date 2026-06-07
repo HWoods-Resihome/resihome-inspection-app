@@ -320,6 +320,15 @@ export function CameraCapture({
   useEffect(() => { hdModeRef.current = hdMode; }, [hdMode]);
   const hdBusyRef = useRef(false);
   const [capturingHd, setCapturingHd] = useState(false);
+  // Auto-HD: a zoomed-in shot is almost always a detail shot, so flip HD ON once
+  // the inspector pinches past ~1.1× and back OFF at 1× (where rapid capture
+  // matters). Only when HD is available; the manual toggle still works and holds
+  // until the next zoom change. (`zoom` is the user-facing factor — hardware or
+  // digital; we removed sub-1 "wide", so >1.08 reliably means zoomed in.)
+  useEffect(() => {
+    if (!hdAvailable) return;
+    setHdMode(zoom > 1.08);
+  }, [zoom, hdAvailable]);
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -1869,7 +1878,7 @@ export function CameraCapture({
                   onClick={() => setHdMode((v) => !v)}
                   aria-pressed={hdMode}
                   className={`relative w-10 h-10 rounded-full flex items-center justify-center text-[11px] font-heading font-bold transition-colors ${hdMode ? 'bg-white text-black' : 'bg-black/50 text-white'}`}
-                  title={hdMode ? 'HD capture ON — full-resolution detail (slower per shot)' : 'HD capture OFF — fast, rapid capture. Tap for full-resolution detail shots.'}
+                  title={hdMode ? 'HD capture ON — full-resolution detail (auto-on when zoomed; slower per shot)' : 'HD capture OFF — fast, rapid capture. Zoom in or tap for full-resolution detail.'}
                 >
                   HD
                   {capturingHd && (
