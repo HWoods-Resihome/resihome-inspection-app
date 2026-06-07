@@ -46,6 +46,23 @@ export function setNativeStatusBarColor(color: string): void {
   } catch { /* iOS no-op / plugin unavailable — fine */ }
 }
 
+// Hide/show the NATIVE keyboard accessory toolbar (the iOS "< >  Done / AutoFill"
+// bar that sits just above the keys). Driven through the runtime-registered
+// global plugin (window.Capacitor.Plugins.Keyboard) so we DON'T pull
+// @capacitor/keyboard into the web bundle — the plugin ships in the native
+// binary (mobile/package.json) and the native app loads this live web app via
+// server.url, so the call resolves there. iOS-only in Capacitor; a no-op on
+// Android (no such bar) and in any normal browser (isNativePlatform() === false).
+// Safe to call before the plugin exists in the native build — it just no-ops.
+export function setNativeKeyboardAccessoryBarVisible(visible: boolean): void {
+  if (typeof window === 'undefined') return;
+  const cap = (window as any).Capacitor;
+  if (!cap?.isNativePlatform?.()) return;
+  const kb = cap.Plugins?.Keyboard;
+  if (!kb?.setAccessoryBarVisible) return;
+  try { kb.setAccessoryBarVisible({ isVisible: visible }); } catch { /* plugin unavailable — fine */ }
+}
+
 export async function installOAuthBridge(): Promise<void> {
   // SSR / non-browser guard.
   if (typeof window === 'undefined') return;

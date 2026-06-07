@@ -30,6 +30,7 @@ import { formatMoney, formatQty } from '@/lib/photoUpload';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
 import { VENDORS, vendorPillStyle, isInternalResolution, defaultVendorForCode } from '@/lib/vendors';
+import { setNativeKeyboardAccessoryBarVisible } from '@/lib/nativeBridge';
 import type {
   RateCardLineItem,
   RegionRate,
@@ -452,12 +453,17 @@ export function EditableLineRow(props: Props) {
   // (no need to delete the existing value); if they leave without entering
   // anything, restore the prior value so it still saves.
   const qtyBeforeFocusRef = useRef('');
-  // While the number keyboard is up for Quantity, collapse the Line Item picker
-  // + description (the "top 2 lines") so the field being typed stays in view and
-  // the editor isn't cluttered behind the keyboard.
-  const [qtyEditing, setQtyEditing] = useState(false);
-  const onQtyFocus = () => { qtyBeforeFocusRef.current = quantity; setQuantity(''); setQtyEditing(true); };
-  const onQtyBlur = () => { if (quantity.trim() === '') setQuantity(qtyBeforeFocusRef.current); setQtyEditing(false); };
+  const onQtyFocus = () => {
+    qtyBeforeFocusRef.current = quantity;
+    setQuantity('');
+    // Hide the iOS keyboard accessory toolbar (< > / Done) while typing a number
+    // in the native shell — pure number entry doesn't need it. No-op on web/Android.
+    setNativeKeyboardAccessoryBarVisible(false);
+  };
+  const onQtyBlur = () => {
+    if (quantity.trim() === '') setQuantity(qtyBeforeFocusRef.current);
+    setNativeKeyboardAccessoryBarVisible(true);
+  };
   // Bid-item subcategories carry a bespoke scope the inspector writes from
   // scratch, so focusing the description selects-all (typing REPLACES the whole
   // text). Every other item keeps its catalog default and the inspector just
@@ -840,32 +846,30 @@ export function EditableLineRow(props: Props) {
                   />
                 </div>
 
-                {!qtyEditing && (
-                  <div>
-                    <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Line Item</label>
-                    <Combobox
-                      options={lineItemOptions}
-                      value={lineItemCode}
-                      onChange={handleLineItemChange}
-                      placeholder="Type to search items…"
-                      emptyLabel={category ? 'No items in this category' : 'No matching items'}
-                      scrollIntoViewOnFocus
-                      filled
-                      deferKeyboard
-                      onFocusChange={setSearchFocused}
+                <div>
+                  <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Line Item</label>
+                  <Combobox
+                    options={lineItemOptions}
+                    value={lineItemCode}
+                    onChange={handleLineItemChange}
+                    placeholder="Type to search items…"
+                    emptyLabel={category ? 'No items in this category' : 'No matching items'}
+                    scrollIntoViewOnFocus
+                    filled
+                    deferKeyboard
+                    onFocusChange={setSearchFocused}
+                  />
+                  {selectedItem && (
+                    <textarea
+                      value={customDescription}
+                      onChange={(e) => { descTouchedRef.current = true; setCustomDescription(e.target.value); }}
+                      onFocus={onDescFocus}
+                      rows={2}
+                      className="w-full mt-2 text-sm bg-gray-100 rounded-lg px-3 py-2 text-gray-700 outline-none focus:ring-2 focus:ring-brand/20"
+                      placeholder={catalogDescription(selectedItem) || 'Edit description (optional)…'}
                     />
-                    {selectedItem && (
-                      <textarea
-                        value={customDescription}
-                        onChange={(e) => { descTouchedRef.current = true; setCustomDescription(e.target.value); }}
-                        onFocus={onDescFocus}
-                        rows={2}
-                        className="w-full mt-2 text-sm bg-gray-100 rounded-lg px-3 py-2 text-gray-700 outline-none focus:ring-2 focus:ring-brand/20"
-                        placeholder={catalogDescription(selectedItem) || 'Edit description (optional)…'}
-                      />
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -878,6 +882,9 @@ export function EditableLineRow(props: Props) {
                       // here, so the keyboard's action CLOSES instead of jumping
                       // focus to the next field (the vendor cost).
                       type="text" inputMode="decimal" enterKeyHint="done"
+                      // Kill the keyboard's predictive/autofill suggestion strip
+                      // (the row above the keys) — a quantity has nothing to suggest.
+                      autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                       value={quantity}
                       onChange={(e) => setQuantity(e.target.value.replace(/[^0-9.]/g, ''))}
                       onFocus={onQtyFocus}
@@ -1097,9 +1104,11 @@ export function EditableLineRow(props: Props) {
           step="0.01"
           min="0"
           enterKeyHint="done"
+          autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
           value={quantity}
           onChange={(e) => setQuantity(e.target.value)}
-          onFocus={(e) => e.target.select()}
+          onFocus={(e) => { e.target.select(); setNativeKeyboardAccessoryBarVisible(false); }}
+          onBlur={() => setNativeKeyboardAccessoryBarVisible(true)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
           className="no-spinner h-9 w-14 border border-gray-300 rounded px-1 text-sm text-center bg-white mx-auto"
         />
