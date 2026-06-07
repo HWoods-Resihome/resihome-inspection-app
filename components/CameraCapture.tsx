@@ -1877,7 +1877,8 @@ export function CameraCapture({
                     className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-heading font-semibold bg-amber-500/90 text-black"
                   >
                     <span className="text-sm leading-none">⚠</span>
-                    <span>Can’t verify · {proximity.reason}</span>
+                    {/* Short label so it never overlaps the HD/flip controls. */}
+                    <span className="whitespace-nowrap">{proximity.reason}</span>
                   </button>
                 )}
               </div>
