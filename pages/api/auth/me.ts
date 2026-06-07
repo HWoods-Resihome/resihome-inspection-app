@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isFinalizeAdmin } from '@/lib/finalizeAccess';
 import { isExternalEmail, EXTERNAL_TEMPLATE } from '@/lib/userAccess';
+import { isAppAdmin } from '@/lib/adminAccess';
 import { warnOnBootIfMisconfigured } from '@/lib/configValidation';
 
 // Cheap, env-only, once-per-cold-instance: log a warning if a required env var
@@ -19,6 +20,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   return res.status(200).json({
     authenticated: true,
     user,
+    // App admin: AI Knowledge curation, the form builder, and admin management.
+    isAdmin: await isAppAdmin(user.email),
     // Whether this user may finalize their OWN submitted inspection (bypass the
     // dual-approval lock). Everyone else must hand off to a second reviewer.
     isFinalizeAdmin: isFinalizeAdmin(user.email),

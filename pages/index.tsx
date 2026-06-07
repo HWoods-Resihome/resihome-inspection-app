@@ -7,7 +7,6 @@ import type { InspectionSummary } from '@/lib/types';
 import { InspectionCard } from '@/components/InspectionCard';
 import { ListPicker } from '@/components/ListPicker';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
-import { isKnowledgeAdmin } from '@/lib/aiKnowledgeAccess';
 import { warmAi } from '@/lib/aiWarm';
 
 interface MeUser { userId: string; email: string; name: string; }
@@ -18,6 +17,7 @@ export default function Home() {
   const dialog = useAppDialog();
   const router = useRouter();
   const [me, setMe] = useState<MeUser | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const [inspections, setInspections] = useState<InspectionSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +48,7 @@ export default function Home() {
   useEffect(() => {
     fetch('/api/auth/me')
       .then((r) => r.json())
-      .then((data) => { if (data.authenticated) setMe(data.user); })
+      .then((data) => { if (data.authenticated) { setMe(data.user); setIsAdmin(!!data.isAdmin); } })
       .catch(() => {});
   }, []);
 
@@ -433,16 +433,24 @@ export default function Home() {
               <span className="font-heading font-bold text-base text-brand">New Inspection</span>
             </Link>
 
-            {/* Admin: AI knowledge base (field-trained live-camera guidance).
-                Curation is limited to the AI_KNOWLEDGE_ADMINS allowlist. */}
-            {me && isKnowledgeAdmin(me.email) && (
-              <Link
-                href="/ai-knowledge"
-                className="mt-2 flex items-center gap-2 text-white/90 hover:text-white text-sm font-heading font-semibold"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></svg>
-                AI Knowledge Base
-              </Link>
+            {/* Admin tools — visible to app admins (dynamic list, see /admin/admins). */}
+            {isAdmin && (
+              <>
+                <Link
+                  href="/ai-knowledge"
+                  className="mt-2 flex items-center gap-2 text-white/90 hover:text-white text-sm font-heading font-semibold"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></svg>
+                  AI Knowledge Base
+                </Link>
+                <Link
+                  href="/admin/admins"
+                  className="mt-2 flex items-center gap-2 text-white/90 hover:text-white text-sm font-heading font-semibold"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+                  Admins
+                </Link>
+              </>
             )}
           </div>
         </header>

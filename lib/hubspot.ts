@@ -2206,6 +2206,81 @@ export async function getKnowledgeBasePromptText(maxChars = 2400): Promise<strin
 }
 
 // ---------------------------------------------------------------------------
+// App admins — the dynamic admin allowlist, stored as JSON on the SAME admin
+// Agent record as the AI knowledge base. Granted capabilities: AI Knowledge
+// curation, the form builder, and admin management. A small seed list (in
+// lib/adminAccess.ts) is always admin so the system can never lock itself out.
+// ---------------------------------------------------------------------------
+const APP_ADMINS_PROP = 'app_admins_json';
+
+export interface AppAdminRecord {
+  email: string;
+  addedByEmail?: string;
+  addedAt: number;       // epoch ms
+}
+
+/** Read the dynamic admin list. Best-effort: [] on any error (caller falls back to seed). */
+export async function readAppAdmins(): Promise<AppAdminRecord[]> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) return [];
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}?properties=${APP_ADMINS_PROP}`);
+    const raw = resp?.properties?.[APP_ADMINS_PROP];
+    if (!raw) return [];
+    const parsed = JSON.parse(String(raw));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((a) => a && typeof a.email === 'string')
+      .map((a) => ({ email: String(a.email).trim().toLowerCase(), addedByEmail: a.addedByEmail, addedAt: Number(a.addedAt) || Date.now() }));
+  } catch (e) {
+    console.warn('[app-admins] read failed:', e);
+    return [];
+  }
+}
+
+/** Best-effort: create the app_admins_json property if it's missing (needs the
+ *  token to have schema-write scope; otherwise the caller's write surfaces a
+ *  clear error and an admin runs scripts/admins/add_admins_property.py). */
+async function ensureAppAdminsProperty(): Promise<void> {
+  try {
+    await hubspotFetch(`/crm/v3/properties/${agentTypeId()}/${APP_ADMINS_PROP}`);
+    return; // exists
+  } catch { /* fall through to create */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${agentTypeId()}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: APP_ADMINS_PROP, label: 'App Admins (JSON)', type: 'string', fieldType: 'textarea',
+        groupName: 'ai_knowledge', // group created by the AI-knowledge setup script
+        description: 'ResiWalk app admin allowlist (managed by the app).',
+      }),
+    });
+  } catch (e) {
+    console.warn('[app-admins] could not auto-create property (run scripts/admins/add_admins_property.py):', String((e as any)?.message || e).slice(0, 160));
+  }
+}
+
+export async function writeAppAdmins(admins: AppAdminRecord[]): Promise<void> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) throw new Error('Admin Agent record not found — set AI_KNOWLEDGE_AGENT_RECORD_ID, or ensure the admin (AI_KNOWLEDGE_ADMIN_EMAIL) is a HubSpot owner with an Agent record.');
+  const doWrite = () => hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ properties: { [APP_ADMINS_PROP]: JSON.stringify(admins) } }),
+  });
+  try {
+    await doWrite();
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    if (msg.includes('PROPERTY_DOESNT_EXIST') || (msg.includes('Property') && msg.includes('does not exist'))) {
+      await ensureAppAdminsProperty();
+      await doWrite(); // retry once after creating the property
+    } else {
+      throw e;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SFTP watch queue — a small singleton JSON array (on the same admin Agent
 // record as the AI knowledge base) of in-flight Tenant Chargeback uploads the
 // background cron is watching for a processed/errored result. Low volume: only

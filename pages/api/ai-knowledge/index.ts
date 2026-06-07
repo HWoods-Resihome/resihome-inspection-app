@@ -14,9 +14,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { readKnowledgeEntries, addKnowledgeEntry } from '@/lib/hubspot';
-import { isKnowledgeAdmin } from '@/lib/aiKnowledgeAccess';
-
-const isAdmin = isKnowledgeAdmin;
+import { isAppAdmin } from '@/lib/adminAccess';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -24,7 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === 'GET') {
     // Listing is for the admin curation screen.
-    if (!isAdmin(session.email)) return res.status(403).json({ error: 'Admin only.' });
+    if (!(await isAppAdmin(session.email))) return res.status(403).json({ error: 'Admin only.' });
     try {
       const entries = await readKnowledgeEntries();
       return res.status(200).json({ entries });
