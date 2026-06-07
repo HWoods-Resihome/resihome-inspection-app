@@ -467,9 +467,12 @@ export function CameraCapture({
       }
       setTimeout(checkTorch, 800);
       // Detect the sensor's zoom range (capabilities populate late on Android,
-      // like torch). When min < 1 the device has an ultra-wide; driving the
-      // hardware zoom to that min switches to the WIDE lens.
+      // like torch). Runs on a few delays to catch the late capability, but
+      // INITIALIZES ONLY ONCE — re-running must never reset the inspector's
+      // current zoom (that caused the "pinch in → snaps back to 1×" glitch,
+      // which also dropped auto-HD since it's zoom-driven).
       const detectZoom = () => {
+        if (zoomCapsRef.current) return; // already initialized — leave zoom alone
         try {
           const track = streamRef.current?.getVideoTracks?.()[0];
           const caps: any = track?.getCapabilities?.() || {};
@@ -482,9 +485,8 @@ export function CameraCapture({
             const start = Math.max(z.min, Math.min(z.max, 1));
             zoomRef.current = start; setZoom(start);
             try { (track!.applyConstraints as any)({ advanced: [{ zoom: start }] }); } catch { /* noop */ }
-          } else if (!zoomCapsRef.current) {
-            hwZoomRef.current = false; setHwZoom(false);
           }
+          // No caps yet → leave hwZoom as-is; a later delayed call may find them.
         } catch { /* best-effort */ }
       };
       detectZoom();
