@@ -43,27 +43,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       [it.category, it.subcategory, it.laborShortDescription, it.laborFullDescription, it.laborSubtext]
         .join(' ').toLowerCase();
 
-    // All whole-house touch-up variants — shown for context so you can confirm.
-    const relatedTouchUps = catalog.filter((it) => /touch.?up/.test(hay(it)) && /whole\s*house/.test(hay(it)));
+    // Free-text finder: ?q=touch  (or gallon, paint, mist…) lists matches so you
+    // can grab the exact line_item_code, then delete with ?code=<code>&apply=1.
+    const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+    if (q && !exactCode) {
+      const matches = catalog.filter((it) => hay(it).includes(q) || it.lineItemCode.toLowerCase().includes(q));
+      return res.status(200).json({
+        ok: true,
+        applied: false,
+        query: q,
+        count: matches.length,
+        matches: matches.map(view),
+        note: 'Finder results. To delete one, re-run with ?code=<line_item_code>&apply=1',
+      });
+    }
 
-    // The target: Whole House touch up 2-3 gallons (or an exact code override).
+    // Target: an exact code, else best-effort "whole house touch up 2-3 gallons".
     const targets = exactCode
       ? catalog.filter((it) => it.lineItemCode === exactCode)
       : catalog.filter((it) => {
           const h = hay(it);
-          return /touch.?up/.test(h)
-            && /whole\s*house/.test(h)
-            && /gallon/.test(h)
-            && /2\s*(?:-|–|—|to)\s*3/.test(h);
+          return /touch.?up/.test(h) && /gallon/.test(h) && /2\s*(?:-|–|—|to)\s*3/.test(h);
         });
 
     if (targets.length === 0) {
+      // Help locate it: surface anything touch-up / gallon / paint related.
+      const candidates = catalog.filter((it) => /touch|gallon|mist|paint/i.test(hay(it)));
       return res.status(200).json({
         ok: true,
         applied: false,
-        message: 'No "Whole House touch up 2-3 gallons" item matched. See relatedTouchUps for the exact items, then re-run with ?code=<line_item_code>.',
+        message: 'No exact match. Use the candidates below to find the right line_item_code, then re-run with ?code=<line_item_code>&apply=1 — or search with ?q=<text>.',
         targets: [],
-        relatedTouchUps: relatedTouchUps.map(view),
+        candidates: candidates.map(view),
       });
     }
 
@@ -74,7 +85,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         dryRun: true,
         wouldRemove: targets.map(view),
         note: 'Dry run — nothing changed. Add ?apply=1 to this URL to remove these from the matrix.',
-        relatedTouchUps: relatedTouchUps.map(view),
       });
     }
 
