@@ -12,12 +12,22 @@
  *     IndexedDB queues; caching API responses would serve stale data.
  */
 
-const CACHE = 'resiwalk-shell-v3';
 const NAV_FALLBACK = '/';
+// Cache name is tied to the build version passed in the registration URL
+// (/sw.js?v=<build>), so every deploy gets a FRESH cache and the activate
+// handler below deletes all older ones — no more stale shells surviving a
+// deploy. Falls back to a static name when registered without a version.
+const SW_VERSION = (() => {
+  try { return new URL(self.location.href).searchParams.get('v') || 'v3'; }
+  catch { return 'v3'; }
+})();
+const CACHE = 'resiwalk-shell-' + SW_VERSION;
 
 self.addEventListener('install', () => {
-  // Activate immediately so the offline shell is available on first load.
-  self.skipWaiting();
+  // Do NOT skipWaiting here: let the new SW WAIT so the app can apply the update
+  // at a safe moment (on reopen, or when the user taps the reload banner). On a
+  // first-ever install there's nothing to wait behind, so it still activates at
+  // once. The client posts 'SKIP_WAITING' (below) to promote an update.
 });
 
 self.addEventListener('activate', (event) => {

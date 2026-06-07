@@ -1,25 +1,97 @@
 /**
- * Service-worker registration + new-version detection for the field PWA.
+ * Service-worker registration + reliable new-version delivery for the field PWA.
  *
- * Two jobs:
- *   1. Register /sw.js so the app has an offline shell.
- *   2. Detect when a newer build has been deployed (by polling /api/version and
- *      comparing to the version this client booted with) and expose an
- *      `updateReady` flag so the UI can offer a one-tap reload. Field devices
- *      can otherwise sit on a stale build for days.
+ * The hard problem with a hand-written SW: the file is byte-identical between
+ * most deploys, so the browser never detects a "new" SW, never re-runs
+ * activate(), and never purges stale caches — leaving users on an old build
+ * until they delete + re-add the app. We fix that decisively:
+ *
+ *   1. Register the SW with a VERSIONED url (/sw.js?v=<build>). The script URL
+ *      changes every deploy, so the browser always installs a fresh SW, which
+ *      rotates its cache name and deletes the old caches on activate.
+ *   2. Detect the waiting worker (updatefound / reg.waiting) and surface it as
+ *      `updateReady` for a one-tap reload banner.
+ *   3. Auto-apply a pending update when the app is REOPENED (becomes visible
+ *      after being backgrounded a while) — the natural, non-disruptive moment
+ *      to jump to the latest build, so most users never see the banner or have
+ *      to do anything.
+ *   4. /api/version polling stays as a backup signal.
+ *
+ * controllerchange → reload ONCE, but only for an update WE initiated (never on
+ * the first-install claim), so there's no reload loop and no first-load refresh.
  */
-
 import { useEffect, useState } from 'react';
 
 const BOOT_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || '';
-const POLL_MS = 5 * 60 * 1000; // every 5 min, plus on focus/visibility
+const POLL_MS = 5 * 60 * 1000;
+const SW_URL = `/sw.js${BOOT_VERSION ? `?v=${BOOT_VERSION}` : ''}`;
+const UPDATE_EVENT = 'resiwalk-sw-update';
+// Only auto-apply on reopen if the app was backgrounded at least this long, so a
+// quick app-switch back into an active inspection isn't interrupted by a reload.
+const AUTO_APPLY_MIN_HIDDEN_MS = 15_000;
+
+let _reg: ServiceWorkerRegistration | null = null;
+let _updating = false;   // true once WE asked the waiting SW to take over
+let _refreshing = false; // guards the controllerchange reload
+let _hiddenAt = 0;
+
+function announceUpdate() {
+  try { window.dispatchEvent(new Event(UPDATE_EVENT)); } catch { /* noop */ }
+}
+
+/** Apply a pending update: tell the waiting SW to activate (→ controllerchange
+ *  → reload). If there's no waiting worker, a plain reload re-fetches the shell
+ *  network-first, which is fresh when online. */
+function applyUpdate(): void {
+  if (_reg?.waiting) {
+    _updating = true;
+    try { _reg.waiting.postMessage('SKIP_WAITING'); } catch { window.location.reload(); }
+  } else {
+    window.location.reload();
+  }
+}
+
+function watchInstalling(reg: ServiceWorkerRegistration) {
+  const sw = reg.installing;
+  if (!sw) return;
+  sw.addEventListener('statechange', () => {
+    // 'installed' WITH an existing controller ⇒ this is an update (not the
+    // first install), and it's now waiting to take over.
+    if (sw.state === 'installed' && navigator.serviceWorker.controller) announceUpdate();
+  });
+}
 
 export function registerServiceWorker(): void {
-  if (typeof window === 'undefined') return;
-  if (!('serviceWorker' in navigator)) return;
-  const register = () => { navigator.serviceWorker.register('/sw.js').catch(() => {/* non-fatal */}); };
-  // Register after load so it never competes with first paint. If `load` has
-  // already fired (it usually has by the time React mounts), register now.
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!_updating || _refreshing) return; // ignore the first-install claim
+    _refreshing = true;
+    window.location.reload();
+  });
+
+  const register = async () => {
+    try {
+      const reg = await navigator.serviceWorker.register(SW_URL);
+      _reg = reg;
+      if (reg.waiting && navigator.serviceWorker.controller) announceUpdate();
+      reg.addEventListener('updatefound', () => watchInstalling(reg));
+
+      const poke = () => { reg.update().catch(() => {}); };
+      window.addEventListener('focus', poke);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') { _hiddenAt = Date.now(); return; }
+        // Became visible (app reopened): check for an update and auto-apply it
+        // if one is waiting and we were away long enough.
+        poke();
+        const awayMs = _hiddenAt ? Date.now() - _hiddenAt : 0;
+        if (reg.waiting && navigator.serviceWorker.controller && awayMs >= AUTO_APPLY_MIN_HIDDEN_MS) {
+          applyUpdate();
+        }
+      });
+      setInterval(poke, POLL_MS);
+    } catch { /* non-fatal */ }
+  };
   if (document.readyState === 'complete') register();
   else window.addEventListener('load', register, { once: true });
 }
@@ -29,10 +101,16 @@ export function useAppUpdate(): { updateReady: boolean; latestVersion: string; r
   const [latestVersion, setLatestVersion] = useState(BOOT_VERSION);
 
   useEffect(() => {
-    if (!BOOT_VERSION) return; // can't compare without a baked baseline
     let alive = true;
 
+    // Primary signal: a new SW is installed and waiting.
+    const onSwUpdate = () => { if (alive) setUpdateReady(true); };
+    window.addEventListener(UPDATE_EVENT, onSwUpdate);
+    if (_reg?.waiting && navigator.serviceWorker?.controller) setUpdateReady(true);
+
+    // Backup signal: the deployed version differs from what we booted with.
     const check = async () => {
+      if (!BOOT_VERSION) return;
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
       try {
         const res = await fetch('/api/version', { cache: 'no-store' });
@@ -41,28 +119,24 @@ export function useAppUpdate(): { updateReady: boolean; latestVersion: string; r
         if (alive && version && version !== BOOT_VERSION) {
           setLatestVersion(version);
           setUpdateReady(true);
+          _reg?.update().catch(() => {}); // nudge the SW to pick up the new build
         }
-      } catch {/* offline / transient — try again later */}
+      } catch { /* offline / transient */ }
     };
-
     check();
     const timer = setInterval(check, POLL_MS);
     const onFocus = () => check();
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onFocus);
+
     return () => {
       alive = false;
       clearInterval(timer);
+      window.removeEventListener(UPDATE_EVENT, onSwUpdate);
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
   }, []);
 
-  const reload = () => {
-    // Ask any waiting SW to take over, then hard-reload to the new build.
-    try { navigator.serviceWorker?.controller?.postMessage('SKIP_WAITING'); } catch {/* noop */}
-    window.location.reload();
-  };
-
-  return { updateReady, latestVersion, reload };
+  return { updateReady, latestVersion, reload: applyUpdate };
 }
