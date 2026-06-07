@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RateCardLineInput, RateCardLineItem } from '@/lib/types';
 import { defaultVendorForCode } from '@/lib/vendors';
 import { isAiWarm, warmAi } from '@/lib/aiWarm';
+import { sendAiFeedback } from '@/lib/aiFeedbackClient';
 
 // A room the assistant can work on / navigate to.
 export interface AssistantSection {
@@ -52,6 +53,8 @@ interface Props {
   // Reports when the conversation panel opens/closes (engaged) so the parent can
   // keep the mic visible over other screens only while a conversation is active.
   onEngagedChange?: (engaged: boolean) => void;
+  // Inspection these adds belong to — tags captured AI feedback (the flywheel).
+  inspectionId?: string;
 }
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
@@ -70,7 +73,7 @@ export type SaveResult = {
   skippedSave?: boolean; // true if the network save was skipped (e.g. still loading)
 };
 
-type Pending = { line: RateCardLineInput; summary: string; spoken: string; action: 'add' | 'edit' };
+type Pending = { line: RateCardLineInput; summary: string; spoken: string; action: 'add' | 'edit'; query?: string };
 
 // Affirmatives that commit a pending proposal when spoken. A leading
 // yes/yeah/sure/ok/etc (optionally followed by a short tail) confirms. A bare
@@ -254,7 +257,7 @@ function speak(
   }
 }
 
-export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, linesBySection, currentLines, catalog, tenantMonths = 12, disabled, onEngagedChange }: Props) {
+export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, linesBySection, currentLines, catalog, tenantMonths = 12, disabled, onEngagedChange, inspectionId }: Props) {
   // The room the assistant is working on right now.
   const currentSection = useMemo(
     () => sections.find((s) => s.id === currentSectionId) || sections[0],
@@ -337,7 +340,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   // hearing the AI's own voice through the speaker).
   const speakingRef = useRef(false);
   // externalId + short label of the most recent voice-added line, for "undo".
-  const lastAddedRef = useRef<{ externalId: string; label: string } | null>(null);
+  const lastAddedRef = useRef<{ externalId: string; label: string; lineItemCode?: string; query?: string; section?: string } | null>(null);
   // The section the agent is working on DURING the current stream. Starts at the
   // panel's current room and is updated by navigate events mid-stream so a line
   // proposed after a room switch is saved to the new room.
@@ -377,6 +380,9 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       setBusy(true);
       setError(null);
       setStreamingText('');
+      // The inspector's utterance for THIS turn — the "query" the AI matched a
+      // catalog code against. Captured with each accept/reject for the flywheel.
+      const userUtterance = [...history].reverse().find((m) => m.role === 'user')?.content || '';
       let accumulated = '';
       // Reset the stream-local room to whatever the panel currently shows; a
       // navigate event mid-stream will update it so later proposals route right.
@@ -506,7 +512,16 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
                   ? (ret as Promise<SaveResult>)
                   : Promise.resolve({ ok: true } as SaveResult);
                 savePromises.push(p.then((r) => r || { ok: true }).catch((e) => ({ ok: false, error: String(e?.message || e) })));
-                if (action === 'add') lastAddedRef.current = { externalId: line.externalId, label: spokenLabel };
+                if (action === 'add') lastAddedRef.current = { externalId: line.externalId, label: spokenLabel, lineItemCode: line.lineItemCode, query: userUtterance, section: targetId };
+                // Flywheel: the inspector accepted this voice match (utterance →
+                // catalog code). Edits keep the code, so both count as 'add'.
+                sendAiFeedback({
+                  source: 'voice_assist',
+                  decision: action === 'edit' ? 'edit' : 'add',
+                  inspectionId,
+                  sectionId: targetId,
+                  suggestion: { type: 'add', catalogCode: line.lineItemCode, title: data.summary, query: userUtterance },
+                });
                 addedThisTurn++;
                 if (targetId) addedRoomIds.add(targetId);
                 setMessages((m) => [...m, { role: 'assistant', content: `${verb}: ${data.summary}` }]);
@@ -611,7 +626,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         setBusy(false);
       }
     },
-    [section, location, region, tenantMonths, currentLines, onAddLine, onAddLineTo, sections, onNavigate, currentRoomName, currentSection, currentSectionId]
+    [section, location, region, tenantMonths, currentLines, onAddLine, onAddLineTo, sections, onNavigate, currentRoomName, currentSection, currentSectionId, inspectionId]
   );
 
   const submitUtterance = useCallback(
@@ -646,6 +661,17 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         const removed = lastAddedRef.current;
         lastAddedRef.current = null;
         setMessages((m) => [...m, { role: 'user', content: t }]);
+        // Flywheel: the inspector undid this voice match → the suggested code was
+        // wrong for that utterance. A strong negative signal for learning.
+        if (removed.lineItemCode) {
+          sendAiFeedback({
+            source: 'voice_assist',
+            decision: 'remove',
+            inspectionId,
+            sectionId: removed.section,
+            suggestion: { type: 'add', catalogCode: removed.lineItemCode, title: removed.label, query: removed.query },
+          });
+        }
         try {
           onRemoveLine(removed.externalId);
           const msg = `Removed ${removed.label}. Anything else?`;
@@ -684,7 +710,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       const trimmed = full.length > MAX_TURNS ? full.slice(-MAX_TURNS) : full;
       void sendToAgent(trimmed);
     },
-    [messages, sendToAgent, onRemoveLine]
+    [messages, sendToAgent, onRemoveLine, inspectionId]
   );
 
   const startListening = useCallback(() => {
@@ -838,7 +864,14 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     try {
       onAddLine(p.line);
       // Remember adds (not edits) so "undo" can remove the last one.
-      if (p.action === 'add') lastAddedRef.current = { externalId: p.line.externalId, label: p.spoken };
+      if (p.action === 'add') lastAddedRef.current = { externalId: p.line.externalId, label: p.spoken, lineItemCode: p.line.lineItemCode, query: p.query };
+      // Flywheel: inspector confirmed this voice match (utterance → catalog code).
+      sendAiFeedback({
+        source: 'voice_assist',
+        decision: p.action === 'edit' ? 'edit' : 'add',
+        inspectionId,
+        suggestion: { type: 'add', catalogCode: p.line.lineItemCode, title: p.summary, query: p.query },
+      });
       // On screen: full detail. Spoken: short — "Added [short]. Anything else?"
       const onScreen = `${verb}: ${p.summary}. Anything else for this area?`;
       const spoken = `${verb} ${p.spoken}. Anything else?`;
@@ -849,7 +882,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       setMessages((m) => [...m, { role: 'assistant', content: msg }]);
       speak(msg, () => { /* no restart on failure */ }, 0, (sp) => { speakingRef.current = sp; });
     }
-  }, [onAddLine]);
+  }, [onAddLine, inspectionId]);
 
   // Keep synchronous refs current for the affirmative intercept.
   useEffect(() => { pendingRef.current = pending; }, [pending]);

@@ -115,10 +115,16 @@ export async function getLearnedMatchModel(): Promise<LearnedMatchModel | null> 
   return model;
 }
 
-/** Whether learned ranking adjustments are enabled (off unless explicitly set). */
+/**
+ * Whether learned ranking adjustments are applied at serving time. ON by default
+ * (the flywheel is "turned on"); set AI_LEARNING_ENABLED=0 (or false/off) as a
+ * kill switch if matching ever regresses. Note this only has any effect once a
+ * model has been built (the daily cron rebuilds it from feedback), and the
+ * deltas are clamped to ±0.05 so they refine — never override — similarity.
+ */
 export function isLearningEnabled(): boolean {
-  const v = process.env.AI_LEARNING_ENABLED;
-  return v === '1' || v === 'true';
+  const v = (process.env.AI_LEARNING_ENABLED || '').toLowerCase();
+  return v !== '0' && v !== 'false' && v !== 'off';
 }
 
 /** Ranking delta for a code from the model (0 if absent). */

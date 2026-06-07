@@ -4070,6 +4070,7 @@ export function RateCardForm(props: RateCardFormProps) {
                 <VoiceLineAssistant
                   sections={sections.map((s) => ({ id: s.id, label: s.label, location: s.location, displayName: s.displayName }))}
                   currentSectionId={voiceSectionId}
+                  inspectionId={props.inspectionRecordId}
                   onNavigate={(id) => { if (cameraOpen) setCameraSectionId(id); else navigateToSection(id); }}
                   region={inspectionRegion}
                   disabled={dataLoading}
