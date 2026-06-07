@@ -310,6 +310,18 @@ export function CameraCapture({
   // lensDeviceId is the chosen one (null = OS default for `facing`).
   const [backCams, setBackCams] = useState<MediaDeviceInfo[]>([]);
   const [lensDeviceId, setLensDeviceId] = useState<string | null>(null);
+  // Optional HD capture. The fast shutter grabs the live preview frame (instant,
+  // rapid) but is capped by the video track resolution. HD mode uses the full
+  // photo sensor via ImageCapture.takePhoto() for deliberate detail shots
+  // (zoom-in evidence) — higher resolution, but slower per shot (it briefly
+  // engages the photo pipeline), so it's OFF by default and one-shot-at-a-time.
+  // Offered only where ImageCapture exists (Chrome/Android; not iOS Safari).
+  const hdAvailable = typeof window !== 'undefined' && typeof (window as any).ImageCapture === 'function';
+  const [hdMode, setHdMode] = useState(false);
+  const hdModeRef = useRef(false);
+  useEffect(() => { hdModeRef.current = hdMode; }, [hdMode]);
+  const hdBusyRef = useRef(false);
+  const [capturingHd, setCapturingHd] = useState(false);
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -1183,54 +1195,78 @@ export function CameraCapture({
     }
     const video = videoRef.current;
     if (!video || video.readyState < 2) return; // not ready; try again in a moment
-    // IMPORTANT: do NOT set `busy` here. The shutter must stay enabled so the
-    // inspector can fire rapid shots. We grab the frame SYNCHRONOUSLY (fast),
-    // then encode + upload in the BACKGROUND via canvas.toBlob (which encodes
-    // off the main thread) — so there's no greyed-out button between shots.
-    try {
-      const src: CanvasImageSource = video;
-      const srcW = video.videoWidth;
-      const srcH = video.videoHeight;
-      if (!srcW || !srcH) return;
-      const longEdge = Math.max(srcW, srcH);
-      const scale = Math.min(1, MAX_SAVE_EDGE / longEdge);
-      const vw = Math.max(1, Math.round(srcW * scale));
-      const vh = Math.max(1, Math.round(srcH * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = vw;
-      canvas.height = vh;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.imageSmoothingQuality = 'high';
-      // Center-crop by the live DIGITAL zoom factor (effZoom()===1 when the
-      // sensor is doing the zoom, so a hardware-zoomed frame is used as-is).
-      const z = effZoom();
-      if (z > 1.001) {
-        const sw = srcW / z, sh = srcH / z;
-        ctx.drawImage(src, (srcW - sw) / 2, (srcH - sh) / 2, sw, sh, 0, 0, vw, vh);
-      } else {
-        ctx.drawImage(src, 0, 0, srcW, srcH, 0, 0, vw, vh);
+
+    // Shared: draw a source (live frame OR full-sensor bitmap) to a capped canvas
+    // with the digital-zoom crop + evidence stamp, then encode + enqueue in the
+    // BACKGROUND (canvas.toBlob is off the main thread) so the shutter never
+    // greys between shots.
+    const buildAndEnqueue = (source: CanvasImageSource, srcW: number, srcH: number) => {
+      try {
+        if (!srcW || !srcH) return;
+        const longEdge = Math.max(srcW, srcH);
+        const scale = Math.min(1, MAX_SAVE_EDGE / longEdge);
+        const vw = Math.max(1, Math.round(srcW * scale));
+        const vh = Math.max(1, Math.round(srcH * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = vw; canvas.height = vh;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.imageSmoothingQuality = 'high';
+        // effZoom()===1 when the sensor is zooming (hardware-zoomed frame used
+        // as-is); otherwise crop the central 1/z (digital zoom).
+        const z = effZoom();
+        if (z > 1.001) {
+          const sw = srcW / z, sh = srcH / z;
+          ctx.drawImage(source, (srcW - sw) / 2, (srcH - sh) / 2, sw, sh, 0, 0, vw, vh);
+        } else {
+          ctx.drawImage(source, 0, 0, srcW, srcH, 0, 0, vw, vh);
+        }
+        const stampLines: StampLine[] = [];
+        if (addressSnapshot) stampLines.push({ text: addressSnapshot });
+        stampLines.push({ text: new Date().toLocaleString() });
+        stampLines.push(...buildGeoStampLines());
+        drawEvidenceStamp(ctx, vw, vh, stampLines);
+        lastManualCaptureRef.current = Date.now();
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          enqueueFile(new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' }));
+        }, 'image/jpeg', PHOTO_SAVE_QUALITY);
+      } catch (e: any) {
+        console.error('Capture error:', e);
       }
-      // Evidence stamp (address / timestamp / GPS). Recorded as-is.
-      const stampLines: StampLine[] = [];
-      if (addressSnapshot) stampLines.push({ text: addressSnapshot });
-      stampLines.push({ text: new Date().toLocaleString() });
-      stampLines.push(...buildGeoStampLines());
-      drawEvidenceStamp(ctx, vw, vh, stampLines);
-      // Keep the AI auto-still fallback quiet while the inspector shoots.
-      lastManualCaptureRef.current = Date.now();
-      // Encode + enqueue in the background — never awaited, so the shutter is
-      // instantly ready for the next shot.
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        const file = new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' });
-        enqueueFile(file);
-      }, 'image/jpeg', PHOTO_SAVE_QUALITY);
-    } catch (e: any) {
-      console.error('Capture error:', e);
+    };
+
+    // HD mode: deliberate full-sensor shot via ImageCapture.takePhoto(). One at a
+    // time (taps ignored while a takePhoto is in flight); falls back to the live
+    // frame if it fails. NOT used for rapid capture — that's the fast path below.
+    if (hdModeRef.current && hdAvailable) {
+      if (hdBusyRef.current) return;
+      const track = streamRef.current?.getVideoTracks?.()[0];
+      const ICtor: any = (window as any).ImageCapture;
+      if (track && ICtor && track.readyState === 'live') {
+        hdBusyRef.current = true;
+        setCapturingHd(true);
+        const ic = new ICtor(track);
+        (ic.takePhoto() as Promise<Blob>)
+          .then(async (shot) => {
+            if (shot && shot.size > 0) {
+              const bmp = await createImageBitmap(shot, { imageOrientation: 'from-image' } as any);
+              buildAndEnqueue(bmp, bmp.width, bmp.height);
+              bmp.close?.();
+            } else {
+              buildAndEnqueue(video, video.videoWidth, video.videoHeight);
+            }
+          })
+          .catch(() => { buildAndEnqueue(video, video.videoWidth, video.videoHeight); })
+          .finally(() => { hdBusyRef.current = false; setCapturingHd(false); });
+        return;
+      }
     }
-  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines]);
+
+    // Fast path — instant live-frame grab (rapid, no freeze).
+    buildAndEnqueue(video, video.videoWidth, video.videoHeight);
+  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines, hdAvailable]);
 
   // ----- Per-photo retake/delete -----
 
@@ -1850,8 +1886,25 @@ export function CameraCapture({
                 </div>
               </>
             )}
-            {/* Top-right control cluster: phone-camera fallback + flip. */}
+            {/* Top-right control cluster: HD toggle + phone-camera fallback + flip. */}
             <div className="absolute top-3 right-3 flex items-center gap-2">
+              {/* HD capture toggle — full-sensor photos for zoom-in detail
+                  (slower per shot). Default off = fast/rapid. Hidden where
+                  ImageCapture is unavailable (e.g. iOS Safari). */}
+              {hdAvailable && (
+                <button
+                  type="button"
+                  onClick={() => setHdMode((v) => !v)}
+                  aria-pressed={hdMode}
+                  className={`relative w-10 h-10 rounded-full flex items-center justify-center text-[11px] font-heading font-bold transition-colors ${hdMode ? 'bg-white text-black' : 'bg-black/50 text-white'}`}
+                  title={hdMode ? 'HD capture ON — full-resolution detail (slower per shot)' : 'HD capture OFF — fast, rapid capture. Tap for full-resolution detail shots.'}
+                >
+                  HD
+                  {capturingHd && (
+                    <span className="absolute inset-0 rounded-full ring-2 ring-brand animate-ping" aria-hidden />
+                  )}
+                </button>
+              )}
               {/* Phone camera fallback. The OS camera has its own working flash,
                   so we badge this with a lightning bolt — tapping it is how you
                   get a flash-capable shot (the in-app live flash is unreliable). */}
