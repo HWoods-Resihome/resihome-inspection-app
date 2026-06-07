@@ -157,7 +157,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div data-modal-scroll className="flex-1 overflow-y-auto px-5 py-4">
           {loading && (
             <div className="py-10 text-center">
               <div className="inline-block w-7 h-7 border-2 border-brand border-t-transparent rounded-full animate-spin mb-3" />

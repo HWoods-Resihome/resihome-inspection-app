@@ -30,6 +30,11 @@ type NumberFieldProps = {
   className?: string;
   ariaLabel?: string;
   disabled?: boolean;
+  /** CSS selector (looked up inside the modal scroller) of an element to keep
+   *  visible just above the keypad while editing — e.g. a live totals row, so
+   *  the price update stays in view. Falls back to keeping the field itself
+   *  visible when omitted. */
+  revealSelector?: string;
   /** Run when the field gains focus (e.g. clear-on-focus). */
   onFocusField?: () => void;
   /** Run when editing ends (Done / blur) — mirrors the old onBlur. */
@@ -58,6 +63,7 @@ export function NumberField({
   className,
   ariaLabel,
   disabled,
+  revealSelector,
   onFocusField,
   onDone,
 }: NumberFieldProps) {
@@ -71,49 +77,44 @@ export function NumberField({
   // leaving the page. Blur runs the same close path as Done (onBlur → onDone).
   useBackToClose(open, () => { inputRef.current?.blur(); });
 
-  // Make room for the keypad when it opens, then restore on close.
-  //  - Inside a modal (marked [data-modal-overlay] + [data-modal-scroll]): LIFT
-  //    the whole modal above the keypad so its Save/Cancel footer stays visible
-  //    and tappable (otherwise the keypad covers Cancel and a tap there hits the
-  //    keypad instead — making Cancel behave like keeping the edit), and shrink
-  //    the scroll area so the edited field clears the keypad.
-  //  - On a plain page: pad the body so the field can scroll above the keypad.
+  // Make room for the keypad when it opens, then restore on close. The modal
+  // already extends to the bottom of the screen, so the keypad sits flush on top
+  // of it (no lift → no dark gap). We just (a) hide the modal's Save/Cancel
+  // footer (the keypad's Done is the dismiss control), (b) pad the scroll area so
+  // content can scroll ABOVE the keypad, and (c) scroll so the field — or a
+  // requested "reveal" element like the live totals row — sits just above it.
   useEffect(() => {
     if (!open) return;
     const inp = inputRef.current;
     if (!inp) return;
-    const h = (padRef.current?.offsetHeight ?? 300) + 12; // keypad height + gap
-    const overlay = inp.closest('[data-modal-overlay]') as HTMLElement | null;
+    const h = padRef.current?.offsetHeight ?? 300; // keypad height (incl. safe area)
     const scroller = inp.closest('[data-modal-scroll]') as HTMLElement | null;
 
     const restore: Array<() => void> = [];
-    // Hide the modal's Save/Cancel footer while the keypad is up — the keypad's
-    // own Done is the dismiss control, so two stacked button rows don't confuse.
-    const footer = (overlay || scroller)?.querySelector('[data-modal-footer]') as HTMLElement | null;
+    const footer = scroller?.querySelector('[data-modal-footer]') as HTMLElement | null;
     if (footer) {
       const prev = footer.style.display;
       footer.style.display = 'none';
       restore.push(() => { footer.style.display = prev; });
     }
-    if (overlay) {
-      const prev = overlay.style.paddingBottom;
-      overlay.style.paddingBottom = `${h}px`;
-      restore.push(() => { overlay.style.paddingBottom = prev; });
-    }
-    if (scroller) {
-      const prev = scroller.style.maxHeight;
-      scroller.style.maxHeight = `calc(100dvh - ${h + 16}px)`;
-      restore.push(() => { scroller.style.maxHeight = prev; });
-    }
-    if (!overlay && !scroller) {
-      const prev = document.body.style.paddingBottom;
-      document.body.style.paddingBottom = `${h}px`;
-      restore.push(() => { document.body.style.paddingBottom = prev; });
-    }
+    const padTarget = scroller || document.body;
+    const prevPad = padTarget.style.paddingBottom;
+    padTarget.style.paddingBottom = `${h + 16}px`;
+    restore.push(() => { padTarget.style.paddingBottom = prevPad; });
 
-    const raf = requestAnimationFrame(() =>
-      inp.scrollIntoView({ block: 'center', behavior: 'smooth' }),
-    );
+    const raf = requestAnimationFrame(() => {
+      const keypadTop = window.innerHeight - h;
+      const reveal = (revealSelector ? scroller?.querySelector(revealSelector) : null) as HTMLElement | null;
+      if (scroller) {
+        // Pin the reveal element (e.g. totals) just above the keypad; for a plain
+        // field, only scroll if it would otherwise hide behind the keypad.
+        const el = reveal || inp;
+        const delta = el.getBoundingClientRect().bottom - (keypadTop - 12);
+        if (reveal || delta > 0) scroller.scrollBy({ top: delta, behavior: 'smooth' });
+      } else {
+        inp.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    });
     return () => {
       cancelAnimationFrame(raf);
       restore.forEach((fn) => fn());

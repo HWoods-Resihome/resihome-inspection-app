@@ -807,7 +807,7 @@ export function EditableLineRow(props: Props) {
     return (
       <tr>
         <td colSpan={12} className="p-0">
-          <div data-modal-overlay className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center sm:justify-center transition-[padding] duration-200">
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center sm:justify-center">
             <div data-modal-scroll className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl max-h-[92vh] overflow-y-auto shadow-xl">
               {/* Sticky header with title + close */}
               <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between z-10">
@@ -884,6 +884,7 @@ export function EditableLineRow(props: Props) {
                       value={quantity}
                       onChange={setQuantity}
                       ariaLabel="Quantity"
+                      revealSelector="[data-totals-row]"
                       onFocusField={onQtyFocus}
                       onDone={onQtyBlur}
                       className={`no-spinner ${INPUT_CLS}`}
@@ -955,8 +956,10 @@ export function EditableLineRow(props: Props) {
                 </div>
 
                 {/* Totals row: Vendor $ (editable, with pencil) · Client $ · Tenant $.
-                    Vendor $ is blank to use the formula; type to override. */}
-                <div className="grid grid-cols-3 gap-3 bg-gray-50 rounded-lg p-3 text-center border-2 border-brand/40">
+                    Vendor $ is blank to use the formula; type to override.
+                    data-totals-row: the Qty keypad scrolls this just above itself
+                    so the price stays visible and updates live while typing. */}
+                <div data-totals-row className="grid grid-cols-3 gap-3 bg-gray-50 rounded-lg p-3 text-center border-2 border-brand/40">
                   <div className="flex flex-col items-center">
                     <div className="text-xs font-bold text-gray-700 flex items-center justify-center gap-1 mb-1">
                       Vendor $
