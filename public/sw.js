@@ -34,6 +34,42 @@ self.addEventListener('message', (event) => {
   if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
+/* ------------------------------------------------------------------
+ * Web Push — approval alerts (and any future server-sent notification).
+ * The server (lib/pushSender) sends a JSON body { title, body, url, tag }.
+ * Tapping the notification focuses an open tab (navigating it if needed) or
+ * opens a new one at `url`.
+ * ------------------------------------------------------------------ */
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (_) { /* non-JSON */ }
+  const title = data.title || 'ResiWalk';
+  const options = {
+    body: data.body || '',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: data.tag || undefined,
+    data: { url: data.url || '/' },
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of all) {
+      // Focus an existing tab; navigate it to the target if it supports it.
+      if ('focus' in c) {
+        try { if (c.url !== target && 'navigate' in c) await c.navigate(target); } catch (_) { /* cross-origin guard */ }
+        return c.focus();
+      }
+    }
+    if (self.clients.openWindow) return self.clients.openWindow(target);
+  })());
+});
+
 /* ------------------------------------------------------------------ *
  * Background Sync: upload queued photos even after the tab is closed.
  *

@@ -9,6 +9,7 @@ import { initErrorReporting } from '@/lib/clientErrorReporter';
 import { installSessionGuard } from '@/lib/sessionGuard';
 import { registerServiceWorker } from '@/lib/useAppUpdate';
 import { installOAuthBridge } from '@/lib/nativeBridge';
+import { initPushOnLoad } from '@/lib/pushClient';
 import { Raleway } from 'next/font/google';
 import '../styles/globals.css';
 
@@ -41,6 +42,10 @@ export default function App({ Component, pageProps }: AppProps) {
     // Capacitor.isNativePlatform() internally), so web behavior is unchanged —
     // this just enables the deep-link return inside the Capacitor app.
     void installOAuthBridge();
+    // Approval alerts: prompt a signed-in inspector once to enable Web Push,
+    // then keep their subscription fresh. No-op until VAPID env is configured
+    // or on browsers without push support. (Native FCM is a separate path.)
+    void initPushOnLoad();
   }, []);
 
   return (

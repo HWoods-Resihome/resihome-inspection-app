@@ -31,6 +31,7 @@ import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { isInternalResolution } from '@/lib/vendors';
 import { recordAuditEvent } from '@/lib/auditLog';
 import { beginFinalizeJob, completeFinalizeJob, type FinalizeMode } from '@/lib/finalizeJobs';
+import { sendPushToUser } from '@/lib/pushSender';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { bustInspectionsCache } from '@/pages/api/inspections';
@@ -734,6 +735,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       detail: regenerateOnly ? 'Regenerated PDFs' : isRefinalize ? 'Re-finalized (PDFs regenerated)' : 'Approved & finalized',
       meta: { vendor: ctx.grandTotals.vendor, client: ctx.grandTotals.client, tenant: ctx.grandTotals.tenant },
     });
+
+    // Approval alert: notify the inspector who SUBMITTED this for approval, on
+    // the first approval only (not re-finalize/regenerate, and never to the
+    // approver themselves). Best-effort — inert until VAPID env is configured.
+    if (!regenerateOnly && !isRefinalize) {
+      const submitter = String(preflight?.submitted_by_email || '').trim().toLowerCase();
+      if (submitter && submitter !== session.email.trim().toLowerCase()) {
+        const addr = (inspectionData as any)?.property?.full_address || (inspection as any)?.propertyAddressSnapshot || (inspection as any)?.inspectionName || '';
+        void sendPushToUser(submitter, {
+          title: 'Inspection approved ✓',
+          body: `${addr ? addr + ' — ' : ''}approved by ${session.name || session.email}.`,
+          url: `/inspection/${id}`,
+          tag: `approved-${id}`,
+        }).then((r) => console.log(`[push] approval → ${submitter}: ${JSON.stringify(r)}`)).catch(() => {});
+      }
+    }
 
     // ---- 6c. Materialize the Final Checklist as structured answer records ----
     // The form persists the whole checklist as ONE opaque qa blob (fc__all) so it
