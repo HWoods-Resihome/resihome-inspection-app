@@ -36,6 +36,10 @@ def main():
         QUESTION, "is_enabled", "Enabled",
         type="bool", field_type="booleancheckbox", group_name=GROUP,
         description="When false, the question is hidden from inspectors (soft off via the form builder). Missing/true = enabled.",
+        options=[
+            {"label": "Yes", "value": "true", "displayOrder": 0, "hidden": False},
+            {"label": "No", "value": "false", "displayOrder": 1, "hidden": False},
+        ],
     )
     print("\nDone. The form builder can now toggle questions on/off.")
 

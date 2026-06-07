@@ -2323,14 +2323,25 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
     try { await hubspotFetch(`/crm/v3/properties/${objType}/${name}`); results[name] = 'exists'; return; }
     catch { /* missing → create */ }
     try { await hubspotFetch(`/crm/v3/properties/${objType}`, { method: 'POST', body: JSON.stringify(def) }); results[name] = 'created'; }
-    catch (e: any) { results[name] = 'error: ' + String(e?.message || e).slice(0, 140); }
+    catch (e: any) {
+      // hubspotFetch sanitizes the thrown message but keeps the real body on .detail.
+      const detail = (e?.detail && String(e.detail)) || String(e?.message || e);
+      results[name] = 'error: ' + detail.slice(0, 160);
+    }
   };
 
   await ensureGroup(agent, 'ai_knowledge', 'AI');
   await ensureProp(agent, 'app_admins_json', { name: 'app_admins_json', label: 'App Admins (JSON)', type: 'string', fieldType: 'textarea', groupName: 'ai_knowledge' });
   await ensureProp(agent, 'app_templates_json', { name: 'app_templates_json', label: 'App Templates (JSON)', type: 'string', fieldType: 'textarea', groupName: 'ai_knowledge' });
   await ensureGroup(question, 'inspection_question_info', 'Question Info');
-  await ensureProp(question, 'is_enabled', { name: 'is_enabled', label: 'Enabled', type: 'bool', fieldType: 'booleancheckbox', groupName: 'inspection_question_info' });
+  // Boolean properties REQUIRE explicit true/false options, or HubSpot 400s.
+  await ensureProp(question, 'is_enabled', {
+    name: 'is_enabled', label: 'Enabled', type: 'bool', fieldType: 'booleancheckbox', groupName: 'inspection_question_info',
+    options: [
+      { label: 'Yes', value: 'true', displayOrder: 0, hidden: false },
+      { label: 'No', value: 'false', displayOrder: 1, hidden: false },
+    ],
+  });
 
   return results;
 }
