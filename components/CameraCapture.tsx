@@ -134,15 +134,14 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.restore();
 }
 
-// Target capture resolution (4:3). Requested HIGH at getUserMedia time (the
-// browser negotiates down if the device can't do it) so the live frame we grab
-// is as detailed as possible — ~11MP where supported. This is set at
-// acquisition only (no mid-stream applyConstraints, which stutters the preview),
-// and capture stays instant: we draw the live frame and let canvas.toBlob encode
-// OFF the main thread, so there's no post-capture freeze and rapid taps work.
-// (We do NOT use ImageCapture.takePhoto() — that's what froze the camera.)
-const CAPTURE_WIDTH = 3840;
-const CAPTURE_HEIGHT = 2880;
+// Target capture resolution (4:3). Kept MODERATE on purpose: requesting a very
+// high resolution makes some Android phones switch to whatever lens/mode can
+// deliver it — often the ULTRA-WIDE — changing the default field of view. This
+// matches the long-standing main-lens behavior. For maximum detail on a
+// deliberate shot, HD mode uses the full photo sensor (ImageCapture.takePhoto)
+// of THIS same lens, so we don't need to over-request the preview resolution.
+const CAPTURE_WIDTH = 1920;
+const CAPTURE_HEIGHT = 1440;
 
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
@@ -481,10 +480,13 @@ export function CameraCapture({
             zoomCapsRef.current = { min: z.min, max: z.max };
             hwZoomRef.current = true;
             setHwZoom(true);
-            // Open at 1× (normal) if it's in range, else the nearest bound.
-            const start = Math.max(z.min, Math.min(z.max, 1));
+            // Sync to the device's CURRENT zoom — do NOT force a value. Forcing
+            // zoom:1 selects the ULTRA-WIDE on logical multi-camera phones (where
+            // 1.0 is the widest lens), which made the camera open wide. Leaving
+            // it alone keeps the OS-chosen default (main) lens; pinch adjusts it.
+            const cur = Number((track?.getSettings?.() as any)?.zoom);
+            const start = (isFinite(cur) && cur > 0) ? cur : 1;
             zoomRef.current = start; setZoom(start);
-            try { (track!.applyConstraints as any)({ advanced: [{ zoom: start }] }); } catch { /* noop */ }
           }
           // No caps yet → leave hwZoom as-is; a later delayed call may find them.
         } catch { /* best-effort */ }
