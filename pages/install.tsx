@@ -29,6 +29,7 @@ export default function InstallPage() {
   const [standalone, setStandalone] = useState(false);
   const [canPrompt, setCanPrompt] = useState(false);
   const [msg, setMsg] = useState('');
+  const [iosSheet, setIosSheet] = useState(false);
   const [det, setDet] = useState<Record<string, string>>({});
   const deferredRef = useRef<Window['__bipEvent'] | null>(null);
   const br = useRef(detectBrowser());
@@ -162,9 +163,15 @@ export default function InstallPage() {
 
   const install = async () => {
     const d = deferredRef.current;
-    if (!d) { setMsg(br.current.isIOS ? 'On iPhone: Share → Add to Home Screen.' : 'Chrome ⋮ menu → “Install app”. If it’s not there, the app may still be installed — uninstall it fully first.'); return; }
-    try { d.prompt(); const { outcome } = await d.userChoice; setMsg(outcome === 'accepted' ? 'Installing… check your home screen.' : 'Dismissed — tap Install again any time.'); if (outcome === 'accepted') { deferredRef.current = null; (window as any).__bipEvent = null; setCanPrompt(false); } }
-    catch { setMsg('Could not open the prompt.'); }
+    // Android / desktop Chrome: fire the REAL install prompt.
+    if (d) {
+      try { d.prompt(); const { outcome } = await d.userChoice; setMsg(outcome === 'accepted' ? 'Installing… check your home screen.' : 'Dismissed — tap Install again any time.'); if (outcome === 'accepted') { deferredRef.current = null; (window as any).__bipEvent = null; setCanPrompt(false); } }
+      catch { setMsg('Could not open the prompt.'); }
+      return;
+    }
+    // iOS: no programmatic install exists — guide them through Add to Home Screen.
+    if (br.current.isIOS) { setIosSheet(true); return; }
+    setMsg('Chrome ⋮ menu → “Install app”. If it’s not there, the app may still be installed — uninstall it fully first.');
   };
 
   return (
@@ -213,7 +220,7 @@ export default function InstallPage() {
           </ul>
 
           {Object.keys(det).length > 0 && (
-            <details className="mt-4" open>
+            <details className="mt-4">
               <summary className="text-xs font-heading font-semibold text-gray-600 cursor-pointer">Technical details (screenshot &amp; send)</summary>
               <div className="mt-2 rounded-lg bg-gray-900 text-gray-100 text-[10.5px] leading-relaxed font-mono p-3 break-words">
                 <div>browser: {det.browser}</div>
@@ -228,6 +235,52 @@ export default function InstallPage() {
           )}
         </div>
       </div>
+
+      {/* iOS Add-to-Home-Screen guide. iOS Safari exposes no install API, so this
+          is the best possible iPhone experience: a one-tap guided sheet. */}
+      {iosSheet && (
+        <div className="fixed inset-0 z-[90] flex flex-col justify-end" role="dialog" aria-modal="true">
+          <button type="button" aria-label="Close" className="absolute inset-0 bg-black/50" onClick={() => setIosSheet(false)} />
+          <div className="relative bg-white rounded-t-3xl shadow-2xl px-5 pt-5 pb-8 animate-[fadeIn_180ms_ease-out]">
+            <div className="mx-auto w-10 h-1.5 rounded-full bg-gray-300 mb-4" />
+            {br.current.isSafari ? (
+              <>
+                <h2 className="text-lg font-heading font-bold mb-1">Add ResiWalk to your Home Screen</h2>
+                <p className="text-sm text-gray-500 mb-4">Two taps in Safari — then it opens full-screen like a real app.</p>
+                <ol className="space-y-3">
+                  <li className="flex items-center gap-3">
+                    <span className="shrink-0 w-7 h-7 rounded-full bg-brand text-white font-heading font-bold text-sm flex items-center justify-center">1</span>
+                    <span className="text-[15px] text-ink flex items-center gap-1.5 flex-wrap">
+                      Tap the <span className="inline-flex items-center gap-1 font-semibold text-brand">Share
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 16V3" /><path d="m8 7 4-4 4 4" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" /></svg>
+                      </span> button in Safari’s toolbar.
+                    </span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <span className="shrink-0 w-7 h-7 rounded-full bg-brand text-white font-heading font-bold text-sm flex items-center justify-center">2</span>
+                    <span className="text-[15px] text-ink">Scroll down and tap <span className="font-semibold">“Add to Home Screen” <span className="inline-block align-middle border border-gray-400 rounded-[5px] px-1 text-gray-600 text-xs">＋</span></span></span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <span className="shrink-0 w-7 h-7 rounded-full bg-brand text-white font-heading font-bold text-sm flex items-center justify-center">3</span>
+                    <span className="text-[15px] text-ink">Tap <span className="font-semibold">Add</span> — done. Open ResiWalk from your home screen.</span>
+                  </li>
+                </ol>
+                <p className="text-xs text-gray-400 mt-4 text-center">The Share button is at the bottom of the screen on iPhone, top on iPad.</p>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-heading font-bold mb-1">Open in Safari first</h2>
+                <p className="text-[15px] text-gray-600 leading-relaxed">
+                  On iPhone, “Add to Home Screen” only works in <strong>Safari</strong> — {br.current.name} can’t install apps.
+                  Open <span className="font-semibold">resiwalk.com/install</span> in Safari, then tap <span className="font-semibold">Install ResiWalk</span> again.
+                </p>
+              </>
+            )}
+            <button type="button" onClick={() => setIosSheet(false)}
+              className="w-full mt-6 py-3 rounded-xl bg-gray-100 text-gray-700 font-heading font-semibold">Got it</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

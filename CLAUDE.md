@@ -63,6 +63,10 @@ is needed** — it flows through `server.url` on the next deploy.
   Vercel and the native shell picks it up via `server.url`, so this is the
   default delivery path (no feature-branch hand-off needed). Native-only changes
   still land on `chore/native-oauth-outbound` per the hard rule above.
+- **`main` is ALWAYS the default push target.** Only push to a test/staging
+  branch when the owner explicitly asks for it; otherwise everything web goes to
+  `main`. (Native-only work is the sole standing exception →
+  `chore/native-oauth-outbound`.) Do not resurrect old per-task branches.
 
 ## Build / verify
 - Web: `npx tsc --noEmit` + `npm run build` before committing.
