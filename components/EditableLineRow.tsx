@@ -452,8 +452,22 @@ export function EditableLineRow(props: Props) {
   // (no need to delete the existing value); if they leave without entering
   // anything, restore the prior value so it still saves.
   const qtyBeforeFocusRef = useRef('');
-  const onQtyFocus = () => { qtyBeforeFocusRef.current = quantity; setQuantity(''); };
-  const onQtyBlur = () => { if (quantity.trim() === '') setQuantity(qtyBeforeFocusRef.current); };
+  // While the number keyboard is up for Quantity, collapse the Line Item picker
+  // + description (the "top 2 lines") so the field being typed stays in view and
+  // the editor isn't cluttered behind the keyboard.
+  const [qtyEditing, setQtyEditing] = useState(false);
+  const onQtyFocus = () => { qtyBeforeFocusRef.current = quantity; setQuantity(''); setQtyEditing(true); };
+  const onQtyBlur = () => { if (quantity.trim() === '') setQuantity(qtyBeforeFocusRef.current); setQtyEditing(false); };
+  // Bid-item subcategories carry a bespoke scope the inspector writes from
+  // scratch, so focusing the description selects-all (typing REPLACES the whole
+  // text). Every other item keeps its catalog default and the inspector just
+  // APPENDS notes — so focus drops the cursor at the end.
+  const isBidItemDesc = !!selectedItem && (selectedItem.isBidItem || /bid\s*item/i.test(selectedItem.subcategory || ''));
+  const onDescFocus = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    if (isBidItemDesc) { e.target.select(); return; }
+    const len = e.target.value.length;
+    e.target.setSelectionRange(len, len);
+  };
   useEffect(() => {
     const code = selectedItem?.lineItemCode || '';
     if (code === (lastDescItemRef.current || '')) return; // same item — keep any edit
@@ -826,29 +840,32 @@ export function EditableLineRow(props: Props) {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Line Item</label>
-                  <Combobox
-                    options={lineItemOptions}
-                    value={lineItemCode}
-                    onChange={handleLineItemChange}
-                    placeholder="Type to search items…"
-                    emptyLabel={category ? 'No items in this category' : 'No matching items'}
-                    scrollIntoViewOnFocus
-                    filled
-                    deferKeyboard
-                    onFocusChange={setSearchFocused}
-                  />
-                  {selectedItem && (
-                    <textarea
-                      value={customDescription}
-                      onChange={(e) => { descTouchedRef.current = true; setCustomDescription(e.target.value); }}
-                      rows={2}
-                      className="w-full mt-2 text-sm bg-gray-100 rounded-lg px-3 py-2 text-gray-700 outline-none focus:ring-2 focus:ring-brand/20"
-                      placeholder={catalogDescription(selectedItem) || 'Edit description (optional)…'}
+                {!qtyEditing && (
+                  <div>
+                    <label className="block text-xs font-heading font-bold text-gray-700 mb-1">Line Item</label>
+                    <Combobox
+                      options={lineItemOptions}
+                      value={lineItemCode}
+                      onChange={handleLineItemChange}
+                      placeholder="Type to search items…"
+                      emptyLabel={category ? 'No items in this category' : 'No matching items'}
+                      scrollIntoViewOnFocus
+                      filled
+                      deferKeyboard
+                      onFocusChange={setSearchFocused}
                     />
-                  )}
-                </div>
+                    {selectedItem && (
+                      <textarea
+                        value={customDescription}
+                        onChange={(e) => { descTouchedRef.current = true; setCustomDescription(e.target.value); }}
+                        onFocus={onDescFocus}
+                        rows={2}
+                        className="w-full mt-2 text-sm bg-gray-100 rounded-lg px-3 py-2 text-gray-700 outline-none focus:ring-2 focus:ring-brand/20"
+                        placeholder={catalogDescription(selectedItem) || 'Edit description (optional)…'}
+                      />
+                    )}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -1065,6 +1082,7 @@ export function EditableLineRow(props: Props) {
           <textarea
             value={customDescription}
             onChange={(e) => { descTouchedRef.current = true; setCustomDescription(e.target.value); }}
+            onFocus={onDescFocus}
             rows={2}
             className="w-full mt-1.5 text-xs border border-gray-300 rounded px-2 py-1 text-gray-700 bg-white"
             placeholder={catalogDescription(selectedItem) || 'Edit description (optional)...'}
