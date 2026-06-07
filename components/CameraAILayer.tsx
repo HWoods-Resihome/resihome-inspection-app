@@ -687,7 +687,32 @@ export function CameraAILayer(props: Props) {
     const beginUtterance = () => {
       if (!audioLoopRef.current || !openRef.current) return;
       const tracks = liveAudioTracks();
-      if (!tracks.length) { dbg('mic tracks lost'); setListening(false); return; }
+      if (!tracks.length) {
+        // The audio source vanished — the camera's shared stream can get
+        // reconfigured/stopped when the video track changes (zoom / lens), which
+        // would otherwise leave the mic permanently deaf. RE-ACQUIRE our own mic
+        // and resume instead of giving up. If re-acquire also fails, then stop.
+        dbg('mic tracks lost — recovering');
+        void (async () => {
+          let ok = false;
+          try {
+            const own = await navigator.mediaDevices.getUserMedia({ audio: true });
+            if (!openRef.current) { own.getTracks().forEach((t) => t.stop()); return; }
+            ownAudioRef.current?.getTracks().forEach((t) => t.stop());
+            ownAudioRef.current = own;
+            ok = own.getAudioTracks().some((t) => t.readyState === 'live');
+            dbg('mic re-acquired (own)');
+          } catch { dbg('mic re-acquire failed'); }
+          if (ok && audioLoopRef.current && openRef.current) {
+            setListening(true);
+            setTimeout(beginUtterance, 120);
+          } else {
+            setListening(false);
+            setErrText('Mic blocked — allow microphone');
+          }
+        })();
+        return;
+      }
       try {
         const audioStream = new MediaStream(tracks);
         if (audioCtxRef.current) {
