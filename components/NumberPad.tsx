@@ -82,6 +82,14 @@ export function NumberField({
     const scroller = inp.closest('[data-modal-scroll]') as HTMLElement | null;
 
     const restore: Array<() => void> = [];
+    // Hide the modal's Save/Cancel footer while the keypad is up — the keypad's
+    // own Done is the dismiss control, so two stacked button rows don't confuse.
+    const footer = (overlay || scroller)?.querySelector('[data-modal-footer]') as HTMLElement | null;
+    if (footer) {
+      const prev = footer.style.display;
+      footer.style.display = 'none';
+      restore.push(() => { footer.style.display = prev; });
+    }
     if (overlay) {
       const prev = overlay.style.paddingBottom;
       overlay.style.paddingBottom = `${h}px`;

@@ -995,8 +995,10 @@ export function EditableLineRow(props: Props) {
                 {searchFocused && <div style={{ height: '200vh' }} aria-hidden />}
               </div>
 
-              {/* Sticky footer action — slim so it doesn't eat the sheet. */}
-              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-2 flex items-center gap-3">
+              {/* Sticky footer action — slim so it doesn't eat the sheet. The
+                  number keypad hides this while open (data-modal-footer) so its
+                  Done is the only dismiss control, then restores it. */}
+              <div data-modal-footer className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-2 flex items-center gap-3">
                 <button
                   type="button"
                   onClick={cancelEdit}
