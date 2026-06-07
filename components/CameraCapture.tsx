@@ -303,10 +303,13 @@ export function CameraCapture({
   }, [items.length]);
 
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
-  // Optional pinned back lens by deviceId (null = OS default for `facing`). The
-  // lens-switcher UI is removed for now; this plumbing stays dormant so capture
-  // keeps working and the feature is easy to restore later.
+  // Pinned back lens by deviceId (null = OS default for `facing`). Some phones
+  // default `facingMode:environment` to the ULTRA-WIDE; when there are multiple
+  // back cameras we auto-pin the 2nd (the main lens on those phones). No UI.
   const [lensDeviceId, setLensDeviceId] = useState<string | null>(null);
+  const lensDeviceIdRef = useRef<string | null>(null);
+  useEffect(() => { lensDeviceIdRef.current = lensDeviceId; }, [lensDeviceId]);
+  const lensPinnedRef = useRef(false); // auto-pick the main lens once per session
   // Optional HD capture. The fast shutter grabs the live preview frame (instant,
   // rapid) but is capped by the video track resolution. HD mode uses the full
   // photo sensor via ImageCapture.takePhoto() for deliberate detail shots
@@ -395,14 +398,25 @@ export function CameraCapture({
       // single, high-quality mic feed (a separate getUserMedia mic is low-gain /
       // flaky on mobile). If the combined request fails, fall back to video-only
       // so the camera itself NEVER breaks because of the mic.
+      const tryGUM = async (vc: MediaTrackConstraints) => {
+        try {
+          return await navigator.mediaDevices.getUserMedia({ video: vc, audio: !!aiAssist });
+        } catch (e) {
+          if (aiAssist) return await navigator.mediaDevices.getUserMedia({ video: vc, audio: false });
+          throw e;
+        }
+      };
       let stream: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: !!aiAssist });
-      } catch (audioErr) {
-        if (aiAssist) {
-          stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: false });
+        stream = await tryGUM(videoConstraint);
+      } catch (e) {
+        // A pinned lens deviceId can fail (busy / removed) — fall back to the OS
+        // default for this facing so the camera never just breaks.
+        if ((videoConstraint as any).deviceId) {
+          if (lensDeviceIdRef.current) { lensPinnedRef.current = true; setLensDeviceId(null); }
+          stream = await tryGUM({ facingMode: { ideal: facing }, width: { ideal: CAPTURE_WIDTH }, height: { ideal: CAPTURE_HEIGHT } });
         } else {
-          throw audioErr;
+          throw e;
         }
       }
       streamRef.current = stream;
@@ -490,6 +504,27 @@ export function CameraCapture({
       // (We intentionally do NOT applyConstraints a higher resolution mid-stream
       // — that reconfigure stutters the live preview. The resolution requested
       // in getUserMedia above is what we keep.)
+      // Some phones default facingMode:environment to the ULTRA-WIDE lens. Once
+      // permission is granted (labels populate), if there are multiple real back
+      // cameras and we haven't pinned one yet, switch to the 2nd (the main lens
+      // on those phones). One-time per camera session; the stream re-acquires on
+      // the chosen deviceId via the [lensDeviceId] effect.
+      (async () => {
+        try {
+          if (facing !== 'environment' || lensDeviceIdRef.current || lensPinnedRef.current) return;
+          const devs = await navigator.mediaDevices.enumerateDevices();
+          const vids = devs.filter((d) => d.kind === 'videoinput');
+          let back = vids.filter((d) => /\b(back|rear|environment)\b/i.test(d.label));
+          if (back.length === 0) back = vids.filter((d) => !/front|user|face|selfie/i.test(d.label));
+          back = back.filter((d) => !/depth|mono(chrome)?|tof|infrared|\bir\b/i.test(d.label));
+          const seen = new Set<string>();
+          const uniq = back.filter((d) => d.deviceId && !seen.has(d.deviceId) && (seen.add(d.deviceId), true));
+          if (uniq.length >= 2 && !lensPinnedRef.current && !lensDeviceIdRef.current) {
+            lensPinnedRef.current = true;
+            setLensDeviceId(uniq[1].deviceId); // 2nd back camera = main lens
+          }
+        } catch { /* enumerate unavailable — stay on the OS default */ }
+      })();
       setPermissionState('granted');
       setPermissionError('');
     } catch (e: any) {
@@ -1419,6 +1454,7 @@ export function CameraCapture({
   useBackToClose(isOpen, () => { void handleDone(); });
 
   const flipCamera = useCallback(() => {
+    lensPinnedRef.current = false; // re-auto-pick the main lens when back on rear
     setLensDeviceId(null); // back to the default lens for the new facing
     setFacing((f) => (f === 'environment' ? 'user' : 'environment'));
     // useEffect on [facing, lensDeviceId] restarts the stream
