@@ -883,6 +883,7 @@ export function EditableLineRow(props: Props) {
                     <NumberField
                       value={quantity}
                       onChange={setQuantity}
+                      format
                       ariaLabel="Quantity"
                       revealSelector="[data-totals-row]"
                       onFocusField={onQtyFocus}
@@ -973,6 +974,7 @@ export function EditableLineRow(props: Props) {
                       <NumberField
                         value={customVendorCost}
                         onChange={setCustomVendorCost}
+                        revealSelector="[data-totals-row]"
                         placeholder={calc && !calc.isCustomPriced ? formatMoney(roundMoney(calc.vendorCost)) : '0.00'}
                         className="no-spinner bg-transparent border-0 focus:ring-0 p-0 text-base font-semibold text-gray-800 text-center w-16"
                         ariaLabel="Vendor dollar amount (editable)"

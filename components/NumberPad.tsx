@@ -26,6 +26,9 @@ type NumberFieldProps = {
   onChange: (next: string) => void;
   /** Allow a decimal point. Default true. */
   allowDecimal?: boolean;
+  /** Show the value with thousands separators (e.g. 1,500) while typing and
+   *  after. The stored value stays raw, so calculations are unaffected. */
+  format?: boolean;
   placeholder?: string;
   className?: string;
   ariaLabel?: string;
@@ -55,10 +58,23 @@ function sanitize(raw: string, allowDecimal: boolean): string {
   return t;
 }
 
+// Display a raw numeric string with thousands separators, preserving a trailing
+// "." and trailing zeros so it formats correctly WHILE typing too (e.g. raw
+// "1234" → "1,234", "1234." → "1,234.", "1000.50" → "1,000.50").
+function formatNumber(raw: string): string {
+  if (!raw) return '';
+  const dot = raw.indexOf('.');
+  const intRaw = dot === -1 ? raw : raw.slice(0, dot);
+  const decRaw = dot === -1 ? null : raw.slice(dot + 1);
+  const intFmt = (intRaw || '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decRaw === null ? intFmt : `${intFmt}.${decRaw}`;
+}
+
 export function NumberField({
   value,
   onChange,
   allowDecimal = true,
+  format = false,
   placeholder,
   className,
   ariaLabel,
@@ -167,7 +183,7 @@ export function NumberField({
         autoCapitalize="off"
         spellCheck={false}
         enterKeyHint="done"
-        value={value}
+        value={format ? formatNumber(value) : value}
         placeholder={placeholder}
         aria-label={ariaLabel}
         disabled={disabled}
@@ -231,8 +247,13 @@ export function NumberField({
               <button
                 type="button"
                 className="mt-2 w-full h-12 rounded-xl bg-brand text-white font-heading font-bold text-lg active:opacity-90 select-none"
-                // Blur the field → onBlur closes the pad and runs onDone once.
-                onPointerDown={(e) => { e.preventDefault(); inputRef.current?.blur(); }}
+                // Close on CLICK (not pointerdown): the container's pointerdown
+                // preventDefault keeps the field focused through the tap, and
+                // consuming the click here means closing the keypad can't let the
+                // same tap fall through onto whatever the keypad was covering
+                // (e.g. the modal's Save button) — Done must never save the line.
+                // blur → onBlur runs the single close path (setOpen(false)+onDone).
+                onClick={() => inputRef.current?.blur()}
               >
                 Done
               </button>
