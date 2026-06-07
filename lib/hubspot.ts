@@ -223,7 +223,7 @@ async function hubspotFetchInner(url: string, method: string, path: string, init
 
 export async function fetchQuestionsForTemplate(
   template: string,
-  opts: { debug?: boolean } = {}
+  opts: { debug?: boolean; includeDisabled?: boolean } = {}
 ): Promise<{ questions: Question[]; debug?: any }> {
   const { question: typeId } = typeIds();
   const properties = [
@@ -231,6 +231,7 @@ export async function fetchQuestionsForTemplate(
     'display_order', 'response_type', 'response_options', 'default_value',
     'note_required_on_values', 'has_assigned_to', 'assigned_to_options',
     'repeats_per_room_type', 'applies_to_templates', 'is_required', 'help_text',
+    'is_enabled',
   ];
 
   const out: Question[] = [];
@@ -288,6 +289,14 @@ export async function fetchQuestionsForTemplate(
         continue;
       }
 
+      // Soft on/off: missing/true ⇒ enabled. Disabled questions are hidden from
+      // inspectors but surfaced to the form builder (includeDisabled).
+      const enabled = String(p.is_enabled).toLowerCase() !== 'false';
+      if (!enabled && !opts.includeDisabled) {
+        if (opts.debug) debugSkipped.push({ id: r.id, questionIdExternal, questionText, reason: 'disabled (is_enabled=false)' });
+        continue;
+      }
+
       const q: Question = {
         hubspotRecordId: r.id,
         questionIdExternal,
@@ -305,6 +314,7 @@ export async function fetchQuestionsForTemplate(
         appliesToTemplates: applies,
         isRequired: String(p.is_required).toLowerCase() === 'true',
         helpText: p.help_text || '',
+        enabled,
       };
       out.push(q);
       if (opts.debug) {
@@ -401,6 +411,19 @@ export async function createQuestionRecord(props: Record<string, any>): Promise<
     method: 'POST', body: JSON.stringify({ properties: props }),
   });
   return resp.id;
+}
+
+/** The templates a question currently applies to (for the form-builder guard).
+ *  Returns null if the record can't be read. */
+export async function getQuestionAppliesToTemplates(recordId: string): Promise<string[] | null> {
+  const { question: typeId } = typeIds();
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/${recordId}?properties=applies_to_templates`);
+    const raw = resp?.properties?.applies_to_templates || '';
+    return String(raw).split('|').map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return null;
+  }
 }
 
 // Pull bed/bath from a Property record. Field names are bedrooms / bathrooms.

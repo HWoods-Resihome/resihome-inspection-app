@@ -68,6 +68,7 @@ function mkQ(p: {
     appliesToTemplates: [],
     isRequired: p.isRequired ?? true,
     helpText: p.helpText ?? '',
+    enabled: true,
   };
 }
 

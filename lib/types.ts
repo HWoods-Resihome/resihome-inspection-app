@@ -35,6 +35,9 @@ export interface Question {
   appliesToTemplates: string[];
   isRequired: boolean;
   helpText: string;
+  // Soft on/off (default true). Disabled questions are hidden from inspectors
+  // but kept (and shown in the form builder) — see lib/hubspot is_enabled.
+  enabled: boolean;
 }
 
 export interface Property {
