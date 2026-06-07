@@ -144,8 +144,9 @@ h1, h2, h3, h4, h5, h6 {
    On short viewports (landscape phones, ≲ 540px tall) reclaim vertical space:
    slim the sticky header + footer chrome, tighten section spacing, and hide
    non-essential lines so the scrollable MIDDLE gets the room. Portrait phones,
-   tablets, and desktop are taller than this, so they're unaffected. Pairs with
-   the orientation:any rotation work. */
+   tablets, and desktop are taller than this, so they're unaffected. Applies
+   whenever the device rotates to landscape (the manifest defers orientation to
+   the OS, so this kicks in only when the user's auto-rotate is unlocked). */
 @media (max-height: 540px) {
   .lz-head { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
   .lz-foot { padding-top: 0.35rem !important; padding-bottom: 0.35rem !important; }

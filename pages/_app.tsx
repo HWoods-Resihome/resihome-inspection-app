@@ -31,10 +31,12 @@ export default function App({ Component, pageProps }: AppProps) {
     initErrorReporting();
     installSessionGuard();
     registerServiceWorker();
-    // NOTE: we deliberately do NOT call screen.orientation.unlock() — in the
-    // installed PWA / native shell it forced sensor rotation and overrode the
-    // device's rotation-lock. The manifest's orientation:"any" already allows
-    // rotation while RESPECTING the OS rotation lock, which is what we want.
+    // NOTE: we deliberately do NOT call screen.orientation.unlock(), and the
+    // manifest deliberately OMITS the `orientation` key. Both forced sensor
+    // rotation in the installed PWA: manifest orientation:"any" maps to the
+    // WebAPK's FULL_SENSOR, which rotates regardless of the device's auto-rotate
+    // lock. With no orientation set (→ UNSPECIFIED) the app defers to the OS —
+    // it rotates when auto-rotate is on and stays put when the user locks it.
     // Native-only OAuth bridge. No-op in browsers (checks
     // Capacitor.isNativePlatform() internally), so web behavior is unchanged —
     // this just enables the deep-link return inside the Capacitor app.
