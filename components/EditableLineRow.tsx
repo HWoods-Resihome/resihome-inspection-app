@@ -31,6 +31,7 @@ import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
 import { VENDORS, vendorPillStyle, isInternalResolution, defaultVendorForCode } from '@/lib/vendors';
 import { setNativeKeyboardAccessoryBarVisible } from '@/lib/nativeBridge';
+import { NumberField } from '@/components/NumberPad';
 import type {
   RateCardLineItem,
   RegionRate,
@@ -876,20 +877,15 @@ export function EditableLineRow(props: Props) {
                     <label className="block text-xs font-heading font-bold text-gray-700 mb-1">
                       Quantity <span className="text-brand">*</span>
                     </label>
-                    <input
-                      // type=text + inputMode=decimal (not type=number): Android
-                      // honors enterKeyHint="done" and fires a real Enter keydown
-                      // here, so the keyboard's action CLOSES instead of jumping
-                      // focus to the next field (the vendor cost).
-                      type="text" inputMode="decimal" enterKeyHint="done"
-                      // Kill the keyboard's predictive/autofill suggestion strip
-                      // (the row above the keys) — a quantity has nothing to suggest.
-                      autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+                    {/* Branded in-app keypad (NumberField): inputMode="none" keeps
+                        the OS keyboard — and its un-removable autofill/suggestion
+                        rows — down, and our own pad drives the value. */}
+                    <NumberField
                       value={quantity}
-                      onChange={(e) => setQuantity(e.target.value.replace(/[^0-9.]/g, ''))}
-                      onFocus={onQtyFocus}
-                      onBlur={onQtyBlur}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
+                      onChange={setQuantity}
+                      ariaLabel="Quantity"
+                      onFocusField={onQtyFocus}
+                      onDone={onQtyBlur}
                       className={`no-spinner ${INPUT_CLS}`}
                     />
                   </div>
@@ -971,15 +967,12 @@ export function EditableLineRow(props: Props) {
                     </div>
                     <div className="inline-flex items-baseline justify-center">
                       <span className="text-base font-semibold text-gray-800">$</span>
-                      <input
-                        type="text" inputMode="decimal" enterKeyHint="done"
+                      <NumberField
                         value={customVendorCost}
-                        onChange={(e) => setCustomVendorCost(e.target.value.replace(/[^0-9.]/g, ''))}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
+                        onChange={setCustomVendorCost}
                         placeholder={calc && !calc.isCustomPriced ? formatMoney(roundMoney(calc.vendorCost)) : '0.00'}
                         className="no-spinner bg-transparent border-0 focus:ring-0 p-0 text-base font-semibold text-gray-800 text-center w-16"
-                        title="Leave blank to use the formula; type a number to override"
-                        aria-label="Vendor dollar amount (editable)"
+                        ariaLabel="Vendor dollar amount (editable)"
                       />
                     </div>
                   </div>
