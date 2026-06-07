@@ -30,6 +30,7 @@ import { isFinalizeAdmin } from '@/lib/finalizeAccess';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { isInternalResolution } from '@/lib/vendors';
 import { recordAuditEvent } from '@/lib/auditLog';
+import { beginFinalizeJob, completeFinalizeJob, type FinalizeMode } from '@/lib/finalizeJobs';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { bustInspectionsCache } from '@/pages/api/inspections';
@@ -157,6 +158,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const t0 = Date.now();
+  // Finalize job tracking — visibility into attempts that die mid-pipeline.
+  let finalizeJobId: string | null = null;
+  let finalizePhase = 'preflight';
+  let finalizeMode: FinalizeMode = regenerateOnly ? 'regenerate' : 'finalize';
   try {
     // ---- 1. Load all the data we need to generate PDFs ----
     const inspectionData = await fetchInspectionWithPropertyRef(id);
@@ -176,6 +181,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // one-time outbound steps (email / ticket / SFTP / xlsx / approver stamp).
     const isRefinalize = regenerateOnly
       || priorStatus === 'completed' || priorStatus === 'complete' || priorStatus === 'submitted';
+
+    finalizeMode = regenerateOnly ? 'regenerate' : isRefinalize ? 'refinalize' : 'finalize';
+    finalizePhase = 'loading';
+    finalizeJobId = await beginFinalizeJob({ inspectionId: id, mode: finalizeMode, actorEmail: session.email });
 
     // Partial-failure resumability: finalize fires several IRREVERSIBLE outbound
     // steps (create maintenance ticket, send the damages email). If a previous
@@ -695,6 +704,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // first finalize so a later regeneration doesn't overwrite the approver.
       ...(!isRefinalize ? { approved_by_name: session.name || session.email, approved_at: new Date(nowIso).getTime() } : {}),
     };
+    finalizePhase = 'persisting-status';
     try {
       await updateInspection(id, fullUpdate);
     } catch (e: any) {
@@ -712,6 +722,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Stamp the FIRST completion timestamp (kept even if re-finalized later).
     // Skipped for regenerateOnly — it isn't a completion.
     if (!regenerateOnly) await stampFirstCompleted(id, nowIso);
+    finalizePhase = 'side-effects'; // status is now persisted; remaining steps are best-effort
 
     // Audit trail: the finalize IS the approval. Distinguish first approval from
     // a re-finalize (regenerated PDFs after a reopen) and a PDFs-only regenerate.
@@ -957,6 +968,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     bustInspectionsCache(); // status → completed; reflect in the list at once
     const elapsed = Date.now() - t0;
+    void completeFinalizeJob(finalizeJobId, { inspectionId: id, mode: finalizeMode, status: 'succeeded', phase: 'completed', elapsedMs: elapsed, actorEmail: session.email });
     return res.status(200).json({
       success: true,
       elapsedMs: elapsed,
@@ -986,6 +998,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch (e: any) {
     const elapsed = Date.now() - t0;
     console.error(`[finalize] failed after ${elapsed}ms:`, e);
+    void completeFinalizeJob(finalizeJobId, { inspectionId: id, mode: finalizeMode, status: 'failed', phase: finalizePhase, error: String(e?.message || e), elapsedMs: elapsed, actorEmail: session.email });
     return res.status(500).json({ error: 'Finalize failed. Please try again.', elapsedMs: elapsed });
   } finally {
     inFlightFinalize.delete(id);
