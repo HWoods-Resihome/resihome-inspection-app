@@ -1,0 +1,17 @@
+[
+  { "utterance": "broken faux wood blind in the bedroom", "expectDescriptionIncludes": "blind", "note": "blinds default to faux wood" },
+  { "utterance": "blinds missing in the living room", "expectDescriptionIncludes": "blind" },
+  { "utterance": "mismatched paint needs touch up", "expectDescriptionIncludes": "paint", "note": "common mishear of 'mist match'" },
+  { "utterance": "patch and paint the hallway wall", "expectDescriptionIncludes": "paint" },
+  { "utterance": "replace the carpet in the master bedroom", "expectDescriptionIncludes": "carpet" },
+  { "utterance": "toilet won't flush, needs replacing", "expectDescriptionIncludes": "toilet" },
+  { "utterance": "missing smoke detector", "expectDescriptionIncludes": "smoke" },
+  { "utterance": "garbage disposal not working", "expectDescriptionIncludes": "disposal" },
+  { "utterance": "kitchen faucet is leaking", "expectDescriptionIncludes": "faucet" },
+  { "utterance": "replace the dishwasher", "expectDescriptionIncludes": "dishwasher" },
+  { "utterance": "clean the oven", "expectDescriptionIncludes": "oven" },
+  { "utterance": "ceiling fan is broken", "expectDescriptionIncludes": "fan" },
+  { "utterance": "refrigerator not cooling", "expectDescriptionIncludes": "refrigerator" },
+  { "utterance": "replace the water heater", "expectDescriptionIncludes": "water heater" },
+  { "utterance": "light fixture in the kitchen is out", "expectDescriptionIncludes": "light" }
+]
