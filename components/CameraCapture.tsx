@@ -322,14 +322,18 @@ export function CameraCapture({
   useEffect(() => { hdModeRef.current = hdMode; }, [hdMode]);
   const hdBusyRef = useRef(false);
   const [capturingHd, setCapturingHd] = useState(false);
-  // Auto-HD: a zoomed-in shot is almost always a detail shot, so flip HD ON once
-  // the inspector pinches past ~1.1× and back OFF at 1× (where rapid capture
-  // matters). Only when HD is available; the manual toggle still works and holds
-  // until the next zoom change. (`zoom` is the user-facing factor — hardware or
-  // digital; we removed sub-1 "wide", so >1.08 reliably means zoomed in.)
+  // Auto-HD: a zoomed-in shot is almost always a detail shot, so flip HD ON when
+  // the inspector pinches past ~1.1× and OFF when they return to 1×. Crucially
+  // this only fires on threshold CROSSINGS — not on every zoom value — so a
+  // MANUAL toggle holds at a steady zoom (e.g. tiny hardware-zoom jitter at 1×
+  // no longer keeps resetting it off, which made the HD button feel dead).
+  const prevZoomRef = useRef(zoom);
   useEffect(() => {
     if (!hdAvailable) return;
-    setHdMode(zoom > 1.08);
+    const was = prevZoomRef.current;
+    prevZoomRef.current = zoom;
+    if (was <= 1.08 && zoom > 1.08) setHdMode(true);        // crossed UP → HD on
+    else if (was > 1.08 && zoom <= 1.08) setHdMode(false);  // crossed DOWN → HD off
   }, [zoom, hdAvailable]);
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
