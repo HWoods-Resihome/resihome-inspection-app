@@ -12,6 +12,7 @@
  */
 import webpush from 'web-push';
 import { getPushTargets, deletePushTargetByPath } from '@/lib/pushSubscriptions';
+import { isFcmConfigured, sendFcmToToken } from '@/lib/fcmSender';
 
 export interface PushPayload {
   title: string;
@@ -58,9 +59,12 @@ export async function sendPushToUser(email: string, payload: PushPayload): Promi
 
   await Promise.all(targets.map(async ({ pathname, target }) => {
     if (target.platform === 'native') {
-      // FCM hook — wired when the Capacitor native push plugin lands. The token
-      // is in target.token; deliver via FCM here. Until then, count + skip.
-      native++;
+      // Native (Capacitor) device token → deliver via FCM. Inert until
+      // FCM_SERVICE_ACCOUNT_JSON is configured.
+      if (!isFcmConfigured() || !target.token) return;
+      const r = await sendFcmToToken(target.token, payload);
+      if (r === 'sent') native++;
+      else if (r === 'expired') { await deletePushTargetByPath(pathname); pruned++; }
       return;
     }
     if (!webReady || !target.subscription) return;
