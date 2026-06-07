@@ -59,6 +59,10 @@
          the device against the property location (navigator.geolocation). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Notifications: FCM push (approval alerts). Required to prompt for the
+         runtime notification permission on Android 13+ (API 33). The
+         @capacitor/push-notifications plugin handles FCM token + delivery. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
