@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { updateInspection, fetchInspectionById, stampFirstCompleted } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
+import { recordAuditEvent } from '@/lib/auditLog';
 
 /**
  * Finalize an existing inspection. All answers should already be saved via
@@ -86,6 +87,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
     const inspection = await fetchInspectionById(id);
+
+    void recordAuditEvent({
+      inspectionId: id,
+      action: 'submit',
+      actorEmail: session.email,
+      actorName: session.name,
+      detail: isRateCard ? 'Submitted for approval' : 'Submitted (completed)',
+    });
 
     return res.status(200).json({
       success: true,

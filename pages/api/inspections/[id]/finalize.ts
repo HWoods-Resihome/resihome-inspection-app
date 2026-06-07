@@ -29,6 +29,7 @@ import { buildQaAnswerProps } from '@/lib/answerProps';
 import { isFinalizeAdmin } from '@/lib/finalizeAccess';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { isInternalResolution } from '@/lib/vendors';
+import { recordAuditEvent } from '@/lib/auditLog';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { bustInspectionsCache } from '@/pages/api/inspections';
@@ -711,6 +712,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Stamp the FIRST completion timestamp (kept even if re-finalized later).
     // Skipped for regenerateOnly — it isn't a completion.
     if (!regenerateOnly) await stampFirstCompleted(id, nowIso);
+
+    // Audit trail: the finalize IS the approval. Distinguish first approval from
+    // a re-finalize (regenerated PDFs after a reopen) and a PDFs-only regenerate.
+    void recordAuditEvent({
+      inspectionId: id,
+      action: regenerateOnly ? 'regenerate' : isRefinalize ? 'refinalize' : 'approve',
+      actorEmail: session.email,
+      actorName: session.name,
+      detail: regenerateOnly ? 'Regenerated PDFs' : isRefinalize ? 'Re-finalized (PDFs regenerated)' : 'Approved & finalized',
+      meta: { vendor: ctx.grandTotals.vendor, client: ctx.grandTotals.client, tenant: ctx.grandTotals.tenant },
+    });
 
     // ---- 6c. Materialize the Final Checklist as structured answer records ----
     // The form persists the whole checklist as ONE opaque qa blob (fc__all) so it

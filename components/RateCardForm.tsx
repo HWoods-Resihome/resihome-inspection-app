@@ -46,6 +46,7 @@ import {
   makeCustomSectionId,
 } from '@/lib/sections';
 import { SectionsManager } from '@/components/SectionsManager';
+import { InspectionAuditTrail } from '@/components/InspectionAuditTrail';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
@@ -186,6 +187,8 @@ export function RateCardForm(props: RateCardFormProps) {
   const [showSectionsManager, setShowSectionsManager] = useState(false);
   // Header settings (gear) dropdown — houses Manage Sections + Refresh Pricing.
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  // Audit trail modal (who submitted/approved/reopened/cancelled, and when).
+  const [showAuditTrail, setShowAuditTrail] = useState(false);
   // Keys of line rows whose edit modal is open — used to hide the floating mic
   // (it should never float over a modal/other screen when idle).
   const [openEditors, setOpenEditors] = useState<Set<string>>(new Set());
@@ -3213,6 +3216,14 @@ export function RateCardForm(props: RateCardFormProps) {
                       >
                         <span aria-hidden className="text-gray-400">⟳</span> {dataLoading ? 'Refreshing…' : 'Refresh Pricing'}
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowSettingsMenu(false); setShowAuditTrail(true); }}
+                        className="w-full text-left px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors border-t border-gray-100"
+                        title="Who submitted, approved, reopened or cancelled this inspection, and when."
+                      >
+                        <span aria-hidden className="text-gray-400">🕑</span> Audit Trail
+                      </button>
                     </div>
                   </>
                 )}
@@ -3879,6 +3890,11 @@ export function RateCardForm(props: RateCardFormProps) {
         inspectionId={props.inspectionRecordId}
         rooms={sections.map((s) => ({ id: s.id, name: s.displayName || s.label }))}
         cameraOpen={!!aiCameraTarget || aiAddItemsOpen}
+      />
+      <InspectionAuditTrail
+        open={showAuditTrail}
+        onClose={() => setShowAuditTrail(false)}
+        inspectionId={props.inspectionRecordId}
       />
       {/* AI review "Decline — Add Items": the manual Add Line Item editor, added
           to Whole House. The review modal hides while it's open (cameraOpen). */}

@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { updateInspection } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
+import { recordAuditEvent } from '@/lib/auditLog';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -16,6 +17,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     await updateInspection(id, { status: 'cancelled' });
+    void recordAuditEvent({ inspectionId: id, action: 'cancel', actorEmail: session.email, actorName: session.name, detail: 'Cancelled' });
     return res.status(200).json({ success: true });
   } catch (e: any) {
     console.error(`POST /api/inspections/${id}/cancel failed:`, e);

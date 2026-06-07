@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { updateInspection } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
+import { recordAuditEvent } from '@/lib/auditLog';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -21,6 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     await updateInspection(id, { status: 'in_progress' });
+    void recordAuditEvent({ inspectionId: id, action: 'reopen', actorEmail: session.email, actorName: session.name, detail: 'Reopened for editing' });
     return res.status(200).json({ success: true });
   } catch (e: any) {
     console.error(`POST /api/inspections/${id}/reopen failed:`, e);
