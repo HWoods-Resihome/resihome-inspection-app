@@ -653,10 +653,22 @@ export function CameraCapture({
     if (e.touches.length < 2) pinchRef.current = null;
     const tp = tapRef.current;
     tapRef.current = null;
+    if (!tp || e.touches.length !== 0) return;
+    const ct = e.changedTouches[0];
+    if (ct) {
+      const dx = ct.clientX - tp.x;
+      const dy = ct.clientY - tp.y;
+      // Horizontal swipe across the preview → change rooms (multi-room only).
+      // Must be clearly horizontal, far enough, and quick — so it never fires on
+      // a tap-to-focus or a vertical drag. Swipe LEFT → next room, RIGHT → prev.
+      if (multiRoom && Math.abs(dx) >= 60 && Math.abs(dx) > Math.abs(dy) * 1.3 && (Date.now() - tp.t) < 700) {
+        goAdjacentRoom(dx < 0 ? 1 : -1);
+        return;
+      }
+    }
     // A clean single tap directly on the preview (not a control button, not a
-    // drag, not the tail of a pinch) → focus there.
-    if (tp && !tp.moved && e.touches.length === 0 && (Date.now() - tp.t) < 400 && tp.target === videoRef.current) {
-      const ct = e.changedTouches[0];
+    // drag/swipe, not the tail of a pinch) → focus there.
+    if (!tp.moved && (Date.now() - tp.t) < 400 && tp.target === videoRef.current) {
       if (ct) focusAt(ct.clientX, ct.clientY);
     }
   };
