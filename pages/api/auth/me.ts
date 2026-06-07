@@ -2,6 +2,12 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isFinalizeAdmin } from '@/lib/finalizeAccess';
 import { isExternalEmail, EXTERNAL_TEMPLATE } from '@/lib/userAccess';
+import { warnOnBootIfMisconfigured } from '@/lib/configValidation';
+
+// Cheap, env-only, once-per-cold-instance: log a warning if a required env var
+// is missing/invalid. Hit on essentially every app load, so it acts as a boot
+// check without a dedicated boot hook (serverless has none).
+warnOnBootIfMisconfigured();
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {

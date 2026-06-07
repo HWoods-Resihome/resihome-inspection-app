@@ -1912,6 +1912,26 @@ export async function fetchPropertyFieldOptions(fieldName: string): Promise<stri
   }
 }
 
+/**
+ * Resolve the canonical custom-object type IDs the app depends on. Throws (with
+ * a precise message) if a required *_TYPE_ID env var is missing. Used by the
+ * config-check endpoint to validate the environment is wired correctly.
+ */
+export function resolvedTypeIds(): { inspection: string; question: string; answer: string; property: string } {
+  return typeIds();
+}
+
+/**
+ * List the internal names of every property defined on a HubSpot object type.
+ * Used by config validation to detect missing inspection properties that would
+ * otherwise make finalize silently degrade (its PROPERTY_DOESNT_EXIST fallbacks
+ * drop PDFs / status writes without surfacing the misconfiguration).
+ */
+export async function listObjectPropertyNames(typeId: string): Promise<string[]> {
+  const resp = await hubspotFetch(`/crm/v3/properties/${typeId}`);
+  return (resp.results || []).map((p: any) => String(p.name)).filter(Boolean);
+}
+
 // ---------------------------------------------------------------------------
 // Billing-field sync (for clean billing reports)
 //

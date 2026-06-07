@@ -1,19 +1,23 @@
 /**
  * GET /api/admin/config-check
  *
- * Ongoing-health check for code↔catalog drift. Today it reports any Final
- * Checklist add-line codes (hardcoded in lib/finalChecklist.ts) that are no
- * longer present in the live catalog — i.e. a rename/removal in the catalog
- * silently broke an FC "add line" button. The rate-card-line SAVE path already
- * rejects unknown codes (rate-card-lines.ts), so this covers the one place a
- * bad code is referenced from code rather than user input.
+ * One-stop configuration & schema health check. Reports:
+ *   - env:    required/recommended environment variables (HubSpot token, type
+ *             IDs, AI keys, blob/cron secrets) present and well-formed.
+ *   - schema: HubSpot reachable, type IDs resolve, and the inspection object has
+ *             the properties finalize/submit WRITE (a missing one makes finalize
+ *             silently degrade to a status-only write — no PDFs, no approval).
+ *   - finalChecklist: code↔catalog drift — FC "add line" codes (hardcoded in
+ *             lib/finalChecklist.ts) that no longer exist in the live catalog.
  *
- * Gated to authenticated @resihome.com staff. Read-only.
+ * `ok` is true only when no REQUIRED check fails. Gated to @resihome.com staff.
+ * Read-only.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { fcReferencedLineCodes, fcMissingLineCodes } from '@/lib/finalChecklist';
+import { validateEnv, validateSchema, type CheckItem } from '@/lib/configValidation';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -24,16 +28,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: 'Method not allowed' });
   }
   try {
-    const catalog = await getCachedCatalog();
-    const codes = new Set(catalog.map((c) => c.lineItemCode));
-    const referenced = fcReferencedLineCodes();
-    const missing = fcMissingLineCodes(codes);
+    const env = validateEnv();
+    // Schema (HubSpot round-trip) and catalog run concurrently; both best-effort
+    // so one failing area still reports the others.
+    const [schema, catalogResult] = await Promise.all([
+      validateSchema().catch((e): CheckItem[] => [{ key: 'schema check', ok: false, level: 'required', detail: String(e?.message || e).slice(0, 200) }]),
+      (async () => {
+        const catalog = await getCachedCatalog();
+        const codes = new Set(catalog.map((c) => c.lineItemCode));
+        return { size: catalog.length, referenced: fcReferencedLineCodes(), missing: fcMissingLineCodes(codes) };
+      })().catch((e) => ({ error: String(e?.message || e).slice(0, 200) } as any)),
+    ]);
+
+    const requiredFailures = [...env, ...schema].filter((c) => c.level === 'required' && !c.ok);
+    const fcMissing: string[] = catalogResult?.missing || [];
+    const ok = requiredFailures.length === 0 && fcMissing.length === 0 && !catalogResult?.error;
+
     return res.status(200).json({
-      ok: missing.length === 0,
-      catalogSize: catalog.length,
-      finalChecklist: {
-        referencedCodes: referenced,
-        missingCodes: missing, // non-empty ⇒ these FC add-line buttons are broken
+      ok,
+      env,
+      schema,
+      catalogSize: catalogResult?.size,
+      finalChecklist: catalogResult?.error
+        ? { error: catalogResult.error }
+        : { referencedCodes: catalogResult.referenced, missingCodes: fcMissing },
+      summary: {
+        requiredFailures: requiredFailures.map((c) => c.key),
+        fcMissingCodes: fcMissing,
       },
     });
   } catch (e: any) {
