@@ -681,6 +681,9 @@ export function EditableLineRow(props: Props) {
       // Clicked inside the floating Combobox panel? That panel renders outside
       // the row's DOM tree visually (position:fixed) — check for the panel marker.
       if (target.closest('[data-combobox-panel="true"]')) return;
+      // Clicked inside the number keypad (a body-portal overlay, e.g. a tablet
+      // using the on-screen pad)? Not "outside" — don't commit mid-entry.
+      if (target.closest('[data-numberpad]')) return;
       // Genuine outside click — commit.
       trySave();
     }
@@ -1099,18 +1102,14 @@ export function EditableLineRow(props: Props) {
       </td>
       {/* Qty (center-aligned, no spinner) */}
       <td className="px-2 py-1.5 text-center align-middle">
-        <input
-          type="number"
-          step="0.01"
-          min="0"
-          enterKeyHint="done"
-          autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+        <NumberField
           value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
-          onFocus={(e) => { e.target.select(); setNativeKeyboardAccessoryBarVisible(false); }}
-          onBlur={() => setNativeKeyboardAccessoryBarVisible(true)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
-          className="no-spinner h-9 w-14 border border-gray-300 rounded px-1 text-sm text-center bg-white mx-auto"
+          onChange={setQuantity}
+          format
+          ariaLabel="Quantity"
+          onFocusField={() => setNativeKeyboardAccessoryBarVisible(false)}
+          onDone={() => setNativeKeyboardAccessoryBarVisible(true)}
+          className="no-spinner h-9 w-16 border border-gray-300 rounded px-1 text-sm text-center bg-white mx-auto"
         />
       </td>
       {/* Unit (read-only — auto from line item) */}
