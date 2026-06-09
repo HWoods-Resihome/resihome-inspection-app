@@ -38,6 +38,8 @@ export interface Question {
   // Soft on/off (default true). Disabled questions are hidden from inspectors
   // but kept (and shown in the form builder) — see lib/hubspot is_enabled.
   enabled: boolean;
+  // Require at least one photo attached to this question before submit.
+  requiresPhoto: boolean;
 }
 
 export interface Property {

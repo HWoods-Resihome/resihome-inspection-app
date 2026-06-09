@@ -460,7 +460,9 @@ export function QuestionForm({
           note: '',
           quantity: null,
           photoUrls: [],
-          optionalPanelOpen: false,
+          // Open the photo/notes panel up-front when a photo is required, so the
+          // inspector sees the capture affordance without hunting for it.
+          optionalPanelOpen: !!q.requiresPhoto,
         };
       }
     }
@@ -1016,6 +1018,14 @@ export function QuestionForm({
         } else if (q.isRequired && (!a || !a.answerValue)) {
           return {
             message: `Required: ${locTag}${q.questionText}`,
+            scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
+            instanceKey: inst.instanceKey,
+          };
+        }
+        // Require a photo on this question (any response type) when flagged.
+        if (q.requiresPhoto && (!a || (a.photoUrls?.length || 0) === 0)) {
+          return {
+            message: `Photo required: ${locTag}${q.questionText}`,
             scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
             instanceKey: inst.instanceKey,
           };

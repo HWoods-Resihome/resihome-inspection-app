@@ -69,6 +69,7 @@ function mkQ(p: {
     isRequired: p.isRequired ?? true,
     helpText: p.helpText ?? '',
     enabled: true,
+    requiresPhoto: false,
   };
 }
 

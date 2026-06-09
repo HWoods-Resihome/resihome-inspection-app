@@ -51,6 +51,15 @@ export const RESPONSE_TYPES: { value: ResponseType; label: string; hasOptions: b
 
 export const RESPONSE_TYPE_VALUES = RESPONSE_TYPES.map((r) => r.value);
 
+// The standard section names (mirrors lib/sections.ts SECTION_ORDER, plus the
+// repeating room types) offered in the form builder's Section dropdown. Admins
+// can also add a new section name via free text.
+export const STANDARD_SECTIONS: string[] = [
+  'Yard / Exterior', 'Entry / Foyer', 'Family / Living Room', 'Dining Room',
+  'Kitchen', 'Hallway / Stairs', 'Bedroom', 'Bathroom', 'Half Bath',
+  'Laundry Room', 'Garage', 'Whole House', 'HVAC / Mechanicals', 'Smart Home / Locks',
+];
+
 export interface QuestionInput {
   questionText?: string;
   section?: string;
@@ -67,6 +76,7 @@ export interface QuestionInput {
   isRequired?: boolean;
   helpText?: string;
   enabled?: boolean;
+  requiresPhoto?: boolean;
 }
 
 /** Map an admin form input to HubSpot inspection_question properties. Only the
@@ -89,5 +99,6 @@ export function questionInputToProps(input: QuestionInput): Record<string, strin
   if (input.isRequired !== undefined) props.is_required = input.isRequired ? 'true' : 'false';
   if (input.helpText !== undefined) props.help_text = String(input.helpText).slice(0, 1000);
   if (input.enabled !== undefined) props.is_enabled = input.enabled ? 'true' : 'false';
+  if (input.requiresPhoto !== undefined) props.requires_photo = input.requiresPhoto ? 'true' : 'false';
   return props;
 }

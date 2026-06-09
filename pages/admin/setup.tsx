@@ -52,7 +52,7 @@ export default function SetupPage() {
       <header className="bg-brand text-white">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
           <h1 className="font-heading font-extrabold text-lg">Admin Setup</h1>
-          <Link href="/" className="text-xs font-heading font-semibold text-white/90 hover:text-white">← Inspections</Link>
+          <Link href="/" className="text-xs font-heading font-semibold text-white/90 hover:text-white inline-flex items-center gap-1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M11 18l-6-6 6-6" /></svg> Inspections</Link>
         </div>
       </header>
       <main className="max-w-2xl mx-auto px-4 py-6">

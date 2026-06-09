@@ -129,7 +129,7 @@ export default function AiKnowledgePage() {
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></svg>
             <h1 className="font-heading font-extrabold text-lg tracking-tight truncate">AI Knowledge Base</h1>
           </div>
-          <Link href="/" className="text-xs font-heading font-semibold text-white/90 hover:text-white shrink-0">← Inspections</Link>
+          <Link href="/" className="text-xs font-heading font-semibold text-white/90 hover:text-white shrink-0 inline-flex items-center gap-1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M11 18l-6-6 6-6" /></svg> Inspections</Link>
         </div>
       </header>
 

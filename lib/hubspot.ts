@@ -231,7 +231,7 @@ export async function fetchQuestionsForTemplate(
     'display_order', 'response_type', 'response_options', 'default_value',
     'note_required_on_values', 'has_assigned_to', 'assigned_to_options',
     'repeats_per_room_type', 'applies_to_templates', 'is_required', 'help_text',
-    'is_enabled',
+    'is_enabled', 'requires_photo',
   ];
 
   const out: Question[] = [];
@@ -315,6 +315,7 @@ export async function fetchQuestionsForTemplate(
         isRequired: String(p.is_required).toLowerCase() === 'true',
         helpText: p.help_text || '',
         enabled,
+        requiresPhoto: String(p.requires_photo).toLowerCase() === 'true',
       };
       out.push(q);
       if (opts.debug) {
@@ -2335,12 +2336,15 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   await ensureProp(agent, 'app_templates_json', { name: 'app_templates_json', label: 'App Templates (JSON)', type: 'string', fieldType: 'textarea', groupName: 'ai_knowledge' });
   await ensureGroup(question, 'inspection_question_info', 'Question Info');
   // Boolean properties REQUIRE explicit true/false options, or HubSpot 400s.
+  const boolOpts = [
+    { label: 'Yes', value: 'true', displayOrder: 0, hidden: false },
+    { label: 'No', value: 'false', displayOrder: 1, hidden: false },
+  ];
   await ensureProp(question, 'is_enabled', {
-    name: 'is_enabled', label: 'Enabled', type: 'bool', fieldType: 'booleancheckbox', groupName: 'inspection_question_info',
-    options: [
-      { label: 'Yes', value: 'true', displayOrder: 0, hidden: false },
-      { label: 'No', value: 'false', displayOrder: 1, hidden: false },
-    ],
+    name: 'is_enabled', label: 'Enabled', type: 'bool', fieldType: 'booleancheckbox', groupName: 'inspection_question_info', options: boolOpts,
+  });
+  await ensureProp(question, 'requires_photo', {
+    name: 'requires_photo', label: 'Requires Photo', type: 'bool', fieldType: 'booleancheckbox', groupName: 'inspection_question_info', options: boolOpts,
   });
 
   return results;

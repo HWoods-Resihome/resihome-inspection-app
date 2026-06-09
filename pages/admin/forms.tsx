@@ -9,7 +9,8 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import type { Question, ResponseType } from '@/lib/types';
-import { RESPONSE_TYPES } from '@/lib/formBuilder';
+import { RESPONSE_TYPES, STANDARD_SECTIONS } from '@/lib/formBuilder';
+import { Combobox } from '@/components/Combobox';
 
 interface TemplateInfo { id: string; label: string; custom: boolean; }
 
@@ -23,39 +24,76 @@ type Draft = {
   isRequired: boolean;
   helpText: string;
   enabled: boolean;
+  requiresPhoto: boolean;
 };
 
 const blankDraft = (section = '', sectionOrder = 0): Draft => ({
   questionText: '', section, sectionOrder, displayOrder: 0,
-  responseType: 'text', responseOptionsText: '', isRequired: false, helpText: '', enabled: true,
+  responseType: 'text', responseOptionsText: '', isRequired: false, helpText: '', enabled: true, requiresPhoto: false,
 });
 
 const toOptions = (s: string): string[] => s.split(/\r?\n|,/).map((x) => x.trim()).filter(Boolean);
 const fromQuestion = (q: Question): Draft => ({
   questionText: q.questionText, section: q.section, sectionOrder: q.sectionOrder, displayOrder: q.displayOrder,
   responseType: q.responseType, responseOptionsText: q.responseOptions.join('\n'),
-  isRequired: q.isRequired, helpText: q.helpText, enabled: q.enabled,
+  isRequired: q.isRequired, helpText: q.helpText, enabled: q.enabled, requiresPhoto: q.requiresPhoto,
 });
 
-function QuestionEditor({ initial, template, onSave, onCancel, busy }: {
-  initial: Draft; template: string; onSave: (d: Draft) => void; onCancel: () => void; busy: boolean;
+const ADD_NEW = '__add_new_section__';
+
+function QuestionEditor({ initial, onSave, onCancel, busy }: {
+  initial: Draft; onSave: (d: Draft) => void; onCancel: () => void; busy: boolean;
 }) {
   const [d, setD] = useState<Draft>(initial);
+  // Section is a dropdown of standard sections + "Add new"; a custom value (not
+  // in the standard list) starts in free-text mode.
+  const [customSection, setCustomSection] = useState(() => !!initial.section && !STANDARD_SECTIONS.includes(initial.section));
   const typeMeta = RESPONSE_TYPES.find((t) => t.value === d.responseType);
   const set = (patch: Partial<Draft>) => setD((cur) => ({ ...cur, ...patch }));
+
+  const sectionOptions = [
+    ...STANDARD_SECTIONS.map((s) => ({ value: s, label: s })),
+    { value: ADD_NEW, label: '➕ Add new section…' },
+  ];
+
   return (
     <div className="rounded-lg border border-brand/40 bg-brand/5 p-3 space-y-2.5">
       <textarea value={d.questionText} onChange={(e) => set({ questionText: e.target.value })} rows={2}
         placeholder="Question text" className="focus-brand w-full border border-gray-300 rounded-lg p-2 text-sm" />
+
+      {/* Section: dropdown of standard sections, with "Add new" → free text. */}
+      <div>
+        <div className="text-[11px] font-heading font-semibold text-gray-500 mb-0.5">Section</div>
+        {customSection ? (
+          <div className="flex items-center gap-2">
+            <input autoFocus value={d.section} onChange={(e) => set({ section: e.target.value })}
+              placeholder="New section name" className="focus-brand flex-1 border border-gray-300 rounded-lg p-2 text-sm" />
+            <button type="button" onClick={() => { setCustomSection(false); set({ section: '' }); }}
+              className="text-xs font-heading font-semibold text-gray-600 shrink-0">Choose existing</button>
+          </div>
+        ) : (
+          <Combobox
+            compact filled
+            options={sectionOptions}
+            value={d.section}
+            placeholder="Select a section"
+            onChange={(v) => { if (v === ADD_NEW) { setCustomSection(true); set({ section: '' }); } else { set({ section: v }); } }}
+          />
+        )}
+      </div>
+
+      {/* Answer type: the app-standard dropdown (not the OS picker). */}
+      <div>
+        <div className="text-[11px] font-heading font-semibold text-gray-500 mb-0.5">Answer type</div>
+        <Combobox
+          compact filled
+          options={RESPONSE_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+          value={d.responseType}
+          onChange={(v) => set({ responseType: v as ResponseType })}
+        />
+      </div>
+
       <div className="grid grid-cols-2 gap-2">
-        <label className="text-[11px] font-heading font-semibold text-gray-500">Section
-          <input value={d.section} onChange={(e) => set({ section: e.target.value })} className="focus-brand w-full border border-gray-300 rounded-lg p-2 text-sm mt-0.5" />
-        </label>
-        <label className="text-[11px] font-heading font-semibold text-gray-500">Answer type
-          <select value={d.responseType} onChange={(e) => set({ responseType: e.target.value as ResponseType })} className="focus-brand w-full border border-gray-300 rounded-lg p-2 text-sm mt-0.5 bg-white">
-            {RESPONSE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
-        </label>
         <label className="text-[11px] font-heading font-semibold text-gray-500">Section order
           <input type="number" value={d.sectionOrder} onChange={(e) => set({ sectionOrder: Number(e.target.value) })} className="focus-brand w-full border border-gray-300 rounded-lg p-2 text-sm mt-0.5" />
         </label>
@@ -63,6 +101,7 @@ function QuestionEditor({ initial, template, onSave, onCancel, busy }: {
           <input type="number" value={d.displayOrder} onChange={(e) => set({ displayOrder: Number(e.target.value) })} className="focus-brand w-full border border-gray-300 rounded-lg p-2 text-sm mt-0.5" />
         </label>
       </div>
+
       {typeMeta?.hasOptions && (
         <label className="block text-[11px] font-heading font-semibold text-gray-500">Choices (one per line)
           <textarea value={d.responseOptionsText} onChange={(e) => set({ responseOptionsText: e.target.value })} rows={3}
@@ -72,8 +111,9 @@ function QuestionEditor({ initial, template, onSave, onCancel, busy }: {
       <label className="block text-[11px] font-heading font-semibold text-gray-500">Help text (optional)
         <input value={d.helpText} onChange={(e) => set({ helpText: e.target.value })} className="focus-brand w-full border border-gray-300 rounded-lg p-2 text-sm mt-0.5" />
       </label>
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-wrap">
         <label className="flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" checked={d.isRequired} onChange={(e) => set({ isRequired: e.target.checked })} /> Required</label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" checked={d.requiresPhoto} onChange={(e) => set({ requiresPhoto: e.target.checked })} /> Require photo</label>
         <label className="flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" checked={d.enabled} onChange={(e) => set({ enabled: e.target.checked })} /> Enabled</label>
       </div>
       <div className="flex justify-end gap-2 pt-1">
@@ -233,7 +273,7 @@ export default function FormBuilderPage() {
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h6" /></svg>
             <h1 className="font-heading font-extrabold text-lg tracking-tight truncate">Form Builder</h1>
           </div>
-          <Link href="/" className="text-xs font-heading font-semibold text-white/90 hover:text-white shrink-0">← Inspections</Link>
+          <Link href="/" className="text-xs font-heading font-semibold text-white/90 hover:text-white shrink-0 inline-flex items-center gap-1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M11 18l-6-6 6-6" /></svg> Inspections</Link>
         </div>
       </header>
 
@@ -247,10 +287,15 @@ export default function FormBuilderPage() {
             <button type="button" onClick={newTemplate} disabled={busy} className="text-xs font-heading font-semibold text-brand hover:underline">+ New template</button>
           </div>
         </div>
-        <select value={template} onChange={(e) => { setEditingId(null); setAdding(false); setTemplate(e.target.value); }}
-          className="focus-brand w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white mb-3">
-          {templates.map((t) => <option key={t.id} value={t.id}>{t.label}{t.custom ? ' (custom)' : ''}</option>)}
-        </select>
+        <div className="mb-3">
+          <Combobox
+            filled
+            options={templates.map((t) => ({ value: t.id, label: `${t.label}${t.custom ? ' (custom)' : ''}` }))}
+            value={template}
+            placeholder="Select a template"
+            onChange={(v) => { setEditingId(null); setAdding(false); setTemplate(v); }}
+          />
+        </div>
         <p className="text-[12px] text-gray-500 mb-4">Scope Rate Card and Turn Re-Inspect QC are locked and not editable here. New templates and question changes sync to HubSpot and apply to new inspections immediately.</p>
 
         {error && <div className="mb-4 p-3 bg-rose-50 border border-rose-300 rounded text-sm text-rose-800">{error}</div>}
@@ -262,7 +307,7 @@ export default function FormBuilderPage() {
 
         {adding && (
           <div className="mb-4">
-            <QuestionEditor initial={blankDraft()} template={template} busy={busy}
+            <QuestionEditor initial={blankDraft()} busy={busy}
               onSave={create} onCancel={() => setAdding(false)} />
           </div>
         )}
@@ -280,7 +325,7 @@ export default function FormBuilderPage() {
                   {qs.map((q) => (
                     <li key={q.hubspotRecordId} className={`bg-white rounded-xl border p-3 shadow-sm ${q.enabled ? 'border-gray-200' : 'border-gray-200 opacity-60'}`}>
                       {editingId === q.hubspotRecordId ? (
-                        <QuestionEditor initial={fromQuestion(q)} template={template} busy={busy}
+                        <QuestionEditor initial={fromQuestion(q)} busy={busy}
                           onSave={(d) => saveEdit(q.hubspotRecordId, d)} onCancel={() => setEditingId(null)} />
                       ) : (
                         <>
