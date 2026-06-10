@@ -2545,11 +2545,53 @@ export function RateCardForm(props: RateCardFormProps) {
         const extra: AiAdjustment[] = [];
         if (!hasCat(/paint/i)) extra.push(missingCategoryCheck('paint'));
         if (!hasCat(/clean/i)) extra.push(missingCategoryCheck('cleaning'));
-        // NOTE: the deterministic "$0 vendor charge" flag was REMOVED — in the
-        // field it conflated "regional pricing hasn't loaded" with "no charge"
-        // and trapped inspectors behind a wall of $0 prompts. To re-introduce it
-        // safely it must be driven by genuine bid-item state (explicit $0), not a
-        // computed cost that's $0 whenever pricing isn't loaded.
+        // Flag lines added with NO vendor charge ($0) — every line should have a
+        // cost. CRITICAL guard against the field flood: only flag $0 lines when
+        // OTHER lines ARE priced (> $0). That proves regional pricing is loaded
+        // and working, so a $0 here is a genuine miss — not "pricing didn't load,
+        // so everything is $0." If nothing is priced, we flag nothing.
+        if (regionsRef.current.length > 0) {
+          const priced: { sid: string; l: RateCardLineInput; item: RateCardLineItem; vc: number }[] = [];
+          for (const [sid, arr] of Object.entries(linesBySectionRef.current)) {
+            for (const l of (arr || [])) {
+              const item = cat.get(l.lineItemCode);
+              if (!item) continue; // unknown code → can't price → don't flag
+              let vc: number | null = null;
+              try {
+                const c = calculateLine(item, inspectionRegion, regionsRef.current, {
+                  quantity: l.quantity, tenantBillBackPercent: l.tenantBillBackPercent,
+                  customLaborRate: l.customLaborRate ?? null, customAdjustedMaterialCost: l.customAdjustedMaterialCost ?? null,
+                  customVendorCost: l.customVendorCost ?? null,
+                });
+                vc = roundMoney(c.vendorCost);
+              } catch { vc = null; } // unpriceable → skip
+              if (vc !== null) priced.push({ sid, l, item, vc });
+            }
+          }
+          const anyPriced = priced.some((p) => p.vc > 0);
+          if (anyPriced) {
+            let flagged = 0;
+            for (const p of priced) {
+              if (flagged >= 30) break;
+              if (p.vc <= 0) {
+                const sec = sections.find((s) => s.id === p.sid);
+                extra.push({
+                  id: `novendor_${p.l.externalId}`,
+                  type: 'edit',
+                  sectionId: p.sid,
+                  sectionName: sec?.displayName || sec?.label,
+                  lineExternalId: p.l.externalId,
+                  needsVendorCost: true,
+                  title: `Add a vendor charge — ${p.item.laborShortDescription}`,
+                  rationale: 'This line has no vendor charge ($0), but every line should have a cost. Enter the vendor cost, or confirm none is needed.',
+                  severity: 'medium',
+                  current: { description: p.item.laborShortDescription, vendorCost: 0, lineItemCode: p.l.lineItemCode, quantity: p.l.quantity, unit: p.item.laborMeas },
+                });
+                flagged++;
+              }
+            }
+          }
+        }
         if (extra.length) setAiAdjustments((prev) => {
           const have = new Set(prev.map((p) => p.id));
           return [...prev, ...extra.filter((e) => !have.has(e.id))];
