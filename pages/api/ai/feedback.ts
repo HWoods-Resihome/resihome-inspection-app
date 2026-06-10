@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { recordAiFeedback, type AiFeedbackEvent } from '@/lib/aiFeedback';
+import { maybeRefreshLearnedKnowledge } from '@/lib/aiKnowledgeLearning';
 
 /**
  * Sink for AI feedback events (see lib/aiFeedbackClient.ts) — how a human
@@ -21,6 +22,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Cap the batch so a misbehaving client can't storm the blob store.
     const events = raw.filter((e) => e && typeof e === 'object' && e.source && e.decision).slice(0, 100);
     await Promise.all(events.map((e) => recordAiFeedback(e as AiFeedbackEvent)));
+    // Near-real-time learning: fold new feedback into the AI Knowledge base
+    // (throttled to ~once / 3 min across the fleet, only when there's activity).
+    if (events.length) await maybeRefreshLearnedKnowledge();
   } catch {
     /* swallow — feedback capture must never fail loudly */
   }

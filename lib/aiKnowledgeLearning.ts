@@ -14,6 +14,7 @@
  * (dismissing it) at /ai-knowledge. The loop refreshes these on a schedule
  * (daily cron) and never touches human or adopted entries.
  */
+import { put, list } from '@vercel/blob';
 import { readAiFeedback, type AiFeedbackEvent } from '@/lib/aiFeedback';
 import { upsertAutoKnowledgeEntries, type AutoKnowledgeCandidate } from '@/lib/hubspot';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
@@ -110,6 +111,54 @@ export async function refreshLearnedKnowledge(days = 90): Promise<{ candidates: 
   const result = await upsertAutoKnowledgeEntries(candidates);
   console.log(`[ai-learning] knowledge refresh: ${JSON.stringify({ candidates: candidates.length, ...result })}`);
   return { candidates: candidates.length, ...result };
+}
+
+// ---------------------------------------------------------------------------
+// Near-real-time learning: refresh on feedback ingestion (throttled), so new
+// knowledge appears within minutes of the activity that produced it — not just
+// on the nightly cron. Two-level throttle keeps it cheap: a per-instance timer
+// short-circuits the hot path, and a shared Blob marker stops every serverless
+// instance from refreshing in the same window. Idle = zero work.
+// ---------------------------------------------------------------------------
+const REALTIME_THROTTLE_MS = 3 * 60 * 1000;
+const REFRESH_MARKER = 'ai-learning/last-knowledge-refresh.json';
+let _lastRealtimeRefreshAt = 0;
+
+async function readMarkerAt(): Promise<number> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return 0;
+  try {
+    const { blobs } = await list({ prefix: REFRESH_MARKER });
+    const hit = blobs.find((b) => b.pathname === REFRESH_MARKER);
+    if (!hit) return 0;
+    const d = await fetch(hit.url).then((r) => r.json()).catch(() => null);
+    return Number(d?.at) || 0;
+  } catch { return 0; }
+}
+async function writeMarker(at: number): Promise<void> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return;
+  try {
+    await put(REFRESH_MARKER, JSON.stringify({ at }),
+      { access: 'public', contentType: 'application/json', allowOverwrite: true, addRandomSuffix: false });
+  } catch { /* best-effort */ }
+}
+
+/**
+ * Refresh learned knowledge if it hasn't run in the last few minutes. Called
+ * from feedback ingestion so the knowledge base self-updates in near real time.
+ * Best-effort; never throws.
+ */
+export async function maybeRefreshLearnedKnowledge(): Promise<void> {
+  const now = Date.now();
+  if (now - _lastRealtimeRefreshAt < REALTIME_THROTTLE_MS) return; // per-instance fast path
+  _lastRealtimeRefreshAt = now;
+  try {
+    const markerAt = await readMarkerAt();
+    if (now - markerAt < REALTIME_THROTTLE_MS) return; // another instance just did it
+    await writeMarker(now);
+    await refreshLearnedKnowledge(90);
+  } catch (e: any) {
+    console.warn('[ai-learning] realtime refresh failed:', String(e?.message || e).slice(0, 120));
+  }
 }
 
 /**
