@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
 import { useAppUpdate } from '@/lib/useAppUpdate';
 import { SESSION_EXPIRED_EVENT } from '@/lib/sessionGuard';
 
@@ -9,8 +10,13 @@ import { SESSION_EXPIRED_EVENT } from '@/lib/sessionGuard';
  *     queued work is safe and prompting a re-login.
  */
 export function FieldStatusOverlays() {
+  const router = useRouter();
   const { updateReady, reload } = useAppUpdate();
   const [sessionExpired, setSessionExpired] = useState(false);
+  // On the login screen the "session expired" prompt is meaningless and traps
+  // the user (it covers the sign-in form, and "Sign in again" just reloads
+  // /login where the guard re-fires). Suppress it there.
+  const onLoginPage = router.pathname === '/login';
 
   useEffect(() => {
     const onExpired = () => setSessionExpired(true);
@@ -33,7 +39,7 @@ export function FieldStatusOverlays() {
         </div>
       )}
 
-      {sessionExpired && (
+      {sessionExpired && !onLoginPage && (
         <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-6">
           <div className="max-w-sm w-full bg-white rounded-xl shadow-xl p-6 text-center">
             <h2 className="text-lg font-heading font-bold text-gray-900 mb-2">Your session expired</h2>
