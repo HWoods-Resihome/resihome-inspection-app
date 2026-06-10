@@ -2381,6 +2381,13 @@ export function RateCardForm(props: RateCardFormProps) {
   }, [aiAdjustments, aiSummary, aiModalOpen, aiDecisions, aiLoading]);
 
   const runAiReview = useCallback(async () => {
+    // Guard: if regional pricing hasn't loaded (offline / weak signal), every
+    // line prices to $0 and the review wrongly asks for a charge on all of them.
+    // Bail with a clear fix instead of trapping the inspector in $0 prompts.
+    if (regionsRef.current.length === 0) {
+      void dialog.alert('Pricing data isn’t loaded yet — you may be offline or on a weak signal. Open the ⚙ menu and tap “Refresh Pricing,” then run the AI check again.');
+      return;
+    }
     reviewRunHashRef.current = scopeHash(linesBySectionRef.current);
     setAiModalOpen(true);
     setAiError(null);
