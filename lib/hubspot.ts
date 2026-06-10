@@ -1744,17 +1744,23 @@ export async function answerHasAfterPhotoProperty(): Promise<boolean> {
 // Generic, cached "does the Answer object have this property?" guard — same
 // fail-safe pattern as answerHasAfterPhotoProperty (batch read 400s on an
 // unknown property). Used to conditionally request newer optional fields.
-const _answerPropCache = new Map<string, boolean>();
+//
+// A positive result is cached forever (a property won't disappear); a NEGATIVE
+// result is re-checked after a short TTL, so a property provisioned via
+// /admin/setup is picked up within minutes on every warm instance — without a
+// cold start (otherwise a QC failure note could silently miss the PDF).
+const _answerPropCache = new Map<string, { exists: boolean; at: number }>();
+const ANSWER_PROP_NEG_TTL_MS = 5 * 60 * 1000;
 export async function answerHasProperty(name: string): Promise<boolean> {
   const cached = _answerPropCache.get(name);
-  if (cached !== undefined) return cached;
+  if (cached && (cached.exists || Date.now() - cached.at < ANSWER_PROP_NEG_TTL_MS)) return cached.exists;
   let exists = false;
   try {
     const { answer } = typeIds();
     await hubspotFetch(`/crm/v3/properties/${answer}/${encodeURIComponent(name)}`);
     exists = true;
   } catch { exists = false; }
-  _answerPropCache.set(name, exists);
+  _answerPropCache.set(name, { exists, at: Date.now() });
   return exists;
 }
 
