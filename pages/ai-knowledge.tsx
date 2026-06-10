@@ -66,6 +66,22 @@ export default function AiKnowledgePage() {
 
   useEffect(() => { if (isAdmin) load(); }, [isAdmin]);
 
+  // Synthesize learned entries from captured feedback right now (instead of
+  // waiting for the daily cron), then refresh the list so they're reviewable.
+  const [learnMsg, setLearnMsg] = useState<string | null>(null);
+  async function learnNow() {
+    setBusy(true); setLearnMsg(null); setError(null);
+    try {
+      const r = await fetch('/api/admin/ai-learning', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || 'Learn failed'); return; }
+      const k = d.knowledge || {};
+      setLearnMsg(`Learned from feedback: ${k.added ?? 0} new, ${k.refreshed ?? 0} updated${k.skipped ? `, ${k.skipped} previously dismissed` : ''}.`);
+      await load();
+    } catch (e: any) { setError(String(e?.message || e)); }
+    finally { setBusy(false); }
+  }
+
   async function addEntry() {
     const text = newText.trim();
     if (!text) return;
@@ -137,6 +153,19 @@ export default function AiKnowledgePage() {
         <p className="text-[13px] text-gray-600 mb-4 leading-snug">
           Guidance the <strong>AI</strong> uses for its call-outs, edits, and voice matching. Inspectors add entries by voice (“Teach AI” in the camera), and the AI <strong>auto-learns</strong> entries (marked <span className="text-violet-700 font-semibold">✨ AI-learned</span>) from how inspectors accept or reject its suggestions. Edit any entry to adopt and refine it, or delete it to stop the AI using it.
         </p>
+
+        {/* Learn now: synthesize entries from captured feedback on demand. */}
+        <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 mb-5 flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-[13px] text-violet-900 min-w-0">
+            <span className="font-heading font-semibold">Learn from feedback now</span>
+            <span className="block text-violet-700/80 text-xs">Turn what inspectors have accepted/rejected into reviewable ✨ AI-learned entries (runs nightly too).</span>
+            {learnMsg && <span className="block text-xs text-emerald-700 font-heading font-semibold mt-1">{learnMsg}</span>}
+          </div>
+          <button type="button" onClick={learnNow} disabled={busy}
+            className="h-9 px-4 rounded-lg bg-violet-600 text-white font-heading font-bold text-sm hover:bg-violet-700 disabled:bg-gray-300 shrink-0">
+            {busy ? 'Learning…' : 'Learn now'}
+          </button>
+        </div>
 
         {/* Add new */}
         <div className="bg-white rounded-xl border border-gray-200 p-3 mb-5 shadow-sm">
