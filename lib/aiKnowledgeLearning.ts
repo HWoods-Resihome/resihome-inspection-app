@@ -22,8 +22,8 @@ import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 const ACCEPT = new Set(['approve', 'add', 'move', 'edit']); // edit on an 'add' keeps the code
 const REJECT = new Set(['decline', 'remove', 'dismiss']);
 
-const MIN_SAMPLES = 3;       // need enough signal before we write a rule
-const MAJORITY = 0.7;        // how lopsided accept/reject must be to be "consistent"
+const MIN_SAMPLES = 2;       // learn fast from sparse early usage (was 3)
+const MAJORITY = 0.6;        // how lopsided accept/reject must be to be "consistent" (was 0.7)
 const MAX_EXAMPLES = 3;      // example phrases shown per rule
 
 function cleanPhrase(q?: string): string | null {
@@ -110,4 +110,50 @@ export async function refreshLearnedKnowledge(days = 90): Promise<{ candidates: 
   const result = await upsertAutoKnowledgeEntries(candidates);
   console.log(`[ai-learning] knowledge refresh: ${JSON.stringify({ candidates: candidates.length, ...result })}`);
   return { candidates: candidates.length, ...result };
+}
+
+/**
+ * Diagnostics for "why isn't the AI learning?": how much feedback exists, how
+ * much of it is a usable code-judgement signal, how many distinct codes have
+ * enough samples, and how many knowledge candidates that yields. Surfaced by
+ * /api/admin/ai-learning so we can tell capture problems (0 events) apart from
+ * threshold problems (events but no candidates).
+ */
+export async function learningDiagnostics(days = 90): Promise<{
+  days: number;
+  feedbackEvents: number;
+  bySource: Record<string, number>;
+  byDecision: Record<string, number>;
+  codeJudgementEvents: number;
+  distinctCodes: number;
+  codesWithEnoughSamples: number;
+  candidates: number;
+  minSamples: number;
+}> {
+  const events = await readAiFeedback(days);
+  const bySource: Record<string, number> = {};
+  const byDecision: Record<string, number> = {};
+  const perCode = new Map<string, number>();
+  let codeJudgementEvents = 0;
+  for (const e of events) {
+    bySource[e.source] = (bySource[e.source] || 0) + 1;
+    byDecision[e.decision] = (byDecision[e.decision] || 0) + 1;
+    if (isCodeJudgement(e) && (ACCEPT.has(e.decision) || REJECT.has(e.decision))) {
+      codeJudgementEvents++;
+      const code = e.suggestion!.catalogCode as string;
+      perCode.set(code, (perCode.get(code) || 0) + 1);
+    }
+  }
+  const candidates = await synthesizeKnowledgeCandidates(days);
+  return {
+    days,
+    feedbackEvents: events.length,
+    bySource,
+    byDecision,
+    codeJudgementEvents,
+    distinctCodes: perCode.size,
+    codesWithEnoughSamples: [...perCode.values()].filter((n) => n >= MIN_SAMPLES).length,
+    candidates: candidates.length,
+    minSamples: MIN_SAMPLES,
+  };
 }

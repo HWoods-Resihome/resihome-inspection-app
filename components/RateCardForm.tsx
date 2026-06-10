@@ -2521,6 +2521,38 @@ export function RateCardForm(props: RateCardFormProps) {
         const extra: AiAdjustment[] = [];
         if (!hasCat(/paint/i)) extra.push(missingCategoryCheck('paint'));
         if (!hasCat(/clean/i)) extra.push(missingCategoryCheck('cleaning'));
+        // Flag every line with NO vendor charge ($0) so the inspector adds a
+        // charge (edit) or confirms none is needed — these are easy to miss.
+        for (const [sid, arr] of Object.entries(linesBySectionRef.current)) {
+          for (const l of (arr || [])) {
+            const item = cat.get(l.lineItemCode);
+            if (!item) continue;
+            let vc = 0;
+            try {
+              const c = calculateLine(item, inspectionRegion, regions, {
+                quantity: l.quantity, tenantBillBackPercent: l.tenantBillBackPercent,
+                customLaborRate: l.customLaborRate ?? null, customAdjustedMaterialCost: l.customAdjustedMaterialCost ?? null,
+                customVendorCost: l.customVendorCost ?? null,
+              });
+              vc = roundMoney(c.vendorCost);
+            } catch { /* unpriceable → treat as $0 (still worth flagging) */ }
+            if (vc <= 0) {
+              const sec = sections.find((s) => s.id === sid);
+              extra.push({
+                id: `novendor_${l.externalId}`,
+                type: 'edit',
+                sectionId: sid,
+                sectionName: sec?.displayName || sec?.label,
+                lineExternalId: l.externalId,
+                needsVendorCost: true,
+                title: `Add a vendor charge — ${item.laborShortDescription}`,
+                rationale: 'This line has no vendor charge ($0). Enter the vendor cost, or confirm no charge is needed.',
+                severity: 'medium',
+                current: { description: item.laborShortDescription, vendorCost: 0, lineItemCode: l.lineItemCode, quantity: l.quantity, unit: item.laborMeas },
+              });
+            }
+          }
+        }
         if (extra.length) setAiAdjustments((prev) => {
           const have = new Set(prev.map((p) => p.id));
           return [...prev, ...extra.filter((e) => !have.has(e.id))];

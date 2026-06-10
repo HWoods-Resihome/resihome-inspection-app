@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { buildLearnedMatchModel, getLearnedMatchModel, isLearningEnabled } from '@/lib/aiLearning';
-import { refreshLearnedKnowledge } from '@/lib/aiKnowledgeLearning';
+import { refreshLearnedKnowledge, learningDiagnostics } from '@/lib/aiKnowledgeLearning';
 
 /**
  * AI self-improvement model admin.
@@ -49,10 +49,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
     if (req.method === 'GET') {
-      const model = await getLearnedMatchModel();
+      const [model, diagnostics] = await Promise.all([
+        getLearnedMatchModel(),
+        learningDiagnostics(90).catch((e) => ({ error: String(e?.message || e).slice(0, 200) })),
+      ]);
       return res.status(200).json({
         enabledForServing: isLearningEnabled(),
         hasModel: !!model,
+        diagnostics,
         model,
       });
     }

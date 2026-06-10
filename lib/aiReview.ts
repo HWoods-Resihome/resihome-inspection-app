@@ -35,6 +35,9 @@ export interface AiAdjustment {
    *  inspector validates: Approve = none needed, or Decline → add items via the
    *  manual line-item editor. No line target; produces no automatic change. */
   missingCategory?: 'paint' | 'cleaning';
+  /** The line has no vendor charge ($0). The inspector enters a vendor cost
+   *  (Apply charge → sets suggested.customVendorCost) or confirms none needed. */
+  needsVendorCost?: boolean;
   /** Snapshot of the line as it is now (for display on edit/remove). */
   current?: {
     description?: string;

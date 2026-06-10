@@ -43,7 +43,7 @@ interface Props {
 
 // Per-suggestion inspector edits — raw input strings so the field can be
 // cleared / retyped freely (parsed to numbers only on apply).
-type Edit = { tenantPct?: string; quantity?: string; moveToSectionId?: string; removeInstead?: boolean };
+type Edit = { tenantPct?: string; quantity?: string; moveToSectionId?: string; removeInstead?: boolean; vendorCost?: string };
 
 // Capitalize the first letter of every word (preserves existing caps/acronyms
 // like SS, EA, QC). Used to clean up the AI's suggestion titles.
@@ -111,6 +111,12 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
       }
       if (a.type === 'remove') return a; // remove ignores field edits
       const e = edits[a.id];
+      // Add-a-vendor-charge: approving with a cost entered sets customVendorCost.
+      if (a.needsVendorCost) {
+        const vc = e?.vendorCost != null && e.vendorCost !== '' ? Number(e.vendorCost) : undefined;
+        if (vc == null || !isFinite(vc)) return a; // approved with no charge → no change
+        return { ...a, suggested: { ...(a.suggested || {}), customVendorCost: Math.max(0, vc) } };
+      }
       const tp = e?.tenantPct != null && e.tenantPct !== '' ? Number(e.tenantPct) : undefined;
       const q = e?.quantity != null && e.quantity !== '' ? Number(e.quantity) : undefined;
       if (tp == null && q == null) return a;
@@ -261,7 +267,36 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                             <div className="min-w-0">
                               <div className="text-xs text-gray-600 mt-1 leading-snug">{a.rationale}</div>
 
-                              {a.missingCategory ? (
+                              {a.needsVendorCost ? (
+                                /* $0 line — enter a vendor charge (Apply), or confirm none needed. */
+                                <div className="mt-2">
+                                  {a.current?.description && (
+                                    <div className="text-xs text-gray-700 mb-1.5">{a.current.description} · <span className="text-gray-400">currently $0</span></div>
+                                  )}
+                                  <div className="flex items-end gap-2 flex-wrap">
+                                    <label className="text-[11px] text-gray-500">
+                                      Vendor charge ($)
+                                      <NumberField
+                                        value={edits[a.id]?.vendorCost ?? ''}
+                                        onChange={(v) => setEdit(a.id, { vendorCost: v })}
+                                        ariaLabel="Vendor charge"
+                                        placeholder="0.00"
+                                        className="block w-24 mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded tabular-nums"
+                                      />
+                                    </label>
+                                    <button type="button"
+                                      onClick={() => setDecisions((m) => ({ ...m, [a.id]: 'approve' }))}
+                                      disabled={!(Number(edits[a.id]?.vendorCost) > 0)}
+                                      className={`px-3 py-1.5 text-xs font-heading font-semibold rounded-md border disabled:opacity-40 ${d === 'approve' ? 'bg-brand text-white border-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`}>
+                                      Apply charge
+                                    </button>
+                                    <button type="button" onClick={() => { setEdit(a.id, { vendorCost: '' }); setDecisions((m) => ({ ...m, [a.id]: 'decline' })); }}
+                                      className={`px-3 py-1.5 text-xs font-heading font-semibold rounded-md border ${d === 'decline' ? 'bg-gray-700 text-white border-gray-700' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
+                                      No charge needed
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : a.missingCategory ? (
                                 /* Deterministic "no <category> lines anywhere" check. Approve →
                                    add items via the manual editor; Decline = no items required. */
                                 (() => {
