@@ -711,14 +711,27 @@ export function RateCardForm(props: RateCardFormProps) {
         }
         const answers = data.answers || [];
 
-        // Build a lookup: "label||location" -> sectionId
+        // Build a lookup: "label||location" -> sectionId, PLUS a fallback by
+        // `location` alone. A section rename changes its label, but the saved
+        // answers still carry the OLD label — so an exact label match would
+        // orphan (hide) the items after a rename. `location` is immutable across
+        // a rename (e.g. "Bathroom 1"), so it recovers the items.
         const sectionLookup: Record<string, string> = {};
+        const sectionByLocation: Record<string, string> = {};
         for (const s of sections) {
-          // Saved answers use `location` for repeating rooms (e.g., "Bedroom 1")
-          // and "" for non-repeating. The corresponding sectionId is unique.
-          const key = `${s.label}||${s.location}`;
-          sectionLookup[key] = s.id;
+          sectionLookup[`${s.label}||${s.location}`] = s.id;
+          if (s.location) {
+            // Only map a location that's unique to one section (repeating rooms);
+            // ambiguous/blank locations fall through to the label match.
+            sectionByLocation[s.location] = sectionByLocation[s.location] === undefined ? s.id : '';
+          }
         }
+        const resolveSectionId = (section: string, location: string): string => {
+          const exact = sectionLookup[`${section}||${location}`];
+          if (exact) return exact;
+          if (location && sectionByLocation[location]) return sectionByLocation[location];
+          return section;
+        };
 
         const linesAcc: Record<string, RateCardLineInput[]> = {};
         const photosAcc: Record<string, string[]> = {};
@@ -730,7 +743,7 @@ export function RateCardForm(props: RateCardFormProps) {
         for (const ans of answers) {
           if (ans.answerType === 'rate_card_line' && ans.rateCardLine) {
             const rc = ans.rateCardLine;
-            const sectionId = sectionLookup[`${ans.section}||${ans.location}`] || ans.section;
+            const sectionId = resolveSectionId(ans.section, ans.location);
             // rc.customLaborFullDescription is whatever was stored in answer_value
             // — the catalog subtext/short description (default) or an inspector
             // override. Treat it as an override only if it differs from BOTH the
@@ -763,7 +776,7 @@ export function RateCardForm(props: RateCardFormProps) {
             linesAcc[sectionId].push(line);
             lineRecordIds[line.externalId] = ans.recordId;
           } else if (ans.answerType === 'section_photo') {
-            const sectionId = sectionLookup[`${ans.section}||${ans.location}`] || ans.section;
+            const sectionId = resolveSectionId(ans.section, ans.location);
             photosAcc[sectionId] = ans.photoUrls || [];
             photoRecordIds[sectionId] = ans.recordId;
           } else if (ans.answerType === 'qa' && ans.questionIdExternal === 'fc__all') {

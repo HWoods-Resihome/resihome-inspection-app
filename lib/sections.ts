@@ -163,19 +163,26 @@ export function parseSectionListJson(json: string | null | undefined): SectionIn
 
 /**
  * Serialize a SectionInstance[] back to JSON for storage on the Inspection.
- * Only stores fields that aren't derivable; displayName is derivable from
- * label+location so we omit it (and re-compute on parse) to keep the JSON
- * compact.
+ * displayName is normally derivable from label+location, so it's omitted to keep
+ * the JSON compact — EXCEPT when the inspector has renamed the section (the
+ * displayName no longer equals the derived default). In that case we MUST store
+ * it, or the rename is lost on reload (parse would recompute it as the location,
+ * e.g. "Master Bathroom" reverting to "Bathroom 1").
  */
 export function serializeSectionList(sections: SectionInstance[]): string {
-  return JSON.stringify(sections.map((s) => ({
-    id: s.id,
-    key: s.key,
-    label: s.label,
-    location: s.location,
-    isCustom: s.isCustom || undefined,
-    photoOptional: s.photoOptional || undefined,
-  })));
+  return JSON.stringify(sections.map((s) => {
+    const derived = s.location || s.label;
+    const renamed = s.displayName && s.displayName !== derived;
+    return {
+      id: s.id,
+      key: s.key,
+      label: s.label,
+      location: s.location,
+      ...(renamed ? { displayName: s.displayName } : {}),
+      isCustom: s.isCustom || undefined,
+      photoOptional: s.photoOptional || undefined,
+    };
+  }));
 }
 
 /**
