@@ -2545,48 +2545,11 @@ export function RateCardForm(props: RateCardFormProps) {
         const extra: AiAdjustment[] = [];
         if (!hasCat(/paint/i)) extra.push(missingCategoryCheck('paint'));
         if (!hasCat(/clean/i)) extra.push(missingCategoryCheck('cleaning'));
-        // Flag lines with NO vendor charge ($0) so the inspector adds a charge
-        // (edit) or confirms none is needed. Only when pricing is actually loaded
-        // — otherwise EVERY line prices to $0 and floods the review (the bug that
-        // "kicked all pricing out"). Skip unpriceable lines; cap to avoid a wall.
-        const regionsNow = regionsRef.current;
-        if (regionsNow.length > 0) {
-          const MAX_NOVENDOR = 30;
-          let flagged = 0;
-          for (const [sid, arr] of Object.entries(linesBySectionRef.current)) {
-            if (flagged >= MAX_NOVENDOR) break;
-            for (const l of (arr || [])) {
-              if (flagged >= MAX_NOVENDOR) break;
-              const item = cat.get(l.lineItemCode);
-              if (!item) continue;
-              let vc: number | null = null;
-              try {
-                const c = calculateLine(item, inspectionRegion, regionsNow, {
-                  quantity: l.quantity, tenantBillBackPercent: l.tenantBillBackPercent,
-                  customLaborRate: l.customLaborRate ?? null, customAdjustedMaterialCost: l.customAdjustedMaterialCost ?? null,
-                  customVendorCost: l.customVendorCost ?? null,
-                });
-                vc = roundMoney(c.vendorCost);
-              } catch { vc = null; } // unpriceable → DON'T flag (avoid false $0)
-              if (vc !== null && vc <= 0) {
-                const sec = sections.find((s) => s.id === sid);
-                extra.push({
-                  id: `novendor_${l.externalId}`,
-                  type: 'edit',
-                  sectionId: sid,
-                  sectionName: sec?.displayName || sec?.label,
-                  lineExternalId: l.externalId,
-                  needsVendorCost: true,
-                  title: `Add a vendor charge — ${item.laborShortDescription}`,
-                  rationale: 'This line has no vendor charge ($0). Enter the vendor cost, or confirm no charge is needed.',
-                  severity: 'medium',
-                  current: { description: item.laborShortDescription, vendorCost: 0, lineItemCode: l.lineItemCode, quantity: l.quantity, unit: item.laborMeas },
-                });
-                flagged++;
-              }
-            }
-          }
-        }
+        // NOTE: the deterministic "$0 vendor charge" flag was REMOVED — in the
+        // field it conflated "regional pricing hasn't loaded" with "no charge"
+        // and trapped inspectors behind a wall of $0 prompts. To re-introduce it
+        // safely it must be driven by genuine bid-item state (explicit $0), not a
+        // computed cost that's $0 whenever pricing isn't loaded.
         if (extra.length) setAiAdjustments((prev) => {
           const have = new Set(prev.map((p) => p.id));
           return [...prev, ...extra.filter((e) => !have.has(e.id))];
