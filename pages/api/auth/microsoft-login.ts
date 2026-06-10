@@ -6,6 +6,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { fetchUsers } from '@/lib/hubspot';
 import { getMicrosoftOAuthConfig, buildMicrosoftConsentUrl } from '@/lib/microsoftAuth';
+import { isInternalEmail } from '@/lib/userAccess';
 import { randomBytes } from 'crypto';
 import { serialize } from 'cookie';
 
@@ -21,6 +22,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const cfg = getMicrosoftOAuthConfig();
   if (!cfg) {
     res.redirect(302, '/login?error=microsoft_not_configured');
+    return;
+  }
+
+  // Microsoft sign-in is for EXTERNAL (1099) agents only; internal staff use
+  // Google (Workspace identity + the Gmail-send token). Block internal emails
+  // even if this route is hit directly.
+  if (isInternalEmail(email)) {
+    res.redirect(302, '/login?error=microsoft_internal_blocked');
     return;
   }
 
