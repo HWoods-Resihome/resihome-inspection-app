@@ -256,6 +256,10 @@ export function RateCardForm(props: RateCardFormProps) {
   // even when those lines were present.
   const catalogByCodeRef = useRef(catalogByCode);
   useEffect(() => { catalogByCodeRef.current = catalogByCode; }, [catalogByCode]);
+  // Fresh regions for callbacks that don't list `regions` in their deps (e.g.
+  // runAiReview) — otherwise pricing computes as $0 against a stale empty array.
+  const regionsRef = useRef(regions);
+  useEffect(() => { regionsRef.current = regions; }, [regions]);
   const inspectionRegion = props.inspectionRegion || '';
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
@@ -2521,35 +2525,45 @@ export function RateCardForm(props: RateCardFormProps) {
         const extra: AiAdjustment[] = [];
         if (!hasCat(/paint/i)) extra.push(missingCategoryCheck('paint'));
         if (!hasCat(/clean/i)) extra.push(missingCategoryCheck('cleaning'));
-        // Flag every line with NO vendor charge ($0) so the inspector adds a
-        // charge (edit) or confirms none is needed — these are easy to miss.
-        for (const [sid, arr] of Object.entries(linesBySectionRef.current)) {
-          for (const l of (arr || [])) {
-            const item = cat.get(l.lineItemCode);
-            if (!item) continue;
-            let vc = 0;
-            try {
-              const c = calculateLine(item, inspectionRegion, regions, {
-                quantity: l.quantity, tenantBillBackPercent: l.tenantBillBackPercent,
-                customLaborRate: l.customLaborRate ?? null, customAdjustedMaterialCost: l.customAdjustedMaterialCost ?? null,
-                customVendorCost: l.customVendorCost ?? null,
-              });
-              vc = roundMoney(c.vendorCost);
-            } catch { /* unpriceable → treat as $0 (still worth flagging) */ }
-            if (vc <= 0) {
-              const sec = sections.find((s) => s.id === sid);
-              extra.push({
-                id: `novendor_${l.externalId}`,
-                type: 'edit',
-                sectionId: sid,
-                sectionName: sec?.displayName || sec?.label,
-                lineExternalId: l.externalId,
-                needsVendorCost: true,
-                title: `Add a vendor charge — ${item.laborShortDescription}`,
-                rationale: 'This line has no vendor charge ($0). Enter the vendor cost, or confirm no charge is needed.',
-                severity: 'medium',
-                current: { description: item.laborShortDescription, vendorCost: 0, lineItemCode: l.lineItemCode, quantity: l.quantity, unit: item.laborMeas },
-              });
+        // Flag lines with NO vendor charge ($0) so the inspector adds a charge
+        // (edit) or confirms none is needed. Only when pricing is actually loaded
+        // — otherwise EVERY line prices to $0 and floods the review (the bug that
+        // "kicked all pricing out"). Skip unpriceable lines; cap to avoid a wall.
+        const regionsNow = regionsRef.current;
+        if (regionsNow.length > 0) {
+          const MAX_NOVENDOR = 30;
+          let flagged = 0;
+          for (const [sid, arr] of Object.entries(linesBySectionRef.current)) {
+            if (flagged >= MAX_NOVENDOR) break;
+            for (const l of (arr || [])) {
+              if (flagged >= MAX_NOVENDOR) break;
+              const item = cat.get(l.lineItemCode);
+              if (!item) continue;
+              let vc: number | null = null;
+              try {
+                const c = calculateLine(item, inspectionRegion, regionsNow, {
+                  quantity: l.quantity, tenantBillBackPercent: l.tenantBillBackPercent,
+                  customLaborRate: l.customLaborRate ?? null, customAdjustedMaterialCost: l.customAdjustedMaterialCost ?? null,
+                  customVendorCost: l.customVendorCost ?? null,
+                });
+                vc = roundMoney(c.vendorCost);
+              } catch { vc = null; } // unpriceable → DON'T flag (avoid false $0)
+              if (vc !== null && vc <= 0) {
+                const sec = sections.find((s) => s.id === sid);
+                extra.push({
+                  id: `novendor_${l.externalId}`,
+                  type: 'edit',
+                  sectionId: sid,
+                  sectionName: sec?.displayName || sec?.label,
+                  lineExternalId: l.externalId,
+                  needsVendorCost: true,
+                  title: `Add a vendor charge — ${item.laborShortDescription}`,
+                  rationale: 'This line has no vendor charge ($0). Enter the vendor cost, or confirm no charge is needed.',
+                  severity: 'medium',
+                  current: { description: item.laborShortDescription, vendorCost: 0, lineItemCode: l.lineItemCode, quantity: l.quantity, unit: item.laborMeas },
+                });
+                flagged++;
+              }
             }
           }
         }
