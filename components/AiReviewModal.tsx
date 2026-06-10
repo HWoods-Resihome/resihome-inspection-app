@@ -489,8 +489,19 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
         {/* Footer */}
         {!loading && !error && (
           <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-3">
-            <div className="text-xs text-gray-500">
-              {streaming ? 'Waiting for the review to finish…' : adjustments.length > 0 ? `${approvedCount} approved · ${declinedCount} declined${allDecided ? '' : ` · ${adjustments.length - approvedCount - declinedCount} pending`}` : ''}
+            {/* Always-available exit so the inspector is never trapped behind
+                pending flags (a clear "back out" that doesn't require deciding
+                every item). */}
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={applying}
+              className="px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white text-gray-700 font-heading font-semibold hover:bg-gray-100 disabled:opacity-40 shrink-0"
+            >
+              Close
+            </button>
+            <div className="text-xs text-gray-500 min-w-0 flex-1 text-right">
+              {streaming ? 'Reviewing…' : adjustments.length > 0 ? `${approvedCount}✓ · ${declinedCount}✗${allDecided ? '' : ` · ${adjustments.length - approvedCount - declinedCount} left`}` : ''}
             </div>
             <button
               type="button"
