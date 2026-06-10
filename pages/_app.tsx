@@ -55,8 +55,11 @@ export default function App({ Component, pageProps }: AppProps) {
     <ErrorBoundary>
       <Head>
         {/* Single global viewport. No maximum-scale so pinch-zoom works
-            (accessibility). Individual pages no longer set their own. */}
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+            (accessibility). Individual pages no longer set their own.
+            viewport-fit=cover makes iOS expose env(safe-area-inset-*) so
+            full-screen UI (the camera) can pad around the notch / home
+            indicator / Safari toolbar instead of hiding controls under them. */}
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
       </Head>
       {/* `display:contents` so this wrapper exposes --font-raleway to the whole
           tree without introducing a layout box (full-height page layouts are

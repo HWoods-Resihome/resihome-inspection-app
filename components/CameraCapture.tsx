@@ -1528,7 +1528,7 @@ export function CameraCapture({
       {/* Top bar — ONE row: Cancel · room navigation (or capture count). No
           "Take Photos" title; the room nav lives inline here in portrait AND
           landscape so the chrome stays one slim line. */}
-      <div className="lz-head flex items-center justify-between gap-2 px-3 py-1 bg-black/60 text-white">
+      <div className="lz-head lz-head-top flex items-center justify-between gap-2 px-3 py-1 bg-black/60 text-white">
         <button
           type="button"
           onClick={handleCancel}

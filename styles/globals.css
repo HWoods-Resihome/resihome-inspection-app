@@ -140,6 +140,14 @@ h1, h2, h3, h4, h5, h6 {
 }
 .animate-cameraFocus { animation: cameraFocus 900ms ease-out forwards; }
 
+/* Camera chrome must clear the device safe areas (notch / home indicator) and,
+   in Safari (non-standalone), the browser toolbar — otherwise the shutter row
+   sits half-hidden behind them. viewport-fit=cover (set in _app) makes these
+   insets non-zero. The top bar drops below the notch; the footer (shutter) is
+   lifted above the home indicator / toolbar grab area. */
+.lz-head-top { padding-top: calc(0.3rem + env(safe-area-inset-top)) !important; }
+.lz-foot { padding-bottom: calc(1rem + env(safe-area-inset-bottom)) !important; }
+
 /* ---- Landscape / short-viewport compaction --------------------------------
    On short viewports (landscape phones, ≲ 540px tall) reclaim vertical space:
    slim the sticky header + footer chrome, tighten section spacing, and hide
@@ -149,7 +157,8 @@ h1, h2, h3, h4, h5, h6 {
    the OS, so this kicks in only when the user's auto-rotate is unlocked). */
 @media (max-height: 540px) {
   .lz-head { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
-  .lz-foot { padding-top: 0.35rem !important; padding-bottom: 0.35rem !important; }
+  .lz-head-top { padding-top: calc(0.3rem + env(safe-area-inset-top)) !important; }
+  .lz-foot { padding-top: 0.35rem !important; padding-bottom: calc(0.35rem + env(safe-area-inset-bottom)) !important; }
   /* Content region: less top padding, just enough bottom to clear the slim footer. */
   .lz-content { padding-top: 0.5rem !important; padding-bottom: 4rem !important; }
   .lz-gap { margin-bottom: 0.75rem !important; }
