@@ -21,7 +21,10 @@
 // critical path and a missing native runtime can't throw.
 
 const APP_SCHEME = 'resiwalk';
-const OAUTH_START_PATH = '/api/auth/google-login';
+// Both provider sign-in start paths must open in the system browser (and carry
+// the native marker) so the resiwalk:// deep-link return works on Android.
+const OAUTH_START_PATHS = ['/api/auth/google-login', '/api/auth/microsoft-login'];
+const isOAuthStartPath = (u: string) => typeof u === 'string' && OAUTH_START_PATHS.some((p) => u.includes(p));
 
 let installed = false;
 
@@ -102,14 +105,14 @@ export async function installOAuthBridge(): Promise<void> {
     const loc = window.location;
     const originalAssign = loc.assign.bind(loc);
 
-    const isOAuthStart = (u: string) => typeof u === 'string' && u.includes(OAUTH_START_PATH);
+    
 
     // Patch location.assign
     try {
       Object.defineProperty(loc, 'assign', {
         configurable: true,
         value: (url: string) => {
-          if (isOAuthStart(url)) { openInSystemBrowser(url); return; }
+          if (isOAuthStartPath(url)) { openInSystemBrowser(url); return; }
           originalAssign(url);
         },
       });
@@ -126,7 +129,7 @@ export async function installOAuthBridge(): Promise<void> {
           configurable: true,
           get: hrefDesc.get ? hrefDesc.get.bind(loc) : undefined,
           set: (url: string) => {
-            if (isOAuthStart(url)) { openInSystemBrowser(url); return; }
+            if (isOAuthStartPath(url)) { openInSystemBrowser(url); return; }
             originalHrefSet(url);
           },
         });
@@ -142,7 +145,7 @@ export async function installOAuthBridge(): Promise<void> {
     (e) => {
       const a = (e.target as HTMLElement)?.closest?.('a') as HTMLAnchorElement | null;
       const href = a?.href || '';
-      if (href.includes(OAUTH_START_PATH)) {
+      if (isOAuthStartPath(href)) {
         e.preventDefault();
         openInSystemBrowser(href);
       }

@@ -13,7 +13,13 @@ const ERROR_MESSAGES: Record<string, string> = {
   google_exchange_failed: 'Google sign-in failed. Please try again.',
   google_no_identity: 'Could not read your Google account. Please try again.',
   google_email_mismatch: 'The Google account you signed in with does not match that email. Sign in with the matching Google account.',
-  access_denied: 'Google sign-in was cancelled.',
+  access_denied: 'Sign-in was cancelled.',
+  microsoft_not_configured: 'Microsoft sign-in is not configured yet. Contact your administrator.',
+  microsoft_missing_code: 'Microsoft sign-in did not complete. Please try again.',
+  microsoft_state_mismatch: 'Your sign-in session expired. Please try again.',
+  microsoft_exchange_failed: 'Microsoft sign-in failed. Please try again.',
+  microsoft_no_identity: 'Could not read your Microsoft account. Please try again.',
+  microsoft_email_mismatch: 'The Microsoft account you signed in with does not match that email. Sign in with the matching account.',
 };
 
 export default function LoginPage() {
@@ -33,8 +39,7 @@ export default function LoginPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.query.error]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function startLogin(provider: 'google' | 'microsoft') {
     if (!email.trim()) {
       setError('Please enter your email');
       return;
@@ -53,14 +58,19 @@ export default function LoginPage() {
         setSubmitting(false);
         return;
       }
-      // Email is a valid HubSpot user. Hand off to Google sign-in to prove
-      // ownership of the email. This is a full-page navigation (OAuth redirect);
-      // keep `submitting` true so the button shows the in-progress state.
-      window.location.href = `/api/auth/google-login?email=${encodeURIComponent(email.trim())}`;
+      // Email is a valid HubSpot user. Hand off to the chosen provider to prove
+      // ownership. Full-page navigation (OAuth redirect); keep `submitting` true.
+      const route = provider === 'microsoft' ? 'microsoft-login' : 'google-login';
+      window.location.href = `/api/auth/${route}?email=${encodeURIComponent(email.trim())}`;
     } catch (err: any) {
       setError(String(err.message || err));
       setSubmitting(false);
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    void startLogin('google');
   }
 
   return (
@@ -114,7 +124,17 @@ export default function LoginPage() {
               disabled={submitting || !email.trim()}
               className="w-full bg-brand hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-heading font-semibold py-3.5 px-4 rounded-lg transition mt-5 active:scale-[0.98]"
             >
-              {submitting ? 'Redirecting to Google…' : 'Continue with Google'}
+              {submitting ? 'Redirecting…' : 'Continue with Google'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void startLogin('microsoft')}
+              disabled={submitting || !email.trim()}
+              className="w-full bg-white hover:bg-gray-50 disabled:bg-gray-100 disabled:cursor-not-allowed text-ink border border-gray-300 font-heading font-semibold py-3.5 px-4 rounded-lg transition mt-3 active:scale-[0.98] flex items-center justify-center gap-2"
+            >
+              <svg width="16" height="16" viewBox="0 0 23 23" aria-hidden><path fill="#f25022" d="M1 1h10v10H1z"/><path fill="#7fba00" d="M12 1h10v10H12z"/><path fill="#00a4ef" d="M1 12h10v10H1z"/><path fill="#ffb900" d="M12 12h10v10H12z"/></svg>
+              Continue with Microsoft
             </button>
 
             <p className="text-xs text-gray-400 text-center mt-5">
