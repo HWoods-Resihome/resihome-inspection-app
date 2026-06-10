@@ -32,6 +32,8 @@ export interface QcPdfLine {
   vendor: string;
   vendorCost: number | null;
   passFail: 'pass' | 'fail' | '';
+  // QC reviewer's explanation when failed — shown so the vendor/MC know what to fix.
+  failureNote?: string;
 }
 
 export interface QcPdfSection {
@@ -197,6 +199,9 @@ function QcSection({ section: s }: { section: QcPdfSection }) {
               <Text style={[pdfStyles.tableCell, { width: COL.subcategory }]}>{line.subcategory}</Text>
               <View style={{ width: COL.description }}>
                 <Text style={pdfStyles.tableCell}>{line.description}</Text>
+                {line.passFail === 'fail' && !!line.failureNote && (
+                  <Text style={[pdfStyles.tableCell, { color: '#b91c1c', fontStyle: 'italic', marginTop: 1 }]}>Failed: {line.failureNote}</Text>
+                )}
               </View>
               <Text style={[pdfStyles.tableCellCentered, { width: COL.qty }]}>{line.quantity != null ? formatQtyPdf(line.quantity) : ''}</Text>
               <Text style={[pdfStyles.tableCellCentered, { width: COL.unit }]}>{line.unit}</Text>

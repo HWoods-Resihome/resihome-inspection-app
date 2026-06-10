@@ -150,6 +150,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         vendor: a.assignedTo || '',
         vendorCost: a.rateCardLine?.vendorCost ?? null,
         passFail: pf,
+        failureNote: pf === 'fail' ? (a.qcFailureNote || '') : '',
       };
       sec.lines.push(line);
     }

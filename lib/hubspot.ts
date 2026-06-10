@@ -1701,6 +1701,9 @@ export interface SavedAnswer {
   // ('after' for QC after-photos). Empty/absent on non-QC answers.
   passFail?: 'pass' | 'fail' | '';
   photoPhase?: string;
+  // QC Turn Re-Inspect: the inspector's explanation when a line is failed
+  // (required on fail) — surfaced to the vendor/MC. Stored in qc_failure_note.
+  qcFailureNote?: string;
   // Present only when answerType === 'rate_card_line'. Holds the raw inputs
   // + last stored totals so the form can hydrate without re-running the math
   // client-side.
@@ -1736,6 +1739,23 @@ export async function answerHasAfterPhotoProperty(): Promise<boolean> {
     _afterPhotoPropCache = false;
   }
   return _afterPhotoPropCache;
+}
+
+// Generic, cached "does the Answer object have this property?" guard — same
+// fail-safe pattern as answerHasAfterPhotoProperty (batch read 400s on an
+// unknown property). Used to conditionally request newer optional fields.
+const _answerPropCache = new Map<string, boolean>();
+export async function answerHasProperty(name: string): Promise<boolean> {
+  const cached = _answerPropCache.get(name);
+  if (cached !== undefined) return cached;
+  let exists = false;
+  try {
+    const { answer } = typeIds();
+    await hubspotFetch(`/crm/v3/properties/${answer}/${encodeURIComponent(name)}`);
+    exists = true;
+  } catch { exists = false; }
+  _answerPropCache.set(name, exists);
+  return exists;
 }
 
 export async function fetchAnswersForInspection(inspectionRecordId: string): Promise<SavedAnswer[]> {
@@ -1791,6 +1811,7 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
   // Only request after_photo_urls once the property exists — HubSpot batch read
   // 400s on an unknown property, which would break this (widely-used) fetch.
   if (await answerHasAfterPhotoProperty()) properties.push('after_photo_urls');
+  if (await answerHasProperty('qc_failure_note')) properties.push('qc_failure_note');
   const out: SavedAnswer[] = [];
   for (let i = 0; i < answerIds.length; i += 100) {
     const chunk = answerIds.slice(i, i + 100);
@@ -1821,6 +1842,7 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
         afterPhotoUrls: (p.after_photo_urls || '').split(/[,;]/).map((s: string) => s.trim()).filter(Boolean),
         passFail: (p.pass_fail === 'pass' || p.pass_fail === 'fail') ? p.pass_fail : '',
         photoPhase: p.photo_phase || '',
+        qcFailureNote: p.qc_failure_note || '',
       };
       // Attach rate card fields when present (won't be on Scope/QA answers)
       if (ans.answerType === 'rate_card_line') {
@@ -2314,7 +2336,7 @@ export async function writeAppAdmins(admins: AppAdminRecord[]): Promise<void> {
 export async function provisionAppProperties(): Promise<Record<string, string>> {
   const results: Record<string, string> = {};
   const agent = agentTypeId();
-  const { question } = typeIds();
+  const { question, answer } = typeIds();
 
   const ensureGroup = async (objType: string, name: string, label: string) => {
     try { await hubspotFetch(`/crm/v3/properties/${objType}/groups`, { method: 'POST', body: JSON.stringify({ name, label }) }); }
@@ -2346,6 +2368,17 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   await ensureProp(question, 'requires_photo', {
     name: 'requires_photo', label: 'Requires Photo', type: 'bool', fieldType: 'booleancheckbox', groupName: 'inspection_question_info', options: boolOpts,
   });
+
+  // QC failure note on the Answer object (required when a QC line is failed).
+  await ensureGroup(answer, 'inspection_answer_info', 'Answer Info');
+  await ensureProp(answer, 'qc_failure_note', {
+    name: 'qc_failure_note', label: 'QC Failure Note', type: 'string', fieldType: 'textarea', groupName: 'inspection_answer_info',
+  });
+
+  // Drop the "does this property exist?" caches so the just-provisioned fields
+  // are picked up by this warm instance without waiting for a cold start.
+  _afterPhotoPropCache = null;
+  _answerPropCache.clear();
 
   return results;
 }

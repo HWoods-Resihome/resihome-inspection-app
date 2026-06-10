@@ -17,6 +17,7 @@ import {
   fetchSourceSectionPhotos,
 } from '@/lib/hubspot';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
+import { resolveSections } from '@/lib/sections';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -90,8 +91,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         vendorCost: a.rateCardLine?.vendorCost ?? null,
         passFail: a.passFail || '',
         photoUrls: a.photoUrls || [],
+        // Read-only reference: the comment the inspector left on this line in the
+        // source Scope (copied onto the QC line at create) — so the QC reviewer
+        // knows exactly what to look for.
+        scopeNote: a.note || '',
+        // The QC reviewer's own failure explanation (required on fail).
+        qcFailureNote: a.qcFailureNote || '',
       };
     });
+
+    // Order the QC lines to MIRROR the Scope template's room order (the QC was
+    // snapshotted from it, but HubSpot returns answers in storage order, which
+    // reads as a confusing jumble). Build the canonical section order from the
+    // inspection's own section layout (copied from the source scope) and sort by
+    // it; unmatched sections fall to the end in their original order.
+    try {
+      const ordered = resolveSections(
+        inspection.sectionListJson,
+        inspection.bedroomsAtInspection || 0,
+        inspection.bathroomsAtInspection || 0,
+      );
+      const orderIndex = new Map<string, number>();
+      ordered.forEach((s, i) => {
+        for (const k of [`${s.label}||${s.location}`, `${s.displayName}||${s.location}`, `${s.displayName}||`, `${s.label}||`, s.displayName, s.label, s.location]) {
+          if (k && !orderIndex.has(k)) orderIndex.set(k, i);
+        }
+      });
+      const rank = (section: string, location: string): number => {
+        for (const k of [`${section}||${location}`, location, section]) {
+          const v = k ? orderIndex.get(k) : undefined;
+          if (v !== undefined) return v;
+        }
+        return Number.MAX_SAFE_INTEGER;
+      };
+      lines.forEach((l, i) => { (l as any)._i = i; }); // stable tiebreaker
+      lines.sort((a, b) => (rank(a.section, a.location) - rank(b.section, b.location)) || ((a as any)._i - (b as any)._i));
+      lines.forEach((l) => { delete (l as any)._i; });
+    } catch (e) {
+      console.warn('[qc-data] section ordering skipped:', e);
+    }
 
     // QC's own "after" section photos, keyed by composite + location.
     const afterPhotos: Record<string, { recordId: string; urls: string[] }> = {};

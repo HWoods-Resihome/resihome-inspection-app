@@ -16,7 +16,7 @@
  * the PDF, stores verdict + counts, flips to completed (like the 1099 flow).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { uploadFilesBatch, formatMoney, formatQty } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { CameraCapture } from '@/components/CameraCapture';
@@ -43,6 +43,10 @@ interface QcLine {
   vendorCost: number | null;
   passFail: 'pass' | 'fail' | '';
   photoUrls: string[];
+  // Read-only comment carried over from the source Scope line (what to look for).
+  scopeNote?: string;
+  // The QC reviewer's explanation when this line is failed (required on fail).
+  qcFailureNote?: string;
 }
 
 interface Props {
@@ -438,7 +442,10 @@ export function QcReinspectForm(props: Props) {
 
   async function setLinePassFail(line: QcLine, pf: 'pass' | 'fail') {
     const next = line.passFail === pf ? '' : pf;
-    setLines((cur) => cur.map((l) => (l.recordId === line.recordId ? { ...l, passFail: next } : l)));
+    setLines((cur) => cur.map((l) => (l.recordId === line.recordId
+      // Leaving 'fail' clears the failure note (it no longer applies).
+      ? { ...l, passFail: next, qcFailureNote: next === 'fail' ? l.qcFailureNote : '' }
+      : l)));
     markSaving();
     try {
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
@@ -455,6 +462,33 @@ export function QcReinspectForm(props: Props) {
       markSaveError();
       setLines((cur) => cur.map((l) => (l.recordId === line.recordId ? { ...l, passFail: line.passFail } : l)));
       void dialog.alert(`Could not save pass/fail: ${e?.message || e}`);
+    }
+    if (next !== 'fail' && line.qcFailureNote) void saveFailureNote(line.recordId, ''); // best-effort clear
+  }
+
+  // Local edit of a fail line's note (persisted on blur via saveFailureNote).
+  function updateFailureNote(recordId: string, text: string) {
+    setLines((cur) => cur.map((l) => (l.recordId === recordId ? { ...l, qcFailureNote: text } : l)));
+  }
+
+  // Persist a line's QC failure note. Separate from pass/fail so a missing
+  // qc_failure_note property (pre-/admin/setup) can't break pass/fail saving.
+  async function saveFailureNote(recordId: string, text: string) {
+    markSaving();
+    try {
+      const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          upserts: [{ recordId, answerProps: { qc_failure_note: text }, questionHubspotRecordId: null }],
+          bumpStatusToInProgress: true,
+        }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      markSaved();
+    } catch (e: any) {
+      markSaveError();
+      void dialog.alert(`Could not save the failure note (run /admin/setup if this persists): ${e?.message || e}`);
     }
   }
 
@@ -490,6 +524,12 @@ export function QcReinspectForm(props: Props) {
 
   async function handleSubmit() {
     if (!allMarked) { void dialog.alert('Every line item must be marked Pass or Fail before submitting.'); return; }
+    // A failed line MUST have a note explaining what failed (for the vendor/MC).
+    const failMissingNote = lines.find((l) => l.passFail === 'fail' && !(l.qcFailureNote || '').trim());
+    if (failMissingNote) {
+      void dialog.alert(`Add a note on every FAILED line explaining what failed and what's needed to correct it.\n\nMissing: ${failMissingNote.description || failMissingNote.lineItemCode}`);
+      return;
+    }
     if (!allSectionsHaveAfter) { void dialog.alert('Every section needs at least one After Photo before submitting.'); return; }
     if (verdict !== 'pass' && verdict !== 'fail') { void dialog.alert('Select an overall Pass or Fail verdict.'); return; }
     setSubmitting(true);
@@ -681,10 +721,16 @@ export function QcReinspectForm(props: Props) {
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {s.lines.map((ln) => (
-                        <tr key={ln.recordId} className="align-top">
+                        <Fragment key={ln.recordId}>
+                        <tr className="align-top">
                           <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{ln.category}</td>
                           <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{ln.subcategory}</td>
-                          <td className="px-3 py-2.5 text-gray-900 min-w-[200px]">{ln.description}</td>
+                          <td className="px-3 py-2.5 text-gray-900 min-w-[200px]">
+                            {ln.description}
+                            {ln.scopeNote && (
+                              <div className="text-xs text-gray-500 italic mt-1">📝 Scope note: {ln.scopeNote}</div>
+                            )}
+                          </td>
                           <td className="px-3 py-2.5 text-center text-gray-600 tabular-nums whitespace-nowrap">{ln.quantity != null ? formatQty(ln.quantity) : ''}</td>
                           <td className="px-3 py-2.5 text-center text-gray-600">{ln.unit}</td>
                           <td className="px-3 py-2.5 text-center">
@@ -727,6 +773,23 @@ export function QcReinspectForm(props: Props) {
                             </div>
                           </td>
                         </tr>
+                        {ln.passFail === 'fail' && (
+                          <tr>
+                            <td colSpan={8} className="px-3 pb-3 pt-0 bg-brand/5">
+                              <label className="block text-[11px] font-heading font-semibold text-brand mb-1">Failure note (required) — what failed &amp; how to fix it</label>
+                              <textarea
+                                value={ln.qcFailureNote || ''}
+                                disabled={props.readOnly}
+                                onChange={(e) => updateFailureNote(ln.recordId, e.target.value)}
+                                onBlur={(e) => saveFailureNote(ln.recordId, e.target.value.trim())}
+                                rows={2}
+                                placeholder="e.g. Paint touch-up missed the north wall; re-coat and feather edges."
+                                className="focus-brand w-full border border-brand/40 rounded-lg p-2 text-sm bg-white"
+                              />
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
@@ -739,7 +802,8 @@ export function QcReinspectForm(props: Props) {
                   {s.lines.map((ln) => {
                     const ps = ln.vendor ? vendorPillStyle(ln.vendor) : null;
                     return (
-                      <div key={ln.recordId} className="py-3 px-2 flex items-start justify-between gap-3">
+                      <div key={ln.recordId} className="py-3 px-2">
+                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1 space-y-1">
                           {/* Line 1: Category · Sub · Short description */}
                           <div className="text-sm font-semibold text-gray-900 leading-snug">
@@ -790,6 +854,26 @@ export function QcReinspectForm(props: Props) {
                             aria-label="Fail"
                           >&#10007;</button>
                         </div>
+                       </div>
+                       {/* Scope note (read-only reference: what to look for). */}
+                       {ln.scopeNote && (
+                         <div className="text-xs text-gray-500 italic mt-2 border-t border-gray-100 pt-2">📝 Scope note: {ln.scopeNote}</div>
+                       )}
+                       {/* Required failure note when failed. */}
+                       {ln.passFail === 'fail' && (
+                         <div className="mt-2">
+                           <label className="block text-[11px] font-heading font-semibold text-brand mb-1">Failure note (required) — what failed &amp; how to fix it</label>
+                           <textarea
+                             value={ln.qcFailureNote || ''}
+                             disabled={props.readOnly}
+                             onChange={(e) => updateFailureNote(ln.recordId, e.target.value)}
+                             onBlur={(e) => saveFailureNote(ln.recordId, e.target.value.trim())}
+                             rows={2}
+                             placeholder="e.g. Paint touch-up missed the north wall; re-coat and feather edges."
+                             className="focus-brand w-full border border-brand/40 rounded-lg p-2 text-sm bg-white"
+                           />
+                         </div>
+                       )}
                       </div>
                     );
                   })}
