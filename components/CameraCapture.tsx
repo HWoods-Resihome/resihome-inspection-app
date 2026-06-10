@@ -257,6 +257,13 @@ export function CameraCapture({
   const recordRafRef = useRef<number | null>(null);
   const canvasStreamRef = useRef<MediaStream | null>(null);
   const shutterStartYRef = useRef<number | null>(null);
+  // Zoom-drag smoothing: anchor to the zoom at drag start (so a tiny finger
+  // drift on press-and-hold can't snap to the ultrawide lens), coalesce moves to
+  // one update per animation frame, and throttle the (slow) hardware zoom calls.
+  const dragStartZoomRef = useRef(1);
+  const zoomTargetRef = useRef<number | null>(null);
+  const zoomDragRafRef = useRef<number | null>(null);
+  const lastHwZoomApplyRef = useRef(0);
   const [zoom, setZoom] = useState(1);
   // Hardware (sensor) zoom capability. On phones with an ultra-wide lens the
   // reported zoom.min is BELOW 1, so applying it switches to the WIDE lens.
@@ -272,7 +279,7 @@ export function CameraCapture({
   const effZoom = useCallback(() => (hwZoomRef.current ? 1 : (zoomRef.current || 1)), []);
   // Single zoom setter: clamp to the live range and, when hardware zoom is
   // available, push it to the sensor (this is what reaches the wide lens).
-  const applyZoom = useCallback((z: number) => {
+  const applyZoom = useCallback((z: number, opts?: { immediateHw?: boolean }) => {
     const caps = zoomCapsRef.current;
     const zMin = caps ? caps.min : 1;
     const zMax = caps ? caps.max : MAX_ZOOM;
@@ -280,8 +287,15 @@ export function CameraCapture({
     zoomRef.current = nz;
     setZoom(nz);
     if (caps) {
-      const track = streamRef.current?.getVideoTracks?.()[0];
-      try { (track?.applyConstraints as any)?.({ advanced: [{ zoom: nz }] }); } catch { /* unsupported */ }
+      // Hardware (sensor) zoom via applyConstraints is comparatively slow and
+      // chokes if called on every pointermove — throttle to ~12/s during a drag
+      // (the digital preview + label still update every frame for smoothness).
+      const now = Date.now();
+      if (opts?.immediateHw || now - lastHwZoomApplyRef.current >= 80) {
+        lastHwZoomApplyRef.current = now;
+        const track = streamRef.current?.getVideoTracks?.()[0];
+        try { (track?.applyConstraints as any)?.({ advanced: [{ zoom: nz }] }); } catch { /* unsupported */ }
+      }
     }
   }, []);
 
@@ -1116,6 +1130,11 @@ export function CameraCapture({
   function onShutterDown(e: React.PointerEvent) {
     if (permissionState !== 'granted' || busy) return;
     shutterStartYRef.current = e.clientY;
+    // Anchor the zoom drag to wherever zoom is NOW, so the gesture nudges from
+    // the current level instead of snapping back to 1× (and a small downward
+    // drift while holding can't dive to the ultrawide lens).
+    dragStartZoomRef.current = zoomRef.current || 1;
+    zoomTargetRef.current = null;
     try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* noop */ }
     if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
     holdTimerRef.current = setTimeout(() => { holdTimerRef.current = null; void startRecording(); }, HOLD_MS);
@@ -1126,15 +1145,25 @@ export function CameraCapture({
     // Deadzone so a small wobble doesn't zoom; gentle ramp via ZOOM_DRAG_PX.
     const dy = raw > ZOOM_DEADZONE_PX ? raw - ZOOM_DEADZONE_PX
       : raw < -ZOOM_DEADZONE_PX ? raw + ZOOM_DEADZONE_PX : 0;
-    // Drag up zooms in toward max; drag down zooms out toward min (the wide lens
-    // when supported). Anchored at 1× with separate spans either side.
+    // Linear from the drag-start zoom across the full range; up = in, down = out.
     const caps = zoomCapsRef.current;
     const zMin = caps ? caps.min : 1;
     const zMax = caps ? caps.max : MAX_ZOOM;
-    applyZoom(1 + (dy / ZOOM_DRAG_PX) * (dy >= 0 ? (zMax - 1) : (1 - zMin)));
+    zoomTargetRef.current = dragStartZoomRef.current + (dy / ZOOM_DRAG_PX) * (zMax - zMin);
+    // Coalesce rapid pointermoves to ONE zoom update per frame (kills the jank
+    // from setState + applyConstraints firing on every move).
+    if (zoomDragRafRef.current == null) {
+      zoomDragRafRef.current = requestAnimationFrame(() => {
+        zoomDragRafRef.current = null;
+        if (zoomTargetRef.current != null) applyZoom(zoomTargetRef.current);
+      });
+    }
   }
   function onShutterUp() {
     shutterStartYRef.current = null;
+    // Flush any pending zoom frame and push the final value to the sensor now.
+    if (zoomDragRafRef.current != null) { cancelAnimationFrame(zoomDragRafRef.current); zoomDragRafRef.current = null; }
+    if (zoomTargetRef.current != null) { applyZoom(zoomTargetRef.current, { immediateHw: true }); zoomTargetRef.current = null; }
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
@@ -1152,6 +1181,7 @@ export function CameraCapture({
     if (elapsedTimerRef.current) { clearInterval(elapsedTimerRef.current); elapsedTimerRef.current = null; }
     try { if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop(); } catch { /* noop */ }
     if (recordRafRef.current != null) { cancelAnimationFrame(recordRafRef.current); recordRafRef.current = null; }
+    if (zoomDragRafRef.current != null) { cancelAnimationFrame(zoomDragRafRef.current); zoomDragRafRef.current = null; }
     canvasStreamRef.current?.getTracks().forEach((t) => t.stop());
     canvasStreamRef.current = null;
     recordCanvasRef.current = null;
@@ -1774,7 +1804,7 @@ export function CameraCapture({
               playsInline
               muted
               className="absolute inset-0 w-full h-full object-cover"
-              style={(!hwZoom && zoom > 1) ? { transform: `scale(${zoom})`, transformOrigin: 'center', transition: 'transform 60ms linear' } : undefined}
+              style={(!hwZoom && zoom > 1) ? { transform: `scale(${zoom})`, transformOrigin: 'center' } : undefined}
             />
             {/* Tap-to-focus reticle */}
             {focusPt && (
