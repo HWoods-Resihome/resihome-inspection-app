@@ -86,11 +86,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     };
 
     if (!apply) {
+      // Self-diagnosing dump so a single fetch reveals the real data shape:
+      // every distinct applies_to_templates value (with counts) and, for any
+      // record whose template key looks community-ish, its section + question.
+      const templateCounts: Record<string, number> = {};
+      for (const q of all) for (const t of q.applies) templateCounts[t] = (templateCounts[t] || 0) + 1;
+      const distinctTemplates = Object.entries(templateCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([template, count]) => ({ template, count }));
+      const communityLike = all
+        .filter((q) => q.applies.some((t) => /commun/i.test(t)))
+        .map((q) => ({ recordId: q.recordId, applies: q.applies, section: q.section, question: q.questionText }));
+
       return res.status(200).json({
         dryRun: true,
         note: 'Nothing was changed. Review the plan below, then re-open with ?apply=1 to commit.',
         applyUrl: '/api/admin/cleanup-community?apply=1',
         plan,
+        diagnostics: {
+          totalRecords: all.length,
+          recordsAppliedToTarget: inScope.length,
+          distinctTemplates,
+          communityLikeRecords: communityLike,
+        },
       });
     }
 
