@@ -56,6 +56,8 @@ export interface QcPdfContext {
   sourceRateCardName: string | null;
   generatedAtIso: string;
   verdict: 'pass' | 'fail';
+  // Overall failure comment (verdict === 'fail') — shown prominently on the report.
+  overallNote?: string;
   passCount: number;
   failCount: number;
   sections: QcPdfSection[];
@@ -129,6 +131,14 @@ function QcDoc({ ctx }: { ctx: QcPdfContext }) {
             <Text style={pdfStyles.grandTotalsValue}>{ctx.passCount + ctx.failCount}</Text>
           </View>
         </View>
+
+        {/* Overall failure reason (when the re-inspect failed). */}
+        {ctx.verdict === 'fail' && !!ctx.overallNote && (
+          <View style={{ marginTop: 6, padding: 8, borderWidth: 1, borderColor: PDF_COLORS.brand, borderRadius: 4 }}>
+            <Text style={{ fontSize: 8, fontWeight: 700, color: PDF_COLORS.brand, marginBottom: 2, textTransform: 'uppercase' }}>Reason for Fail</Text>
+            <Text style={{ fontSize: 9, color: PDF_COLORS.brand }}>{ctx.overallNote}</Text>
+          </View>
+        )}
 
         {/* Source reference line */}
         {ctx.sourceRateCardName && (

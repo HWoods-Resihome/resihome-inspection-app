@@ -90,6 +90,9 @@ export function QcReinspectForm(props: Props) {
   const [afterPhotoRecordIds, setAfterPhotoRecordIds] = useState<Record<string, string>>({});
   const [sourceName, setSourceName] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<'pass' | 'fail' | ''>('');
+  // Overall failure comment — REQUIRED when the verdict is Fail; carried onto the
+  // QC PDF so the vendor/MC see why the re-inspect failed overall.
+  const [overallNote, setOverallNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<null | { verdict: string; passCount: number; failCount: number; pdf: { name: string; url: string }; resultSync?: { verdictSynced: boolean; inspectionResultSynced: boolean; fields: string[] } }>(null);
   const [cameraKey, setCameraKey] = useState<string | null>(null);
@@ -532,13 +535,18 @@ export function QcReinspectForm(props: Props) {
     }
     if (!allSectionsHaveAfter) { void dialog.alert('Every section needs at least one After Photo before submitting.'); return; }
     if (verdict !== 'pass' && verdict !== 'fail') { void dialog.alert('Select an overall Pass or Fail verdict.'); return; }
+    // A failing overall verdict REQUIRES a comment — it prints on the QC PDF.
+    if (verdict === 'fail' && !overallNote.trim()) {
+      void dialog.alert('Add an overall failure comment explaining why the re-inspect failed — it’s included on the report.');
+      return;
+    }
     setSubmitting(true);
     try {
       await burnTaggedLabelsQc();
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}/qc-finalize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verdict }),
+        body: JSON.stringify({ verdict, overallNote: verdict === 'fail' ? overallNote.trim() : '' }),
       });
       if (!r.ok) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0, 300)}`); }
       setResult(await r.json());
@@ -912,11 +920,26 @@ export function QcReinspectForm(props: Props) {
             >&#10007; Fail</button>
           </div>
 
-          {(!allMarked || !allSectionsHaveAfter || !verdict) && (
+          {/* Required overall failure comment (Fail only) — printed on the PDF. */}
+          {verdict === 'fail' && (
+            <div className="mb-2">
+              <label className="block text-[11px] font-heading font-semibold text-brand mb-1">Overall failure comment (required) — why the re-inspect failed</label>
+              <textarea
+                value={overallNote}
+                onChange={(e) => setOverallNote(e.target.value)}
+                rows={3}
+                placeholder="Summarize what failed overall and what's needed to pass the re-inspect."
+                className="focus-brand w-full border border-brand/40 rounded-lg p-2 text-sm bg-white"
+              />
+            </div>
+          )}
+
+          {(!allMarked || !allSectionsHaveAfter || !verdict || (verdict === 'fail' && !overallNote.trim())) && (
             <ul className="text-xs text-amber-700 list-disc pl-5 space-y-0.5">
               {!allMarked && <li>Mark every line item Pass or Fail.</li>}
               {!allSectionsHaveAfter && <li>Add at least one After Photo to every section.</li>}
               {!verdict && <li>Choose an overall Pass/Fail verdict.</li>}
+              {verdict === 'fail' && !overallNote.trim() && <li>Add an overall failure comment.</li>}
             </ul>
           )}
         </div>

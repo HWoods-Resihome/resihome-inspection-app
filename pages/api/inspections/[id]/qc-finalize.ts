@@ -55,6 +55,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (xDenial) { res.status(403).json({ error: xDenial }); return; }
 
   const verdict = (req.body?.verdict || '').toString().toLowerCase();
+  const overallNote = (req.body?.overallNote || '').toString().trim().slice(0, 2000);
   if (verdict !== 'pass' && verdict !== 'fail') {
     res.status(400).json({ error: 'verdict must be "pass" or "fail"' });
     return;
@@ -183,6 +184,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       sourceRateCardName: inspection.sourceRateCardName || null,
       generatedAtIso: new Date().toISOString(),
       verdict: verdict as 'pass' | 'fail',
+      overallNote: verdict === 'fail' ? overallNote : '',
       passCount,
       failCount,
       sections,
