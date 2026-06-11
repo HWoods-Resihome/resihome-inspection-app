@@ -828,6 +828,50 @@ export async function fetchUsers(): Promise<HubSpotUser[]> {
   return out;
 }
 
+// Active HubSpot users only. A user that's deactivated/removed has their OWNER
+// record archived, so the set of non-archived owner emails is the authoritative
+// "currently active" list. Cached briefly (login hits this a few times per
+// sign-in). Returns null on error so callers can fail OPEN (don't lock everyone
+// out during an owners-API hiccup) rather than closed.
+let _activeOwnerEmailsCache: { emails: Set<string>; at: number } | null = null;
+const ACTIVE_OWNERS_TTL_MS = 5 * 60 * 1000;
+async function fetchActiveOwnerEmails(): Promise<Set<string> | null> {
+  if (_activeOwnerEmailsCache && Date.now() - _activeOwnerEmailsCache.at < ACTIVE_OWNERS_TTL_MS) {
+    return _activeOwnerEmailsCache.emails;
+  }
+  try {
+    const emails = new Set<string>();
+    let after: string | undefined;
+    do {
+      const qs = new URLSearchParams({ limit: '100', archived: 'false' });
+      if (after) qs.set('after', after);
+      const resp = await hubspotFetch(`/crm/v3/owners/?${qs.toString()}`);
+      for (const o of resp.results || []) {
+        if (o.email) emails.add(String(o.email).trim().toLowerCase());
+      }
+      after = resp.paging?.next?.after;
+    } while (after);
+    _activeOwnerEmailsCache = { emails, at: Date.now() };
+    return emails;
+  } catch (e) {
+    console.warn('[auth] could not load active owners; falling back to all users:', e);
+    return null;
+  }
+}
+
+/**
+ * Active HubSpot users — fetchUsers() filtered to those whose owner is NOT
+ * archived (i.e. the account hasn't been deactivated/removed). This is the gate
+ * sign-in must use so a deactivated user can't authenticate. If the owners list
+ * can't be loaded, falls back to all users (fail-open) so an API hiccup can't
+ * lock everyone out.
+ */
+export async function fetchActiveUsers(): Promise<HubSpotUser[]> {
+  const [users, activeEmails] = await Promise.all([fetchUsers(), fetchActiveOwnerEmails()]);
+  if (!activeEmails) return users; // owners unavailable → don't break login
+  return users.filter((u) => activeEmails.has(u.email.trim().toLowerCase()));
+}
+
 async function getAssociationTypeId(fromTypeId: string, toTypeId: string, label: string): Promise<number | null> {
   const resp = await hubspotFetch(assocLabelsUrl(fromTypeId, toTypeId));
   for (const a of resp.results || []) {

@@ -18,7 +18,7 @@ import {
   gmailTokenCookie,
   emailFromIdToken,
 } from '@/lib/gmailAuth';
-import { fetchUsers } from '@/lib/hubspot';
+import { fetchActiveUsers } from '@/lib/hubspot';
 import { isInternalEmail } from '@/lib/userAccess';
 import { parse, serialize } from 'cookie';
 
@@ -103,7 +103,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // the session against the canonical HubSpot record.
     let match;
     try {
-      const users = await fetchUsers();
+      const users = await fetchActiveUsers();
       match = users.find((u) => u.email.toLowerCase() === verifiedEmail);
     } catch (e) {
       console.error('[login callback] HubSpot user check failed:', e);

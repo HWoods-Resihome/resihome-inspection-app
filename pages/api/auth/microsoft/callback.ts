@@ -6,7 +6,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createSessionCookie, createOAuthExchangeToken } from '@/lib/auth';
 import { getMicrosoftOAuthConfig, exchangeMicrosoftCode, emailFromMicrosoftIdToken } from '@/lib/microsoftAuth';
-import { fetchUsers } from '@/lib/hubspot';
+import { fetchActiveUsers } from '@/lib/hubspot';
 import { parse, serialize } from 'cookie';
 
 const STATE_COOKIE = 'resihome_mslogin_oauth_state';
@@ -60,7 +60,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // Re-confirm it's still an active HubSpot user; mint against the canonical record.
   let match;
   try {
-    const users = await fetchUsers();
+    const users = await fetchActiveUsers();
     match = users.find((u) => u.email.toLowerCase() === verifiedEmail);
   } catch (e) {
     console.error('[microsoft callback] HubSpot user check failed:', e);

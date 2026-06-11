@@ -4,7 +4,7 @@
 // minted in the callback only after Microsoft confirms the email matches.
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { fetchUsers } from '@/lib/hubspot';
+import { fetchActiveUsers } from '@/lib/hubspot';
 import { getMicrosoftOAuthConfig, buildMicrosoftConsentUrl } from '@/lib/microsoftAuth';
 import { isInternalEmail } from '@/lib/userAccess';
 import { randomBytes } from 'crypto';
@@ -36,7 +36,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // Re-validate the email against HubSpot users server-side (don't trust the
   // client). Generic failure so we don't leak which emails exist.
   try {
-    const users = await fetchUsers();
+    const users = await fetchActiveUsers();
     if (!users.find((u) => u.email.toLowerCase() === email)) {
       res.redirect(302, '/login?error=not_recognized');
       return;

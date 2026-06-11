@@ -4,7 +4,7 @@
 // the client redirects the browser to /api/auth/google-login?email=...
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { fetchUsers } from '@/lib/hubspot';
+import { fetchActiveUsers } from '@/lib/hubspot';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -22,7 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     let users;
     try {
-      users = await fetchUsers();
+      users = await fetchActiveUsers();
     } catch (e: any) {
       console.error('Login: failed to fetch HubSpot users:', e);
       return res.status(500).json({ error: 'Could not verify users at this time. Try again.' });

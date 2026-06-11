@@ -8,7 +8,7 @@
 //     via /api/auth/login, but we re-validate here server-side too).
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { fetchUsers } from '@/lib/hubspot';
+import { fetchActiveUsers } from '@/lib/hubspot';
 import { getLoginOAuthConfig, buildGmailConsentUrl, LOGIN_SCOPES, IDENTITY_SCOPES, GMAIL_TOKEN_COOKIE } from '@/lib/gmailAuth';
 import { isInternalEmail } from '@/lib/userAccess';
 import { randomBytes } from 'crypto';
@@ -36,7 +36,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // client). Same generic failure as the email step so we don't leak which
   // emails exist.
   try {
-    const users = await fetchUsers();
+    const users = await fetchActiveUsers();
     const match = users.find((u) => u.email.toLowerCase() === email);
     if (!match) {
       res.redirect(302, '/login?error=not_recognized');
