@@ -19,6 +19,10 @@ const PUBLIC_PATHS = new Set<string>([
   // flow checks the session itself).
   '/api/auth/google-login',
   '/api/auth/gmail/callback',
+  // Microsoft/Outlook sign-in (external 1099 agents) — same pre-session pair as
+  // Google: these run before a session exists; the callback verifies itself.
+  '/api/auth/microsoft-login',
+  '/api/auth/microsoft/callback',
   // Native OAuth return: validates a short-TTL token and sets the session in the
   // app webview's cookie jar. Must be reachable pre-session, like the callbacks.
   '/api/auth/exchange',
@@ -107,10 +111,17 @@ export async function middleware(req: NextRequest) {
 
 function redirectToLogin(req: NextRequest): NextResponse {
   if (req.nextUrl.pathname.startsWith('/api/')) {
-    return new NextResponse(JSON.stringify({ error: 'Not authenticated' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    // A real fetch() (Accept: */* or application/json) gets the 401 the app's
+    // session guard expects. But a BROWSER NAVIGATION to a protected API — e.g.
+    // a link opened in the system browser without the app's cookie — should land
+    // on /login, not a raw {"error":"Not authenticated"} dead-end page.
+    const accept = req.headers.get('accept') || '';
+    if (!accept.includes('text/html')) {
+      return new NextResponse(JSON.stringify({ error: 'Not authenticated' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
   }
   const url = req.nextUrl.clone();
   url.pathname = '/login';
