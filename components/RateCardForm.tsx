@@ -2331,16 +2331,19 @@ export function RateCardForm(props: RateCardFormProps) {
   );
   const finalChecklistComplete = fcGap === null;
   // The Final Checklist is EDITABLE + gates Submit only for scheduled/in-progress
-  // (+ all future) scope inspections. It's also shown READ-ONLY during pending
-  // approval — but only when the inspection actually has checklist data, so
-  // inspections that predate the feature stay exempt. Completed/cancelled hide it.
+  // (+ all future) scope inspections. It's shown READ-ONLY during pending approval
+  // AND on completed inspections (so the checklist can still be reviewed after the
+  // fact) — but only when the inspection actually has checklist data, so
+  // inspections that predate the feature stay exempt. Cancelled hides it.
   const fcStatusLower = (props.inspectionStatus || '').toLowerCase();
   const fcEditable = isScopeTemplate
     && fcStatusLower !== 'pending_approval'
     && fcStatusLower !== 'completed' && fcStatusLower !== 'complete'
     && fcStatusLower !== 'cancelled';
   const fcHasData = Object.keys(fcAnswers).length > 0;
-  const fcVisible = fcEditable || (isScopeTemplate && fcStatusLower === 'pending_approval' && fcHasData);
+  const fcViewableStatus = fcStatusLower === 'pending_approval'
+    || fcStatusLower === 'completed' || fcStatusLower === 'complete';
+  const fcVisible = fcEditable || (isScopeTemplate && fcViewableStatus && fcHasData);
   // Load any persisted "passed" marker for this inspection on mount.
   useEffect(() => {
     setReviewedHash(getPassedReviewHash(props.inspectionRecordId));
