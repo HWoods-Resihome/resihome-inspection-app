@@ -42,18 +42,23 @@ const fromQuestion = (q: Question): Draft => ({
 
 const ADD_NEW = '__add_new_section__';
 
-function QuestionEditor({ initial, onSave, onCancel, busy }: {
-  initial: Draft; onSave: (d: Draft) => void; onCancel: () => void; busy: boolean;
+function QuestionEditor({ initial, onSave, onCancel, busy, knownSections = [] }: {
+  initial: Draft; onSave: (d: Draft) => void; onCancel: () => void; busy: boolean; knownSections?: string[];
 }) {
   const [d, setD] = useState<Draft>(initial);
-  // Section is a dropdown of standard sections + "Add new"; a custom value (not
-  // in the standard list) starts in free-text mode.
-  const [customSection, setCustomSection] = useState(() => !!initial.section && !STANDARD_SECTIONS.includes(initial.section));
+  // Section options = the standard list + any sections already used on this
+  // template (so existing ones are selectable, not just re-typable).
+  const allSections = useMemo(
+    () => Array.from(new Set([...STANDARD_SECTIONS, ...knownSections])),
+    [knownSections],
+  );
+  // A value not in the known list starts in free-text mode.
+  const [customSection, setCustomSection] = useState(() => !!initial.section && !allSections.includes(initial.section));
   const typeMeta = RESPONSE_TYPES.find((t) => t.value === d.responseType);
   const set = (patch: Partial<Draft>) => setD((cur) => ({ ...cur, ...patch }));
 
   const sectionOptions = [
-    ...STANDARD_SECTIONS.map((s) => ({ value: s, label: s })),
+    ...allSections.map((s) => ({ value: s, label: s })),
     { value: ADD_NEW, label: '➕ Add new section…' },
   ];
 
@@ -213,6 +218,14 @@ export default function FormBuilderPage() {
     return Array.from(m.entries());
   }, [questions]);
 
+  // Sections already in use on THIS template — offered in the Section dropdown
+  // alongside the standard list so any existing section (e.g. "Curb Appeal /
+  // Amenities") is selectable without retyping it.
+  const knownSections = useMemo(
+    () => Array.from(new Set((questions || []).map((q) => (q.section || '').trim()).filter(Boolean))),
+    [questions],
+  );
+
   async function saveEdit(id: string, d: Draft) {
     setBusy(true);
     try {
@@ -314,7 +327,7 @@ export default function FormBuilderPage() {
 
         {adding && (
           <div className="mb-4">
-            <QuestionEditor initial={blankDraft()} busy={busy}
+            <QuestionEditor initial={blankDraft()} busy={busy} knownSections={knownSections}
               onSave={create} onCancel={() => setAdding(false)} />
           </div>
         )}
@@ -332,7 +345,7 @@ export default function FormBuilderPage() {
                   {qs.map((q) => (
                     <li key={q.hubspotRecordId} className={`bg-white rounded-xl border p-3 shadow-sm ${q.enabled ? 'border-gray-200' : 'border-gray-200 opacity-60'}`}>
                       {editingId === q.hubspotRecordId ? (
-                        <QuestionEditor initial={fromQuestion(q)} busy={busy}
+                        <QuestionEditor initial={fromQuestion(q)} busy={busy} knownSections={knownSections}
                           onSave={(d) => saveEdit(q.hubspotRecordId, d)} onCancel={() => setEditingId(null)} />
                       ) : (
                         <>

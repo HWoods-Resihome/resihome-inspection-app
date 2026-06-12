@@ -474,9 +474,10 @@ export function QuestionForm({
           note: '',
           quantity: null,
           photoUrls: [],
-          // Open the photo/notes panel up-front when a photo or note is required,
-          // so the inspector sees the capture affordance without hunting for it.
-          optionalPanelOpen: !!q.requiresPhoto || !!q.requiresNote,
+          // Notes/photos panel starts CLOSED. It opens automatically once an
+          // answer is selected when that answer requires a note/photo (handled by
+          // QuestionItem's forcedOpen), and the inspector can open it any time.
+          optionalPanelOpen: false,
         };
       }
     }
