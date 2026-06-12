@@ -286,6 +286,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ...photoContent,
     ];
 
+    // Cache the per-review scope + photos so the 4-round tool loop re-reads this
+    // (often photo-heavy) message at ~0.1x instead of full price each round.
+    if (userContent.length) (userContent[userContent.length - 1] as any).cache_control = { type: 'ephemeral' };
+
     const messages: any[] = [{ role: 'user', content: userContent }];
     const reviewTools = tools();
 
@@ -364,7 +368,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       sseHeartbeat(res);
       const { content } = await streamTurn(
         {
-          model: MODEL, max_tokens: 4000, system: AI_REVIEW_KNOWLEDGE, tools: reviewTools,
+          // Cache the knowledge base + tools (tools render before system, so a
+          // breakpoint on the system block caches both together). Re-read at
+          // ~0.1x on rounds 2-4 of this loop and across reviews within the TTL.
+          model: MODEL, max_tokens: 4000,
+          system: [{ type: 'text', text: AI_REVIEW_KNOWLEDGE, cache_control: { type: 'ephemeral' } }],
+          tools: reviewTools,
           tool_choice: round === MAX_TOOL_ROUNDS - 1 ? { type: 'tool', name: 'finish_review' } : { type: 'auto' },
           messages,
         },

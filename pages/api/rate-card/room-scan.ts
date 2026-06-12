@@ -163,7 +163,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 2000,
-        system: SYSTEM,
+        // Cache the static instructions + tool (the per-room frames live in the
+        // user message, so they stay out of the cached prefix). Saves on the
+        // fixed prefix across back-to-back room scans within the TTL.
+        system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
         tools: [SUGGEST_TOOL],
         tool_choice: { type: 'auto' },
         messages: [{ role: 'user', content: userContent }],
