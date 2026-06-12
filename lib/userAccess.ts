@@ -47,22 +47,43 @@ export function isCompletedStatus(status: string | null | undefined): boolean {
 }
 
 /**
+ * Does this email own the inspection (i.e. is the recorded inspector)?
+ * Case-insensitive. When the owner is unknown (blank inspector_email), returns
+ * true — we can't prove non-ownership, so we don't lock out legacy/blank-field
+ * inspections. New external-created 1099s stamp the creator, so this only
+ * affects pre-existing records.
+ */
+export function ownsInspection(email: string | null | undefined, ownerEmail: string | null | undefined): boolean {
+  const owner = (ownerEmail || '').trim().toLowerCase();
+  if (!owner) return true; // unknown owner → don't restrict
+  return (email || '').trim().toLowerCase() === owner;
+}
+
+/**
  * The single rule for external-user access to an inspection. Returns a denial
  * REASON string (safe to surface) or null when allowed. Internal users are never
- * restricted. External users: only the 1099 template, and no edits once completed.
+ * restricted. External users: only the 1099 template, no edits once completed,
+ * and they may only modify (edit/cancel) inspections they own — every other 1099
+ * they can see is view-only.
  * Call from every inspection read/write API route (server-side enforcement).
  */
 export function externalAccessDenial(
   email: string | null | undefined,
   templateType: string | null | undefined,
-  opts: { write?: boolean; status?: string | null } = {},
+  opts: { write?: boolean; status?: string | null; ownerEmail?: string | null } = {},
 ): string | null {
   if (!isExternalEmail(email)) return null; // internal = full access
   if (!externalCanUseTemplate(templateType)) {
     return 'Your account can only access 1099 Leasing Agent Property Inspections.';
   }
-  if (opts.write && isCompletedStatus(opts.status)) {
-    return 'Completed inspections are read-only for your account.';
+  if (opts.write) {
+    if (isCompletedStatus(opts.status)) {
+      return 'Completed inspections are read-only for your account.';
+    }
+    // Ownership: external users may only edit/cancel their OWN inspections.
+    if (!ownsInspection(email, opts.ownerEmail)) {
+      return 'You can only edit or cancel your own inspections.';
+    }
   }
   return null;
 }

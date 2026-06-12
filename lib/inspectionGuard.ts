@@ -16,5 +16,5 @@ export async function externalWriteDenial(
   if (!isExternalEmail(email)) return null; // internal users: unrestricted, no fetch
   const insp = await fetchInspectionById(inspectionId);
   if (!insp) return null; // not found → let the endpoint return its own 404
-  return externalAccessDenial(email, insp.templateType, { write: true, status: insp.status });
+  return externalAccessDenial(email, insp.templateType, { write: true, status: insp.status, ownerEmail: insp.inspectorEmail });
 }

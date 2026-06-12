@@ -3,7 +3,7 @@ import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, 
 import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
-import { externalAccessDenial } from '@/lib/userAccess';
+import { externalAccessDenial, isExternalEmail } from '@/lib/userAccess';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -115,7 +115,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       bedrooms_at_inspection: body.bedrooms,
       bathrooms_at_inspection: body.bathrooms,
       inspector_name: body.inspectorName,
-      inspector_email: body.inspectorEmail || '',
+      // Stamp external (1099) creators as the owner so the ownership guard can
+      // reliably restrict edit/cancel to their own inspections. Internal users
+      // keep the client-provided value (they may create on behalf of others).
+      inspector_email: isExternalEmail(session.email) ? session.email : (body.inspectorEmail || ''),
       property_id_ref: body.propertyRecordId,
       scheduled_date: scheduledDateValue,
     };

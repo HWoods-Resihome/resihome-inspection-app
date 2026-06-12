@@ -309,7 +309,14 @@ export default function ExistingInspection() {
   if (!inspection) return null;
   const isCompleted = (inspection.status || '').toLowerCase() === 'completed';
   const isCancelled = (inspection.status || '').toLowerCase() === 'cancelled';
-  const readOnly = isCompleted || isCancelled;
+  const statusReadOnly = isCompleted || isCancelled;
+  // External (1099) users may only edit/cancel inspections they own; any other
+  // 1099 they can see is view-only. Mirrors the server guard — unknown owner
+  // (blank inspector_email) counts as own so legacy records aren't locked out.
+  const ownsThis = !inspection.inspectorEmail
+    || (!!currentUserEmail && currentUserEmail.trim().toLowerCase() === inspection.inspectorEmail.trim().toLowerCase());
+  const externalViewOnly = isExternal && !ownsThis && !statusReadOnly;
+  const readOnly = statusReadOnly || externalViewOnly;
   const templateLabel = templateLabelFor(inspection.templateType) || inspection.templateType;
 
   // Compose the display address: append the property's zip code if we have
@@ -327,7 +334,14 @@ export default function ExistingInspection() {
       <Head>
         <title>{inspection.propertyAddressSnapshot || 'Inspection'} - ResiHome</title>
       </Head>
-      {readOnly && (
+      {externalViewOnly && (
+        <div className="bg-sky-50 border-b border-sky-200 py-2">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 text-xs sm:text-sm text-sky-900 font-heading font-semibold">
+            View only — this inspection belongs to another agent. You can review it, but can’t make changes.
+          </div>
+        </div>
+      )}
+      {statusReadOnly && (
         <div className="bg-amber-50 border-b border-amber-200 py-2">
           {/* Symmetrical 3-zone header, aligned to the same max-width container
               as the page content below: status (left) · downloads (center) ·
