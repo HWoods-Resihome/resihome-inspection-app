@@ -95,10 +95,14 @@ function QuestionEditor({ initial, onSave, onCancel, busy }: {
 
       <div className="grid grid-cols-2 gap-2">
         <label className="text-[11px] font-heading font-semibold text-gray-500">Section order
-          <input type="number" value={d.sectionOrder} onChange={(e) => set({ sectionOrder: Number(e.target.value) })} className="focus-brand w-full border border-gray-300 rounded-lg p-2 text-sm mt-0.5" />
+          <input type="number" inputMode="numeric" min={0} value={d.sectionOrder === 0 ? '' : d.sectionOrder}
+            onChange={(e) => { const n = parseInt(e.target.value, 10); set({ sectionOrder: Number.isFinite(n) && n >= 0 ? n : 0 }); }}
+            className="focus-brand w-full border border-gray-300 rounded-lg p-2 text-sm mt-0.5" />
         </label>
         <label className="text-[11px] font-heading font-semibold text-gray-500">Display order
-          <input type="number" value={d.displayOrder} onChange={(e) => set({ displayOrder: Number(e.target.value) })} className="focus-brand w-full border border-gray-300 rounded-lg p-2 text-sm mt-0.5" />
+          <input type="number" inputMode="numeric" min={0} value={d.displayOrder === 0 ? '' : d.displayOrder}
+            onChange={(e) => { const n = parseInt(e.target.value, 10); set({ displayOrder: Number.isFinite(n) && n >= 0 ? n : 0 }); }}
+            className="focus-brand w-full border border-gray-300 rounded-lg p-2 text-sm mt-0.5" />
         </label>
       </div>
 
