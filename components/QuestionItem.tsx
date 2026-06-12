@@ -469,21 +469,44 @@ function renderInput(
         />
       );
     }
+    // Good/Fail semantics: positive answers (Good/Pass) get a thumbs-up and fill
+    // green when selected; negative answers (Fail/Poor) get a thumbs-down and keep
+    // the brand pink fill. Other options (N/A, etc.) stay neutral.
+    const classify = (opt: string): 'good' | 'fail' | null => {
+      const n = opt.trim().toLowerCase();
+      if (/^(good|pass|passed)$/.test(n)) return 'good';
+      if (/^(fail|failed|poor)$/.test(n)) return 'fail';
+      return null;
+    };
     return (
       <div className="flex flex-wrap gap-1.5">
         {opts.map((opt) => {
           const selected = a.answerValue === opt;
+          const kind = classify(opt);
+          const cls = selected
+            ? (kind === 'good'
+                ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm'
+                : 'bg-brand text-white border-brand shadow-sm')
+            : `bg-white text-ink border-gray-300 ${kind === 'good' ? 'hover:border-emerald-400' : 'hover:border-brand/50'}`;
           return (
             <button
               type="button"
               key={opt}
               onClick={() => onUpdate({ answerValue: selected ? '' : opt })}
-              className={`text-xs font-heading font-semibold px-3 py-1.5 rounded-full border-2 transition whitespace-nowrap ${
-                selected
-                  ? 'bg-brand text-white border-brand shadow-sm'
-                  : 'bg-white text-ink border-gray-300 hover:border-brand/50'
-              }`}
+              className={`inline-flex items-center gap-1.5 text-xs font-heading font-semibold px-3 py-1.5 rounded-full border-2 transition whitespace-nowrap ${cls}`}
             >
+              {kind === 'good' && (
+                <svg className={selected ? 'text-white' : 'text-emerald-600'} width="13" height="13" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                </svg>
+              )}
+              {kind === 'fail' && (
+                <svg className={selected ? 'text-white' : 'text-brand'} width="13" height="13" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
+                </svg>
+              )}
               {opt}
             </button>
           );
