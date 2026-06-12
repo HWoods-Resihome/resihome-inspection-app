@@ -53,37 +53,32 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
   const populatedSections = ctx.sections.filter(
     (s) => s.lines.length > 0 || s.photoUrls.length > 0
   );
-  const sumBy = (lines: PdfLineRow[], key: 'vendorCost' | 'clientCost' | 'tenantCost') =>
-    lines.reduce((acc, l) => acc + (l[key] || 0), 0);
-
-  // Page-1 condensed summary columns — mirror the detail table's money columns.
+  // Page-1 condensed summary columns — Room is prepended by PdfSummaryTable;
+  // these widths + roomWidth (11%) sum to 100%.
   const summaryColumns: PdfSummaryColumn<PdfLineRow>[] = [
-    { key: 'category', header: 'Category', width: COL.category, align: 'center', cell: (l) => l.category },
-    { key: 'subcategory', header: 'Sub-\ncategory', width: COL.subcategory, align: 'center', cell: (l) => l.subcategory },
-    { key: 'description', header: 'Description', width: COL.description, cell: (l) => l.laborShortDescription },
-    { key: 'qty', header: 'Qty', width: COL.qty, align: 'center', cell: (l) => formatQtyPdf(l.quantity) },
-    { key: 'unit', header: 'Unit', width: COL.unit, align: 'center', cell: (l) => l.laborMeas },
-    { key: 'vendor', header: 'Vendor', width: COL.vendor, align: 'center', cell: (l) => l.vendor },
+    { key: 'category', header: 'Category', width: '8%', align: 'center', cell: (l) => l.category },
+    { key: 'subcategory', header: 'Sub-\ncategory', width: '8%', align: 'center', cell: (l) => l.subcategory },
+    { key: 'description', header: 'Description', width: '18%', cell: (l) => l.laborShortDescription },
+    { key: 'qty', header: 'Qty', width: '5%', align: 'center', cell: (l) => formatQtyPdf(l.quantity) },
+    { key: 'unit', header: 'Unit', width: '4%', align: 'center', cell: (l) => l.laborMeas },
+    { key: 'vendor', header: 'Vendor', width: '9%', align: 'center', cell: (l) => l.vendor },
     {
-      key: 'vendorCost', header: 'Vendor $', width: COL.vendorCost, align: 'right', hasTotal: true,
+      key: 'vendorCost', header: 'Vendor $', width: '9%', align: 'right', hasTotal: true,
       cell: (l) => `$${formatMoneyPdf(l.vendorCost)}`,
-      sectionTotal: (lines) => `$${formatMoneyPdf(sumBy(lines, 'vendorCost'))}`,
       grandTotal: `$${formatMoneyPdf(ctx.grandTotals.vendor)}`,
     },
     {
-      key: 'clientCost', header: 'Client $', width: COL.clientCost, align: 'right',
+      key: 'clientCost', header: 'Client $', width: '9%', align: 'right',
       cell: (l) => `$${formatMoneyPdf(l.clientCost)}`,
-      sectionTotal: (lines) => `$${formatMoneyPdf(sumBy(lines, 'clientCost'))}`,
       grandTotal: `$${formatMoneyPdf(ctx.grandTotals.client)}`,
     },
     {
-      key: 'tenantPct', header: 'Ten %', width: COL.tenantPct, align: 'right',
+      key: 'tenantPct', header: 'Ten %', width: '5%', align: 'right',
       cell: (l) => `${Math.round(l.tenantBillBackPercent)}%`,
     },
     {
-      key: 'tenantCost', header: 'Tenant $', width: COL.tenantCost, align: 'right', brand: true,
+      key: 'tenantCost', header: 'Tenant $', width: '14%', align: 'right', brand: true,
       cell: (l) => `$${formatMoneyPdf(l.tenantCost)}`,
-      sectionTotal: (lines) => `$${formatMoneyPdf(sumBy(lines, 'tenantCost'))}`,
       grandTotal: `$${formatMoneyPdf(ctx.grandTotals.tenant)}`,
     },
   ];
@@ -145,6 +140,7 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
           title="Scope Summary — All Line Items"
           groups={populatedSections}
           columns={summaryColumns}
+          roomWidth="11%"
           grandTotalLabel="Grand Total"
         />
 

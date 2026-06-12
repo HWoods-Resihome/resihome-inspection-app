@@ -257,19 +257,11 @@ export const pdfStyles = StyleSheet.create({
     textAlign: 'right',
   },
 
-  // ---- Page-1 condensed summary table (all line items, grouped by room,
-  //      no photos, totals at the bottom) ----
-  summaryRoomRow: {
-    flexDirection: 'row',
-    backgroundColor: PDF_COLORS.grayBg,
-    borderTopWidth: 0.5,
-    borderBottomWidth: 0.5,
-    borderColor: PDF_COLORS.grayLight,
-    paddingVertical: 3,
-  },
-  summaryRoomName: {
+  // ---- Page-1 condensed summary table (one row per line item, Room as its
+  //      own column, no photos, single grand-total row at the bottom) ----
+  summaryRoomCell: {
     fontFamily: 'Helvetica-Bold',
-    fontSize: 8,
+    fontSize: 7.5,
     color: PDF_COLORS.ink,
     paddingHorizontal: 3,
   },
@@ -500,17 +492,19 @@ export function PdfSectionHeader(props: { title: string; photoUrls: string[]; mi
 }
 
 /**
- * Page-1 condensed summary table. Combines EVERY line item into one clean
- * table, broken out by room (a thin room sub-header row carries the room's
- * own totals), with no photos and a grand-total row at the bottom. Generic
- * over the line type so Master / Vendor / Chargeback (PdfLineRow) and QC
- * (QcPdfLine) can all share it — each supplies its own column set.
+ * Page-1 condensed summary table. Combines EVERY line item into ONE clean,
+ * flat table — Room is its own column (shown once per room run), one row per
+ * line item, no photos and no per-room subtotals, with a single grand-total
+ * row at the bottom. Generic over the line type so Master / Vendor / Chargeback
+ * (PdfLineRow) and QC (QcPdfLine) can all share it — each supplies its own
+ * column set + widths.
  *
- * Column model: every column renders a per-line cell. Columns flagged with
- * `hasTotal` (and any columns after the first such one) form the right-aligned
- * "totals zone" — those columns get a per-room subtotal on the room header row
- * and a value on the grand-total row. The descriptive columns before the
- * totals zone are merged into the room-name / "Grand Total" label cell.
+ * Column model: the Room column is prepended automatically (its value comes
+ * from the group). The caller's columns render per-line cells; columns flagged
+ * `hasTotal` (and any after the first such one) form the right-aligned totals
+ * zone and carry a value on the grand-total row. Room + the descriptive
+ * columns before the totals zone are merged into the "Grand Total" label cell.
+ * The caller's column widths + `roomWidth` must sum to 100%.
  */
 function parsePctWidth(w: string): number {
   const n = parseFloat(w);
@@ -526,8 +520,6 @@ export interface PdfSummaryColumn<T> {
   cell: (line: T) => React.ReactNode;
   /** Marks the first column of the right-aligned totals zone. */
   hasTotal?: boolean;
-  /** Value shown in this column on each room's header row. */
-  sectionTotal?: (lines: T[]) => React.ReactNode;
   /** Value shown in this column on the grand-total row. */
   grandTotal?: React.ReactNode;
   /** Render the value in brand (tenant) color. */
@@ -538,15 +530,28 @@ export function PdfSummaryTable<T>(props: {
   title: string;
   groups: { displayName: string; lines: T[] }[];
   columns: PdfSummaryColumn<T>[];
+  /** Width of the prepended Room column (e.g. "12%"). */
+  roomWidth: string;
+  roomHeader?: string;
   grandTotalLabel?: string;
 }) {
   const cols = props.columns;
   const firstTotalIdx = cols.findIndex((c) => c.hasTotal);
-  const labelCols = firstTotalIdx >= 0 ? cols.slice(0, firstTotalIdx) : cols;
+  const leadingCols = firstTotalIdx >= 0 ? cols.slice(0, firstTotalIdx) : cols;
   const totalCols = firstTotalIdx >= 0 ? cols.slice(firstTotalIdx) : [];
-  const labelWidth = `${labelCols.reduce((s, c) => s + parsePctWidth(c.width), 0)}%`;
+  // The "Grand Total" label spans the Room column + every descriptive column
+  // before the totals zone, so the totals land under their own headers.
+  const labelWidth = `${parsePctWidth(props.roomWidth) + leadingCols.reduce((s, c) => s + parsePctWidth(c.width), 0)}%`;
   const groups = props.groups.filter((g) => g.lines.length > 0);
   if (groups.length === 0) return null;
+
+  // Flatten to one row per line, tagging each with its room. Show the room name
+  // only on the first row of each consecutive run (a clean "merged cell" look)
+  // while keeping one physical row per line item.
+  const rows: { room: string; showRoom: boolean; line: T }[] = [];
+  for (const g of groups) {
+    g.lines.forEach((line, i) => rows.push({ room: g.displayName, showRoom: i === 0, line }));
+  }
 
   const lineCellStyle = (c: PdfSummaryColumn<T>) => {
     if (c.brand) return pdfStyles.tableCellTenant;
@@ -559,8 +564,9 @@ export function PdfSummaryTable<T>(props: {
     <View style={{ marginTop: 4, marginBottom: 4 }}>
       <Text style={pdfStyles.sectionTitle}>{props.title}</Text>
 
-      {/* Column headers */}
+      {/* Column headers (Room first) */}
       <View style={pdfStyles.tableHeaderRow}>
+        <Text style={[pdfStyles.tableHeaderCell, { width: props.roomWidth }]}>{props.roomHeader ?? 'Room'}</Text>
         {cols.map((c) => (
           <Text key={c.key} style={[pdfStyles.tableHeaderCell, { width: c.width, textAlign: c.align ?? 'left' }]}>
             {c.header}
@@ -568,36 +574,16 @@ export function PdfSummaryTable<T>(props: {
         ))}
       </View>
 
-      {groups.map((g) => (
-        <React.Fragment key={g.displayName}>
-          {/* Room header row — name on the left, this room's totals on the right.
-              minPresenceAhead keeps it from stranding alone at a page bottom. */}
-          <View style={pdfStyles.summaryRoomRow} wrap={false} minPresenceAhead={40}>
-            <Text style={[pdfStyles.summaryRoomName, { width: labelWidth }]}>{g.displayName}</Text>
-            {totalCols.map((c) => (
-              <Text
-                key={c.key}
-                style={[
-                  c.brand ? pdfStyles.tableCellTenant : pdfStyles.tableCellNumeric,
-                  { width: c.width, fontFamily: 'Helvetica-Bold' },
-                ]}
-              >
-                {c.sectionTotal ? c.sectionTotal(g.lines) : ' '}
-              </Text>
-            ))}
-          </View>
-
-          {/* Compact per-line rows (no photos) */}
-          {g.lines.map((line, i) => (
-            <View key={i} style={pdfStyles.summaryLineRow} wrap={false}>
-              {cols.map((c) => (
-                <Text key={c.key} style={[lineCellStyle(c), { width: c.width }]}>
-                  {c.cell(line)}
-                </Text>
-              ))}
-            </View>
+      {/* One row per line item */}
+      {rows.map((r, i) => (
+        <View key={i} style={pdfStyles.summaryLineRow} wrap={false}>
+          <Text style={[pdfStyles.summaryRoomCell, { width: props.roomWidth }]}>{r.showRoom ? r.room : ''}</Text>
+          {cols.map((c) => (
+            <Text key={c.key} style={[lineCellStyle(c), { width: c.width }]}>
+              {c.cell(r.line)}
+            </Text>
           ))}
-        </React.Fragment>
+        </View>
       ))}
 
       {/* Grand-total row */}

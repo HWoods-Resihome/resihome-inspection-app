@@ -94,23 +94,19 @@ function QcDoc({ ctx }: { ctx: QcPdfContext }) {
   const verdictColor = ctx.verdict === 'pass' ? PDF_COLORS.emerald : PDF_COLORS.brand;
   const verdictText = ctx.verdict === 'pass' ? 'PASS' : 'FAIL';
 
-  const passFailLabel = (lines: QcPdfLine[]) => {
-    const p = lines.filter((l) => l.passFail === 'pass').length;
-    const f = lines.filter((l) => l.passFail === 'fail').length;
-    return `${p}P / ${f}F`;
-  };
+  // Page-1 condensed summary columns — Room is prepended by PdfSummaryTable;
+  // these widths + roomWidth (12%) sum to 100%.
   const summaryColumns: PdfSummaryColumn<QcPdfLine>[] = [
-    { key: 'category', header: 'Category', width: COL.category, cell: (l) => l.category },
-    { key: 'subcategory', header: 'Sub', width: COL.subcategory, cell: (l) => l.subcategory },
-    { key: 'description', header: 'Line Item', width: COL.description, cell: (l) => l.description },
-    { key: 'qty', header: 'Qty', width: COL.qty, align: 'center', cell: (l) => (l.quantity != null ? formatQtyPdf(l.quantity) : '') },
-    { key: 'unit', header: 'Unit', width: COL.unit, align: 'center', cell: (l) => l.unit },
-    { key: 'vendor', header: 'Vendor', width: COL.vendor, align: 'center', cell: (l) => l.vendor },
-    { key: 'vendorCost', header: 'Vendor $', width: COL.vendorCost, align: 'right', cell: (l) => (l.vendorCost != null ? `$${formatMoneyPdf(l.vendorCost)}` : '') },
+    { key: 'category', header: 'Category', width: '11%', cell: (l) => l.category },
+    { key: 'subcategory', header: 'Sub', width: '10%', cell: (l) => l.subcategory },
+    { key: 'description', header: 'Line Item', width: '24%', cell: (l) => l.description },
+    { key: 'qty', header: 'Qty', width: '5%', align: 'center', cell: (l) => (l.quantity != null ? formatQtyPdf(l.quantity) : '') },
+    { key: 'unit', header: 'Unit', width: '5%', align: 'center', cell: (l) => l.unit },
+    { key: 'vendor', header: 'Vendor', width: '11%', align: 'center', cell: (l) => l.vendor },
+    { key: 'vendorCost', header: 'Vendor $', width: '10%', align: 'right', cell: (l) => (l.vendorCost != null ? `$${formatMoneyPdf(l.vendorCost)}` : '') },
     {
-      key: 'result', header: 'Result', width: COL.result, align: 'center', hasTotal: true,
+      key: 'result', header: 'Result', width: '12%', align: 'center', hasTotal: true,
       cell: (l) => <ResultChip pf={l.passFail} />,
-      sectionTotal: (lines) => passFailLabel(lines),
       grandTotal: `${ctx.passCount}P / ${ctx.failCount}F`,
     },
   ];
@@ -175,6 +171,7 @@ function QcDoc({ ctx }: { ctx: QcPdfContext }) {
           title="Re-Inspect Summary — All Line Items"
           groups={ctx.sections}
           columns={summaryColumns}
+          roomWidth="12%"
           grandTotalLabel="Grand Total"
         />
 

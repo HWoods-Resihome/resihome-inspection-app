@@ -55,16 +55,17 @@ function VendorDoc(props: {
   // self-contained and parallel-safe.
   const galleryBase = ctx.photoGalleryBase ? `${ctx.photoGalleryBase}?k=vendor&v=${slugifyVendor(vendor)}` : undefined;
 
+  // Page-1 condensed summary columns — Room is prepended by PdfSummaryTable;
+  // these widths + roomWidth (14%) sum to 100%.
   const summaryColumns: PdfSummaryColumn<PdfLineRow>[] = [
-    { key: 'category', header: 'Category', width: COL.category, align: 'center', cell: (l) => l.category },
-    { key: 'subcategory', header: 'Sub-\ncategory', width: COL.subcategory, align: 'center', cell: (l) => l.subcategory },
-    { key: 'description', header: 'Description', width: COL.description, cell: (l) => l.laborShortDescription },
-    { key: 'qty', header: 'Qty', width: COL.qty, align: 'center', cell: (l) => formatQtyPdf(l.quantity) },
-    { key: 'unit', header: 'Unit', width: COL.unit, align: 'center', cell: (l) => l.laborMeas },
+    { key: 'category', header: 'Category', width: '11%', align: 'center', cell: (l) => l.category },
+    { key: 'subcategory', header: 'Sub-\ncategory', width: '11%', align: 'center', cell: (l) => l.subcategory },
+    { key: 'description', header: 'Description', width: '39%', cell: (l) => l.laborShortDescription },
+    { key: 'qty', header: 'Qty', width: '6%', align: 'center', cell: (l) => formatQtyPdf(l.quantity) },
+    { key: 'unit', header: 'Unit', width: '5%', align: 'center', cell: (l) => l.laborMeas },
     {
-      key: 'vendorCost', header: 'Vendor $', width: COL.vendorCost, align: 'right', hasTotal: true, brand: true,
+      key: 'vendorCost', header: 'Vendor $', width: '14%', align: 'right', hasTotal: true, brand: true,
       cell: (l) => `$${formatMoneyPdf(l.vendorCost)}`,
-      sectionTotal: (lines) => `$${formatMoneyPdf(lines.reduce((a, l) => a + (l.vendorCost || 0), 0))}`,
       grandTotal: `$${formatMoneyPdf(vendorTotal)}`,
     },
   ];
@@ -110,6 +111,7 @@ function VendorDoc(props: {
           title="Scope Summary — All Line Items"
           groups={vendorSections}
           columns={summaryColumns}
+          roomWidth="14%"
           grandTotalLabel="Grand Total"
         />
 

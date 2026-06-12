@@ -55,20 +55,21 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
   const grandTenantTotal = filteredSections.reduce((sum, s) => sum + s.tenantTotal, 0);
   const grandLineCount = filteredSections.reduce((sum, s) => sum + s.lines.length, 0);
 
+  // Page-1 condensed summary columns — Room is prepended by PdfSummaryTable;
+  // these widths + roomWidth (13%) sum to 100%.
   const summaryColumns: PdfSummaryColumn<PdfLineRow>[] = [
-    { key: 'category', header: 'Category', width: COL.category, align: 'center', cell: (l) => l.category },
-    { key: 'subcategory', header: 'Sub-\ncategory', width: COL.subcategory, align: 'center', cell: (l) => l.subcategory },
-    { key: 'description', header: 'Description', width: COL.description, cell: (l) => l.laborShortDescription },
-    { key: 'qty', header: 'Qty', width: COL.qty, align: 'center', cell: (l) => formatQtyPdf(l.quantity) },
-    { key: 'unit', header: 'Unit', width: COL.unit, align: 'center', cell: (l) => l.laborMeas },
+    { key: 'category', header: 'Category', width: '10%', align: 'center', cell: (l) => l.category },
+    { key: 'subcategory', header: 'Sub-\ncategory', width: '10%', align: 'center', cell: (l) => l.subcategory },
+    { key: 'description', header: 'Description', width: '39%', cell: (l) => l.laborShortDescription },
+    { key: 'qty', header: 'Qty', width: '6%', align: 'center', cell: (l) => formatQtyPdf(l.quantity) },
+    { key: 'unit', header: 'Unit', width: '6%', align: 'center', cell: (l) => l.laborMeas },
     {
-      key: 'tenantPct', header: 'Ten %', width: COL.tenantPct, align: 'right', hasTotal: true,
+      key: 'tenantPct', header: 'Ten %', width: '6%', align: 'right', hasTotal: true,
       cell: (l) => `${Math.round(l.tenantBillBackPercent)}%`,
     },
     {
-      key: 'tenantCost', header: 'Tenant $', width: COL.tenantCost, align: 'right', brand: true,
+      key: 'tenantCost', header: 'Tenant $', width: '10%', align: 'right', brand: true,
       cell: (l) => `$${formatMoneyPdf(l.tenantCost)}`,
-      sectionTotal: (lines) => `$${formatMoneyPdf(lines.reduce((a, l) => a + (l.tenantCost || 0), 0))}`,
       grandTotal: `$${formatMoneyPdf(grandTenantTotal)}`,
     },
   ];
@@ -114,6 +115,7 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
           title="Chargeback Summary — All Line Items"
           groups={filteredSections}
           columns={summaryColumns}
+          roomWidth="13%"
           grandTotalLabel="Grand Total"
         />
 
