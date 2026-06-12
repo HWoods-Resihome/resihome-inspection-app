@@ -74,6 +74,7 @@ function QuestionEditor({ initial, onSave, onCancel, busy }: {
         ) : (
           <Combobox
             compact filled
+            deferKeyboard
             options={sectionOptions}
             value={d.section}
             placeholder="Select a section"
