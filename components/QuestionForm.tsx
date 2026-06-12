@@ -212,6 +212,11 @@ export function QuestionForm({
     templateType === 'leasing_agent_1099_property_inspection' ||
     templateType === 'pm_vacancy_occupancy_check' ||
     templateType === 'pm_community_inspection';
+  const isCommunity = templateType === 'pm_community_inspection';
+  // Community / Visit inspections drop the reused Scope widgets (HVAC & Air
+  // Filters, Smart Home Tech, Utilities) entirely. Everything else scope-style
+  // (1099, occupancy) keeps them.
+  const fcEnabled = scopeStyle && !isCommunity;
   // Property values used to prefill the HVAC air-filter widget.
   const propertyValues = useMemo<Record<string, string>>(() => ({
     air_filters___total_quantity: propertyAirFiltersTotal != null ? String(propertyAirFiltersTotal) : '',
@@ -232,7 +237,7 @@ export function QuestionForm({
 
   // Hydrate the checklist blob from the saved answer on open.
   useEffect(() => {
-    if (!scopeStyle || fcHydratedRef.current) return;
+    if (!fcEnabled || fcHydratedRef.current) return;
     fcHydratedRef.current = true;
     const blob = (existingAnswers || []).find(
       (a) => a.questionIdExternal === 'fc__all' || (a.answerIdExternal || '').startsWith('FINALCHECKLIST-')
@@ -971,7 +976,7 @@ export function QuestionForm({
   // starts empty (the widget prefills from the property), so a plain load never
   // writes — only real edits do. Sizes beyond the quantity are cleared.
   useEffect(() => {
-    if (!scopeStyle || readOnly || !propertyRecordId) return;
+    if (!fcEnabled || readOnly || !propertyRecordId) return;
     const qn = fcAnswers['fc_air_filters_qty']?.quantity ?? null;
     const sizes = fcAnswers['fc_filter_sizes']?.filterSizes || [];
     if (qn == null && !sizes.some(Boolean)) return;
@@ -1083,7 +1088,7 @@ export function QuestionForm({
       return;
     }
     // HVAC + Smart Home checklist (reused Scope widgets) must be complete.
-    if (scopeStyle) {
+    if (fcEnabled) {
       const gap = finalChecklistGap(fcAnswers, fcCtx, { onlySectionIds: FC_ONLY, skipLineRules: true });
       if (gap) { await dialog.alert(`Please complete: ${gap}`); return; }
     }
@@ -1208,7 +1213,7 @@ export function QuestionForm({
     }
 
     // Make sure the HVAC/Smart Home checklist blob is persisted before finalize.
-    if (scopeStyle) { try { await saveFc(fcAnswers); } catch { /* surfaced via answers save */ } }
+    if (fcEnabled) { try { await saveFc(fcAnswers); } catch { /* surfaced via answers save */ } }
 
     onSubmit(finalAnswers, sectionPhotoUrlsForApi);
   }
@@ -1239,7 +1244,7 @@ export function QuestionForm({
 
   // Roll the reused Scope sections (HVAC/Smart Home/Utilities) into the header
   // total alongside the question sections.
-  const fcTotals = scopeStyle
+  const fcTotals = fcEnabled
     ? FC_ONLY.reduce((acc, id) => {
         const c = fcSectionCounts(fcAnswers, fcCtx, id, { skipLineRules: true });
         return { completed: acc.completed + c.completed, total: acc.total + c.total };
@@ -1286,10 +1291,10 @@ export function QuestionForm({
   // "HVAC / Utilities" section (utilities at the end). Other scope-style templates
   // keep the standalone-section layout (Smart Home above Whole House/Yard).
   const is1099 = templateType === 'leasing_agent_1099_property_inspection';
-  const smartFc = scopeStyle && smartAnchorKey
+  const smartFc = fcEnabled && smartAnchorKey
     ? makeFc(['smart_home_tech'], is1099 ? { seamless: true } : undefined)
     : null;
-  const bottomFc = scopeStyle
+  const bottomFc = fcEnabled
     ? (smartAnchorKey
         ? makeFc(['hvac_air_filters', 'utilities'], is1099 ? { mergeName: 'HVAC / Utilities' } : undefined)
         : makeFc(FC_ONLY))
@@ -1390,7 +1395,7 @@ export function QuestionForm({
                 )}
                 {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
               </div>
-              {(typeof listingPrice === 'number' && listingPrice > 0) || listingDate ? (
+              {!isCommunity && ((typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? (
                 <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
                   {typeof listingPrice === 'number' && listingPrice > 0 && (
                     <span>Listing ${listingPrice.toLocaleString()}</span>
