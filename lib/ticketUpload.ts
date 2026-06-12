@@ -295,8 +295,20 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
       // contains "Turnkey"/"Maintenance" as selectable options, and reading those
       // gave a false "already Turnkey". The read-only value is the bold label
       // (.lblbold) right after the visible "Ticket Type :" label.
+      // Read the CURRENT ticket type. Prefer the live <select id="TicketType">
+      // when it's actually visible (edit mode) — its selected option is the
+      // source of truth. Otherwise fall back to the read-only bold label after
+      // the visible "Ticket Type :" label. CRITICAL: only VISIBLE elements —
+      // the hidden edit form carries "Turnkey"/"Maintenance" options that
+      // previously produced a false "already Turnkey".
       const readType = async (): Promise<string> => page.evaluate(() => {
         const isVisible = (el: Element) => !!(el as HTMLElement).offsetParent;
+        const sel = document.querySelector('#TicketType') as HTMLSelectElement | null;
+        if (sel && isVisible(sel)) {
+          const opt = sel.options[sel.selectedIndex];
+          const t = (opt?.textContent || '').trim();
+          if (t && !/^-?\s*select\s*-?$/i.test(t)) return t;
+        }
         const labels = (Array.from(document.querySelectorAll('label')) as HTMLElement[]).filter(isVisible);
         const i = labels.findIndex((l) => /^ticket type\s*:?\s*$/i.test((l.textContent || '').trim()));
         if (i >= 0) for (let j = i + 1; j < Math.min(i + 4, labels.length); j++) {
@@ -318,17 +330,58 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
           log(`clicked Edit: ${clickedEdit}`);
           await sleep(1800); // let edit-mode controls render
 
-          // Select the target type in whatever control edit mode exposes
-          // (a <select>, a radio, or a clickable toggle/label).
+          // Select the target type. The confirmed control is
+          //   <select id="TicketType" ng-model="TicketDetail.TicketTypeId"
+          //           ng-options="g.LookupId as g.LookupDesc for g in TicketTypes"
+          //           ng-change="ChangeTicketType()">
+          // i.e. an AngularJS-bound <select> whose options are LABELLED by text
+          // ("Turnkey") — the value attr is whatever ng-options renders. So we
+          // MUST match by the option's VISIBLE TEXT, set it, dispatch a native
+          // `change` (Angular's select directive updates ng-model inside a
+          // digest and fires ng-change), AND, as a belt-and-suspenders, push the
+          // value onto the bound scope model and invoke ChangeTicketType() in an
+          // $apply so it sticks regardless of the rendered value format.
           const picked = await page.evaluate((t: string) => {
             const re = new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-            // Scope to the edit form (#formAddTicket / #divAddEdit) when present so
-            // we don't match an unrelated element elsewhere on the page.
+            const ng = (window as any).angular;
+            const driveSelect = (s: HTMLSelectElement): string => {
+              const opts = Array.from(s.options);
+              const opt = opts.find((o) => re.test((o.textContent || '').trim()))
+                || opts.find((o) => re.test(o.value || ''));
+              if (!opt) return '';
+              s.value = opt.value;
+              s.selectedIndex = opts.indexOf(opt);
+              s.dispatchEvent(new Event('input', { bubbles: true }));
+              s.dispatchEvent(new Event('change', { bubbles: true }));
+              // AngularJS belt-and-suspenders: assign the bound model on the
+              // select's scope and run its ng-change handler inside a digest.
+              try {
+                const modelAttr = s.getAttribute('ng-model'); // e.g. TicketDetail.TicketTypeId
+                if (ng && modelAttr) {
+                  const scope = ng.element(s).scope();
+                  if (scope) {
+                    const num = Number(opt.value);
+                    const val = opt.value !== '' && !isNaN(num) ? num : opt.value;
+                    scope.$apply(() => {
+                      const parts = modelAttr.split('.'); let o: any = scope;
+                      for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; }
+                      o[parts[parts.length - 1]] = val;
+                      if (typeof scope.ChangeTicketType === 'function') scope.ChangeTicketType();
+                    });
+                  }
+                }
+              } catch { /* DOM change already dispatched — fine */ }
+              return `select#${s.id || '?'}`;
+            };
+            // 1) The confirmed control by id.
+            const byId = document.querySelector('#TicketType') as HTMLSelectElement | null;
+            if (byId) { const r = driveSelect(byId); if (r) return r; }
+            // 2) Any other select in the edit form.
             const root: ParentNode = document.querySelector('#formAddTicket, #divAddEdit') || document;
             for (const s of Array.from(root.querySelectorAll('select')) as HTMLSelectElement[]) {
-              const opt = Array.from(s.options).find((o) => re.test(o.textContent || '') || re.test(o.value || ''));
-              if (opt) { s.value = opt.value; s.dispatchEvent(new Event('change', { bubbles: true })); return 'select'; }
+              const r = driveSelect(s); if (r) return r;
             }
+            // 3) Radio / clickable fallbacks.
             for (const r of Array.from(root.querySelectorAll('input[type=radio]')) as HTMLInputElement[]) {
               const lbl = (r.closest('label')?.textContent || (r.id && document.querySelector(`label[for="${r.id}"]`)?.textContent) || r.value || '');
               if (re.test(String(lbl))) { r.click(); return 'radio'; }
