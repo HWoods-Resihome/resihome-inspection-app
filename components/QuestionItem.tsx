@@ -25,11 +25,14 @@ type Props = {
    *  border (no yellow fill) and photos use a single in-app "Take" button (no
    *  separate Choose Files). Used by the 1099 / occupancy / community templates. */
   plainStyle?: boolean;
-  /** Render the Photos block ABOVE the Note block in the panel (1099). */
+  /** Render the Photos block ABOVE the Note block in the panel. */
   photoFirst?: boolean;
+  /** Shrink answer pills so long sets (e.g. Good - No Issues / Fail - Needs
+   *  Attention / N/A) fit on one line on mobile. */
+  compactOptions?: boolean;
 };
 
-export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName, propertyRecordId, plainStyle, photoFirst }: Props) {
+export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName, propertyRecordId, plainStyle, photoFirst, compactOptions }: Props) {
   const dialog = useAppDialog();
   // A note is required when the selected value is explicitly configured
   // (noteRequiredOnValues) OR — robust to the Good/Fail relabel — when a
@@ -276,7 +279,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
         </p>
       )}
 
-      {renderInput(question, answer, onUpdate)}
+      {renderInput(question, answer, onUpdate, compactOptions)}
 
       {/* Combined notes/photos panel */}
       {panelOpen && (
@@ -523,7 +526,8 @@ export function isNA(opt: string): boolean {
 function renderInput(
   q: Question,
   a: AnswerInput,
-  onUpdate: (patch: Partial<AnswerInput>) => void
+  onUpdate: (patch: Partial<AnswerInput>) => void,
+  compactOptions?: boolean,
 ) {
   // Picklists: short choice sets (Yes/No, Good/Fail, Pass/Fail/NA, etc.) stay as
   // quick tap-buttons; only LONGER lists use the branded ListPicker pop-up (a
@@ -563,7 +567,7 @@ function renderInput(
       return { tone: null, icon: null };
     };
     return (
-      <div className="flex flex-wrap gap-1.5">
+      <div className={compactOptions ? 'flex gap-1' : 'flex flex-wrap gap-1.5'}>
         {opts.map((opt) => {
           const selected = a.answerValue === opt;
           const { tone, icon } = meta(opt);
@@ -581,7 +585,7 @@ function renderInput(
               type="button"
               key={opt}
               onClick={() => onUpdate({ answerValue: selected ? '' : opt })}
-              className={`inline-flex items-center gap-1.5 text-xs font-heading font-semibold px-3 py-1.5 rounded-full border-2 transition whitespace-nowrap ${cls}`}
+              className={`inline-flex items-center rounded-full border-2 transition whitespace-nowrap font-heading font-semibold ${compactOptions ? 'gap-1 text-[10px] px-2 py-1' : 'gap-1.5 text-xs px-3 py-1.5'} ${cls}`}
             >
               <PillIcon icon={icon} tone={tone} selected={selected} />
               {opt}
