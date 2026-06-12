@@ -58,6 +58,12 @@ interface Props {
   /** Drives the bare subsections' open/closed state from the parent's global
    *  Collapse/Expand-all. Bump `token` to force every subsection to `open`. */
   openAllToken?: { open: boolean; token: number };
+  /** Render the selected sections as plain question rows — NO card, NO header,
+   *  NO collapse — so they can be embedded as the first rows of another section. */
+  seamless?: boolean;
+  /** Merge the `only` sections into ONE rendered section under this display name
+   *  (questions concatenated in `only` order; the X/Y count sums all members). */
+  mergeName?: string;
 }
 
 const num = (v: unknown): number | null => {
@@ -106,6 +112,19 @@ export function FinalChecklist(props: Props) {
   const sections = props.only ? FINAL_CHECKLIST.filter((s) => props.only!.includes(s.id)) : FINAL_CHECKLIST;
   const allSubsOpen = sections.every((s) => openSections[s.id] ?? true);
   const setAllSubs = (v: boolean) => setOpenSections(Object.fromEntries(sections.map((s) => [s.id, v])));
+
+  // What actually gets rendered. With `mergeName`, the selected sections collapse
+  // into ONE section (questions concatenated in `only` order, count summed over
+  // all members); otherwise each section renders on its own.
+  const renderSections: { id: string; name: string; questions: FcQuestion[]; memberIds: string[] }[] =
+    props.mergeName && sections.length > 0
+      ? [{
+          id: sections[0].id,
+          name: props.mergeName,
+          questions: sections.flatMap((s) => s.questions),
+          memberIds: sections.map((s) => s.id),
+        }]
+      : sections.map((s) => ({ id: s.id, name: s.name, questions: s.questions, memberIds: [s.id] }));
 
   // Completion context for the per-section "X/Y" pills (built from props).
   const countCtx: FcCompletionCtx = {
@@ -553,10 +572,19 @@ export function FinalChecklist(props: Props) {
   // One subsection's header + questions. In bare mode each is its OWN bubble
   // (matching the Q&A form's section style); otherwise it's a row inside the
   // outer "Final Checklist" bubble.
-  const sectionEls = sections.map((section) => {
+  const sectionEls = renderSections.map((section) => {
     const qs = section.questions.filter(visible);
     if (qs.length === 0) return null;
-    const sopen = openSections[section.id] ?? true;
+    // Seamless sections are always open (no collapse chrome).
+    const sopen = props.seamless ? true : (openSections[section.id] ?? true);
+    // Combined X/Y count across every member section (one member in the common case).
+    const counts = section.memberIds.reduce(
+      (acc, mid) => {
+        const c = fcSectionCounts(answers, countCtx, mid, { skipLineRules });
+        return { completed: acc.completed + c.completed, total: acc.total + c.total };
+      },
+      { completed: 0, total: 0 },
+    );
     const header = props.bare ? (
       // Mirror the Q&A form's section header exactly: left rotating chevron,
       // big bold title, no "(Required)" tag.
@@ -572,9 +600,7 @@ export function FinalChecklist(props: Props) {
           <polyline points="9 18 15 12 9 6" />
         </svg>
         <h2 className="font-heading font-bold text-lg truncate min-w-0 flex-1">{titleCase(section.name)}</h2>
-        {(() => { const c = fcSectionCounts(answers, countCtx, section.id, { skipLineRules }); return (
-          <span className="shrink-0 text-sm bg-brand text-white font-heading font-semibold px-2.5 py-0.5 rounded-full">{c.completed}/{c.total}</span>
-        ); })()}
+        <span className="shrink-0 text-sm bg-brand text-white font-heading font-semibold px-2.5 py-0.5 rounded-full">{counts.completed}/{counts.total}</span>
       </button>
     ) : (
       <button
@@ -596,6 +622,11 @@ export function FinalChecklist(props: Props) {
         {renderQuestion(q)}
       </div>
     ));
+    // Seamless: just the question rows (no card, no header) so they embed as the
+    // first rows of another section.
+    if (props.seamless) {
+      return <div key={section.id}>{body}</div>;
+    }
     return props.bare ? (
       <section key={section.id} className="mb-8 rounded-xl border border-gray-200 shadow-md overflow-hidden bg-white">
         {header}

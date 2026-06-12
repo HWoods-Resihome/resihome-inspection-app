@@ -1247,9 +1247,13 @@ export function QuestionForm({
   const yardKey = sectionInstances.find((i) => /yard|exterior/i.test(i.baseSectionName))?.instanceKey;
 
   // Builder for a reused Scope bubble group (each section its own bubble).
-  const makeFc = (only: string[]) => (
+  // seamless = render as plain rows (embedded inside another section);
+  // mergeName = collapse the given sections into one section under that title.
+  const makeFc = (only: string[], opts?: { seamless?: boolean; mergeName?: string }) => (
     <FinalChecklist
       bare
+      seamless={opts?.seamless}
+      mergeName={opts?.mergeName}
       only={only}
       openAllToken={fcOpenToken}
       answers={fcAnswers}
@@ -1267,8 +1271,19 @@ export function QuestionForm({
   // neither it drops into the bottom group.
   const wholeHouseKey = sectionInstances.find((i) => /whole\s*house/i.test(i.baseSectionName))?.instanceKey;
   const smartAnchorKey = wholeHouseKey || yardKey;
-  const smartFc = scopeStyle && smartAnchorKey ? makeFc(['smart_home_tech']) : null;
-  const bottomFc = scopeStyle ? makeFc(smartAnchorKey ? ['hvac_air_filters', 'utilities'] : FC_ONLY) : null;
+  // 1099 ONLY: Smart Home Tech becomes the first rows INSIDE the Whole House
+  // section (seamless — no separate section), and HVAC + Utilities merge into one
+  // "HVAC / Utilities" section (utilities at the end). Other scope-style templates
+  // keep the standalone-section layout (Smart Home above Whole House/Yard).
+  const is1099 = templateType === 'leasing_agent_1099_property_inspection';
+  const smartFc = scopeStyle && smartAnchorKey
+    ? makeFc(['smart_home_tech'], is1099 ? { seamless: true } : undefined)
+    : null;
+  const bottomFc = scopeStyle
+    ? (smartAnchorKey
+        ? makeFc(['hvac_air_filters', 'utilities'], is1099 ? { mergeName: 'HVAC / Utilities' } : undefined)
+        : makeFc(FC_ONLY))
+    : null;
 
   // Header status badge + "Submitted" stamp (only while actually submitted).
   const headerBadge = statusBadge(status);
@@ -1437,8 +1452,9 @@ export function QuestionForm({
             <Fragment key={inst.instanceKey}>
             {/* HVAC + Utilities sit just above the Review & Sign-Off section. */}
             {inst.instanceKey === firstSummaryKey && bottomFc}
-            {/* Smart Home Tech sits just above the Whole House section. */}
-            {inst.instanceKey === smartAnchorKey && smartFc}
+            {/* Non-1099 scope-style: Smart Home Tech is its own section above the
+                anchor. (1099 embeds it inside the section body instead — below.) */}
+            {!is1099 && inst.instanceKey === smartAnchorKey && smartFc}
             <section id={sectionDomId} className="lz-gap mb-8 scroll-mt-24 rounded-xl shadow-md overflow-hidden">
               {/* Section header (tappable to collapse) */}
               <button
@@ -1579,6 +1595,10 @@ export function QuestionForm({
                       </div>
                     )}
                   </div>
+
+                  {/* 1099: Smart Home Tech renders as the FIRST rows of the Whole
+                      House section (seamless — no separate section). */}
+                  {is1099 && inst.instanceKey === smartAnchorKey && smartFc}
 
                   {/* Questions for this instance (hidden conditional widget
                       fields are filtered out). */}

@@ -237,7 +237,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             onClick={togglePanel}
             aria-label={panelOpen ? 'Close notes/photos' : 'Add notes/photos'}
             aria-expanded={panelOpen}
-            title={panelOpen ? 'Close notes/photos' : 'Add notes/photos (optional)'}
+            title={panelOpen ? 'Close notes/photos' : 'Add notes/photos (Optional)'}
             className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-heading font-semibold transition ${
               panelOpen
                 ? 'bg-gray-700 text-white hover:bg-gray-800'
@@ -293,7 +293,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             <label className={`block text-xs font-heading font-semibold mb-1 ${
               triggered ? 'text-amber-900' : 'text-gray-700'
             }`}>
-              Note {triggered ? <span className="text-brand">(required)</span> : <span className="text-gray-400 font-normal">(optional)</span>}
+              Note {triggered ? <span className="text-brand">(Required)</span> : <span className="text-gray-400 font-normal">(Optional)</span>}
             </label>
             <textarea
               value={answer.note || ''}
@@ -326,7 +326,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             return (
               <div>
                 <label className="block text-xs font-heading font-semibold text-amber-900 mb-1">
-                  Assigned to <span className="text-brand">(required)</span>
+                  Assigned to <span className="text-brand">(Required)</span>
                 </label>
                 <ListPicker
                   value={answer.assignedTo || 'Vendor 1'}
@@ -344,7 +344,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             <label className={`block text-xs font-heading font-semibold mb-1 ${
               forcedOpen ? 'text-amber-900' : 'text-gray-700'
             }`}>
-              Photos {photoRequired ? <span className="text-brand">(required)</span> : <span className="text-gray-400 font-normal">(optional)</span>}
+              Photos {photoRequired ? <span className="text-brand">(Required)</span> : <span className="text-gray-400 font-normal">(Optional)</span>}
             </label>
             <div className="flex flex-wrap gap-2 items-center mt-1">
               {/* Existing photos (tap to view / mark up / delete) */}
