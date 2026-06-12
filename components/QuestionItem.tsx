@@ -454,6 +454,38 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
 // (Yes/No, Good/Fail, Pass/Fail/NA…); longer lists use the ListPicker pop-up.
 const PILL_MAX = 4;
 
+// Visual tone for an answer pill: drives the selected fill + icon color.
+//   good = emerald green · fail = brand pink · neutral = slate
+type PillTone = 'good' | 'fail' | 'neutral';
+type PillIconKind = 'thumbUp' | 'thumbDown' | 'arrowUp' | 'arrowDown' | 'flat' | 'house' | 'person' | null;
+
+// A small stroke icon shown at the far left of an answer pill. Inherits white
+// when the pill is selected; otherwise tinted to the tone (matching the
+// thumbs-up / thumbs-down treatment).
+function PillIcon({ icon, tone, selected }: { icon: PillIconKind; tone: PillTone | null; selected: boolean }) {
+  if (!icon) return null;
+  const color = selected ? 'text-white'
+    : tone === 'good' ? 'text-emerald-600'
+    : tone === 'neutral' ? 'text-gray-600'
+    : 'text-brand';
+  let inner: JSX.Element | null = null;
+  switch (icon) {
+    case 'thumbUp':   inner = <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />; break;
+    case 'thumbDown': inner = <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />; break;
+    case 'arrowUp':   inner = <><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></>; break;
+    case 'arrowDown': inner = <><line x1="12" y1="5" x2="12" y2="19" /><polyline points="19 12 12 19 5 12" /></>; break;
+    case 'flat':      inner = <line x1="5" y1="12" x2="19" y2="12" />; break;
+    case 'house':     inner = <><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /></>; break;
+    case 'person':    inner = <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>; break;
+  }
+  return (
+    <svg className={color} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {inner}
+    </svg>
+  );
+}
+
 function renderInput(
   q: Question,
   a: AnswerInput,
@@ -481,39 +513,34 @@ function renderInput(
         />
       );
     }
-    // Good/Fail semantics: positive answers (Good/Pass) get a thumbs-up and fill
-    // green when selected; negative answers (Fail/Poor) get a thumbs-down and keep
-    // the brand pink fill. Other options (N/A, etc.) stay neutral.
-    const classify = (opt: string): 'good' | 'fail' | null => {
+    // Map a short answer label to a tone (selected fill color) + leading icon.
+    // Matched on the word anywhere in the label so multi-word options like
+    // "Good - No Issues" / "Fail - Needs Attention" still classify.
+    const meta = (opt: string): { tone: PillTone | null; icon: PillIconKind } => {
       const n = opt.trim().toLowerCase();
-      // Match on the word anywhere in the label so multi-word options like
-      // "Good - No Issues" / "Fail - Needs Attention" classify correctly.
-      if (/\b(fail|failed|poor|deficient)\b/.test(n)) return 'fail';
-      if (/\b(good|pass|passed|satisfactory)\b/.test(n)) return 'good';
-      return null;
-    };
-    // A leading emoji for recognizable answer sets (rent direction, occupancy).
-    // Good/Fail use the thumbs SVGs above and never get an emoji.
-    const emojiFor = (opt: string): string => {
-      const n = opt.trim().toLowerCase();
-      if (/\breduce\b/.test(n)) return '📉';
-      if (/\bkeep\b/.test(n)) return '⏸️';
-      if (/\bincrease\b/.test(n)) return '📈';
-      if (/\bvacant\b/.test(n)) return '🏚️';
-      if (/squatter|occupied/.test(n)) return '⚠️';
-      return '';
+      if (/\b(fail|failed|poor|deficient)\b/.test(n)) return { tone: 'fail', icon: 'thumbDown' };
+      if (/\b(good|pass|passed|satisfactory)\b/.test(n)) return { tone: 'good', icon: 'thumbUp' };
+      if (/\bincrease\b/.test(n)) return { tone: 'good', icon: 'arrowUp' };      // green up arrow
+      if (/\breduce\b/.test(n)) return { tone: 'fail', icon: 'arrowDown' };      // pink down arrow
+      if (/\bkeep\b/.test(n)) return { tone: 'neutral', icon: 'flat' };          // flat line
+      if (/\bvacant\b/.test(n)) return { tone: 'good', icon: 'house' };          // green house
+      if (/squatter|occupied/.test(n)) return { tone: 'fail', icon: 'person' };  // pink person
+      return { tone: null, icon: null };
     };
     return (
       <div className="flex flex-wrap gap-1.5">
         {opts.map((opt) => {
           const selected = a.answerValue === opt;
-          const kind = classify(opt);
-          const emoji = kind ? '' : emojiFor(opt);
-          const cls = selected
-            ? (kind === 'good'
-                ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm'
-                : 'bg-brand text-white border-brand shadow-sm')
-            : `bg-white text-ink border-gray-300 ${kind === 'good' ? 'hover:border-emerald-400' : 'hover:border-brand/50'}`;
+          const { tone, icon } = meta(opt);
+          const selectedCls =
+            tone === 'good' ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm'
+            : tone === 'neutral' ? 'bg-gray-600 text-white border-gray-600 shadow-sm'
+            : 'bg-brand text-white border-brand shadow-sm';
+          const hover =
+            tone === 'good' ? 'hover:border-emerald-400'
+            : tone === 'neutral' ? 'hover:border-gray-400'
+            : 'hover:border-brand/50';
+          const cls = selected ? selectedCls : `bg-white text-ink border-gray-300 ${hover}`;
           return (
             <button
               type="button"
@@ -521,19 +548,7 @@ function renderInput(
               onClick={() => onUpdate({ answerValue: selected ? '' : opt })}
               className={`inline-flex items-center gap-1.5 text-xs font-heading font-semibold px-3 py-1.5 rounded-full border-2 transition whitespace-nowrap ${cls}`}
             >
-              {kind === 'good' && (
-                <svg className={selected ? 'text-white' : 'text-emerald-600'} width="13" height="13" viewBox="0 0 24 24"
-                     fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-                </svg>
-              )}
-              {kind === 'fail' && (
-                <svg className={selected ? 'text-white' : 'text-brand'} width="13" height="13" viewBox="0 0 24 24"
-                     fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
-                </svg>
-              )}
-              {emoji && <span className="text-sm leading-none" aria-hidden="true">{emoji}</span>}
+              <PillIcon icon={icon} tone={tone} selected={selected} />
               {opt}
             </button>
           );
