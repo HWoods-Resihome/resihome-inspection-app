@@ -23,16 +23,25 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  // Restore the list view (filters/sort/search/paging) from the last time the
+  // user was on this page, so backing out of an inspection lands them exactly
+  // where they left off. Persisted to sessionStorage (per browsing session).
+  const savedView = useMemo<Record<string, any>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(window.sessionStorage.getItem('resiwalk_home_view_v1') || '{}') || {}; }
+    catch { return {}; }
+  }, []);
+
+  const [search, setSearch] = useState<string>(savedView.search ?? '');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(savedView.statusFilter ?? 'all');
   // Sort field + direction. Default: most-recently-updated first.
-  const [sortField, setSortField] = useState<'updated' | 'scheduled'>('updated');
+  const [sortField, setSortField] = useState<'updated' | 'scheduled'>(savedView.sortField ?? 'updated');
   // 'desc' = newest first (default), 'asc' = oldest first.
-  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>(savedView.sortDir ?? 'desc');
   // Filter by inspector name. 'all' = no filter; otherwise match by name (case-insensitive).
-  const [inspectorFilter, setInspectorFilter] = useState<string>('all');
+  const [inspectorFilter, setInspectorFilter] = useState<string>(savedView.inspectorFilter ?? 'all');
   // Filter by template internal name. 'all' = no filter.
-  const [templateFilter, setTemplateFilter] = useState<string>('all');
+  const [templateFilter, setTemplateFilter] = useState<string>(savedView.templateFilter ?? 'all');
 
   // Bulk-select mode + selection set + busy flag for the cancel action.
   const [selectMode, setSelectMode] = useState(false);
@@ -42,8 +51,18 @@ export default function Home() {
   // Pagination — show a page of cards at a time so the initial render stays
   // snappy even with hundreds of inspections. Default 20 per page; user can
   // bump to 50 / 100 and page forward/back.
-  const [pageSize, setPageSize] = useState<number>(20);
-  const [page, setPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(savedView.pageSize ?? 20);
+  const [page, setPage] = useState<number>(savedView.page ?? 1);
+
+  // Persist the view state on every change so it's restored on return.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.sessionStorage.setItem('resiwalk_home_view_v1', JSON.stringify({
+        search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, pageSize, page,
+      }));
+    } catch { /* storage disabled — view just won't persist */ }
+  }, [search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, pageSize, page]);
 
   useEffect(() => {
     fetch('/api/auth/me')
