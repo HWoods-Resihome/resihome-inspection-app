@@ -10,12 +10,15 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionHeader,
+  PdfSummaryTable,
   PdfGalleryBaseProvider,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
   type PdfBuildContext,
   type PdfSectionGroup,
+  type PdfLineRow,
+  type PdfSummaryColumn,
 } from './pdfShared';
 
 // Chargeback column layout (Client column removed — Tenant Total is the
@@ -51,6 +54,24 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
 
   const grandTenantTotal = filteredSections.reduce((sum, s) => sum + s.tenantTotal, 0);
   const grandLineCount = filteredSections.reduce((sum, s) => sum + s.lines.length, 0);
+
+  const summaryColumns: PdfSummaryColumn<PdfLineRow>[] = [
+    { key: 'category', header: 'Category', width: COL.category, align: 'center', cell: (l) => l.category },
+    { key: 'subcategory', header: 'Sub-\ncategory', width: COL.subcategory, align: 'center', cell: (l) => l.subcategory },
+    { key: 'description', header: 'Description', width: COL.description, cell: (l) => l.laborShortDescription },
+    { key: 'qty', header: 'Qty', width: COL.qty, align: 'center', cell: (l) => formatQtyPdf(l.quantity) },
+    { key: 'unit', header: 'Unit', width: COL.unit, align: 'center', cell: (l) => l.laborMeas },
+    {
+      key: 'tenantPct', header: 'Ten %', width: COL.tenantPct, align: 'right', hasTotal: true,
+      cell: (l) => `${Math.round(l.tenantBillBackPercent)}%`,
+    },
+    {
+      key: 'tenantCost', header: 'Tenant $', width: COL.tenantCost, align: 'right', brand: true,
+      cell: (l) => `$${formatMoneyPdf(l.tenantCost)}`,
+      sectionTotal: (lines) => `$${formatMoneyPdf(lines.reduce((a, l) => a + (l.tenantCost || 0), 0))}`,
+      grandTotal: `$${formatMoneyPdf(grandTenantTotal)}`,
+    },
+  ];
 
   return (
     <Document
@@ -88,9 +109,20 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
           </View>
         </View>
 
-        {filteredSections.map((section) => (
-          <ChargebackSection key={section.label} section={section} />
-        ))}
+        {/* Page 1: condensed summary of every chargeback line, grouped by room. */}
+        <PdfSummaryTable
+          title="Chargeback Summary — All Line Items"
+          groups={filteredSections}
+          columns={summaryColumns}
+          grandTotalLabel="Grand Total"
+        />
+
+        {/* Detail pages: each room with photos + full line table. */}
+        <View break>
+          {filteredSections.map((section) => (
+            <ChargebackSection key={section.label} section={section} />
+          ))}
+        </View>
 
         <PdfFooter docName="Tenant Chargeback" propertyName={ctx.propertyName} />
       </Page>

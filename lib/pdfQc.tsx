@@ -17,10 +17,12 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionPhotos,
+  PdfSummaryTable,
   setPdfPhotoGalleryBase,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
+  type PdfSummaryColumn,
 } from './pdfShared';
 
 export interface QcPdfLine {
@@ -92,6 +94,27 @@ function QcDoc({ ctx }: { ctx: QcPdfContext }) {
   const verdictColor = ctx.verdict === 'pass' ? PDF_COLORS.emerald : PDF_COLORS.brand;
   const verdictText = ctx.verdict === 'pass' ? 'PASS' : 'FAIL';
 
+  const passFailLabel = (lines: QcPdfLine[]) => {
+    const p = lines.filter((l) => l.passFail === 'pass').length;
+    const f = lines.filter((l) => l.passFail === 'fail').length;
+    return `${p}P / ${f}F`;
+  };
+  const summaryColumns: PdfSummaryColumn<QcPdfLine>[] = [
+    { key: 'category', header: 'Category', width: COL.category, cell: (l) => l.category },
+    { key: 'subcategory', header: 'Sub', width: COL.subcategory, cell: (l) => l.subcategory },
+    { key: 'description', header: 'Line Item', width: COL.description, cell: (l) => l.description },
+    { key: 'qty', header: 'Qty', width: COL.qty, align: 'center', cell: (l) => (l.quantity != null ? formatQtyPdf(l.quantity) : '') },
+    { key: 'unit', header: 'Unit', width: COL.unit, align: 'center', cell: (l) => l.unit },
+    { key: 'vendor', header: 'Vendor', width: COL.vendor, align: 'center', cell: (l) => l.vendor },
+    { key: 'vendorCost', header: 'Vendor $', width: COL.vendorCost, align: 'right', cell: (l) => (l.vendorCost != null ? `$${formatMoneyPdf(l.vendorCost)}` : '') },
+    {
+      key: 'result', header: 'Result', width: COL.result, align: 'center', hasTotal: true,
+      cell: (l) => <ResultChip pf={l.passFail} />,
+      sectionTotal: (lines) => passFailLabel(lines),
+      grandTotal: `${ctx.passCount}P / ${ctx.failCount}F`,
+    },
+  ];
+
   return (
     <Document title={`Turn Re-Inspect QC — ${ctx.propertyName}`} author="ResiHome" subject="Turn Re-Inspect QC">
       <Page size="LETTER" style={pdfStyles.page} wrap>
@@ -147,9 +170,20 @@ function QcDoc({ ctx }: { ctx: QcPdfContext }) {
           </Text>
         )}
 
-        {ctx.sections.map((s, i) => (
-          <QcSection key={`${s.displayName}-${i}`} section={s} />
-        ))}
+        {/* Page 1: condensed summary of every re-inspected line, grouped by room. */}
+        <PdfSummaryTable
+          title="Re-Inspect Summary — All Line Items"
+          groups={ctx.sections}
+          columns={summaryColumns}
+          grandTotalLabel="Grand Total"
+        />
+
+        {/* Detail pages: each room with before/after photos + full line table. */}
+        <View break>
+          {ctx.sections.map((s, i) => (
+            <QcSection key={`${s.displayName}-${i}`} section={s} />
+          ))}
+        </View>
 
         <PdfFooter docName="Turn Re-Inspect QC" propertyName={ctx.propertyName} />
       </Page>

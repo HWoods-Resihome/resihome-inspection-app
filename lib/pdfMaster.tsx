@@ -9,12 +9,15 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionHeader,
+  PdfSummaryTable,
   PdfGalleryBaseProvider,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
   type PdfBuildContext,
   type PdfSectionGroup,
+  type PdfLineRow,
+  type PdfSummaryColumn,
 } from './pdfShared';
 
 // Master column layout (sums to 100%):
@@ -50,6 +53,40 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
   const populatedSections = ctx.sections.filter(
     (s) => s.lines.length > 0 || s.photoUrls.length > 0
   );
+  const sumBy = (lines: PdfLineRow[], key: 'vendorCost' | 'clientCost' | 'tenantCost') =>
+    lines.reduce((acc, l) => acc + (l[key] || 0), 0);
+
+  // Page-1 condensed summary columns — mirror the detail table's money columns.
+  const summaryColumns: PdfSummaryColumn<PdfLineRow>[] = [
+    { key: 'category', header: 'Category', width: COL.category, align: 'center', cell: (l) => l.category },
+    { key: 'subcategory', header: 'Sub-\ncategory', width: COL.subcategory, align: 'center', cell: (l) => l.subcategory },
+    { key: 'description', header: 'Description', width: COL.description, cell: (l) => l.laborShortDescription },
+    { key: 'qty', header: 'Qty', width: COL.qty, align: 'center', cell: (l) => formatQtyPdf(l.quantity) },
+    { key: 'unit', header: 'Unit', width: COL.unit, align: 'center', cell: (l) => l.laborMeas },
+    { key: 'vendor', header: 'Vendor', width: COL.vendor, align: 'center', cell: (l) => l.vendor },
+    {
+      key: 'vendorCost', header: 'Vendor $', width: COL.vendorCost, align: 'right', hasTotal: true,
+      cell: (l) => `$${formatMoneyPdf(l.vendorCost)}`,
+      sectionTotal: (lines) => `$${formatMoneyPdf(sumBy(lines, 'vendorCost'))}`,
+      grandTotal: `$${formatMoneyPdf(ctx.grandTotals.vendor)}`,
+    },
+    {
+      key: 'clientCost', header: 'Client $', width: COL.clientCost, align: 'right',
+      cell: (l) => `$${formatMoneyPdf(l.clientCost)}`,
+      sectionTotal: (lines) => `$${formatMoneyPdf(sumBy(lines, 'clientCost'))}`,
+      grandTotal: `$${formatMoneyPdf(ctx.grandTotals.client)}`,
+    },
+    {
+      key: 'tenantPct', header: 'Ten %', width: COL.tenantPct, align: 'right',
+      cell: (l) => `${Math.round(l.tenantBillBackPercent)}%`,
+    },
+    {
+      key: 'tenantCost', header: 'Tenant $', width: COL.tenantCost, align: 'right', brand: true,
+      cell: (l) => `$${formatMoneyPdf(l.tenantCost)}`,
+      sectionTotal: (lines) => `$${formatMoneyPdf(sumBy(lines, 'tenantCost'))}`,
+      grandTotal: `$${formatMoneyPdf(ctx.grandTotals.tenant)}`,
+    },
+  ];
 
   return (
     <Document
@@ -103,11 +140,23 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
           </View>
         </View>
 
-        {populatedSections.map((section) => (
-          <MasterSection key={section.label} section={section} />
-        ))}
+        {/* Page 1: condensed summary of every line item, grouped by room. */}
+        <PdfSummaryTable
+          title="Scope Summary — All Line Items"
+          groups={populatedSections}
+          columns={summaryColumns}
+          grandTotalLabel="Grand Total"
+        />
 
-        <FinalChecklistBlock ctx={ctx} />
+        {/* Detail pages: each room with its photos + full line table. Forced to
+            start on a new page so the summary owns page 1. */}
+        <View break>
+          {populatedSections.map((section) => (
+            <MasterSection key={section.label} section={section} />
+          ))}
+
+          <FinalChecklistBlock ctx={ctx} />
+        </View>
 
         <PdfFooter docName="Master Report" propertyName={ctx.propertyName} />
       </Page>

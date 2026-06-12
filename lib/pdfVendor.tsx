@@ -10,6 +10,7 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionHeader,
+  PdfSummaryTable,
   PdfGalleryBaseProvider,
   PdfSectionPhotos,
   formatMoneyPdf,
@@ -17,6 +18,8 @@ import {
   isoToHumanDate,
   type PdfBuildContext,
   type PdfSectionGroup,
+  type PdfLineRow,
+  type PdfSummaryColumn,
 } from './pdfShared';
 import { vendorGetsOwnPdf } from './vendors';
 import { slugifyVendor } from '@/lib/shortLinks';
@@ -51,6 +54,20 @@ function VendorDoc(props: {
   // vendor's line after-photos). Supplied via context so the render is
   // self-contained and parallel-safe.
   const galleryBase = ctx.photoGalleryBase ? `${ctx.photoGalleryBase}?k=vendor&v=${slugifyVendor(vendor)}` : undefined;
+
+  const summaryColumns: PdfSummaryColumn<PdfLineRow>[] = [
+    { key: 'category', header: 'Category', width: COL.category, align: 'center', cell: (l) => l.category },
+    { key: 'subcategory', header: 'Sub-\ncategory', width: COL.subcategory, align: 'center', cell: (l) => l.subcategory },
+    { key: 'description', header: 'Description', width: COL.description, cell: (l) => l.laborShortDescription },
+    { key: 'qty', header: 'Qty', width: COL.qty, align: 'center', cell: (l) => formatQtyPdf(l.quantity) },
+    { key: 'unit', header: 'Unit', width: COL.unit, align: 'center', cell: (l) => l.laborMeas },
+    {
+      key: 'vendorCost', header: 'Vendor $', width: COL.vendorCost, align: 'right', hasTotal: true, brand: true,
+      cell: (l) => `$${formatMoneyPdf(l.vendorCost)}`,
+      sectionTotal: (lines) => `$${formatMoneyPdf(lines.reduce((a, l) => a + (l.vendorCost || 0), 0))}`,
+      grandTotal: `$${formatMoneyPdf(vendorTotal)}`,
+    },
+  ];
 
   return (
     <Document
@@ -88,9 +105,20 @@ function VendorDoc(props: {
           </View>
         </View>
 
-        {vendorSections.map((section) => (
-          <VendorSection key={section.label} section={section} />
-        ))}
+        {/* Page 1: condensed summary of every line, grouped by room. */}
+        <PdfSummaryTable
+          title="Scope Summary — All Line Items"
+          groups={vendorSections}
+          columns={summaryColumns}
+          grandTotalLabel="Grand Total"
+        />
+
+        {/* Detail pages: each room with photos + full line table. */}
+        <View break>
+          {vendorSections.map((section) => (
+            <VendorSection key={section.label} section={section} />
+          ))}
+        </View>
 
         <PdfFooter docName={vendor} propertyName={ctx.propertyName} />
       </Page>

@@ -257,6 +257,40 @@ export const pdfStyles = StyleSheet.create({
     textAlign: 'right',
   },
 
+  // ---- Page-1 condensed summary table (all line items, grouped by room,
+  //      no photos, totals at the bottom) ----
+  summaryRoomRow: {
+    flexDirection: 'row',
+    backgroundColor: PDF_COLORS.grayBg,
+    borderTopWidth: 0.5,
+    borderBottomWidth: 0.5,
+    borderColor: PDF_COLORS.grayLight,
+    paddingVertical: 3,
+  },
+  summaryRoomName: {
+    fontFamily: 'Helvetica-Bold',
+    fontSize: 8,
+    color: PDF_COLORS.ink,
+    paddingHorizontal: 3,
+  },
+  summaryLineRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 0.5,
+    borderBottomColor: PDF_COLORS.grayLight,
+    paddingVertical: 2.5,
+    minHeight: 0,
+  },
+  summaryGrandRow: {
+    flexDirection: 'row',
+    backgroundColor: PDF_COLORS.grayBg,
+    borderTopWidth: 1.5,
+    borderTopColor: PDF_COLORS.brand,
+    borderBottomWidth: 1.5,
+    borderBottomColor: PDF_COLORS.brand,
+    paddingVertical: 5,
+    marginTop: 1,
+  },
+
   // ---- Section photos (inline, smaller) ----
   // Each photo about half the previous size (~65 wide instead of 130 high).
   photoGrid: {
@@ -461,6 +495,124 @@ export function PdfSectionHeader(props: { title: string; photoUrls: string[]; mi
     <View wrap={false} minPresenceAhead={props.minPresenceAhead ?? 90} style={{ marginTop: 8 }}>
       <Text style={pdfStyles.sectionTitle}>{props.title}</Text>
       <PdfSectionPhotos photoUrls={props.photoUrls} />
+    </View>
+  );
+}
+
+/**
+ * Page-1 condensed summary table. Combines EVERY line item into one clean
+ * table, broken out by room (a thin room sub-header row carries the room's
+ * own totals), with no photos and a grand-total row at the bottom. Generic
+ * over the line type so Master / Vendor / Chargeback (PdfLineRow) and QC
+ * (QcPdfLine) can all share it — each supplies its own column set.
+ *
+ * Column model: every column renders a per-line cell. Columns flagged with
+ * `hasTotal` (and any columns after the first such one) form the right-aligned
+ * "totals zone" — those columns get a per-room subtotal on the room header row
+ * and a value on the grand-total row. The descriptive columns before the
+ * totals zone are merged into the room-name / "Grand Total" label cell.
+ */
+function parsePctWidth(w: string): number {
+  const n = parseFloat(w);
+  return isNaN(n) ? 0 : n;
+}
+
+export interface PdfSummaryColumn<T> {
+  key: string;
+  header: React.ReactNode;
+  width: string;
+  align?: 'left' | 'center' | 'right';
+  /** Per-line cell content. */
+  cell: (line: T) => React.ReactNode;
+  /** Marks the first column of the right-aligned totals zone. */
+  hasTotal?: boolean;
+  /** Value shown in this column on each room's header row. */
+  sectionTotal?: (lines: T[]) => React.ReactNode;
+  /** Value shown in this column on the grand-total row. */
+  grandTotal?: React.ReactNode;
+  /** Render the value in brand (tenant) color. */
+  brand?: boolean;
+}
+
+export function PdfSummaryTable<T>(props: {
+  title: string;
+  groups: { displayName: string; lines: T[] }[];
+  columns: PdfSummaryColumn<T>[];
+  grandTotalLabel?: string;
+}) {
+  const cols = props.columns;
+  const firstTotalIdx = cols.findIndex((c) => c.hasTotal);
+  const labelCols = firstTotalIdx >= 0 ? cols.slice(0, firstTotalIdx) : cols;
+  const totalCols = firstTotalIdx >= 0 ? cols.slice(firstTotalIdx) : [];
+  const labelWidth = `${labelCols.reduce((s, c) => s + parsePctWidth(c.width), 0)}%`;
+  const groups = props.groups.filter((g) => g.lines.length > 0);
+  if (groups.length === 0) return null;
+
+  const lineCellStyle = (c: PdfSummaryColumn<T>) => {
+    if (c.brand) return pdfStyles.tableCellTenant;
+    if (c.align === 'right') return pdfStyles.tableCellNumeric;
+    if (c.align === 'center') return pdfStyles.tableCellCentered;
+    return pdfStyles.tableCell;
+  };
+
+  return (
+    <View style={{ marginTop: 4, marginBottom: 4 }}>
+      <Text style={pdfStyles.sectionTitle}>{props.title}</Text>
+
+      {/* Column headers */}
+      <View style={pdfStyles.tableHeaderRow}>
+        {cols.map((c) => (
+          <Text key={c.key} style={[pdfStyles.tableHeaderCell, { width: c.width, textAlign: c.align ?? 'left' }]}>
+            {c.header}
+          </Text>
+        ))}
+      </View>
+
+      {groups.map((g) => (
+        <React.Fragment key={g.displayName}>
+          {/* Room header row — name on the left, this room's totals on the right.
+              minPresenceAhead keeps it from stranding alone at a page bottom. */}
+          <View style={pdfStyles.summaryRoomRow} wrap={false} minPresenceAhead={40}>
+            <Text style={[pdfStyles.summaryRoomName, { width: labelWidth }]}>{g.displayName}</Text>
+            {totalCols.map((c) => (
+              <Text
+                key={c.key}
+                style={[
+                  c.brand ? pdfStyles.tableCellTenant : pdfStyles.tableCellNumeric,
+                  { width: c.width, fontFamily: 'Helvetica-Bold' },
+                ]}
+              >
+                {c.sectionTotal ? c.sectionTotal(g.lines) : ' '}
+              </Text>
+            ))}
+          </View>
+
+          {/* Compact per-line rows (no photos) */}
+          {g.lines.map((line, i) => (
+            <View key={i} style={pdfStyles.summaryLineRow} wrap={false}>
+              {cols.map((c) => (
+                <Text key={c.key} style={[lineCellStyle(c), { width: c.width }]}>
+                  {c.cell(line)}
+                </Text>
+              ))}
+            </View>
+          ))}
+        </React.Fragment>
+      ))}
+
+      {/* Grand-total row */}
+      {totalCols.length > 0 && (
+        <View style={pdfStyles.summaryGrandRow} wrap={false}>
+          <Text style={[pdfStyles.subtotalCell, { width: labelWidth, textAlign: 'right' }]}>
+            {props.grandTotalLabel ?? 'Grand Total'}
+          </Text>
+          {totalCols.map((c) => (
+            <Text key={c.key} style={[c.brand ? pdfStyles.subtotalCellTenant : pdfStyles.subtotalCell, { width: c.width }]}>
+              {c.grandTotal ?? ' '}
+            </Text>
+          ))}
+        </View>
+      )}
     </View>
   );
 }

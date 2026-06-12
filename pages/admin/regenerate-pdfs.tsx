@@ -25,6 +25,14 @@ export default function RegeneratePdfsPage() {
   const cancelRef = useRef(false);
   const resultsRef = useRef<LogLine[]>([]); // full results (for CSV)
 
+  // Single-inspection preview: regenerate ONE id and surface links to the
+  // freshly built PDFs so you can eyeball the new format right away.
+  type PdfLink = { name: string; url: string };
+  const [oneId, setOneId] = useState('');
+  const [oneBusy, setOneBusy] = useState(false);
+  const [oneErr, setOneErr] = useState<string | null>(null);
+  const [oneLinks, setOneLinks] = useState<PdfLink[] | null>(null);
+
   const CONCURRENCY = 3;
   const MAX_RETRY = 2;
 
@@ -96,6 +104,30 @@ export default function RegeneratePdfsPage() {
     setRunning(false);
   }
 
+  // Regenerate a single inspection and collect links to the new PDFs.
+  async function regenerateOne() {
+    const id = oneId.trim();
+    if (!id || oneBusy) return;
+    setOneBusy(true); setOneErr(null); setOneLinks(null);
+    try {
+      const r = await fetch(`/api/inspections/${id}/finalize`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ regenerateOnly: true }),
+      });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) throw new Error((d.error || `HTTP ${r.status}`).toString());
+      const links: PdfLink[] = [];
+      const p = d.pdfs || {};
+      if (p.master?.url) links.push({ name: p.master.name || 'Master', url: p.master.url });
+      if (p.chargeback?.url) links.push({ name: p.chargeback.name || 'Tenant Chargeback', url: p.chargeback.url });
+      for (const v of (p.vendors || [])) if (v?.url) links.push({ name: v.name || v.vendor, url: v.url });
+      setOneLinks(links);
+    } catch (e: any) {
+      setOneErr(String(e?.message || e).slice(0, 300));
+    } finally {
+      setOneBusy(false);
+    }
+  }
+
   function downloadCsv() {
     const rows = [['inspection_id', 'status', 'message'], ...resultsRef.current.map((r) => [r.id, r.ok ? 'ok' : 'failed', r.msg])];
     const csv = rows.map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -126,6 +158,45 @@ export default function RegeneratePdfsPage() {
           changes an inspection's status, bypasses approval, or sends any email/ticket. Keep this tab
           open while it runs.
         </p>
+
+        {/* Single-inspection preview — fastest way to eyeball the new format. */}
+        <div className="mt-5 border border-gray-200 rounded-lg bg-white p-4">
+          <h2 className="font-heading font-bold text-sm text-ink">Preview one inspection</h2>
+          <p className="text-[12px] text-gray-500 mt-1">
+            Paste an inspection record ID to regenerate just that one and open its new-format PDFs.
+          </p>
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <input
+              value={oneId}
+              onChange={(e) => setOneId(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') regenerateOne(); }}
+              placeholder="Inspection record ID"
+              className="text-sm px-3 py-2 rounded-lg border border-gray-300 flex-1 min-w-[200px] font-mono"
+            />
+            <button type="button" disabled={oneBusy || !oneId.trim()} onClick={regenerateOne}
+              className="text-sm font-heading font-semibold px-4 py-2 rounded-lg bg-brand text-white hover:bg-brand-dark disabled:opacity-40">
+              {oneBusy ? 'Regenerating…' : 'Regenerate'}
+            </button>
+          </div>
+          {oneErr && <div className="mt-3 text-xs text-red-600">{oneErr}</div>}
+          {oneLinks && (
+            oneLinks.length ? (
+              <div className="mt-3">
+                <div className="text-xs text-emerald-700 font-semibold mb-1.5">✓ Regenerated — open to preview:</div>
+                <ul className="space-y-1">
+                  {oneLinks.map((l, i) => (
+                    <li key={i}>
+                      <a href={l.url} target="_blank" rel="noopener noreferrer"
+                        className="text-sm text-brand hover:underline break-all">{l.name}</a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="mt-3 text-xs text-gray-500">Regenerated, but no PDF links were returned.</div>
+            )
+          )}
+        </div>
 
         {ids === null ? (
           <div className="mt-6 text-sm text-gray-500">Loading inspections…</div>
