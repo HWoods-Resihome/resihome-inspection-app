@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import type { Question, AnswerInput, TemplateType } from '@/lib/types';
 import type { SavedAnswer } from '@/lib/hubspot';
-import { QuestionItem } from './QuestionItem';
+import { QuestionItem, answerTone } from './QuestionItem';
 import { CameraCapture } from './CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadFilesBatch } from '@/lib/photoUpload';
@@ -137,13 +137,15 @@ function FitText({ text, className, max = 14, min = 11 }: {
 }
 
 // Sections that do NOT require a section photo.
-function sectionPhotosExempt(sectionName: string, sectionOrder: number): boolean {
+function sectionPhotosExempt(sectionName: string, sectionOrder: number, templateType?: string): boolean {
   if (sectionOrder === 10 || sectionOrder === 190 || sectionOrder === 900 || sectionOrder === 910) return true;
   const lower = sectionName.toLowerCase();
   if (lower.includes('overview')) return true;
   if (lower.includes('review') && lower.includes('sign')) return true;
   if (lower.includes('summary')) return true;
   if (lower.includes('hap')) return true;
+  // 1099: the Whole House section does not require a section photo.
+  if (templateType === 'leasing_agent_1099_property_inspection' && /whole\s*house/.test(lower)) return true;
   return false;
 }
 
@@ -460,9 +462,9 @@ export function QuestionForm({
           note: '',
           quantity: null,
           photoUrls: [],
-          // Open the photo/notes panel up-front when a photo is required, so the
-          // inspector sees the capture affordance without hunting for it.
-          optionalPanelOpen: !!q.requiresPhoto,
+          // Open the photo/notes panel up-front when a photo or note is required,
+          // so the inspector sees the capture affordance without hunting for it.
+          optionalPanelOpen: !!q.requiresPhoto || !!q.requiresNote,
         };
       }
     }
@@ -1030,10 +1032,18 @@ export function QuestionForm({
             instanceKey: inst.instanceKey,
           };
         }
-        if (a && a.answerValue && q.noteRequiredOnValues.length > 0 && q.noteRequiredOnValues.includes(a.answerValue)) {
-          if (!a.note?.trim()) {
+        // Require a note when this value is configured (robust to the Good/Fail
+        // relabel — a "Fail …" answer still triggers a value whose tone is fail)
+        // OR when the question is flagged "Require note".
+        if (a && a.answerValue) {
+          const failSel = answerTone(a.answerValue) === 'fail';
+          const triggeredNote = q.noteRequiredOnValues.length > 0 && (
+            q.noteRequiredOnValues.includes(a.answerValue)
+            || (failSel && q.noteRequiredOnValues.some((v) => answerTone(v) === 'fail'))
+          );
+          if ((triggeredNote || q.requiresNote) && !a.note?.trim()) {
             return {
-              message: `Note required: ${locTag}${q.questionText} (selected "${a.answerValue}")`,
+              message: `Note required: ${locTag}${q.questionText}`,
               scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
               instanceKey: inst.instanceKey,
             };
@@ -1041,7 +1051,7 @@ export function QuestionForm({
           // Assigned To validation: only if the question supports it AND this
           // isn't a plainStyle template (vendor assignment is Scope-only there).
           // useEffect in QuestionItem auto-defaults to "Vendor 1", so this is a backstop.
-          if (!scopeStyle && q.hasAssignedTo && !a.assignedTo?.trim()) {
+          if (triggeredNote && !scopeStyle && q.hasAssignedTo && !a.assignedTo?.trim()) {
             return {
               message: `Assigned To required: ${locTag}${q.questionText}`,
               scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
@@ -1051,7 +1061,7 @@ export function QuestionForm({
         }
       }
       // Section photo validation (per-instance)
-      if (!sectionPhotosExempt(inst.baseSectionName, inst.sectionOrder)) {
+      if (!sectionPhotosExempt(inst.baseSectionName, inst.sectionOrder, templateType)) {
         const photos = sectionPhotos[inst.instanceKey] || [];
         if (photos.length === 0) {
           return {
@@ -1443,7 +1453,7 @@ export function QuestionForm({
         {sectionInstances.map((inst) => {
           const prog = sectionProgress[inst.instanceKey];
           const sectionPhotoUrls = sectionPhotos[inst.instanceKey] || [];
-          const photosRequired = !sectionPhotosExempt(inst.baseSectionName, inst.sectionOrder);
+          const photosRequired = !sectionPhotosExempt(inst.baseSectionName, inst.sectionOrder, templateType);
           const photosMissing = photosRequired && sectionPhotoUrls.length === 0;
           const isCollapsed = collapsed.has(inst.instanceKey);
           const sectionDomId = `section-${inst.instanceKey}`;
@@ -1507,11 +1517,11 @@ export function QuestionForm({
                             Photos
                             {photosRequired
                               ? <span className="text-brand ml-1">*</span>
-                              : <span className="text-gray-400 normal-case font-normal ml-1">(opt)</span>}
+                              : <span className="text-gray-400 normal-case font-normal ml-1">(Optional)</span>}
                           </span>
                         </button>
                         {photosMissing && uploadingSection?.instanceKey !== inst.instanceKey && (
-                          <span className="text-xs text-amber-800 font-semibold whitespace-nowrap">&ge;1 req</span>
+                          <span className="text-xs text-amber-800 font-semibold whitespace-nowrap">&ge;1 Required</span>
                         )}
                         {uploadingSection?.instanceKey === inst.instanceKey && (
                           <span className="text-xs text-brand font-semibold">
@@ -1733,7 +1743,7 @@ export function QuestionForm({
         uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, inspectionRecordId, sectionCameraInstance || '')}
         rooms={sectionInstances.map((inst) => {
           const count = (sectionPhotos[inst.instanceKey] || []).length;
-          const required = !sectionPhotosExempt(inst.baseSectionName, inst.sectionOrder);
+          const required = !sectionPhotosExempt(inst.baseSectionName, inst.sectionOrder, templateType);
           return {
             id: inst.instanceKey,
             name: inst.displayName,

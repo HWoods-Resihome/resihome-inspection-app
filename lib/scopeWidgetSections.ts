@@ -70,6 +70,7 @@ function mkQ(p: {
     helpText: p.helpText ?? '',
     enabled: true,
     requiresPhoto: false,
+    requiresNote: false,
   };
 }
 

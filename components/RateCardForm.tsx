@@ -3678,11 +3678,11 @@ export function RateCardForm(props: RateCardFormProps) {
                             Photos
                             {photosRequired
                               ? <span className="text-brand ml-1">*</span>
-                              : <span className="text-gray-400 normal-case font-normal ml-1">(opt)</span>}
+                              : <span className="text-gray-400 normal-case font-normal ml-1">(Optional)</span>}
                           </span>
                         </span>
                         {photosMissing && !isUploadingHere && (
-                          <span className="text-xs text-amber-800 font-semibold whitespace-nowrap">&ge;1 req</span>
+                          <span className="text-xs text-amber-800 font-semibold whitespace-nowrap">&ge;1 Required</span>
                         )}
                         {isUploadingHere && (
                           <span className="text-xs text-brand font-semibold whitespace-nowrap">

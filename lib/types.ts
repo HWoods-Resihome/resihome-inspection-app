@@ -40,6 +40,8 @@ export interface Question {
   enabled: boolean;
   // Require at least one photo attached to this question before submit.
   requiresPhoto: boolean;
+  // Require a note (free text) on this question once it's answered.
+  requiresNote: boolean;
 }
 
 export interface Property {

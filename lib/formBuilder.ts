@@ -77,6 +77,7 @@ export interface QuestionInput {
   helpText?: string;
   enabled?: boolean;
   requiresPhoto?: boolean;
+  requiresNote?: boolean;
 }
 
 /** Map an admin form input to HubSpot inspection_question properties. Only the
@@ -100,5 +101,6 @@ export function questionInputToProps(input: QuestionInput): Record<string, strin
   if (input.helpText !== undefined) props.help_text = String(input.helpText).slice(0, 1000);
   if (input.enabled !== undefined) props.is_enabled = input.enabled ? 'true' : 'false';
   if (input.requiresPhoto !== undefined) props.requires_photo = input.requiresPhoto ? 'true' : 'false';
+  if (input.requiresNote !== undefined) props.requires_note = input.requiresNote ? 'true' : 'false';
   return props;
 }

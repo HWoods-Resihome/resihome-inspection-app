@@ -29,14 +29,23 @@ type Props = {
 
 export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName, propertyRecordId, plainStyle }: Props) {
   const dialog = useAppDialog();
-  const triggered = !!answer.answerValue && question.noteRequiredOnValues.includes(answer.answerValue);
-  // Form-builder "Require photo": once ANY answer is picked, force the panel open
-  // so the inspector can attach the required photo (regardless of Good/Fail).
+  // A note is required when the selected value is explicitly configured
+  // (noteRequiredOnValues) OR — robust to the Good/Fail relabel — when a
+  // "Fail …" answer is picked and this question requires a note on its fail value.
+  const failSelected = answerTone(answer.answerValue) === 'fail';
+  const triggered = !!answer.answerValue && (
+    question.noteRequiredOnValues.includes(answer.answerValue)
+    || (failSelected && question.noteRequiredOnValues.some((v) => answerTone(v) === 'fail'))
+  );
+  // Form-builder "Require note" / "Require photo": once ANY answer is picked,
+  // force the panel open so the inspector can add the required note/photo.
+  const noteRequired = !!question.requiresNote && !!answer.answerValue;
   const photoRequired = !!question.requiresPhoto && !!answer.answerValue;
+  const noteMandatory = triggered || noteRequired;
   // The panel is forced open (and the Notes/Photos toggle hidden) when an answer
-  // demands a note (triggered) or a photo (photoRequired). Deselect / switch back
-  // to a non-triggering answer and the optional Notes/Photos toggle returns.
-  const forcedOpen = triggered || photoRequired;
+  // demands a note or a photo. Deselect / switch back to a non-triggering answer
+  // and the optional Notes/Photos toggle returns.
+  const forcedOpen = triggered || noteRequired || photoRequired;
 
   // Optional panel is open if:
   //  - it's forced open (action required / photo required), OR
@@ -275,7 +284,11 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             <span className={`text-xs font-heading font-bold uppercase tracking-wider ${
               forcedOpen ? 'text-amber-900' : 'text-gray-600'
             }`}>
-              {triggered ? 'Action required' : photoRequired ? 'Photo required' : 'Optional notes & photos'}
+              {triggered ? 'Action required'
+                : (noteRequired && photoRequired) ? 'Note & photo required'
+                : noteRequired ? 'Note required'
+                : photoRequired ? 'Photo required'
+                : 'Optional notes & photos'}
             </span>
             {!forcedOpen && (
               <button
@@ -288,20 +301,20 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             )}
           </div>
 
-          {/* Note (shared field, required if triggered) */}
+          {/* Note (shared field, required when triggered or "Require note" is set) */}
           <div>
             <label className={`block text-xs font-heading font-semibold mb-1 ${
-              triggered ? 'text-amber-900' : 'text-gray-700'
+              noteMandatory ? 'text-amber-900' : 'text-gray-700'
             }`}>
-              Note {triggered ? <span className="text-brand">(Required)</span> : <span className="text-gray-400 font-normal">(Optional)</span>}
+              Note {noteMandatory ? <span className="text-brand">(Required)</span> : <span className="text-gray-400 font-normal">(Optional)</span>}
             </label>
             <textarea
               value={answer.note || ''}
               onChange={(e) => onUpdate({ note: e.target.value })}
               rows={2}
-              placeholder={triggered ? 'Describe the issue or action needed' : 'Add a note for this question'}
+              placeholder={noteMandatory ? 'Describe the issue or action needed' : 'Add a note for this question'}
               className={`focus-brand w-full text-sm rounded-md px-2 py-1.5 bg-white border ${
-                triggered ? 'border-amber-300' : 'border-gray-300'
+                noteMandatory ? 'border-amber-300' : 'border-gray-300'
               }`}
             />
           </div>
@@ -486,6 +499,16 @@ function PillIcon({ icon, tone, selected }: { icon: PillIconKind; tone: PillTone
   );
 }
 
+// Pass/fail tone of an answer label (good = positive, fail = needs attention).
+// Drives pill coloring AND lets a "Fail …" answer keep triggering the note panel
+// even after the option text was relabeled (e.g. "Fail" → "Fail - Needs Attention").
+export function answerTone(opt: string): 'good' | 'fail' | null {
+  const n = (opt || '').trim().toLowerCase();
+  if (/\b(fail|failed|poor|deficient)\b/.test(n)) return 'fail';
+  if (/\b(good|pass|passed|satisfactory)\b/.test(n)) return 'good';
+  return null;
+}
+
 function renderInput(
   q: Question,
   a: AnswerInput,
@@ -518,8 +541,9 @@ function renderInput(
     // "Good - No Issues" / "Fail - Needs Attention" still classify.
     const meta = (opt: string): { tone: PillTone | null; icon: PillIconKind } => {
       const n = opt.trim().toLowerCase();
-      if (/\b(fail|failed|poor|deficient)\b/.test(n)) return { tone: 'fail', icon: 'thumbDown' };
-      if (/\b(good|pass|passed|satisfactory)\b/.test(n)) return { tone: 'good', icon: 'thumbUp' };
+      const t = answerTone(opt);
+      if (t === 'fail') return { tone: 'fail', icon: 'thumbDown' };
+      if (t === 'good') return { tone: 'good', icon: 'thumbUp' };
       if (/\bincrease\b/.test(n)) return { tone: 'good', icon: 'arrowUp' };      // green up arrow
       if (/\breduce\b/.test(n)) return { tone: 'fail', icon: 'arrowDown' };      // pink down arrow
       if (/\bkeep\b/.test(n)) return { tone: 'neutral', icon: 'flat' };          // flat line

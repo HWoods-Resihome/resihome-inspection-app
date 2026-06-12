@@ -25,18 +25,19 @@ type Draft = {
   helpText: string;
   enabled: boolean;
   requiresPhoto: boolean;
+  requiresNote: boolean;
 };
 
 const blankDraft = (section = '', sectionOrder = 0): Draft => ({
   questionText: '', section, sectionOrder, displayOrder: 0,
-  responseType: 'text', responseOptionsText: '', isRequired: false, helpText: '', enabled: true, requiresPhoto: false,
+  responseType: 'text', responseOptionsText: '', isRequired: false, helpText: '', enabled: true, requiresPhoto: false, requiresNote: false,
 });
 
 const toOptions = (s: string): string[] => s.split(/\r?\n|,/).map((x) => x.trim()).filter(Boolean);
 const fromQuestion = (q: Question): Draft => ({
   questionText: q.questionText, section: q.section, sectionOrder: q.sectionOrder, displayOrder: q.displayOrder,
   responseType: q.responseType, responseOptionsText: q.responseOptions.join('\n'),
-  isRequired: q.isRequired, helpText: q.helpText, enabled: q.enabled, requiresPhoto: q.requiresPhoto,
+  isRequired: q.isRequired, helpText: q.helpText, enabled: q.enabled, requiresPhoto: q.requiresPhoto, requiresNote: q.requiresNote,
 });
 
 const ADD_NEW = '__add_new_section__';
@@ -119,6 +120,7 @@ function QuestionEditor({ initial, onSave, onCancel, busy }: {
       <div className="flex items-center gap-4 flex-wrap">
         <label className="flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" checked={d.isRequired} onChange={(e) => set({ isRequired: e.target.checked })} /> Required</label>
         <label className="flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" checked={d.requiresPhoto} onChange={(e) => set({ requiresPhoto: e.target.checked })} /> Require photo</label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" checked={d.requiresNote} onChange={(e) => set({ requiresNote: e.target.checked })} /> Require note</label>
         <label className="flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" checked={d.enabled} onChange={(e) => set({ enabled: e.target.checked })} /> Enabled</label>
       </div>
       <div className="flex justify-end gap-2 pt-1">

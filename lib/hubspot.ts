@@ -231,26 +231,34 @@ export async function fetchQuestionsForTemplate(
     'display_order', 'response_type', 'response_options', 'default_value',
     'note_required_on_values', 'has_assigned_to', 'assigned_to_options',
     'repeats_per_room_type', 'applies_to_templates', 'is_required', 'help_text',
-    'is_enabled', 'requires_photo',
+    'is_enabled', 'requires_photo', 'requires_note',
   ];
 
   const out: Question[] = [];
   const debugAll: any[] = [];
   const debugSkipped: any[] = [];
+  // `requires_note` is a newer property; if it hasn't been provisioned yet the
+  // search would 400 on it. Drop it and retry so question loading never breaks
+  // before /admin/setup runs (it simply reads back as false until provisioned).
+  let activeProps = properties;
+  const runSearch = async (afterCursor?: string): Promise<any> => {
+    const body: any = { filterGroups: [], properties: activeProps, limit: 100 };
+    if (afterCursor) body.after = afterCursor;
+    try {
+      return await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, { method: 'POST', body: JSON.stringify(body) });
+    } catch (e) {
+      if (activeProps.includes('requires_note')) {
+        activeProps = activeProps.filter((p) => p !== 'requires_note');
+        const body2: any = { filterGroups: [], properties: activeProps, limit: 100 };
+        if (afterCursor) body2.after = afterCursor;
+        return await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, { method: 'POST', body: JSON.stringify(body2) });
+      }
+      throw e;
+    }
+  };
   let after: string | undefined = undefined;
   do {
-    const body: any = {
-      filterGroups: [],
-      properties,
-      limit: 100,
-      // Exclude archived records explicitly. HubSpot's default is already to
-      // exclude archived from search, but being explicit prevents accidents.
-    };
-    if (after) body.after = after;
-    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
+    const resp = await runSearch(after);
     for (const r of resp.results || []) {
       const p = r.properties || {};
       const appliesStr = p.applies_to_templates || '';
@@ -316,6 +324,7 @@ export async function fetchQuestionsForTemplate(
         helpText: p.help_text || '',
         enabled,
         requiresPhoto: String(p.requires_photo).toLowerCase() === 'true',
+        requiresNote: String(p.requires_note).toLowerCase() === 'true',
       };
       out.push(q);
       if (opts.debug) {
@@ -2417,6 +2426,9 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   });
   await ensureProp(question, 'requires_photo', {
     name: 'requires_photo', label: 'Requires Photo', type: 'bool', fieldType: 'booleancheckbox', groupName: 'inspection_question_info', options: boolOpts,
+  });
+  await ensureProp(question, 'requires_note', {
+    name: 'requires_note', label: 'Requires Note', type: 'bool', fieldType: 'booleancheckbox', groupName: 'inspection_question_info', options: boolOpts,
   });
 
   // QC failure note on the Answer object (required when a QC line is failed).
