@@ -52,6 +52,11 @@ interface CodeAgg {
 /** Build learned knowledge candidates from the last `days` of feedback. */
 export async function synthesizeKnowledgeCandidates(days = 90): Promise<AutoKnowledgeCandidate[]> {
   const events = await readAiFeedback(days);
+  return candidatesFromEvents(events);
+}
+
+/** Aggregate already-loaded feedback events into knowledge candidates. */
+async function candidatesFromEvents(events: AiFeedbackEvent[]): Promise<AutoKnowledgeCandidate[]> {
   const byCode = new Map<string, CodeAgg>();
 
   for (const e of events) {
@@ -106,11 +111,22 @@ export async function synthesizeKnowledgeCandidates(days = 90): Promise<AutoKnow
 }
 
 /** Synthesize and persist learned knowledge into the AI Knowledge store. */
-export async function refreshLearnedKnowledge(days = 90): Promise<{ candidates: number; added: number; refreshed: number; skipped: number }> {
-  const candidates = await synthesizeKnowledgeCandidates(days);
+export async function refreshLearnedKnowledge(days = 90): Promise<{
+  candidates: number; added: number; refreshed: number; skipped: number;
+  feedbackEvents: number; codeJudgementEvents: number; newestEventTs: string | null;
+}> {
+  const events = await readAiFeedback(days);
+  const candidates = await candidatesFromEvents(events);
   const result = await upsertAutoKnowledgeEntries(candidates);
-  console.log(`[ai-learning] knowledge refresh: ${JSON.stringify({ candidates: candidates.length, ...result })}`);
-  return { candidates: candidates.length, ...result };
+  // Volume signals so "Learn now" makes clear whether feedback is still flowing
+  // (newestEventTs) and how much of it is a usable signal — a frozen newestEventTs
+  // means capture stopped; a growing event count with 0 new entries just means
+  // the existing rules are getting stronger, not that nothing was learned.
+  const newestEventTs = events.reduce<string | null>((m, e) => (e.ts && (!m || e.ts > m) ? e.ts : m), null);
+  const codeJudgementEvents = events.filter((e) => isCodeJudgement(e) && (ACCEPT.has(e.decision) || REJECT.has(e.decision))).length;
+  const summary = { candidates: candidates.length, ...result, feedbackEvents: events.length, codeJudgementEvents, newestEventTs };
+  console.log(`[ai-learning] knowledge refresh: ${JSON.stringify(summary)}`);
+  return summary;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +187,8 @@ export async function maybeRefreshLearnedKnowledge(): Promise<void> {
 export async function learningDiagnostics(days = 90): Promise<{
   days: number;
   feedbackEvents: number;
+  newestEventTs: string | null;
+  byDay: Record<string, number>;
   bySource: Record<string, number>;
   byDecision: Record<string, number>;
   codeJudgementEvents: number;
@@ -182,11 +200,17 @@ export async function learningDiagnostics(days = 90): Promise<{
   const events = await readAiFeedback(days);
   const bySource: Record<string, number> = {};
   const byDecision: Record<string, number> = {};
+  const byDay: Record<string, number> = {};   // capture activity per calendar day
   const perCode = new Map<string, number>();
   let codeJudgementEvents = 0;
+  let newestEventTs: string | null = null;
   for (const e of events) {
     bySource[e.source] = (bySource[e.source] || 0) + 1;
     byDecision[e.decision] = (byDecision[e.decision] || 0) + 1;
+    if (e.ts) {
+      byDay[e.ts.slice(0, 10)] = (byDay[e.ts.slice(0, 10)] || 0) + 1;
+      if (!newestEventTs || e.ts > newestEventTs) newestEventTs = e.ts;
+    }
     if (isCodeJudgement(e) && (ACCEPT.has(e.decision) || REJECT.has(e.decision))) {
       codeJudgementEvents++;
       const code = e.suggestion!.catalogCode as string;
@@ -197,6 +221,8 @@ export async function learningDiagnostics(days = 90): Promise<{
   return {
     days,
     feedbackEvents: events.length,
+    newestEventTs,
+    byDay,
     bySource,
     byDecision,
     codeJudgementEvents,
