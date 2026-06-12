@@ -7,6 +7,7 @@ import {
   answerHasAfterPhotoProperty,
   fetchPropertyFieldOptions,
   fetchActiveListingForProperty,
+  fetchPropertyCommunityName,
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { buildShortLink } from '@/lib/shortLinks';
@@ -28,11 +29,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // External (1099) users can only open 1099-type inspections.
       const denial = externalAccessDenial(session.email, data.inspection.templateType);
       if (denial) return res.status(403).json({ error: denial });
-      // Answers + the property's active listing (best-effort) in parallel.
-      const [answers, listing] = await Promise.all([
+      // Answers + the property's active listing + (Community/Visit only) the
+      // associated community's name — all best-effort, in parallel.
+      const isCommunityTpl = data.inspection.templateType === 'pm_community_inspection';
+      const [answers, listing, communityName] = await Promise.all([
         fetchAnswersForInspection(id),
         data.propertyIdRef
           ? fetchActiveListingForProperty(data.propertyIdRef).catch(() => null)
+          : Promise.resolve(null),
+        (isCommunityTpl && data.propertyIdRef)
+          ? fetchPropertyCommunityName(data.propertyIdRef).catch(() => null)
           : Promise.resolve(null),
       ]);
 
@@ -95,6 +101,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         propertySepticFee: data.propertySepticFee,
         listingPrice: listing?.listingPrice ?? null,
         listingDate: listing?.listingDate ?? null,
+        communityName: communityName ?? null,
         filterSizeOptions,
         shareLinks,
         answers,

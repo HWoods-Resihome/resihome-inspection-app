@@ -47,6 +47,9 @@ type Props = {
    *  property has no qualifying listing or the listing object isn't configured. */
   listingPrice?: number | null;
   listingDate?: string | null;
+  /** Community/Visit only: the name of the community associated with the
+   *  property, shown above the address in the header. */
+  communityName?: string | null;
   /** Property air-filter fields — prefill the HVAC widget and are written back
    *  to the property as the inspector confirms/corrects them. */
   propertyAirFiltersTotal?: number | null;
@@ -197,7 +200,7 @@ function slugify(s: string): string {
 
 export function QuestionForm({
   questions, templateType, templateLabel, inspectorName, propertyName, propertyRecordId,
-  bedrooms, bathrooms, squareFootage, inspectionRegion, status, submittedAt, listingPrice, listingDate, onSubmit, onCancel,
+  bedrooms, bathrooms, squareFootage, inspectionRegion, status, submittedAt, listingPrice, listingDate, communityName, onSubmit, onCancel,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
   propertyAirFiltersTotal, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
@@ -324,9 +327,13 @@ export function QuestionForm({
   //     they mirror the rate card exactly. The HubSpot question records are left
   //     untouched; we just don't render them.
   const formQuestions = useMemo(() => {
-    const base = templateType === 'leasing_agent_1099_property_inspection'
+    let base = templateType === 'leasing_agent_1099_property_inspection'
       ? questions.filter((q) => !/\bhap\b/i.test(q.section))
       : questions;
+    // Community / Visit: the Overview section (and its community-name prompt) is
+    // dropped — the community name is pulled from the property and shown in the
+    // header instead.
+    if (isCommunity) base = base.filter((q) => !/overview/i.test(q.section));
     // Strip the HubSpot HVAC, Smart Home, and Safety/Electric sections — they're
     // replaced by the reused Scope widgets (HVAC & Air Filters, Smart Home, and
     // Utilities) rendered below.
@@ -1382,6 +1389,12 @@ export function QuestionForm({
               <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
             </button>
             <div className="min-w-0 flex-1">
+              {/* Community / Visit: the community name sits ABOVE the address. */}
+              {isCommunity && communityName && (
+                <div className="text-sm font-heading font-bold text-brand truncate" title={communityName}>
+                  {communityName}
+                </div>
+              )}
               {/* Full address on ONE line — never wraps; the font shrinks to fit
                   the available width. */}
               <FitText

@@ -634,6 +634,49 @@ export async function fetchPropertyCoords(recordId: string): Promise<{ lat: numb
   return null;
 }
 
+// ── Community / Visit: the Community custom object linked to a property ──────
+// Optional — only the Community/Visit inspection surfaces it. Everything is
+// fail-open: if the object/association/name can't be resolved we return null
+// and the header simply omits the community line.
+//   undefined = not yet resolved · null = definitively unavailable
+let _communityMeta: { typeId: string; nameProp: string } | null | undefined;
+
+async function resolveCommunityMeta(): Promise<{ typeId: string; nameProp: string } | null> {
+  if (_communityMeta !== undefined) return _communityMeta;
+  const envName = (process.env.HUBSPOT_COMMUNITY_NAME_PROPERTY || '').trim();
+  const envType = normalizeTypeId(process.env.HUBSPOT_COMMUNITY_TYPE_ID);
+  if (envType) { _communityMeta = { typeId: envType, nameProp: envName || 'name' }; return _communityMeta; }
+  try {
+    const schemas = await hubspotFetch('/crm/v3/schemas');
+    const match = (schemas.results || []).find((s: any) =>
+      /communit/i.test(s.name || '') || /communit/i.test(s.labels?.singular || '') || /communit/i.test(s.labels?.plural || ''));
+    if (!match) { _communityMeta = null; return null; } // definitively not present
+    _communityMeta = { typeId: match.objectTypeId, nameProp: envName || match.primaryDisplayProperty || 'name' };
+    return _communityMeta;
+  } catch (e) {
+    console.warn('[community] schema resolve failed (will retry):', e);
+    return null; // transient — do NOT cache, so a later request can retry
+  }
+}
+
+/** Name of the Community object associated with a property, or null. Fail-open. */
+export async function fetchPropertyCommunityName(propertyRecordId: string): Promise<string | null> {
+  try {
+    const meta = await resolveCommunityMeta();
+    if (!meta) return null;
+    const { property } = typeIds();
+    const assoc = await hubspotFetch(`/crm/v4/objects/${property}/${propertyRecordId}/associations/${meta.typeId}?limit=1`);
+    const communityId = assoc?.results?.[0]?.toObjectId;
+    if (!communityId) return null;
+    const rec = await hubspotFetch(`/crm/v3/objects/${meta.typeId}/${communityId}?properties=${encodeURIComponent(meta.nameProp)}`);
+    const name = String(rec?.properties?.[meta.nameProp] || '').trim();
+    return name || null;
+  } catch (e) {
+    console.warn('[community] name fetch failed:', e);
+    return null;
+  }
+}
+
 /**
  * Fetch all Inspection records for the list view (Round A).
  * Returns lightweight summary records sorted by most-recent-first.

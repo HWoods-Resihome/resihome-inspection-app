@@ -71,6 +71,7 @@ export default function ExistingInspection() {
   const [propertySepticFee, setPropertySepticFee] = useState<number | null>(null);
   const [listingPrice, setListingPrice] = useState<number | null>(null);
   const [listingDate, setListingDate] = useState<string | null>(null);
+  const [communityName, setCommunityName] = useState<string | null>(null);
   const [filterSizeOptions, setFilterSizeOptions] = useState<string[]>([]);
   const [existingAnswers, setExistingAnswers] = useState<SavedAnswer[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -111,6 +112,7 @@ export default function ExistingInspection() {
         );
         setListingPrice(typeof data.listingPrice === 'number' ? data.listingPrice : null);
         setListingDate(typeof data.listingDate === 'string' ? data.listingDate : null);
+        setCommunityName(typeof data.communityName === 'string' ? data.communityName : null);
         setFilterSizeOptions(Array.isArray(data.filterSizeOptions) ? data.filterSizeOptions : []);
         setExistingAnswers(data.answers || []);
 
@@ -458,6 +460,7 @@ export default function ExistingInspection() {
           submittedAt={inspection.submittedAt}
           listingPrice={listingPrice}
           listingDate={listingDate}
+          communityName={communityName}
           propertyAirFiltersTotal={propertyAirFiltersTotal}
           propertyAirFiltersType1={propertyAirFiltersType1}
           propertyAirFiltersType2={propertyAirFiltersType2}
