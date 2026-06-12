@@ -216,7 +216,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
   return (
     <div className="p-4" data-question-id={question.questionIdExternal}>
       {/* Question text + Notes/Photos toggle button */}
-      <div className="flex items-start justify-between gap-3 mb-2">
+      <div className="flex items-center justify-between gap-3 mb-2">
         <label className="block font-heading font-semibold text-ink text-sm flex-1">
           {question.questionText}
           {question.isRequired && <span className="text-brand ml-1">*</span>}
@@ -474,8 +474,10 @@ function renderInput(
     // the brand pink fill. Other options (N/A, etc.) stay neutral.
     const classify = (opt: string): 'good' | 'fail' | null => {
       const n = opt.trim().toLowerCase();
-      if (/^(good|pass|passed)$/.test(n)) return 'good';
-      if (/^(fail|failed|poor)$/.test(n)) return 'fail';
+      // Match on the word anywhere in the label so multi-word options like
+      // "Good - No Issues" / "Fail - Needs Attention" classify correctly.
+      if (/\b(fail|failed|poor|deficient)\b/.test(n)) return 'fail';
+      if (/\b(good|pass|passed|satisfactory)\b/.test(n)) return 'good';
       return null;
     };
     return (
