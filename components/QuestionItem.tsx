@@ -346,42 +346,72 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             }`}>
               Photos {photoRequired ? <span className="text-brand">(required)</span> : <span className="text-gray-400 font-normal">(optional)</span>}
             </label>
-            <div className="flex flex-wrap gap-2 items-center">
-              {/* Take Photos: in-app camera */}
+            <div className="flex flex-wrap gap-2 items-center mt-1">
+              {/* Existing photos (tap to view / mark up / delete) */}
+              {answer.photoUrls.map((url, idx) => (
+                <div key={`${url}-${idx}`} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={displayImageSrc(url)}
+                    alt=""
+                    onClick={() => setLightboxIndex(idx)}
+                    title="Tap to view, mark up, or delete"
+                    className="w-14 h-14 object-cover rounded border border-gray-200 cursor-pointer"
+                  />
+                  {isVideoEntry(url) && (
+                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <span className="w-6 h-6 rounded-full bg-black/55 flex items-center justify-center">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z" /></svg>
+                      </span>
+                    </span>
+                  )}
+                  {url.startsWith('blob:') && (
+                    <span className="absolute bottom-0 inset-x-0 bg-amber-500/95 text-white text-[8px] font-heading font-bold text-center leading-tight py-0.5 rounded-b pointer-events-none" title="Saved Offline · Will Sync When Online">Saved Offline</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removePhoto(idx)}
+                    aria-label="Delete photo"
+                    className="absolute -top-1 -right-1 bg-ink text-white text-xs w-4 h-4 rounded-full leading-none flex items-center justify-center hover:bg-brand transition"
+                  >&times;</button>
+                </div>
+              ))}
+              {/* Add photo — dashed box + plus (matches the HVAC/air-filter strip).
+                  Amber dashed when a photo is required and none yet; grey when optional. */}
               <button
                 type="button"
                 onClick={() => setCameraOpen(true)}
                 disabled={!!uploadProgress || !hasMediaDevices}
-                className="inline-flex items-center gap-1.5 text-sm bg-brand text-white font-heading font-semibold py-1.5 px-3 rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed"
+                aria-label="Add photo"
                 title={hasMediaDevices ? 'Take photos with the in-app camera' : 'Camera not supported in this browser'}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                  <circle cx="12" cy="13" r="4" />
-                </svg>
-                Take Photos
-              </button>
-              {/* Choose Files: native file input. Hidden for plainStyle templates,
-                  which use a single in-app Take button (the camera covers gallery). */}
+                className={`w-14 h-14 rounded-lg border-2 border-dashed flex items-center justify-center text-2xl leading-none disabled:opacity-40 ${
+                  photoRequired && answer.photoUrls.length === 0
+                    ? 'border-amber-300 text-amber-500'
+                    : 'border-gray-300 text-gray-400 hover:border-brand/50 hover:text-brand'
+                }`}
+              >+</button>
+              {/* Choose Files: gallery import as a matching dashed tile. Hidden for
+                  plainStyle templates (the in-app camera also covers the gallery). */}
               {!plainStyle && (
-              <label className="inline-flex items-center gap-1.5 text-sm bg-brand/10 text-brand font-heading font-semibold py-1.5 px-3 rounded cursor-pointer hover:bg-brand/20">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1="12" y1="3" x2="12" y2="15" />
-                </svg>
-                Choose Files
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={(e) => handlePhotoUpload(e.target.files)}
-                  disabled={!!uploadProgress}
-                  className="hidden"
-                />
-              </label>
+                <label
+                  title="Choose photos from your device"
+                  className="w-14 h-14 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 hover:border-brand/50 hover:text-brand flex items-center justify-center cursor-pointer"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={(e) => handlePhotoUpload(e.target.files)}
+                    disabled={!!uploadProgress}
+                    className="hidden"
+                  />
+                </label>
               )}
             </div>
             {uploadProgress && (
@@ -402,36 +432,6 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                 }
               }}
             />
-            {answer.photoUrls.length > 0 && (
-              <div className="grid grid-cols-4 gap-2 mt-2">
-                {answer.photoUrls.map((url, idx) => (
-                  <div key={`${url}-${idx}`} className="relative">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={displayImageSrc(url)}
-                      alt=""
-                      onClick={() => setLightboxIndex(idx)}
-                      className="w-full h-16 object-cover rounded cursor-pointer"
-                    />
-                    {isVideoEntry(url) && (
-                      <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <span className="w-6 h-6 rounded-full bg-black/55 flex items-center justify-center">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z" /></svg>
-                        </span>
-                      </span>
-                    )}
-                    {url.startsWith('blob:') && (
-                      <span className="absolute bottom-0 inset-x-0 bg-amber-500/95 text-white text-[8px] font-heading font-bold text-center leading-tight py-0.5 rounded-b pointer-events-none" title="Saved Offline · Will Sync When Online">Saved Offline</span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => removePhoto(idx)}
-                      className="absolute -top-1 -right-1 bg-ink text-white text-xs w-5 h-5 rounded-full leading-none flex items-center justify-center hover:bg-brand transition"
-                    >&times;</button>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       )}
