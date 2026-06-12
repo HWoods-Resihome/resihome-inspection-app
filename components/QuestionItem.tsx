@@ -30,13 +30,20 @@ type Props = {
 export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName, propertyRecordId, plainStyle }: Props) {
   const dialog = useAppDialog();
   const triggered = !!answer.answerValue && question.noteRequiredOnValues.includes(answer.answerValue);
+  // Form-builder "Require photo": once ANY answer is picked, force the panel open
+  // so the inspector can attach the required photo (regardless of Good/Fail).
+  const photoRequired = !!question.requiresPhoto && !!answer.answerValue;
+  // The panel is forced open (and the Notes/Photos toggle hidden) when an answer
+  // demands a note (triggered) or a photo (photoRequired). Deselect / switch back
+  // to a non-triggering answer and the optional Notes/Photos toggle returns.
+  const forcedOpen = triggered || photoRequired;
 
   // Optional panel is open if:
+  //  - it's forced open (action required / photo required), OR
   //  - inspector explicitly opened it, OR
-  //  - answer is triggered (action required), OR
   //  - panel already has content (note/photos/quantity)
   const hasContent = !!answer.note || answer.photoUrls.length > 0 || answer.quantity != null;
-  const panelOpen = answer.optionalPanelOpen || triggered || hasContent;
+  const panelOpen = answer.optionalPanelOpen || forcedOpen || hasContent;
 
   // Auto-default assignedTo to "Vendor 1" when the question supports it and is
   // triggered. Skipped for plainStyle (1099/occupancy/community) templates —
@@ -221,27 +228,32 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
           {question.questionText}
           {question.isRequired && <span className="text-brand ml-1">*</span>}
         </label>
-        <button
-          type="button"
-          onClick={togglePanel}
-          aria-label={panelOpen ? 'Close notes/photos' : 'Add notes/photos'}
-          aria-expanded={panelOpen}
-          title={panelOpen ? 'Close notes/photos' : 'Add notes/photos (optional)'}
-          className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-heading font-semibold transition ${
-            panelOpen
-              ? 'bg-gray-700 text-white hover:bg-gray-800'
-              : 'bg-gray-100 text-gray-600 hover:bg-brand/10 hover:text-brand'
-          } ${hasContent && !panelOpen ? 'ring-2 ring-brand/40' : ''}`}
-        >
-          {/* Camera + pencil glyph combo */}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="2" y="6" width="14" height="11" rx="2" />
-            <circle cx="9" cy="11.5" r="2.2" />
-            <path d="M5.5 6L6.5 4h5L12.5 6" />
-            <path d="M18 9l3.5 3.5L19 21l-4 1 1-4 6.5-6.5z" transform="scale(0.7) translate(8 6)" />
-          </svg>
-          <span>Notes/Photos</span>
-        </button>
+        {/* Notes/Photos toggle — hidden when the panel is forced open (the
+            required note/photo panel already shows). Returns as an optional add
+            once the answer no longer requires it. */}
+        {!forcedOpen && (
+          <button
+            type="button"
+            onClick={togglePanel}
+            aria-label={panelOpen ? 'Close notes/photos' : 'Add notes/photos'}
+            aria-expanded={panelOpen}
+            title={panelOpen ? 'Close notes/photos' : 'Add notes/photos (optional)'}
+            className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-heading font-semibold transition ${
+              panelOpen
+                ? 'bg-gray-700 text-white hover:bg-gray-800'
+                : 'bg-gray-100 text-gray-600 hover:bg-brand/10 hover:text-brand'
+            } ${hasContent && !panelOpen ? 'ring-2 ring-brand/40' : ''}`}
+          >
+            {/* Camera + pencil glyph combo */}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="6" width="14" height="11" rx="2" />
+              <circle cx="9" cy="11.5" r="2.2" />
+              <path d="M5.5 6L6.5 4h5L12.5 6" />
+              <path d="M18 9l3.5 3.5L19 21l-4 1 1-4 6.5-6.5z" transform="scale(0.7) translate(8 6)" />
+            </svg>
+            <span>Notes/Photos</span>
+          </button>
+        )}
       </div>
 
       {question.helpText && (
@@ -255,17 +267,17 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
       {/* Combined notes/photos panel */}
       {panelOpen && (
         <div className={`mt-3 p-3 rounded-lg space-y-3 ${
-          triggered
+          forcedOpen
             ? (plainStyle ? 'bg-white border-2 border-amber-300' : 'bg-amber-50 border border-amber-300')
             : 'bg-gray-50 border border-gray-200'
         }`}>
           <div className="flex items-center justify-between">
             <span className={`text-xs font-heading font-bold uppercase tracking-wider ${
-              triggered ? 'text-amber-900' : 'text-gray-600'
+              forcedOpen ? 'text-amber-900' : 'text-gray-600'
             }`}>
-              {triggered ? 'Action required' : 'Optional notes & photos'}
+              {triggered ? 'Action required' : photoRequired ? 'Photo required' : 'Optional notes & photos'}
             </span>
-            {!triggered && (
+            {!forcedOpen && (
               <button
                 type="button"
                 onClick={togglePanel}
@@ -330,9 +342,9 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
           {/* Photos */}
           <div>
             <label className={`block text-xs font-heading font-semibold mb-1 ${
-              triggered ? 'text-amber-900' : 'text-gray-700'
+              forcedOpen ? 'text-amber-900' : 'text-gray-700'
             }`}>
-              Photos <span className="text-gray-400 font-normal">(optional)</span>
+              Photos {photoRequired ? <span className="text-brand">(required)</span> : <span className="text-gray-400 font-normal">(optional)</span>}
             </label>
             <div className="flex flex-wrap gap-2 items-center">
               {/* Take Photos: in-app camera */}
@@ -480,11 +492,23 @@ function renderInput(
       if (/\b(good|pass|passed|satisfactory)\b/.test(n)) return 'good';
       return null;
     };
+    // A leading emoji for recognizable answer sets (rent direction, occupancy).
+    // Good/Fail use the thumbs SVGs above and never get an emoji.
+    const emojiFor = (opt: string): string => {
+      const n = opt.trim().toLowerCase();
+      if (/\breduce\b/.test(n)) return '📉';
+      if (/\bkeep\b/.test(n)) return '⏸️';
+      if (/\bincrease\b/.test(n)) return '📈';
+      if (/\bvacant\b/.test(n)) return '🏚️';
+      if (/squatter|occupied/.test(n)) return '⚠️';
+      return '';
+    };
     return (
       <div className="flex flex-wrap gap-1.5">
         {opts.map((opt) => {
           const selected = a.answerValue === opt;
           const kind = classify(opt);
+          const emoji = kind ? '' : emojiFor(opt);
           const cls = selected
             ? (kind === 'good'
                 ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm'
@@ -509,6 +533,7 @@ function renderInput(
                   <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
                 </svg>
               )}
+              {emoji && <span className="text-sm leading-none" aria-hidden="true">{emoji}</span>}
               {opt}
             </button>
           );

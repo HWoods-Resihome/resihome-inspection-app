@@ -1262,10 +1262,13 @@ export function QuestionForm({
       readOnly={readOnly}
     />
   );
-  // Smart Home alone after Yard/Exterior (only when that section exists);
-  // otherwise it falls into the bottom group.
-  const smartFc = scopeStyle && yardKey ? makeFc(['smart_home_tech']) : null;
-  const bottomFc = scopeStyle ? makeFc(yardKey ? ['hvac_air_filters', 'utilities'] : FC_ONLY) : null;
+  // Smart Home Tech renders just ABOVE the "Whole House" section (preferred);
+  // if there's no Whole House section it falls in above Yard/Exterior, and with
+  // neither it drops into the bottom group.
+  const wholeHouseKey = sectionInstances.find((i) => /whole\s*house/i.test(i.baseSectionName))?.instanceKey;
+  const smartAnchorKey = wholeHouseKey || yardKey;
+  const smartFc = scopeStyle && smartAnchorKey ? makeFc(['smart_home_tech']) : null;
+  const bottomFc = scopeStyle ? makeFc(smartAnchorKey ? ['hvac_air_filters', 'utilities'] : FC_ONLY) : null;
 
   // Header status badge + "Submitted" stamp (only while actually submitted).
   const headerBadge = statusBadge(status);
@@ -1434,6 +1437,8 @@ export function QuestionForm({
             <Fragment key={inst.instanceKey}>
             {/* HVAC + Utilities sit just above the Review & Sign-Off section. */}
             {inst.instanceKey === firstSummaryKey && bottomFc}
+            {/* Smart Home Tech sits just above the Whole House section. */}
+            {inst.instanceKey === smartAnchorKey && smartFc}
             <section id={sectionDomId} className="lz-gap mb-8 scroll-mt-24 rounded-xl shadow-md overflow-hidden">
               {/* Section header (tappable to collapse) */}
               <button
@@ -1596,8 +1601,6 @@ export function QuestionForm({
                 </div>
               )}
             </section>
-            {/* Smart Home renders right after Yard / Exterior. */}
-            {inst.instanceKey === yardKey && smartFc}
             </Fragment>
           );
         })}
