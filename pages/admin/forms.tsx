@@ -40,6 +40,32 @@ const fromQuestion = (q: Question): Draft => ({
   isRequired: q.isRequired, helpText: q.helpText, enabled: q.enabled, requiresPhoto: q.requiresPhoto, requiresNote: q.requiresNote,
 });
 
+// Merge an edited Draft onto a (possibly partial) base Question — used for
+// optimistic list updates so the builder reflects a save immediately, without
+// waiting on HubSpot's search index to catch up. Fields the builder doesn't
+// expose (noteRequiredOnValues, assignedTo, etc.) are preserved from the base.
+const applyDraft = (base: Partial<Question>, d: Draft): Question => ({
+  hubspotRecordId: base.hubspotRecordId || '',
+  questionIdExternal: base.questionIdExternal || '',
+  questionText: d.questionText,
+  section: d.section,
+  sectionOrder: d.sectionOrder,
+  displayOrder: d.displayOrder,
+  responseType: d.responseType,
+  responseOptions: toOptions(d.responseOptionsText),
+  defaultValue: base.defaultValue || '',
+  noteRequiredOnValues: base.noteRequiredOnValues || [],
+  hasAssignedTo: base.hasAssignedTo ?? false,
+  assignedToOptions: base.assignedToOptions || [],
+  repeatsPerRoomType: base.repeatsPerRoomType || '',
+  appliesToTemplates: base.appliesToTemplates || [],
+  isRequired: d.isRequired,
+  helpText: d.helpText,
+  enabled: d.enabled,
+  requiresPhoto: d.requiresPhoto,
+  requiresNote: d.requiresNote,
+});
+
 const ADD_NEW = '__add_new_section__';
 
 function QuestionEditor({ initial, onSave, onCancel, busy, knownSections = [] }: {
@@ -213,8 +239,11 @@ export default function FormBuilderPage() {
   useEffect(() => { if (isAdmin) load(); /* eslint-disable-next-line */ }, [isAdmin, template]);
 
   const grouped = useMemo(() => {
+    // Sort by section then display order so add/edit/reorder reflect immediately.
+    const sorted = [...(questions || [])].sort((a, b) =>
+      (a.sectionOrder - b.sectionOrder) || (a.displayOrder - b.displayOrder));
     const m = new Map<string, Question[]>();
-    for (const q of questions || []) { const k = q.section || '(no section)'; (m.get(k) || m.set(k, []).get(k)!).push(q); }
+    for (const q of sorted) { const k = q.section || '(no section)'; (m.get(k) || m.set(k, []).get(k)!).push(q); }
     return Array.from(m.entries());
   }, [questions]);
 
@@ -235,7 +264,10 @@ export default function FormBuilderPage() {
       });
       const dd = await r.json();
       if (!r.ok) { setError(dd.error || 'Save failed'); return; }
-      setEditingId(null); setError(null); await load();
+      // Optimistically update the list (HubSpot's search index lags a few
+      // seconds after a write, so re-fetching here would show stale data).
+      setQuestions((cur) => (cur || []).map((q) => q.hubspotRecordId === id ? applyDraft(q, d) : q));
+      setEditingId(null); setError(null);
     } finally { setBusy(false); }
   }
 
@@ -248,7 +280,14 @@ export default function FormBuilderPage() {
       });
       const dd = await r.json();
       if (!r.ok) { setError(dd.error || 'Create failed'); return; }
-      setAdding(false); setError(null); await load();
+      // Append the new question immediately (search-index lag would otherwise
+      // hide it on an immediate re-fetch).
+      const newQ = applyDraft(
+        { hubspotRecordId: dd.id, questionIdExternal: dd.questionIdExternal, appliesToTemplates: [template] },
+        d,
+      );
+      setQuestions((cur) => [...(cur || []), newQ]);
+      setAdding(false); setError(null);
     } finally { setBusy(false); }
   }
 
@@ -261,7 +300,8 @@ export default function FormBuilderPage() {
       });
       const dd = await r.json();
       if (!r.ok) { setError(dd.error || 'Update failed'); return; }
-      setError(null); await load();
+      setQuestions((cur) => (cur || []).map((x) => x.hubspotRecordId === q.hubspotRecordId ? { ...x, enabled: !q.enabled } : x));
+      setError(null);
     } finally { setBusy(false); }
   }
 
@@ -272,7 +312,8 @@ export default function FormBuilderPage() {
       const r = await fetch(`/api/admin/questions/${q.hubspotRecordId}`, { method: 'DELETE' });
       const dd = await r.json();
       if (!r.ok) { setError(dd.error || 'Remove failed'); return; }
-      setError(null); await load();
+      setQuestions((cur) => (cur || []).filter((x) => x.hubspotRecordId !== q.hubspotRecordId));
+      setError(null);
     } finally { setBusy(false); }
   }
 
