@@ -140,13 +140,15 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
       }
       const tp = e?.tenantPct != null && e.tenantPct !== '' ? Number(e.tenantPct) : undefined;
       const q = e?.quantity != null && e.quantity !== '' ? Number(e.quantity) : undefined;
-      if (tp == null && q == null) return a;
+      const vc = e?.vendorCost != null && e.vendorCost !== '' ? Number(e.vendorCost) : undefined;
+      if (tp == null && q == null && vc == null) return a;
       return {
         ...a,
         suggested: {
           ...(a.suggested || {}),
           ...(tp != null && isFinite(tp) ? { tenantBillBackPercent: Math.max(0, Math.min(100, tp)) } : {}),
           ...(q != null && isFinite(q) ? { quantity: q } : {}),
+          ...(vc != null && isFinite(vc) ? { customVendorCost: Math.max(0, vc) } : {}),
         },
       };
     }), [adjustments, decisions, edits]);
@@ -484,6 +486,16 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                               onChange={(v) => setEdit(a.id, { quantity: v })}
                                               ariaLabel="Quantity"
                                               className="block w-20 mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded tabular-nums"
+                                            />
+                                          </label>
+                                          <label className="text-[11px] text-gray-500">
+                                            Vendor $
+                                            <NumberField
+                                              value={edits[a.id]?.vendorCost ?? (a.suggested?.customVendorCost != null ? String(a.suggested.customVendorCost) : (a.current?.vendorCost != null ? String(a.current.vendorCost) : ''))}
+                                              placeholder="cost"
+                                              onChange={(v) => setEdit(a.id, { vendorCost: v })}
+                                              ariaLabel="Vendor cost"
+                                              className="block w-24 mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded tabular-nums"
                                             />
                                           </label>
                                           <div className="text-xs text-brand font-semibold pb-1.5 ml-auto">
