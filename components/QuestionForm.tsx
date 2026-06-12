@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import type { Question, AnswerInput, TemplateType } from '@/lib/types';
 import type { SavedAnswer } from '@/lib/hubspot';
-import { QuestionItem, answerTone } from './QuestionItem';
+import { QuestionItem, answerTone, isNA } from './QuestionItem';
 import { CameraCapture } from './CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadFilesBatch } from '@/lib/photoUpload';
@@ -1037,8 +1037,9 @@ export function QuestionForm({
             instanceKey: inst.instanceKey,
           };
         }
-        // Require a photo on this question (any response type) when flagged.
-        if (q.requiresPhoto && (!a || (a.photoUrls?.length || 0) === 0)) {
+        // Require a photo on this question when flagged — but N/A answers are
+        // exempt (a not-applicable item needs no evidence).
+        if (q.requiresPhoto && !isNA(a?.answerValue || '') && (!a || (a.photoUrls?.length || 0) === 0)) {
           return {
             message: `Photo required: ${locTag}${q.questionText}`,
             scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
@@ -1047,8 +1048,8 @@ export function QuestionForm({
         }
         // Require a note when this value is configured (robust to the Good/Fail
         // relabel — a "Fail …" answer still triggers a value whose tone is fail)
-        // OR when the question is flagged "Require note".
-        if (a && a.answerValue) {
+        // OR when the question is flagged "Require note". N/A is exempt.
+        if (a && a.answerValue && !isNA(a.answerValue)) {
           const failSel = answerTone(a.answerValue) === 'fail';
           const triggeredNote = q.noteRequiredOnValues.length > 0 && (
             q.noteRequiredOnValues.includes(a.answerValue)
@@ -1261,6 +1262,17 @@ export function QuestionForm({
   const totalCompleted = Object.values(sectionProgress).reduce((acc, s) => acc + s.completed, 0) + fcTotals.completed;
   const totalQuestions = Object.values(sectionProgress).reduce((acc, s) => acc + s.total, 0) + fcTotals.total;
 
+  // Live Pass / Fail tally across all answered Good/Fail questions — shown in
+  // the header by the address and updated as the inspector makes selections.
+  const { passCount, failCount } = useMemo(() => {
+    let pass = 0, fail = 0;
+    for (const a of Object.values(answers)) {
+      const t = answerTone(a.answerValue);
+      if (t === 'good') pass++; else if (t === 'fail') fail++;
+    }
+    return { passCount: pass, failCount: fail };
+  }, [answers]);
+
   // The Review/Sign-off/Summary section (if any) renders LAST — after the reused
   // Scope HVAC/Smart Home/Utilities bubbles. (After the cleanup these merge into
   // one "Review & Sign-Off" section.)
@@ -1409,6 +1421,13 @@ export function QuestionForm({
                 )}
                 {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
               </div>
+              {/* Live Pass / Fail tally — updates as selections are made. */}
+              {scopeStyle && (
+                <div className="mt-0.5 flex items-center gap-1.5 text-[11px] font-heading font-bold">
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{passCount} Pass</span>
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{failCount} Fail</span>
+                </div>
+              )}
               {!isCommunity && ((typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? (
                 <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
                   {typeof listingPrice === 'number' && listingPrice > 0 && (

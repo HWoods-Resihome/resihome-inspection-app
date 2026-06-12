@@ -32,15 +32,18 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
   // A note is required when the selected value is explicitly configured
   // (noteRequiredOnValues) OR — robust to the Good/Fail relabel — when a
   // "Fail …" answer is picked and this question requires a note on its fail value.
+  // "N/A" answers never require a note/photo and never open the panel, even when
+  // the question is flagged Require note / Require photo.
+  const naSelected = isNA(answer.answerValue);
   const failSelected = answerTone(answer.answerValue) === 'fail';
-  const triggered = !!answer.answerValue && (
+  const triggered = !!answer.answerValue && !naSelected && (
     question.noteRequiredOnValues.includes(answer.answerValue)
     || (failSelected && question.noteRequiredOnValues.some((v) => answerTone(v) === 'fail'))
   );
-  // Form-builder "Require note" / "Require photo": once ANY answer is picked,
-  // force the panel open so the inspector can add the required note/photo.
-  const noteRequired = !!question.requiresNote && !!answer.answerValue;
-  const photoRequired = !!question.requiresPhoto && !!answer.answerValue;
+  // Form-builder "Require note" / "Require photo": once a (non-N/A) answer is
+  // picked, force the panel open so the inspector can add the required note/photo.
+  const noteRequired = !!question.requiresNote && !!answer.answerValue && !naSelected;
+  const photoRequired = !!question.requiresPhoto && !!answer.answerValue && !naSelected;
   const noteMandatory = triggered || noteRequired;
   // The panel is forced open (and the Notes/Photos toggle hidden) when an answer
   // demands a note or a photo. Deselect / switch back to a non-triggering answer
@@ -507,6 +510,12 @@ export function answerTone(opt: string): 'good' | 'fail' | null {
   if (/\b(fail|failed|poor|deficient)\b/.test(n)) return 'fail';
   if (/\b(good|pass|passed|satisfactory)\b/.test(n)) return 'good';
   return null;
+}
+
+// "N/A" (and variants) — a not-applicable answer never requires a note or photo,
+// even if the question is flagged Require note / Require photo.
+export function isNA(opt: string): boolean {
+  return /^(n\/?a|n\.a\.?|not applicable)\b/.test((opt || '').trim().toLowerCase());
 }
 
 function renderInput(
