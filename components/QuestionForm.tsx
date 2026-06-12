@@ -979,6 +979,15 @@ export function QuestionForm({
   // by the reused FinalChecklist, so every remaining question is always shown.)
   function isWidgetVisible(_qid: string, _instanceKey: string): boolean { return true; }
 
+  // Vacancy / Occupancy: when the home is OCCUPIED, the interior-only items that
+  // can't be assessed are hidden — HVAC & Air Filters, Utilities, and the Whole
+  // House "General Condition (Interior)" question. Reactive to the occupancy answer.
+  const isVacancy = templateType === 'pm_vacancy_occupancy_check';
+  const occupied = isVacancy && Object.values(answers).some((a) => /\boccupied\b/i.test(a.answerValue || ''));
+  const isHiddenWhenOccupied = (q: Question) => occupied && /general\s*condition.*interior/i.test(q.questionText || '');
+  // FC sections still counted/required for submit (drop HVAC + Utilities when occupied).
+  const fcGateIds = occupied ? FC_ONLY.filter((id) => id !== 'hvac_air_filters' && id !== 'utilities') : FC_ONLY;
+
   // Air-filter writeback: when the inspector changes the HVAC widget's filter
   // quantity / sizes, sync them onto the Property object (debounced). fcAnswers
   // starts empty (the widget prefills from the property), so a plain load never
@@ -1017,8 +1026,9 @@ export function QuestionForm({
     for (const inst of sectionInstances) {
       // Per-question validations
       for (const q of inst.questions) {
-        // Hidden conditional widget fields aren't required.
+        // Hidden conditional widget fields / occupied-hidden questions aren't required.
         if (!isWidgetVisible(q.questionIdExternal, inst.instanceKey)) continue;
+        if (isHiddenWhenOccupied(q)) continue;
         const key = answerKey(q.questionIdExternal, inst.instanceKey);
         const a = answers[key];
         const locTag = inst.location ? `${inst.location} -> ` : `${inst.displayName} -> `;
@@ -1098,7 +1108,7 @@ export function QuestionForm({
     }
     // HVAC + Smart Home checklist (reused Scope widgets) must be complete.
     if (fcEnabled) {
-      const gap = finalChecklistGap(fcAnswers, fcCtx, { onlySectionIds: FC_ONLY, skipLineRules: true });
+      const gap = finalChecklistGap(fcAnswers, fcCtx, { onlySectionIds: fcGateIds, skipLineRules: true });
       if (gap) { await dialog.alert(`Please complete: ${gap}`); return; }
     }
     const totalSectionPhotos = Object.values(sectionPhotos).flat().length;
@@ -1235,6 +1245,7 @@ export function QuestionForm({
       let total = 0;
       for (const q of inst.questions) {
         if (!isWidgetVisible(q.questionIdExternal, inst.instanceKey)) continue;
+        if (isHiddenWhenOccupied(q)) continue;
         // Optional questions don't count toward the progress total — e.g. the
         // all-optional Review / Sign-Off section should not show "0/1".
         if (!q.isRequired) continue;
@@ -1254,7 +1265,7 @@ export function QuestionForm({
   // Roll the reused Scope sections (HVAC/Smart Home/Utilities) into the header
   // total alongside the question sections.
   const fcTotals = fcEnabled
-    ? FC_ONLY.reduce((acc, id) => {
+    ? fcGateIds.reduce((acc, id) => {
         const c = fcSectionCounts(fcAnswers, fcCtx, id, { skipLineRules: true });
         return { completed: acc.completed + c.completed, total: acc.total + c.total };
       }, { completed: 0, total: 0 })
@@ -1314,10 +1325,13 @@ export function QuestionForm({
   const smartFc = fcEnabled && smartAnchorKey
     ? makeFc(['smart_home_tech'], is1099 ? { seamless: true } : undefined)
     : null;
-  const bottomFc = fcEnabled
-    ? (smartAnchorKey
-        ? makeFc(['hvac_air_filters', 'utilities'], is1099 ? { mergeName: 'HVAC / Utilities' } : undefined)
-        : makeFc(FC_ONLY))
+  // When occupied (Vacancy/Occupancy), drop HVAC & Air Filters + Utilities from
+  // the bottom group; Smart Home Tech stays.
+  const bottomKeys = smartAnchorKey
+    ? (occupied ? [] : ['hvac_air_filters', 'utilities'])
+    : (occupied ? ['smart_home_tech'] : FC_ONLY);
+  const bottomFc = fcEnabled && bottomKeys.length
+    ? makeFc(bottomKeys, is1099 ? { mergeName: 'HVAC / Utilities' } : undefined)
     : null;
 
   // Header status badge + "Submitted" stamp (only while actually submitted).
@@ -1650,7 +1664,7 @@ export function QuestionForm({
 
                   {/* Questions for this instance (hidden conditional widget
                       fields are filtered out). */}
-                  {inst.questions.filter((q) => isWidgetVisible(q.questionIdExternal, inst.instanceKey)).map((q) => {
+                  {inst.questions.filter((q) => isWidgetVisible(q.questionIdExternal, inst.instanceKey) && !isHiddenWhenOccupied(q)).map((q) => {
                     const key = answerKey(q.questionIdExternal, inst.instanceKey);
                     return (
                       <div key={key} id={`q-${inst.instanceKey}-${q.questionIdExternal}`} className="scroll-mt-24">
