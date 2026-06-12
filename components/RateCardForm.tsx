@@ -23,7 +23,7 @@ import { isAiWarm, warmAi } from '@/lib/aiWarm';
 import { ListPicker } from '@/components/ListPicker';
 import { getResolutionTimings, setResolutionTiming } from '@/lib/resolutionTiming';
 import { AiReviewModal } from '@/components/AiReviewModal';
-import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, saveReviewCache, loadReviewCache, clearReviewCache, type AiAdjustment } from '@/lib/aiReview';
+import { scopeHash, getPassedReviewHash, setPassedReviewHash, getIgnoredPhotoLines, addIgnoredPhotoLine, getReviewedItems, addReviewedItems, reviewSignature, saveReviewCache, loadReviewCache, clearReviewCache, type AiAdjustment } from '@/lib/aiReview';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 
@@ -2431,6 +2431,8 @@ export function RateCardForm(props: RateCardFormProps) {
       // Lines the inspector chose to "Ignore" for photo evidence — the
       // review won't re-flag these for a photo.
       ignoredLineIds: getIgnoredPhotoLines(props.inspectionRecordId),
+      // Items already reviewed (decided on) in a prior run — don't re-flag them.
+      reviewedSignatures: getReviewedItems(props.inspectionRecordId),
       property: {
         bedrooms: props.bedrooms,
         bathrooms: props.bathrooms,
@@ -3963,7 +3965,15 @@ export function RateCardForm(props: RateCardFormProps) {
         adjustments={aiAdjustments}
         onClose={() => setAiModalOpen(false)}
         onRetry={() => runAiReview()}
-        onApply={(approved) => applyApproved(approved)}
+        onApply={(approved) => {
+          // Remember every item the user decided on (approve OR decline) so a
+          // later re-review of this inspection doesn't re-flag the same call-outs.
+          try {
+            const sigs = aiAdjustments.filter((a) => aiDecisions[a.id]).map((a) => reviewSignature(a));
+            addReviewedItems(props.inspectionRecordId, sigs);
+          } catch { /* non-fatal */ }
+          applyApproved(approved);
+        }}
         previewTenantDollars={previewTenantDollars}
         onAddPhoto={addPhotoForAdjustment}
         onAddLineItems={addLineItemsForReview}

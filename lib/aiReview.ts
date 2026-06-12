@@ -167,6 +167,43 @@ export function addIgnoredPhotoLine(inspectionId: string, lineExternalId: string
   } catch { /* storage disabled */ }
 }
 
+// ----- Already-reviewed items (per inspection) ----------------------------
+// Once a user decides on a suggestion (approve / decline / edit / move / …),
+// that item counts as "reviewed". Future AI reviews of the same inspection skip
+// re-flagging it — so editing the scope and re-running the review doesn't repeat
+// call-outs the user already handled. Keyed by a STABLE signature (the target
+// line id, or section+code for an add) so it survives re-runs that regenerate
+// suggestions with fresh ids.
+const REVIEWED_KEY = 'resiwalk_ai_reviewed_v1';
+
+/** Stable signature for a suggestion's target — same across review runs. */
+export function reviewSignature(a: { type?: string; sectionId?: string; lineExternalId?: string; suggested?: { lineItemCode?: string }; suggestedLineItemCode?: string }): string {
+  if (a.lineExternalId) return `line:${a.lineExternalId}`;
+  const code = a.suggested?.lineItemCode || (a as any).suggestedLineItemCode || '';
+  return `add:${a.sectionId || ''}:${code}`;
+}
+
+function readReviewed(): Record<string, string[]> {
+  if (typeof window === 'undefined') return {};
+  try { return JSON.parse(window.localStorage.getItem(REVIEWED_KEY) || '{}') || {}; }
+  catch { return {}; }
+}
+
+export function getReviewedItems(inspectionId: string): string[] {
+  return readReviewed()[inspectionId] || [];
+}
+
+export function addReviewedItems(inspectionId: string, signatures: string[]): void {
+  if (typeof window === 'undefined' || !inspectionId || !signatures.length) return;
+  try {
+    const all = readReviewed();
+    const set = new Set(all[inspectionId] || []);
+    for (const s of signatures) if (s) set.add(s);
+    all[inspectionId] = Array.from(set);
+    window.localStorage.setItem(REVIEWED_KEY, JSON.stringify(all));
+  } catch { /* storage disabled */ }
+}
+
 // ----- Cached review results (per inspection) -----------------------------
 // So the in-progress review survives backgrounding the app / a reload / a dead
 // zone. Keyed by inspection; only restored when the scope still matches the

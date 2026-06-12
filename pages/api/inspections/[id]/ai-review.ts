@@ -210,6 +210,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rawMonths = Number(body?.property?.tenantMonths);
     const tenantMonths = Number.isFinite(rawMonths) && rawMonths > 0 ? rawMonths : 12;
     const ignoredLineIds: string[] = Array.isArray(body?.ignoredLineIds) ? body.ignoredLineIds.map(String) : [];
+    // Items the user already reviewed (decided on) in a prior run — never re-flag
+    // them. Signatures are "line:<externalId>" or "add:<sectionId>:<code>".
+    const reviewedSet = new Set<string>(Array.isArray((body as any)?.reviewedSignatures) ? (body as any).reviewedSignatures.map(String) : []);
+    const reviewedLineIds = [...reviewedSet].filter((s) => s.startsWith('line:')).map((s) => s.slice(5));
 
     const catalog = await getCachedCatalog();
     const byCode = new Map(catalog.map((c) => [c.lineItemCode, c]));
@@ -281,6 +285,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           `Review this Scope rate card.\n\nHOUSE DETAILS:\n${houseDetails}\n\nSCOPE (all rooms and their line items, priced):\n${scopeText}\n\n` +
           (photoContent.length ? `Inspection photos for the rooms follow — use them to confirm scope and tenant responsibility.` : `No usable inspection photos were available; review on the scope data.`) +
           (ignoredLineIds.length ? `\n\nDo NOT raise photo-evidence (needsPhoto) flags for these line ids — the inspector has already accepted them without a photo: ${ignoredLineIds.join(', ')}.` : '') +
+          (reviewedLineIds.length ? `\n\nThese line ids were already reviewed and decided on in a PRIOR pass — do NOT flag them again: ${reviewedLineIds.join(', ')}.` : '') +
           `\n\nAnalyze against the standard and rules in the system prompt. Call add_adjustment once per issue as you find it (for ADDs, search_catalog first for a real code). Provide suggested tenant % AND $ where possible. When finished, call finish_review with a short summary. If the scope is already compliant, just call finish_review.`,
       },
       ...photoContent,
@@ -357,6 +362,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         suggested: Object.keys(suggested).length ? suggested : undefined,
         suggestedTenantDollars: suggestedTenantDollars != null && isFinite(suggestedTenantDollars) ? suggestedTenantDollars : undefined,
       };
+      // Skip items already reviewed/decided in a prior pass (hard dedup across
+      // re-reviews — signature must match the client's reviewSignature()).
+      const sig = norm.lineExternalId
+        ? `line:${norm.lineExternalId}`
+        : `add:${norm.sectionId || ''}:${norm.suggested?.lineItemCode || ''}`;
+      if (reviewedSet.has(sig)) return null;
       // Validity: edit/remove need a resolvable target; add needs a real code.
       const valid = norm.type === 'add' ? !!norm.suggested?.lineItemCode : (!!norm.lineExternalId && lines.some((l) => l.externalId === norm.lineExternalId));
       return valid ? norm : null;
