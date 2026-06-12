@@ -33,20 +33,33 @@ function cleanPhrase(q?: string): string | null {
   return s.slice(0, 60);
 }
 
-/** Only events where the CODE itself is what's being judged carry a useful signal. */
-function isCodeJudgement(e: AiFeedbackEvent): boolean {
+/**
+ * The code-preference signal in one event, if any:
+ *   - add (or untyped voice/scan add): accept → "prefer this code", reject → "avoid it".
+ *   - remove: accepting the removal → "avoid" (the code shouldn't be there);
+ *             declining the removal → "prefer/keep" (the line is legit).
+ * edit / wrongRoom / needsPhoto / missingCategory adjust parameters or placement,
+ * not the code choice, so they don't vote on code preference.
+ */
+function codeVote(e: AiFeedbackEvent): { code: string; vote: 'prefer' | 'avoid'; phrase: string | null } | null {
   const code = e.suggestion?.catalogCode;
-  if (!code) return false;
-  const t = e.suggestion?.type;
-  return !t || t === 'add'; // voice/scan adds, and ai_review 'add' suggestions
+  if (!code) return null;
+  const accepted = ACCEPT.has(e.decision);
+  const rejected = REJECT.has(e.decision);
+  if (!accepted && !rejected) return null;
+  const type = (e.suggestion?.type || '').toLowerCase();
+  const phrase = cleanPhrase(e.suggestion?.query);
+  if (!type || type === 'add') return { code, vote: accepted ? 'prefer' : 'avoid', phrase };
+  if (type === 'remove') return { code, vote: accepted ? 'avoid' : 'prefer', phrase };
+  return null;
 }
 
 interface CodeAgg {
   code: string;
-  accepts: number;
-  rejects: number;
-  acceptPhrases: Set<string>;
-  rejectPhrases: Set<string>;
+  prefer: number;
+  avoid: number;
+  preferPhrases: Set<string>;
+  avoidPhrases: Set<string>;
 }
 
 /** Build learned knowledge candidates from the last `days` of feedback. */
@@ -60,12 +73,11 @@ async function candidatesFromEvents(events: AiFeedbackEvent[]): Promise<AutoKnow
   const byCode = new Map<string, CodeAgg>();
 
   for (const e of events) {
-    if (!isCodeJudgement(e)) continue;
-    const code = e.suggestion!.catalogCode as string;
-    const agg = byCode.get(code) || (byCode.set(code, { code, accepts: 0, rejects: 0, acceptPhrases: new Set(), rejectPhrases: new Set() }), byCode.get(code)!);
-    const phrase = cleanPhrase(e.suggestion?.query);
-    if (ACCEPT.has(e.decision)) { agg.accepts++; if (phrase) agg.acceptPhrases.add(phrase); }
-    else if (REJECT.has(e.decision)) { agg.rejects++; if (phrase) agg.rejectPhrases.add(phrase); }
+    const v = codeVote(e);
+    if (!v) continue;
+    const agg = byCode.get(v.code) || (byCode.set(v.code, { code: v.code, prefer: 0, avoid: 0, preferPhrases: new Set(), avoidPhrases: new Set() }), byCode.get(v.code)!);
+    if (v.vote === 'prefer') { agg.prefer++; if (v.phrase) agg.preferPhrases.add(v.phrase); }
+    else { agg.avoid++; if (v.phrase) agg.avoidPhrases.add(v.phrase); }
   }
 
   // Resolve code → description (best-effort; fall back to the bare code).
@@ -84,22 +96,22 @@ async function candidatesFromEvents(events: AiFeedbackEvent[]): Promise<AutoKnow
 
   const candidates: AutoKnowledgeCandidate[] = [];
   for (const agg of byCode.values()) {
-    const total = agg.accepts + agg.rejects;
+    const total = agg.prefer + agg.avoid;
     if (total < MIN_SAMPLES) continue;
 
-    if (agg.accepts / total >= MAJORITY) {
-      const ex = exampleList(agg.acceptPhrases);
+    if (agg.prefer / total >= MAJORITY) {
+      const ex = exampleList(agg.preferPhrases);
       candidates.push({
         signature: `accept:${agg.code}`,
         text: `Inspectors consistently choose ${label(agg.code)}${ex ? ` when they say things like ${ex}` : ''}. Prefer it for similar call-outs.`,
-        meta: { code: agg.code, accepts: agg.accepts, rejects: agg.rejects, samples: total, examples: [...agg.acceptPhrases].slice(0, MAX_EXAMPLES) },
+        meta: { code: agg.code, accepts: agg.prefer, rejects: agg.avoid, samples: total, examples: [...agg.preferPhrases].slice(0, MAX_EXAMPLES) },
       });
-    } else if (agg.rejects / total >= MAJORITY) {
-      const ex = exampleList(agg.rejectPhrases);
+    } else if (agg.avoid / total >= MAJORITY) {
+      const ex = exampleList(agg.avoidPhrases);
       candidates.push({
         signature: `reject:${agg.code}`,
         text: `Inspectors consistently reject ${label(agg.code)}${ex ? ` for call-outs like ${ex}` : ''}. Don't suggest it there unless they ask.`,
-        meta: { code: agg.code, accepts: agg.accepts, rejects: agg.rejects, samples: total, examples: [...agg.rejectPhrases].slice(0, MAX_EXAMPLES) },
+        meta: { code: agg.code, accepts: agg.prefer, rejects: agg.avoid, samples: total, examples: [...agg.avoidPhrases].slice(0, MAX_EXAMPLES) },
       });
     }
     // else: ambiguous (no clear majority) — don't write a rule.
@@ -123,7 +135,7 @@ export async function refreshLearnedKnowledge(days = 90): Promise<{
   // means capture stopped; a growing event count with 0 new entries just means
   // the existing rules are getting stronger, not that nothing was learned.
   const newestEventTs = events.reduce<string | null>((m, e) => (e.ts && (!m || e.ts > m) ? e.ts : m), null);
-  const codeJudgementEvents = events.filter((e) => isCodeJudgement(e) && (ACCEPT.has(e.decision) || REJECT.has(e.decision))).length;
+  const codeJudgementEvents = events.filter((e) => codeVote(e) != null).length;
   const summary = { candidates: candidates.length, ...result, feedbackEvents: events.length, codeJudgementEvents, newestEventTs };
   console.log(`[ai-learning] knowledge refresh: ${JSON.stringify(summary)}`);
   return summary;
@@ -211,10 +223,10 @@ export async function learningDiagnostics(days = 90): Promise<{
       byDay[e.ts.slice(0, 10)] = (byDay[e.ts.slice(0, 10)] || 0) + 1;
       if (!newestEventTs || e.ts > newestEventTs) newestEventTs = e.ts;
     }
-    if (isCodeJudgement(e) && (ACCEPT.has(e.decision) || REJECT.has(e.decision))) {
+    const v = codeVote(e);
+    if (v) {
       codeJudgementEvents++;
-      const code = e.suggestion!.catalogCode as string;
-      perCode.set(code, (perCode.get(code) || 0) + 1);
+      perCode.set(v.code, (perCode.get(v.code) || 0) + 1);
     }
   }
   const candidates = await synthesizeKnowledgeCandidates(days);
