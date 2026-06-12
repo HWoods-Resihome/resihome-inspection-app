@@ -452,9 +452,13 @@ export function PdfSectionPhotos(props: { photoUrls: string[] }) {
  * whole block bumps to the next page. The table that follows can still wrap
  * normally (rows are individually wrap={false} but the table itself isn't).
  */
-export function PdfSectionHeader(props: { title: string; photoUrls: string[] }) {
+export function PdfSectionHeader(props: { title: string; photoUrls: string[]; minPresenceAhead?: number }) {
+  // minPresenceAhead reserves space AFTER this block on the page; if there isn't
+  // enough room for the table that follows to start, the whole header (title +
+  // photos) breaks to the next page WITH its table — instead of the title/photos
+  // stranding at the bottom and the table flowing to the next page on its own.
   return (
-    <View wrap={false} style={{ marginTop: 8 }}>
+    <View wrap={false} minPresenceAhead={props.minPresenceAhead ?? 90} style={{ marginTop: 8 }}>
       <Text style={pdfStyles.sectionTitle}>{props.title}</Text>
       <PdfSectionPhotos photoUrls={props.photoUrls} />
     </View>

@@ -290,9 +290,14 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     if (env('HBMM_ENSURE_TICKET_TYPE', '1') !== '0') {
       const target = env('HBMM_TICKET_TYPE_TARGET', 'Turnkey');
       const targetRe = new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      // Read the value shown next to the "Ticket Type :" label.
+      // Read the value shown next to the "Ticket Type :" label. CRITICAL: only
+      // consider VISIBLE labels — the hidden edit form (#formAddTicket, ng-hide)
+      // contains "Turnkey"/"Maintenance" as selectable options, and reading those
+      // gave a false "already Turnkey". The read-only value is the bold label
+      // (.lblbold) right after the visible "Ticket Type :" label.
       const readType = async (): Promise<string> => page.evaluate(() => {
-        const labels = Array.from(document.querySelectorAll('label')) as HTMLElement[];
+        const isVisible = (el: Element) => !!(el as HTMLElement).offsetParent;
+        const labels = (Array.from(document.querySelectorAll('label')) as HTMLElement[]).filter(isVisible);
         const i = labels.findIndex((l) => /^ticket type\s*:?\s*$/i.test((l.textContent || '').trim()));
         if (i >= 0) for (let j = i + 1; j < Math.min(i + 4, labels.length); j++) {
           const t = (labels[j].textContent || '').trim();
