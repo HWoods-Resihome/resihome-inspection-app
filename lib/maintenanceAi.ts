@@ -61,6 +61,8 @@ export interface CreateTicketResult {
   status?: number;
   /** The x-request-id GUID we sent (for support/idempotency tracing). */
   requestId?: string;
+  /** Outcome of the separate ticket-type update (the type isn't set on create). */
+  typeUpdate?: TicketTypeUpdateResult;
   error?: string;
 }
 
@@ -123,26 +125,43 @@ export interface CreateTicketInput {
   ticketTypeId?: number;
 }
 
+export interface TicketTypeUpdateResult { ok: boolean; status?: number; body?: string; error?: string }
+
 /**
- * Backup path: explicitly set a ticket's type after creation, for environments
- * that ignore ticketTypeId on the create call. Best-effort — the caller wraps
- * this in try/catch and never fails the finalize over it.
+ * Set a ticket's type. The create call does NOT reliably set the type (the API
+ * applies it on a SEPARATE update), so this runs after create as the authoritative
+ * step. Best-effort and observable: returns status + (truncated) body so the
+ * finalize log shows whether it actually stuck, and retries once. Never throws.
  *
- * Endpoint/field are the documented ones (PUT /ticket/{id} with ticketTypeId);
+ * Endpoint/method are the documented ones (PUT /ticket/{id} with ticketTypeId);
  * overridable via MAINTENANCE_AI_TICKET_UPDATE_METHOD if the API differs.
  */
-async function updateTicketType(baseUrl: string, version: string, apiKey: string, ticketId: number, ticketTypeId: number): Promise<void> {
+async function updateTicketType(baseUrl: string, version: string, apiKey: string, ticketId: number, ticketTypeId: number): Promise<TicketTypeUpdateResult> {
   const method = (process.env.MAINTENANCE_AI_TICKET_UPDATE_METHOD || 'PUT').trim().toUpperCase();
-  const resp = await fetch(`${baseUrl}/api/external/${version}/ticket/${ticketId}`, {
-    method,
-    headers: { 'x-api-key': apiKey, 'x-request-id': genRequestId(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ticketId, ticketTypeId }),
-  });
-  if (!resp.ok) {
-    const t = await resp.text().catch(() => '');
-    throw new Error(`HTTP ${resp.status} ${t.slice(0, 160)}`);
+  const attempt = async (): Promise<TicketTypeUpdateResult> => {
+    const resp = await fetch(`${baseUrl}/api/external/${version}/ticket/${ticketId}`, {
+      method,
+      headers: { 'x-api-key': apiKey, 'x-request-id': genRequestId(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticketId, ticketTypeId }),
+    });
+    const body = await resp.text().catch(() => '');
+    return { ok: resp.ok, status: resp.status, body: body.replace(/\s+/g, ' ').slice(0, 200) };
+  };
+  try {
+    // Newly-created tickets sometimes aren't immediately updatable; let it settle.
+    await new Promise((r) => setTimeout(r, 1200));
+    let res = await attempt();
+    if (!res.ok) {
+      await new Promise((r) => setTimeout(r, 1500));
+      res = await attempt(); // one retry
+    }
+    console.log(`[maintenanceAi] ticket #${ticketId} type→${ticketTypeId} via ${method}: ${res.ok ? 'OK' : 'FAILED'} (status ${res.status}) ${res.body || ''}`);
+    return res;
+  } catch (e: any) {
+    const error = String(e?.message || e).slice(0, 200);
+    console.warn(`[maintenanceAi] ticket #${ticketId} type update threw: ${error}`);
+    return { ok: false, error };
   }
-  console.log(`[maintenanceAi] ticket #${ticketId} type set to ${ticketTypeId} via ${method} (backup).`);
 }
 
 /**
@@ -197,14 +216,11 @@ export async function createMaintenanceTicket(input: CreateTicketInput): Promise
     if (resp.ok) {
       const ticketId = json?.data?.ticketId;
       const tid = typeof ticketId === 'number' ? ticketId : undefined;
-      // Backup: some environments don't honor ticketTypeId on CREATE, so the
-      // ticket lands as a default Maintenance type. Best-effort: explicitly set
-      // the type via an update so it ends up as Turnkey (1828). Never fatal.
-      if (tid) {
-        try { await updateTicketType(baseUrl, version, apiKey, tid, body.ticketTypeId); }
-        catch (e: any) { console.warn('[maintenanceAi] ticket type update (backup) failed:', String(e?.message || e).slice(0, 200)); }
-      }
-      return { ok: true, configured: true, status, requestId, ticketId: tid };
+      // The API does NOT set the type on CREATE — it must be applied via a
+      // SEPARATE update, so we run it here as the authoritative step. Observable
+      // (the result is returned + logged); never fatal to finalize.
+      const typeUpdate = tid ? await updateTicketType(baseUrl, version, apiKey, tid, body.ticketTypeId) : undefined;
+      return { ok: true, configured: true, status, requestId, ticketId: tid, typeUpdate };
     }
 
     // 202 = idempotency replay/in-progress; treat as non-fatal but not "ok".

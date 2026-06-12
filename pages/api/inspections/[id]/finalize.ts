@@ -810,7 +810,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             description: buildTicketDescription(shareVendorLinks, shareMasterUrl),
           });
           if (ticketResult.ok) {
-            console.log(`[finalize] maintenance ticket created: #${ticketResult.ticketId} on property ${hbmmId}`);
+            const tu = ticketResult.typeUpdate;
+            console.log(`[finalize] maintenance ticket created: #${ticketResult.ticketId} on property ${hbmmId}`
+              + (tu ? ` · type update ${tu.ok ? 'OK' : `FAILED (status ${tu.status ?? '-'}) ${tu.error || tu.body || ''}`}` : ''));
             // Persist the ticket id (best-effort) for visibility + background
             // doc-upload retries. Swallow if the property doesn't exist yet.
             try { await updateInspection(id, { hbmm_ticket_id: String(ticketResult.ticketId || '') }); }
