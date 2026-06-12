@@ -260,13 +260,14 @@ export const pdfStyles = StyleSheet.create({
   // ---- Page-1 condensed summary table (one row per line item, Room as its
   //      own column, no photos, single grand-total row at the bottom) ----
   summaryRoomCell: {
-    fontFamily: 'Helvetica-Bold',
+    fontFamily: 'Helvetica',
     fontSize: 7.5,
     color: PDF_COLORS.ink,
     paddingHorizontal: 3,
   },
   summaryLineRow: {
     flexDirection: 'row',
+    alignItems: 'center', // vertically center the cell values for a cleaner line
     borderBottomWidth: 0.5,
     borderBottomColor: PDF_COLORS.grayLight,
     paddingVertical: 2.5,
@@ -545,12 +546,12 @@ export function PdfSummaryTable<T>(props: {
   const groups = props.groups.filter((g) => g.lines.length > 0);
   if (groups.length === 0) return null;
 
-  // Flatten to one row per line, tagging each with its room. Show the room name
-  // only on the first row of each consecutive run (a clean "merged cell" look)
-  // while keeping one physical row per line item.
-  const rows: { room: string; showRoom: boolean; line: T }[] = [];
+  // Flatten to one row per line, tagging each with its room. The room name
+  // shows on every row (so the room column reads top-to-bottom even across
+  // page breaks).
+  const rows: { room: string; line: T }[] = [];
   for (const g of groups) {
-    g.lines.forEach((line, i) => rows.push({ room: g.displayName, showRoom: i === 0, line }));
+    for (const line of g.lines) rows.push({ room: g.displayName, line });
   }
 
   const lineCellStyle = (c: PdfSummaryColumn<T>) => {
@@ -577,7 +578,7 @@ export function PdfSummaryTable<T>(props: {
       {/* One row per line item */}
       {rows.map((r, i) => (
         <View key={i} style={pdfStyles.summaryLineRow} wrap={false}>
-          <Text style={[pdfStyles.summaryRoomCell, { width: props.roomWidth }]}>{r.showRoom ? r.room : ''}</Text>
+          <Text style={[pdfStyles.summaryRoomCell, { width: props.roomWidth }]}>{r.room}</Text>
           {cols.map((c) => (
             <Text key={c.key} style={[lineCellStyle(c), { width: c.width }]}>
               {c.cell(r.line)}
@@ -610,8 +611,12 @@ export function formatMoneyPdf(n: number): string {
 }
 
 export function formatQtyPdf(n: number): string {
-  if (Number.isInteger(n)) return n.toString();
-  return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  // Thousands-separated (e.g. 1,800). Whole numbers show no decimals; otherwise
+  // up to 2 decimal places.
+  return n.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: Number.isInteger(n) ? 0 : 2,
+  });
 }
 
 export function isoToHumanDate(iso: string): string {

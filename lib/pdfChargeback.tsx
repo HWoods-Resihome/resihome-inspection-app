@@ -59,7 +59,7 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
   // these widths + roomWidth (13%) sum to 100%.
   const summaryColumns: PdfSummaryColumn<PdfLineRow>[] = [
     { key: 'category', header: 'Category', width: '10%', align: 'center', cell: (l) => l.category },
-    { key: 'subcategory', header: 'Sub-\ncategory', width: '10%', align: 'center', cell: (l) => l.subcategory },
+    { key: 'subcategory', header: 'Sub', width: '10%', align: 'center', cell: (l) => l.subcategory },
     { key: 'description', header: 'Description', width: '39%', cell: (l) => l.laborShortDescription },
     { key: 'qty', header: 'Qty', width: '6%', align: 'center', cell: (l) => formatQtyPdf(l.quantity) },
     { key: 'unit', header: 'Unit', width: '6%', align: 'center', cell: (l) => l.laborMeas },
@@ -141,7 +141,7 @@ function ChargebackSection(props: { section: PdfSectionGroup }) {
 
       <View style={pdfStyles.tableHeaderRow}>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.category, textAlign: 'center' }]}>Category</Text>
-        <Text style={[pdfStyles.tableHeaderCell, { width: COL.subcategory, textAlign: 'center' }]}>{'Sub-\ncategory'}</Text>
+        <Text style={[pdfStyles.tableHeaderCell, { width: COL.subcategory, textAlign: 'center' }]}>Sub</Text>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.description }]}>Description</Text>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.qty, textAlign: 'center' }]}>Qty</Text>
         <Text style={[pdfStyles.tableHeaderCell, { width: COL.unit, textAlign: 'center' }]}>Unit</Text>
