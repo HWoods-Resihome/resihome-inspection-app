@@ -1662,6 +1662,7 @@ export function QuestionForm({
                           propertyName={propertyName}
                           propertyRecordId={propertyRecordId}
                           plainStyle={scopeStyle}
+                          photoFirst={is1099}
                         />
                       </div>
                     );

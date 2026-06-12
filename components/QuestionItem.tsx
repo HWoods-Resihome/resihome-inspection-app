@@ -25,9 +25,11 @@ type Props = {
    *  border (no yellow fill) and photos use a single in-app "Take" button (no
    *  separate Choose Files). Used by the 1099 / occupancy / community templates. */
   plainStyle?: boolean;
+  /** Render the Photos block ABOVE the Note block in the panel (1099). */
+  photoFirst?: boolean;
 };
 
-export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName, propertyRecordId, plainStyle }: Props) {
+export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName, propertyRecordId, plainStyle, photoFirst }: Props) {
   const dialog = useAppDialog();
   // A note is required when the selected value is explicitly configured
   // (noteRequiredOnValues) OR — robust to the Good/Fail relabel — when a
@@ -278,7 +280,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
 
       {/* Combined notes/photos panel */}
       {panelOpen && (
-        <div className={`mt-3 p-3 rounded-lg space-y-3 ${
+        <div className={`mt-3 p-3 rounded-lg flex flex-col gap-3 ${
           forcedOpen
             ? (plainStyle ? 'bg-white border-2 border-amber-300' : 'bg-amber-50 border border-amber-300')
             : 'bg-gray-50 border border-gray-200'
@@ -305,7 +307,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
           </div>
 
           {/* Note (shared field, required when triggered or "Require note" is set) */}
-          <div>
+          <div className={photoFirst ? 'order-2' : ''}>
             <label className={`block text-xs font-heading font-semibold mb-1 ${
               noteMandatory ? 'text-amber-900' : 'text-gray-700'
             }`}>
@@ -356,7 +358,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
           })()}
 
           {/* Photos */}
-          <div>
+          <div className={photoFirst ? 'order-1' : ''}>
             <label className={`block text-xs font-heading font-semibold mb-1 ${
               forcedOpen ? 'text-amber-900' : 'text-gray-700'
             }`}>
