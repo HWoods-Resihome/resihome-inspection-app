@@ -317,15 +317,18 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
           // (a <select>, a radio, or a clickable toggle/label).
           const picked = await page.evaluate((t: string) => {
             const re = new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-            for (const s of Array.from(document.querySelectorAll('select')) as HTMLSelectElement[]) {
+            // Scope to the edit form (#formAddTicket / #divAddEdit) when present so
+            // we don't match an unrelated element elsewhere on the page.
+            const root: ParentNode = document.querySelector('#formAddTicket, #divAddEdit') || document;
+            for (const s of Array.from(root.querySelectorAll('select')) as HTMLSelectElement[]) {
               const opt = Array.from(s.options).find((o) => re.test(o.textContent || '') || re.test(o.value || ''));
               if (opt) { s.value = opt.value; s.dispatchEvent(new Event('change', { bubbles: true })); return 'select'; }
             }
-            for (const r of Array.from(document.querySelectorAll('input[type=radio]')) as HTMLInputElement[]) {
+            for (const r of Array.from(root.querySelectorAll('input[type=radio]')) as HTMLInputElement[]) {
               const lbl = (r.closest('label')?.textContent || (r.id && document.querySelector(`label[for="${r.id}"]`)?.textContent) || r.value || '');
               if (re.test(String(lbl))) { r.click(); return 'radio'; }
             }
-            const clickables = Array.from(document.querySelectorAll('button, a, label, [role=button], .btn, li, span, div')) as HTMLElement[];
+            const clickables = Array.from(root.querySelectorAll('button, a, label, [role=button], .btn, li, span, div')) as HTMLElement[];
             const hit = clickables.find((e) => { const txt = (e.textContent || '').trim(); return txt.length > 0 && txt.length < 40 && re.test(txt); });
             if (hit) { hit.scrollIntoView({ block: 'center' }); hit.click(); return 'click'; }
             return '';

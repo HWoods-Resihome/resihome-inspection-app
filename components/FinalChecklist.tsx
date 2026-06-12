@@ -413,7 +413,13 @@ export function FinalChecklist(props: Props) {
   // Stepper — wide, full-height tap targets on each side (whole side is the button).
   function Stepper({ value, min, max, onChange }: { value: number | null; min: number; max?: number; onChange: (v: number) => void }) {
     const v = value ?? min;
-    const step = (d: number) => { const nv = Math.max(min, Math.min(max ?? 9999, v + d)); onChange(nv); };
+    const step = (d: number) => {
+      // First press from a BLANK field lands on the starting value (the min, or 1
+      // when min is 0) — not min+1 — so "+" goes blank → 1, not blank → 2.
+      if (value == null) { onChange(Math.max(min, 1)); return; }
+      const nv = Math.max(min, Math.min(max ?? 9999, v + d));
+      onChange(nv);
+    };
     const atMin = v <= min;
     const atMax = max != null && v >= max;
     return (

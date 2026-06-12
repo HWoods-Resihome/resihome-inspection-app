@@ -722,6 +722,10 @@ export function CameraCapture({
     if (!isOpen || typeof document === 'undefined') return;
     const body = document.body;
     const html = document.documentElement;
+    // Remember where the inspector was so closing the camera (Done/Cancel) leaves
+    // them exactly there — toggling body overflow / tearing down the <video> can
+    // otherwise snap the page back to the top (seen on iOS especially).
+    const scrollY = window.scrollY || window.pageYOffset || 0;
     const prev = {
       bodyOverflow: body.style.overflow,
       bodyTouch: body.style.touchAction,
@@ -741,6 +745,8 @@ export function CameraCapture({
       body.style.width = prev.bodyW;
       html.style.overflow = prev.htmlOverflow;
       (html.style as any).overscrollBehavior = prev.overscroll;
+      // Restore the saved scroll position after layout settles.
+      requestAnimationFrame(() => { try { window.scrollTo(0, scrollY); } catch { /* noop */ } });
     };
   }, [isOpen]);
 
