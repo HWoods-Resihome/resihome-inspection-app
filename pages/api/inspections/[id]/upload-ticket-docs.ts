@@ -66,8 +66,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!upload.configured) {
       return res.status(200).json({ ok: false, skipped: true, reason: 'not configured' });
     }
-    console.log(`[upload-ticket-docs] inspection ${id} → ticket #${ticketId}: ok=${upload.ok} uploaded=${upload.uploaded}${upload.error ? ` error=${upload.error}` : ''}`);
-    return res.status(upload.ok ? 200 : 502).json({ ok: upload.ok, ticketId, uploaded: upload.uploaded, error: upload.error });
+    console.log(`[upload-ticket-docs] inspection ${id} → ticket #${ticketId}: ok=${upload.ok} uploaded=${upload.uploaded}${upload.error ? ` error=${upload.error}` : ''}\n  steps: ${upload.steps.join('\n         ')}`);
+    // Return the step log (and, on failure, the screenshot) so the exact failure
+    // point + selectors are visible without digging through server logs.
+    return res.status(upload.ok ? 200 : 502).json({
+      ok: upload.ok, ticketId, uploaded: upload.uploaded, error: upload.error,
+      steps: upload.steps, screenshot: upload.ok ? undefined : upload.screenshot,
+    });
   } catch (e: any) {
     console.error(`[upload-ticket-docs] inspection ${id} failed:`, e);
     return res.status(500).json({ ok: false, error: String(e?.message || e).slice(0, 300) });

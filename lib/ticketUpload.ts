@@ -341,6 +341,11 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
           await sleep(3500); // let the save round-trip + re-render
           const after = await readType();
           log(`ticket type after save: "${after || '(unknown)'}"${after && targetRe.test(after) ? ' ✓' : ''}`);
+          // CRITICAL: reload to a clean view so the upload isn't broken if we're
+          // stuck in edit mode (the "Upload Document" button is hidden there).
+          await page.goto(ticketUrl, { waitUntil: 'networkidle2' });
+          await sleep(2500);
+          log('reloaded ticket after type change');
         }
       } catch (e: any) {
         log(`ensure-turnkey step failed (continuing to upload): ${String(e?.message || e).slice(0, 160)}`);
