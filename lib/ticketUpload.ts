@@ -20,6 +20,10 @@
 //   HBMM_SEL_FILE_INPUT       CSS selector for the file <input>
 //   HBMM_SEL_UPLOAD_BTN       selector/text for the modal "Upload" button
 //   HBMM_NAV_TIMEOUT_MS       per-step timeout (default 30000)
+//   HBMM_ENSURE_TICKET_TYPE   "0" to skip the Turnkey check (default on)
+//   HBMM_TICKET_TYPE_TARGET   target type text (default "Turnkey")
+//   HBMM_SEL_TICKET_EDIT      selector for the Edit button (EditTicketDetails())
+//   HBMM_SEL_TICKET_SAVE      selector for the Save button (after Edit)
 
 import fs from 'fs';
 import os from 'os';
@@ -277,6 +281,71 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     await sleep(3500);
     const diag = await page.evaluate(() => /upload document/i.test(document.body?.innerText || document.body?.textContent || '')).catch(() => false);
     log(`opened ticket (url=${page.url()} · hasUploadDocText=${diag})`);
+
+    // 4b. FALLBACK — ensure the ticket type is "Turnkey" BEFORE adding documents.
+    // The create/update API doesn't always stick the type (it can land as
+    // "Maintenance"), so we confirm via the UI and fix it: read the Ticket Type,
+    // and if it isn't the target, click Edit → select Turnkey → Save. Entirely
+    // best-effort and env-tunable — it NEVER blocks the upload.
+    if (env('HBMM_ENSURE_TICKET_TYPE', '1') !== '0') {
+      const target = env('HBMM_TICKET_TYPE_TARGET', 'Turnkey');
+      const targetRe = new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      // Read the value shown next to the "Ticket Type :" label.
+      const readType = async (): Promise<string> => page.evaluate(() => {
+        const labels = Array.from(document.querySelectorAll('label')) as HTMLElement[];
+        const i = labels.findIndex((l) => /^ticket type\s*:?\s*$/i.test((l.textContent || '').trim()));
+        if (i >= 0) for (let j = i + 1; j < Math.min(i + 4, labels.length); j++) {
+          const t = (labels[j].textContent || '').trim();
+          if (t && !/:\s*$/.test(t)) return t;
+        }
+        return '';
+      }).catch(() => '');
+      try {
+        const before = await readType();
+        if (before && targetRe.test(before)) {
+          log(`ticket type already "${before}" — no change needed`);
+        } else {
+          log(`ticket type is "${before || '(unknown)'}" — switching to ${target}`);
+          // Click Edit (ng-click="EditTicketDetails()"), else by visible text.
+          const editSel = env('HBMM_SEL_TICKET_EDIT', '[ng-click="EditTicketDetails()"]');
+          let clickedEdit = await page.evaluate((sel: string) => { const el = document.querySelector(sel) as HTMLElement | null; if (el) { el.scrollIntoView({ block: 'center' }); el.click(); return true; } return false; }, editSel).catch(() => false);
+          if (!clickedEdit) clickedEdit = await clickByText('edit', true);
+          log(`clicked Edit: ${clickedEdit}`);
+          await sleep(1800); // let edit-mode controls render
+
+          // Select the target type in whatever control edit mode exposes
+          // (a <select>, a radio, or a clickable toggle/label).
+          const picked = await page.evaluate((t: string) => {
+            const re = new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+            for (const s of Array.from(document.querySelectorAll('select')) as HTMLSelectElement[]) {
+              const opt = Array.from(s.options).find((o) => re.test(o.textContent || '') || re.test(o.value || ''));
+              if (opt) { s.value = opt.value; s.dispatchEvent(new Event('change', { bubbles: true })); return 'select'; }
+            }
+            for (const r of Array.from(document.querySelectorAll('input[type=radio]')) as HTMLInputElement[]) {
+              const lbl = (r.closest('label')?.textContent || (r.id && document.querySelector(`label[for="${r.id}"]`)?.textContent) || r.value || '');
+              if (re.test(String(lbl))) { r.click(); return 'radio'; }
+            }
+            const clickables = Array.from(document.querySelectorAll('button, a, label, [role=button], .btn, li, span, div')) as HTMLElement[];
+            const hit = clickables.find((e) => { const txt = (e.textContent || '').trim(); return txt.length > 0 && txt.length < 40 && re.test(txt); });
+            if (hit) { hit.scrollIntoView({ block: 'center' }); hit.click(); return 'click'; }
+            return '';
+          }, target).catch(() => '');
+          log(`selected ${target} via: ${picked || 'NONE'}`);
+          await sleep(800);
+
+          // Save — the Edit button becomes Save in the same spot.
+          const saveSel = env('HBMM_SEL_TICKET_SAVE', '[ng-click="SaveTicketDetails()"], [ng-click="UpdateTicket()"], [ng-click="SaveTicket()"], [ng-click="UpdateTicketDetails()"]');
+          let clickedSave = await page.evaluate((sel: string) => { const el = document.querySelector(sel) as HTMLElement | null; if (el) { el.scrollIntoView({ block: 'center' }); el.click(); return true; } return false; }, saveSel).catch(() => false);
+          if (!clickedSave) clickedSave = await clickByText('save', true);
+          log(`clicked Save: ${clickedSave}`);
+          await sleep(3500); // let the save round-trip + re-render
+          const after = await readType();
+          log(`ticket type after save: "${after || '(unknown)'}"${after && targetRe.test(after) ? ' ✓' : ''}`);
+        }
+      } catch (e: any) {
+        log(`ensure-turnkey step failed (continuing to upload): ${String(e?.message || e).slice(0, 160)}`);
+      }
+    }
 
     // 5. Click "Upload Document" — the DOCUMENT button is exactly
     // ng-click="openUploadModal(false)". (The "Upload Photo" button is
