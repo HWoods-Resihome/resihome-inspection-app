@@ -80,11 +80,15 @@ async function candidatesFromEvents(events: AiFeedbackEvent[]): Promise<AutoKnow
     else { agg.avoid++; if (v.phrase) agg.avoidPhrases.add(v.phrase); }
   }
 
-  // Resolve code → description (best-effort; fall back to the bare code).
+  // Resolve code → description + category (best-effort; fall back to bare code).
   const descByCode = new Map<string, string>();
+  const catByCode = new Map<string, string>();
   try {
     const catalog = await getCachedCatalog();
-    for (const c of catalog) descByCode.set(c.lineItemCode, c.laborShortDescription || c.laborFullDescription || c.lineItemCode);
+    for (const c of catalog) {
+      descByCode.set(c.lineItemCode, c.laborShortDescription || c.laborFullDescription || c.lineItemCode);
+      if (c.category) catByCode.set(c.lineItemCode, c.category);
+    }
   } catch { /* no catalog → code-only text */ }
 
   const label = (code: string) => {
@@ -115,6 +119,34 @@ async function candidatesFromEvents(events: AiFeedbackEvent[]): Promise<AutoKnow
       });
     }
     // else: ambiguous (no clear majority) — don't write a rule.
+  }
+
+  // ── Tenant % norms ─────────────────────────────────────────────────────────
+  // When inspectors consistently set the SAME tenant responsibility % on lines of
+  // a category (an edit correction), surface that as guidance — a real behavior /
+  // depreciation signal beyond the scheduled defaults.
+  const pctByCategory = new Map<string, number[]>();
+  for (const e of events) {
+    const pct = e.correction?.toTenantPct;
+    const code = e.suggestion?.catalogCode;
+    if (pct == null || !isFinite(pct) || pct < 0 || pct > 100 || !code) continue;
+    const cat = catByCode.get(code);
+    if (!cat) continue;
+    const rounded = Math.round(pct / 5) * 5; // tenant % moves in steps of 5
+    (pctByCategory.get(cat) || (pctByCategory.set(cat, []), pctByCategory.get(cat)!)).push(rounded);
+  }
+  for (const [cat, vals] of pctByCategory) {
+    if (vals.length < MIN_SAMPLES) continue;
+    const counts = new Map<number, number>();
+    for (const v of vals) counts.set(v, (counts.get(v) || 0) + 1);
+    let mode = vals[0], modeN = 0;
+    for (const [v, n] of counts) if (n > modeN) { mode = v; modeN = n; }
+    if (modeN / vals.length < MAJORITY) continue; // no clear, consistent norm
+    candidates.push({
+      signature: `tenantpct:${cat.toLowerCase()}`,
+      text: `Inspectors consistently set tenant responsibility to ${mode}% on ${cat} lines. Default to ${mode}% there unless the depreciation schedule or the inspector says otherwise.`,
+      meta: { category: cat, tenantPct: mode, samples: vals.length, agree: modeN },
+    });
   }
 
   // Strongest signals first (most samples) so the cap keeps the best rules.
