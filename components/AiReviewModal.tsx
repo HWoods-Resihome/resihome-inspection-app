@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AiAdjustment } from '@/lib/aiReview';
 import { formatQty } from '@/lib/photoUpload';
 import { NumberField } from '@/components/NumberPad';
@@ -72,6 +72,27 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
   // missingCategory checks: how many lines the inspector added, and which is busy.
   const [linesAdded, setLinesAdded] = useState<Record<string, number>>({});
   const [addingItems, setAddingItems] = useState<string | null>(null);
+
+  // Minimize + drag-by-header, so the inspector can pull the review aside and
+  // see/edit the original inspection while suggestions stream in. The backdrop
+  // is non-blocking (clicks pass through to the form behind).
+  const [minimized, setMinimized] = useState(false);
+  const [drag, setDrag] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ sx: number; sy: number; bx: number; by: number } | null>(null);
+  useEffect(() => { if (open) { setDrag({ x: 0, y: 0 }); setMinimized(false); } }, [open]);
+  const onHeaderDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return; // header buttons still work
+    dragRef.current = { sx: e.clientX, sy: e.clientY, bx: drag.x, by: drag.y };
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
+  };
+  const onHeaderMove = (e: React.PointerEvent) => {
+    const d = dragRef.current; if (!d) return;
+    setDrag({ x: d.bx + (e.clientX - d.sx), y: d.by + (e.clientY - d.sy) });
+  };
+  const onHeaderUp = (e: React.PointerEvent) => {
+    dragRef.current = null;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
+  };
 
   // Friendly, cycling status shown the instant the review opens (before the
   // first suggestion streams in) so the inspector gets immediate feedback.
@@ -188,10 +209,18 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
   };
 
   return (
-    <div data-modal-overlay className={`fixed inset-0 z-[80] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 transition-[padding] duration-200 ${cameraOpen ? 'hidden' : ''}`}>
-      <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-2xl max-h-[92vh] flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="px-5 py-3.5 border-b border-gray-200 flex items-start justify-between gap-3">
+    <div data-modal-overlay className={`fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-4 pointer-events-none ${cameraOpen ? 'hidden' : ''}`}>
+      <div
+        className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-2xl max-h-[92vh] flex flex-col overflow-hidden pointer-events-auto ring-1 ring-black/10"
+        style={{ transform: `translate(${drag.x}px, ${drag.y}px)` }}
+      >
+        {/* Header — drag handle (click + drag to move the panel aside) */}
+        <div
+          onPointerDown={onHeaderDown}
+          onPointerMove={onHeaderMove}
+          onPointerUp={onHeaderUp}
+          className="px-5 py-3.5 border-b border-gray-200 flex items-start justify-between gap-3 cursor-move touch-none select-none"
+        >
           <div className="min-w-0">
             <div className="font-heading font-bold text-ink text-base flex items-center gap-2">
               <span className="text-brand">✦</span> AI Scope Review
@@ -204,11 +233,26 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
               </div>
             )}
           </div>
-          <button type="button" onClick={onClose} disabled={applying} className="text-sm text-gray-500 hover:text-gray-800 shrink-0 disabled:opacity-40">Close</button>
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={() => setMinimized((m) => !m)}
+              aria-label={minimized ? 'Expand' : 'Minimize'}
+              title={minimized ? 'Expand' : 'Minimize'}
+              className="text-gray-500 hover:text-gray-800"
+            >
+              {minimized ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="5" width="14" height="14" rx="2" /></svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+              )}
+            </button>
+            <button type="button" onClick={onClose} disabled={applying} className="text-sm text-gray-500 hover:text-gray-800 disabled:opacity-40">Close</button>
+          </div>
         </div>
 
         {/* Body */}
-        <div data-modal-scroll className="flex-1 overflow-y-auto px-5 py-4">
+        <div data-modal-scroll className={`flex-1 overflow-y-auto px-5 py-4 ${minimized ? 'hidden' : ''}`}>
           {loading && (
             <div className="py-10 text-center">
               <div className="inline-block w-7 h-7 border-2 border-brand border-t-transparent rounded-full animate-spin mb-3" />
@@ -488,7 +532,7 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
 
         {/* Footer */}
         {!loading && !error && (
-          <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-3">
+          <div className={`px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-3 ${minimized ? 'hidden' : ''}`}>
             {/* Always-available exit so the inspector is never trapped behind
                 pending flags (a clear "back out" that doesn't require deciding
                 every item). */}
