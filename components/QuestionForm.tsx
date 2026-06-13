@@ -1100,7 +1100,14 @@ export function QuestionForm({
     return null;
   }
 
+  // Guards the submit button for the whole persist→finalize round-trip so a
+  // second tap on weak signal can't double-submit (ref = synchronous guard
+  // against rapid taps; state = drives the disabled/label UI).
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+
   async function handleSubmit() {
+    if (submittingRef.current) return;
     const err = validate();
     if (err) {
       await dialog.alert(err.message);
@@ -1122,6 +1129,9 @@ export function QuestionForm({
     );
     if (!ok) return;
 
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
     // Persist ALL answered questions to HubSpot before finalizing. Do NOT rely
     // solely on the debounced autosave having flushed — if real-time autosave
     // hiccupped, those edits would otherwise live only in memory, the PDF would
@@ -1236,6 +1246,10 @@ export function QuestionForm({
     if (fcEnabled) { try { await saveFc(fcAnswers); } catch { /* surfaced via answers save */ } }
 
     onSubmit(finalAnswers, sectionPhotoUrlsForApi);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   }
 
   // Completion progress per instance
@@ -1784,10 +1798,20 @@ export function QuestionForm({
               <button
                 type="button"
                 onClick={handleSubmit}
-                className="bg-brand hover:bg-brand-dark text-white font-heading font-bold px-3 sm:px-5 py-2.5 sm:py-3 rounded-lg active:scale-[0.99] transition text-xs sm:text-sm whitespace-nowrap"
+                disabled={submitting}
+                className="bg-brand hover:bg-brand-dark text-white font-heading font-bold px-3 sm:px-5 py-2.5 sm:py-3 rounded-lg active:scale-[0.99] transition text-xs sm:text-sm whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
               >
-                <span className="sm:hidden">Submit</span>
-                <span className="hidden sm:inline">Submit Inspection</span>
+                {submitting ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+                    Submitting…
+                  </span>
+                ) : (
+                  <>
+                    <span className="sm:hidden">Submit</span>
+                    <span className="hidden sm:inline">Submit Inspection</span>
+                  </>
+                )}
               </button>
             )}
             {readOnly && (

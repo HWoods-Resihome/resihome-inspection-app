@@ -1143,7 +1143,13 @@ export function CameraCapture({
     zoomTargetRef.current = null;
     try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* noop */ }
     if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-    holdTimerRef.current = setTimeout(() => { holdTimerRef.current = null; void startRecording(); }, HOLD_MS);
+    holdTimerRef.current = setTimeout(() => {
+      holdTimerRef.current = null;
+      // Longer buzz to signal "hold engaged — now recording" (distinct from the
+      // short photo-capture tick). No-op on iOS Safari.
+      try { navigator.vibrate?.(35); } catch { /* unsupported */ }
+      void startRecording();
+    }, HOLD_MS);
   }
   function onShutterMove(e: React.PointerEvent) {
     if (!recordingRef.current || shutterStartYRef.current == null) return;
@@ -1231,6 +1237,11 @@ export function CameraCapture({
     }
     const video = videoRef.current;
     if (!video || video.readyState < 2) return; // not ready; try again in a moment
+
+    // Tactile "shot taken" confirmation (Android; a no-op on iOS Safari, which
+    // ignores the Vibration API). Helps inspectors know the tap registered when
+    // the shutter visual is brief and they're not looking closely.
+    try { navigator.vibrate?.(15); } catch { /* unsupported */ }
 
     // Shared: draw a source (live frame OR full-sensor bitmap) to a capped canvas
     // with the digital-zoom crop + evidence stamp, then encode + enqueue in the

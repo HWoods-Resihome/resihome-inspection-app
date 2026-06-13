@@ -459,6 +459,11 @@ export function RateCardForm(props: RateCardFormProps) {
     totals: { vendor: number; client: number; tenant: number; lineCount: number };
   };
   const [finalizing, setFinalizing] = useState(false);
+  // "Submit for Approval" in-flight state (the finalize path uses `finalizing`).
+  // The ref is a synchronous guard so a fast double-tap can't fire two
+  // submit/finalize POSTs in the same frame before the disabled state renders.
+  const [submitting, setSubmitting] = useState(false);
+  const submitGuardRef = useRef(false);
   const [finalizeResult, setFinalizeResult] = useState<FinalizeResult | null>(null);
 
   // Ref to the finalize handler so the auto-resume effect (below) can call the
@@ -2936,6 +2941,7 @@ export function RateCardForm(props: RateCardFormProps) {
   }
 
   async function handleSubmitOrFinalize() {
+    if (submitGuardRef.current) return; // a submit/finalize is already in flight
     // Don't submit/finalize until the AI-applied (and any other) changes have
     // actually synced to the server — otherwise approval would run on a stale
     // or partial scope. The Submit button is also disabled in this state.
@@ -3085,6 +3091,7 @@ export function RateCardForm(props: RateCardFormProps) {
       // intent to finalize. Spinner shows in the button label while the PDFs
       // generate (10-30s on Vercel lambda). The result modal still appears
       // afterward to surface the downloads.
+      submitGuardRef.current = true;
       setFinalizing(true);
       try {
         // Burn line labels onto tagged photos before the server builds the PDF
@@ -3121,10 +3128,13 @@ export function RateCardForm(props: RateCardFormProps) {
         else await dialog.alert(`Finalize failed: ${e?.message || e}\n\nThe inspection status was NOT changed. You can try again.`);
       } finally {
         setFinalizing(false);
+        submitGuardRef.current = false;
       }
       return;
     }
     // First submit: flip status to pending_approval
+    setSubmitting(true);
+    submitGuardRef.current = true;
     try {
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}/submit`, {
         method: 'POST',
@@ -3143,6 +3153,9 @@ export function RateCardForm(props: RateCardFormProps) {
       props.onSubmit();
     } catch (e: any) {
       await dialog.alert(`Submit failed: ${e.message || e}`);
+    } finally {
+      setSubmitting(false);
+      submitGuardRef.current = false;
     }
   }
 
@@ -3189,15 +3202,19 @@ export function RateCardForm(props: RateCardFormProps) {
 
   const submitLabel = finalizing
     ? 'Generating PDFs...'
-    : props.inspectionStatus === 'pending_approval'
-      ? 'Finalize & Generate PDFs'
-      : 'Submit for Approval';
+    : submitting
+      ? 'Submitting...'
+      : props.inspectionStatus === 'pending_approval'
+        ? 'Finalize & Generate PDFs'
+        : 'Submit for Approval';
   // Compact label for the narrow mobile footer (keeps everything on one line).
   const submitLabelShort = finalizing
     ? 'Generating...'
-    : props.inspectionStatus === 'pending_approval'
-      ? 'Finalize'
-      : 'Submit';
+    : submitting
+      ? 'Submitting...'
+      : props.inspectionStatus === 'pending_approval'
+        ? 'Finalize'
+        : 'Submit';
 
   // Collapse/expand-all: mirrors the per-section isOpen logic (undefined =
   // default-open when the section has content).
@@ -3916,7 +3933,7 @@ export function RateCardForm(props: RateCardFormProps) {
               showCancelInspection={!!props.onCancelInspection}
               submitLabel={submitLabel}
               submitLabelShort={submitLabelShort}
-              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || aiApplying || (pendingSync + pendingPhotos) > 0 || selfApprovalLocked || (fcEditable && !finalChecklistComplete)}
+              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || submitting || aiApplying || (pendingSync + pendingPhotos) > 0 || selfApprovalLocked || (fcEditable && !finalChecklistComplete)}
               submitTitle={
                 props.readOnly ? undefined
                 : saveStatus.kind === 'saving' ? 'Saving — wait a moment, then submit.'

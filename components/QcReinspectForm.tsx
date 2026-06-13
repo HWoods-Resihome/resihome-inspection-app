@@ -94,6 +94,10 @@ export function QcReinspectForm(props: Props) {
   // QC PDF so the vendor/MC see why the re-inspect failed overall.
   const [overallNote, setOverallNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Synchronous re-entry guard: `disabled={submitting}` only blocks taps AFTER
+  // the next render, so a fast double-tap could fire two qc-finalize POSTs in
+  // the same frame. The ref blocks the second call immediately.
+  const submittingRef = useRef(false);
   const [result, setResult] = useState<null | { verdict: string; passCount: number; failCount: number; pdf: { name: string; url: string }; resultSync?: { verdictSynced: boolean; inspectionResultSynced: boolean; fields: string[] } }>(null);
   const [cameraKey, setCameraKey] = useState<string | null>(null);
   // Photo viewer (swipe / markup / delete / tag-to-line / video). `phase`
@@ -526,6 +530,7 @@ export function QcReinspectForm(props: Props) {
   }
 
   async function handleSubmit() {
+    if (submittingRef.current) return;
     if (!allMarked) { void dialog.alert('Every line item must be marked Pass or Fail before submitting.'); return; }
     // A failed line MUST have a note explaining what failed (for the vendor/MC).
     const failMissingNote = lines.find((l) => l.passFail === 'fail' && !(l.qcFailureNote || '').trim());
@@ -540,6 +545,7 @@ export function QcReinspectForm(props: Props) {
       void dialog.alert('Add an overall failure comment explaining why the re-inspect failed — it’s included on the report.');
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       await burnTaggedLabelsQc();
@@ -553,6 +559,7 @@ export function QcReinspectForm(props: Props) {
     } catch (e: any) {
       void dialog.alert(`Submit failed: ${e?.message || e}`);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
