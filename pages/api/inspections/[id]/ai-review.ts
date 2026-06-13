@@ -374,6 +374,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     };
 
     let finished = false;
+    // The breakpoint on the most-recently-appended tool_results, so the growing
+    // conversation prefix is cache-read on the next round (the model otherwise
+    // re-processes every prior turn each round). We MOVE it forward each round
+    // (clearing the previous one) to stay well under Anthropic's 4-breakpoint
+    // cap: system(1) + initial user(1) + latest tool_results(1).
+    let lastCachedToolBlock: any = null;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS && !finished; round++) {
       sseHeartbeat(res);
@@ -419,6 +425,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           // add_adjustment already streamed — just acknowledge so the model can continue.
           toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: 'recorded' });
         }
+      }
+      // Cache the conversation through this round: put the breakpoint on the
+      // latest tool_results block and clear the previous one (keeps breakpoints
+      // bounded; reads still match the longest previously-written prefix).
+      if (lastCachedToolBlock) { delete lastCachedToolBlock.cache_control; lastCachedToolBlock = null; }
+      if (toolResults.length) {
+        toolResults[toolResults.length - 1].cache_control = { type: 'ephemeral' };
+        lastCachedToolBlock = toolResults[toolResults.length - 1];
       }
       messages.push({ role: 'user', content: toolResults });
     }

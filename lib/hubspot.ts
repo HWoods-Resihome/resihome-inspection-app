@@ -3080,16 +3080,28 @@ export async function upsertAnswers(
       );
     }
     if (newAnswers.length > 0) {
-      const assocResult = await batchCreateAssociations(
-        tids.inspection, tids.answer, inspToAnswer,
-        newAnswers.map((a) => ({ fromId: inspectionRecordId, toId: a.recordId })),
-      );
-      if (assocResult.ok === 0 && newAnswers.length > 0) {
+      const pairs = newAnswers.map((a) => ({ fromId: inspectionRecordId, toId: a.recordId }));
+      let assocResult = await batchCreateAssociations(tids.inspection, tids.answer, inspToAnswer, pairs);
+      // PARTIAL failure → those specific answers would be orphaned (invisible on
+      // reopen). Re-associating is IDEMPOTENT in HubSpot (re-creating an existing
+      // association is a no-op and never duplicates the Answer record), so retry
+      // the whole set ONCE to recover transient failures (a 429 on one chunk,
+      // brief 5xx) before treating it as data loss.
+      if (assocResult.failed > 0) {
+        console.warn(`[upsertAnswers] ${assocResult.failed}/${pairs.length} Inspection→Answer associations failed — retrying once (idempotent)`);
+        assocResult = await batchCreateAssociations(tids.inspection, tids.answer, inspToAnswer, pairs);
+      }
+      if (assocResult.ok === 0) {
         throw new Error(
           `Created ${newAnswers.length} answer record(s) but FAILED to associate any ` +
           `to the inspection — they would be invisible on reopen. Aborting so the issue ` +
           `is visible rather than causing silent data loss.`
         );
+      }
+      if (assocResult.failed > 0) {
+        // Still partial after the idempotent retry — log loudly (telemetry) so it
+        // surfaces rather than silently orphaning those answers.
+        console.error(`[upsertAnswers] ${assocResult.failed}/${pairs.length} Inspection→Answer associations STILL failed after retry for inspection ${inspectionRecordId} — those answers may be invisible on reopen.`);
       }
     }
 
@@ -3105,7 +3117,15 @@ export async function upsertAnswers(
         qaPairs.push({ fromId: qid, toId: matchingNewAnswer.recordId });
       }
       if (qaPairs.length > 0) {
-        await batchCreateAssociations(tids.question, tids.answer, qToAnswer, qaPairs);
+        // Idempotent retry on partial failure (same rationale as the
+        // Inspection→Answer batch above). Non-fatal — a missing Question→Answer
+        // link only affects question-grouped views, not answer visibility.
+        let qaResult = await batchCreateAssociations(tids.question, tids.answer, qToAnswer, qaPairs);
+        if (qaResult.failed > 0) {
+          console.warn(`[upsertAnswers] ${qaResult.failed}/${qaPairs.length} Question→Answer associations failed — retrying once (idempotent)`);
+          qaResult = await batchCreateAssociations(tids.question, tids.answer, qToAnswer, qaPairs);
+          if (qaResult.failed > 0) console.error(`[upsertAnswers] ${qaResult.failed}/${qaPairs.length} Question→Answer associations STILL failed after retry for inspection ${inspectionRecordId}.`);
+        }
       }
     }
   }

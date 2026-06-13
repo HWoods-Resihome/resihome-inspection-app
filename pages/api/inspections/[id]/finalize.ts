@@ -592,63 +592,69 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     // ---- 5. Upload PDFs to HubSpot Files ----
-    // Sequential to stay polite with HubSpot's rate limit.
+    // Upload every generated file to HubSpot CONCURRENTLY (rendering above is
+    // already parallel). uploadFileWithId routes through the shared HubSpot
+    // request governor, so this respects our configured concurrency cap.
     // overwrite=true so re-running Finalize on a reopened inspection REPLACES
     // the old PDFs in place (same URL, same record) instead of leaving them
-    // as orphans + creating "-1.pdf" duplicates.
+    // as orphans + creating "-1.pdf" duplicates. The Tenant Charge Import SFTP
+    // push is independent of the HubSpot uploads, so it rides along in parallel.
+    const vendorEntries = [...vendorBufs.entries()];
+    const [masterUp, chargebackUp, chargebackXlsxUp, vendorUps, sftpRes] = await Promise.all([
+      uploadFileWithId(masterBuf, masterFilename, 'application/pdf', '/inspection_pdfs', true),
+      chargebackBuf
+        ? uploadFileWithId(chargebackBuf, chargebackFilename, 'application/pdf', '/inspection_pdfs', true)
+        : Promise.resolve(null),
+      chargebackXlsxBuf
+        ? uploadFileWithId(chargebackXlsxBuf, chargebackXlsxFilename, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '/inspection_pdfs', true)
+        : Promise.resolve(null),
+      Promise.all(vendorEntries.map(([vendor, buf]) =>
+        uploadFileWithId(buf, vendorFilename(vendor), 'application/pdf', '/inspection_pdfs', true)
+          .then((up) => [vendor, up] as const))),
+      chargebackXlsxBuf
+        // uploadToSftp is designed not to throw, but stay defensive.
+        ? uploadToSftp(chargebackXlsxFilename, chargebackXlsxBuf).catch((e: any) =>
+            ({ ok: false, configured: true, error: String(e?.message || e).slice(0, 220) } as SftpUploadResult))
+        : Promise.resolve(null),
+    ]);
+
+    // Assemble results in a deterministic order (master, chargeback, xlsx, vendors).
     const attachmentFileIds: string[] = [];
-    const masterUp = await uploadFileWithId(masterBuf, masterFilename, 'application/pdf', '/inspection_pdfs', true);
     const masterUrl = masterUp.url;
     if (masterUp.id) attachmentFileIds.push(masterUp.id);
 
     let chargebackUrl: string | null = null;
-    if (chargebackBuf) {
-      const up = await uploadFileWithId(chargebackBuf, chargebackFilename, 'application/pdf', '/inspection_pdfs', true);
-      chargebackUrl = up.url;
-      if (up.id) attachmentFileIds.push(up.id);
+    if (chargebackUp) {
+      chargebackUrl = chargebackUp.url;
+      if (chargebackUp.id) attachmentFileIds.push(chargebackUp.id);
     }
 
     // Tenant Chargeback Import xlsx — only uploaded if there were chargeback lines
     let chargebackXlsxUrl: string | null = null;
-    if (chargebackXlsxBuf) {
-      const up = await uploadFileWithId(
-        chargebackXlsxBuf,
-        chargebackXlsxFilename,
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        '/inspection_pdfs',
-        true,
-      );
-      chargebackXlsxUrl = up.url;
-      if (up.id) attachmentFileIds.push(up.id);
-    }
-
-    // ---- 5b. Push the Tenant Chargeback Import xlsx to the SFTP site ----
-    // Best-effort: this NEVER blocks finalize. The result is reported as a line
-    // in the finalize email ("Tenant Charge Import: Successful / Unsuccessful").
-    // No-ops (configured:false) until the SFTP_* env vars are set on Vercel.
-    let sftpResult: SftpUploadResult | null = null;
-    if (chargebackXlsxBuf) {
-      try {
-        sftpResult = await uploadToSftp(chargebackXlsxFilename, chargebackXlsxBuf);
-        if (sftpResult.ok) {
-          console.log(`[finalize] tenant charge import uploaded to SFTP: ${sftpResult.remotePath}`);
-        } else if (sftpResult.configured) {
-          console.warn(`[finalize] tenant charge import SFTP upload failed: ${sftpResult.error}`);
-        } else {
-          console.warn('[finalize] tenant charge import SFTP not configured — skipped.');
-        }
-      } catch (e: any) {
-        // uploadToSftp is designed not to throw, but stay defensive.
-        sftpResult = { ok: false, configured: true, error: String(e?.message || e).slice(0, 220) };
-        console.warn('[finalize] tenant charge import SFTP upload threw (caught):', e);
-      }
+    if (chargebackXlsxUp) {
+      chargebackXlsxUrl = chargebackXlsxUp.url;
+      if (chargebackXlsxUp.id) attachmentFileIds.push(chargebackXlsxUp.id);
     }
 
     const vendorUrls: Record<string, string> = {};
-    for (const [vendor, buf] of vendorBufs.entries()) {
-      const up = await uploadFileWithId(buf, vendorFilename(vendor), 'application/pdf', '/inspection_pdfs', true);
+    for (const [vendor, up] of vendorUps) {
       vendorUrls[vendor] = up.url;
       if (up.id) attachmentFileIds.push(up.id);
+    }
+
+    // ---- 5b. Tenant Charge Import SFTP result (pushed in parallel above) ----
+    // Best-effort: NEVER blocks finalize. Reported as a line in the finalize
+    // email ("Tenant Charge Import: Successful / Unsuccessful"). No-ops
+    // (configured:false) until the SFTP_* env vars are set on Vercel.
+    const sftpResult: SftpUploadResult | null = sftpRes;
+    if (sftpResult) {
+      if (sftpResult.ok) {
+        console.log(`[finalize] tenant charge import uploaded to SFTP: ${sftpResult.remotePath}`);
+      } else if (sftpResult.configured) {
+        console.warn(`[finalize] tenant charge import SFTP upload failed: ${sftpResult.error}`);
+      } else {
+        console.warn('[finalize] tenant charge import SFTP not configured — skipped.');
+      }
     }
 
     // Attach every generated file to the inspection's Attachments card

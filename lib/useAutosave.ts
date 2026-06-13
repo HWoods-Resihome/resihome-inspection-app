@@ -115,6 +115,32 @@ export function useAutosave(opts: Options) {
     return `${inspectionExternalId}_${safeQ}__${safeI}`;
   }, [inspectionExternalId]);
 
+  // Build the answers-API upsert payload for one answer state. Shared by the
+  // normal flush and the sendBeacon fallback so the two can never drift.
+  const buildUpsertFromState = useCallback((state: AutosaveAnswerState) => {
+    const a = state.answer;
+    const externalId = buildAnswerExternalId(a.questionIdExternal, state.instanceKey);
+    const props = buildQaAnswerProps({
+      answerIdExternal: externalId,
+      inspectionIdExternal: inspectionExternalId,
+      questionIdExternal: a.questionIdExternal,
+      questionText: a.questionText,
+      section: a.section,
+      summaryInstanceLabel: state.instanceKey,
+      answerValue: a.answerValue || '',
+      location: a.location,
+      note: a.note,
+      quantity: a.quantity,
+      assignedTo: a.assignedTo,
+      photoUrls: a.photoUrls,
+    }, { isScope: !!isScope });
+    return {
+      recordId: state.recordId || undefined,
+      answerProps: props,
+      questionHubspotRecordId: state.recordId ? undefined : state.questionHubspotRecordId,
+    };
+  }, [buildAnswerExternalId, inspectionExternalId, isScope]);
+
   // Flush pending dirty answers. Returns the list of changes that were attempted.
   const flush = useCallback(async (forceAll: boolean = false): Promise<boolean> => {
     if (disabled) return false;
@@ -164,30 +190,8 @@ export function useAutosave(opts: Options) {
     console.log(`[autosave] flushing ${toUpsert.length} upserts, ${toArchive.length} archives to inspection ${inspectionRecordId}`);
 
     try {
-      // Build the upsert payload
-      const upserts = toUpsert.map(({ state }) => {
-        const a = state.answer;
-        const externalId = buildAnswerExternalId(a.questionIdExternal, state.instanceKey);
-        const props = buildQaAnswerProps({
-          answerIdExternal: externalId,
-          inspectionIdExternal: inspectionExternalId,
-          questionIdExternal: a.questionIdExternal,
-          questionText: a.questionText,
-          section: a.section,
-          summaryInstanceLabel: state.instanceKey,
-          answerValue: a.answerValue || '',
-          location: a.location,
-          note: a.note,
-          quantity: a.quantity,
-          assignedTo: a.assignedTo,
-          photoUrls: a.photoUrls,
-        }, { isScope: !!isScope });
-        return {
-          recordId: state.recordId || undefined,
-          answerProps: props,
-          questionHubspotRecordId: state.recordId ? undefined : state.questionHubspotRecordId,
-        };
-      });
+      // Build the upsert payload (shared builder — see buildUpsertFromState).
+      const upserts = toUpsert.map(({ state }) => buildUpsertFromState(state));
 
       const willBumpStatus = !hasEverSaved;
 
@@ -275,7 +279,31 @@ export function useAutosave(opts: Options) {
     } finally {
       inFlightRef.current = false;
     }
-  }, [disabled, inspectionRecordId, inspectionExternalId, hasEverSaved, onSaveSuccess, onFirstSave, buildAnswerExternalId, saveState.kind, isScope]);
+  }, [disabled, inspectionRecordId, inspectionExternalId, hasEverSaved, onSaveSuccess, onFirstSave, buildAnswerExternalId, buildUpsertFromState, saveState.kind, isScope]);
+
+  // Last-resort save when the page is genuinely being torn down (hard nav, tab
+  // close, mobile pagehide). An async fetch can't finish during unload, so POST
+  // the pending edits via navigator.sendBeacon — fire-and-forget, but the
+  // browser delivers it after the page is gone. Auth cookies ride along
+  // automatically; we send the SAME body shape as flush().
+  const beaconFlush = useCallback((): boolean => {
+    if (disabled || typeof navigator === 'undefined' || typeof navigator.sendBeacon !== 'function') return false;
+    const toArchive = Array.from(archiveQueueRef.current);
+    const dirty = Array.from(answerStatesRef.current.values()).filter((s) => s.dirtySince != null);
+    if (dirty.length === 0 && toArchive.length === 0) return false;
+    try {
+      const upserts = dirty.map((state) => buildUpsertFromState(state));
+      const body = new Blob(
+        [JSON.stringify({ upserts, archives: toArchive, bumpStatusToInProgress: !hasEverSaved })],
+        { type: 'application/json' },
+      );
+      return navigator.sendBeacon(`/api/inspections/${inspectionRecordId}/answers`, body);
+    } catch {
+      return false;
+    }
+  }, [disabled, inspectionRecordId, hasEverSaved, buildUpsertFromState]);
+  const beaconFlushRef = useRef(beaconFlush);
+  beaconFlushRef.current = beaconFlush;
 
   // Tick: periodically check if any dirty answers have been stable long enough
   // to flush. Hold `flush` in a ref so the interval is created ONCE and isn't
@@ -310,15 +338,22 @@ export function useAutosave(opts: Options) {
   }, [disabled]);
 
   // Best-effort flush when the tab is hidden/closed (mobile app-switch, refresh).
+  // Two cases with different mechanisms:
+  //   • visibilitychange→hidden: the page is NOT torn down (app switch), so the
+  //     async flush has time to complete and update local state — use it.
+  //   • pagehide / beforeunload: the page IS being torn down; an async fetch
+  //     won't finish, so use navigator.sendBeacon (guaranteed delivery).
   useEffect(() => {
     if (disabled) return;
-    const onLeave = () => { void flushRef.current(true); };
-    window.addEventListener('beforeunload', onLeave);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') onLeave();
-    });
+    const onHidden = () => { if (document.visibilityState === 'hidden') void flushRef.current(true); };
+    const onTeardown = () => { beaconFlushRef.current(); };
+    document.addEventListener('visibilitychange', onHidden);
+    window.addEventListener('pagehide', onTeardown);
+    window.addEventListener('beforeunload', onTeardown);
     return () => {
-      window.removeEventListener('beforeunload', onLeave);
+      document.removeEventListener('visibilitychange', onHidden);
+      window.removeEventListener('pagehide', onTeardown);
+      window.removeEventListener('beforeunload', onTeardown);
     };
   }, [disabled]);
 

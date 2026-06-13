@@ -151,34 +151,61 @@ function bufToBase64(buffer) {
   return btoa(binary);
 }
 
+// Cap per-photo background attempts so a single un-uploadable image (corrupt
+// blob, a file the server keeps rejecting) can't keep failing the sync forever.
+const MAX_BG_PHOTO_ATTEMPTS = 6;
+
 async function uploadQueuedPhotosInBackground() {
   let db;
   try { db = await idbOpen(); } catch { return; }
   const all = await idbGetAll(db);
   // Photos only — video uses a Vercel Blob client flow that can't run here; it
-  // syncs via the foreground flush when the app reopens.
+  // syncs via the foreground flush when the app reopens. Skip photos that have
+  // exhausted their background attempts (they'll be retried by the foreground
+  // flush when the app reopens, which surfaces errors to the user).
   const pending = all
-    .filter((r) => r && r.kind === 'photo' && !r.uploadedUrl && r.blob)
+    .filter((r) => r && r.kind === 'photo' && !r.uploadedUrl && r.blob && (r.bgAttempts || 0) < MAX_BG_PHOTO_ATTEMPTS)
     .sort((a, b) => a.createdAt - b.createdAt);
 
+  let hadRetryableFailure = false;
   for (const rec of pending) {
-    const base64 = bufToBase64(await rec.blob.arrayBuffer());
-    const res = await fetch('/api/upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: rec.filename, contentType: 'image/jpeg', base64 }),
-    });
+    let res;
+    try {
+      const base64 = bufToBase64(await rec.blob.arrayBuffer());
+      res = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: rec.filename, contentType: 'image/jpeg', base64 }),
+      });
+    } catch (e) {
+      // Network/offline — every upload will fail the same way; stop and let the
+      // browser reschedule the whole sync. Records are left intact.
+      throw (e instanceof Error ? e : new Error('background upload network error'));
+    }
+    if (res.status === 401 || res.status === 403) {
+      // Session expired — every upload will fail; stop and let the browser retry
+      // the whole sync once the user re-authenticates.
+      throw new Error(`background upload auth failed: HTTP ${res.status}`);
+    }
     if (!res.ok) {
-      // 401 (session expired) / 5xx / offline — stop and let the browser retry
-      // the whole sync later. Leaves the record intact for the next attempt.
-      throw new Error(`background upload failed: HTTP ${res.status}`);
+      // Per-photo server error (e.g. one bad file): record the attempt and SKIP
+      // to the next photo so one poison-pill image can't block the rest of the
+      // queue. The browser will reschedule (we throw at the end).
+      rec.bgAttempts = (rec.bgAttempts || 0) + 1;
+      try { await idbPut(db, rec); } catch { /* ignore */ }
+      hadRetryableFailure = true;
+      continue;
     }
     const data = await res.json().catch(() => ({}));
     if (data && data.url) {
       rec.uploadedUrl = data.url;
+      rec.bgAttempts = 0;
       await idbPut(db, rec);
     }
   }
+  // If anything failed transiently, throw so the browser reschedules the sync.
+  // Already-uploaded photos carry uploadedUrl and won't be retried.
+  if (hadRetryableFailure) throw new Error('one or more background photo uploads failed; will retry');
 }
 
 function isStaticAsset(url) {

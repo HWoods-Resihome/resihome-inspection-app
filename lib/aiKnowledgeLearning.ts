@@ -183,21 +183,23 @@ export async function refreshLearnedKnowledge(days = 90): Promise<{
 const REALTIME_THROTTLE_MS = 3 * 60 * 1000;
 const REFRESH_MARKER = 'ai-learning/last-knowledge-refresh.json';
 let _lastRealtimeRefreshAt = 0;
+// Per-instance identity used to claim the refresh window (see the lease below).
+const _instanceId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
-async function readMarkerAt(): Promise<number> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return 0;
+async function readMarker(): Promise<{ at: number; owner: string }> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return { at: 0, owner: '' };
   try {
     const { blobs } = await list({ prefix: REFRESH_MARKER });
     const hit = blobs.find((b) => b.pathname === REFRESH_MARKER);
-    if (!hit) return 0;
+    if (!hit) return { at: 0, owner: '' };
     const d = await fetch(hit.url).then((r) => r.json()).catch(() => null);
-    return Number(d?.at) || 0;
-  } catch { return 0; }
+    return { at: Number(d?.at) || 0, owner: String(d?.owner || '') };
+  } catch { return { at: 0, owner: '' }; }
 }
-async function writeMarker(at: number): Promise<void> {
+async function writeMarker(at: number, owner: string): Promise<void> {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return;
   try {
-    await put(REFRESH_MARKER, JSON.stringify({ at }),
+    await put(REFRESH_MARKER, JSON.stringify({ at, owner }),
       { access: 'public', contentType: 'application/json', allowOverwrite: true, addRandomSuffix: false });
   } catch { /* best-effort */ }
 }
@@ -206,15 +208,27 @@ async function writeMarker(at: number): Promise<void> {
  * Refresh learned knowledge if it hasn't run in the last few minutes. Called
  * from feedback ingestion so the knowledge base self-updates in near real time.
  * Best-effort; never throws.
+ *
+ * Concurrency: under load, many serverless instances hit this in the same
+ * window. A naive read-then-write marker still lets them all pass the throttle
+ * check and refresh together — a thundering herd of read+merge+write against the
+ * single admin knowledge record. Vercel Blob has no compare-and-swap, so we use
+ * a LAST-WRITE-WINS LEASE: claim the window by writing our instance id, wait a
+ * short jitter, then re-read — only the instance whose id survived proceeds. The
+ * rest back off. Collapses N concurrent refreshes to ~1.
  */
 export async function maybeRefreshLearnedKnowledge(): Promise<void> {
   const now = Date.now();
   if (now - _lastRealtimeRefreshAt < REALTIME_THROTTLE_MS) return; // per-instance fast path
   _lastRealtimeRefreshAt = now;
   try {
-    const markerAt = await readMarkerAt();
-    if (now - markerAt < REALTIME_THROTTLE_MS) return; // another instance just did it
-    await writeMarker(now);
+    const marker = await readMarker();
+    if (now - marker.at < REALTIME_THROTTLE_MS) return; // refreshed recently — skip
+    // Claim the window, then confirm we won (last write wins).
+    await writeMarker(now, _instanceId);
+    await new Promise((r) => setTimeout(r, 300 + Math.floor(Math.random() * 500)));
+    const confirm = await readMarker();
+    if (confirm.owner && confirm.owner !== _instanceId) return; // another instance claimed it
     await refreshLearnedKnowledge(90);
   } catch (e: any) {
     console.warn('[ai-learning] realtime refresh failed:', String(e?.message || e).slice(0, 120));

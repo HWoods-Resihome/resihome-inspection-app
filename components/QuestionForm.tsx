@@ -6,6 +6,7 @@ import { CameraCapture } from './CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadFilesBatch } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { useStorageQuota, formatMB } from '@/lib/storageQuota';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
 import { useAppDialog } from '@/components/AppDialog';
@@ -1275,6 +1276,10 @@ export function QuestionForm({
 
   // Live Pass / Fail tally across all answered Good/Fail questions — shown in
   // the header by the address and updated as the inspector makes selections.
+  // Device-storage status — photos sit in local IndexedDB until they sync, so
+  // warn Q&A inspectors before the device fills up (parity with the scope form).
+  const storage = useStorageQuota();
+
   const { passCount, failCount } = useMemo(() => {
     let pass = 0, fail = 0;
     for (const a of Object.values(answers)) {
@@ -1343,6 +1348,17 @@ export function QuestionForm({
 
   return (
     <main className="min-h-screen bg-white">
+      {/* Device-storage warning. Photos sit in local storage until they sync;
+          if the device fills up, new captures fail. Warn early. */}
+      {storage.nearFull && (
+        <div className={`px-4 py-1.5 text-xs font-heading font-semibold flex items-center justify-center gap-2 ${storage.critical ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
+          <span className={`inline-block w-2 h-2 rounded-full ${storage.critical ? 'bg-red-500' : 'bg-amber-500'}`} />
+          {storage.critical
+            ? `Device storage almost full (${formatMB(storage.usageBytes)} of ${formatMB(storage.quotaBytes)}). Sync or free up space soon — new photos may fail to save.`
+            : `Device storage is filling up (${Math.round(storage.pct * 100)}% used). Reconnect to sync photos and free up space.`}
+        </div>
+      )}
+
       {/* Top block — title + inspector + Back. NOT sticky: scrolls away (Scope style). */}
       <div className="lz-head max-w-3xl mx-auto px-4 pt-3 pb-2">
         <div className="flex items-start justify-between gap-3">
