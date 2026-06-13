@@ -335,42 +335,29 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
           //           ng-options="g.LookupId as g.LookupDesc for g in TicketTypes"
           //           ng-change="ChangeTicketType()">
           // i.e. an AngularJS-bound <select> whose options are LABELLED by text
-          // ("Turnkey") — the value attr is whatever ng-options renders. So we
-          // MUST match by the option's VISIBLE TEXT, set it, dispatch a native
-          // `change` (Angular's select directive updates ng-model inside a
-          // digest and fires ng-change), AND, as a belt-and-suspenders, push the
-          // value onto the bound scope model and invoke ChangeTicketType() in an
-          // $apply so it sticks regardless of the rendered value format.
+          // ("Turnkey"). With ng-options the option's `value` attr is an Angular
+          // tracking token (the array INDEX, e.g. "3"), NOT the LookupId — so we
+          // match by VISIBLE TEXT, set value + selectedIndex, and dispatch a
+          // native `change`. Angular's select directive then maps the selected
+          // option back to its real LookupId inside its own $digest and fires
+          // ng-change. We deliberately do NOT write the model ourselves: opt.value
+          // is the index, so assigning it would clobber the correct LookupId the
+          // change handler just set.
           const picked = await page.evaluate((t: string) => {
             const re = new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-            const ng = (window as any).angular;
+            const norm = (s: string) => (s || '').replace(/\s+/g, ' ').trim();
             const driveSelect = (s: HTMLSelectElement): string => {
               const opts = Array.from(s.options);
-              const opt = opts.find((o) => re.test((o.textContent || '').trim()))
+              // Prefer an EXACT (case-insensitive) text match so "Turnkey" can't
+              // grab "Non-Turnkey"/"Turnkey Plus"; fall back to a substring match.
+              const opt = opts.find((o) => norm(o.textContent || '').toLowerCase() === t.toLowerCase())
+                || opts.find((o) => re.test(norm(o.textContent || '')))
                 || opts.find((o) => re.test(o.value || ''));
               if (!opt) return '';
               s.value = opt.value;
               s.selectedIndex = opts.indexOf(opt);
               s.dispatchEvent(new Event('input', { bubbles: true }));
               s.dispatchEvent(new Event('change', { bubbles: true }));
-              // AngularJS belt-and-suspenders: assign the bound model on the
-              // select's scope and run its ng-change handler inside a digest.
-              try {
-                const modelAttr = s.getAttribute('ng-model'); // e.g. TicketDetail.TicketTypeId
-                if (ng && modelAttr) {
-                  const scope = ng.element(s).scope();
-                  if (scope) {
-                    const num = Number(opt.value);
-                    const val = opt.value !== '' && !isNaN(num) ? num : opt.value;
-                    scope.$apply(() => {
-                      const parts = modelAttr.split('.'); let o: any = scope;
-                      for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; }
-                      o[parts[parts.length - 1]] = val;
-                      if (typeof scope.ChangeTicketType === 'function') scope.ChangeTicketType();
-                    });
-                  }
-                }
-              } catch { /* DOM change already dispatched — fine */ }
               return `select#${s.id || '?'}`;
             };
             // 1) The confirmed control by id.
@@ -400,13 +387,16 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
           if (!clickedSave) clickedSave = await clickByText('save', true);
           log(`clicked Save: ${clickedSave}`);
           await sleep(3500); // let the save round-trip + re-render
-          const after = await readType();
-          log(`ticket type after save: "${after || '(unknown)'}"${after && targetRe.test(after) ? ' ✓' : ''}`);
-          // CRITICAL: reload to a clean view so the upload isn't broken if we're
-          // stuck in edit mode (the "Upload Document" button is hidden there).
+          // CRITICAL: reload to a clean view BEFORE verifying — so the upload
+          // isn't broken if we're stuck in edit mode (the "Upload Document"
+          // button is hidden there) AND so the read reflects the PERSISTED value
+          // rather than the edit form's still-open in-memory selection (which
+          // always shows what we just picked → a false "✓").
           await page.goto(ticketUrl, { waitUntil: 'networkidle2' });
           await sleep(2500);
-          log('reloaded ticket after type change');
+          const after = await readType();
+          const confirmed = !!after && targetRe.test(after);
+          log(`reloaded ticket; type after save: "${after || '(unknown)'}"${confirmed ? ' ✓' : ' ✗ (NOT confirmed — still not ' + target + ')'}`);
         }
       } catch (e: any) {
         log(`ensure-turnkey step failed (continuing to upload): ${String(e?.message || e).slice(0, 160)}`);

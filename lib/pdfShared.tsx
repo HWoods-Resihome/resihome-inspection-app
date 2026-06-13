@@ -546,6 +546,17 @@ export function PdfSummaryTable<T>(props: {
   const groups = props.groups.filter((g) => g.lines.length > 0);
   if (groups.length === 0) return null;
 
+  // Dev guard: column widths + roomWidth must total ~100% or the grand-total
+  // row (one merged label cell) drifts out from under the per-line columns.
+  // Warn loudly in non-production instead of failing silently in a rendered PDF.
+  if (process.env.NODE_ENV !== 'production') {
+    const widthSum = parsePctWidth(props.roomWidth) + cols.reduce((s, c) => s + parsePctWidth(c.width), 0);
+    if (Math.abs(widthSum - 100) > 0.5) {
+      // eslint-disable-next-line no-console
+      console.warn(`[PdfSummaryTable] "${props.title}" column widths sum to ${widthSum}%, not 100% — totals row will misalign.`);
+    }
+  }
+
   // Flatten to one row per line, tagging each with its room. The room name
   // shows on every row (so the room column reads top-to-bottom even across
   // page breaks).
@@ -579,11 +590,20 @@ export function PdfSummaryTable<T>(props: {
       {rows.map((r, i) => (
         <View key={i} style={pdfStyles.summaryLineRow} wrap={false}>
           <Text style={[pdfStyles.summaryRoomCell, { width: props.roomWidth }]}>{r.room}</Text>
-          {cols.map((c) => (
-            <Text key={c.key} style={[lineCellStyle(c), { width: c.width }]}>
-              {c.cell(r.line)}
-            </Text>
-          ))}
+          {cols.map((c) => {
+            const content = c.cell(r.line);
+            // String/number cells render as Text; element cells (e.g. a colored
+            // chip) render inside a View so we never nest a View/Image in a Text.
+            if (typeof content === 'string' || typeof content === 'number') {
+              return <Text key={c.key} style={[lineCellStyle(c), { width: c.width }]}>{content}</Text>;
+            }
+            const hAlign = c.align === 'right' ? 'flex-end' : c.align === 'center' ? 'center' : 'flex-start';
+            return (
+              <View key={c.key} style={{ width: c.width, flexDirection: 'row', justifyContent: hAlign, paddingHorizontal: 3 }}>
+                {content}
+              </View>
+            );
+          })}
         </View>
       ))}
 
@@ -594,7 +614,7 @@ export function PdfSummaryTable<T>(props: {
             {props.grandTotalLabel ?? 'Grand Total'}
           </Text>
           {totalCols.map((c) => (
-            <Text key={c.key} style={[c.brand ? pdfStyles.subtotalCellTenant : pdfStyles.subtotalCell, { width: c.width }]}>
+            <Text key={c.key} style={[c.brand ? pdfStyles.subtotalCellTenant : pdfStyles.subtotalCell, { width: c.width, textAlign: c.align ?? 'right' }]}>
               {c.grandTotal ?? ' '}
             </Text>
           ))}
