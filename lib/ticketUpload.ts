@@ -328,7 +328,12 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
           let clickedEdit = await page.evaluate((sel: string) => { const el = document.querySelector(sel) as HTMLElement | null; if (el) { el.scrollIntoView({ block: 'center' }); el.click(); return true; } return false; }, editSel).catch(() => false);
           if (!clickedEdit) clickedEdit = await clickByText('edit', true);
           log(`clicked Edit: ${clickedEdit}`);
-          await sleep(1800); // let edit-mode controls render
+          // Wait for the edit control to actually render rather than guessing a
+          // fixed delay (cold-start Lambda renders are slow; warm ones are fast).
+          const editWait = Math.min(navTimeout, 10000);
+          const sawSelect = await page.waitForSelector('#TicketType', { visible: true, timeout: editWait }).then(() => true).catch(() => false);
+          log(`edit-mode #TicketType visible: ${sawSelect}`);
+          if (!sawSelect) await sleep(1200); // fallback for non-#TicketType edit forms
 
           // Select the target type. The confirmed control is
           //   <select id="TicketType" ng-model="TicketDetail.TicketTypeId"
@@ -379,21 +384,40 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
             return '';
           }, target).catch(() => '');
           log(`selected ${target} via: ${picked || 'NONE'}`);
-          await sleep(800);
+          // Wait until the select actually reflects the target (ng-model digested)
+          // instead of a fixed pause. Harmless no-op when the control isn't #TicketType.
+          await page.waitForFunction((t: string) => {
+            const s = document.querySelector('#TicketType') as HTMLSelectElement | null;
+            if (!s) return true;
+            const opt = s.options[s.selectedIndex];
+            return !!opt && (opt.textContent || '').trim().toLowerCase().includes(t.toLowerCase());
+          }, { timeout: 4000 }, target).catch(() => {});
 
           // Save — the Edit button becomes Save in the same spot.
           const saveSel = env('HBMM_SEL_TICKET_SAVE', '[ng-click="SaveTicketDetails()"], [ng-click="UpdateTicket()"], [ng-click="SaveTicket()"], [ng-click="UpdateTicketDetails()"]');
           let clickedSave = await page.evaluate((sel: string) => { const el = document.querySelector(sel) as HTMLElement | null; if (el) { el.scrollIntoView({ block: 'center' }); el.click(); return true; } return false; }, saveSel).catch(() => false);
           if (!clickedSave) clickedSave = await clickByText('save', true);
           log(`clicked Save: ${clickedSave}`);
-          await sleep(3500); // let the save round-trip + re-render
+          // Wait for the save to settle — the edit form closes (#TicketType no
+          // longer visible) when the round-trip returns to read-only — rather
+          // than a blanket 3.5s pause.
+          await page.waitForFunction(() => {
+            const s = document.querySelector('#TicketType') as HTMLSelectElement | null;
+            return !s || !s.offsetParent;
+          }, { timeout: Math.min(navTimeout, 10000) }).catch(() => {});
           // CRITICAL: reload to a clean view BEFORE verifying — so the upload
           // isn't broken if we're stuck in edit mode (the "Upload Document"
           // button is hidden there) AND so the read reflects the PERSISTED value
           // rather than the edit form's still-open in-memory selection (which
           // always shows what we just picked → a false "✓").
           await page.goto(ticketUrl, { waitUntil: 'networkidle2' });
-          await sleep(2500);
+          // Wait until the ticket type is readable (label or bound select present)
+          // before reading it back, then a brief settle for Angular to bind.
+          await page.waitForFunction(() => {
+            const labels = (Array.from(document.querySelectorAll('label')) as HTMLElement[]).filter((l) => l.offsetParent);
+            return labels.some((l) => /^ticket type\s*:?\s*$/i.test((l.textContent || '').trim())) || !!document.querySelector('#TicketType');
+          }, { timeout: Math.min(navTimeout, 10000) }).catch(() => {});
+          await sleep(600);
           const after = await readType();
           const confirmed = !!after && targetRe.test(after);
           log(`reloaded ticket; type after save: "${after || '(unknown)'}"${confirmed ? ' ✓' : ' ✗ (NOT confirmed — still not ' + target + ')'}`);
