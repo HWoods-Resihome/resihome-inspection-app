@@ -1,13 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { fetchUsers } from '@/lib/hubspot';
+import { fetchActiveUsers } from '@/lib/hubspot';
 import type { HubSpotUser } from '@/lib/types';
 
 /**
  * GET /api/users — the inspector/owner roster for the home filters and the
- * new-inspection assignee dropdown. The roster changes rarely (staff list), so
- * we cache it for 10 minutes with single-flight + serve-stale, instead of
- * hitting HubSpot on every load from every one of ~100 concurrent users.
+ * new-inspection assignee dropdown. ACTIVE users only (deactivated/archived
+ * HubSpot owners are excluded) so you can't assign an inspection to someone who
+ * no longer works here. The roster changes rarely (staff list), so we cache it
+ * for 10 minutes with single-flight + serve-stale, instead of hitting HubSpot on
+ * every load from every one of ~100 concurrent users.
  * ?refresh=1 forces a fresh fetch after onboarding/offboarding.
  */
 
@@ -19,7 +21,7 @@ async function load(forceRefresh: boolean): Promise<HubSpotUser[]> {
   if (!INFLIGHT || forceRefresh) {
     INFLIGHT = (async () => {
       try {
-        const users = await fetchUsers();
+        const users = await fetchActiveUsers();
         CACHE = { data: users, fetchedAt: Date.now() };
         return users;
       } finally {

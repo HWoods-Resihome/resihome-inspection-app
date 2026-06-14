@@ -17,7 +17,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { uploadFilesBatch, formatMoney, formatQty } from '@/lib/photoUpload';
+import { formatMoney, formatQty } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
@@ -292,14 +292,6 @@ export function QcReinspectForm(props: Props) {
     setAfterPhotos((cur) => ({ ...cur, [key]: merged }));
     try { await persistAfterPhotos(key, section, location, merged); }
     catch (e: any) { void dialog.alert(`Could not save photos: ${e?.message || e}`); }
-  }
-
-  async function handleFilePick(key: string, section: string, location: string, files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const uploaded: string[] = [];
-    await uploadFilesBatch(Array.from(files), (url) => uploaded.push(url), undefined,
-      (file) => uploadPhotoOrQueue(file, props.inspectionRecordId, key));
-    await addAfterPhotos(key, section, location, uploaded);
   }
 
   async function removeAfterPhoto(key: string, section: string, location: string, url: string) {
@@ -724,20 +716,11 @@ export function QcReinspectForm(props: Props) {
                       onPhotoClick={(i) => setQcLightbox({ phase: 'after', key: s.key, index: i })}
                     >
                       {!props.readOnly && (
-                        <div className="flex items-center gap-1.5 flex-nowrap">
-                          <button
-                            type="button"
-                            onClick={() => setCameraKey(s.key)}
-                            className="text-xs font-semibold bg-teal-600 text-white rounded px-2 py-1.5 hover:bg-teal-700 whitespace-nowrap"
-                          >Take Photo</button>
-                          <label className="text-xs font-semibold text-teal-700 border border-teal-300 rounded px-2 py-1.5 cursor-pointer hover:border-teal-400 bg-white whitespace-nowrap">
-                            Upload
-                            <input
-                              type="file" accept="image/*" multiple className="hidden"
-                              onChange={(e) => { handleFilePick(s.key, s.section, s.location, e.target.files); e.currentTarget.value = ''; }}
-                            />
-                          </label>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setCameraKey(s.key)}
+                          className="text-xs font-semibold bg-teal-600 text-white rounded px-2 py-1.5 hover:bg-teal-700 whitespace-nowrap"
+                        >Take Photo</button>
                       )}
                     </PhotoStrip>
                   </div>

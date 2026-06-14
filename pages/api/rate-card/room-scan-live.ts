@@ -176,6 +176,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const faux = match.candidates.find((c) => /faux\s*wood\s*blind/i.test(c.item.laborShortDescription));
         if (faux) top = faux;
       }
+      // CLEAN-LEVEL guard: when the inspector names a cleaning LEVEL ("level 1
+      // clean", "level one clean", "l1"), prefer the matching Level-1 clean
+      // candidate over a differently-named clean (e.g. "Refresh Clean") the scorer
+      // may rank higher. No-ops if no Level-1 clean is among the candidates.
+      if (/clean/i.test(q) && (/\blevel\s*(?:1|one)\b/i.test(q) || /\bl1\b/i.test(q)) && !/level\s*1\b/i.test(top.item.laborShortDescription || '')) {
+        const lvl1 = match.candidates.find((c) =>
+          /clean/i.test(c.item.laborShortDescription || '') && /level\s*1\b/i.test(c.item.laborShortDescription || ''));
+        if (lvl1) top = lvl1;
+      }
       const item = top.item;
       const unit = (item.laborMeas || '').trim().toUpperCase();
       const isMeasured = unit === 'SF' || unit === 'LF' || unit === 'SY';

@@ -48,12 +48,23 @@ export function warmAi(force = false): Promise<void> {
   if (inflight) return inflight;
   if (!force && warmedAt && Date.now() - warmedAt < STALE_MS) return Promise.resolve();
 
+  // Each warm-up GET is time-boxed: a hung endpoint (stuck cold start, network
+  // black hole) must NOT leave warmAi() unresolved — that would keep the voice
+  // mic / AI-camera buttons disabled forever (they gate on warm-up completing).
+  // The abort makes every fetch settle within the timeout no matter what.
+  const warmFetch = (url: string) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    return fetch(url, { method: 'GET', signal: ctrl.signal })
+      .catch(() => { /* offline / aborted / 5xx — warm-up is best-effort */ })
+      .finally(() => clearTimeout(t));
+  };
   inflight = (async () => {
     await Promise.allSettled([
-      fetch('/api/rate-card/voice-assist', { method: 'GET' }).catch(() => {}),
-      fetch('/api/rate-card/room-scan-live', { method: 'GET' }).catch(() => {}),
+      warmFetch('/api/rate-card/voice-assist'),
+      warmFetch('/api/rate-card/room-scan-live'),
       // Warms the OpenAI TLS pool for the Whisper transcription path (iOS/Safari).
-      fetch('/api/transcribe', { method: 'GET' }).catch(() => {}),
+      warmFetch('/api/transcribe'),
     ]);
     warmedAt = Date.now();
     try { window.sessionStorage.setItem('ai_warmed_at', String(warmedAt)); } catch { /* noop */ }
