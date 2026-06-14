@@ -263,7 +263,13 @@ export function CameraCapture({
   const dragStartZoomRef = useRef(1);
   const zoomTargetRef = useRef<number | null>(null);
   const zoomDragRafRef = useRef<number | null>(null);
-  const lastHwZoomApplyRef = useRef(0);
+  // Hybrid (hardware-zoom devices): the zoom the SENSOR has actually committed,
+  // and whether an applyConstraints is in flight. The preview CSS-scales by
+  // target/committed so it tracks the finger with zero lag, then relaxes to 1×
+  // as the sensor catches up — no double-zoom because CSS only relaxes once the
+  // hardware confirms the new zoom.
+  const hwAppliedZoomRef = useRef(1);
+  const hwZoomInFlightRef = useRef(false);
   const [zoom, setZoom] = useState(1);
   // Hardware (sensor) zoom capability. On phones with an ultra-wide lens the
   // reported zoom.min is BELOW 1, so applying it switches to the WIDE lens.
@@ -272,32 +278,60 @@ export function CameraCapture({
   // iOS Safari doesn't expose it → digital fallback (zoom IN only).
   const zoomCapsRef = useRef<{ min: number; max: number } | null>(null);
   const hwZoomRef = useRef(false);
-  const [hwZoom, setHwZoom] = useState(false);
   // The DIGITAL crop factor the preview/capture/focus should apply: always 1
   // when the sensor is doing the zoom (so we never double-zoom), else the
   // current digital zoom.
   const effZoom = useCallback(() => (hwZoomRef.current ? 1 : (zoomRef.current || 1)), []);
-  // Single zoom setter: clamp to the live range and, when hardware zoom is
-  // available, push it to the sensor (this is what reaches the wide lens).
-  const applyZoom = useCallback((z: number, opts?: { immediateHw?: boolean }) => {
+  // Paint the preview at the target zoom INSTANTLY (imperative — no React
+  // re-render, no waiting on the sensor). On hardware-zoom devices the sensor
+  // supplies `hwAppliedZoomRef`× and CSS makes up the remainder (target/applied);
+  // on digital-only devices CSS does the whole zoom. Relaxes to identity at 1×.
+  const updatePreviewTransform = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const target = zoomRef.current || 1;
+    const base = hwZoomRef.current ? (hwAppliedZoomRef.current || 1) : 1;
+    const scale = Math.max(1, target / base);
+    v.style.transformOrigin = 'center';
+    v.style.transform = scale > 1.0005 ? `scale(${scale})` : '';
+  }, []);
+  // Drive the (slow, async) sensor zoom toward the latest target. Gated on a
+  // single in-flight call so we never queue/choke applyConstraints: when it
+  // resolves we relax the CSS overshoot and, if the finger moved on meanwhile,
+  // immediately chase the newest target. This adapts to each device's real zoom
+  // speed instead of a fixed throttle.
+  const pushHardwareZoom = useCallback(() => {
+    if (!hwZoomRef.current || hwZoomInFlightRef.current) return;
+    const track = streamRef.current?.getVideoTracks?.()[0];
+    if (!track) return;
+    const target = zoomRef.current || 1;
+    if (Math.abs(target - hwAppliedZoomRef.current) < 0.01) return;
+    hwZoomInFlightRef.current = true;
+    Promise.resolve((track.applyConstraints as any)?.({ advanced: [{ zoom: target }] }))
+      .then(() => { hwAppliedZoomRef.current = target; })
+      .catch(() => { /* unsupported / transient reject — keep CSS doing the zoom */ })
+      .finally(() => {
+        hwZoomInFlightRef.current = false;
+        updatePreviewTransform();
+        if (Math.abs((zoomRef.current || 1) - hwAppliedZoomRef.current) >= 0.01) pushHardwareZoom();
+      });
+  }, [updatePreviewTransform]);
+  // Single zoom setter: clamp to the live range, paint the preview instantly,
+  // and let the sensor catch up in the background (hardware-zoom devices).
+  const applyZoom = useCallback((z: number, _opts?: { immediateHw?: boolean }) => {
     const caps = zoomCapsRef.current;
     const zMin = caps ? caps.min : 1;
     const zMax = caps ? caps.max : MAX_ZOOM;
     const nz = Math.max(zMin, Math.min(zMax, z));
     zoomRef.current = nz;
     setZoom(nz);
-    if (caps) {
-      // Hardware (sensor) zoom via applyConstraints is comparatively slow and
-      // chokes if called on every pointermove — throttle to ~12/s during a drag
-      // (the digital preview + label still update every frame for smoothness).
-      const now = Date.now();
-      if (opts?.immediateHw || now - lastHwZoomApplyRef.current >= 80) {
-        lastHwZoomApplyRef.current = now;
-        const track = streamRef.current?.getVideoTracks?.()[0];
-        try { (track?.applyConstraints as any)?.({ advanced: [{ zoom: nz }] }); } catch { /* unsupported */ }
-      }
-    }
-  }, []);
+    updatePreviewTransform();   // INSTANT — preview never waits on the sensor
+    if (caps) pushHardwareZoom(); // sensor converges in the background
+  }, [updatePreviewTransform, pushHardwareZoom]);
+  // Backstop: keep the preview transform in sync whenever the zoom level changes
+  // through any path that isn't applyZoom (the per-mode resets after recording /
+  // on close), so a leftover CSS scale can't linger after zoom returns to 1×.
+  useEffect(() => { updatePreviewTransform(); }, [zoom, updatePreviewTransform]);
 
   const [items, setItems] = useState<CaptureItem[]>([]);
   // Mirror items in a ref so async code (handleDone polling) can read the
@@ -370,8 +404,8 @@ export function CameraCapture({
       stopStream();
       // Reset zoom for the new stream; detectZoom() below re-reads the new
       // track's capabilities (e.g. the front camera usually has no wide/zoom).
-      zoomCapsRef.current = null; hwZoomRef.current = false; setHwZoom(false);
-      zoomRef.current = 1; setZoom(1);
+      zoomCapsRef.current = null; hwZoomRef.current = false; hwAppliedZoomRef.current = 1;
+      zoomRef.current = 1; setZoom(1); updatePreviewTransform();
       // When a specific back lens is chosen, pin it by deviceId; otherwise let
       // the OS pick the default for the facing direction.
       const videoConstraint: MediaTrackConstraints = {
@@ -479,7 +513,6 @@ export function CameraCapture({
           if (z && typeof z.min === 'number' && typeof z.max === 'number' && z.max > z.min) {
             zoomCapsRef.current = { min: z.min, max: z.max };
             hwZoomRef.current = true;
-            setHwZoom(true);
             // CAPABILITY-BASED main-lens fix (not lens-index): a wide/ultra-wide-
             // capable lens reports zoom.min < 1. On those, normalize to 1.0× —
             // the standard (main) field of view — so the camera doesn't open
@@ -489,9 +522,11 @@ export function CameraCapture({
             // later reset of the inspector's zoom).
             const start = z.min < 1 ? Math.min(z.max, 1) : Math.max(z.min, Math.min(z.max, Number((track?.getSettings?.() as any)?.zoom) || 1));
             zoomRef.current = start; setZoom(start);
+            hwAppliedZoomRef.current = start; // sensor's committed zoom baseline
             if (z.min < 1) {
               try { (track!.applyConstraints as any)({ advanced: [{ zoom: start }] }); } catch { /* noop */ }
             }
+            updatePreviewTransform();
           }
           // No caps yet → leave hwZoom as-is; a later delayed call may find them.
         } catch { /* best-effort */ }
@@ -1821,7 +1856,9 @@ export function CameraCapture({
               playsInline
               muted
               className="absolute inset-0 w-full h-full object-cover"
-              style={(!hwZoom && zoom > 1) ? { transform: `scale(${zoom})`, transformOrigin: 'center' } : undefined}
+              /* zoom transform is driven imperatively (updatePreviewTransform) so
+                 the preview tracks the finger with zero lag and never fights a
+                 React re-render mid-drag. */
             />
             {/* Tap-to-focus reticle */}
             {focusPt && (
