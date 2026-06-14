@@ -249,3 +249,9 @@ h1, h2, h3, h4, h5, h6 {
 .no-spinner {
   -moz-appearance: textfield;     /* Firefox */
 }
+
+/* Lightbox video: hide the browser's built-in CENTER overlay play button — it
+   renders off-center on some Android builds. We draw our own centered button
+   (see PhotoLightbox). The scrubber / timeline controls stay. */
+.lightbox-video::-webkit-media-controls-overlay-play-button { display: none !important; }
+.lightbox-video::-webkit-media-controls-start-playback-button { display: none !important; }

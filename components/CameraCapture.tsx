@@ -282,6 +282,7 @@ export function CameraCapture({
   // one update per animation frame, and throttle the (slow) hardware zoom calls.
   const dragStartZoomRef = useRef(1);
   const zoomTargetRef = useRef<number | null>(null);
+  const zoomStateRafRef = useRef<number | null>(null); // coalesces setZoom (the indicator) to 1/frame
   const zoomDragRafRef = useRef<number | null>(null);
   const [zoom, setZoom] = useState(1);
   // PURE DIGITAL zoom — the whole point of this rewrite. An instant, GPU-cheap
@@ -302,8 +303,18 @@ export function CameraCapture({
   const applyZoom = useCallback((z: number) => {
     const nz = Math.max(1, Math.min(MAX_ZOOM, z));
     zoomRef.current = nz;
-    setZoom(nz);
-    updatePreviewTransform(); // imperative → no React re-render in the hot path
+    updatePreviewTransform(); // INSTANT every call → the actual zoom motion is smooth
+    // Coalesce the React state update (drives the on-screen "1.5×" indicator) to
+    // ONE per animation frame. Pinch fires touchmove many times per frame; calling
+    // setZoom on each one re-rendered this whole (heavy) component per move and
+    // made the zoom glitchy. The transform above already moved — this just catches
+    // the label up at most once per frame.
+    if (zoomStateRafRef.current == null) {
+      zoomStateRafRef.current = requestAnimationFrame(() => {
+        zoomStateRafRef.current = null;
+        setZoom(zoomRef.current);
+      });
+    }
   }, [updatePreviewTransform]);
   // Backstop: keep the preview transform in sync when zoom changes through a path
   // other than applyZoom (e.g. the on-close reset).
@@ -1294,6 +1305,7 @@ export function CameraCapture({
     try { if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop(); } catch { /* noop */ }
     if (recordRafRef.current != null) { cancelAnimationFrame(recordRafRef.current); recordRafRef.current = null; }
     if (zoomDragRafRef.current != null) { cancelAnimationFrame(zoomDragRafRef.current); zoomDragRafRef.current = null; }
+    if (zoomStateRafRef.current != null) { cancelAnimationFrame(zoomStateRafRef.current); zoomStateRafRef.current = null; }
     canvasStreamRef.current?.getTracks().forEach((t) => t.stop());
     canvasStreamRef.current = null;
     recordCanvasRef.current = null;
