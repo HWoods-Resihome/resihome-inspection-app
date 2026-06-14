@@ -27,6 +27,7 @@ interface CaptureItem {
   error?: string;                // populated when upload fails
   abortController?: AbortController;
   kind?: 'photo' | 'video';      // 'video' = press-and-hold clip (blobUrl is its poster)
+  videoUrl?: string;             // video only: object URL of the clip (for in-gallery playback)
 }
 
 interface CameraRoom {
@@ -386,29 +387,16 @@ export function CameraCapture({
   const [busy, setBusy] = useState(false);
   // Id of the captured photo currently open in the annotator (null = closed).
   const [annotatingId, setAnnotatingId] = useState<string | null>(null);
-  // Index (within photo-only items) of the photo open in the swipeable viewer.
+  // Index (within ALL items — photos AND videos) open in the swipeable viewer.
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
-  // Captured video clip open in the inline player (poster thumbnails aren't
-  // playable in PhotoLightbox, so clips get their own <video> overlay).
-  const [previewVideo, setPreviewVideo] = useState<{ id: string; url: string } | null>(null);
-  const closeVideoPreview = useCallback(() => {
-    setPreviewVideo((p) => { if (p) { try { URL.revokeObjectURL(p.url); } catch { /* noop */ } } return null; });
-  }, []);
   // Tell the parent when a photo viewer/markup editor is open over the camera
   // (so it can hide the floating mic). Report closed on unmount.
   const onOverlayChangeRef = useRef(onOverlayChange);
   onOverlayChangeRef.current = onOverlayChange;
   useEffect(() => {
-    onOverlayChangeRef.current?.(viewerIndex !== null || annotatingId !== null || previewVideo !== null);
-  }, [viewerIndex, annotatingId, previewVideo]);
-  // Revoke an open clip URL if the camera unmounts mid-playback.
-  const previewVideoRef = useRef(previewVideo);
-  previewVideoRef.current = previewVideo;
-  useEffect(() => () => {
-    onOverlayChangeRef.current?.(false);
-    const p = previewVideoRef.current;
-    if (p) { try { URL.revokeObjectURL(p.url); } catch { /* noop */ } }
-  }, []);
+    onOverlayChangeRef.current?.(viewerIndex !== null || annotatingId !== null);
+  }, [viewerIndex, annotatingId]);
+  useEffect(() => () => { onOverlayChangeRef.current?.(false); }, []);
   // Flash / torch. Only supported on some devices (typically Android Chrome,
   // back camera). torchSupported gates the button so we don't show a control
   // that does nothing (e.g. iOS Safari, front camera).
@@ -1073,9 +1061,10 @@ export function CameraCapture({
     const rid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 8);
     const id = `${Date.now()}_${rid}`;
     const posterUrl = URL.createObjectURL(posterBlob);
+    const videoUrl = URL.createObjectURL(videoFile); // playable in the swipe gallery
     const abortController = new AbortController();
     const posterFile = new File([posterBlob], `clip_${id}_poster.jpg`, { type: 'image/jpeg' });
-    const item: CaptureItem = { id, blobUrl: posterUrl, file: videoFile, status: 'uploading', abortController, kind: 'video' };
+    const item: CaptureItem = { id, blobUrl: posterUrl, file: videoFile, status: 'uploading', abortController, kind: 'video', videoUrl };
     setItems((prev) => [...prev, item]);
     // Prefer the queue-aware combined uploader (offline-capable); fall back to
     // the direct poster + clip uploads when not provided.
@@ -1575,16 +1564,15 @@ export function CameraCapture({
   }, [uploadPhoto]);
 
   const deletePhoto = useCallback((id: string) => {
-    // If the clip being deleted is open in the player, close it (revokes its URL).
-    setPreviewVideo((p) => { if (p && p.id === id) { try { URL.revokeObjectURL(p.url); } catch { /* noop */ } return null; } return p; });
     setItems((prev) => {
       const found = prev.find((it) => it.id === id);
       if (found) {
         // Cancel in-flight upload if any. The .then() above checks aborted before
         // updating state, so this prevents stale state writes.
         found.abortController?.abort();
-        // Free the blob URL to avoid memory leaks
+        // Free the blob URLs to avoid memory leaks (poster + the clip's video URL).
         try { URL.revokeObjectURL(found.blobUrl); } catch { /* harmless */ }
+        if (found.videoUrl) { try { URL.revokeObjectURL(found.videoUrl); } catch { /* harmless */ } }
       }
       return prev.filter((it) => it.id !== id);
     });
@@ -2248,15 +2236,9 @@ export function CameraCapture({
                   src={it.blobUrl}
                   alt=""
                   onClick={() => {
-                    if (it.kind === 'video') {
-                      // Play the captured clip (it.file is the video; blobUrl is its poster).
-                      const url = URL.createObjectURL(it.file);
-                      setPreviewVideo({ id: it.id, url });
-                      return;
-                    }
-                    const photoItems = items.filter((p) => p.kind !== 'video');
-                    const vIdx = photoItems.findIndex((p) => p.id === it.id);
-                    if (vIdx >= 0) setViewerIndex(vIdx);
+                    // Photos AND videos share one swipeable gallery now.
+                    const idx = items.findIndex((p) => p.id === it.id);
+                    if (idx >= 0) setViewerIndex(idx);
                   }}
                   className="w-16 h-16 object-cover rounded border border-white/20 cursor-pointer"
                   title={it.kind === 'video' ? 'Tap to play clip' : 'Tap to view'}
@@ -2430,33 +2412,32 @@ export function CameraCapture({
       />
 
       {/* Swipeable viewer for captured photos (markup is opt-in, not auto-on) */}
-      {viewerIndex !== null && (() => {
-        const photoItems = items.filter((p) => p.kind !== 'video');
-        if (photoItems.length === 0) { return null; }
-        const idx = Math.min(viewerIndex, photoItems.length - 1);
+      {viewerIndex !== null && items.length > 0 && (() => {
+        // ONE swipeable gallery for photos AND videos. Videos are passed as
+        // poster#v=video composite entries — PhotoLightbox plays the clip on the
+        // active slide and shows the poster for neighbors. Index maps directly
+        // into `items` (no photo-only filtering).
+        const entries = items.map((it) =>
+          it.kind === 'video' && it.videoUrl ? makeVideoEntry(it.blobUrl, it.videoUrl) : it.blobUrl);
+        const idx = Math.min(viewerIndex, items.length - 1);
         return (
           <PhotoLightbox
-            groups={[{ id: 'session', name: 'Photos' }]}
-            photosByGroup={{ session: photoItems.map((p) => p.blobUrl) }}
+            groups={[{ id: 'session', name: 'Captures' }]}
+            photosByGroup={{ session: entries }}
             initialGroupId="session"
             initialIndex={idx}
             onClose={() => setViewerIndex(null)}
-            onDelete={(_g, i) => {
-              const target = items.filter((p) => p.kind !== 'video')[i];
-              if (target) deletePhoto(target.id);
-            }}
-            onReplace={(_g, i, file) => {
-              const target = items.filter((p) => p.kind !== 'video')[i];
-              if (target) handleAnnotated(target.id, file);
-            }}
-            // Tag-to-line — only when the active room actually has line items.
+            onDelete={(_g, i) => { const t = items[i]; if (t) deletePhoto(t.id); }}
+            // Markup applies to photos only (PhotoLightbox hides it for videos).
+            onReplace={(_g, i, file) => { const t = items[i]; if (t) handleAnnotated(t.id, file); }}
+            // Tag-to-line — works for photos AND videos (when the room has lines).
             tagLinesByGroup={tagLines && tagLines.length > 0 ? { session: tagLines } : undefined}
             onTagToLine={tagLines && tagLines.length > 0 && onTagPhotoToLine
               ? (_g, i, lineId) => {
-                  const target = items.filter((p) => p.kind !== 'video')[i];
+                  const target = items[i];
                   if (!target) return;
                   if (target.status !== 'uploaded' || !target.hubspotUrl) {
-                    void dialog.alert('This photo is still uploading — tag it again in a moment.');
+                    void dialog.alert('This capture is still uploading — tag it again in a moment.');
                     return;
                   }
                   const prevUrl = target.hubspotUrl;
@@ -2470,33 +2451,6 @@ export function CameraCapture({
           />
         );
       })()}
-
-      {/* Captured video clip player. Poster thumbnails can't play in the photo
-          lightbox, so clips get a simple full-screen <video> overlay. */}
-      {previewVideo && (
-        <div
-          className="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center"
-          onClick={closeVideoPreview}
-        >
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); closeVideoPreview(); }}
-            aria-label="Close clip"
-            className="absolute top-3 right-3 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-black/60 text-white text-2xl leading-none"
-          >
-            ×
-          </button>
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <video
-            src={previewVideo.url}
-            className="max-w-full max-h-full"
-            controls
-            autoPlay
-            playsInline
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
 
       {/* Markup editor (explicit "Mark" action) */}
       {annotatingId && (() => {
