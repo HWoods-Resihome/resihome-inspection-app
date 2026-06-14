@@ -149,7 +149,9 @@ const JPEG_QUALITY = 0.92;
 // (≤ CAPTURE_WIDTH), so this is just safety headroom; quality 0.9 keeps zoom-in
 // detail crisp. The PDF is unaffected (it embeds a 520px thumbnail).
 const MAX_SAVE_EDGE = 4096;
-const PHOTO_SAVE_QUALITY = 0.9;
+// High intermediate quality — this JPEG is recompressed once more on upload, so
+// keep it near-lossless here to avoid stacking compression artifacts.
+const PHOTO_SAVE_QUALITY = 0.95;
 
 // Photo geostamp proximity check: how close (meters) the device GPS must be to
 // the property's reference location to stamp a ✓ rather than a ✗. Generous by
@@ -361,6 +363,10 @@ export function CameraCapture({
   // pays no construction cost. Recreated when the track changes; nulled on stop.
   const imageCaptureRef = useRef<any>(null);
   const imageCaptureTrackRef = useRef<MediaStreamTrack | null>(null);
+  // Max still resolution the camera can produce (from getPhotoCapabilities),
+  // prefetched per track so takePhoto() can request a FULL-RES still instead of
+  // the (often much smaller) default — the main gap vs the native camera app.
+  const photoCapsRef = useRef<{ w: number; h: number } | null>(null);
 
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
   // Pinned back lens by deviceId (null = OS default for `facing`). Some phones
@@ -433,7 +439,7 @@ export function CameraCapture({
       zoomCapsRef.current = null; hwZoomRef.current = false; hwAppliedZoomRef.current = 1;
       zoomRef.current = 1; setZoom(1); updatePreviewTransform();
       // New track → invalidate the cached ImageCapture and clear any freeze.
-      imageCaptureRef.current = null; imageCaptureTrackRef.current = null;
+      imageCaptureRef.current = null; imageCaptureTrackRef.current = null; photoCapsRef.current = null;
       pendingCaptureCountRef.current = 0; setFrozen(false);
       // When a specific back lens is chosen, pin it by deviceId; otherwise let
       // the OS pick the default for the facing direction.
@@ -1276,7 +1282,7 @@ export function CameraCapture({
     setRecording(false);
     zoomRef.current = 1; setZoom(1);
     // Clear capture-side caches/overlays when the camera closes.
-    imageCaptureRef.current = null; imageCaptureTrackRef.current = null;
+    imageCaptureRef.current = null; imageCaptureTrackRef.current = null; photoCapsRef.current = null;
     pendingCaptureCountRef.current = 0; setFrozen(false);
   }, [isOpen]);
 
@@ -1314,12 +1320,34 @@ export function CameraCapture({
     try {
       imageCaptureRef.current = new IC(track);
       imageCaptureTrackRef.current = track;
+      // Prefetch the max still resolution (fire-and-forget) so the first tap can
+      // already request a full-res photo. Some devices default takePhoto() to the
+      // video resolution — far below the sensor's photo max.
+      photoCapsRef.current = null;
+      try {
+        imageCaptureRef.current.getPhotoCapabilities?.().then((caps: any) => {
+          const w = caps?.imageWidth?.max, h = caps?.imageHeight?.max;
+          if (w && h) photoCapsRef.current = { w, h };
+        }).catch(() => { /* not supported */ });
+      } catch { /* not supported */ }
       return imageCaptureRef.current;
     } catch {
       imageCaptureRef.current = null;
       imageCaptureTrackRef.current = null;
       return null;
     }
+  }, []);
+
+  // Capture a still, requesting the camera's MAX resolution when known (matches
+  // the native camera far better, esp. for zoomed-in shots). Falls back to a
+  // default-settings takePhoto() if the device rejects custom photoSettings.
+  const takeBestPhoto = useCallback(async (ic: any): Promise<Blob> => {
+    const caps = photoCapsRef.current;
+    if (caps) {
+      try { return await ic.takePhoto({ imageWidth: caps.w, imageHeight: caps.h }); }
+      catch { /* device rejected the settings — fall through to default */ }
+    }
+    return await ic.takePhoto();
   }, []);
 
   // Paint the current (zoom-cropped) preview frame into the freeze canvas and
@@ -1437,7 +1465,7 @@ export function CameraCapture({
       const timer = setTimeout(liveFallback, 1500);
       (async () => {
         try {
-          const photo: Blob = await ic.takePhoto();
+          const photo: Blob = await takeBestPhoto(ic);
           const bmp = await createImageBitmap(photo);
           clearTimeout(timer);
           // Timed out first → live frame already handled it; drop this one.
@@ -1455,7 +1483,7 @@ export function CameraCapture({
 
     // No ImageCapture (iOS Safari, etc.) → instant live-frame grab.
     buildAndEnqueue(video, video.videoWidth, video.videoHeight, endCapture);
-  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines, effZoom, showFreezeFrame, endCapture, getImageCapture]);
+  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines, effZoom, showFreezeFrame, endCapture, getImageCapture, takeBestPhoto]);
 
   // ----- Per-photo retake/delete -----
 

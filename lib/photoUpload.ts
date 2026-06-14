@@ -2,12 +2,12 @@
  * Photo upload helpers shared between QuestionForm and RateCardForm.
  *
  * The pattern:
- *   1. Compress with browser-image-compression (≤1MB target, 1920px max edge, q0.82).
- *      Inspection photos are viewed on a phone screen and in HubSpot's web UI and
- *      occasionally zoomed to check a defect, so we keep 1080p-class detail — but
- *      still small enough to upload fast on LTE and stay under the API body limit
- *      even after base64 inflation. The library iterates quality DOWN to hit the
- *      size cap, so files self-limit (clean low-light stills land well under it).
+ *   1. Compress with browser-image-compression (≤3MB target, 3024px max edge, q0.9).
+ *      Inspectors zoom into these photos to check fine defects (cracks, scuffs),
+ *      so we keep near-native ~9MP detail rather than crushing to a screen size.
+ *      The /api/upload body limit is 48MB, so there's ample headroom even after
+ *      base64 inflation. The library iterates quality DOWN to hit the size cap,
+ *      so files self-limit (clean shots land well under it).
  *   2. If the library fails (silent web worker OOM on big phone photos is the usual
  *      cause), fall back to a manual canvas-based downscale.
  *   3. Convert to base64 and POST to /api/upload.
@@ -24,8 +24,8 @@ const RETRY_BASE_DELAY_MS = 800;
 // Per-attempt network timeout. A stalled upload on a weak signal aborts here so
 // the caller can fall back to the offline cache instead of spinning forever.
 const UPLOAD_TIMEOUT_MS = 20000;
-const TARGET_MAX_SIZE_MB = 1.0;     // ceiling; the lib drops quality to fit (clean shots land lower)
-const TARGET_MAX_DIMENSION = 1920;  // 1080p-class long edge — enough to inspect a defect
+const TARGET_MAX_SIZE_MB = 3.0;     // ceiling; the lib drops quality only if over this
+const TARGET_MAX_DIMENSION = 3024;  // ~9MP long edge — near native still res, so zoomed-in detail survives
 
 /**
  * Compress any image File to a screen-sized JPEG Blob (client-side; works
@@ -43,7 +43,7 @@ export async function compressToJpeg(file: File): Promise<Blob> {
       maxSizeMB: TARGET_MAX_SIZE_MB,
       maxWidthOrHeight: TARGET_MAX_DIMENSION,
       useWebWorker: false,  // web worker is faster but silently OOMs on big files
-      initialQuality: 0.82, // cleaner JPEG — fewer artifacts compounding sensor noise
+      initialQuality: 0.9,  // near-native fidelity — preserves fine detail on zoomed-in shots
       fileType: 'image/jpeg',
     });
     if (result && result.type === 'image/jpeg') compressed = result;
@@ -51,9 +51,12 @@ export async function compressToJpeg(file: File): Promise<Blob> {
     console.warn('[uploadPhoto] library compression failed, will try canvas:', e?.message || e);
   }
 
-  if (!compressed || compressed.size > 2 * 1024 * 1024) {
+  // Only fall back to the canvas path if the library failed or produced an
+  // unexpectedly huge file (well above our size target) — not for normal
+  // high-quality results that legitimately sit near the target ceiling.
+  if (!compressed || compressed.size > (TARGET_MAX_SIZE_MB + 1) * 1024 * 1024) {
     try {
-      compressed = await canvasDownscale(file, TARGET_MAX_DIMENSION, 0.8);
+      compressed = await canvasDownscale(file, TARGET_MAX_DIMENSION, 0.88);
     } catch (e: any) {
       if (isHeic) {
         throw new Error('This HEIC photo couldn’t be converted in this browser. On iPhone, set Settings → Camera → Formats to "Most Compatible", or use the in-app camera, then re-upload.');
