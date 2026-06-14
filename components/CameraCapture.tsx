@@ -341,6 +341,7 @@ export function CameraCapture({
       if (z >= inAt) {
         const id = mainLensIdRef.current || backCandidatesRef.current.find((d) => !triedBadLensRef.current.has(d));
         if (!id) return;
+        beginLensSwitchFreeze();
         lensSwitchAtRef.current = Date.now();
         lensRoleRef.current = 'main';
         lensPinnedRef.current = true;
@@ -350,12 +351,19 @@ export function CameraCapture({
       // Zoomed back to the main lens's floor → return to the ultra-wide.
       const min = zoomCapsRef.current?.min ?? 1;
       if (z <= min + 0.05) {
+        beginLensSwitchFreeze();
         lensSwitchAtRef.current = Date.now();
         lensRoleRef.current = 'wide';
         lensPinnedRef.current = false;
         setLensDeviceId(null);
       }
     }
+  }, []);
+  // Freeze the current frame on screen so the lens swap doesn't flash black —
+  // the overlay holds until the new lens delivers a frame (cleared in startStream).
+  const beginLensSwitchFreeze = useCallback(() => {
+    const v = videoRef.current;
+    if (v && freezeFnRef.current) { freezeFnRef.current(v); lensSwitchFreezeRef.current = true; }
   }, []);
   // Single zoom setter: clamp, update the (digital-mode) preview, and drive the
   // sensor (hardware mode). Zoom is STICKY — never auto-reset across captures or
@@ -426,6 +434,8 @@ export function CameraCapture({
   const triedBadLensRef = useRef<Set<string>>(new Set());   // candidates that proved bad (depth/IR/low-res)
   const lensSwitchAtRef = useRef(0);                        // last switch time (cooldown)
   const multiBackRef = useRef(false);                       // >1 usable back lens exists
+  const lensSwitchFreezeRef = useRef(false);                // a freeze-frame is masking a lens switch
+  const freezeFnRef = useRef<((v: HTMLVideoElement) => void) | null>(null); // → showFreezeFrame (set after it's defined)
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -521,6 +531,14 @@ export function CameraCapture({
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => { /* play() may reject silently if autoplay is blocked; not fatal */ });
+        // If a lens swap is being masked by the freeze-frame, lift it once the new
+        // lens has painted a frame (short settle), so the swap looks fluid, not black.
+        if (lensSwitchFreezeRef.current) {
+          setTimeout(() => {
+            lensSwitchFreezeRef.current = false;
+            if (pendingCaptureCountRef.current === 0) setFrozen(false);
+          }, 220);
+        }
       }
       // Keep the live preview continuously autofocused + auto-exposed so every
       // grabbed frame is sharp — this same <video> feeds BOTH the manual shutter
@@ -634,30 +652,35 @@ export function CameraCapture({
       };
       void discoverBackLenses();
 
-      // Validate a lens we just switched TO: a depth/IR sensor (or anything that
-      // opens but isn't a real photo lens) reports a low resolution — reject it,
-      // remember it as bad, and either try the next candidate or fall back to the
-      // ultra-wide. Runs slightly late so the track resolution has settled.
+      // Validate a lens we switched TO, but LENIENTLY: only reject if it produced
+      // NO video at all (a dead/ended track), which is the real failure mode for a
+      // non-photo (depth/IR) sensor. A genuine main/tele lens always delivers
+      // frames — even at a modest resolution — so we must NOT reject it on a size
+      // threshold (that was switching the good lens straight back). Lenses that
+      // can't open at all are already handled by the getUserMedia fallback below.
       if (lensRoleRef.current === 'main' && lensDeviceId) {
         const badId = lensDeviceId;
         setTimeout(() => {
           const t = streamRef.current?.getVideoTracks?.()[0];
+          const live = !!t && t.readyState === 'live' && !t.muted;
           const w = ((t?.getSettings?.() as any)?.width as number) || videoRef.current?.videoWidth || 0;
-          if (w && w < 1280) {
+          if (!live || w === 0) {
             triedBadLensRef.current.add(badId);
             mainLensIdRef.current = null;
             const next = backCandidatesRef.current.find((d) => d !== badId && !triedBadLensRef.current.has(d));
             lensSwitchAtRef.current = Date.now();
             if (next) { setLensDeviceId(next); }
             else { lensRoleRef.current = 'wide'; lensPinnedRef.current = false; setLensDeviceId(null); }
-          } else if (w) {
+          } else {
             mainLensIdRef.current = badId; // good lens — cache it for instant future handoffs
           }
-        }, 700);
+        }, 1200);
       }
       setPermissionState('granted');
       setPermissionError('');
     } catch (e: any) {
+      // Never leave a lens-switch freeze stuck if the new stream failed to open.
+      if (lensSwitchFreezeRef.current) { lensSwitchFreezeRef.current = false; if (pendingCaptureCountRef.current === 0) setFrozen(false); }
       const name = e?.name || '';
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
         setPermissionState('denied');
@@ -1460,6 +1483,8 @@ export function CameraCapture({
       setFrozen(true);
     } catch { /* frame not ready — skip the freeze, no harm */ }
   }, [effZoom]);
+  // Expose showFreezeFrame to earlier callbacks (the lens-switch freeze) via a ref.
+  freezeFnRef.current = showFreezeFrame;
 
   // One capture finished (saved or failed) — drop the freeze once the LAST one
   // in a rapid-fire burst is done.
