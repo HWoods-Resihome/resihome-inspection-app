@@ -195,7 +195,10 @@ const CLIP_BITRATE = 8_000_000;
 // Digital zoom while recording: drag the thumb up to zoom in, down to zoom out.
 // (Done in-canvas so it works on iOS Safari, which doesn't support the hardware
 // `zoom` track constraint.)
-const MAX_ZOOM = 4;
+// Max DIGITAL zoom. Capped at 3× on purpose: 4× was both the laggiest point (the
+// GPU upscales the video texture hardest there) and the softest/least useful. For
+// genuinely closer shots the lens selector (optical main/tele) is the right tool.
+const MAX_ZOOM = 3;
 const ZOOM_DRAG_PX = 520; // thumb travel (px) for the full 1x→MAX_ZOOM range (higher = gentler)
 const ZOOM_DEADZONE_PX = 18; // ignore tiny thumb wobble before zoom kicks in
 const LENS_LS_KEY = 'rw_cam_lens'; // persists the chosen back-lens deviceId across sessions
@@ -307,6 +310,7 @@ export function CameraCapture({
   }, []);
   const applyZoom = useCallback((z: number) => {
     const nz = Math.max(1, Math.min(MAX_ZOOM, z));
+    if (nz === zoomRef.current) return; // no change (e.g. pinned at max while still dragging) → skip all work
     zoomRef.current = nz;
     updatePreviewTransform(); // INSTANT every call → the actual zoom motion is smooth
     // Coalesce the React state update (drives the on-screen "1.5×" indicator) to
