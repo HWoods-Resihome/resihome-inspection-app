@@ -89,8 +89,9 @@ const S = StyleSheet.create({
   tocNum: { fontFamily: 'Helvetica-Bold', color: C.brand, width: 22 },
   tocTitle: { flex: 1, color: C.ink },
   divider: { height: 0.75, backgroundColor: C.line, marginVertical: 12 },
+  sec: { marginBottom: 16 },
   // figures
-  figRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 10, gap: 14 },
+  figRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 7, gap: 12 },
   fig: { borderWidth: 1, borderColor: C.line, borderRadius: 6, padding: 3, backgroundColor: C.white },
   figCap: { fontSize: 7.5, color: C.gray, textAlign: 'center', marginTop: 3, maxWidth: 180 },
   figImg: { borderRadius: 3 },
@@ -112,7 +113,7 @@ const CALL = (title, text, tip) => h(View, { style: tip ? [S.call, S.tip] : S.ca
 // figure(s): a centered row of device screenshots with captions. `w` is the
 // display width; height derives from the cropped aspect ratio.
 function FIG(items) {
-  const w = items.length > 1 ? 158 : 188;
+  const w = items.length > 1 ? 132 : 168;
   return h(View, { style: S.figRow, wrap: false }, ...items.map(({ shot, cap }) =>
     V(null,
       h(View, { style: S.fig }, h(Image, { src: shot.src, style: [S.figImg, { width: w, height: Math.round(w * shot.h / shot.w) }] })),
@@ -121,7 +122,10 @@ function FIG(items) {
 }
 
 function RunningHeader() {
-  return V(S.runHead,
+  // `fixed` applied directly to the absolutely-positioned header so its top/left
+  // offsets resolve against the page (not a wrapper in normal flow, which would
+  // drop the logo onto the page title).
+  return h(View, { style: S.runHead, fixed: true },
     V(S.runHeadL, LOGO ? h(Image, { src: LOGO, style: S.runLogo }) : null, T(S.runWord, 'RESIWALK')),
     T(S.runRight, 'Field Inspection App — Training Guide'));
 }
@@ -131,7 +135,12 @@ function Footer() {
     h(Text, { style: S.footTxt, render: ({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}` }));
 }
 function CPage(...kids) {
-  return h(Page, { size: 'LETTER', style: S.page }, h(View, { fixed: true }, RunningHeader()), ...kids, Footer());
+  return h(Page, { size: 'LETTER', style: S.page }, RunningHeader(), ...kids, Footer());
+}
+// A section that flows in a shared, auto-paginating page.
+const SEC = (...kids) => h(View, { style: S.sec }, ...kids);
+function ContentPage(...secs) {
+  return h(Page, { size: 'LETTER', style: S.page }, RunningHeader(), ...secs, Footer());
 }
 
 (async () => {
@@ -162,7 +171,6 @@ function CPage(...kids) {
     ['9', 'The Final Checklist'], ['10', 'AI Review (before you submit)'],
     ['11', 'Submitting, Approval & Hand-off'], ['12', 'The Turn Reinspection'],
     ['13', 'Reports & PDFs'], ['14', 'Good to Know (autosave, offline, audit)'],
-    ['15', 'Quick Reference & Support'],
   ];
   const toc = CPage(
     H1('', 'Contents'),
@@ -171,7 +179,7 @@ function CPage(...kids) {
     CALL('THE BIG PICTURE', 'ResiWALK turns a property walk into a structured, photo-backed record. You inspect, the app validates your entries with AI, a manager approves, and the system auto-generates the reports, emails the team, opens a maintenance ticket, and pushes tenant chargebacks to the ledger — no manual paperwork.'),
   );
 
-  const p1 = CPage(
+  const p1 = SEC(
     H1('1', 'Getting Started — Install & Sign In'),
     H2('Install the app'),
     LI('Android:', 'Go to resiwalk.com/install and add the app to your home screen.'),
@@ -184,7 +192,7 @@ function CPage(...kids) {
     FIG([{ shot: I.signin, cap: 'Sign in with Google (staff) or Microsoft (1099).' }]),
   );
 
-  const p2 = CPage(
+  const p2 = SEC(
     H1('2', 'The Home Screen'),
     T(S.intro, 'The home screen is your inspection pipeline — every open inspection in one list.'),
     H2('Find what you need'),
@@ -196,7 +204,7 @@ function CPage(...kids) {
     FIG([{ shot: I.home, cap: 'The pipeline: search, status counts, filters, and inspection cards.' }]),
   );
 
-  const p3 = CPage(
+  const p3 = SEC(
     H1('3', 'Scheduling & Assigning Inspections'),
     T(S.intro, 'Inspections are created from the property record — most details fill themselves in.'),
     H2('Auto-populated from HubSpot'),
@@ -209,7 +217,7 @@ function CPage(...kids) {
     FIG([{ shot: I.newInsp, cap: 'New Inspection — template, property, beds/baths, date & inspector pre-filled.' }]),
   );
 
-  const p4 = CPage(
+  const p4 = SEC(
     H1('4', 'Inspection Types at a Glance'),
     T(S.intro, 'ResiWALK supports several templates; the app shows the right questions and tools for each.'),
     LI('1099 Leasing Agent', '— a guided photo + question walk (listing health, condition, HVAC, meters, trash). See §6.'),
@@ -221,7 +229,7 @@ function CPage(...kids) {
     CALL('SAME TOOLS EVERYWHERE', 'Every template uses the same camera, markup, voice, and validation tools — learn one inspection and you know them all.', true),
   );
 
-  const p5 = CPage(
+  const p5 = SEC(
     H1('5', 'The Camera & Media Tools'),
     T(S.intro, 'Photos and video are the backbone of every inspection. The in-app camera does a lot.'),
     H2('Capturing'),
@@ -241,7 +249,7 @@ function CPage(...kids) {
     ]),
   );
 
-  const p6 = CPage(
+  const p6 = SEC(
     H1('6', 'The 1099 Leasing Agent Inspection'),
     T(S.intro, 'A guided walk that captures the home’s condition and listing health. The header shows type, status, listing price, and how long it’s been listed — plus your pass/fail tally and "all changes saved."'),
     H2('What you’ll cover'),
@@ -252,7 +260,7 @@ function CPage(...kids) {
     FIG([{ shot: I.leasing, cap: 'A question with pass/fail, required note, and photos.' }]),
   );
 
-  const p7 = CPage(
+  const p7 = SEC(
     H1('7', 'The Scope Rate Card Inspection'),
     T(S.intro, 'The full turn scope and the financial heart of the app — you build the work room by room and it prices it.'),
     H2('Build the scope'),
@@ -270,7 +278,7 @@ function CPage(...kids) {
     ]),
   );
 
-  const p8 = CPage(
+  const p8 = SEC(
     H1('8', 'Adding Lines by Voice & Camera AI'),
     T(S.intro, 'You don’t have to tap through menus — talk to it, or point the camera and describe what you see. (Look for the mic and AI buttons in the scope footer.)'),
     H2('Voice assistant'),
@@ -282,7 +290,7 @@ function CPage(...kids) {
     CALL('SPEAK NATURALLY', 'List several things in one breath ("the yard needs leaves raked and a gutter cleaning, 50 linear feet, two-story") — it splits them into separate lines and asks if it needs a quantity.', true),
   );
 
-  const p9 = CPage(
+  const p9 = SEC(
     H1('9', 'The Final Checklist'),
     T(S.intro, 'At the bottom of the scope, a closing checklist makes sure the essentials are captured. (The 1099 inspection has a similar checklist.)'),
     LI('Bluetooth lock:', 'mark online/offline and record the serial number.'),
@@ -295,7 +303,7 @@ function CPage(...kids) {
     CALL('PROMPTS CATCH MISSES', 'The checklist actively prompts you to add the right line when something’s missing — so remotes, mailbox keys, and HVAC service don’t slip through.'),
   );
 
-  const p10 = CPage(
+  const p10 = SEC(
     H1('10', 'AI Review (before you submit)'),
     T(S.intro, 'Before a Scope Rate Card can be submitted, it runs an AI Review — a second set of eyes on your scope and photos.'),
     H2('What it checks'),
@@ -307,7 +315,7 @@ function CPage(...kids) {
     CALL('GREEN MEANS GO', 'Once you’ve worked through the review it turns green and Submit unlocks. The review is required for scope inspections, so a quick pass keeps quality high before a manager sees it.'),
   );
 
-  const p11 = CPage(
+  const p11 = SEC(
     H1('11', 'Submitting, Approval & Hand-off'),
     T(S.intro, 'Submitting a scope kicks off an approval and automation chain — what used to be manual now happens for you.'),
     H2('The flow'),
@@ -322,7 +330,7 @@ function CPage(...kids) {
     CALL('TWO SETS OF EYES', 'The person who submits a scope cannot finalize their own submission — a second reviewer must approve it. Every turn is double-checked.'),
   );
 
-  const p12 = CPage(
+  const p12 = SEC(
     H1('12', 'The Turn Reinspection'),
     T(S.intro, 'After the vendor completes the work, create a reinspection to verify it — quickly, against the original scope.'),
     H2('How it works'),
@@ -335,7 +343,7 @@ function CPage(...kids) {
     FIG([{ shot: I.reinspect, cap: 'Reinspect: before/after strips, per-line pass/fail, required fail note.' }]),
   );
 
-  const p13 = CPage(
+  const p13 = SEC(
     H1('13', 'Reports & PDFs'),
     T(S.intro, 'Every finalized scope produces a clean set of PDFs, downloadable from the completed inspection.'),
     H2('The documents'),
@@ -351,7 +359,7 @@ function CPage(...kids) {
     ]),
   );
 
-  const p14 = CPage(
+  const p14 = SEC(
     H1('14', 'Good to Know'),
     T(S.intro, 'A few things working quietly in the background that make ResiWALK reliable in the field.'),
     H2('Autosave'),
@@ -365,26 +373,19 @@ function CPage(...kids) {
     CALL('IF SOMETHING LOOKS OFF', 'Reload from the update banner (or fully close and reopen the app) to be sure you’re on the latest version before reporting an issue.', true),
   );
 
-  const p15 = CPage(
-    H1('15', 'Quick Reference & Support'),
-    H2('Install'),
-    LI('Android:', 'resiwalk.com/install → Add to home screen.'),
-    LI('iPhone:', 'Safari → Share → Add to Home Screen.'),
-    H2('Everyday flow (Scope Rate Card)'),
-    STEP(1, 'Open the scheduled inspection (data auto-loads from HubSpot).'),
-    STEP(2, 'Build sections & line items — by tapping, by voice, or with the camera AI.'),
-    STEP(3, 'Capture & tag photos; mark up where helpful.'),
-    STEP(4, 'Complete the final checklist.'),
-    STEP(5, 'Run the AI Review and clear it to green.'),
-    STEP(6, 'Submit → a manager finalizes → PDFs, email, ticket & chargebacks happen automatically.'),
-    STEP(7, 'After the vendor finishes, create a Turn Reinspect to verify and set the home on/off market.'),
-    V(S.divider),
-    CALL('NEED HELP?', 'For access issues, missing properties, or anything that doesn’t look right, contact your ResiWALK administrator or the SODA box team. Include the property address and a screenshot — it speeds things up.'),
-    T([S.footTxt, { marginTop: 14, textAlign: 'center' }], 'ResiWALK — Field Inspection Platform   ·   ResiHome   ·   resiwalk.com'),
-  );
-
+  // Sections flow across a few shared, auto-paginating pages (instead of one
+  // forced page break per section) so the whole guide stays within 15 pages.
   const doc = h(Document, { title: 'ResiWALK — App Training Guide', author: 'ResiHome / ResiWALK', subject: 'How to use the ResiWALK field inspection app', creator: 'ResiWALK' },
-    cover, toc, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15);
+    cover, toc,
+    // Figure-bearing sections render one-per-page (a wrap:false figure inside a
+    // multi-section flow trips a react-pdf layout loop); consecutive text-only
+    // sections share pages to keep the whole guide within 15 pages.
+    ContentPage(p1), ContentPage(p2), ContentPage(p3),
+    ContentPage(p4),
+    ContentPage(p5), ContentPage(p6), ContentPage(p7),
+    ContentPage(p8, p9, p10, p11),
+    ContentPage(p12), ContentPage(p13),
+    ContentPage(p14));
 
   const buf = await renderToBuffer(doc);
   const out = path.join(__dirname, '..', 'ResiWALK_Training_Guide.pdf');
