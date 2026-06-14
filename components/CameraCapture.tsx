@@ -298,11 +298,11 @@ export function CameraCapture({
     if (!v) return;
     const s = zoomRef.current || 1;
     v.style.transformOrigin = 'center';
-    // ALWAYS keep a transform set (scale(1) is identity at 1×). Previously we
-    // cleared it at ≤1×, but toggling the transform property on/off promotes/
-    // demotes the GPU compositor layer — a one-frame hitch every time the zoom
-    // crossed ~1× (the glitch felt "at a certain magnification, both in and out").
-    // Keeping it set + will-change on the element holds a stable layer = smooth.
+    // ALWAYS keep a transform set (scale(1) is identity at 1×). Toggling the
+    // transform property on/off promotes/demotes the compositor layer — a
+    // one-frame hitch each time the zoom crossed ~1×. Keeping it always set on a
+    // <video> (which composites its live texture natively) scales smoothly across
+    // the whole range, no will-change needed.
     v.style.transform = `scale(${s})`;
   }, []);
   const applyZoom = useCallback((z: number) => {
@@ -2087,11 +2087,12 @@ export function CameraCapture({
               playsInline
               muted
               className="absolute inset-0 w-full h-full object-cover"
-              // willChange pins the video on its own GPU compositor layer so the
-              // zoom scale() animates smoothly and the layer is never promoted/
-              // demoted mid-zoom. Transform itself is driven imperatively in
-              // updatePreviewTransform (no React re-render in the hot path).
-              style={{ willChange: 'transform', backfaceVisibility: 'hidden' }}
+              // Zoom is an imperative transform: scale(s) set in updatePreviewTransform
+              // (always set, never toggled — that toggle was the ~1× glitch). We do
+              // NOT use will-change here: a <video> is already GPU-composited (live
+              // texture) and scales smoothly, whereas will-change forces a RASTER
+              // layer that Chrome re-rasterizes at scale thresholds (~2×) — which was
+              // the new hitch around 2×.
             />
             {/* Freeze-frame overlay: holds the captured frame while the real
                 still is taken + saved, so the preview never goes dark. Already
