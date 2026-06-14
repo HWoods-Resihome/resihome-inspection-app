@@ -39,46 +39,24 @@ function announceUpdate() {
   try { window.dispatchEvent(new Event(UPDATE_EVENT)); } catch { /* noop */ }
 }
 
-/** Apply a pending update in ONE step (no "reload twice").
+/** Apply a pending update in ONE reload.
  *
- *  The banner can appear from the /api/version poll BEFORE the new SW has finished
- *  installing — so there may be no `waiting` worker yet. A naive reload then just
- *  INSTALLS the new SW (leaving it waiting) and the banner pops right back, needing
- *  a second reload to actually activate it. Instead we:
- *    1. promote a waiting worker immediately (→ controllerchange → one reload), or
- *    2. nudge the update and WAIT for the installing worker to finish, then promote
- *       it (still one reload), or
- *    3. fall back to a plain reload if no SW update materializes (network-first
- *       shell is fresh online anyway). */
-function promoteWaiting(reg: ServiceWorkerRegistration): boolean {
-  if (reg.waiting) {
-    _updating = true;
-    try { reg.waiting.postMessage('SKIP_WAITING'); return true; } catch { /* fall through */ }
-  }
-  return false;
-}
-
+ *  Common case (banner came from the /api/version poll while still on the old
+ *  bundle): there's no waiting worker yet, because the new SW only registers once
+ *  the NEW bundle loads. So we reload straight away — the navigation is
+ *  network-first (fresh HTML + fresh hashed chunks), and the new bundle's SW
+ *  installs with skipWaiting() so it activates in that same load. No second
+ *  banner, no second reload.
+ *
+ *  Rare case (a worker is already waiting, e.g. a second tab installed it):
+ *  promote it via SKIP_WAITING → controllerchange → reload once. */
 function applyUpdate(): void {
   const reg = _reg;
-  if (!reg) { window.location.reload(); return; }
-  if (promoteWaiting(reg)) return; // controllerchange will reload once
-
-  let done = false;
-  const finish = (promoted: boolean) => {
-    if (done) return; done = true;
-    if (!promoted) window.location.reload();
-  };
-  const tryPromote = () => { if (promoteWaiting(reg)) finish(true); };
-  const watch = () => {
-    const sw = reg.installing || reg.waiting;
-    if (!sw) return;
-    if (sw.state === 'installed') { tryPromote(); return; }
-    sw.addEventListener('statechange', () => { if (sw.state === 'installed') tryPromote(); });
-  };
-  reg.addEventListener('updatefound', watch);
-  watch();                              // already installing?
-  reg.update().catch(() => {});         // make sure an update is fetched
-  setTimeout(() => finish(false), 4000); // safety net: don't hang on the banner
+  if (reg?.waiting) {
+    _updating = true;
+    try { reg.waiting.postMessage('SKIP_WAITING'); return; } catch { /* fall through to reload */ }
+  }
+  window.location.reload();
 }
 
 function watchInstalling(reg: ServiceWorkerRegistration) {

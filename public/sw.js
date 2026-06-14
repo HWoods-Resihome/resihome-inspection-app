@@ -24,10 +24,13 @@ const SW_VERSION = (() => {
 const CACHE = 'resiwalk-shell-' + SW_VERSION;
 
 self.addEventListener('install', () => {
-  // Do NOT skipWaiting here: let the new SW WAIT so the app can apply the update
-  // at a safe moment (on reopen, or when the user taps the reload banner). On a
-  // first-ever install there's nothing to wait behind, so it still activates at
-  // once. The client posts 'SKIP_WAITING' (below) to promote an update.
+  // Activate immediately. The SW's bytes only change when the page that
+  // registers it loads with a new /sw.js?v=<build> — i.e. AFTER the user has
+  // already reloaded onto the new bundle. Letting it WAIT then just left a
+  // pending worker that re-triggered the "new version" banner, forcing a SECOND
+  // reload to promote it. skipWaiting + clients.claim (in activate) means the
+  // fresh SW takes over in that same load — one reload, no lingering banner.
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {

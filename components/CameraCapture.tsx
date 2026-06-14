@@ -377,6 +377,7 @@ export function CameraCapture({
   const lensDeviceIdRef = useRef<string | null>(null);
   useEffect(() => { lensDeviceIdRef.current = lensDeviceId; }, [lensDeviceId]);
   const lensPinnedRef = useRef(false); // auto-pick the main lens once per session
+  const lensOptimizedRef = useRef(false); // ran the once-per-session ultra-wide→main switch
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -556,10 +557,39 @@ export function CameraCapture({
       };
       detectZoom();
       [600, 1500, 2800].forEach((ms) => setTimeout(detectZoom, ms));
-      // (We intentionally do NOT applyConstraints a higher resolution mid-stream
-      // — that reconfigure stutters the live preview. The resolution requested
-      // in getUserMedia above is what we keep.) The ultra-wide-default fix is
-      // capability-based (zoom normalization in detectZoom), not lens-index.
+
+      // ULTRA-WIDE → MAIN lens (quality on zoom). Some phones hand `facingMode:
+      // environment` a PHYSICAL ultra-wide sensor; zooming then just crops that
+      // wide sensor → soft/grainy. A logical multi-camera (which switches lenses
+      // itself) instead reports a LARGE zoom.max, so we leave those alone. When
+      // we detect a physical ultra-wide AND can positively identify a main lens
+      // by label, we pin the main lens so zoom crops the sharp main sensor.
+      // Runs once per session; fully reversible (pin failure falls back to OS
+      // default). Conservative on purpose: if we can't be sure, we don't switch.
+      const optimizeBackLens = async () => {
+        if (lensOptimizedRef.current || facing !== 'environment') return;
+        const track = streamRef.current?.getVideoTracks?.()[0];
+        const caps: any = track?.getCapabilities?.() || {};
+        const z = caps.zoom;
+        // Only act on a physical ultra-wide: can go wide (min<1) but limited range
+        // (max<4). A logical camera has a big range and handles switching itself.
+        if (!z || typeof z.max !== 'number' || z.max >= 4 || !(z.min < 1)) { lensOptimizedRef.current = true; return; }
+        lensOptimizedRef.current = true;
+        try {
+          const curId = (track?.getSettings?.() as any)?.deviceId;
+          const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+          const labelsKnown = cams.some((c) => !!c.label);
+          if (!labelsKnown) return; // can't tell lenses apart → don't risk a depth/IR sensor
+          const isBack = (l: string) => /back|rear|environment/i.test(l);
+          const isWide = (l: string) => /wide|ultra|0\.5|\.5\s*x|macro|depth|tof|mono|ir\b/i.test(l);
+          const backs = cams.filter((c) => isBack(c.label));
+          const pool = backs.length ? backs : cams;
+          // A POSITIVELY-identified non-wide back lens (the main), not the current one.
+          const main = pool.find((c) => c.deviceId && c.deviceId !== curId && c.label && !isWide(c.label));
+          if (main) { lensPinnedRef.current = true; setLensDeviceId(main.deviceId); }
+        } catch { /* enumerate failed — keep the OS default */ }
+      };
+      void optimizeBackLens();
       setPermissionState('granted');
       setPermissionError('');
     } catch (e: any) {
@@ -1643,6 +1673,7 @@ export function CameraCapture({
 
   const flipCamera = useCallback(() => {
     lensPinnedRef.current = false; // re-auto-pick the main lens when back on rear
+    lensOptimizedRef.current = false; // re-run the ultra-wide→main check for the new facing
     setLensDeviceId(null); // back to the default lens for the new facing
     setFacing((f) => (f === 'environment' ? 'user' : 'environment'));
     // useEffect on [facing, lensDeviceId] restarts the stream
