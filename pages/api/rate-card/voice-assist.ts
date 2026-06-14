@@ -406,20 +406,64 @@ function money(n: number): string {
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function reEsc(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// Route a line to a room the inspector NAMED in their utterance even when the
+// model didn't set `room` (e.g. "replace light bulb kitchen" → Kitchen). Matches
+// each room by its significant name tokens (≥4 chars) and returns a room ONLY
+// when exactly one distinct room matches — ambiguous words like "bedroom" across
+// Bedroom 1/2/3 yield null, leaving the routing to the model.
+const ROOM_STOPWORDS = new Set(['room', 'area', 'main', 'unit']);
+function roomFromUtterance(text: string, rooms: { id: string; name: string }[]): { id: string; name: string } | null {
+  const hay = ` ${(text || '').toLowerCase()} `;
+  const matched: { id: string; name: string }[] = [];
+  for (const r of rooms) {
+    const tokens = (r.name || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !ROOM_STOPWORDS.has(w));
+    if (tokens.length && tokens.some((tok) => new RegExp(`\\b${reEsc(tok)}\\b`).test(hay))) matched.push(r);
+  }
+  const uniq = Array.from(new Map(matched.map((m) => [m.id, m])).values());
+  return uniq.length === 1 ? uniq[0] : null;
+}
+
+// When the inspector explicitly said "level 2" but the matched clean is a lower
+// tier (Lite / Level 1), find the Level-2 sibling in the same category +
+// subcategory so the correct tier is added. Returns null if there isn't one.
+function level2CleanSibling(catalog: RateCardLineItem[], item: RateCardLineItem): RateCardLineItem | null {
+  const desc = item.laborShortDescription || '';
+  const isClean = /clean/i.test(`${desc} ${item.category} ${item.subcategory}`);
+  const alreadyL2 = /level\s*2|level\s*two|\bl2\b/i.test(desc);
+  if (!isClean || alreadyL2) return null;
+  return catalog.find((c) =>
+    c.isActive !== false
+    && (c.category || '') === (item.category || '')
+    && (c.subcategory || '') === (item.subcategory || '')
+    && /level\s*2|level\s*two|\bl2\b/i.test(c.laborShortDescription || '')
+  ) || null;
+}
+
+// Build the line confirmation shown on screen. Per the inspector's preference,
+// the vendor assignment and tenant chargeback % are NOT shown unless they
+// explicitly set them (showVendor / showPct) — a default add just reads
+// "<item> — <qty> <unit> — Vendor $<cost>".
 function lineToSummary(
   item: RateCardLineItem,
   qty: number,
   vendor: string,
   pct: number,
   region: string,
-  regions: RegionRate[]
+  regions: RegionRate[],
+  opts: { showVendor?: boolean; showPct?: boolean } = {}
 ): string {
   let vendorCostStr = '';
   try {
     const calc = calculateLine(item, region, regions, { quantity: qty, tenantBillBackPercent: pct });
     vendorCostStr = ` — Vendor ${money(calc.vendorCost)}`;
   } catch { /* if calc fails, omit the cost rather than block the line */ }
-  return `${item.laborShortDescription} — ${qty} ${item.laborMeas || 'EA'}, ${vendor}, ${pct}% Tenant${vendorCostStr}`;
+  const extras: string[] = [];
+  if (opts.showVendor) extras.push(vendor);
+  if (opts.showPct) extras.push(`${pct}% Tenant`);
+  const extraStr = extras.length ? `, ${extras.join(', ')}` : '';
+  return `${item.laborShortDescription} — ${qty} ${item.laborMeas || 'EA'}${extraStr}${vendorCostStr}`;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -478,6 +522,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const tenantMonths = Number.isFinite(tenantMonthsRaw) && tenantMonthsRaw > 0 ? tenantMonthsRaw : 12;
     const currentLines: CurrentLine[] = Array.isArray(body?.currentLines) ? body.currentLines : [];
     const linesByExternalId = new Map(currentLines.map((l) => [l.externalId, l]));
+    // The inspector's latest spoken line + all their text this conversation —
+    // used by the server-side routing/level guards in emitAdd below.
+    const lastUtterance = (() => {
+      const m = clientMessages[clientMessages.length - 1];
+      return m && m.role === 'user' ? String(m.content || '') : '';
+    })();
+    const allUserText = clientMessages.filter((m) => m.role === 'user').map((m) => m.content).join(' ');
 
     const messages: any[] = clientMessages.map((m) => ({ role: m.role, content: m.content }));
     // Room navigation context.
@@ -702,13 +753,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 if (r) { bidSection = r.name; bidLocation = r.name; bidSectionId = r.id; }
               }
               const bidPrice = Math.round(price * 100) / 100;
+              const bidExtras: string[] = [];
+              if (tu.input?.vendor != null && VENDORS.includes(String(tu.input.vendor))) bidExtras.push(bidVendor);
+              if (tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent))) bidExtras.push(`${bidPct}% Tenant`);
+              const bidTail = bidExtras.length ? ` (${bidExtras.join(', ')})` : '';
               const line: RateCardLineInput = {
                 externalId: `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
                 section: bidSection, location: bidLocation, lineItemCode: bid.lineItemCode,
                 quantity: 1, tenantBillBackPercent: bidPct, assignedTo: bidVendor,
                 note: description, customVendorCost: bidPrice, customLaborFullDescription: description, photoUrls: [],
               };
-              sse(res, 'proposal', { action: 'add', line, sectionId: bidSectionId, summary: `Bid item: ${description} — $${bidPrice.toFixed(2)} (${bidVendor}, ${bidPct}% Tenant)`, spokenSummary: 'bid item', awaitingReply: false });
+              sse(res, 'proposal', { action: 'add', line, sectionId: bidSectionId, summary: `Bid item: ${description} — $${bidPrice.toFixed(2)}${bidTail}`, spokenSummary: 'bid item', awaitingReply: false });
               didAct = true;
               result = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ ok: true, addedBidItem: description, price: bidPrice, note: 'Bid item added. Briefly tell the inspector the price you used so they can change it.' }) };
             }
@@ -716,10 +771,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         } else {
           // propose_line
           const code = String(tu.input?.code || '');
-          const item = byCode.get(code);
+          let item = byCode.get(code);
           if (!item) {
             result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: `No catalog item with code ${code}. Use search_catalog first.` }) };
           } else {
+            // Level-2 clean correction: if the inspector explicitly said "level 2"
+            // but the matched clean is a lower tier (Lite / Level 1), swap to the
+            // Level-2 sibling so the right tier is added.
+            if (/\blevel\s*(2|two)\b/i.test(allUserText)) {
+              const l2 = level2CleanSibling(catalog, item);
+              if (l2) item = l2;
+            }
             const qty = Number(tu.input?.quantity);
             let vendor = tu.input?.vendor ? String(tu.input.vendor) : 'Vendor 1';
             if (!VENDORS.includes(vendor)) vendor = 'Vendor 1';
@@ -737,7 +799,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             // ... SF" line proposed from any room).
             const isWholeHouse = /whole\s*house/i.test(activeSection || body.section || '')
               || /\b(whole|full)\s*house\b/i.test(item.laborShortDescription || '')
-              || /\b(whole|full)\s*house\b/i.test(String(tu.input?.room || ''));
+              || /\b(whole|full)\s*house\b/i.test(String(tu.input?.room || ''))
+              // Also when the inspector SAID "whole house" AND this inspection has
+              // a Whole House section to route into — the app auto-fills the
+              // property's square footage there, so don't ask for it. (Gated on the
+              // section existing so we don't skip the measurement and then land the
+              // line in a non-Whole-House room where the auto-fill wouldn't fire.)
+              || (/\b(whole|full)\s*house\b/i.test(lastUtterance)
+                  && rooms.some((rm) => /whole\s*house/i.test(rm.name)));
             const confirmed = tu.input?.quantityConfirmed === true;
             // Stair items (carpet/tread/runner on stairs) are priced PER STAIR
             // even though the unit reads EACH, so a defaulted qty of 1 is almost
@@ -761,14 +830,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   || rooms.find((rm) => rm.name.toLowerCase() === want)
                   || rooms.find((rm) => rm.name.toLowerCase().includes(want) || want.includes(rm.name.toLowerCase()));
                 if (r) { lineSection = r.name; lineLocation = r.name; lineSectionId = r.id; }
+              } else {
+                // The model didn't attribute a room — route to a room the
+                // inspector NAMED in their utterance (e.g. "...kitchen") when
+                // exactly one is named, so a line isn't silently left in the
+                // wrong/current room.
+                const named = roomFromUtterance(lastUtterance, rooms);
+                if (named && named.name.toLowerCase() !== (activeSection || '').toLowerCase()) {
+                  lineSection = named.name; lineLocation = named.name; lineSectionId = named.id;
+                }
               }
+              const vendorStated = tu.input?.vendor != null && VENDORS.includes(String(tu.input.vendor));
+              const pctStated = tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent));
               const line: RateCardLineInput = {
                 externalId: `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-                section: lineSection, location: lineLocation, lineItemCode: code,
+                section: lineSection, location: lineLocation, lineItemCode: item.lineItemCode,
                 quantity: qty, tenantBillBackPercent: pct, assignedTo: vendor,
                 note: tu.input?.note ? String(tu.input.note) : '', photoUrls: [],
               };
-              sse(res, 'proposal', { action: 'add', line, sectionId: lineSectionId, summary: lineToSummary(item, qty, vendor, pct, region, regions), spokenSummary: item.laborShortDescription, awaitingReply: false });
+              sse(res, 'proposal', { action: 'add', line, sectionId: lineSectionId, summary: lineToSummary(item, qty, vendor, pct, region, regions, { showVendor: vendorStated, showPct: pctStated }), spokenSummary: item.laborShortDescription, awaitingReply: false });
               didAct = true;
               result = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ ok: true, added: item.laborShortDescription, note: 'Line added. If the inspector listed more items, continue; otherwise stop.' }) };
             }
@@ -822,9 +902,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           continue;
         }
         if (didAct) {
-          // It acted (and may add a brief wrap-up). The client synthesizes the
-          // spoken summary of what changed; pass any text along as a message.
-          sse(res, 'message', { text: textBlocks || '', awaitingReply: true });
+          // It acted. The app already announces/speaks what changed, so a model
+          // wrap-up that NARRATES the add ("Added Replace Fridge … $1,650") is
+          // both redundant and a source of wrong/duplicate numbers — suppress it.
+          // Keep the text ONLY when it's a genuine follow-up question (ends with
+          // "?") or a bid-item price callout (the one case we ask it to speak).
+          const t = (textBlocks || '').trim();
+          const keep = !!t && (/\?\s*$/.test(t) || (/\bbid\b/i.test(t) && /\$\s*\d/.test(t)));
+          sse(res, 'message', { text: keep ? t : '', awaitingReply: true });
         } else {
           // It only wants more info — a clarifying question.
           sse(res, 'question', { text: textBlocks || 'Could you tell me more?', awaitingReply: true });
@@ -963,9 +1048,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             customLaborFullDescription: bidDesc ?? undefined,
             photoUrls: [],
           };
+          const editVendorStated = tu.input?.vendor != null && VENDORS.includes(String(tu.input.vendor));
+          const editPctStated = tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent));
+          const editExtras: string[] = [];
+          if (editVendorStated) editExtras.push(vendor);
+          if (editPctStated) editExtras.push(`${pct}% Tenant`);
+          const editTail = editExtras.length ? ` (${editExtras.join(', ')})` : '';
           const editSummary = bidCost != null
-            ? `Bid item: ${bidDesc || (item ? item.laborShortDescription : existing.lineItemCode)} — $${bidCost.toFixed(2)} (${vendor}, ${pct}% Tenant)`
-            : item ? lineToSummary(item, qty, vendor, pct, region, regions) : `${existing.lineItemCode} — ${qty}, ${vendor}, ${pct}% Tenant`;
+            ? `Bid item: ${bidDesc || (item ? item.laborShortDescription : existing.lineItemCode)} — $${bidCost.toFixed(2)}${editTail}`
+            : item ? lineToSummary(item, qty, vendor, pct, region, regions, { showVendor: editVendorStated, showPct: editPctStated }) : `${existing.lineItemCode} — ${qty}`;
           sse(res, 'proposal', {
             action: 'edit',
             line,
