@@ -134,11 +134,11 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.restore();
 }
 
-// Target capture resolution (4:3). Requested HIGH so BOTH the live preview and
-// the captured frame are as sharp/zoomable as possible (the browser negotiates
-// down per device). We grab the live frame on capture (instant — no freeze, no
-// ImageCapture.takePhoto), so the higher track resolution directly raises final
-// photo quality.
+// Target capture resolution (4:3). Requested HIGH so the live preview is sharp
+// and zoomable (the browser negotiates down per device). On capture we prefer
+// ImageCapture.takePhoto() (the camera's full still pipeline — far cleaner in
+// low light) and fall back to grabbing this high-res preview frame when that's
+// unsupported or slow. See capturePhoto().
 const CAPTURE_WIDTH = 3840;
 const CAPTURE_HEIGHT = 2880;
 
@@ -1319,8 +1319,45 @@ export function CameraCapture({
       }
     };
 
-    // Instant live-frame grab (rapid, no freeze). Sharpness comes from the
-    // high-resolution preview track requested in getUserMedia.
+    // QUALITY-FIRST capture: prefer ImageCapture.takePhoto(), which fires the
+    // camera's real STILL pipeline — multi-frame noise reduction + proper
+    // exposure/HDR — instead of grabbing a single noisy preview frame. This is
+    // the fix for grainy low-light indoor shots. A denoised still also encodes
+    // SMALLER at the same JPEG quality (less high-frequency noise), so photo size
+    // stays efficient. Fall back to the instant live-frame grab when unsupported
+    // (iOS Safari has no ImageCapture) or if takePhoto is slow/fails — a 1.2s
+    // race keeps rapid "quick click" capture from ever stalling.
+    const track = streamRef.current?.getVideoTracks?.()[0];
+    const IC: any = (typeof window !== 'undefined') ? (window as any).ImageCapture : undefined;
+    if (track && typeof IC === 'function') {
+      let settled = false;
+      const liveFallback = () => {
+        if (settled) return;
+        settled = true;
+        buildAndEnqueue(video, video.videoWidth, video.videoHeight);
+      };
+      const timer = setTimeout(liveFallback, 1200);
+      (async () => {
+        try {
+          const photo: Blob = await new IC(track).takePhoto();
+          const bmp = await createImageBitmap(photo);
+          clearTimeout(timer);
+          // Timed out first → the live frame was already enqueued; drop this one
+          // so we never double-capture.
+          if (settled) { try { (bmp as any).close?.(); } catch { /* noop */ } return; }
+          settled = true;
+          buildAndEnqueue(bmp, bmp.width, bmp.height);
+          try { (bmp as any).close?.(); } catch { /* noop */ }
+        } catch {
+          clearTimeout(timer);
+          liveFallback();
+        }
+      })();
+      return;
+    }
+
+    // No ImageCapture (iOS Safari, etc.) → instant live-frame grab. Sharpness
+    // comes from the high-resolution preview track requested in getUserMedia.
     buildAndEnqueue(video, video.videoWidth, video.videoHeight);
   }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines]);
 

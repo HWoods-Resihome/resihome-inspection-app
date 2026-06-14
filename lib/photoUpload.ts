@@ -2,10 +2,12 @@
  * Photo upload helpers shared between QuestionForm and RateCardForm.
  *
  * The pattern:
- *   1. Aggressively compress with browser-image-compression (600KB target, 1280px max).
- *      Inspection photos don't need to be print-quality — these get viewed on a phone
- *      screen and in HubSpot's web UI, never zoomed in. Small files upload faster and
- *      stay well under the API body limit even after base64 inflation.
+ *   1. Compress with browser-image-compression (≤1MB target, 1920px max edge, q0.82).
+ *      Inspection photos are viewed on a phone screen and in HubSpot's web UI and
+ *      occasionally zoomed to check a defect, so we keep 1080p-class detail — but
+ *      still small enough to upload fast on LTE and stay under the API body limit
+ *      even after base64 inflation. The library iterates quality DOWN to hit the
+ *      size cap, so files self-limit (clean low-light stills land well under it).
  *   2. If the library fails (silent web worker OOM on big phone photos is the usual
  *      cause), fall back to a manual canvas-based downscale.
  *   3. Convert to base64 and POST to /api/upload.
@@ -22,8 +24,8 @@ const RETRY_BASE_DELAY_MS = 800;
 // Per-attempt network timeout. A stalled upload on a weak signal aborts here so
 // the caller can fall back to the offline cache instead of spinning forever.
 const UPLOAD_TIMEOUT_MS = 20000;
-const TARGET_MAX_SIZE_MB = 0.6;     // aim for ~600KB output
-const TARGET_MAX_DIMENSION = 1280;  // 1280px on the long edge
+const TARGET_MAX_SIZE_MB = 1.0;     // ceiling; the lib drops quality to fit (clean shots land lower)
+const TARGET_MAX_DIMENSION = 1920;  // 1080p-class long edge — enough to inspect a defect
 
 /**
  * Compress any image File to a screen-sized JPEG Blob (client-side; works
@@ -41,7 +43,7 @@ export async function compressToJpeg(file: File): Promise<Blob> {
       maxSizeMB: TARGET_MAX_SIZE_MB,
       maxWidthOrHeight: TARGET_MAX_DIMENSION,
       useWebWorker: false,  // web worker is faster but silently OOMs on big files
-      initialQuality: 0.75, // a good baseline for photos viewed on screens
+      initialQuality: 0.82, // cleaner JPEG — fewer artifacts compounding sensor noise
       fileType: 'image/jpeg',
     });
     if (result && result.type === 'image/jpeg') compressed = result;
@@ -51,7 +53,7 @@ export async function compressToJpeg(file: File): Promise<Blob> {
 
   if (!compressed || compressed.size > 2 * 1024 * 1024) {
     try {
-      compressed = await canvasDownscale(file, TARGET_MAX_DIMENSION, 0.72);
+      compressed = await canvasDownscale(file, TARGET_MAX_DIMENSION, 0.8);
     } catch (e: any) {
       if (isHeic) {
         throw new Error('This HEIC photo couldn’t be converted in this browser. On iPhone, set Settings → Camera → Formats to "Most Compatible", or use the in-app camera, then re-upload.');
