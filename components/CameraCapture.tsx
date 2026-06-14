@@ -181,10 +181,14 @@ function fmtDistance(m: number): string {
 }
 
 // Press-and-hold video clips: hold the shutter > HOLD_MS to start recording;
-// clips auto-stop at MAX_CLIP_MS. Bitrate-capped so a 10s clip stays small.
+// clips auto-stop at MAX_CLIP_MS.
 const HOLD_MS = 260;
 const MAX_CLIP_MS = 20000; // cap clips at 20s to keep upload sizes/durations sane
-const CLIP_BITRATE = 2_500_000;
+// Record at 1080p (long edge) — 4K at any sane bitrate looked blocky, and 1080p
+// oversampled from the high-res sensor frame is sharp. 8 Mbps is solid 1080p30
+// quality (~20 MB for a 20s clip) — a big step up from the old grainy 2.5 Mbps.
+const CLIP_MAX_EDGE = 1920;
+const CLIP_BITRATE = 8_000_000;
 // Digital zoom while recording: drag the thumb up to zoom in, down to zoom out.
 // (Done in-canvas so it works on iOS Safari, which doesn't support the hardware
 // `zoom` track constraint.)
@@ -270,11 +274,6 @@ export function CameraCapture({
   // hardware confirms the new zoom.
   const hwAppliedZoomRef = useRef(1);
   const hwZoomInFlightRef = useRef(false);
-  // True while the user is actively zooming (pinch or the record-drag). During a
-  // gesture we FREEZE the sensor and do the whole zoom digitally (CSS preview +
-  // canvas crop) so it tracks the finger with zero lag and no overshoot; the
-  // sensor is committed once, at rest, when the gesture ends (crisp photos).
-  const zoomGestureActiveRef = useRef(false);
   const [zoom, setZoom] = useState(1);
   // Hardware (sensor) zoom capability. On phones with an ultra-wide lens the
   // reported zoom.min is BELOW 1, so applying it switches to the WIDE lens.
@@ -283,53 +282,44 @@ export function CameraCapture({
   // iOS Safari doesn't expose it → digital fallback (zoom IN only).
   const zoomCapsRef = useRef<{ min: number; max: number } | null>(null);
   const hwZoomRef = useRef(false);
-  // The DIGITAL crop factor the preview/capture/focus should apply: always 1
-  // when the sensor is doing the zoom (so we never double-zoom), else the
-  // current digital zoom.
-  // The DIGITAL zoom factor (≥1) the preview/recording/capture/focus must apply
-  // ON TOP of the sensor's currently-committed zoom. At rest the sensor holds the
-  // full zoom so this is 1 (no crop, full quality). During a gesture the sensor
-  // is frozen, so this carries the whole change — linear in the target, hence
-  // smooth and not oversensitive. Digital-only devices keep hwApplied=1, so this
-  // is just the zoom level (unchanged behavior).
-  const effZoom = useCallback(
-    () => Math.max(1, (zoomRef.current || 1) / (hwAppliedZoomRef.current || 1)),
-    [],
-  );
-  // Paint the preview at the target zoom INSTANTLY (imperative — no React
-  // re-render, no waiting on the sensor) via the digital factor above.
+  // The DIGITAL crop factor for preview/recording/capture/focus. QUALITY-FIRST:
+  // on hardware-zoom devices the SENSOR (ISP) does the zoom — full resolution,
+  // sharp — so the digital factor is 1 (no crop, never upscale-grainy). Only
+  // digital-only devices (iOS Safari) fall back to a CSS/canvas crop.
+  const effZoom = useCallback(() => (hwZoomRef.current ? 1 : (zoomRef.current || 1)), []);
+  // Preview transform. Hardware mode: NONE — the <video> already shows the
+  // sensor-zoomed (full-quality) frame, so the preview matches the recording
+  // exactly. Digital mode: CSS scale does the whole zoom.
   const updatePreviewTransform = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
-    const scale = effZoom();
+    const scale = hwZoomRef.current ? 1 : (zoomRef.current || 1);
     v.style.transformOrigin = 'center';
     v.style.transform = scale > 1.0005 ? `scale(${scale})` : '';
-  }, [effZoom]);
-  // Commit the target zoom to the SENSOR — only ever called at rest (gesture
-  // end), never mid-gesture. Gated on a single in-flight call so we don't queue
-  // applyConstraints; on resolve the sensor now holds the full zoom, so the
-  // digital factor relaxes to 1 (CSS scale → identity) seamlessly. If the target
-  // moved again before it resolved, chase the newest value.
-  const commitHardwareZoom = useCallback(() => {
-    if (!hwZoomRef.current || hwZoomInFlightRef.current || zoomGestureActiveRef.current) return;
+  }, []);
+  // Drive the SENSOR zoom toward the latest target as fast as the device allows:
+  // a single in-flight applyConstraints (no fixed throttle), and the moment it
+  // resolves we re-issue toward the newest target. This is the smoothest a
+  // FULL-QUALITY (sensor) zoom can be — we deliberately don't fake it with a
+  // grainy digital crop. hwAppliedZoomRef tracks what the sensor is actually at.
+  const pushHardwareZoom = useCallback(() => {
+    if (!hwZoomRef.current || hwZoomInFlightRef.current) return;
     const track = streamRef.current?.getVideoTracks?.()[0];
     if (!track) return;
     const target = zoomRef.current || 1;
-    if (Math.abs(target - hwAppliedZoomRef.current) < 0.01) return;
+    if (Math.abs(target - hwAppliedZoomRef.current) < 0.005) return;
     hwZoomInFlightRef.current = true;
     Promise.resolve((track.applyConstraints as any)?.({ advanced: [{ zoom: target }] }))
       .then(() => { hwAppliedZoomRef.current = target; })
-      .catch(() => { /* unsupported / transient reject — CSS keeps doing the zoom */ })
+      .catch(() => { /* unsupported / transient reject */ })
       .finally(() => {
         hwZoomInFlightRef.current = false;
-        updatePreviewTransform();
-        if (!zoomGestureActiveRef.current && Math.abs((zoomRef.current || 1) - hwAppliedZoomRef.current) >= 0.01) commitHardwareZoom();
+        if (Math.abs((zoomRef.current || 1) - hwAppliedZoomRef.current) >= 0.005) pushHardwareZoom();
       });
-  }, [updatePreviewTransform]);
-  // Single zoom setter: clamp to the live range and paint the preview instantly.
-  // The sensor is left frozen here (the gesture owns it); commitHardwareZoom()
-  // runs at gesture end. The lone exception is a non-gesture programmatic set
-  // (none today), which falls through to a rest-commit harmlessly.
+  }, []);
+  // Single zoom setter: clamp, update the (digital-mode) preview, and drive the
+  // sensor (hardware mode). Zoom is STICKY — never auto-reset across captures or
+  // recordings (that was the "flashes back to 1×" bug).
   const applyZoom = useCallback((z: number) => {
     const caps = zoomCapsRef.current;
     const zMin = caps ? caps.min : 1;
@@ -337,18 +327,11 @@ export function CameraCapture({
     const nz = Math.max(zMin, Math.min(zMax, z));
     zoomRef.current = nz;
     setZoom(nz);
-    updatePreviewTransform();   // INSTANT, pure-digital — never waits on the sensor
-    if (caps && !zoomGestureActiveRef.current) commitHardwareZoom();
-  }, [updatePreviewTransform, commitHardwareZoom]);
-  // End-of-gesture: re-enable and run the one-shot sensor commit so the resting
-  // preview + photos use crisp sensor zoom (the digital crop then relaxes away).
-  const endZoomGesture = useCallback(() => {
-    zoomGestureActiveRef.current = false;
-    if (zoomCapsRef.current) commitHardwareZoom();
-  }, [commitHardwareZoom]);
-  // Backstop: keep the preview transform in sync whenever the zoom level changes
-  // through any path that isn't applyZoom (the per-mode resets after recording /
-  // on close), so a leftover CSS scale can't linger after zoom returns to 1×.
+    updatePreviewTransform();
+    if (caps) pushHardwareZoom();
+  }, [updatePreviewTransform, pushHardwareZoom]);
+  // Backstop: keep the (digital-mode) preview transform in sync when zoom changes
+  // through a path other than applyZoom (e.g. the on-close reset).
   useEffect(() => { updatePreviewTransform(); }, [zoom, updatePreviewTransform]);
 
   const [items, setItems] = useState<CaptureItem[]>([]);
@@ -366,6 +349,18 @@ export function CameraCapture({
     el.scrollTo({ left: el.scrollWidth, top: el.scrollHeight, behavior: 'smooth' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items.length]);
+
+  // Freeze-frame: a canvas overlay that holds the just-captured frame on screen
+  // while the real still is captured + saved, so the preview never goes dark
+  // (like the native camera). `frozen` toggles it; the counter keeps it up until
+  // every in-flight capture finishes (so rapid-fire bursts stay covered).
+  const freezeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [frozen, setFrozen] = useState(false);
+  const pendingCaptureCountRef = useRef(0);
+  // Cache one ImageCapture per video track — reused across shots so rapid fire
+  // pays no construction cost. Recreated when the track changes; nulled on stop.
+  const imageCaptureRef = useRef<any>(null);
+  const imageCaptureTrackRef = useRef<MediaStreamTrack | null>(null);
 
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
   // Pinned back lens by deviceId (null = OS default for `facing`). Some phones
@@ -437,6 +432,9 @@ export function CameraCapture({
       // track's capabilities (e.g. the front camera usually has no wide/zoom).
       zoomCapsRef.current = null; hwZoomRef.current = false; hwAppliedZoomRef.current = 1;
       zoomRef.current = 1; setZoom(1); updatePreviewTransform();
+      // New track → invalidate the cached ImageCapture and clear any freeze.
+      imageCaptureRef.current = null; imageCaptureTrackRef.current = null;
+      pendingCaptureCountRef.current = 0; setFrozen(false);
       // When a specific back lens is chosen, pin it by deviceId; otherwise let
       // the OS pick the default for the facing direction.
       const videoConstraint: MediaTrackConstraints = {
@@ -713,7 +711,6 @@ export function CameraCapture({
   const onViewportTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
       pinchRef.current = { startDist: touchDist(e.touches) || 1, startZoom: zoomRef.current };
-      zoomGestureActiveRef.current = true; // freeze the sensor; zoom digitally
       tapRef.current = null; // a two-finger gesture is never a focus tap
     } else if (e.touches.length === 1) {
       const t = e.touches[0];
@@ -731,7 +728,7 @@ export function CameraCapture({
     }
   };
   const onViewportTouchEnd = (e: React.TouchEvent) => {
-    if (e.touches.length < 2 && pinchRef.current) { pinchRef.current = null; endZoomGesture(); }
+    if (e.touches.length < 2) pinchRef.current = null;
     const tp = tapRef.current;
     tapRef.current = null;
     if (!tp || e.touches.length !== 0) return;
@@ -1105,9 +1102,6 @@ export function CameraCapture({
     if (mr && mr.state !== 'inactive') { try { mr.stop(); } catch { /* noop */ } }
     recordingRef.current = false;
     setRecording(false);
-    // Clip done — re-enable the sensor and commit the final zoom (the digital
-    // crop relaxes to a crisp sensor zoom for the resting preview).
-    endZoomGesture();
   }
 
   async function finalizeClip(mime: string) {
@@ -1127,8 +1121,8 @@ export function CameraCapture({
       recordAudioStreamRef.current = null;
     }
     mediaRecorderRef.current = null;
-    // Preserve a hardware/wide zoom across recording; only reset digital zoom.
-    if (!hwZoomRef.current) { zoomRef.current = 1; setZoom(1); }
+    // Zoom is STICKY — leave it exactly where the inspector left it (no snap back
+    // to 1× after a clip; that was the jarring "flashes back out" behavior).
     if (!chunks.length) return;
     const ext = /mp4/i.test(mime) ? 'mp4' : 'webm';
     const type = (mime.split(';')[0] || `video/${ext}`);
@@ -1157,22 +1151,31 @@ export function CameraCapture({
       audioTracks = audio.getAudioTracks();
     } catch { /* video-only */ }
 
-    // Render the camera into a canvas, center-cropped by the live zoom factor,
-    // and record the canvas stream. This gives smooth digital zoom on every
-    // platform (incl. iOS) and keeps the recording in sync with the preview.
-    const vw = video.videoWidth || 1280;
-    const vh = video.videoHeight || 720;
+    // Render the camera into a canvas and record the canvas stream. CRITICAL for
+    // quality: cap the canvas to 1080p (long edge ≤ CLIP_MAX_EDGE) instead of the
+    // full sensor resolution. A 4K canvas at our bitrate looked blocky/grainy;
+    // a 1080p canvas at the same bitrate is far sharper AND downscaling the
+    // high-res sensor frame INTO 1080p oversamples → crisp. On hardware-zoom
+    // devices effZoom()===1, so the sensor (ISP) does the zoom at full quality
+    // and we just downscale; on digital-only devices we crop the high-res source
+    // into 1080p (sharp until the crop drops below 1080p).
+    const srcW = video.videoWidth || 1280;
+    const srcH = video.videoHeight || 720;
+    const fit = Math.min(1, CLIP_MAX_EDGE / Math.max(srcW, srcH));
+    const cw = Math.max(2, Math.round(srcW * fit));
+    const ch = Math.max(2, Math.round(srcH * fit));
     const canvas = document.createElement('canvas');
-    canvas.width = vw; canvas.height = vh;
+    canvas.width = cw; canvas.height = ch;
     const cctx = canvas.getContext('2d');
     if (!cctx) return;
+    cctx.imageSmoothingEnabled = true;
+    cctx.imageSmoothingQuality = 'high';
     recordCanvasRef.current = canvas;
-    if (!hwZoomRef.current) { zoomRef.current = 1; setZoom(1); }
     const drawFrame = () => {
       const z = effZoom();
-      const sw = vw / z, sh = vh / z;
-      const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
-      try { cctx.drawImage(video, sx, sy, sw, sh, 0, 0, vw, vh); } catch { /* not ready yet */ }
+      const sw = srcW / z, sh = srcH / z;
+      const sx = (srcW - sw) / 2, sy = (srcH - sh) / 2;
+      try { cctx.drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch); } catch { /* not ready yet */ }
       recordRafRef.current = requestAnimationFrame(drawFrame);
     };
     drawFrame();
@@ -1193,7 +1196,6 @@ export function CameraCapture({
     recorder.onstop = () => { void finalizeClip(mime); };
     mediaRecorderRef.current = recorder;
     try { recorder.start(); } catch { teardownCanvasPipeline(); return; }
-    zoomGestureActiveRef.current = true; // freeze the sensor for the whole clip — zoom digitally
     recordingRef.current = true;
     setRecording(true);
     setRecordSecs(0);
@@ -1244,8 +1246,7 @@ export function CameraCapture({
   }
   function onShutterUp() {
     shutterStartYRef.current = null;
-    // Flush any pending zoom frame so the final target is locked in before we
-    // stop recording (stopRecording → endZoomGesture commits it to the sensor).
+    // Flush any pending zoom frame so the final target is applied before stop.
     if (zoomDragRafRef.current != null) { cancelAnimationFrame(zoomDragRafRef.current); zoomDragRafRef.current = null; }
     if (zoomTargetRef.current != null) { applyZoom(zoomTargetRef.current); zoomTargetRef.current = null; }
     if (holdTimerRef.current) {
@@ -1274,6 +1275,9 @@ export function CameraCapture({
     recordingRef.current = false;
     setRecording(false);
     zoomRef.current = 1; setZoom(1);
+    // Clear capture-side caches/overlays when the camera closes.
+    imageCaptureRef.current = null; imageCaptureTrackRef.current = null;
+    pendingCaptureCountRef.current = 0; setFrozen(false);
   }, [isOpen]);
 
   // Native OS camera fallback. On iOS (no web torch) and as a universal
@@ -1301,27 +1305,83 @@ export function CameraCapture({
     for (const f of picked) enqueueFile(f);
   }, [enqueueFile, maxPhotos]);
 
+  // Cached ImageCapture for the current track (recreated only when the track
+  // changes), so rapid fire pays no per-shot construction cost.
+  const getImageCapture = useCallback((track: MediaStreamTrack): any => {
+    const IC: any = (typeof window !== 'undefined') ? (window as any).ImageCapture : undefined;
+    if (typeof IC !== 'function') return null;
+    if (imageCaptureRef.current && imageCaptureTrackRef.current === track) return imageCaptureRef.current;
+    try {
+      imageCaptureRef.current = new IC(track);
+      imageCaptureTrackRef.current = track;
+      return imageCaptureRef.current;
+    } catch {
+      imageCaptureRef.current = null;
+      imageCaptureTrackRef.current = null;
+      return null;
+    }
+  }, []);
+
+  // Paint the current (zoom-cropped) preview frame into the freeze canvas and
+  // show it. The live <video> keeps running underneath; this overlay simply
+  // holds the captured frame so the screen never goes dark during takePhoto.
+  const showFreezeFrame = useCallback((video: HTMLVideoElement) => {
+    const c = freezeCanvasRef.current;
+    if (!c) return;
+    const srcW = video.videoWidth, srcH = video.videoHeight;
+    if (!srcW || !srcH) return;
+    // ~720p is plenty for a transient on-screen placeholder and keeps the draw cheap.
+    const fit = Math.min(1, 1280 / Math.max(srcW, srcH));
+    const cw = Math.max(2, Math.round(srcW * fit)), ch = Math.max(2, Math.round(srcH * fit));
+    if (c.width !== cw) c.width = cw;
+    if (c.height !== ch) c.height = ch;
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    const z = effZoom();
+    try {
+      if (z > 1.001) {
+        const sw = srcW / z, sh = srcH / z;
+        ctx.drawImage(video, (srcW - sw) / 2, (srcH - sh) / 2, sw, sh, 0, 0, cw, ch);
+      } else {
+        ctx.drawImage(video, 0, 0, srcW, srcH, 0, 0, cw, ch);
+      }
+      setFrozen(true);
+    } catch { /* frame not ready — skip the freeze, no harm */ }
+  }, [effZoom]);
+
+  // One capture finished (saved or failed) — drop the freeze once the LAST one
+  // in a rapid-fire burst is done.
+  const endCapture = useCallback(() => {
+    pendingCaptureCountRef.current = Math.max(0, pendingCaptureCountRef.current - 1);
+    if (pendingCaptureCountRef.current === 0) setFrozen(false);
+  }, []);
+
   const capturePhoto = useCallback(() => {
-    // Count from the ref so rapid taps see the live total (state can lag a frame).
-    if (itemsRef.current.length >= maxPhotos) {
+    // Count in-flight captures too, so a rapid burst can't blow past the cap
+    // before any have finished enqueuing.
+    if (itemsRef.current.length + pendingCaptureCountRef.current >= maxPhotos) {
       void dialog.alert(`You can capture up to ${maxPhotos} photos per session. Tap Done to finish.`);
       return;
     }
     const video = videoRef.current;
     if (!video || video.readyState < 2) return; // not ready; try again in a moment
 
-    // Tactile "shot taken" confirmation (Android; a no-op on iOS Safari, which
-    // ignores the Vibration API). Helps inspectors know the tap registered when
-    // the shutter visual is brief and they're not looking closely.
+    // Tactile "shot taken" confirmation (Android; a no-op on iOS Safari).
     try { navigator.vibrate?.(15); } catch { /* unsupported */ }
 
-    // Shared: draw a source (live frame OR full-sensor bitmap) to a capped canvas
-    // with the digital-zoom crop + evidence stamp, then encode + enqueue in the
-    // BACKGROUND (canvas.toBlob is off the main thread) so the shutter never
-    // greys between shots.
-    const buildAndEnqueue = (source: CanvasImageSource, srcW: number, srcH: number) => {
+    // Hold the frame on screen so the preview never blacks out while the real
+    // still is captured + saved (native-camera behavior), then count this shot.
+    showFreezeFrame(video);
+    pendingCaptureCountRef.current += 1;
+
+    // Draw a source (live frame OR full-sensor still) to a capped canvas with the
+    // digital-zoom crop + evidence stamp, encode + enqueue. `finish` runs exactly
+    // once when the photo is saved (or on error) — that's when the freeze lifts.
+    const buildAndEnqueue = (source: CanvasImageSource, srcW: number, srcH: number, finish: () => void) => {
+      let finished = false;
+      const done = () => { if (!finished) { finished = true; finish(); } };
       try {
-        if (!srcW || !srcH) return;
+        if (!srcW || !srcH) { done(); return; }
         const longEdge = Math.max(srcW, srcH);
         const scale = Math.min(1, MAX_SAVE_EDGE / longEdge);
         const vw = Math.max(1, Math.round(srcW * scale));
@@ -1329,10 +1389,10 @@ export function CameraCapture({
         const canvas = document.createElement('canvas');
         canvas.width = vw; canvas.height = vh;
         const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+        if (!ctx) { done(); return; }
         ctx.imageSmoothingQuality = 'high';
-        // effZoom()===1 when the sensor is zooming (hardware-zoomed frame used
-        // as-is); otherwise crop the central 1/z (digital zoom).
+        // effZoom()===1 when the sensor is zooming (frame used as-is); otherwise
+        // crop the central 1/z (digital zoom on iOS).
         const z = effZoom();
         if (z > 1.001) {
           const sw = srcW / z, sh = srcH / z;
@@ -1347,43 +1407,43 @@ export function CameraCapture({
         drawEvidenceStamp(ctx, vw, vh, stampLines);
         lastManualCaptureRef.current = Date.now();
         canvas.toBlob((blob) => {
-          if (!blob) return;
-          const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          enqueueFile(new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' }));
+          if (blob) {
+            const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            enqueueFile(new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' }));
+          }
+          done();
         }, 'image/jpeg', PHOTO_SAVE_QUALITY);
       } catch (e: any) {
         console.error('Capture error:', e);
+        done();
       }
     };
 
-    // QUALITY-FIRST capture: prefer ImageCapture.takePhoto(), which fires the
-    // camera's real STILL pipeline — multi-frame noise reduction + proper
-    // exposure/HDR — instead of grabbing a single noisy preview frame. This is
-    // the fix for grainy low-light indoor shots. A denoised still also encodes
-    // SMALLER at the same JPEG quality (less high-frequency noise), so photo size
-    // stays efficient. Fall back to the instant live-frame grab when unsupported
-    // (iOS Safari has no ImageCapture) or if takePhoto is slow/fails — a 1.2s
-    // race keeps rapid "quick click" capture from ever stalling.
+    // QUALITY-FIRST: prefer ImageCapture.takePhoto() — the camera's real STILL
+    // pipeline (multi-frame denoise + proper exposure/HDR), the fix for grainy
+    // low-light shots — over a single noisy preview frame. The cached
+    // ImageCapture avoids per-shot setup cost. Fall back to the instant
+    // live-frame grab when unsupported (iOS) or if takePhoto is slow/fails; a
+    // 1.5s race keeps rapid fire from ever stalling.
     const track = streamRef.current?.getVideoTracks?.()[0];
-    const IC: any = (typeof window !== 'undefined') ? (window as any).ImageCapture : undefined;
-    if (track && typeof IC === 'function') {
+    const ic = track ? getImageCapture(track) : null;
+    if (track && ic) {
       let settled = false;
       const liveFallback = () => {
         if (settled) return;
         settled = true;
-        buildAndEnqueue(video, video.videoWidth, video.videoHeight);
+        buildAndEnqueue(video, video.videoWidth, video.videoHeight, endCapture);
       };
-      const timer = setTimeout(liveFallback, 1200);
+      const timer = setTimeout(liveFallback, 1500);
       (async () => {
         try {
-          const photo: Blob = await new IC(track).takePhoto();
+          const photo: Blob = await ic.takePhoto();
           const bmp = await createImageBitmap(photo);
           clearTimeout(timer);
-          // Timed out first → the live frame was already enqueued; drop this one
-          // so we never double-capture.
+          // Timed out first → live frame already handled it; drop this one.
           if (settled) { try { (bmp as any).close?.(); } catch { /* noop */ } return; }
           settled = true;
-          buildAndEnqueue(bmp, bmp.width, bmp.height);
+          buildAndEnqueue(bmp, bmp.width, bmp.height, endCapture);
           try { (bmp as any).close?.(); } catch { /* noop */ }
         } catch {
           clearTimeout(timer);
@@ -1393,10 +1453,9 @@ export function CameraCapture({
       return;
     }
 
-    // No ImageCapture (iOS Safari, etc.) → instant live-frame grab. Sharpness
-    // comes from the high-resolution preview track requested in getUserMedia.
-    buildAndEnqueue(video, video.videoWidth, video.videoHeight);
-  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines]);
+    // No ImageCapture (iOS Safari, etc.) → instant live-frame grab.
+    buildAndEnqueue(video, video.videoWidth, video.videoHeight, endCapture);
+  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines, effZoom, showFreezeFrame, endCapture, getImageCapture]);
 
   // ----- Per-photo retake/delete -----
 
@@ -1935,6 +1994,15 @@ export function CameraCapture({
               /* zoom transform is driven imperatively (updatePreviewTransform) so
                  the preview tracks the finger with zero lag and never fights a
                  React re-render mid-drag. */
+            />
+            {/* Freeze-frame overlay: holds the captured frame while the real
+                still is taken + saved, so the preview never goes dark. Already
+                zoom-cropped to match the live view, so no transform needed. */}
+            <canvas
+              ref={freezeCanvasRef}
+              className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+              style={{ display: frozen ? 'block' : 'none' }}
+              aria-hidden
             />
             {/* Tap-to-focus reticle */}
             {focusPt && (
