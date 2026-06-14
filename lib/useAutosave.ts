@@ -69,6 +69,23 @@ export function useAutosave(opts: Options) {
   // Retry backoff after failures so we don't hammer the network (esp. offline).
   const consecutiveErrorsRef = useRef(0);
   const errorBackoffUntilRef = useRef(0);
+  // Audit: log ONE "edited" event per editing session — on the first successful
+  // save after opening the inspection, and again after the app is re-entered
+  // (backgrounded long enough then reopened). Not every keystroke. Reset on
+  // re-entry below so a fresh session is recorded.
+  const editAuditLoggedRef = useRef(false);
+  const logEditOnce = useCallback(() => {
+    if (editAuditLoggedRef.current || disabled) return;
+    editAuditLoggedRef.current = true;
+    try {
+      void fetch(`/api/inspections/${inspectionRecordId}/audit-edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+        keepalive: true,
+      }).catch(() => { /* best-effort — never blocks editing */ });
+    } catch { /* ignore */ }
+  }, [disabled, inspectionRecordId]);
 
   // Mark an answer as edited. The state map is updated and dirtySince timestamp set.
   const noteEdit = useCallback((key: string, answer: AnswerInput, questionHubspotRecordId: string, instanceKey: string) => {
@@ -245,6 +262,8 @@ export function useAutosave(opts: Options) {
       errorBackoffUntilRef.current = 0;
 
       onSaveSuccess?.(updatedKeys);
+      // First successful save of this session → record an "edited" audit event.
+      logEditOnce();
       if (willBumpStatus) {
         onFirstSave?.();
         setHasEverSaved(true);
@@ -279,7 +298,7 @@ export function useAutosave(opts: Options) {
     } finally {
       inFlightRef.current = false;
     }
-  }, [disabled, inspectionRecordId, inspectionExternalId, hasEverSaved, onSaveSuccess, onFirstSave, buildAnswerExternalId, buildUpsertFromState, saveState.kind, isScope]);
+  }, [disabled, inspectionRecordId, inspectionExternalId, hasEverSaved, onSaveSuccess, onFirstSave, buildAnswerExternalId, buildUpsertFromState, saveState.kind, isScope, logEditOnce]);
 
   // Last-resort save when the page is genuinely being torn down (hard nav, tab
   // close, mobile pagehide). An async fetch can't finish during unload, so POST
@@ -345,7 +364,13 @@ export function useAutosave(opts: Options) {
   //     won't finish, so use navigator.sendBeacon (guaranteed delivery).
   useEffect(() => {
     if (disabled) return;
-    const onHidden = () => { if (document.visibilityState === 'hidden') void flushRef.current(true); };
+    let hiddenAt = 0;
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); void flushRef.current(true); return; }
+      // Became visible again: if we were away a while, treat the next edit as a
+      // NEW session for the audit trail (re-arm the once-per-session edit log).
+      if (hiddenAt && Date.now() - hiddenAt > 60_000) editAuditLoggedRef.current = false;
+    };
     const onTeardown = () => { beaconFlushRef.current(); };
     document.addEventListener('visibilitychange', onHidden);
     window.addEventListener('pagehide', onTeardown);

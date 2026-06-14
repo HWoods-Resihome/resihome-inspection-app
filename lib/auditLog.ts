@@ -20,6 +20,7 @@ export type AuditAction =
   | 'refinalize'    // re-finalized after a reopen (PDFs regenerated, no re-approve)
   | 'regenerate'    // PDFs regenerated only (status unchanged)
   | 'reopen'        // completed → in_progress
+  | 'edit'          // answers edited (logged once per session / app re-entry, not per keystroke)
   | 'cancel';       // marked cancelled
 
 export interface AuditEvent {

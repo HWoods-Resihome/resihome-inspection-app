@@ -23,6 +23,7 @@ const ACTION: Record<string, { label: string; dot: string; glyph: string }> = {
   refinalize: { label: 'Re-finalized',           dot: 'bg-amber-500',   glyph: '⟳' },
   regenerate: { label: 'PDFs regenerated',       dot: 'bg-amber-400',   glyph: '⟳' },
   reopen:     { label: 'Reopened',               dot: 'bg-amber-500',   glyph: '↩' },
+  edit:       { label: 'Edited',                 dot: 'bg-indigo-500',  glyph: '✎' },
   cancel:     { label: 'Cancelled',              dot: 'bg-red-500',     glyph: '✕' },
 };
 
