@@ -168,6 +168,11 @@ async function hubspotFetchInner(url: string, method: string, path: string, init
   //   250ms -> 750ms -> 2000ms -> 5000ms
   // Honor Retry-After if HubSpot sends it (rare, but it's the API's request).
   const BACKOFFS_MS = [250, 750, 2000, 5000];
+  // ±35% jitter on every backoff. Without it, hundreds of serverless instances
+  // that all hit a HubSpot 429/5xx at the same moment back off by the SAME fixed
+  // amounts and retry in lockstep — re-colliding wave after wave. Jitter spreads
+  // the retries out so the upstream recovers instead of being re-stormed.
+  const jitter = (ms: number) => Math.round(ms * (0.65 + Math.random() * 0.7));
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt <= BACKOFFS_MS.length; attempt++) {
@@ -181,9 +186,11 @@ async function hubspotFetchInner(url: string, method: string, path: string, init
     });
     if (res.status === 429 && attempt < BACKOFFS_MS.length) {
       const retryAfterHeader = res.headers.get('retry-after');
+      // Honor an explicit Retry-After exactly (it's the API's instruction); only
+      // jitter our own default backoff.
       const retryAfterMs = retryAfterHeader
         ? Math.max(BACKOFFS_MS[attempt], Number(retryAfterHeader) * 1000)
-        : BACKOFFS_MS[attempt];
+        : jitter(BACKOFFS_MS[attempt]);
       // Consume body so the socket can be reused
       await res.text().catch(() => '');
       console.warn(`[hubspotFetch] 429 on ${method} ${path}, retrying in ${retryAfterMs}ms (attempt ${attempt + 1}/${BACKOFFS_MS.length})`);
@@ -194,8 +201,9 @@ async function hubspotFetchInner(url: string, method: string, path: string, init
     // brief HubSpot blip shouldn't fail an inspector's save outright.
     if ((res.status === 502 || res.status === 503 || res.status === 504) && attempt < BACKOFFS_MS.length) {
       await res.text().catch(() => '');
-      console.warn(`[hubspotFetch] ${res.status} on ${method} ${path}, retrying in ${BACKOFFS_MS[attempt]}ms (attempt ${attempt + 1}/${BACKOFFS_MS.length})`);
-      await new Promise((resolve) => setTimeout(resolve, BACKOFFS_MS[attempt]));
+      const waitMs = jitter(BACKOFFS_MS[attempt]);
+      console.warn(`[hubspotFetch] ${res.status} on ${method} ${path}, retrying in ${waitMs}ms (attempt ${attempt + 1}/${BACKOFFS_MS.length})`);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
       continue;
     }
     if (!res.ok) {

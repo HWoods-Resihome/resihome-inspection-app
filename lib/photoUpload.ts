@@ -110,7 +110,11 @@ export async function uploadJpegBlob(
         ? new Error('Upload timed out (slow or no connection)')
         : (e instanceof Error ? e : new Error(String(e)));
       if (attempt < attempts) {
-        await new Promise((r) => setTimeout(r, RETRY_BASE_DELAY_MS * attempt));
+        // Jitter the backoff so many phones retrying a failed upload at once
+        // (e.g. a flaky cell tower coming back) don't all re-hit /api/upload on
+        // the same beat and re-collide.
+        const base = RETRY_BASE_DELAY_MS * attempt;
+        await new Promise((r) => setTimeout(r, Math.round(base * (0.65 + Math.random() * 0.7))));
       }
     } finally {
       clearTimeout(timer);

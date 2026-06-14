@@ -24,16 +24,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === 'GET') {
     try {
+      // Answers only need the route id (not the inspection record), so kick that
+      // fetch off IN PARALLEL with the inspection+property fetch — these are the
+      // two slowest calls on this hot path, and overlapping them removes a serial
+      // round-trip per detail open. A rejection still surfaces below (we await it
+      // in the Promise.all); attach a no-op catch on the early-return paths so it
+      // can't become an unhandled rejection.
+      const answersPromise = fetchAnswersForInspection(id);
       const data = await fetchInspectionWithPropertyRef(id);
-      if (!data) return res.status(404).json({ error: 'Inspection not found' });
+      if (!data) { answersPromise.catch(() => {}); return res.status(404).json({ error: 'Inspection not found' }); }
       // External (1099) users can only open 1099-type inspections.
       const denial = externalAccessDenial(session.email, data.inspection.templateType);
-      if (denial) return res.status(403).json({ error: denial });
+      if (denial) { answersPromise.catch(() => {}); return res.status(403).json({ error: denial }); }
       // Answers + the property's active listing + (Community/Visit only) the
       // associated community's name — all best-effort, in parallel.
       const isCommunityTpl = data.inspection.templateType === 'pm_community_inspection';
       const [answers, listing, communityName] = await Promise.all([
-        fetchAnswersForInspection(id),
+        answersPromise,
         data.propertyIdRef
           ? fetchActiveListingForProperty(data.propertyIdRef).catch(() => null)
           : Promise.resolve(null),

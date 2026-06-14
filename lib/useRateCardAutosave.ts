@@ -172,68 +172,59 @@ export function useRateCardAutosave(args: Args): AutosaveHandle {
         }
       }
 
-      // Save section photos (if any) — uses the generic /answers endpoint
-      // since section photos are stored as inspection_answer records with
-      // answer_type='section_photo', same as the Scope template.
-      for (const sectionId of dirtyPhotos) {
-        const urls = photos[sectionId] || [];
-        const section = resolveSection(sectionId);
-        const existingRecordId = sectionPhotoIdsRef.current[sectionId];
-        const externalId = `SECTIONPHOTO-${inspectionRecordId}-${sectionId}`;
-
-        // If no photos and no existing record, skip.
-        // If no photos and a record exists, archive it.
-        if (urls.length === 0) {
-          if (existingRecordId) {
-            await fetch(`/api/inspections/${inspectionRecordId}/answers`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                upserts: [],
-                archives: [existingRecordId],
-              }),
-            });
-            if (myGen === saveGenerationRef.current) {
-              const next = { ...sectionPhotoIdsRef.current };
-              delete next[sectionId];
-              setSectionPhotoRecordIds(next);
-            }
+      // Save section photos (if any) in ONE batched /answers call instead of a
+      // request per room — a multi-room photo save was N sequential POSTs (and N
+      // HubSpot upserts); batching collapses it to a single round-trip, which
+      // matters a lot under hundreds of concurrent editors. Section photos are
+      // stored as inspection_answer records with answer_type='section_photo',
+      // same as the Scope template.
+      const dirtyPhotoList = Array.from(dirtyPhotos);
+      if (dirtyPhotoList.length > 0) {
+        const photoUpserts: Array<{ recordId: string | undefined; answerProps: any; questionHubspotRecordId: null }> = [];
+        const photoArchives: string[] = [];
+        const archivedSections: string[] = [];
+        const extToSection = new Map<string, string>();
+        for (const sectionId of dirtyPhotoList) {
+          const urls = photos[sectionId] || [];
+          const section = resolveSection(sectionId);
+          const existingRecordId = sectionPhotoIdsRef.current[sectionId];
+          const externalId = `SECTIONPHOTO-${inspectionRecordId}-${sectionId}`;
+          if (urls.length === 0) {
+            // No photos: archive the existing record (if any), else nothing to do.
+            if (existingRecordId) { photoArchives.push(existingRecordId); archivedSections.push(sectionId); }
+            continue;
           }
-          continue;
-        }
-
-        // Upsert the section_photo record
-        const props = buildSectionPhotoAnswerProps({
-          answerIdExternal: externalId,
-          inspectionIdExternal: args.inspectionExternalId,
-          section: section?.label || '',
-          summaryLabel: section?.label || sectionId,
-          location: section?.location || '',
-          photoUrls: urls,
-        });
-        const r = await fetch(`/api/inspections/${inspectionRecordId}/answers`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            upserts: [{
-              recordId: existingRecordId,
-              answerProps: props,
-              questionHubspotRecordId: null,
-            }],
-            archives: [],
-          }),
-        });
-        if (!r.ok) {
-          const text = await r.text();
-          throw new Error(`Photo save failed (${r.status}): ${text.slice(0, 200)}`);
-        }
-        const data = await r.json();
-        const newRecordId = data.results?.[0]?.recordId;
-        if (newRecordId && myGen === saveGenerationRef.current) {
-          setSectionPhotoRecordIds({
-            ...sectionPhotoIdsRef.current,
-            [sectionId]: newRecordId,
+          const props = buildSectionPhotoAnswerProps({
+            answerIdExternal: externalId,
+            inspectionIdExternal: args.inspectionExternalId,
+            section: section?.label || '',
+            summaryLabel: section?.label || sectionId,
+            location: section?.location || '',
+            photoUrls: urls,
           });
+          photoUpserts.push({ recordId: existingRecordId, answerProps: props, questionHubspotRecordId: null });
+          extToSection.set(externalId, sectionId);
+        }
+        if (photoUpserts.length > 0 || photoArchives.length > 0) {
+          const r = await fetch(`/api/inspections/${inspectionRecordId}/answers`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ upserts: photoUpserts, archives: photoArchives }),
+          });
+          if (!r.ok) {
+            const text = await r.text();
+            throw new Error(`Photo save failed (${r.status}): ${text.slice(0, 200)}`);
+          }
+          const data = await r.json();
+          if (myGen === saveGenerationRef.current) {
+            const next = { ...sectionPhotoIdsRef.current };
+            for (const result of data.results || []) {
+              const sId = extToSection.get(result.answerIdExternal);
+              if (sId && result.recordId) next[sId] = result.recordId;
+            }
+            for (const sId of archivedSections) delete next[sId];
+            setSectionPhotoRecordIds(next);
+          }
         }
       }
 
