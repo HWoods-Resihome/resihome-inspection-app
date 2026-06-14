@@ -270,6 +270,11 @@ export function CameraCapture({
   // hardware confirms the new zoom.
   const hwAppliedZoomRef = useRef(1);
   const hwZoomInFlightRef = useRef(false);
+  // True while the user is actively zooming (pinch or the record-drag). During a
+  // gesture we FREEZE the sensor and do the whole zoom digitally (CSS preview +
+  // canvas crop) so it tracks the finger with zero lag and no overshoot; the
+  // sensor is committed once, at rest, when the gesture ends (crisp photos).
+  const zoomGestureActiveRef = useRef(false);
   const [zoom, setZoom] = useState(1);
   // Hardware (sensor) zoom capability. On phones with an ultra-wide lens the
   // reported zoom.min is BELOW 1, so applying it switches to the WIDE lens.
@@ -281,27 +286,32 @@ export function CameraCapture({
   // The DIGITAL crop factor the preview/capture/focus should apply: always 1
   // when the sensor is doing the zoom (so we never double-zoom), else the
   // current digital zoom.
-  const effZoom = useCallback(() => (hwZoomRef.current ? 1 : (zoomRef.current || 1)), []);
+  // The DIGITAL zoom factor (≥1) the preview/recording/capture/focus must apply
+  // ON TOP of the sensor's currently-committed zoom. At rest the sensor holds the
+  // full zoom so this is 1 (no crop, full quality). During a gesture the sensor
+  // is frozen, so this carries the whole change — linear in the target, hence
+  // smooth and not oversensitive. Digital-only devices keep hwApplied=1, so this
+  // is just the zoom level (unchanged behavior).
+  const effZoom = useCallback(
+    () => Math.max(1, (zoomRef.current || 1) / (hwAppliedZoomRef.current || 1)),
+    [],
+  );
   // Paint the preview at the target zoom INSTANTLY (imperative — no React
-  // re-render, no waiting on the sensor). On hardware-zoom devices the sensor
-  // supplies `hwAppliedZoomRef`× and CSS makes up the remainder (target/applied);
-  // on digital-only devices CSS does the whole zoom. Relaxes to identity at 1×.
+  // re-render, no waiting on the sensor) via the digital factor above.
   const updatePreviewTransform = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
-    const target = zoomRef.current || 1;
-    const base = hwZoomRef.current ? (hwAppliedZoomRef.current || 1) : 1;
-    const scale = Math.max(1, target / base);
+    const scale = effZoom();
     v.style.transformOrigin = 'center';
     v.style.transform = scale > 1.0005 ? `scale(${scale})` : '';
-  }, []);
-  // Drive the (slow, async) sensor zoom toward the latest target. Gated on a
-  // single in-flight call so we never queue/choke applyConstraints: when it
-  // resolves we relax the CSS overshoot and, if the finger moved on meanwhile,
-  // immediately chase the newest target. This adapts to each device's real zoom
-  // speed instead of a fixed throttle.
-  const pushHardwareZoom = useCallback(() => {
-    if (!hwZoomRef.current || hwZoomInFlightRef.current) return;
+  }, [effZoom]);
+  // Commit the target zoom to the SENSOR — only ever called at rest (gesture
+  // end), never mid-gesture. Gated on a single in-flight call so we don't queue
+  // applyConstraints; on resolve the sensor now holds the full zoom, so the
+  // digital factor relaxes to 1 (CSS scale → identity) seamlessly. If the target
+  // moved again before it resolved, chase the newest value.
+  const commitHardwareZoom = useCallback(() => {
+    if (!hwZoomRef.current || hwZoomInFlightRef.current || zoomGestureActiveRef.current) return;
     const track = streamRef.current?.getVideoTracks?.()[0];
     if (!track) return;
     const target = zoomRef.current || 1;
@@ -309,25 +319,33 @@ export function CameraCapture({
     hwZoomInFlightRef.current = true;
     Promise.resolve((track.applyConstraints as any)?.({ advanced: [{ zoom: target }] }))
       .then(() => { hwAppliedZoomRef.current = target; })
-      .catch(() => { /* unsupported / transient reject — keep CSS doing the zoom */ })
+      .catch(() => { /* unsupported / transient reject — CSS keeps doing the zoom */ })
       .finally(() => {
         hwZoomInFlightRef.current = false;
         updatePreviewTransform();
-        if (Math.abs((zoomRef.current || 1) - hwAppliedZoomRef.current) >= 0.01) pushHardwareZoom();
+        if (!zoomGestureActiveRef.current && Math.abs((zoomRef.current || 1) - hwAppliedZoomRef.current) >= 0.01) commitHardwareZoom();
       });
   }, [updatePreviewTransform]);
-  // Single zoom setter: clamp to the live range, paint the preview instantly,
-  // and let the sensor catch up in the background (hardware-zoom devices).
-  const applyZoom = useCallback((z: number, _opts?: { immediateHw?: boolean }) => {
+  // Single zoom setter: clamp to the live range and paint the preview instantly.
+  // The sensor is left frozen here (the gesture owns it); commitHardwareZoom()
+  // runs at gesture end. The lone exception is a non-gesture programmatic set
+  // (none today), which falls through to a rest-commit harmlessly.
+  const applyZoom = useCallback((z: number) => {
     const caps = zoomCapsRef.current;
     const zMin = caps ? caps.min : 1;
     const zMax = caps ? caps.max : MAX_ZOOM;
     const nz = Math.max(zMin, Math.min(zMax, z));
     zoomRef.current = nz;
     setZoom(nz);
-    updatePreviewTransform();   // INSTANT — preview never waits on the sensor
-    if (caps) pushHardwareZoom(); // sensor converges in the background
-  }, [updatePreviewTransform, pushHardwareZoom]);
+    updatePreviewTransform();   // INSTANT, pure-digital — never waits on the sensor
+    if (caps && !zoomGestureActiveRef.current) commitHardwareZoom();
+  }, [updatePreviewTransform, commitHardwareZoom]);
+  // End-of-gesture: re-enable and run the one-shot sensor commit so the resting
+  // preview + photos use crisp sensor zoom (the digital crop then relaxes away).
+  const endZoomGesture = useCallback(() => {
+    zoomGestureActiveRef.current = false;
+    if (zoomCapsRef.current) commitHardwareZoom();
+  }, [commitHardwareZoom]);
   // Backstop: keep the preview transform in sync whenever the zoom level changes
   // through any path that isn't applyZoom (the per-mode resets after recording /
   // on close), so a leftover CSS scale can't linger after zoom returns to 1×.
@@ -364,14 +382,27 @@ export function CameraCapture({
   const [annotatingId, setAnnotatingId] = useState<string | null>(null);
   // Index (within photo-only items) of the photo open in the swipeable viewer.
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  // Captured video clip open in the inline player (poster thumbnails aren't
+  // playable in PhotoLightbox, so clips get their own <video> overlay).
+  const [previewVideo, setPreviewVideo] = useState<{ id: string; url: string } | null>(null);
+  const closeVideoPreview = useCallback(() => {
+    setPreviewVideo((p) => { if (p) { try { URL.revokeObjectURL(p.url); } catch { /* noop */ } } return null; });
+  }, []);
   // Tell the parent when a photo viewer/markup editor is open over the camera
   // (so it can hide the floating mic). Report closed on unmount.
   const onOverlayChangeRef = useRef(onOverlayChange);
   onOverlayChangeRef.current = onOverlayChange;
   useEffect(() => {
-    onOverlayChangeRef.current?.(viewerIndex !== null || annotatingId !== null);
-  }, [viewerIndex, annotatingId]);
-  useEffect(() => () => { onOverlayChangeRef.current?.(false); }, []);
+    onOverlayChangeRef.current?.(viewerIndex !== null || annotatingId !== null || previewVideo !== null);
+  }, [viewerIndex, annotatingId, previewVideo]);
+  // Revoke an open clip URL if the camera unmounts mid-playback.
+  const previewVideoRef = useRef(previewVideo);
+  previewVideoRef.current = previewVideo;
+  useEffect(() => () => {
+    onOverlayChangeRef.current?.(false);
+    const p = previewVideoRef.current;
+    if (p) { try { URL.revokeObjectURL(p.url); } catch { /* noop */ } }
+  }, []);
   // Flash / torch. Only supported on some devices (typically Android Chrome,
   // back camera). torchSupported gates the button so we don't show a control
   // that does nothing (e.g. iOS Safari, front camera).
@@ -682,6 +713,7 @@ export function CameraCapture({
   const onViewportTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
       pinchRef.current = { startDist: touchDist(e.touches) || 1, startZoom: zoomRef.current };
+      zoomGestureActiveRef.current = true; // freeze the sensor; zoom digitally
       tapRef.current = null; // a two-finger gesture is never a focus tap
     } else if (e.touches.length === 1) {
       const t = e.touches[0];
@@ -699,7 +731,7 @@ export function CameraCapture({
     }
   };
   const onViewportTouchEnd = (e: React.TouchEvent) => {
-    if (e.touches.length < 2) pinchRef.current = null;
+    if (e.touches.length < 2 && pinchRef.current) { pinchRef.current = null; endZoomGesture(); }
     const tp = tapRef.current;
     tapRef.current = null;
     if (!tp || e.touches.length !== 0) return;
@@ -1073,6 +1105,9 @@ export function CameraCapture({
     if (mr && mr.state !== 'inactive') { try { mr.stop(); } catch { /* noop */ } }
     recordingRef.current = false;
     setRecording(false);
+    // Clip done — re-enable the sensor and commit the final zoom (the digital
+    // crop relaxes to a crisp sensor zoom for the resting preview).
+    endZoomGesture();
   }
 
   async function finalizeClip(mime: string) {
@@ -1158,6 +1193,7 @@ export function CameraCapture({
     recorder.onstop = () => { void finalizeClip(mime); };
     mediaRecorderRef.current = recorder;
     try { recorder.start(); } catch { teardownCanvasPipeline(); return; }
+    zoomGestureActiveRef.current = true; // freeze the sensor for the whole clip — zoom digitally
     recordingRef.current = true;
     setRecording(true);
     setRecordSecs(0);
@@ -1208,9 +1244,10 @@ export function CameraCapture({
   }
   function onShutterUp() {
     shutterStartYRef.current = null;
-    // Flush any pending zoom frame and push the final value to the sensor now.
+    // Flush any pending zoom frame so the final target is locked in before we
+    // stop recording (stopRecording → endZoomGesture commits it to the sensor).
     if (zoomDragRafRef.current != null) { cancelAnimationFrame(zoomDragRafRef.current); zoomDragRafRef.current = null; }
-    if (zoomTargetRef.current != null) { applyZoom(zoomTargetRef.current, { immediateHw: true }); zoomTargetRef.current = null; }
+    if (zoomTargetRef.current != null) { applyZoom(zoomTargetRef.current); zoomTargetRef.current = null; }
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
@@ -1380,6 +1417,8 @@ export function CameraCapture({
   }, [uploadPhoto]);
 
   const deletePhoto = useCallback((id: string) => {
+    // If the clip being deleted is open in the player, close it (revokes its URL).
+    setPreviewVideo((p) => { if (p && p.id === id) { try { URL.revokeObjectURL(p.url); } catch { /* noop */ } return null; } return p; });
     setItems((prev) => {
       const found = prev.find((it) => it.id === id);
       if (found) {
@@ -2030,13 +2069,18 @@ export function CameraCapture({
                   src={it.blobUrl}
                   alt=""
                   onClick={() => {
-                    if (it.kind === 'video') return;
+                    if (it.kind === 'video') {
+                      // Play the captured clip (it.file is the video; blobUrl is its poster).
+                      const url = URL.createObjectURL(it.file);
+                      setPreviewVideo({ id: it.id, url });
+                      return;
+                    }
                     const photoItems = items.filter((p) => p.kind !== 'video');
                     const vIdx = photoItems.findIndex((p) => p.id === it.id);
                     if (vIdx >= 0) setViewerIndex(vIdx);
                   }}
-                  className={`w-16 h-16 object-cover rounded border border-white/20 ${it.kind === 'video' ? '' : 'cursor-pointer'}`}
-                  title={it.kind === 'video' ? 'Video clip' : 'Tap to view'}
+                  className="w-16 h-16 object-cover rounded border border-white/20 cursor-pointer"
+                  title={it.kind === 'video' ? 'Tap to play clip' : 'Tap to view'}
                 />
                 {it.kind === 'video' && (
                   <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -2247,6 +2291,33 @@ export function CameraCapture({
           />
         );
       })()}
+
+      {/* Captured video clip player. Poster thumbnails can't play in the photo
+          lightbox, so clips get a simple full-screen <video> overlay. */}
+      {previewVideo && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center"
+          onClick={closeVideoPreview}
+        >
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); closeVideoPreview(); }}
+            aria-label="Close clip"
+            className="absolute top-3 right-3 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-black/60 text-white text-2xl leading-none"
+          >
+            ×
+          </button>
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+          <video
+            src={previewVideo.url}
+            className="max-w-full max-h-full"
+            controls
+            autoPlay
+            playsInline
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
 
       {/* Markup editor (explicit "Mark" action) */}
       {annotatingId && (() => {
