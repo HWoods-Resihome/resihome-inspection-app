@@ -198,6 +198,7 @@ const CLIP_BITRATE = 8_000_000;
 const MAX_ZOOM = 4;
 const ZOOM_DRAG_PX = 520; // thumb travel (px) for the full 1x→MAX_ZOOM range (higher = gentler)
 const ZOOM_DEADZONE_PX = 18; // ignore tiny thumb wobble before zoom kicks in
+const LENS_LS_KEY = 'rw_cam_lens'; // persists the chosen back-lens deviceId across sessions
 
 // Friendly label for a back lens from its (best-effort) device label. Many
 // Android builds give uninformative labels ("camera2 0, facing back") → we fall
@@ -344,9 +345,19 @@ export function CameraCapture({
   // Manual lens selector. Zoom is pure-digital, but the inspector can DELIBERATELY
   // switch the physical back lens (ultra-wide / main / tele) for optical quality —
   // a stream restart, masked by the freeze-frame. null = OS default lens.
-  const [lensDeviceId, setLensDeviceId] = useState<string | null>(null);
+  // The choice is PERSISTED (localStorage) so reopening the camera — even in
+  // another room — defaults to the last back lens used. Restored on first open.
+  const [lensDeviceId, setLensDeviceId] = useState<string | null>(() => {
+    try { return localStorage.getItem(LENS_LS_KEY) || null; } catch { return null; }
+  });
   const lensDeviceIdRef = useRef<string | null>(null);
   useEffect(() => { lensDeviceIdRef.current = lensDeviceId; }, [lensDeviceId]);
+  // Remembered back lens (mirrors localStorage) so a front↔back flip can restore it.
+  const savedLensRef = useRef<string | null>(lensDeviceId);
+  const rememberLens = useCallback((id: string | null) => {
+    savedLensRef.current = id;
+    try { if (id) localStorage.setItem(LENS_LS_KEY, id); else localStorage.removeItem(LENS_LS_KEY); } catch { /* ignore */ }
+  }, []);
   const [backLenses, setBackLenses] = useState<{ id: string; label: string }[]>([]); // selectable back lenses
   const [activeLensId, setActiveLensId] = useState<string | null>(null);              // deviceId actually in use
   const prevLensIdRef = useRef<string | null>(null);     // lens before the current switch (for auto-revert)
@@ -431,10 +442,11 @@ export function CameraCapture({
       try {
         stream = await tryGUM(videoConstraint);
       } catch (e) {
-        // A pinned lens deviceId can fail (busy / removed) — fall back to the OS
-        // default for this facing so the camera never just breaks.
+        // A pinned lens deviceId can fail (busy / removed, or a stale saved id on
+        // a different device) — forget it and fall back to the OS default so the
+        // camera never just breaks.
         if ((videoConstraint as any).deviceId) {
-          if (lensDeviceIdRef.current) setLensDeviceId(null);
+          if (lensDeviceIdRef.current) { rememberLens(null); setLensDeviceId(null); }
           stream = await tryGUM({ facingMode: { ideal: facing }, width: { ideal: CAPTURE_WIDTH }, height: { ideal: CAPTURE_HEIGHT } });
         } else {
           throw e;
@@ -489,7 +501,7 @@ export function CameraCapture({
           const w = ((t?.getSettings?.() as any)?.width as number) || videoRef.current?.videoWidth || 0;
           if (lensDeviceIdRef.current === tappedId && (!live || w === 0)) {
             lensSwitchFreezeRef.current = true;
-            if (videoRef.current) { /* keep the freeze up through the revert */ }
+            rememberLens(prevLensIdRef.current); // don't persist a dead lens
             setLensDeviceId(prevLensIdRef.current);
           }
         }, 1200);
@@ -673,17 +685,16 @@ export function CameraCapture({
       const caps: any = track.getCapabilities?.() || {};
       const adv: any[] = [];
       if ('pointsOfInterest' in caps) adv.push({ pointsOfInterest: [{ x: nx, y: ny }] });
-      if (Array.isArray(caps.focusMode) && caps.focusMode.includes('single-shot')) adv.push({ focusMode: 'single-shot' });
-      else if (Array.isArray(caps.focusMode) && caps.focusMode.includes('manual')) adv.push({ focusMode: 'manual' });
+      // Prefer CONTINUOUS AF directed at the tapped region — it refocuses smoothly
+      // and does NOT freeze the (recording) preview the way a single-shot focus
+      // hunt does. Only fall back to single-shot if continuous isn't offered.
+      if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) adv.push({ focusMode: 'continuous' });
+      else if (Array.isArray(caps.focusMode) && caps.focusMode.includes('single-shot')) adv.push({ focusMode: 'single-shot' });
       if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous')) adv.push({ exposureMode: 'continuous' });
       if (!adv.length) return; // device exposes no focus controls — iOS path
       (track.applyConstraints as any)({ advanced: adv }).catch(() => { /* unsupported */ });
-      // Return to continuous AF so a later scene change still refocuses.
-      window.setTimeout(() => {
-        if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
-          (track.applyConstraints as any)({ advanced: [{ focusMode: 'continuous' }] }).catch(() => { /* noop */ });
-        }
-      }, 2500);
+      // No revert needed — we stay in continuous AF (region-directed), so the
+      // frame keeps running and re-focuses on later scene changes too.
     } catch { /* best-effort */ }
   }, []);
 
@@ -1348,14 +1359,19 @@ export function CameraCapture({
     }
   }, []);
 
-  // Capture a still, requesting the camera's MAX resolution when known (matches
-  // the native camera far better, esp. for zoomed-in shots). Falls back to a
-  // default-settings takePhoto() if the device rejects custom photoSettings.
+  // Capture a still. Requesting the FULL sensor max is slow to capture + encode
+  // (very noticeable at high zoom on a big still); since we save at ≤3024px
+  // anyway, we request ~3000px on the long edge — same final quality, much faster.
+  // Falls back to a default-settings takePhoto() if the device rejects the size.
   const takeBestPhoto = useCallback(async (ic: any): Promise<Blob> => {
     const caps = photoCapsRef.current;
-    if (caps) {
-      try { return await ic.takePhoto({ imageWidth: caps.w, imageHeight: caps.h }); }
-      catch { /* device rejected the settings — fall through to default */ }
+    if (caps && caps.w && caps.h) {
+      const CAP = 3000;
+      const long = Math.max(caps.w, caps.h);
+      const s = long > CAP ? CAP / long : 1;
+      const w = Math.round(caps.w * s), h = Math.round(caps.h * s);
+      try { return await ic.takePhoto({ imageWidth: w, imageHeight: h }); }
+      catch { /* device rejected the size — fall through to default */ }
     }
     return await ic.takePhoto();
   }, []);
@@ -1444,6 +1460,12 @@ export function CameraCapture({
         stampLines.push(...buildGeoStampLines());
         drawEvidenceStamp(ctx, vw, vh, stampLines);
         lastManualCaptureRef.current = Date.now();
+        // The source frame is now captured to canvas and the live preview is back,
+        // so LIFT THE FREEZE NOW — the JPEG encode + upload below run in the
+        // background. This is what makes capture feel fast (esp. at high zoom on a
+        // big still); the screen returns the instant the shot is grabbed, not after
+        // it finishes saving.
+        if (pendingCaptureCountRef.current <= 1) setFrozen(false);
         canvas.toBlob((blob) => {
           if (blob) {
             const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1662,8 +1684,12 @@ export function CameraCapture({
   useBackToClose(isOpen, () => { void handleDone(); });
 
   const flipCamera = useCallback(() => {
-    setLensDeviceId(null); // OS default lens for the new facing
-    setFacing((f) => (f === 'environment' ? 'user' : 'environment'));
+    setFacing((f) => {
+      const next = f === 'environment' ? 'user' : 'environment';
+      // Front has no lens choice; returning to back restores the remembered lens.
+      setLensDeviceId(next === 'environment' ? savedLensRef.current : null);
+      return next;
+    });
     // useEffect on [facing, lensDeviceId] restarts the stream
   }, []);
 
@@ -1675,8 +1701,9 @@ export function CameraCapture({
     prevLensIdRef.current = activeLensId;
     const v = videoRef.current;
     if (v) { showFreezeFrame(v); lensSwitchFreezeRef.current = true; }
+    rememberLens(id); // persist so reopening defaults to this lens
     setLensDeviceId(id);
-  }, [activeLensId, showFreezeFrame]);
+  }, [activeLensId, showFreezeFrame, rememberLens]);
 
   const toggleTorch = useCallback(async () => {
     const track = streamRef.current?.getVideoTracks?.()[0];
