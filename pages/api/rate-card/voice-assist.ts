@@ -263,6 +263,7 @@ const SYSTEM_RULES = [
   `TRASH-OUT: a trash out / debris removal / haul-away is the labor line only. Do NOT also add a dumpster (or roll-off / container) line unless the inspector explicitly says "dumpster". Ask which trash-out size (small/medium/large or the volume) before adding, and add just that one line.`,
   `4. When you have a code and quantity AND the match is confident, call propose_line. The app adds the line automatically and announces it — you do NOT need the inspector to say yes first, and you must NOT claim you added it in your own words. If the match is not confident (see step 1), ask first instead of proposing.`,
   ``,
+  `EDITING vs ADDING: naming a NEW item — a clean, paint, a repair, a fixture, etc. (e.g. "level one sales clean", "replace the microwave") — is always an ADD via propose_line, EVEN IF it comes right after another line. edit_line is ONLY for changing an EXISTING line's quantity / vendor / tenant percent (or a bid item's price / description); it can never set a note or a description on a regular catalog line. If in doubt, add a new line.`,
   `EDITING an existing line (e.g. "make that 50% tenant", "change the paint line to PPW", "that should be 3 not 1"):`,
   `  - Identify which existing line they mean (the most recent one if they say "that"/"the last one", or by description). Use the id from the existing-lines list below.`,
   `  - Call edit_line with that externalId and only the fields to change. The app saves and announces it.`,
@@ -998,18 +999,39 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             let p = Number(tu.input.tenantBillBackPercent);
             if (isFinite(p)) pct = Math.max(0, Math.min(100, Math.round(p / 5) * 5));
           }
-          // Preserve existing bid-item fields; allow changing the price and/or
-          // the vendor-visible description when provided.
+          // description/price are BID-ITEM-ONLY fields. Only apply them when this
+          // line is actually a bid item — otherwise an edit_line carrying a
+          // description (e.g. the model misreading "level one sales clean" as an
+          // edit of the prior line) would silently write it as a NOTE on a
+          // regular catalog line, or a price would turn it into a bid-priced line.
+          const isBid = !!(item?.isBidItem) || existing.customVendorCost != null;
           let bidCost = existing.customVendorCost ?? null;
-          if (tu.input?.price != null) {
+          if (isBid && tu.input?.price != null) {
             const pc = Number(tu.input.price);
             if (isFinite(pc) && pc >= 0) bidCost = Math.round(pc * 100) / 100;
           }
           let bidDesc = existing.customLaborFullDescription ?? null;
           let bidNote = existing.note || '';
-          if (tu.input?.description != null && String(tu.input.description).trim()) {
+          if (isBid && tu.input?.description != null && String(tu.input.description).trim()) {
             bidDesc = String(tu.input.description).trim();
             bidNote = bidDesc;
+          }
+          // If nothing legitimately changeable was provided, this edit_line is
+          // almost certainly a MISCLASSIFIED ADD — the inspector named a new item
+          // (e.g. "level one sales clean") and the model tried to edit the prior
+          // line instead. Bounce it so the model proposes a NEW line rather than
+          // corrupting this one with a stray note.
+          const editChangedQty = tu.input?.quantity != null && isFinite(Number(tu.input.quantity)) && Number(tu.input.quantity) >= 0;
+          const editChangedVendor = tu.input?.vendor != null && VENDORS.includes(String(tu.input.vendor));
+          const editChangedPct = tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent));
+          const editChangedBid = isBid && ((tu.input?.price != null && isFinite(Number(tu.input.price)))
+            || (tu.input?.description != null && String(tu.input.description).trim() !== ''));
+          if (!editChangedQty && !editChangedVendor && !editChangedPct && !editChangedBid) {
+            toolResults.push({
+              type: 'tool_result', tool_use_id: tu.id, is_error: true,
+              content: JSON.stringify({ error: `Nothing editable was provided for "${item ? item.laborShortDescription : existing.lineItemCode}". (description and price apply to BID items only; a regular line can only change quantity/vendor/tenant percent.) If the inspector named a NEW item to add — e.g. "level one sales clean" — call propose_line for it instead of editing this line.` }),
+            });
+            continue;
           }
           // Re-save with the SAME externalId so the existing record is updated.
           const line: RateCardLineInput = {
