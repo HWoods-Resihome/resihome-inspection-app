@@ -198,12 +198,6 @@ const CLIP_BITRATE = 8_000_000;
 const MAX_ZOOM = 4;
 const ZOOM_DRAG_PX = 520; // thumb travel (px) for the full 1x→MAX_ZOOM range (higher = gentler)
 const ZOOM_DEADZONE_PX = 18; // ignore tiny thumb wobble before zoom kicks in
-// Ultra-wide → main lens handoff. Ultra-wide is typically ~0.5× the main lens, so
-// the ultra-wide at 2× ≈ the main at 1× — handing off there is near-seamless and
-// swaps the cropped (soft) wide sensor for the sharp main sensor. Cooldown stops
-// the threshold from thrashing back and forth.
-const LENS_SWITCH_IN_ZOOM = 2.0;
-const LENS_SWITCH_COOLDOWN_MS = 1200;
 
 // Pick the best MediaRecorder mime type this browser supports (Safari → mp4,
 // Chrome/Android → webm). Returns '' if recording is unsupported entirely.
@@ -276,114 +270,30 @@ export function CameraCapture({
   const dragStartZoomRef = useRef(1);
   const zoomTargetRef = useRef<number | null>(null);
   const zoomDragRafRef = useRef<number | null>(null);
-  // Hybrid (hardware-zoom devices): the zoom the SENSOR has actually committed,
-  // and whether an applyConstraints is in flight. The preview CSS-scales by
-  // target/committed so it tracks the finger with zero lag, then relaxes to 1×
-  // as the sensor catches up — no double-zoom because CSS only relaxes once the
-  // hardware confirms the new zoom.
-  const hwAppliedZoomRef = useRef(1);
-  const hwZoomInFlightRef = useRef(false);
   const [zoom, setZoom] = useState(1);
-  // Hardware (sensor) zoom capability. On phones with an ultra-wide lens the
-  // reported zoom.min is BELOW 1, so applying it switches to the WIDE lens.
-  // When present we drive the whole zoom range through the hardware track —
-  // giving true optical/sensor zoom AND wide — and skip the CSS digital crop.
-  // iOS Safari doesn't expose it → digital fallback (zoom IN only).
-  const zoomCapsRef = useRef<{ min: number; max: number } | null>(null);
-  const hwZoomRef = useRef(false);
-  // The DIGITAL crop factor for preview/recording/capture/focus. QUALITY-FIRST:
-  // on hardware-zoom devices the SENSOR (ISP) does the zoom — full resolution,
-  // sharp — so the digital factor is 1 (no crop, never upscale-grainy). Only
-  // digital-only devices (iOS Safari) fall back to a CSS/canvas crop.
-  const effZoom = useCallback(() => (hwZoomRef.current ? 1 : (zoomRef.current || 1)), []);
-  // Preview transform. Hardware mode: NONE — the <video> already shows the
-  // sensor-zoomed (full-quality) frame, so the preview matches the recording
-  // exactly. Digital mode: CSS scale does the whole zoom.
+  // PURE DIGITAL zoom — the whole point of this rewrite. An instant, GPU-cheap
+  // CSS scale on the preview, and a matching center-crop for capture + recording.
+  // We deliberately do NOT use the hardware `zoom` constraint (applyConstraints is
+  // slow on many phones → the laggy zoom) nor physical lens switching (a camera
+  // stream restart → the long black screen). Sharpness comes from the
+  // high-resolution stream we request in getUserMedia. Smooth and instant
+  // everywhere; sticky (never auto-resets).
+  const effZoom = useCallback(() => zoomRef.current || 1, []);
   const updatePreviewTransform = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
-    const scale = hwZoomRef.current ? 1 : (zoomRef.current || 1);
+    const s = zoomRef.current || 1;
     v.style.transformOrigin = 'center';
-    v.style.transform = scale > 1.0005 ? `scale(${scale})` : '';
+    v.style.transform = s > 1.0005 ? `scale(${s})` : '';
   }, []);
-  // Drive the SENSOR zoom toward the latest target as fast as the device allows:
-  // a single in-flight applyConstraints (no fixed throttle), and the moment it
-  // resolves we re-issue toward the newest target. This is the smoothest a
-  // FULL-QUALITY (sensor) zoom can be — we deliberately don't fake it with a
-  // grainy digital crop. hwAppliedZoomRef tracks what the sensor is actually at.
-  const pushHardwareZoom = useCallback(() => {
-    if (!hwZoomRef.current || hwZoomInFlightRef.current) return;
-    const track = streamRef.current?.getVideoTracks?.()[0];
-    if (!track) return;
-    const target = zoomRef.current || 1;
-    if (Math.abs(target - hwAppliedZoomRef.current) < 0.005) return;
-    hwZoomInFlightRef.current = true;
-    Promise.resolve((track.applyConstraints as any)?.({ advanced: [{ zoom: target }] }))
-      .then(() => { hwAppliedZoomRef.current = target; })
-      .catch(() => { /* unsupported / transient reject */ })
-      .finally(() => {
-        hwZoomInFlightRef.current = false;
-        if (Math.abs((zoomRef.current || 1) - hwAppliedZoomRef.current) >= 0.005) pushHardwareZoom();
-      });
-  }, []);
-  // Hand off between the ultra-wide and the main/tele lens based on zoom, so
-  // zooming uses the SHARP main sensor instead of a cropped ultra-wide. Switching
-  // restarts the stream on the chosen deviceId (validated after start); cooldown
-  // prevents thrashing at the threshold.
-  const maybeSwitchLensForZoom = useCallback((z: number) => {
-    if (facingRef.current !== 'environment' || !multiBackRef.current) return;
-    // NEVER swap lenses mid-recording — restarting the stream kills the clip (and
-    // scrambled the zoom). During a clip we stay on the current lens.
-    if (recordingRef.current) return;
-    if (Date.now() - lensSwitchAtRef.current < LENS_SWITCH_COOLDOWN_MS) return;
-    if (lensRoleRef.current === 'wide') {
-      // Hand off at 2× — or sooner if the ultra-wide tops out below that, so we
-      // always switch before the user runs out of optical range.
-      const uwMax = zoomCapsRef.current?.max ?? MAX_ZOOM;
-      const inAt = Math.min(LENS_SWITCH_IN_ZOOM, uwMax * 0.92);
-      if (z >= inAt) {
-        const id = mainLensIdRef.current || backCandidatesRef.current.find((d) => !triedBadLensRef.current.has(d));
-        if (!id) return;
-        beginLensSwitchFreeze();
-        lensSwitchAtRef.current = Date.now();
-        lensRoleRef.current = 'main';
-        lensPinnedRef.current = true;
-        setLensDeviceId(id); // → stream restarts on the main lens
-      }
-    } else {
-      // Zoomed back to the main lens's floor → return to the ultra-wide.
-      const min = zoomCapsRef.current?.min ?? 1;
-      if (z <= min + 0.05) {
-        beginLensSwitchFreeze();
-        lensSwitchAtRef.current = Date.now();
-        lensRoleRef.current = 'wide';
-        lensPinnedRef.current = false;
-        setLensDeviceId(null);
-      }
-    }
-  }, []);
-  // Freeze the current frame on screen so the lens swap doesn't flash black —
-  // the overlay holds until the new lens delivers a frame (cleared in startStream).
-  const beginLensSwitchFreeze = useCallback(() => {
-    const v = videoRef.current;
-    if (v && freezeFnRef.current) { freezeFnRef.current(v); lensSwitchFreezeRef.current = true; }
-  }, []);
-  // Single zoom setter: clamp, update the (digital-mode) preview, and drive the
-  // sensor (hardware mode). Zoom is STICKY — never auto-reset across captures or
-  // recordings (that was the "flashes back to 1×" bug).
   const applyZoom = useCallback((z: number) => {
-    const caps = zoomCapsRef.current;
-    const zMin = caps ? caps.min : 1;
-    const zMax = caps ? caps.max : MAX_ZOOM;
-    const nz = Math.max(zMin, Math.min(zMax, z));
+    const nz = Math.max(1, Math.min(MAX_ZOOM, z));
     zoomRef.current = nz;
     setZoom(nz);
-    updatePreviewTransform();
-    if (caps) pushHardwareZoom();
-    maybeSwitchLensForZoom(nz);
-  }, [updatePreviewTransform, pushHardwareZoom, maybeSwitchLensForZoom]);
-  // Backstop: keep the (digital-mode) preview transform in sync when zoom changes
-  // through a path other than applyZoom (e.g. the on-close reset).
+    updatePreviewTransform(); // imperative → no React re-render in the hot path
+  }, [updatePreviewTransform]);
+  // Backstop: keep the preview transform in sync when zoom changes through a path
+  // other than applyZoom (e.g. the on-close reset).
   useEffect(() => { updatePreviewTransform(); }, [zoom, updatePreviewTransform]);
 
   const [items, setItems] = useState<CaptureItem[]>([]);
@@ -419,26 +329,11 @@ export function CameraCapture({
   const photoCapsRef = useRef<{ w: number; h: number } | null>(null);
 
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
-  const facingRef = useRef(facing);
-  useEffect(() => { facingRef.current = facing; }, [facing]);
-  // Pinned back lens by deviceId (null = OS default for `facing`). Some phones
-  // default `facingMode:environment` to the ULTRA-WIDE; when there are multiple
-  // back cameras we auto-pin the 2nd (the main lens on those phones). No UI.
+  // Front/back only — no per-lens pinning (zoom is pure digital, so we never need
+  // to restart the stream onto a specific physical lens). null = OS default.
   const [lensDeviceId, setLensDeviceId] = useState<string | null>(null);
   const lensDeviceIdRef = useRef<string | null>(null);
   useEffect(() => { lensDeviceIdRef.current = lensDeviceId; }, [lensDeviceId]);
-  const lensPinnedRef = useRef(false); // auto-pick the main lens once per session
-  // Zoom-based lens handoff (ultra-wide ⇄ main). Refs so applyZoom can drive it
-  // without re-creating the callback.
-  const lensRoleRef = useRef<'wide' | 'main'>('wide');     // which lens is active
-  const wideLensIdRef = useRef<string | null>(null);        // the default (ultra-wide) deviceId
-  const mainLensIdRef = useRef<string | null>(null);        // resolved good main/tele deviceId
-  const backCandidatesRef = useRef<string[]>([]);           // other back lens deviceIds to try
-  const triedBadLensRef = useRef<Set<string>>(new Set());   // candidates that proved bad (depth/IR/low-res)
-  const lensSwitchAtRef = useRef(0);                        // last switch time (cooldown)
-  const multiBackRef = useRef(false);                       // >1 usable back lens exists
-  const lensSwitchFreezeRef = useRef(false);                // a freeze-frame is masking a lens switch
-  const freezeFnRef = useRef<((v: HTMLVideoElement) => void) | null>(null); // → showFreezeFrame (set after it's defined)
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -484,9 +379,7 @@ export function CameraCapture({
     try {
       // Stop any existing stream before starting a new one (e.g., when switching facing)
       stopStream();
-      // Reset zoom for the new stream; detectZoom() below re-reads the new
-      // track's capabilities (e.g. the front camera usually has no wide/zoom).
-      zoomCapsRef.current = null; hwZoomRef.current = false; hwAppliedZoomRef.current = 1;
+      // Reset (digital) zoom to 1× for the new stream.
       zoomRef.current = 1; setZoom(1); updatePreviewTransform();
       // New track → invalidate the cached ImageCapture and clear any freeze.
       imageCaptureRef.current = null; imageCaptureTrackRef.current = null; photoCapsRef.current = null;
@@ -524,7 +417,7 @@ export function CameraCapture({
         // A pinned lens deviceId can fail (busy / removed) — fall back to the OS
         // default for this facing so the camera never just breaks.
         if ((videoConstraint as any).deviceId) {
-          if (lensDeviceIdRef.current) { lensPinnedRef.current = true; setLensDeviceId(null); }
+          if (lensDeviceIdRef.current) setLensDeviceId(null);
           stream = await tryGUM({ facingMode: { ideal: facing }, width: { ideal: CAPTURE_WIDTH }, height: { ideal: CAPTURE_HEIGHT } });
         } else {
           throw e;
@@ -534,23 +427,6 @@ export function CameraCapture({
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => { /* play() may reject silently if autoplay is blocked; not fatal */ });
-        // If a lens swap is being masked by the freeze-frame, lift it the instant
-        // the NEW lens actually paints a frame (via requestVideoFrameCallback when
-        // available, else a short settle) so the swap looks fluid, never black.
-        if (lensSwitchFreezeRef.current) {
-          const lift = () => {
-            if (!lensSwitchFreezeRef.current) return;
-            lensSwitchFreezeRef.current = false;
-            if (pendingCaptureCountRef.current === 0) setFrozen(false);
-          };
-          const v = videoRef.current as any;
-          if (v && typeof v.requestVideoFrameCallback === 'function') {
-            try { v.requestVideoFrameCallback(() => lift()); } catch { setTimeout(lift, 220); }
-            setTimeout(lift, 1200); // safety net if the callback never fires
-          } else {
-            setTimeout(lift, 220);
-          }
-        }
       }
       // Keep the live preview continuously autofocused + auto-exposed so every
       // grabbed frame is sharp — this same <video> feeds BOTH the manual shutter
@@ -601,98 +477,9 @@ export function CameraCapture({
         videoRef.current.addEventListener('loadedmetadata', () => { checkTorch(); }, { once: true });
       }
       setTimeout(checkTorch, 800);
-      // Detect the sensor's zoom range (capabilities populate late on Android,
-      // like torch). Runs on a few delays to catch the late capability, but
-      // INITIALIZES ONLY ONCE — re-running must never reset the inspector's
-      // current zoom (that caused the "pinch in → snaps back to 1×" glitch,
-      // which also dropped auto-HD since it's zoom-driven).
-      const detectZoom = () => {
-        if (zoomCapsRef.current) return; // already initialized — leave zoom alone
-        try {
-          const track = streamRef.current?.getVideoTracks?.()[0];
-          const caps: any = track?.getCapabilities?.() || {};
-          const z = caps.zoom;
-          if (z && typeof z.min === 'number' && typeof z.max === 'number' && z.max > z.min) {
-            zoomCapsRef.current = { min: z.min, max: z.max };
-            hwZoomRef.current = true;
-            // CAPABILITY-BASED main-lens fix (not lens-index): a wide/ultra-wide-
-            // capable lens reports zoom.min < 1. On those, normalize to 1.0× —
-            // the standard (main) field of view — so the camera doesn't open
-            // wide. 1.0 is the native FOV for a normal lens (min ≈ 1), so this is
-            // a no-op there → fleet-safe. It's a zoom constraint (smooth), not a
-            // camera switch, and runs ONCE (the early-return above prevents any
-            // later reset of the inspector's zoom).
-            const start = z.min < 1 ? Math.min(z.max, 1) : Math.max(z.min, Math.min(z.max, Number((track?.getSettings?.() as any)?.zoom) || 1));
-            zoomRef.current = start; setZoom(start);
-            hwAppliedZoomRef.current = start; // sensor's committed zoom baseline
-            if (z.min < 1) {
-              try { (track!.applyConstraints as any)({ advanced: [{ zoom: start }] }); } catch { /* noop */ }
-            }
-            updatePreviewTransform();
-          }
-          // No caps yet → leave hwZoom as-is; a later delayed call may find them.
-        } catch { /* best-effort */ }
-      };
-      detectZoom();
-      [600, 1500, 2800].forEach((ms) => setTimeout(detectZoom, ms));
-
-      // ----- Zoom-based lens handoff: discovery + validation -----
-      // Build the list of OTHER back lenses we can hand off to when zooming, and
-      // record the current default as the ultra-wide. Excludes depth/IR/mono by
-      // label when labels exist; on labelless devices we keep all non-current
-      // back lenses and rely on post-switch resolution validation to reject bad
-      // sensors. Runs on every (re)start — cheap, and keeps the list fresh.
-      const discoverBackLenses = async () => {
-        try {
-          const track = streamRef.current?.getVideoTracks?.()[0];
-          const curId = ((track?.getSettings?.() as any)?.deviceId as string) || null;
-          if (lensRoleRef.current === 'wide') wideLensIdRef.current = curId; // default lens = ultra-wide
-          const vids = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
-          const labeled = vids.some((v) => !!v.label);
-          const isBack = (l: string) => /back|rear|environment/i.test(l);
-          const isBad = (l: string) => /depth|tof|infrared|\bir\b|mono/i.test(l);
-          let pool = vids;
-          if (labeled) {
-            const backs = vids.filter((v) => isBack(v.label));
-            pool = (backs.length ? backs : vids).filter((v) => !isBad(v.label));
-          }
-          backCandidatesRef.current = pool
-            .map((v) => v.deviceId)
-            .filter((id) => id && id !== wideLensIdRef.current && !triedBadLensRef.current.has(id));
-          multiBackRef.current = backCandidatesRef.current.length >= 1;
-        } catch { /* enumerate unavailable — single-lens behavior */ }
-      };
-      void discoverBackLenses();
-
-      // Validate a lens we switched TO, but LENIENTLY: only reject if it produced
-      // NO video at all (a dead/ended track), which is the real failure mode for a
-      // non-photo (depth/IR) sensor. A genuine main/tele lens always delivers
-      // frames — even at a modest resolution — so we must NOT reject it on a size
-      // threshold (that was switching the good lens straight back). Lenses that
-      // can't open at all are already handled by the getUserMedia fallback below.
-      if (lensRoleRef.current === 'main' && lensDeviceId) {
-        const badId = lensDeviceId;
-        setTimeout(() => {
-          const t = streamRef.current?.getVideoTracks?.()[0];
-          const live = !!t && t.readyState === 'live' && !t.muted;
-          const w = ((t?.getSettings?.() as any)?.width as number) || videoRef.current?.videoWidth || 0;
-          if (!live || w === 0) {
-            triedBadLensRef.current.add(badId);
-            mainLensIdRef.current = null;
-            const next = backCandidatesRef.current.find((d) => d !== badId && !triedBadLensRef.current.has(d));
-            lensSwitchAtRef.current = Date.now();
-            if (next) { setLensDeviceId(next); }
-            else { lensRoleRef.current = 'wide'; lensPinnedRef.current = false; setLensDeviceId(null); }
-          } else {
-            mainLensIdRef.current = badId; // good lens — cache it for instant future handoffs
-          }
-        }, 1200);
-      }
       setPermissionState('granted');
       setPermissionError('');
     } catch (e: any) {
-      // Never leave a lens-switch freeze stuck if the new stream failed to open.
-      if (lensSwitchFreezeRef.current) { lensSwitchFreezeRef.current = false; if (pendingCaptureCountRef.current === 0) setFrozen(false); }
       const name = e?.name || '';
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
         setPermissionState('denied');
@@ -1355,13 +1142,9 @@ export function CameraCapture({
     // Deadzone so a small wobble doesn't zoom; gentle ramp via ZOOM_DRAG_PX.
     const dy = raw > ZOOM_DEADZONE_PX ? raw - ZOOM_DEADZONE_PX
       : raw < -ZOOM_DEADZONE_PX ? raw + ZOOM_DEADZONE_PX : 0;
-    // Linear from the drag-start zoom across the full range; up = in, down = out.
-    const caps = zoomCapsRef.current;
-    const zMin = caps ? caps.min : 1;
-    const zMax = caps ? caps.max : MAX_ZOOM;
-    zoomTargetRef.current = dragStartZoomRef.current + (dy / ZOOM_DRAG_PX) * (zMax - zMin);
-    // Coalesce rapid pointermoves to ONE zoom update per frame (kills the jank
-    // from setState + applyConstraints firing on every move).
+    // Linear from the drag-start zoom across the 1×→MAX_ZOOM range; up = in.
+    zoomTargetRef.current = dragStartZoomRef.current + (dy / ZOOM_DRAG_PX) * (MAX_ZOOM - 1);
+    // Coalesce rapid pointermoves to ONE zoom update per frame.
     if (zoomDragRafRef.current == null) {
       zoomDragRafRef.current = requestAnimationFrame(() => {
         zoomDragRafRef.current = null;
@@ -1495,9 +1278,6 @@ export function CameraCapture({
       setFrozen(true);
     } catch { /* frame not ready — skip the freeze, no harm */ }
   }, [effZoom]);
-  // Expose showFreezeFrame to earlier callbacks (the lens-switch freeze) via a ref.
-  freezeFnRef.current = showFreezeFrame;
-
   // One capture finished (saved or failed) — drop the freeze once the LAST one
   // in a rapid-fire burst is done.
   const endCapture = useCallback(() => {
@@ -1774,12 +1554,7 @@ export function CameraCapture({
   useBackToClose(isOpen, () => { void handleDone(); });
 
   const flipCamera = useCallback(() => {
-    lensPinnedRef.current = false; // re-auto-pick the main lens when back on rear
-    // Reset the zoom-handoff state for the new facing.
-    lensRoleRef.current = 'wide';
-    mainLensIdRef.current = null;
-    wideLensIdRef.current = null;
-    setLensDeviceId(null); // back to the default lens for the new facing
+    setLensDeviceId(null); // OS default lens for the new facing
     setFacing((f) => (f === 'environment' ? 'user' : 'environment'));
     // useEffect on [facing, lensDeviceId] restarts the stream
   }, []);
