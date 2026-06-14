@@ -1,85 +1,157 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { fetchInspections } from '@/lib/hubspot';
+import {
+  searchInspectionsPage,
+  countInspectionsByStatus,
+  inspectionFacets,
+} from '@/lib/hubspot';
+import type {
+  InspectionQuery,
+  InspectionStatusKey,
+  InspectionSortField,
+  InspectionCounts,
+} from '@/lib/hubspot';
 import { isExternalEmail, EXTERNAL_TEMPLATE } from '@/lib/userAccess';
 import type { InspectionSummary } from '@/lib/types';
 
 /**
- * GET /api/inspections?search=...
+ * GET /api/inspections?search=&status=&inspector=&template=&sort=&dir=&page=&pageSize=
  *
- * The home screen's most-hit endpoint. fetchInspections paginates the HubSpot
- * search API (up to ~5 calls for the default list), so with many concurrent
- * users this is the top source of rate-limit pressure. We protect it with:
- *   - a short-TTL in-memory cache keyed by the search term (the list is global
- *     — filtered client-side — so the cache is safely shared across users);
- *   - single-flight so a burst of concurrent identical loads awaits ONE fetch
- *     instead of each firing its own paginated sweep (the "100 users open the
- *     app at once" case);
+ * The home screen's most-hit endpoint. To scale to 10,000+ inspections the
+ * filter / sort / search / pagination / status-counts all run server-side in
+ * HubSpot (see lib/hubspot.ts) rather than pulling a 500-record window and
+ * working it client-side. We protect HubSpot with:
+ *   - short-TTL in-memory caches keyed by the query (lists are global — the same
+ *     query returns the same data for every user — so the cache is shared);
+ *   - single-flight so a burst of identical loads awaits ONE fetch;
+ *   - separate caches for the page, the status counts (independent of page/sort),
+ *     and the filter facets (rarely change → longer TTL);
  *   - serve-stale-on-error so a transient HubSpot blip doesn't blank the list;
  *   - a ?refresh=1 bypass for manual pull-to-refresh.
- * Mutations (create / bulk-cancel) call bustInspectionsCache() so the same
- * instance reflects them immediately; other instances self-heal within the TTL.
+ * Mutations (create / bulk-cancel) call bustInspectionsCache().
  */
 
-type Entry = { data: InspectionSummary[]; fetchedAt: number };
-const CACHE = new Map<string, Entry>();
-const INFLIGHT = new Map<string, Promise<InspectionSummary[]>>();
-const TTL_MS = 15 * 1000; // short — the list must stay near-live for the field
-const MAX_KEYS = 50;      // bound memory (varied search terms)
+const TTL_MS = 15 * 1000;            // lists + counts: near-live for the field
+const FACET_TTL_MS = 5 * 60 * 1000;  // inspector/template options change rarely
+const MAX_KEYS = 80;                 // bound memory across query variants
 
-/** Invalidate cached lists after a create/cancel so the change shows at once. */
-export function bustInspectionsCache(): void {
-  CACHE.clear();
-  // In-flight fetches are allowed to finish; they just won't be cached-as-fresh
-  // for long since the next request past their resolution re-checks the TTL.
+type ListResult = { items: InspectionSummary[]; total: number };
+type Facets = { inspectors: string[]; templates: string[] };
+type CacheEntry<T> = { data: T; at: number };
+
+function makeCache<T>() {
+  return {
+    cache: new Map<string, CacheEntry<T>>(),
+    inflight: new Map<string, Promise<T>>(),
+  };
 }
 
-async function load(search: string, forceRefresh: boolean): Promise<InspectionSummary[]> {
-  const key = search;
-  if (!forceRefresh) {
-    const hit = CACHE.get(key);
-    if (hit && Date.now() - hit.fetchedAt < TTL_MS) return hit.data;
-    const inflight = INFLIGHT.get(key);
+const lists = makeCache<ListResult>();
+const counts = makeCache<InspectionCounts>();
+const facets = makeCache<Facets>();
+
+/** Invalidate cached lists/counts after a create/cancel so the change shows at once. */
+export function bustInspectionsCache(): void {
+  lists.cache.clear();
+  counts.cache.clear();
+  // Facets (inspector/template options) don't change on create/cancel — leave them.
+}
+
+async function withCache<T>(
+  store: { cache: Map<string, CacheEntry<T>>; inflight: Map<string, Promise<T>> },
+  key: string,
+  ttl: number,
+  force: boolean,
+  fn: () => Promise<T>,
+): Promise<T> {
+  if (!force) {
+    const hit = store.cache.get(key);
+    if (hit && Date.now() - hit.at < ttl) return hit.data;
+    const inflight = store.inflight.get(key);
     if (inflight) return inflight;
   }
   const p = (async () => {
     try {
-      const data = await fetchInspections({ search });
-      if (CACHE.size >= MAX_KEYS) CACHE.clear();
-      CACHE.set(key, { data, fetchedAt: Date.now() });
+      const data = await fn();
+      if (store.cache.size >= MAX_KEYS) store.cache.clear();
+      store.cache.set(key, { data, at: Date.now() });
       return data;
     } finally {
-      INFLIGHT.delete(key);
+      store.inflight.delete(key);
     }
   })();
-  INFLIGHT.set(key, p);
+  store.inflight.set(key, p);
   return p;
 }
 
+const STATUS_KEYS: InspectionStatusKey[] = ['all', 'scheduled', 'in_progress', 'pending_approval', 'completed'];
+const ZERO_COUNTS: InspectionCounts = { all: 0, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0 };
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Defense-in-depth: middleware already gates this, but verify the
-  // session here too so the route is never reachable unauthenticated
-  // even if the middleware matcher changes.
+  // Defense-in-depth: middleware already gates this, but verify the session here
+  // too so the route is never reachable unauthenticated.
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-  const search = typeof req.query.search === 'string' ? req.query.search : '';
-  const refresh = String(req.query.refresh || '') === '1';
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  const search = str(req.query.search).trim();
+  const statusRaw = str(req.query.status);
+  const status: InspectionStatusKey = (STATUS_KEYS as string[]).includes(statusRaw)
+    ? (statusRaw as InspectionStatusKey) : 'all';
+  const inspector = str(req.query.inspector).trim();
+  const templateRaw = str(req.query.template).trim();
+  const sortField: InspectionSortField = str(req.query.sort) === 'scheduled' ? 'scheduled' : 'updated';
+  const sortDir: 'asc' | 'desc' = str(req.query.dir) === 'asc' ? 'asc' : 'desc';
+  const pageSize = Math.min(100, Math.max(1, parseInt(str(req.query.pageSize), 10) || 20));
+  const page = Math.max(1, parseInt(str(req.query.page), 10) || 1);
+  const refresh = str(req.query.refresh) === '1';
+
+  // External (1099) users only ever see their one template — locked server-side
+  // so their list/counts/facets can't be widened by crafting a query param.
+  const external = isExternalEmail(session.email);
+  const forceTemplate = external ? EXTERNAL_TEMPLATE : null;
+  const template = external ? '' : templateRaw;
+
+  const baseQuery: InspectionQuery = { search, status, inspector, template, forceTemplate };
+  // Counts ignore the selected status (each chip shows its own total) and the
+  // page/sort, so cache them on just the constraining filters.
+  const countKey = JSON.stringify({ search, inspector, template, forceTemplate });
+  const listKey = JSON.stringify({ search, status, inspector, template, forceTemplate, sortField, sortDir, page, pageSize });
+  const facetKey = forceTemplate || 'internal';
+
   try {
-    let inspections = await load(search, refresh);
-    // External (1099) users only see 1099-type inspections.
-    if (isExternalEmail(session.email)) {
-      inspections = inspections.filter((i) => String(i.templateType || '') === EXTERNAL_TEMPLATE);
-    }
-    return res.status(200).json({ inspections });
+    const [list, statusCounts, facetData] = await Promise.all([
+      withCache(lists, listKey, TTL_MS, refresh, () =>
+        searchInspectionsPage({ ...baseQuery, sortField, sortDir, page, pageSize })),
+      withCache(counts, countKey, TTL_MS, refresh, () =>
+        countInspectionsByStatus(baseQuery)),
+      withCache(facets, facetKey, FACET_TTL_MS, false, () =>
+        inspectionFacets({ externalTemplate: forceTemplate })),
+    ]);
+    return res.status(200).json({
+      inspections: list.items,
+      total: list.total,
+      counts: statusCounts,
+      facets: facetData,
+      page,
+      pageSize,
+    });
   } catch (e: any) {
     console.error('GET /api/inspections failed:', e);
     // Serve-stale-on-error: a transient HubSpot failure shouldn't blank the list.
-    const stale = CACHE.get(search);
-    if (stale) return res.status(200).json({ inspections: stale.data, stale: true });
+    const staleList = lists.cache.get(listKey)?.data;
+    if (staleList) {
+      return res.status(200).json({
+        inspections: staleList.items,
+        total: staleList.total,
+        counts: counts.cache.get(countKey)?.data || ZERO_COUNTS,
+        facets: facets.cache.get(facetKey)?.data || { inspectors: [], templates: [] },
+        page,
+        pageSize,
+        stale: true,
+      });
+    }
     return res.status(500).json({ error: 'Could not load inspections. Please try again.' });
   }
 }

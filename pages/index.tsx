@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import Head from 'next/head';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppDialog } from '@/components/AppDialog';
 import { useRouter } from 'next/router';
 import type { InspectionSummary } from '@/lib/types';
@@ -12,6 +12,7 @@ import { warmAi } from '@/lib/aiWarm';
 interface MeUser { userId: string; email: string; name: string; }
 
 type StatusFilter = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
+type StatusCounts = { all: number; scheduled: number; in_progress: number; pending_approval: number; completed: number };
 
 export default function Home() {
   const dialog = useAppDialog();
@@ -22,6 +23,11 @@ export default function Home() {
   const [inspections, setInspections] = useState<InspectionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Server-computed metadata for the current query (so filtering/counting/paging
+  // scale to 10,000+ inspections instead of being derived from a 500-row window).
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState<StatusCounts>({ all: 0, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0 });
+  const [facets, setFacets] = useState<{ inspectors: string[]; templates: string[] }>({ inspectors: [], templates: [] });
 
   // Restore the list view (filters/sort/search/paging) from the last time the
   // user was on this page, so backing out of an inspection lands them exactly
@@ -109,24 +115,31 @@ export default function Home() {
     return () => clearTimeout(t);
   }, []);
 
-  // Keep the latest search term in a ref so refetch-on-focus / post-action
-  // reloads honor the active search instead of resetting to the default list.
-  const searchRef = useRef('');
-  searchRef.current = search;
-
-  // Wrapped in useCallback so we can call it from multiple places. When a
-  // search term is active, it's sent to the server so inspections beyond the
-  // recent-500 window are reachable (address / name / inspector match).
-  const fetchInspections = useCallback(async () => {
+  // Fetch one server-side page for the current filter/sort/search/paging state.
+  // The server evaluates filters, sorting, search, pagination, and the status
+  // counts (so none of it depends on how many inspections are loaded client-side).
+  const load = useCallback(async (opts?: { refresh?: boolean }) => {
     try {
-      const term = searchRef.current.trim();
-      const qs = term ? `?search=${encodeURIComponent(term)}` : '';
-      const r = await fetch(`/api/inspections${qs}`, { cache: 'no-store' });
+      const params = new URLSearchParams();
+      const term = search.trim();
+      if (term) params.set('search', term);
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (inspectorFilter !== 'all') params.set('inspector', inspectorFilter);
+      if (templateFilter !== 'all') params.set('template', templateFilter);
+      params.set('sort', sortField);
+      params.set('dir', sortDir);
+      params.set('page', String(page));
+      params.set('pageSize', String(pageSize));
+      if (opts?.refresh) params.set('refresh', '1');
+      const r = await fetch(`/api/inspections?${params.toString()}`, { cache: 'no-store' });
       const data = await r.json();
       if (data.error) {
         setError(data.error);
       } else {
         setInspections(data.inspections || []);
+        setTotal(typeof data.total === 'number' ? data.total : (data.inspections || []).length);
+        if (data.counts) setCounts(data.counts);
+        if (data.facets) setFacets(data.facets);
         setError(null);
       }
     } catch (e: any) {
@@ -134,149 +147,55 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search, statusFilter, inspectorFilter, templateFilter, sortField, sortDir, page, pageSize]);
 
-  // Initial load AND honor the "just_*" query hints by doing a delayed second
-  // fetch (HubSpot search index can lag for fresh creates).
-  // This effect runs ONCE on mount. router.query is read directly inside without
-  // a dependency to prevent re-running when the query changes.
+  // Load whenever any query input changes. `load`'s identity changes with its
+  // deps, so this single debounced effect covers typing in search, tapping a
+  // filter, changing sort, and paging — coalescing rapid changes into one fetch.
   useEffect(() => {
-    fetchInspections();
-    // Check if we arrived with a "just_" hint indicating a fresh record was created
+    setLoading(true);
+    const t = setTimeout(() => { void load(); }, 250);
+    return () => clearTimeout(t);
+  }, [load]);
+
+  // Honor the "just_*" query hint (fresh create) with a delayed re-fetch, since
+  // HubSpot's search index can lag a beat behind a brand-new record.
+  useEffect(() => {
     const url = typeof window !== 'undefined' ? window.location.search : '';
-    if (url.includes('just_')) {
-      const t = setTimeout(fetchInspections, 1800);
-      return () => clearTimeout(t);
-    }
+    if (!url.includes('just_')) return;
+    const t = setTimeout(() => { void load({ refresh: true }); }, 1800);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-fetch when the user returns to this tab (mobile app switching, alt-tab on desktop)
+  // Re-fetch when the user returns to this tab (app switching, alt-tab).
   useEffect(() => {
-    function onFocus() {
-      fetchInspections();
-    }
+    function onFocus() { void load({ refresh: true }); }
     window.addEventListener('focus', onFocus);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [fetchInspections]);
-
-  // Debounced server-side search: re-query when the term changes so older
-  // inspections (past the recent-500 default) surface. Skips the initial mount
-  // (the mount effect already loaded the default list).
-  const didMountSearch = useRef(false);
-  useEffect(() => {
-    if (!didMountSearch.current) { didMountSearch.current = true; return; }
-    const t = setTimeout(() => { setLoading(true); fetchInspections(); }, 400);
-    return () => clearTimeout(t);
-  }, [search, fetchInspections]);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [load]);
 
   async function handleLogout() {
     try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
     router.replace('/login');
   }
 
-  // Apply search + status + inspector + template filters to the inspection list
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const wantStatus = statusFilter;
-    const wantInspector = inspectorFilter; // 'all' or lowercase inspector name
-    const wantTemplate = templateFilter; // 'all' or template internal name
-    return inspections.filter((i) => {
-      // Cancelled inspections are hidden from the app entirely. They still
-      // exist in HubSpot, but the field team doesn't need to see them here.
-      const statusLower = (i.status || '').trim().toLowerCase();
-      if (statusLower === 'cancelled' || statusLower === 'canceled') return false;
-
-      // Search filter — match address, name, OR inspector so a server result
-      // that matched by name/inspector isn't hidden by a narrower client filter.
-      if (q) {
-        const hay = `${i.propertyAddressSnapshot} ${i.inspectionName} ${i.inspectorName}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      // Status filter
-      if (wantStatus !== 'all') {
-        const s = statusLower;
-        if (wantStatus === 'scheduled' && s !== 'scheduled') return false;
-        if (wantStatus === 'in_progress' && !(s === 'in progress' || s === 'in-progress' || s === 'in_progress')) return false;
-        if (wantStatus === 'pending_approval' && !(s === 'pending approval' || s === 'pending-approval' || s === 'pending_approval' || s === 'pendingapproval')) return false;
-        if (wantStatus === 'completed' && !(s === 'completed' || s === 'complete' || s === 'submitted')) return false;
-      }
-      // Inspector filter (case-insensitive name match)
-      if (wantInspector !== 'all') {
-        if ((i.inspectorName || '').trim().toLowerCase() !== wantInspector) return false;
-      }
-      // Template filter (exact match on internal name)
-      if (wantTemplate !== 'all') {
-        if ((i.templateType || '') !== wantTemplate) return false;
-      }
-      return true;
-    });
-  }, [inspections, search, statusFilter, inspectorFilter, templateFilter]);
-
-  // Apply sort. Priority: scheduled_date > completed_at > created_at.
-  // Inspections with no date sort to the end (regardless of asc/desc).
-  // HubSpot Date fields come back as epoch-ms strings; DateTime/ISO fields come
-  // back as ISO 8601. Parse both forms.
-  const sorted = useMemo(() => {
-    const effective = (i: InspectionSummary): number | null => {
-      // "Updated" sorts by last-edited (fallbacks keep older records ordered);
-      // "Scheduled" keeps the prior scheduled-date behavior.
-      const raw = sortField === 'updated'
-        ? (i.updatedAt || i.completedAt || i.createdAt)
-        : (i.scheduledDate || i.completedAt || i.createdAt);
-      if (!raw) return null;
-      if (/^\d+$/.test(raw)) {
-        const n = Number(raw);
-        return isNaN(n) ? null : n;
-      }
-      const t = Date.parse(raw);
-      return isNaN(t) ? null : t;
-    };
-    const copy = [...filtered];
-    copy.sort((a, b) => {
-      const ta = effective(a);
-      const tb = effective(b);
-      // Missing dates always sort to the end
-      if (ta == null && tb == null) return 0;
-      if (ta == null) return 1;
-      if (tb == null) return -1;
-      return sortDir === 'desc' ? tb - ta : ta - tb;
-    });
-    return copy;
-  }, [filtered, sortField, sortDir]);
+  // Filtering, sorting, search, and the status counts are all evaluated
+  // server-side now (see /api/inspections). The browser just renders the page
+  // of results the server returned — `inspections` IS the current page.
 
   // Snap back to page 1 whenever the result set's shape changes (new filter,
-  // search, sort, or page size) so the user isn't stranded on an empty page.
+  // search, sort, or page size) so the user isn't stranded past the last page.
   useEffect(() => {
     setPage(1);
   }, [search, statusFilter, inspectorFilter, templateFilter, sortField, sortDir, pageSize]);
 
-  // Page math. currentPage is clamped in case the list shrank beneath `page`.
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  // Page math derives from the server's total match count for this query.
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageStart = (currentPage - 1) * pageSize;
-  const paged = useMemo(
-    () => sorted.slice(pageStart, pageStart + pageSize),
-    [sorted, pageStart, pageSize]
-  );
-
-  // Count by status for filter chips. Cancelled inspections are excluded
-  // from the app, so they don't count toward any chip (including "All").
-  const counts = useMemo(() => {
-    const c = { all: 0, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0 };
-    for (const i of inspections) {
-      const s = (i.status || '').trim().toLowerCase();
-      if (s === 'cancelled' || s === 'canceled') continue; // hidden everywhere
-      c.all++;
-      if (s === 'scheduled') c.scheduled++;
-      else if (s === 'in progress' || s === 'in-progress' || s === 'in_progress') c.in_progress++;
-      else if (s === 'pending approval' || s === 'pending-approval' || s === 'pending_approval' || s === 'pendingapproval') c.pending_approval++;
-      else if (s === 'completed' || s === 'complete' || s === 'submitted') c.completed++;
-    }
-    return c;
-  }, [inspections]);
+  const anyFilterActive = !!search.trim()
+    || statusFilter !== 'all' || inspectorFilter !== 'all' || templateFilter !== 'all';
 
   // ---- Bulk-select helpers ----
   // A card is selectable for cancellation unless it's completed.
@@ -308,8 +227,8 @@ export default function Home() {
 
   // Select / clear all currently-visible selectable inspections (current page).
   const selectableVisible = useMemo(
-    () => paged.filter(isSelectable),
-    [paged]
+    () => inspections.filter(isSelectable),
+    [inspections]
   );
   const allVisibleSelected = selectableVisible.length > 0
     && selectableVisible.every((i) => selectedIds.has(i.recordId));
@@ -343,8 +262,8 @@ export default function Home() {
       if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
       exitSelectMode();
       // Refresh; HubSpot's index can lag so give it a beat.
-      await fetchInspections();
-      setTimeout(() => { fetchInspections(); }, 1200);
+      await load({ refresh: true });
+      setTimeout(() => { void load({ refresh: true }); }, 1200);
       const skippedCompleted = (data.skipped || []).filter((s: any) => s.reason === 'completed').length;
       if (skippedCompleted > 0) {
         void dialog.alert(`${data.cancelled.length} cancelled. ${skippedCompleted} completed inspection${skippedCompleted === 1 ? ' was' : 's were'} skipped (completed inspections can't be cancelled).`);
@@ -356,37 +275,28 @@ export default function Home() {
     }
   }
 
-  // Derive inspector dropdown options from the loaded inspections.
-  // Each option: { value: lowercase name (filter key), label: original-case display name, count }
-  // Dedupes case-insensitively; uses the first variant seen for display.
-  const inspectorOptions = useMemo(() => {
-    const map = new Map<string, { label: string; count: number }>();
-    for (const i of inspections) {
-      const raw = (i.inspectorName || '').trim();
-      if (!raw) continue;
-      const key = raw.toLowerCase();
-      const existing = map.get(key);
-      if (existing) existing.count++;
-      else map.set(key, { label: raw, count: 1 });
-    }
-    return Array.from(map.entries())
-      .map(([value, { label, count }]) => ({ value, label, count }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [inspections]);
+  // Inspector + template dropdown options come from the server-computed facets
+  // (active users and the known template set) so they're complete regardless of
+  // which page is loaded. The inspector filter value is the exact inspector_name
+  // the server matches on (EQ), so value === label here.
+  const inspectorOptions = useMemo(
+    () => facets.inspectors.map((name) => ({ value: name, label: name })),
+    [facets.inspectors]
+  );
+  const templateOptions = useMemo(
+    () => facets.templates
+      .map((value) => ({ value, label: prettyTemplateLabel(value) }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [facets.templates]
+  );
 
-  // Derive template dropdown options. Templates are stable internal names, but
-  // we'll only show those that appear in the loaded data so the filter is meaningful.
-  const templateOptions = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const i of inspections) {
-      const t = (i.templateType || '').trim();
-      if (!t) continue;
-      map.set(t, (map.get(t) || 0) + 1);
-    }
-    return Array.from(map.entries())
-      .map(([value, count]) => ({ value, label: prettyTemplateLabel(value), count }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [inspections]);
+  // Self-heal a stale saved inspector filter. Older builds stored a lowercased
+  // name as the filter key; the server now matches the exact inspector_name, so
+  // if the saved value isn't a known inspector once facets load, clear it.
+  useEffect(() => {
+    if (inspectorFilter === 'all' || facets.inspectors.length === 0) return;
+    if (!facets.inspectors.includes(inspectorFilter)) setInspectorFilter('all');
+  }, [facets.inspectors, inspectorFilter]);
 
   return (
     <>
@@ -593,9 +503,9 @@ export default function Home() {
             <div className="text-xs text-gray-500 font-heading">
               {loading
                 ? 'Loading...'
-                : sorted.length === 0
+                : total === 0
                 ? `0 of ${counts.all} inspection${counts.all === 1 ? '' : 's'}`
-                : `Showing ${pageStart + 1}–${Math.min(pageStart + pageSize, sorted.length)} of ${sorted.length}`}
+                : `Showing ${pageStart + 1}–${Math.min(pageStart + pageSize, total)} of ${total}`}
             </div>
             {!loading && !error && inspections.length > 0 && (
               selectMode ? (
@@ -659,19 +569,19 @@ export default function Home() {
               Could not load inspections: {error}
             </div>
           )}
-          {!loading && !error && sorted.length === 0 && (
+          {!loading && !error && total === 0 && (
             <div className="text-center py-12">
               <div className="text-sm text-gray-500 mb-2">
-                {inspections.length === 0 ? 'No inspections yet.' : 'No matching inspections.'}
+                {anyFilterActive ? 'No matching inspections.' : 'No inspections yet.'}
               </div>
-              {inspections.length === 0 && (
+              {!anyFilterActive && (
                 <div className="text-xs text-gray-400">
                   Tap &quot;+ New Inspection&quot; above to get started.
                 </div>
               )}
             </div>
           )}
-          {paged.map((i) => (
+          {inspections.map((i) => (
             <InspectionCard
               key={i.recordId}
               inspection={i}
@@ -688,7 +598,7 @@ export default function Home() {
         {/* Pagination bar — frozen at the bottom on desktop, in-flow on mobile.
             Per-page selector (20/50/100) + Back/Next. Hidden while loading,
             erroring, or when there are no results. */}
-        {!loading && !error && sorted.length > 0 && (
+        {!loading && !error && total > 0 && (
           <div className="frozen-foot lz-foot bg-white border-t border-gray-200">
             <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 shrink-0">

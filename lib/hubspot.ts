@@ -683,22 +683,68 @@ export async function fetchPropertyCommunityName(propertyRecordId: string): Prom
  *
  * Sort priority: scheduled_date if set, else completed_at, else createdate (HubSpot built-in).
  */
+// Lightweight properties pulled for the list / summary view.
+const INSPECTION_LIST_PROPERTIES = [
+  'inspection_id_external', 'inspection_name', 'template_type', 'status',
+  'property_address_snapshot', 'inspector_name', 'inspector_email',
+  'bedrooms_at_inspection', 'bathrooms_at_inspection',
+  'started_at', 'completed_at', 'scheduled_date',
+  'total_questions_answered',
+  'pdf_attachment_url',
+  'hs_createdate',
+  'last_edited_at', 'hs_lastmodifieddate',
+];
+
+/** Map a HubSpot inspection search result into a lightweight InspectionSummary. */
+function mapInspectionRow(r: any): InspectionSummary {
+  const p = r.properties || {};
+  return {
+    recordId: r.id,
+    inspectionIdExternal: p.inspection_id_external || '',
+    inspectionName: p.inspection_name || `(Inspection ${r.id})`,
+    templateType: p.template_type || '',
+    status: p.status || '',
+    propertyAddressSnapshot: p.property_address_snapshot || '',
+    inspectorName: p.inspector_name || '',
+    inspectorEmail: p.inspector_email || '',
+    bedroomsAtInspection: p.bedrooms_at_inspection != null && p.bedrooms_at_inspection !== ''
+      ? Number(p.bedrooms_at_inspection) : null,
+    bathroomsAtInspection: p.bathrooms_at_inspection != null && p.bathrooms_at_inspection !== ''
+      ? Number(p.bathrooms_at_inspection) : null,
+    startedAt: p.started_at || null,
+    completedAt: p.completed_at || null,
+    scheduledDate: p.scheduled_date || null,
+    createdAt: p.hs_createdate || null,
+    updatedAt: p.last_edited_at || p.hs_lastmodifieddate || null,
+    totalQuestionsAnswered: p.total_questions_answered != null && p.total_questions_answered !== ''
+      ? Number(p.total_questions_answered) : null,
+    pdfUrl: p.pdf_attachment_url || null,
+    regionSnapshot: p.region_snapshot || null,
+    sectionListJson: p.section_list_json || null,
+    pdfMasterUrl: null,
+    pdfChargebackUrl: null,
+    pdfChargebackXlsxUrl: null,
+    pdfVendorUrlsJson: null,
+    pdfGeneratedAt: null,
+    sourceRateCardId: null,
+    sourceRateCardName: null,
+    qcVerdict: null,
+    qcPassCount: null,
+    qcFailCount: null,
+    submittedAt: null,
+    submittedByEmail: null,
+    approvedByName: null,
+    approvedAt: null,
+    resolutionTimingJson: null,
+  };
+}
+
 export async function fetchInspections(opts: { search?: string } = {}): Promise<InspectionSummary[]> {
   const { inspection: typeId } = typeIds();
   // A search term lets the user reach inspections beyond the recent-500 window
   // (address / name / inspector substring match), so old records aren't
   // unreachable from the list.
   const search = (opts.search || '').trim();
-  const properties = [
-    'inspection_id_external', 'inspection_name', 'template_type', 'status',
-    'property_address_snapshot', 'inspector_name', 'inspector_email',
-    'bedrooms_at_inspection', 'bathrooms_at_inspection',
-    'started_at', 'completed_at', 'scheduled_date',
-    'total_questions_answered',
-    'pdf_attachment_url',
-    'hs_createdate',
-    'last_edited_at', 'hs_lastmodifieddate',
-  ];
 
   const out: InspectionSummary[] = [];
   let after: string | undefined = undefined;
@@ -716,7 +762,7 @@ export async function fetchInspections(opts: { search?: string } = {}): Promise<
   do {
     const body: any = {
       filterGroups: searchGroups,
-      properties,
+      properties: INSPECTION_LIST_PROPERTIES,
       limit: 100,
       sorts: [{ propertyName: 'hs_createdate', direction: 'DESCENDING' }],
     };
@@ -725,51 +771,7 @@ export async function fetchInspections(opts: { search?: string } = {}): Promise<
       method: 'POST',
       body: JSON.stringify(body),
     });
-    for (const r of resp.results || []) {
-      const p = r.properties || {};
-      out.push({
-        recordId: r.id,
-        inspectionIdExternal: p.inspection_id_external || '',
-        inspectionName: p.inspection_name || `(Inspection ${r.id})`,
-        templateType: p.template_type || '',
-        status: p.status || '',
-        propertyAddressSnapshot: p.property_address_snapshot || '',
-        inspectorName: p.inspector_name || '',
-        inspectorEmail: p.inspector_email || '',
-        bedroomsAtInspection: p.bedrooms_at_inspection != null && p.bedrooms_at_inspection !== ''
-          ? Number(p.bedrooms_at_inspection)
-          : null,
-        bathroomsAtInspection: p.bathrooms_at_inspection != null && p.bathrooms_at_inspection !== ''
-          ? Number(p.bathrooms_at_inspection)
-          : null,
-        startedAt: p.started_at || null,
-        completedAt: p.completed_at || null,
-        scheduledDate: p.scheduled_date || null,
-        createdAt: p.hs_createdate || null,
-        updatedAt: p.last_edited_at || p.hs_lastmodifieddate || null,
-        totalQuestionsAnswered: p.total_questions_answered != null && p.total_questions_answered !== ''
-          ? Number(p.total_questions_answered)
-          : null,
-        pdfUrl: p.pdf_attachment_url || null,
-        regionSnapshot: p.region_snapshot || null,
-        sectionListJson: p.section_list_json || null,
-        pdfMasterUrl: null,
-        pdfChargebackUrl: null,
-        pdfChargebackXlsxUrl: null,
-        pdfVendorUrlsJson: null,
-        pdfGeneratedAt: null,
-        sourceRateCardId: null,
-        sourceRateCardName: null,
-        qcVerdict: null,
-        qcPassCount: null,
-        qcFailCount: null,
-        submittedAt: null,
-        submittedByEmail: null,
-        approvedByName: null,
-        approvedAt: null,
-        resolutionTimingJson: null,
-      });
-    }
+    for (const r of resp.results || []) out.push(mapInspectionRow(r));
     after = resp.paging?.next?.after;
     pages++;
     // Cap the default (no-search) list at 500; a search narrows server-side so
@@ -778,6 +780,163 @@ export async function fetchInspections(opts: { search?: string } = {}): Promise<
   } while (after);
 
   return out;
+}
+
+// ============================================================================
+// Server-side list: filtering, sorting, paging, and status counts.
+//
+// This is what lets the home screen scale to 10,000+ inspections: instead of
+// pulling a recent-500 window and filtering/counting/paging in the browser, the
+// query is pushed into HubSpot's search API. Filters + sort + offset paging are
+// evaluated server-side, and accurate per-status counts come from each search
+// response's `total` (the search API reports the full match count even though
+// it only lets you PAGE through the first 10,000 — well within reach once a
+// status/inspector/template filter narrows the set).
+// ============================================================================
+
+// Status is written lowercase-underscore, but legacy records used other casings;
+// match defensively with the known variants.
+const STATUS_VARIANTS: Record<string, string[]> = {
+  scheduled: ['scheduled', 'Scheduled'],
+  in_progress: ['in_progress', 'in progress', 'in-progress', 'In Progress'],
+  pending_approval: ['pending_approval', 'pending approval', 'pending-approval', 'pendingapproval', 'Pending Approval'],
+  completed: ['completed', 'complete', 'Completed', 'submitted'],
+};
+const CANCELLED_VARIANTS = ['cancelled', 'canceled', 'Cancelled', 'Canceled'];
+
+// The inspection templates currently offered (used to populate the filter
+// dropdown without scanning the whole dataset for distinct values).
+const CURRENT_TEMPLATE_TYPES = [
+  'pm_scope_rate_card',
+  'pm_turn_reinspect_qc',
+  'pm_community_inspection',
+  'pm_vacancy_occupancy_check',
+  'qc_new_construction_rrqc',
+  'leasing_agent_1099_property_inspection',
+];
+
+export type InspectionStatusKey = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
+export type InspectionSortField = 'updated' | 'scheduled';
+
+export interface InspectionQuery {
+  search?: string;
+  status?: InspectionStatusKey;
+  inspector?: string;            // exact inspector_name; '' / 'all' = no filter
+  template?: string;             // exact template_type; '' / 'all' = no filter
+  forceTemplate?: string | null; // external (1099) users are locked to one template
+}
+
+export interface InspectionCounts {
+  all: number; scheduled: number; in_progress: number; pending_approval: number; completed: number;
+}
+
+// AND-filters that constrain a query (everything except the search OR).
+function inspectionAndFilters(q: InspectionQuery): any[] {
+  const filters: any[] = [];
+  const status = q.status && q.status !== 'all' ? q.status : '';
+  if (status && STATUS_VARIANTS[status]) {
+    filters.push({ propertyName: 'status', operator: 'IN', values: STATUS_VARIANTS[status] });
+  } else {
+    // "All" still hides cancelled inspections from the field team.
+    filters.push({ propertyName: 'status', operator: 'NOT_IN', values: CANCELLED_VARIANTS });
+  }
+  const template = (q.forceTemplate || (q.template && q.template !== 'all' ? q.template : '') || '').trim();
+  if (template) filters.push({ propertyName: 'template_type', operator: 'EQ', value: template });
+  const inspector = (q.inspector && q.inspector !== 'all' ? q.inspector : '').trim();
+  if (inspector) filters.push({ propertyName: 'inspector_name', operator: 'EQ', value: inspector });
+  return filters;
+}
+
+// Compose filterGroups. When searching, replicate the AND-filters into each of
+// the three search dimensions (address / name / inspector) so search ANDs with
+// the active filters (HubSpot ORs across groups, ANDs within a group).
+function inspectionFilterGroups(q: InspectionQuery): any[] {
+  const and = inspectionAndFilters(q);
+  const search = (q.search || '').trim();
+  if (!search) return [{ filters: and }];
+  const token = `*${search}*`;
+  return ['property_address_snapshot', 'inspection_name', 'inspector_name'].map((propertyName) => ({
+    filters: [{ propertyName, operator: 'CONTAINS_TOKEN', value: token }, ...and],
+  }));
+}
+
+const SORT_PROPERTY: Record<InspectionSortField, string> = {
+  updated: 'hs_lastmodifieddate',
+  scheduled: 'scheduled_date',
+};
+
+/**
+ * Server-side, filtered, sorted, paginated inspection list. Offset paging uses
+ * HubSpot's numeric `after` cursor (valid through the first 10,000 results of a
+ * query). Returns the page of items plus the full match `total` for the pager.
+ */
+export async function searchInspectionsPage(params: InspectionQuery & {
+  sortField?: InspectionSortField;
+  sortDir?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
+}): Promise<{ items: InspectionSummary[]; total: number }> {
+  const { inspection: typeId } = typeIds();
+  const sortField: InspectionSortField = params.sortField === 'scheduled' ? 'scheduled' : 'updated';
+  const direction = params.sortDir === 'asc' ? 'ASCENDING' : 'DESCENDING';
+  const pageSize = Math.min(100, Math.max(1, params.pageSize || 20));
+  const page = Math.max(1, params.page || 1);
+  const offset = (page - 1) * pageSize;
+  const body: any = {
+    filterGroups: inspectionFilterGroups(params),
+    properties: INSPECTION_LIST_PROPERTIES,
+    limit: pageSize,
+    sorts: [{ propertyName: SORT_PROPERTY[sortField], direction }],
+  };
+  // HubSpot caps offset paging at 10,000; clamp so a very deep page never errors.
+  if (offset > 0) body.after = String(Math.min(offset, Math.max(0, 10000 - pageSize)));
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  const items = (resp.results || []).map(mapInspectionRow);
+  const total = typeof resp.total === 'number' ? resp.total : items.length;
+  return { items, total };
+}
+
+/**
+ * Per-status counts for the filter chips, honoring the active (non-status)
+ * filters. One cheap count-only search per chip, run in parallel; the count is
+ * read off each search response's `total`.
+ */
+export async function countInspectionsByStatus(q: InspectionQuery): Promise<InspectionCounts> {
+  const { inspection: typeId } = typeIds();
+  const keys: InspectionStatusKey[] = ['all', 'scheduled', 'in_progress', 'pending_approval', 'completed'];
+  const countOne = async (status: InspectionStatusKey): Promise<number> => {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filterGroups: inspectionFilterGroups({ ...q, status }),
+        properties: ['hs_object_id'],
+        limit: 1,
+      }),
+    });
+    return typeof resp.total === 'number' ? resp.total : (resp.results || []).length;
+  };
+  const [all, scheduled, in_progress, pending_approval, completed] = await Promise.all(keys.map(countOne));
+  return { all, scheduled, in_progress, pending_approval, completed };
+}
+
+/**
+ * Options for the inspector + template filter dropdowns, derived WITHOUT a full
+ * dataset scan: inspectors come from the active-users list (assignment is gated
+ * to active users), templates from the known current set. External users only
+ * ever see their one template.
+ */
+export async function inspectionFacets(opts: { externalTemplate?: string | null } = {}): Promise<{ inspectors: string[]; templates: string[] }> {
+  let inspectors: string[] = [];
+  try {
+    const users = await fetchActiveUsers();
+    inspectors = Array.from(new Set(users.map((u) => (u.fullName || '').trim()).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b));
+  } catch { inspectors = []; }
+  const templates = opts.externalTemplate ? [opts.externalTemplate] : CURRENT_TEMPLATE_TYPES;
+  return { inspectors, templates };
 }
 
 /**
