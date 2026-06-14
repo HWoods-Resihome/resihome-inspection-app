@@ -199,6 +199,18 @@ const MAX_ZOOM = 4;
 const ZOOM_DRAG_PX = 520; // thumb travel (px) for the full 1x→MAX_ZOOM range (higher = gentler)
 const ZOOM_DEADZONE_PX = 18; // ignore tiny thumb wobble before zoom kicks in
 
+// Friendly label for a back lens from its (best-effort) device label. Many
+// Android builds give uninformative labels ("camera2 0, facing back") → we fall
+// back to "Lens N" and the inspector just taps to find the one they want.
+function lensLabel(raw: string, index: number): string {
+  const l = (raw || '').toLowerCase();
+  if (/ultra|0\.5/.test(l)) return '0.5×';
+  if (/tele|telephoto/.test(l)) return 'Tele';
+  if (/macro/.test(l)) return 'Macro';
+  if (/wide|main|back camera 0|rear camera 0/.test(l)) return '1×';
+  return `Lens ${index + 1}`;
+}
+
 // Pick the best MediaRecorder mime type this browser supports (Safari → mp4,
 // Chrome/Android → webm). Returns '' if recording is unsupported entirely.
 function pickClipMime(): string {
@@ -329,11 +341,16 @@ export function CameraCapture({
   const photoCapsRef = useRef<{ w: number; h: number } | null>(null);
 
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
-  // Front/back only — no per-lens pinning (zoom is pure digital, so we never need
-  // to restart the stream onto a specific physical lens). null = OS default.
+  // Manual lens selector. Zoom is pure-digital, but the inspector can DELIBERATELY
+  // switch the physical back lens (ultra-wide / main / tele) for optical quality —
+  // a stream restart, masked by the freeze-frame. null = OS default lens.
   const [lensDeviceId, setLensDeviceId] = useState<string | null>(null);
   const lensDeviceIdRef = useRef<string | null>(null);
   useEffect(() => { lensDeviceIdRef.current = lensDeviceId; }, [lensDeviceId]);
+  const [backLenses, setBackLenses] = useState<{ id: string; label: string }[]>([]); // selectable back lenses
+  const [activeLensId, setActiveLensId] = useState<string | null>(null);              // deviceId actually in use
+  const prevLensIdRef = useRef<string | null>(null);     // lens before the current switch (for auto-revert)
+  const lensSwitchFreezeRef = useRef(false);             // freeze-frame is masking a lens switch
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -427,6 +444,55 @@ export function CameraCapture({
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => { /* play() may reject silently if autoplay is blocked; not fatal */ });
+        // If a lens switch is being masked by the freeze-frame, lift it the instant
+        // the new lens paints (so the swap reads as a quick freeze, never black).
+        if (lensSwitchFreezeRef.current) {
+          const lift = () => {
+            if (!lensSwitchFreezeRef.current) return;
+            lensSwitchFreezeRef.current = false;
+            if (pendingCaptureCountRef.current === 0) setFrozen(false);
+          };
+          const v = videoRef.current as any;
+          if (typeof v.requestVideoFrameCallback === 'function') {
+            try { v.requestVideoFrameCallback(() => lift()); } catch { setTimeout(lift, 250); }
+            setTimeout(lift, 1500); // safety net
+          } else { setTimeout(lift, 250); }
+        }
+      }
+
+      // ----- Manual lens selector: discover back lenses + note the active one -----
+      void (async () => {
+        try {
+          const track = streamRef.current?.getVideoTracks?.()[0];
+          const curId = ((track?.getSettings?.() as any)?.deviceId as string) || null;
+          setActiveLensId(curId);
+          if (facing !== 'environment') { setBackLenses([]); return; }
+          const vids = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+          const isBack = (l: string) => /back|rear|environment/i.test(l);
+          const isBad = (l: string) => /depth|tof|infrared|\bir\b|mono/i.test(l);
+          const labeled = vids.some((v) => !!v.label);
+          let backs = labeled ? vids.filter((v) => isBack(v.label) && !isBad(v.label)) : vids;
+          if (labeled && backs.length === 0) backs = vids.filter((v) => !isBad(v.label));
+          const named = backs.filter((v) => v.deviceId).map((v, i) => ({ id: v.deviceId, label: lensLabel(v.label, i) }));
+          setBackLenses(named.length >= 2 ? named : []); // only show the control when there's a choice
+        } catch { setBackLenses([]); }
+      })();
+
+      // Light validation: if the lens we just switched TO is dead (a depth/IR
+      // sensor that opened but yields no video), revert to the previous lens.
+      // Only triggers on a genuinely dead track — never false-reverts a real lens.
+      if (lensDeviceId && lensDeviceId !== prevLensIdRef.current) {
+        const tappedId = lensDeviceId;
+        setTimeout(() => {
+          const t = streamRef.current?.getVideoTracks?.()[0];
+          const live = !!t && t.readyState === 'live' && !t.muted;
+          const w = ((t?.getSettings?.() as any)?.width as number) || videoRef.current?.videoWidth || 0;
+          if (lensDeviceIdRef.current === tappedId && (!live || w === 0)) {
+            lensSwitchFreezeRef.current = true;
+            if (videoRef.current) { /* keep the freeze up through the revert */ }
+            setLensDeviceId(prevLensIdRef.current);
+          }
+        }, 1200);
       }
       // Keep the live preview continuously autofocused + auto-exposed so every
       // grabbed frame is sharp — this same <video> feeds BOTH the manual shutter
@@ -480,6 +546,8 @@ export function CameraCapture({
       setPermissionState('granted');
       setPermissionError('');
     } catch (e: any) {
+      // Don't leave a lens-switch freeze stuck if the new lens failed to open.
+      if (lensSwitchFreezeRef.current) { lensSwitchFreezeRef.current = false; if (pendingCaptureCountRef.current === 0) setFrozen(false); }
       const name = e?.name || '';
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
         setPermissionState('denied');
@@ -619,7 +687,31 @@ export function CameraCapture({
     } catch { /* best-effort */ }
   }, []);
 
+  // Re-run autofocus at the center of the frame — used after a zoom change so the
+  // subject is re-acquired ("auto focus on zoom").
+  const refocusCenter = useCallback(() => {
+    const box = viewportRef.current;
+    if (!box) return;
+    const r = box.getBoundingClientRect();
+    if (r.width && r.height) focusAt(r.left + r.width / 2, r.top + r.height / 2);
+  }, [focusAt]);
+  // Debounce the zoom-driven refocus so it fires once when the gesture settles,
+  // not on every frame of a pinch/drag.
+  const zoomFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleZoomRefocus = useCallback(() => {
+    if (zoomFocusTimerRef.current) clearTimeout(zoomFocusTimerRef.current);
+    zoomFocusTimerRef.current = setTimeout(() => { zoomFocusTimerRef.current = null; refocusCenter(); }, 350);
+  }, [refocusCenter]);
+
   const onViewportTouchStart = (e: React.TouchEvent) => {
+    // DURING RECORDING the shutter is held (zoom is the shutter-drag), so the
+    // surface always has that extra touch — never treat a preview touch as a
+    // pinch here, just track it as a focus tap (tap-to-focus mid-video).
+    if (recordingRef.current) {
+      const t = e.changedTouches[0];
+      if (t) tapRef.current = { x: t.clientX, y: t.clientY, t: Date.now(), moved: false, target: t.target };
+      return;
+    }
     if (e.touches.length === 2) {
       pinchRef.current = { startDist: touchDist(e.touches) || 1, startZoom: zoomRef.current };
       tapRef.current = null; // a two-finger gesture is never a focus tap
@@ -629,9 +721,14 @@ export function CameraCapture({
     }
   };
   const onViewportTouchMove = (e: React.TouchEvent) => {
+    if (recordingRef.current) {
+      if (tapRef.current) {
+        const t = e.changedTouches[0];
+        if (t && Math.hypot(t.clientX - tapRef.current.x, t.clientY - tapRef.current.y) > 12) tapRef.current.moved = true;
+      }
+      return;
+    }
     if (e.touches.length === 2 && pinchRef.current) {
-      // Pinch maps to the live range — below 1 reaches the wide lens when the
-      // hardware supports it (applyZoom clamps + pushes to the sensor).
       applyZoom(pinchRef.current.startZoom * (touchDist(e.touches) / pinchRef.current.startDist));
     } else if (tapRef.current && e.touches.length === 1) {
       const t = e.touches[0];
@@ -639,7 +736,18 @@ export function CameraCapture({
     }
   };
   const onViewportTouchEnd = (e: React.TouchEvent) => {
+    // Recording: a clean preview tap → focus (ignore the held shutter touch in
+    // the surface-wide touch count).
+    if (recordingRef.current) {
+      const tp0 = tapRef.current; tapRef.current = null;
+      const ct0 = e.changedTouches[0];
+      const onPreview = !!tp0 && (tp0.target === videoRef.current || !!viewportRef.current?.contains(tp0.target as Node));
+      if (tp0 && ct0 && !tp0.moved && (Date.now() - tp0.t) < 400 && onPreview) focusAt(ct0.clientX, ct0.clientY);
+      return;
+    }
+    const wasPinch = !!pinchRef.current;
     if (e.touches.length < 2) pinchRef.current = null;
+    if (wasPinch) { scheduleZoomRefocus(); return; } // pinch-zoom ended → refocus
     const tp = tapRef.current;
     tapRef.current = null;
     if (!tp || e.touches.length !== 0) return;
@@ -1148,7 +1256,7 @@ export function CameraCapture({
     if (zoomDragRafRef.current == null) {
       zoomDragRafRef.current = requestAnimationFrame(() => {
         zoomDragRafRef.current = null;
-        if (zoomTargetRef.current != null) applyZoom(zoomTargetRef.current);
+        if (zoomTargetRef.current != null) { applyZoom(zoomTargetRef.current); scheduleZoomRefocus(); }
       });
     }
   }
@@ -1558,6 +1666,17 @@ export function CameraCapture({
     setFacing((f) => (f === 'environment' ? 'user' : 'environment'));
     // useEffect on [facing, lensDeviceId] restarts the stream
   }, []);
+
+  // Manual lens switch (tap a lens chip). Freeze-masked so the stream restart
+  // reads as a quick freeze, not a black flash. Records the previous lens for the
+  // dead-track auto-revert in startStream.
+  const switchToLens = useCallback((id: string) => {
+    if (id === activeLensId) return;
+    prevLensIdRef.current = activeLensId;
+    const v = videoRef.current;
+    if (v) { showFreezeFrame(v); lensSwitchFreezeRef.current = true; }
+    setLensDeviceId(id);
+  }, [activeLensId, showFreezeFrame]);
 
   const toggleTorch = useCallback(async () => {
     const track = streamRef.current?.getVideoTracks?.()[0];
@@ -2011,6 +2130,28 @@ export function CameraCapture({
                   <span className="text-white/80 text-[11px] font-heading">Slide up/down to zoom</span>
                 </div>
               </>
+            )}
+            {/* Lens selector — deliberate physical-lens switch (ultra-wide / main /
+                tele). Hidden while recording (a swap restarts the stream). Only
+                shown when the device exposes more than one back lens. */}
+            {!recording && permissionState === 'granted' && backLenses.length >= 2 && (
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 bg-black/55 backdrop-blur-sm rounded-full px-1.5 py-1">
+                {backLenses.map((lens) => {
+                  const active = lens.id === activeLensId;
+                  return (
+                    <button
+                      key={lens.id}
+                      type="button"
+                      onClick={() => switchToLens(lens.id)}
+                      aria-pressed={active}
+                      aria-label={`Switch to ${lens.label} lens`}
+                      className={`min-w-[36px] px-2.5 py-1 rounded-full text-[11px] font-heading font-semibold transition-colors ${active ? 'bg-white text-black' : 'text-white/85 hover:bg-white/15'}`}
+                    >
+                      {lens.label}
+                    </button>
+                  );
+                })}
+              </div>
             )}
             {/* Top-right control cluster: phone-camera fallback + flip. */}
             <div className="absolute top-3 right-3 flex items-center gap-2">
