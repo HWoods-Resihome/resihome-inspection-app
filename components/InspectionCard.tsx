@@ -58,11 +58,6 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
   const updated = fmtDate(i.updatedAt);
   const tmpl = templateLabel(i.templateType);
 
-  // Progress: only show if we have data (Completed inspections always have it;
-  // Scheduled inspections don't).
-  // total_questions_answered is set at submit, so it's only meaningful for Completed/In Progress.
-  const hasProgress = i.totalQuestionsAnswered != null && i.totalQuestionsAnswered > 0;
-
   const { street, locality } = splitAddress(i.propertyAddressSnapshot || i.inspectionName);
 
   const inner = (
@@ -94,13 +89,6 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
         {i.inspectorName && <span className="truncate">{i.inspectorName}</span>}
         {updated && <span className="text-gray-400 ml-auto shrink-0 whitespace-nowrap">Updated {updated}</span>}
       </div>
-      {hasProgress && (
-        <div className="mt-2">
-          <div className="text-xs text-gray-500 font-heading">
-            {i.totalQuestionsAnswered} answers
-          </div>
-        </div>
-      )}
     </>
   );
 
