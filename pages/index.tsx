@@ -172,9 +172,13 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-fetch when the user returns to this tab (app switching, alt-tab).
+  // Re-fetch when the user returns to this tab (app switching, alt-tab). This
+  // goes through the server cache + single-flight (NOT a forced refresh): with
+  // many field users backgrounding/foregrounding the app, force-refreshing on
+  // every focus would bypass the cache and storm HubSpot. The short list TTL
+  // keeps it near-live anyway.
   useEffect(() => {
-    function onFocus() { void load({ refresh: true }); }
+    function onFocus() { void load(); }
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [load]);

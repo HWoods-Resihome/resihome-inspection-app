@@ -919,7 +919,7 @@ export async function countInspectionsByStatus(q: InspectionQuery): Promise<Insp
 // `q`. HubSpot has no distinct/aggregation API, so the filter dropdowns derive
 // their options from the most-recently-touched matching records. Capped so a
 // broad query (e.g. status=all) still costs O(cap), not O(dataset).
-const FACET_SCAN_MAX_PAGES = 12; // up to ~1,200 most-recently-touched matches
+const FACET_SCAN_MAX_PAGES = 5; // up to ~500 most-recently-touched matches — plenty for a dropdown, cheap under load
 
 async function scanInspectionProps(q: InspectionQuery, properties: string[]): Promise<any[]> {
   const { inspection: typeId } = typeIds();
@@ -1134,10 +1134,20 @@ export async function fetchActiveUsers(): Promise<HubSpotUser[]> {
   return users.filter((u) => activeEmails.has(u.email.trim().toLowerCase()));
 }
 
+// Association type IDs are stable, provisioned-once metadata, but were being
+// re-fetched on EVERY answer-create batch (two lookups per save). Under hundreds
+// of concurrent autosaves that's a large, avoidable multiplier on HubSpot's
+// association-labels endpoint, so memoize the resolved id. Only a FOUND id is
+// cached (forever); a miss stays uncached so a label provisioned later is picked
+// up without a cold start.
+const _assocTypeIdCache = new Map<string, number>();
 async function getAssociationTypeId(fromTypeId: string, toTypeId: string, label: string): Promise<number | null> {
+  const key = `${fromTypeId}:${toTypeId}:${label}`;
+  const cached = _assocTypeIdCache.get(key);
+  if (cached !== undefined) return cached;
   const resp = await hubspotFetch(assocLabelsUrl(fromTypeId, toTypeId));
   for (const a of resp.results || []) {
-    if (a.label === label) return a.typeId;
+    if (a.label === label) { _assocTypeIdCache.set(key, a.typeId); return a.typeId; }
   }
   return null;
 }
@@ -2255,18 +2265,29 @@ export async function updateProperty(recordId: string, props: Record<string, any
  * they stay in sync with the field's configured options. Returns [] on any
  * error so the caller can fall back gracefully.
  */
+// Property dropdown options are global schema metadata (e.g. air-filter sizes),
+// identical for every user and rarely changed — but were read from HubSpot on
+// every inspection-detail load (3 reads per open). Cache them so hundreds of
+// concurrent opens don't each re-read the schema; a short-ish TTL keeps the
+// scroll-wheels in sync after an admin edits the field.
+const _propFieldOptionsCache = new Map<string, { opts: string[]; at: number }>();
+const PROP_FIELD_OPTIONS_TTL_MS = 30 * 60 * 1000;
 export async function fetchPropertyFieldOptions(fieldName: string): Promise<string[]> {
+  const cached = _propFieldOptionsCache.get(fieldName);
+  if (cached && Date.now() - cached.at < PROP_FIELD_OPTIONS_TTL_MS) return cached.opts;
   const { property: typeId } = typeIds();
   try {
     const resp = await hubspotFetch(`/crm/v3/properties/${typeId}/${encodeURIComponent(fieldName)}`);
     const options = Array.isArray(resp.options) ? resp.options : [];
-    return options
+    const opts = options
       .filter((o: any) => o && o.hidden !== true)
       .map((o: any) => String(o.label ?? o.value ?? '').trim())
       .filter(Boolean);
+    _propFieldOptionsCache.set(fieldName, { opts, at: Date.now() });
+    return opts;
   } catch (e: any) {
     console.warn(`[fetchPropertyFieldOptions] ${fieldName} unavailable:`, String(e).slice(0, 160));
-    return [];
+    return cached?.opts ?? []; // serve stale on a transient error rather than blanking the wheel
   }
 }
 
