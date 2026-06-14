@@ -58,10 +58,10 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
   const summaryColumns: PdfSummaryColumn<PdfLineRow>[] = [
     { key: 'category', header: 'Category', width: '8%', align: 'center', cell: (l) => l.category },
     { key: 'subcategory', header: 'Sub', width: '8%', align: 'center', cell: (l) => l.subcategory },
-    { key: 'description', header: 'Description', width: '18%', cell: (l) => l.laborShortDescription },
+    { key: 'description', header: 'Description', width: '21%', cell: (l) => l.laborShortDescription },
     { key: 'qty', header: 'Qty', width: '5%', align: 'center', cell: (l) => formatQtyPdf(l.quantity) },
     { key: 'unit', header: 'Unit', width: '4%', align: 'center', cell: (l) => l.laborMeas },
-    { key: 'vendor', header: 'Vendor', width: '9%', align: 'center', cell: (l) => l.vendor },
+    { key: 'vendor', header: 'Vendor', width: '10%', align: 'center', cell: (l) => l.vendor },
     {
       key: 'vendorCost', header: 'Vendor $', width: '9%', align: 'right', hasTotal: true,
       cell: (l) => `$${formatMoneyPdf(l.vendorCost)}`,
@@ -77,7 +77,7 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
       cell: (l) => `${Math.round(l.tenantBillBackPercent)}%`,
     },
     {
-      key: 'tenantCost', header: 'Tenant $', width: '14%', align: 'right', brand: true,
+      key: 'tenantCost', header: 'Tenant $', width: '10%', align: 'right', brand: true,
       cell: (l) => `$${formatMoneyPdf(l.tenantCost)}`,
       grandTotal: `$${formatMoneyPdf(ctx.grandTotals.tenant)}`,
     },

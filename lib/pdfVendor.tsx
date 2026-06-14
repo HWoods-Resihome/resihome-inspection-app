@@ -60,11 +60,11 @@ function VendorDoc(props: {
   const summaryColumns: PdfSummaryColumn<PdfLineRow>[] = [
     { key: 'category', header: 'Category', width: '11%', align: 'center', cell: (l) => l.category },
     { key: 'subcategory', header: 'Sub', width: '11%', align: 'center', cell: (l) => l.subcategory },
-    { key: 'description', header: 'Description', width: '39%', cell: (l) => l.laborShortDescription },
+    { key: 'description', header: 'Description', width: '43%', cell: (l) => l.laborShortDescription },
     { key: 'qty', header: 'Qty', width: '6%', align: 'center', cell: (l) => formatQtyPdf(l.quantity) },
     { key: 'unit', header: 'Unit', width: '5%', align: 'center', cell: (l) => l.laborMeas },
     {
-      key: 'vendorCost', header: 'Vendor $', width: '14%', align: 'right', hasTotal: true, brand: true,
+      key: 'vendorCost', header: 'Vendor $', width: '10%', align: 'right', hasTotal: true, brand: true,
       cell: (l) => `$${formatMoneyPdf(l.vendorCost)}`,
       grandTotal: `$${formatMoneyPdf(vendorTotal)}`,
     },
