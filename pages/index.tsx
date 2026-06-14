@@ -302,14 +302,6 @@ export default function Home() {
     ? 'All Templates'
     : templateFilter.length === 1 ? (templateLabel(templateFilter[0]) || templateFilter[0]) : `${templateFilter.length} templates`;
 
-  // Self-heal stale saved inspector filters: drop any saved name that isn't a
-  // known inspector once facets load (older builds stored a lowercased key, and
-  // the server now matches the exact inspector_name).
-  useEffect(() => {
-    if (inspectorFilter.length === 0 || facets.inspectors.length === 0) return;
-    const valid = inspectorFilter.filter((n) => facets.inspectors.includes(n));
-    if (valid.length !== inspectorFilter.length) setInspectorFilter(valid);
-  }, [facets.inspectors, inspectorFilter]);
 
   return (
     <>
@@ -428,12 +420,12 @@ export default function Home() {
           <div className="space-y-1.5 mb-3">
             <div className="flex gap-1.5">
               <FilterChip className="flex-1" label={`All (${counts.all})`} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
-              <FilterChip className="flex-1" label={`Scheduled (${counts.scheduled})`} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter('scheduled')} />
-              <FilterChip className="flex-1" label={`In Progress (${counts.in_progress})`} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter('in_progress')} />
+              <FilterChip className="flex-1" label={`Scheduled (${counts.scheduled})`} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter(statusFilter === 'scheduled' ? 'all' : 'scheduled')} />
+              <FilterChip className="flex-1" label={`In Progress (${counts.in_progress})`} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter(statusFilter === 'in_progress' ? 'all' : 'in_progress')} />
             </div>
             <div className="flex gap-1.5">
-              <FilterChip className="flex-1" label={`Pending Approval (${counts.pending_approval})`} active={statusFilter === 'pending_approval'} onClick={() => setStatusFilter('pending_approval')} />
-              <FilterChip className="flex-1" label={`Completed (${counts.completed})`} active={statusFilter === 'completed'} onClick={() => setStatusFilter('completed')} />
+              <FilterChip className="flex-1" label={`Pending Approval (${counts.pending_approval})`} active={statusFilter === 'pending_approval'} onClick={() => setStatusFilter(statusFilter === 'pending_approval' ? 'all' : 'pending_approval')} />
+              <FilterChip className="flex-1" label={`Completed (${counts.completed})`} active={statusFilter === 'completed'} onClick={() => setStatusFilter(statusFilter === 'completed' ? 'all' : 'completed')} />
             </div>
           </div>
 

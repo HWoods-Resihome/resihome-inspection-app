@@ -126,7 +126,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // page/sort, so cache them on just the constraining filters.
   const countKey = JSON.stringify({ search, inspectors: insKey, templates: tmpKey, forceTemplate });
   const listKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, forceTemplate, sortField, sortDir, page, pageSize });
-  const facetKey = forceTemplate || 'internal';
+  // Facets are DEPENDENT: each dropdown is constrained by the other active
+  // filters (status, search, and the other dimension's selection), so the cache
+  // key includes them all.
+  const facetKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, forceTemplate });
 
   try {
     const [list, statusCounts, facetData] = await Promise.all([
@@ -135,7 +138,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       withCache(counts, countKey, TTL_MS, refresh, () =>
         countInspectionsByStatus(baseQuery)),
       withCache(facets, facetKey, FACET_TTL_MS, false, () =>
-        inspectionFacets({ externalTemplate: forceTemplate })),
+        inspectionFacets(baseQuery)),
     ]);
     return res.status(200).json({
       inspections: list.items,

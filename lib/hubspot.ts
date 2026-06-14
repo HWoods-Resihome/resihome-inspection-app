@@ -804,17 +804,6 @@ const STATUS_VARIANTS: Record<string, string[]> = {
 };
 const CANCELLED_VARIANTS = ['cancelled', 'canceled', 'Cancelled', 'Canceled'];
 
-// The inspection templates currently offered (used to populate the filter
-// dropdown without scanning the whole dataset for distinct values).
-const CURRENT_TEMPLATE_TYPES = [
-  'pm_scope_rate_card',
-  'pm_turn_reinspect_qc',
-  'pm_community_inspection',
-  'pm_vacancy_occupancy_check',
-  'qc_new_construction_rrqc',
-  'leasing_agent_1099_property_inspection',
-];
-
 export type InspectionStatusKey = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
 export type InspectionSortField = 'updated' | 'scheduled';
 
@@ -926,62 +915,78 @@ export async function countInspectionsByStatus(q: InspectionQuery): Promise<Insp
   return { all, scheduled, in_progress, pending_approval, completed };
 }
 
-// Distinct inspector_name values that actually appear on inspections — so the
-// filter dropdown lists only inspectors WITH inspections, not the whole user
-// directory. Derived from a bounded recent scan (HubSpot has no distinct API),
-// cached at module scope so the multi-page sweep runs at most once per TTL per
-// warm instance rather than on every home load.
-let _inspectorNamesCache: { names: string[]; at: number } | null = null;
-const INSPECTOR_NAMES_TTL_MS = 30 * 60 * 1000;
-const INSPECTOR_NAMES_MAX_PAGES = 20; // up to ~2,000 most-recently-touched inspections
+// Bounded scan that collects the requested properties from inspections matching
+// `q`. HubSpot has no distinct/aggregation API, so the filter dropdowns derive
+// their options from the most-recently-touched matching records. Capped so a
+// broad query (e.g. status=all) still costs O(cap), not O(dataset).
+const FACET_SCAN_MAX_PAGES = 12; // up to ~1,200 most-recently-touched matches
 
-export async function inspectionInspectorNames(): Promise<string[]> {
-  if (_inspectorNamesCache && Date.now() - _inspectorNamesCache.at < INSPECTOR_NAMES_TTL_MS) {
-    return _inspectorNamesCache.names;
-  }
+async function scanInspectionProps(q: InspectionQuery, properties: string[]): Promise<any[]> {
   const { inspection: typeId } = typeIds();
-  const seen = new Set<string>();
+  const rows: any[] = [];
   let after: string | undefined;
   let pages = 0;
-  try {
-    do {
-      const body: any = {
-        filterGroups: [{ filters: [{ propertyName: 'status', operator: 'NOT_IN', values: CANCELLED_VARIANTS }] }],
-        properties: ['inspector_name'],
-        limit: 100,
-        sorts: [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }],
-      };
-      if (after) body.after = after;
-      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
-        method: 'POST', body: JSON.stringify(body),
-      });
-      for (const r of resp.results || []) {
-        const n = String(r.properties?.inspector_name || '').trim();
-        if (n) seen.add(n);
-      }
-      after = resp.paging?.next?.after;
-      pages++;
-    } while (after && pages < INSPECTOR_NAMES_MAX_PAGES);
-  } catch (e) {
-    // Return whatever we collected; an empty list just yields no inspector options.
-    console.warn('[inspector-facet] scan failed:', e);
-  }
-  const names = Array.from(seen).sort((a, b) => a.localeCompare(b));
-  // Only cache a non-empty result so a transient failure doesn't pin an empty list.
-  if (names.length) _inspectorNamesCache = { names, at: Date.now() };
-  return names;
+  do {
+    const body: any = {
+      filterGroups: inspectionFilterGroups(q),
+      properties,
+      limit: 100,
+      sorts: [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }],
+    };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST', body: JSON.stringify(body),
+    });
+    for (const r of resp.results || []) rows.push(r.properties || {});
+    after = resp.paging?.next?.after;
+    pages++;
+  } while (after && pages < FACET_SCAN_MAX_PAGES);
+  return rows;
 }
 
+const distinct = (vals: any[]): string[] =>
+  Array.from(new Set(vals.map((v) => String(v || '').trim()).filter(Boolean)));
+
 /**
- * Options for the inspector + template filter dropdowns, derived WITHOUT a full
- * dataset scan: inspectors are the distinct names that appear on inspections
- * (cached, bounded recent scan), templates the known current set. External
- * users only ever see their one template.
+ * Options for the inspector + template filter dropdowns, computed DEPENDENTLY:
+ * each dimension is constrained by the OTHER active filters (exclude-self
+ * faceting). So choosing a status narrows both dropdowns to names/templates that
+ * exist within it; choosing an inspector narrows the template options to that
+ * inspector's templates; and so on. Inspector options list only names that
+ * actually appear on inspections. External (1099) users only ever see their one
+ * template.
  */
-export async function inspectionFacets(opts: { externalTemplate?: string | null } = {}): Promise<{ inspectors: string[]; templates: string[] }> {
+export async function inspectionFacets(query: InspectionQuery): Promise<{ inspectors: string[]; templates: string[] }> {
+  const ext = query.forceTemplate || null;
+  // Inspector options ignore the inspector selection (so you can change it);
+  // template options ignore the template selection.
+  const inspectorQ: InspectionQuery = { search: query.search, status: query.status, templates: query.templates, forceTemplate: ext };
+  const templateQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, forceTemplate: ext };
+  const sameConstraint = (query.inspectors?.length || 0) === 0 && (query.templates?.length || 0) === 0;
+
   let inspectors: string[] = [];
-  try { inspectors = await inspectionInspectorNames(); } catch { inspectors = []; }
-  const templates = opts.externalTemplate ? [opts.externalTemplate] : CURRENT_TEMPLATE_TYPES;
+  let templates: string[] = ext ? [ext] : [];
+  try {
+    if (ext) {
+      // Template is fixed; only the inspector list needs scanning.
+      inspectors = distinct((await scanInspectionProps(inspectorQ, ['inspector_name'])).map((p) => p.inspector_name));
+    } else if (sameConstraint) {
+      // Neither dimension is selected → both share one constraint; single scan.
+      const rows = await scanInspectionProps(inspectorQ, ['inspector_name', 'template_type']);
+      inspectors = distinct(rows.map((p) => p.inspector_name));
+      templates = distinct(rows.map((p) => p.template_type));
+    } else {
+      const [iRows, tRows] = await Promise.all([
+        scanInspectionProps(inspectorQ, ['inspector_name']),
+        scanInspectionProps(templateQ, ['template_type']),
+      ]);
+      inspectors = distinct(iRows.map((p) => p.inspector_name));
+      templates = distinct(tRows.map((p) => p.template_type));
+    }
+  } catch (e) {
+    console.warn('[facets] scan failed:', e);
+  }
+  inspectors.sort((a, b) => a.localeCompare(b));
   return { inspectors, templates };
 }
 
