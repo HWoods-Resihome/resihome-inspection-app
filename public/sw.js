@@ -235,7 +235,9 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       (async () => {
         try {
-          const fresh = await fetch(req);
+          // no-store: bypass the HTTP cache so a reload after a deploy ALWAYS gets
+          // the fresh HTML (which references the new hashed chunks) in one go.
+          const fresh = await fetch(req, { cache: 'no-store' });
           const cache = await caches.open(CACHE);
           cache.put(req, fresh.clone());
           return fresh;

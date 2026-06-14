@@ -332,6 +332,9 @@ export function CameraCapture({
   // prevents thrashing at the threshold.
   const maybeSwitchLensForZoom = useCallback((z: number) => {
     if (facingRef.current !== 'environment' || !multiBackRef.current) return;
+    // NEVER swap lenses mid-recording — restarting the stream kills the clip (and
+    // scrambled the zoom). During a clip we stay on the current lens.
+    if (recordingRef.current) return;
     if (Date.now() - lensSwitchAtRef.current < LENS_SWITCH_COOLDOWN_MS) return;
     if (lensRoleRef.current === 'wide') {
       // Hand off at 2× — or sooner if the ultra-wide tops out below that, so we
@@ -531,13 +534,22 @@ export function CameraCapture({
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => { /* play() may reject silently if autoplay is blocked; not fatal */ });
-        // If a lens swap is being masked by the freeze-frame, lift it once the new
-        // lens has painted a frame (short settle), so the swap looks fluid, not black.
+        // If a lens swap is being masked by the freeze-frame, lift it the instant
+        // the NEW lens actually paints a frame (via requestVideoFrameCallback when
+        // available, else a short settle) so the swap looks fluid, never black.
         if (lensSwitchFreezeRef.current) {
-          setTimeout(() => {
+          const lift = () => {
+            if (!lensSwitchFreezeRef.current) return;
             lensSwitchFreezeRef.current = false;
             if (pendingCaptureCountRef.current === 0) setFrozen(false);
-          }, 220);
+          };
+          const v = videoRef.current as any;
+          if (v && typeof v.requestVideoFrameCallback === 'function') {
+            try { v.requestVideoFrameCallback(() => lift()); } catch { setTimeout(lift, 220); }
+            setTimeout(lift, 1200); // safety net if the callback never fires
+          } else {
+            setTimeout(lift, 220);
+          }
         }
       }
       // Keep the live preview continuously autofocused + auto-exposed so every

@@ -80,7 +80,10 @@ export function registerServiceWorker(): void {
 
   const register = async () => {
     try {
-      const reg = await navigator.serviceWorker.register(SW_URL);
+      // updateViaCache:'none' → the browser never serves /sw.js from its HTTP
+      // cache, so reg.update() always sees a new build immediately (a big cause of
+      // "needs two reloads to update").
+      const reg = await navigator.serviceWorker.register(SW_URL, { updateViaCache: 'none' });
       _reg = reg;
       if (reg.waiting && navigator.serviceWorker.controller) announceUpdate();
       reg.addEventListener('updatefound', () => watchInstalling(reg));
