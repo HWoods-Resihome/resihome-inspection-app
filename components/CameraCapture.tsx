@@ -198,6 +198,12 @@ const CLIP_BITRATE = 8_000_000;
 const MAX_ZOOM = 4;
 const ZOOM_DRAG_PX = 520; // thumb travel (px) for the full 1x→MAX_ZOOM range (higher = gentler)
 const ZOOM_DEADZONE_PX = 18; // ignore tiny thumb wobble before zoom kicks in
+// Ultra-wide → main lens handoff. Ultra-wide is typically ~0.5× the main lens, so
+// the ultra-wide at 2× ≈ the main at 1× — handing off there is near-seamless and
+// swaps the cropped (soft) wide sensor for the sharp main sensor. Cooldown stops
+// the threshold from thrashing back and forth.
+const LENS_SWITCH_IN_ZOOM = 2.0;
+const LENS_SWITCH_COOLDOWN_MS = 1200;
 
 // Pick the best MediaRecorder mime type this browser supports (Safari → mp4,
 // Chrome/Android → webm). Returns '' if recording is unsupported entirely.
@@ -320,6 +326,37 @@ export function CameraCapture({
         if (Math.abs((zoomRef.current || 1) - hwAppliedZoomRef.current) >= 0.005) pushHardwareZoom();
       });
   }, []);
+  // Hand off between the ultra-wide and the main/tele lens based on zoom, so
+  // zooming uses the SHARP main sensor instead of a cropped ultra-wide. Switching
+  // restarts the stream on the chosen deviceId (validated after start); cooldown
+  // prevents thrashing at the threshold.
+  const maybeSwitchLensForZoom = useCallback((z: number) => {
+    if (facingRef.current !== 'environment' || !multiBackRef.current) return;
+    if (Date.now() - lensSwitchAtRef.current < LENS_SWITCH_COOLDOWN_MS) return;
+    if (lensRoleRef.current === 'wide') {
+      // Hand off at 2× — or sooner if the ultra-wide tops out below that, so we
+      // always switch before the user runs out of optical range.
+      const uwMax = zoomCapsRef.current?.max ?? MAX_ZOOM;
+      const inAt = Math.min(LENS_SWITCH_IN_ZOOM, uwMax * 0.92);
+      if (z >= inAt) {
+        const id = mainLensIdRef.current || backCandidatesRef.current.find((d) => !triedBadLensRef.current.has(d));
+        if (!id) return;
+        lensSwitchAtRef.current = Date.now();
+        lensRoleRef.current = 'main';
+        lensPinnedRef.current = true;
+        setLensDeviceId(id); // → stream restarts on the main lens
+      }
+    } else {
+      // Zoomed back to the main lens's floor → return to the ultra-wide.
+      const min = zoomCapsRef.current?.min ?? 1;
+      if (z <= min + 0.05) {
+        lensSwitchAtRef.current = Date.now();
+        lensRoleRef.current = 'wide';
+        lensPinnedRef.current = false;
+        setLensDeviceId(null);
+      }
+    }
+  }, []);
   // Single zoom setter: clamp, update the (digital-mode) preview, and drive the
   // sensor (hardware mode). Zoom is STICKY — never auto-reset across captures or
   // recordings (that was the "flashes back to 1×" bug).
@@ -332,7 +369,8 @@ export function CameraCapture({
     setZoom(nz);
     updatePreviewTransform();
     if (caps) pushHardwareZoom();
-  }, [updatePreviewTransform, pushHardwareZoom]);
+    maybeSwitchLensForZoom(nz);
+  }, [updatePreviewTransform, pushHardwareZoom, maybeSwitchLensForZoom]);
   // Backstop: keep the (digital-mode) preview transform in sync when zoom changes
   // through a path other than applyZoom (e.g. the on-close reset).
   useEffect(() => { updatePreviewTransform(); }, [zoom, updatePreviewTransform]);
@@ -370,6 +408,8 @@ export function CameraCapture({
   const photoCapsRef = useRef<{ w: number; h: number } | null>(null);
 
   const [facing, setFacing] = useState<'environment' | 'user'>('environment');
+  const facingRef = useRef(facing);
+  useEffect(() => { facingRef.current = facing; }, [facing]);
   // Pinned back lens by deviceId (null = OS default for `facing`). Some phones
   // default `facingMode:environment` to the ULTRA-WIDE; when there are multiple
   // back cameras we auto-pin the 2nd (the main lens on those phones). No UI.
@@ -377,7 +417,15 @@ export function CameraCapture({
   const lensDeviceIdRef = useRef<string | null>(null);
   useEffect(() => { lensDeviceIdRef.current = lensDeviceId; }, [lensDeviceId]);
   const lensPinnedRef = useRef(false); // auto-pick the main lens once per session
-  const lensOptimizedRef = useRef(false); // ran the once-per-session ultra-wide→main switch
+  // Zoom-based lens handoff (ultra-wide ⇄ main). Refs so applyZoom can drive it
+  // without re-creating the callback.
+  const lensRoleRef = useRef<'wide' | 'main'>('wide');     // which lens is active
+  const wideLensIdRef = useRef<string | null>(null);        // the default (ultra-wide) deviceId
+  const mainLensIdRef = useRef<string | null>(null);        // resolved good main/tele deviceId
+  const backCandidatesRef = useRef<string[]>([]);           // other back lens deviceIds to try
+  const triedBadLensRef = useRef<Set<string>>(new Set());   // candidates that proved bad (depth/IR/low-res)
+  const lensSwitchAtRef = useRef(0);                        // last switch time (cooldown)
+  const multiBackRef = useRef(false);                       // >1 usable back lens exists
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -558,38 +606,55 @@ export function CameraCapture({
       detectZoom();
       [600, 1500, 2800].forEach((ms) => setTimeout(detectZoom, ms));
 
-      // ULTRA-WIDE → MAIN lens (quality on zoom). Some phones hand `facingMode:
-      // environment` a PHYSICAL ultra-wide sensor; zooming then just crops that
-      // wide sensor → soft/grainy. A logical multi-camera (which switches lenses
-      // itself) instead reports a LARGE zoom.max, so we leave those alone. When
-      // we detect a physical ultra-wide AND can positively identify a main lens
-      // by label, we pin the main lens so zoom crops the sharp main sensor.
-      // Runs once per session; fully reversible (pin failure falls back to OS
-      // default). Conservative on purpose: if we can't be sure, we don't switch.
-      const optimizeBackLens = async () => {
-        if (lensOptimizedRef.current || facing !== 'environment') return;
-        const track = streamRef.current?.getVideoTracks?.()[0];
-        const caps: any = track?.getCapabilities?.() || {};
-        const z = caps.zoom;
-        // Only act on a physical ultra-wide: can go wide (min<1) but limited range
-        // (max<4). A logical camera has a big range and handles switching itself.
-        if (!z || typeof z.max !== 'number' || z.max >= 4 || !(z.min < 1)) { lensOptimizedRef.current = true; return; }
-        lensOptimizedRef.current = true;
+      // ----- Zoom-based lens handoff: discovery + validation -----
+      // Build the list of OTHER back lenses we can hand off to when zooming, and
+      // record the current default as the ultra-wide. Excludes depth/IR/mono by
+      // label when labels exist; on labelless devices we keep all non-current
+      // back lenses and rely on post-switch resolution validation to reject bad
+      // sensors. Runs on every (re)start — cheap, and keeps the list fresh.
+      const discoverBackLenses = async () => {
         try {
-          const curId = (track?.getSettings?.() as any)?.deviceId;
-          const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
-          const labelsKnown = cams.some((c) => !!c.label);
-          if (!labelsKnown) return; // can't tell lenses apart → don't risk a depth/IR sensor
+          const track = streamRef.current?.getVideoTracks?.()[0];
+          const curId = ((track?.getSettings?.() as any)?.deviceId as string) || null;
+          if (lensRoleRef.current === 'wide') wideLensIdRef.current = curId; // default lens = ultra-wide
+          const vids = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+          const labeled = vids.some((v) => !!v.label);
           const isBack = (l: string) => /back|rear|environment/i.test(l);
-          const isWide = (l: string) => /wide|ultra|0\.5|\.5\s*x|macro|depth|tof|mono|ir\b/i.test(l);
-          const backs = cams.filter((c) => isBack(c.label));
-          const pool = backs.length ? backs : cams;
-          // A POSITIVELY-identified non-wide back lens (the main), not the current one.
-          const main = pool.find((c) => c.deviceId && c.deviceId !== curId && c.label && !isWide(c.label));
-          if (main) { lensPinnedRef.current = true; setLensDeviceId(main.deviceId); }
-        } catch { /* enumerate failed — keep the OS default */ }
+          const isBad = (l: string) => /depth|tof|infrared|\bir\b|mono/i.test(l);
+          let pool = vids;
+          if (labeled) {
+            const backs = vids.filter((v) => isBack(v.label));
+            pool = (backs.length ? backs : vids).filter((v) => !isBad(v.label));
+          }
+          backCandidatesRef.current = pool
+            .map((v) => v.deviceId)
+            .filter((id) => id && id !== wideLensIdRef.current && !triedBadLensRef.current.has(id));
+          multiBackRef.current = backCandidatesRef.current.length >= 1;
+        } catch { /* enumerate unavailable — single-lens behavior */ }
       };
-      void optimizeBackLens();
+      void discoverBackLenses();
+
+      // Validate a lens we just switched TO: a depth/IR sensor (or anything that
+      // opens but isn't a real photo lens) reports a low resolution — reject it,
+      // remember it as bad, and either try the next candidate or fall back to the
+      // ultra-wide. Runs slightly late so the track resolution has settled.
+      if (lensRoleRef.current === 'main' && lensDeviceId) {
+        const badId = lensDeviceId;
+        setTimeout(() => {
+          const t = streamRef.current?.getVideoTracks?.()[0];
+          const w = ((t?.getSettings?.() as any)?.width as number) || videoRef.current?.videoWidth || 0;
+          if (w && w < 1280) {
+            triedBadLensRef.current.add(badId);
+            mainLensIdRef.current = null;
+            const next = backCandidatesRef.current.find((d) => d !== badId && !triedBadLensRef.current.has(d));
+            lensSwitchAtRef.current = Date.now();
+            if (next) { setLensDeviceId(next); }
+            else { lensRoleRef.current = 'wide'; lensPinnedRef.current = false; setLensDeviceId(null); }
+          } else if (w) {
+            mainLensIdRef.current = badId; // good lens — cache it for instant future handoffs
+          }
+        }, 700);
+      }
       setPermissionState('granted');
       setPermissionError('');
     } catch (e: any) {
@@ -1673,7 +1738,10 @@ export function CameraCapture({
 
   const flipCamera = useCallback(() => {
     lensPinnedRef.current = false; // re-auto-pick the main lens when back on rear
-    lensOptimizedRef.current = false; // re-run the ultra-wide→main check for the new facing
+    // Reset the zoom-handoff state for the new facing.
+    lensRoleRef.current = 'wide';
+    mainLensIdRef.current = null;
+    wideLensIdRef.current = null;
     setLensDeviceId(null); // back to the default lens for the new facing
     setFacing((f) => (f === 'environment' ? 'user' : 'environment'));
     // useEffect on [facing, lensDeviceId] restarts the stream
