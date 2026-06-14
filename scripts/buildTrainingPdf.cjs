@@ -391,7 +391,7 @@ function ContentPage(...secs) {
     ContentPage(p14));
 
   const buf = await renderToBuffer(doc);
-  const out = path.join(__dirname, '..', 'ResiWALK_Training_Guide.pdf');
+  const out = path.join(__dirname, '..', 'ResiWalk_Training_Guide.pdf');
   fs.writeFileSync(out, buf);
   console.log('Wrote', out, buf.length, 'bytes; logo:', LOGO ? 'yes' : 'MISSING', '; shots:', Object.keys(I).length);
 })().catch((e) => { console.error(e); process.exit(1); });
