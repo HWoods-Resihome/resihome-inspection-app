@@ -124,15 +124,21 @@ export async function readAiFeedback(days = 30): Promise<AiFeedbackEvent[]> {
   const wanted = new Set<string>();
   for (let i = 0; i < days; i++) wanted.add(new Date(Date.now() - i * 864e5).toISOString().slice(0, 10));
   try {
-    let cursor: string | undefined;
-    do {
-      const page = await list({ prefix: 'ai-feedback/', cursor, limit: 1000 });
-      const fetches = page.blobs
-        .filter((b) => wanted.has(b.pathname.split('/')[1] || ''))
-        .map((b) => fetch(b.url).then((r) => r.json()).catch(() => null));
-      for (const ev of await Promise.all(fetches)) if (ev) out.push(ev as AiFeedbackEvent);
-      cursor = page.hasMore ? page.cursor : undefined;
-    } while (cursor);
+    // List ONLY the requested days' partitions (ai-feedback/<date>/…), in
+    // parallel, instead of scanning the entire ai-feedback/ archive and
+    // filtering client-side — keeps reads O(days), not O(all-events-ever).
+    const perDay = await Promise.all(Array.from(wanted).map(async (date) => {
+      const events: AiFeedbackEvent[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await list({ prefix: `ai-feedback/${date}/`, cursor, limit: 1000 });
+        const evs = await Promise.all(page.blobs.map((b) => fetch(b.url).then((r) => r.json()).catch(() => null)));
+        for (const ev of evs) if (ev) events.push(ev as AiFeedbackEvent);
+        cursor = page.hasMore ? page.cursor : undefined;
+      } while (cursor);
+      return events;
+    }));
+    for (const arr of perDay) out.push(...arr);
   } catch (e: any) {
     console.warn('[ai-feedback] read failed:', String(e?.message || e).slice(0, 120));
   }

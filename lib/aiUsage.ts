@@ -107,18 +107,30 @@ export async function readAiUsage(days = 7): Promise<{
 
   if (!process.env.BLOB_READ_WRITE_TOKEN) return { byDay, bySource, byModel, total };
   try {
-    const { blobs } = await list({ prefix: 'ai-usage/' });
-    for (const blob of blobs) {
-      const date = blob.pathname.split('/')[1] || '';
-      if (!wanted.has(date)) continue;
-      const data = await fetch(blob.url).then((r) => r.json()).catch(() => null);
-      if (!data?.buckets) continue;
-      for (const [key, b] of Object.entries(data.buckets as Record<string, Bucket>)) {
-        const [source, model] = key.split('|');
-        add(byDay[date] || (byDay[date] = empty()), b);
-        add(bySource[source] || (bySource[source] = empty()), b);
-        add(byModel[model] || (byModel[model] = empty()), b);
-        add(total, b);
+    // List ONLY the requested days' partitions (ai-usage/<date>/…), in parallel,
+    // instead of scanning the entire ai-usage/ history and filtering client-side.
+    // This keeps the dashboard O(days) rather than O(all-history-ever).
+    const perDay = await Promise.all(Array.from(wanted).map(async (date) => {
+      const urls: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await list({ prefix: `ai-usage/${date}/`, cursor, limit: 1000 });
+        for (const b of page.blobs) urls.push(b.url);
+        cursor = page.hasMore ? page.cursor : undefined;
+      } while (cursor);
+      const datas = await Promise.all(urls.map((u) => fetch(u).then((r) => r.json()).catch(() => null)));
+      return { date, datas };
+    }));
+    for (const { date, datas } of perDay) {
+      for (const data of datas) {
+        if (!data?.buckets) continue;
+        for (const [key, b] of Object.entries(data.buckets as Record<string, Bucket>)) {
+          const [source, model] = key.split('|');
+          add(byDay[date] || (byDay[date] = empty()), b);
+          add(bySource[source] || (bySource[source] = empty()), b);
+          add(byModel[model] || (byModel[model] = empty()), b);
+          add(total, b);
+        }
       }
     }
   } catch (e: any) { console.warn('[ai-usage] read failed:', String(e?.message || e).slice(0, 120)); }
@@ -137,13 +149,20 @@ export async function pruneOldAiUsage(retentionDays = 90): Promise<{ deleted: nu
   const cutoff = new Date(Date.now() - Math.max(1, retentionDays) * 864e5).toISOString().slice(0, 10);
   let deleted = 0, scanned = 0;
   try {
-    const { blobs } = await list({ prefix: 'ai-usage/' });
+    // Pruning must see the whole prefix to find old partitions, but page through
+    // it with the cursor so a backlog beyond one list() page (1000) is fully
+    // reclaimed rather than silently leaving a growing tail.
     const stale: string[] = [];
-    for (const b of blobs) {
-      scanned++;
-      const date = b.pathname.split('/')[1] || '';
-      if (date && date < cutoff) stale.push(b.url);
-    }
+    let cursor: string | undefined;
+    do {
+      const page = await list({ prefix: 'ai-usage/', cursor, limit: 1000 });
+      for (const b of page.blobs) {
+        scanned++;
+        const date = b.pathname.split('/')[1] || '';
+        if (date && date < cutoff) stale.push(b.url);
+      }
+      cursor = page.hasMore ? page.cursor : undefined;
+    } while (cursor);
     for (let i = 0; i < stale.length; i += 100) {
       await del(stale.slice(i, i + 100)); // del takes a url or an array of urls
       deleted += stale.slice(i, i + 100).length;

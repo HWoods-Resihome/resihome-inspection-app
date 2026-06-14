@@ -10,9 +10,11 @@
  * retry them (re-POSTing finalize is idempotent/resumable by design).
  *
  * Storage mirrors the other Blob logs: one record per attempt at
- * finalize-jobs/<inspectionId>/<jobId>.json, overwritten as the attempt reaches
- * a terminal state. The structured [finalize-job] log is authoritative. The
- * startedAt is encoded in the jobId so the terminal write needs no prior read.
+ * finalize-jobs/<date>/<inspectionId>/<jobId>.json, overwritten as the attempt
+ * reaches a terminal state. The structured [finalize-job] log is authoritative.
+ * The startedAt is encoded in the jobId, so both the terminal write and the
+ * date partition derive from the jobId without any prior read — and the admin
+ * view lists only the recent days' partitions instead of the whole history.
  */
 import { put, list } from '@vercel/blob';
 
@@ -43,11 +45,17 @@ function startedAtFromJobId(jobId: string): string {
   return isFinite(ms) ? new Date(ms).toISOString() : new Date().toISOString();
 }
 
+/** The partition date (YYYY-MM-DD) a job belongs to, derived from its jobId so
+ *  the start and terminal writes always land in the same partition. */
+function partitionDate(jobId: string): string {
+  return startedAtFromJobId(jobId).slice(0, 10);
+}
+
 async function writeJob(job: FinalizeJob): Promise<void> {
   try { console.log(`[finalize-job] ${JSON.stringify(job)}`); } catch { /* noop */ }
   if (!process.env.BLOB_READ_WRITE_TOKEN) return;
   try {
-    await put(`finalize-jobs/${job.inspectionId}/${job.jobId}.json`, JSON.stringify(job),
+    await put(`finalize-jobs/${partitionDate(job.jobId)}/${job.inspectionId}/${job.jobId}.json`, JSON.stringify(job),
       { access: 'public', contentType: 'application/json', allowOverwrite: true, addRandomSuffix: false });
   } catch (e: any) {
     console.warn('[finalize-job] write failed:', String(e?.message || e).slice(0, 120));
@@ -90,19 +98,29 @@ export async function readFinalizeJobs(days = 7): Promise<FinalizeJob[]> {
   const out: FinalizeJob[] = [];
   if (!process.env.BLOB_READ_WRITE_TOKEN) return out;
   const cutoffMs = Date.now() - Math.max(1, days) * 864e5;
+  // Only the requested days' partitions (finalize-jobs/<date>/…) are listed, in
+  // parallel — so the admin view's cost is O(days) rather than fetching every
+  // finalize attempt ever recorded across all inspections.
+  const wanted: string[] = [];
+  for (let i = 0; i < Math.max(1, days); i++) wanted.push(new Date(Date.now() - i * 864e5).toISOString().slice(0, 10));
   try {
-    let cursor: string | undefined;
-    do {
-      const page = await list({ prefix: 'finalize-jobs/', cursor, limit: 1000 });
-      const jobs = await Promise.all(page.blobs.map((b) => fetch(b.url).then((r) => r.json()).catch(() => null)));
-      for (const j of jobs) {
-        if (!j) continue;
-        if (new Date(j.startedAt).getTime() < cutoffMs) continue;
-        const stuck = j.status === 'started' && (Date.now() - new Date(j.updatedAt).getTime() > STUCK_MS);
-        out.push({ ...j, stuck });
-      }
-      cursor = page.hasMore ? page.cursor : undefined;
-    } while (cursor);
+    const perDay = await Promise.all(wanted.map(async (date) => {
+      const jobs: FinalizeJob[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await list({ prefix: `finalize-jobs/${date}/`, cursor, limit: 1000 });
+        const parsed = await Promise.all(page.blobs.map((b) => fetch(b.url).then((r) => r.json()).catch(() => null)));
+        for (const j of parsed) {
+          if (!j) continue;
+          if (new Date(j.startedAt).getTime() < cutoffMs) continue;
+          const stuck = j.status === 'started' && (Date.now() - new Date(j.updatedAt).getTime() > STUCK_MS);
+          jobs.push({ ...j, stuck });
+        }
+        cursor = page.hasMore ? page.cursor : undefined;
+      } while (cursor);
+      return jobs;
+    }));
+    for (const arr of perDay) out.push(...arr);
   } catch (e: any) {
     console.warn('[finalize-job] read failed:', String(e?.message || e).slice(0, 120));
   }

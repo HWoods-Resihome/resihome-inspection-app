@@ -2963,6 +2963,12 @@ export async function backfillInspectionTotals(opts: { after?: string; max?: num
   let after = opts.after;
   let processed = 0, updated = 0, skipped = 0, errors = 0;
 
+  // Process records with bounded concurrency rather than strictly one-at-a-time
+  // with a fixed sleep: the shared HubSpot request governor (HS_MAX_CONCURRENT)
+  // already throttles the underlying calls, so a small in-flight window cuts the
+  // wall-clock time ~Nx without risking rate limits. Each recompute makes a few
+  // calls, so keep the window small.
+  const CONCURRENCY = 4;
   while (processed < max) {
     const body: any = { filterGroups: [], properties: ['template_type'], limit: 100 };
     if (after) body.after = after;
@@ -2971,16 +2977,18 @@ export async function backfillInspectionTotals(opts: { after?: string; max?: num
       body: JSON.stringify(body),
     });
     const results = resp.results || [];
-    for (const r of results) {
-      processed++;
-      try {
-        const out = await recomputeInspectionTotals(r.id, { skipIfNoLines: true });
-        if (out.wrote) updated++; else skipped++;
-      } catch (e) {
-        errors++;
-        console.warn(`[inspection-totals-backfill] record ${r.id} failed:`, e);
-      }
-      await new Promise((res) => setTimeout(res, 110)); // polite to the API
+    for (let i = 0; i < results.length; i += CONCURRENCY) {
+      const chunk = results.slice(i, i + CONCURRENCY);
+      await Promise.all(chunk.map(async (r: any) => {
+        processed++;
+        try {
+          const out = await recomputeInspectionTotals(r.id, { skipIfNoLines: true });
+          if (out.wrote) updated++; else skipped++;
+        } catch (e) {
+          errors++;
+          console.warn(`[inspection-totals-backfill] record ${r.id} failed:`, e);
+        }
+      }));
     }
     after = resp.paging?.next?.after;
     if (!after) return { processed, updated, skipped, errors, nextAfter: null };
