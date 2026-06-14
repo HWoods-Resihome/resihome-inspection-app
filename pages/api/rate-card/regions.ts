@@ -1,11 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { fetchRegionRates } from '@/lib/hubspot';
-import { kvGetJSON, kvSetJSON } from '@/lib/sharedCache';
 import type { RegionRate } from '@/lib/types';
-
-// Shared-cache key (cross-instance L2 via Vercel KV; no-op when KV isn't set up).
-const KV_REGIONS_KEY = 'ratecard:regions:v1';
 
 /**
  * GET /api/rate-card/regions
@@ -35,17 +31,8 @@ async function loadRegions(forceRefresh: boolean): Promise<RegionRate[]> {
   if (!INFLIGHT || forceRefresh) {
     INFLIGHT = (async () => {
       try {
-        // L2 (cross-instance) before HubSpot. No-op when KV isn't configured.
-        if (!forceRefresh) {
-          const shared = await kvGetJSON<RegionRate[]>(KV_REGIONS_KEY);
-          if (Array.isArray(shared) && shared.length) {
-            CACHE = { data: shared, fetchedAt: Date.now() };
-            return shared;
-          }
-        }
         const regions = await fetchRegionRates();
         CACHE = { data: regions, fetchedAt: Date.now() };
-        void kvSetJSON(KV_REGIONS_KEY, regions, Math.floor(TTL_MS / 1000)); // fire-and-forget
         return regions;
       } finally {
         INFLIGHT = null;

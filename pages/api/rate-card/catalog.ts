@@ -1,11 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { fetchRateCardCatalog } from '@/lib/hubspot';
-import { kvGetJSON, kvSetJSON } from '@/lib/sharedCache';
 import type { RateCardLineItem } from '@/lib/types';
-
-// Shared-cache key (cross-instance L2 via Vercel KV; no-op when KV isn't set up).
-const KV_CATALOG_KEY = 'ratecard:catalog:v1';
 
 /**
  * GET /api/rate-card/catalog
@@ -40,18 +36,8 @@ async function loadCatalog(forceRefresh: boolean): Promise<RateCardLineItem[]> {
   if (!INFLIGHT || forceRefresh) {
     INFLIGHT = (async () => {
       try {
-        // L2 (cross-instance) before HubSpot: a cold instance reuses a sibling's
-        // catalog instead of re-paginating ~10 calls. No-op when KV isn't configured.
-        if (!forceRefresh) {
-          const shared = await kvGetJSON<RateCardLineItem[]>(KV_CATALOG_KEY);
-          if (Array.isArray(shared) && shared.length) {
-            CACHE = { data: shared, fetchedAt: Date.now() };
-            return shared;
-          }
-        }
         const items = await fetchRateCardCatalog();
         CACHE = { data: items, fetchedAt: Date.now() };
-        void kvSetJSON(KV_CATALOG_KEY, items, Math.floor(TTL_MS / 1000)); // fire-and-forget
         return items;
       } finally {
         INFLIGHT = null;
