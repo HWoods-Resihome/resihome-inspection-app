@@ -92,6 +92,10 @@ const UNDO = /\b(undo|scratch that|(remove|delete|cancel|drop)\b.{0,12}\b(line|o
 // don't reply. Covers a bare "no", "nope", "that's it", "I'm done", "close",
 // "stop", "nothing", "all set", etc. Kept tight so it doesn't swallow real
 // requests (e.g. "no, make it 50 percent" still goes to the agent).
+// How many extra silent listen-windows to re-arm before giving up (each ≈ the
+// browser's ~6-8s no-speech timeout → ~20-30s total patience for a reply).
+const MAX_EMPTY_RESTARTS = 3;
+
 const DONE = /^(no|nope|nah|no thanks?|no more|nothing more|that'?s enough|that'?s (it|all)|i'?m (done|good|all set)|all set|all done|(we'?re|were) done|done|close|close (it|out|the mic)|stop|cancel|nothing( else)?|that'?ll do|we'?re good|good for now)[.!]?$/i;
 
 // Minimal typing for the vendor-prefixed SpeechRecognition (webkit on most
@@ -307,6 +311,14 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   // inside the start handler to prevent double-starts).
   const startingRef = useRef(false);
   const listeningRef = useRef(false);
+  // Keep the mic open for a reply: the Web Speech API ends on its own ~6-8s
+  // "no-speech" timeout, which closed the mic before the inspector finished
+  // thinking after the assistant spoke. We re-arm listening on a silent end up to
+  // MAX_EMPTY_RESTARTS times (a generous ~20-30s reply window) so they don't have
+  // to tap the mic again. `autoListenRef` = we currently want the mic open; reset
+  // the counter whenever a real utterance lands or a new reply window opens.
+  const autoListenRef = useRef(false);
+  const emptyRestartsRef = useRef(0);
   // Silence timer + accumulated final transcript across pauses.
   const silenceTimerRef = useRef<any>(null);
   const finalTranscriptRef = useRef('');
@@ -635,6 +647,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       // ("change change to change to the…") before doing anything with it.
       const t = dedupeTranscript(text);
       if (!t) return;
+      emptyRestartsRef.current = 0; // a real utterance landed → reset the reply-window patience
       // Voice/typed requests both hit the cloud agent; offline, don't try.
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
         setError('Voice needs a connection. You can still add line items by tapping a section — they save and sync automatically.');
@@ -717,6 +730,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     // Never (re)open the mic if the panel has been closed — e.g. a TTS-onend
     // restart firing after the inspector hit Close.
     if (!openRef.current) return;
+    autoListenRef.current = true; // we want the mic open (drives silent re-arm on onend)
     setError(null);
     // NOTE: do NOT cancel speech here. Opening the mic early shouldn't cut off
     // the assistant's reply — only the inspector actually speaking should
@@ -810,7 +824,18 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       // path now), in which case this is a no-op.
       const captured = finalTranscriptRef.current.trim();
       finalTranscriptRef.current = '';
-      if (captured && !utteranceSubmittedRef.current) { utteranceSubmittedRef.current = true; submitUtterance(captured); }
+      if (captured && !utteranceSubmittedRef.current) { utteranceSubmittedRef.current = true; submitUtterance(captured); return; }
+      // Silent end (the browser's ~6-8s no-speech timeout fired, or it ended with
+      // nothing). Keep the mic open for the inspector to reply: re-arm a few times
+      // before giving up, so a thinking pause after the assistant spoke doesn't
+      // force them to tap the mic again.
+      if (autoListenRef.current && openRef.current && !utteranceSubmittedRef.current
+          && !speakingRef.current && emptyRestartsRef.current < MAX_EMPTY_RESTARTS) {
+        emptyRestartsRef.current += 1;
+        setTimeout(() => { startListeningRef.current(); }, 250);
+      } else {
+        autoListenRef.current = false;
+      }
     };
 
     try {
@@ -823,6 +848,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   }, [submitUtterance]);
 
   const stopListening = useCallback(() => {
+    autoListenRef.current = false; // explicit stop → don't silently re-arm
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
     try { recogRef.current?.stop(); } catch { /* noop */ }
     startingRef.current = false;
@@ -844,6 +870,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   // longer open early — it caused echo and timing issues. The speaking-state
   // callback still drives the echo guard during playback.
   const speakThenListen = useCallback((text: string) => {
+    emptyRestartsRef.current = 0; // fresh reply window after the assistant speaks
     speak(text, () => { startListeningRef.current(); }, 0, (sp) => { speakingRef.current = sp; });
   }, []);
   const speakThenListenRef = useRef(speakThenListen);
@@ -1055,6 +1082,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               }
             } catch { /* noop */ }
             if (!online) return;
+            emptyRestartsRef.current = 0; // fresh reply-window patience on a manual open
             if (supported) setTimeout(() => { startListeningRef.current(); }, 0);
             else void startAudioCapture(); // iOS push-to-talk: start recording now
           }}
