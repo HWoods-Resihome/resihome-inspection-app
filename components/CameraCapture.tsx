@@ -298,7 +298,12 @@ export function CameraCapture({
     if (!v) return;
     const s = zoomRef.current || 1;
     v.style.transformOrigin = 'center';
-    v.style.transform = s > 1.0005 ? `scale(${s})` : '';
+    // ALWAYS keep a transform set (scale(1) is identity at 1×). Previously we
+    // cleared it at ≤1×, but toggling the transform property on/off promotes/
+    // demotes the GPU compositor layer — a one-frame hitch every time the zoom
+    // crossed ~1× (the glitch felt "at a certain magnification, both in and out").
+    // Keeping it set + will-change on the element holds a stable layer = smooth.
+    v.style.transform = `scale(${s})`;
   }, []);
   const applyZoom = useCallback((z: number) => {
     const nz = Math.max(1, Math.min(MAX_ZOOM, z));
@@ -2082,9 +2087,11 @@ export function CameraCapture({
               playsInline
               muted
               className="absolute inset-0 w-full h-full object-cover"
-              /* zoom transform is driven imperatively (updatePreviewTransform) so
-                 the preview tracks the finger with zero lag and never fights a
-                 React re-render mid-drag. */
+              // willChange pins the video on its own GPU compositor layer so the
+              // zoom scale() animates smoothly and the layer is never promoted/
+              // demoted mid-zoom. Transform itself is driven imperatively in
+              // updatePreviewTransform (no React re-render in the hot path).
+              style={{ willChange: 'transform', backfaceVisibility: 'hidden' }}
             />
             {/* Freeze-frame overlay: holds the captured frame while the real
                 still is taken + saved, so the preview never goes dark. Already
