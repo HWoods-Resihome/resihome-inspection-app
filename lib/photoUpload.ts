@@ -43,7 +43,7 @@ export async function compressToJpeg(file: File): Promise<Blob> {
       maxSizeMB: TARGET_MAX_SIZE_MB,
       maxWidthOrHeight: TARGET_MAX_DIMENSION,
       useWebWorker: false,  // web worker is faster but silently OOMs on big files
-      initialQuality: 0.9,  // near-native fidelity — preserves fine detail on zoomed-in shots
+      initialQuality: 0.92, // near-native fidelity — preserves fine detail on zoomed-in shots
       fileType: 'image/jpeg',
     });
     if (result && result.type === 'image/jpeg') compressed = result;
