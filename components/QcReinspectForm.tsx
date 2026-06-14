@@ -111,14 +111,38 @@ export function QcReinspectForm(props: Props) {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Audit: log ONE "Edited" event per editing session (first successful save),
+  // re-armed after the app is re-entered following an absence. Best-effort.
+  const editAuditLoggedRef = useRef(false);
+  function logEditOnce() {
+    if (editAuditLoggedRef.current) return;
+    editAuditLoggedRef.current = true;
+    try {
+      void fetch(`/api/inspections/${props.inspectionRecordId}/audit-edit`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', keepalive: true,
+      }).catch(() => { /* best-effort — never blocks editing */ });
+    } catch { /* ignore */ }
+  }
+
   function markSaving() { setSaveStatus('saving'); }
   function markSaved() {
+    logEditOnce(); // first save of the session → record an "Edited" audit event
     setSaveStatus('saved');
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     savedTimerRef.current = setTimeout(() => setSaveStatus('idle'), 2000);
   }
   function markSaveError() { setSaveStatus('error'); }
   useEffect(() => () => { if (savedTimerRef.current) clearTimeout(savedTimerRef.current); }, []);
+  // Re-arm the once-per-session edit log when the app is re-entered after >60s away.
+  useEffect(() => {
+    let hiddenAt = 0;
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+      if (hiddenAt && Date.now() - hiddenAt > 60_000) editAuditLoggedRef.current = false;
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
