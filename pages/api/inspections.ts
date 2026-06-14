@@ -95,12 +95,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  // Inspector/template can be repeated query params (multi-select) — collect all.
+  const arr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean)
+      : typeof v === 'string' && v.trim() ? [v.trim()] : [];
   const search = str(req.query.search).trim();
   const statusRaw = str(req.query.status);
   const status: InspectionStatusKey = (STATUS_KEYS as string[]).includes(statusRaw)
     ? (statusRaw as InspectionStatusKey) : 'all';
-  const inspector = str(req.query.inspector).trim();
-  const templateRaw = str(req.query.template).trim();
+  const inspectors = arr(req.query.inspector);
+  const templatesRaw = arr(req.query.template);
   const sortField: InspectionSortField = str(req.query.sort) === 'scheduled' ? 'scheduled' : 'updated';
   const sortDir: 'asc' | 'desc' = str(req.query.dir) === 'asc' ? 'asc' : 'desc';
   const pageSize = Math.min(100, Math.max(1, parseInt(str(req.query.pageSize), 10) || 20));
@@ -111,13 +115,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // so their list/counts/facets can't be widened by crafting a query param.
   const external = isExternalEmail(session.email);
   const forceTemplate = external ? EXTERNAL_TEMPLATE : null;
-  const template = external ? '' : templateRaw;
+  const templates = external ? [] : templatesRaw;
 
-  const baseQuery: InspectionQuery = { search, status, inspector, template, forceTemplate };
+  const baseQuery: InspectionQuery = { search, status, inspectors, templates, forceTemplate };
+  // Stable key parts: sort the multi-value arrays so equivalent selections share
+  // a cache entry regardless of click order.
+  const insKey = [...inspectors].sort();
+  const tmpKey = [...templates].sort();
   // Counts ignore the selected status (each chip shows its own total) and the
   // page/sort, so cache them on just the constraining filters.
-  const countKey = JSON.stringify({ search, inspector, template, forceTemplate });
-  const listKey = JSON.stringify({ search, status, inspector, template, forceTemplate, sortField, sortDir, page, pageSize });
+  const countKey = JSON.stringify({ search, inspectors: insKey, templates: tmpKey, forceTemplate });
+  const listKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, forceTemplate, sortField, sortDir, page, pageSize });
   const facetKey = forceTemplate || 'internal';
 
   try {

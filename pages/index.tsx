@@ -8,6 +8,7 @@ import { InspectionCard } from '@/components/InspectionCard';
 import { ListPicker } from '@/components/ListPicker';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
 import { warmAi } from '@/lib/aiWarm';
+import { templateLabel } from '@/lib/templateLabels';
 
 interface MeUser { userId: string; email: string; name: string; }
 
@@ -44,10 +45,13 @@ export default function Home() {
   const [sortField, setSortField] = useState<'updated' | 'scheduled'>(savedView.sortField ?? 'updated');
   // 'desc' = newest first (default), 'asc' = oldest first.
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>(savedView.sortDir ?? 'desc');
-  // Filter by inspector name. 'all' = no filter; otherwise match by name (case-insensitive).
-  const [inspectorFilter, setInspectorFilter] = useState<string>(savedView.inspectorFilter ?? 'all');
-  // Filter by template internal name. 'all' = no filter.
-  const [templateFilter, setTemplateFilter] = useState<string>(savedView.templateFilter ?? 'all');
+  // Filter by inspector name(s). Empty = no filter; multi-select supported.
+  // Values are exact inspector_name strings the server matches on.
+  const [inspectorFilter, setInspectorFilter] = useState<string[]>(
+    () => (Array.isArray(savedView.inspectorFilter) ? savedView.inspectorFilter : []));
+  // Filter by template internal name(s). Empty = no filter; multi-select supported.
+  const [templateFilter, setTemplateFilter] = useState<string[]>(
+    () => (Array.isArray(savedView.templateFilter) ? savedView.templateFilter : []));
 
   // Bulk-select mode + selection set + busy flag for the cancel action.
   const [selectMode, setSelectMode] = useState(false);
@@ -124,8 +128,8 @@ export default function Home() {
       const term = search.trim();
       if (term) params.set('search', term);
       if (statusFilter !== 'all') params.set('status', statusFilter);
-      if (inspectorFilter !== 'all') params.set('inspector', inspectorFilter);
-      if (templateFilter !== 'all') params.set('template', templateFilter);
+      for (const name of inspectorFilter) params.append('inspector', name);
+      for (const t of templateFilter) params.append('template', t);
       params.set('sort', sortField);
       params.set('dir', sortDir);
       params.set('page', String(page));
@@ -195,7 +199,7 @@ export default function Home() {
   const currentPage = Math.min(page, totalPages);
   const pageStart = (currentPage - 1) * pageSize;
   const anyFilterActive = !!search.trim()
-    || statusFilter !== 'all' || inspectorFilter !== 'all' || templateFilter !== 'all';
+    || statusFilter !== 'all' || inspectorFilter.length > 0 || templateFilter.length > 0;
 
   // ---- Bulk-select helpers ----
   // A card is selectable for cancellation unless it's completed.
@@ -285,17 +289,26 @@ export default function Home() {
   );
   const templateOptions = useMemo(
     () => facets.templates
-      .map((value) => ({ value, label: prettyTemplateLabel(value) }))
+      .map((value) => ({ value, label: templateLabel(value) || value }))
       .sort((a, b) => a.label.localeCompare(b.label)),
     [facets.templates]
   );
 
-  // Self-heal a stale saved inspector filter. Older builds stored a lowercased
-  // name as the filter key; the server now matches the exact inspector_name, so
-  // if the saved value isn't a known inspector once facets load, clear it.
+  // Trigger summaries for the multi-select dropdowns.
+  const inspectorTriggerLabel = inspectorFilter.length === 0
+    ? 'All Inspectors'
+    : inspectorFilter.length === 1 ? inspectorFilter[0] : `${inspectorFilter.length} inspectors`;
+  const templateTriggerLabel = templateFilter.length === 0
+    ? 'All Templates'
+    : templateFilter.length === 1 ? (templateLabel(templateFilter[0]) || templateFilter[0]) : `${templateFilter.length} templates`;
+
+  // Self-heal stale saved inspector filters: drop any saved name that isn't a
+  // known inspector once facets load (older builds stored a lowercased key, and
+  // the server now matches the exact inspector_name).
   useEffect(() => {
-    if (inspectorFilter === 'all' || facets.inspectors.length === 0) return;
-    if (!facets.inspectors.includes(inspectorFilter)) setInspectorFilter('all');
+    if (inspectorFilter.length === 0 || facets.inspectors.length === 0) return;
+    const valid = inspectorFilter.filter((n) => facets.inspectors.includes(n));
+    if (valid.length !== inspectorFilter.length) setInspectorFilter(valid);
   }, [facets.inspectors, inspectorFilter]);
 
   return (
@@ -428,28 +441,36 @@ export default function Home() {
               The dropdowns shrink (truncating) so Updated + sort fit to their
               right without wrapping or horizontal-scrolling on mobile. */}
           <div className="flex items-center gap-2 mb-2 pb-1">
-            {/* Inspector filter — branded tap-to-select pop-up (no OS dropdown) */}
+            {/* Inspector filter — tap to filter by one, press & hold for multi-select */}
             <div className="flex-1 min-w-0 max-w-[160px]">
               <ListPicker
-                value={inspectorFilter}
-                options={[{ value: 'all', label: 'All Inspectors' }, ...inspectorOptions.map((o) => ({ value: o.value, label: o.label }))]}
-                onChange={setInspectorFilter}
+                value={inspectorFilter[0] ?? 'all'}
+                options={[{ value: 'all', label: 'All Inspectors' }, ...inspectorOptions]}
+                onChange={() => { /* multi-mode uses onApply */ }}
+                multiple
+                selectedValues={inspectorFilter}
+                onApply={setInspectorFilter}
+                triggerLabel={inspectorTriggerLabel}
                 ariaLabel="Filter by inspector"
                 className={`w-full truncate text-xs font-heading font-semibold pl-2.5 pr-2 py-1.5 border rounded-md bg-white flex items-center justify-between ${
-                  inspectorFilter !== 'all' ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'
+                  inspectorFilter.length > 0 ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'
                 }`}
               />
             </div>
 
-            {/* Template filter — branded tap-to-select pop-up (no OS dropdown) */}
+            {/* Template filter — tap to filter by one, press & hold for multi-select */}
             <div className="flex-1 min-w-0 max-w-[160px]">
               <ListPicker
-                value={templateFilter}
-                options={[{ value: 'all', label: 'All Templates' }, ...templateOptions.map((o) => ({ value: o.value, label: o.label }))]}
-                onChange={setTemplateFilter}
+                value={templateFilter[0] ?? 'all'}
+                options={[{ value: 'all', label: 'All Templates' }, ...templateOptions]}
+                onChange={() => { /* multi-mode uses onApply */ }}
+                multiple
+                selectedValues={templateFilter}
+                onApply={setTemplateFilter}
+                triggerLabel={templateTriggerLabel}
                 ariaLabel="Filter by template"
                 className={`w-full truncate text-xs font-heading font-semibold pl-2.5 pr-2 py-1.5 border rounded-md bg-white flex items-center justify-between ${
-                  templateFilter !== 'all' ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'
+                  templateFilter.length > 0 ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'
                 }`}
               />
             </div>
@@ -487,10 +508,10 @@ export default function Home() {
             </button>
 
             {/* Clear-all link, only shown when any filter is active */}
-            {(inspectorFilter !== 'all' || templateFilter !== 'all') && (
+            {(inspectorFilter.length > 0 || templateFilter.length > 0) && (
               <button
                 type="button"
-                onClick={() => { setInspectorFilter('all'); setTemplateFilter('all'); }}
+                onClick={() => { setInspectorFilter([]); setTemplateFilter([]); }}
                 className="shrink-0 text-xs text-gray-500 hover:text-brand font-heading underline whitespace-nowrap"
                 title="Clear inspector and template filters"
               >
@@ -663,22 +684,6 @@ function FilterChip({ label, active, onClick, className = '' }: ChipProps) {
       {label}
     </button>
   );
-}
-
-// Display label for a template internal name.
-// "pm_scope_inspection" -> "Scope"
-// "qc_new_construction_rrqc" -> "QC New Construction"
-function prettyTemplateLabel(t: string): string {
-  if (!t) return '';
-  return t
-    .replace(/^pm_/, '')
-    .replace(/^qc_/, 'QC ')
-    .replace(/_inspection$/, '')
-    .replace(/_/g, ' ')
-    .split(' ')
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
 }
 
 /**

@@ -821,8 +821,8 @@ export type InspectionSortField = 'updated' | 'scheduled';
 export interface InspectionQuery {
   search?: string;
   status?: InspectionStatusKey;
-  inspector?: string;            // exact inspector_name; '' / 'all' = no filter
-  template?: string;             // exact template_type; '' / 'all' = no filter
+  inspectors?: string[];         // exact inspector_name values; empty = no filter
+  templates?: string[];          // exact template_type values; empty = no filter
   forceTemplate?: string | null; // external (1099) users are locked to one template
 }
 
@@ -830,7 +830,9 @@ export interface InspectionCounts {
   all: number; scheduled: number; in_progress: number; pending_approval: number; completed: number;
 }
 
-// AND-filters that constrain a query (everything except the search OR).
+// AND-filters that constrain a query (everything except the search OR). Inspector
+// and template accept multiple values (OR within the dimension via the IN
+// operator) so the dropdowns can multi-select.
 function inspectionAndFilters(q: InspectionQuery): any[] {
   const filters: any[] = [];
   const status = q.status && q.status !== 'all' ? q.status : '';
@@ -840,10 +842,12 @@ function inspectionAndFilters(q: InspectionQuery): any[] {
     // "All" still hides cancelled inspections from the field team.
     filters.push({ propertyName: 'status', operator: 'NOT_IN', values: CANCELLED_VARIANTS });
   }
-  const template = (q.forceTemplate || (q.template && q.template !== 'all' ? q.template : '') || '').trim();
-  if (template) filters.push({ propertyName: 'template_type', operator: 'EQ', value: template });
-  const inspector = (q.inspector && q.inspector !== 'all' ? q.inspector : '').trim();
-  if (inspector) filters.push({ propertyName: 'inspector_name', operator: 'EQ', value: inspector });
+  const templates = q.forceTemplate
+    ? [q.forceTemplate]
+    : (q.templates || []).map((t) => t.trim()).filter((t) => t && t !== 'all');
+  if (templates.length) filters.push({ propertyName: 'template_type', operator: 'IN', values: templates });
+  const inspectors = (q.inspectors || []).map((n) => n.trim()).filter((n) => n && n !== 'all');
+  if (inspectors.length) filters.push({ propertyName: 'inspector_name', operator: 'IN', values: inspectors });
   return filters;
 }
 
@@ -922,19 +926,61 @@ export async function countInspectionsByStatus(q: InspectionQuery): Promise<Insp
   return { all, scheduled, in_progress, pending_approval, completed };
 }
 
+// Distinct inspector_name values that actually appear on inspections — so the
+// filter dropdown lists only inspectors WITH inspections, not the whole user
+// directory. Derived from a bounded recent scan (HubSpot has no distinct API),
+// cached at module scope so the multi-page sweep runs at most once per TTL per
+// warm instance rather than on every home load.
+let _inspectorNamesCache: { names: string[]; at: number } | null = null;
+const INSPECTOR_NAMES_TTL_MS = 30 * 60 * 1000;
+const INSPECTOR_NAMES_MAX_PAGES = 20; // up to ~2,000 most-recently-touched inspections
+
+export async function inspectionInspectorNames(): Promise<string[]> {
+  if (_inspectorNamesCache && Date.now() - _inspectorNamesCache.at < INSPECTOR_NAMES_TTL_MS) {
+    return _inspectorNamesCache.names;
+  }
+  const { inspection: typeId } = typeIds();
+  const seen = new Set<string>();
+  let after: string | undefined;
+  let pages = 0;
+  try {
+    do {
+      const body: any = {
+        filterGroups: [{ filters: [{ propertyName: 'status', operator: 'NOT_IN', values: CANCELLED_VARIANTS }] }],
+        properties: ['inspector_name'],
+        limit: 100,
+        sorts: [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }],
+      };
+      if (after) body.after = after;
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+        method: 'POST', body: JSON.stringify(body),
+      });
+      for (const r of resp.results || []) {
+        const n = String(r.properties?.inspector_name || '').trim();
+        if (n) seen.add(n);
+      }
+      after = resp.paging?.next?.after;
+      pages++;
+    } while (after && pages < INSPECTOR_NAMES_MAX_PAGES);
+  } catch (e) {
+    // Return whatever we collected; an empty list just yields no inspector options.
+    console.warn('[inspector-facet] scan failed:', e);
+  }
+  const names = Array.from(seen).sort((a, b) => a.localeCompare(b));
+  // Only cache a non-empty result so a transient failure doesn't pin an empty list.
+  if (names.length) _inspectorNamesCache = { names, at: Date.now() };
+  return names;
+}
+
 /**
  * Options for the inspector + template filter dropdowns, derived WITHOUT a full
- * dataset scan: inspectors come from the active-users list (assignment is gated
- * to active users), templates from the known current set. External users only
- * ever see their one template.
+ * dataset scan: inspectors are the distinct names that appear on inspections
+ * (cached, bounded recent scan), templates the known current set. External
+ * users only ever see their one template.
  */
 export async function inspectionFacets(opts: { externalTemplate?: string | null } = {}): Promise<{ inspectors: string[]; templates: string[] }> {
   let inspectors: string[] = [];
-  try {
-    const users = await fetchActiveUsers();
-    inspectors = Array.from(new Set(users.map((u) => (u.fullName || '').trim()).filter(Boolean)))
-      .sort((a, b) => a.localeCompare(b));
-  } catch { inspectors = []; }
+  try { inspectors = await inspectionInspectorNames(); } catch { inspectors = []; }
   const templates = opts.externalTemplate ? [opts.externalTemplate] : CURRENT_TEMPLATE_TYPES;
   return { inspectors, templates };
 }
