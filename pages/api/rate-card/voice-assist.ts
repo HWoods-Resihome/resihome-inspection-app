@@ -25,7 +25,10 @@ import { recordAiUsage } from '@/lib/aiUsage';
 import { getKnowledgeBasePromptText } from '@/lib/hubspot';
 import { matchCatalog, getCatalogEmbeddings } from '@/lib/voiceCatalogMatch';
 import { aliasFor } from '@/lib/voiceAliases';
-import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
+import {
+  correctCleanLevel, correctBlinds, wholeHouseExempt,
+  measuredUnitOf, measurementWord, isStairCount, resolveTenantPct,
+} from '@/lib/rateCardAiCore';
 import { calculateLine } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
@@ -425,22 +428,6 @@ function roomFromUtterance(text: string, rooms: { id: string; name: string }[]):
   return uniq.length === 1 ? uniq[0] : null;
 }
 
-// When the inspector explicitly said "level 2" but the matched clean is a lower
-// tier (Lite / Level 1), find the Level-2 sibling in the same category +
-// subcategory so the correct tier is added. Returns null if there isn't one.
-function level2CleanSibling(catalog: RateCardLineItem[], item: RateCardLineItem): RateCardLineItem | null {
-  const desc = item.laborShortDescription || '';
-  const isClean = /clean/i.test(`${desc} ${item.category} ${item.subcategory}`);
-  const alreadyL2 = /level\s*2|level\s*two|\bl2\b/i.test(desc);
-  if (!isClean || alreadyL2) return null;
-  return catalog.find((c) =>
-    c.isActive !== false
-    && (c.category || '') === (item.category || '')
-    && (c.subcategory || '') === (item.subcategory || '')
-    && /level\s*2|level\s*two|\bl2\b/i.test(c.laborShortDescription || '')
-  ) || null;
-}
-
 // Build the line confirmation shown on screen. Per the inspector's preference,
 // the vendor assignment and tenant chargeback % are NOT shown unless they
 // explicitly set them (showVendor / showPct) — a default add just reads
@@ -681,9 +668,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // the confirmation, exactly as it would for a model-emitted proposal.
     if (fastAddItem) {
       const item = fastAddItem;
-      const depKind = depKindForCategory(item.category, item.laborShortDescription);
-      let pct = depKind ? depreciationTenantPct(depKind, tenantMonths) : 100;
-      pct = Math.max(0, Math.min(100, Math.round(pct / 5) * 5));
+      const pct = resolveTenantPct(item, tenantMonths);
       const line: RateCardLineInput = {
         externalId: `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
         section: activeSection, location: activeLocation, lineItemCode: item.lineItemCode,
@@ -775,50 +760,44 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           if (!item) {
             result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: `No catalog item with code ${code}. Use search_catalog first.` }) };
           } else {
-            // Level-2 clean correction: if the inspector explicitly said "level 2"
-            // but the matched clean is a lower tier (Lite / Level 1), swap to the
-            // Level-2 sibling so the right tier is added.
-            if (/\blevel\s*(2|two)\b/i.test(allUserText)) {
-              const l2 = level2CleanSibling(catalog, item);
-              if (l2) item = l2;
-            }
+            // Shared guards (identical to the camera AI, via lib/rateCardAiCore):
+            // an explicit "level 1/2" clean → that exact tier; a bare "blind" →
+            // faux-wood blind replacement.
+            item = correctCleanLevel(item, allUserText, catalog);
+            item = correctBlinds(item, lastUtterance, catalog);
             const qty = Number(tu.input?.quantity);
             let vendor = tu.input?.vendor ? String(tu.input.vendor) : 'Vendor 1';
             if (!VENDORS.includes(vendor)) vendor = 'Vendor 1';
-            const depKind = depKindForCategory(item.category, item.laborShortDescription);
             let pct: number;
-            if (tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent))) pct = Number(tu.input.tenantBillBackPercent);
-            else if (depKind) pct = depreciationTenantPct(depKind, tenantMonths);
-            else pct = 100;
-            pct = Math.max(0, Math.min(100, Math.round(pct / 5) * 5));
-            const unit = (item.laborMeas || '').trim().toUpperCase();
-            const isMeasured = unit === 'SF' || unit === 'LF' || unit === 'SY';
+            if (tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent))) {
+              pct = Math.max(0, Math.min(100, Math.round(Number(tu.input.tenantBillBackPercent) / 5) * 5));
+            } else {
+              pct = resolveTenantPct(item, tenantMonths);
+            }
+            const { unit, isMeasured } = measuredUnitOf(item);
             // Whole-house SF items never need a measurement — the app fills the
-            // property's square footage. Exempt them whether identified by the
-            // section/room OR the item description itself (e.g. a "Whole House
-            // ... SF" line proposed from any room).
-            const isWholeHouse = /whole\s*house/i.test(activeSection || body.section || '')
-              || /\b(whole|full)\s*house\b/i.test(item.laborShortDescription || '')
-              || /\b(whole|full)\s*house\b/i.test(String(tu.input?.room || ''))
-              // Also when the inspector SAID "whole house" AND this inspection has
-              // a Whole House section to route into — the app auto-fills the
-              // property's square footage there, so don't ask for it. (Gated on the
-              // section existing so we don't skip the measurement and then land the
-              // line in a non-Whole-House room where the auto-fill wouldn't fire.)
-              || (/\b(whole|full)\s*house\b/i.test(lastUtterance)
-                  && rooms.some((rm) => /whole\s*house/i.test(rm.name)));
+            // property's square footage in the Whole House section. Shared with
+            // the camera AI; also exempts when the inspector SAID "whole house"
+            // and a Whole House section exists to route the line into.
+            const isWholeHouse = wholeHouseExempt({
+              item,
+              sectionName: activeSection || body.section || '',
+              roomInput: String(tu.input?.room || ''),
+              utterance: lastUtterance,
+              hasWholeHouseRoom: rooms.some((rm) => /whole\s*house/i.test(rm.name)),
+            });
             const confirmed = tu.input?.quantityConfirmed === true;
             // Stair items (carpet/tread/runner on stairs) are priced PER STAIR
             // even though the unit reads EACH, so a defaulted qty of 1 is almost
             // always wrong. Treat them like a measured item: require a confirmed
             // count of stairs before adding.
-            const isStairCount = /\bstair/i.test(item.laborShortDescription);
+            const stairCount = isStairCount(item);
             if (!isFinite(qty) || qty < 0) {
               result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: 'Quantity must be a non-negative number. Ask the inspector.' }) };
             } else if (isMeasured && !isWholeHouse && !confirmed) {
-              const unitWord = unit === 'SF' ? 'square feet' : unit === 'LF' ? 'linear feet' : 'square yards';
+              const unitWord = measurementWord(unit);
               result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: `"${item.laborShortDescription}" is measured in ${unitWord}. Do not guess the amount. Ask the inspector to confirm the ${unitWord} (e.g. "How many ${unitWord} for the carpet?"), then call propose_line again with the stated quantity and quantityConfirmed: true.`, needsQuantity: true, unit }) };
-            } else if (isStairCount && !confirmed) {
+            } else if (stairCount && !confirmed) {
               result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: `"${item.laborShortDescription}" is priced per stair. Do not guess. Ask the inspector how many stairs (e.g. "How many stairs?"), then call propose_line again with that count as the quantity and quantityConfirmed: true.`, needsQuantity: true, unit: 'stairs' }) };
             } else {
               let lineSection = activeSection;

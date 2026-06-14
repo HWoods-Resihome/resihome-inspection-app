@@ -21,7 +21,10 @@ import sharp from 'sharp';
 import { getSessionFromRequest } from '@/lib/auth';
 import { matchCatalog } from '@/lib/voiceCatalogMatch';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
-import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
+import {
+  aliasFor, correctCleanLevel, correctBlinds, wholeHouseExempt,
+  measuredUnitOf, measurementWord, isStairCount, resolveTenantPct,
+} from '@/lib/rateCardAiCore';
 import { recordAiUsage } from '@/lib/aiUsage';
 
 export const config = {
@@ -187,17 +190,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const inp = toolUses[i].input || {};
       const query = String(inp.query || '').trim();
       if (!query) continue;
-      const match = await matchCatalog(query, catalog, { sectionName, categoryHint: String(inp.category || '') });
+      // Same shared resolution as the voice + live-camera AIs (lib/rateCardAiCore):
+      // phrase aliases, then the blinds → faux-wood and explicit clean-level guards.
+      const alias = aliasFor(query);
+      const match = await matchCatalog(alias ? alias.query : query, catalog, { sectionName, categoryHint: String(inp.category || '') || alias?.categoryHint });
       const top = match.candidates[0];
       // No GOOD catalog match → drop it. Never surface a clearly-wrong item just
       // to have a suggestion; if the rate card doesn't cover it, skip silently.
       if (!top || !match.confident) continue;
-      const item = top.item;
-      const unit = (item.laborMeas || '').trim().toUpperCase();
-      const isMeasured = unit === 'SF' || unit === 'LF' || unit === 'SY';
-      const isWholeHouse = /\b(whole|full)\s*house\b/i.test(item.laborShortDescription || '');
+      let item = correctBlinds(top.item, query, catalog);
+      item = correctCleanLevel(item, query, catalog);
+      const { unit, isMeasured } = measuredUnitOf(item);
+      const isWholeHouse = wholeHouseExempt({ item, sectionName, utterance: query });
       const quantityStated = inp.quantityStated === true && typeof inp.quantity === 'number' && isFinite(inp.quantity);
-      const needsMeasurement = isMeasured && !isWholeHouse && !quantityStated;
+      // Stairs are priced PER STAIR (unit reads EACH) — confirm the count instead
+      // of defaulting to 1 (parity with the voice + live-camera AIs).
+      const stair = isStairCount(item);
+      const needsMeasurement = ((isMeasured && !isWholeHouse) || stair) && !quantityStated;
       const quantity = quantityStated ? Number(inp.quantity) : (needsMeasurement ? null : 1);
       // Rough AI estimate (clamped to something sane) to pre-fill the approve
       // screen for measured items the inspector didn't state. Draft only.
@@ -207,8 +216,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         : null;
 
       // Default tenant % the same way voice/manual adds do (depreciation-aware).
-      const depKind = depKindForCategory(item.category, item.laborShortDescription);
-      const tenantPct = depKind ? depreciationTenantPct(depKind, tenantMonths) : 100;
+      const tenantPct = resolveTenantPct(item, tenantMonths);
 
       const frameIndex = (typeof inp.frameIndex === 'number' && frameMap.includes(Math.round(inp.frameIndex)))
         ? Math.round(inp.frameIndex)
@@ -224,7 +232,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         unit,
         quantity,
         needsMeasurement,
-        measurementUnit: needsMeasurement ? (unit === 'SF' ? 'square feet' : unit === 'LF' ? 'linear feet' : 'square yards') : '',
+        measurementUnit: needsMeasurement ? (stair ? 'stairs' : measurementWord(unit)) : '',
         estimatedQuantity,
         suggestedVendor: 'Vendor 1',
         tenantBillBackPercent: tenantPct,

@@ -15,9 +15,12 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { getKnowledgeBasePromptText } from '@/lib/hubspot';
 import { matchCatalog } from '@/lib/voiceCatalogMatch';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
-import { depKindForCategory, depreciationTenantPct } from '@/lib/depreciation';
 import { VENDORS } from '@/lib/vendors';
 import { recordAiUsage } from '@/lib/aiUsage';
+import {
+  aliasFor, correctCleanLevel, correctBlinds, wholeHouseExempt,
+  measuredUnitOf, measurementWord, isStairCount, resolveTenantPct,
+} from '@/lib/rateCardAiCore';
 
 export const config = {
   maxDuration: 30,
@@ -168,30 +171,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const resolveItem = async (query: string, categoryHint: string, fromVoice = false) => {
       const q = String(query || '').trim();
       if (!q) return null;
-      const match = await matchCatalog(q, catalog, { sectionName, categoryHint });
-      let top = match.candidates[0];
+      // Phrase aliases (e.g. "mismatch" → mist-match paint, "sales clean" →
+      // whole-house sales clean) — the SAME normalization the voice AI uses.
+      const alias = aliasFor(q);
+      const match = await matchCatalog(alias ? alias.query : q, catalog, { sectionName, categoryHint: categoryHint || alias?.categoryHint });
+      const top = match.candidates[0];
       const ok = match.confident || (fromVoice && top && match.topScore >= VOICE_FLOOR);
       if (!top || !ok) return null;
-      if (/\bblind/i.test(q) && !/valance|wand|vertical/i.test(q) && /valance|wand/i.test(top.item.laborShortDescription)) {
-        const faux = match.candidates.find((c) => /faux\s*wood\s*blind/i.test(c.item.laborShortDescription));
-        if (faux) top = faux;
-      }
-      // CLEAN-LEVEL guard: when the inspector names a cleaning LEVEL ("level 1
-      // clean", "level one clean", "l1"), prefer the matching Level-1 clean
-      // candidate over a differently-named clean (e.g. "Refresh Clean") the scorer
-      // may rank higher. No-ops if no Level-1 clean is among the candidates.
-      if (/clean/i.test(q) && (/\blevel\s*(?:1|one)\b/i.test(q) || /\bl1\b/i.test(q)) && !/level\s*1\b/i.test(top.item.laborShortDescription || '')) {
-        const lvl1 = match.candidates.find((c) =>
-          /clean/i.test(c.item.laborShortDescription || '') && /level\s*1\b/i.test(c.item.laborShortDescription || ''));
-        if (lvl1) top = lvl1;
-      }
-      const item = top.item;
-      const unit = (item.laborMeas || '').trim().toUpperCase();
-      const isMeasured = unit === 'SF' || unit === 'LF' || unit === 'SY';
-      const isWholeHouse = /\b(whole|full)\s*house\b/i.test(item.laborShortDescription || '');
-      const depKind = depKindForCategory(item.category, item.laborShortDescription);
-      const tenantPct = depKind ? depreciationTenantPct(depKind, tenantMonths) : 100;
-      const measurementUnit = isMeasured && !isWholeHouse ? (unit === 'SF' ? 'square feet' : unit === 'LF' ? 'linear feet' : 'square yards') : '';
+      // Shared guards (identical to the voice AI): a bare "blind" → faux-wood
+      // blind; an explicit "level 1/2" clean → that exact tier.
+      let item = correctBlinds(top.item, q, catalog);
+      item = correctCleanLevel(item, q, catalog);
+      const { unit, isMeasured } = measuredUnitOf(item);
+      const isWholeHouse = wholeHouseExempt({ item, sectionName, utterance: q });
+      const tenantPct = resolveTenantPct(item, tenantMonths);
+      const measurementUnit = isMeasured && !isWholeHouse ? measurementWord(unit) : '';
       return { item, unit, isMeasured, isWholeHouse, tenantPct, measurementUnit, topScore: match.topScore, confident: match.confident };
     };
 
@@ -239,7 +233,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const buildSuggestionObj = (inp: any, resolved: any) => {
       const { item, unit, isMeasured, isWholeHouse, tenantPct, measurementUnit } = resolved;
       const quantityStated = inp.quantityStated === true && typeof inp.quantity === 'number' && isFinite(inp.quantity);
-      const needsMeasurement = isMeasured && !isWholeHouse && !quantityStated;
+      // Stairs (carpet/tread/runner) are priced PER STAIR though the unit reads
+      // EACH, so a default of 1 mis-prices — treat like a measured item and have
+      // the inspector confirm the stair count (parity with the voice AI).
+      const stair = isStairCount(item);
+      const needsMeasurement = ((isMeasured && !isWholeHouse) || stair) && !quantityStated;
+      const measUnit = stair ? 'stairs' : measurementUnit;
       const quantity = quantityStated ? Number(inp.quantity) : (needsMeasurement ? null : 1);
       const rawEst = Number(inp.estimatedQuantity);
       const estimatedQuantity = (needsMeasurement && isFinite(rawEst) && rawEst > 0) ? Math.min(100000, Math.round(rawEst)) : null;
@@ -249,7 +248,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         lineItemCode: item.lineItemCode,
         category: item.category,
         subcategory: item.subcategory,
-        unit, quantity, needsMeasurement, measurementUnit, estimatedQuantity,
+        unit, quantity, needsMeasurement, measurementUnit: measUnit, estimatedQuantity,
         suggestedVendor: 'Vendor 1',
         tenantBillBackPercent: tenantPct,
         rationale: String(inp.rationale || '').slice(0, 160),
