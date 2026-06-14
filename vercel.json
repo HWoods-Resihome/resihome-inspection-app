@@ -20,6 +20,9 @@
     },
     "pages/api/cron/blob-cleanup.ts": {
       "maxDuration": 60
+    },
+    "pages/api/cron/auto-cancel-stale.ts": {
+      "maxDuration": 60
     }
   },
   "crons": [
@@ -30,6 +33,10 @@
     {
       "path": "/api/cron/blob-cleanup",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/auto-cancel-stale",
+      "schedule": "0 9 * * *"
     }
   ]
 }

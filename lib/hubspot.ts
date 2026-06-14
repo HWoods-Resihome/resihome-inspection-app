@@ -999,6 +999,55 @@ export async function inspectionFacets(query: InspectionQuery): Promise<{ inspec
 }
 
 /**
+ * List "Scheduled" inspections whose scheduled_date is at least `daysPastDue`
+ * days in the past — the stale ones an inspector never started. Used by the
+ * auto-cancel cron. Only status=scheduled is returned (in_progress / completed /
+ * cancelled are excluded by the status filter), and records with no
+ * scheduled_date can't be judged past-due so the LT filter naturally skips them.
+ * Oldest-scheduled first; capped at `max` per sweep (the daily cron drains any
+ * backlog over subsequent runs).
+ */
+export async function listStaleScheduledInspections(
+  daysPastDue: number,
+  max = 500,
+): Promise<Array<{ recordId: string; inspectionName: string; scheduledDate: string | null }>> {
+  const { inspection: typeId } = typeIds();
+  const cutoffMs = Date.now() - Math.max(0, daysPastDue) * 864e5;
+  const out: Array<{ recordId: string; inspectionName: string; scheduledDate: string | null }> = [];
+  let after: string | undefined;
+  let pages = 0;
+  const maxPages = Math.max(1, Math.ceil(max / 100));
+  do {
+    const body: any = {
+      filterGroups: [{
+        filters: [
+          { propertyName: 'status', operator: 'IN', values: STATUS_VARIANTS.scheduled },
+          { propertyName: 'scheduled_date', operator: 'LT', value: String(cutoffMs) },
+        ],
+      }],
+      properties: ['inspection_name', 'scheduled_date', 'status'],
+      limit: 100,
+      sorts: [{ propertyName: 'scheduled_date', direction: 'ASCENDING' }], // most overdue first
+    };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST', body: JSON.stringify(body),
+    });
+    for (const r of resp.results || []) {
+      out.push({
+        recordId: r.id,
+        inspectionName: r.properties?.inspection_name || `(Inspection ${r.id})`,
+        scheduledDate: r.properties?.scheduled_date || null,
+      });
+      if (out.length >= max) return out;
+    }
+    after = resp.paging?.next?.after;
+    pages++;
+  } while (after && pages < maxPages);
+  return out;
+}
+
+/**
  * For the QC Turn Re-Inspect flow: list a property's Scope Rate Card
  * inspections that are submitted/completed (the only ones worth validating).
  * Sorted most-recently-submitted first so the picker can default to the top.
