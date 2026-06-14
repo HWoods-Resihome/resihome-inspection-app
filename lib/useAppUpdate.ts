@@ -39,24 +39,37 @@ function announceUpdate() {
   try { window.dispatchEvent(new Event(UPDATE_EVENT)); } catch { /* noop */ }
 }
 
-/** Apply a pending update in ONE reload.
+/** Apply a pending update in ONE reload — bulletproof.
  *
- *  Common case (banner came from the /api/version poll while still on the old
- *  bundle): there's no waiting worker yet, because the new SW only registers once
- *  the NEW bundle loads. So we reload straight away — the navigation is
- *  network-first (fresh HTML + fresh hashed chunks), and the new bundle's SW
- *  installs with skipWaiting() so it activates in that same load. No second
- *  banner, no second reload.
+ *  Why the previous attempts needed two clicks: the banner usually fires from the
+ *  /api/version poll while we're still on the OLD bundle, so there's no waiting
+ *  worker to promote — and the bare reload that follows is handled by the OLD
+ *  service worker still in control, which can serve a STALE cached shell. So
+ *  reload #1 doesn't actually load the new build, the version still mismatches,
+ *  the banner returns, and you reload again.
  *
- *  Rare case (a worker is already waiting, e.g. a second tab installed it):
- *  promote it via SKIP_WAITING → controllerchange → reload once. */
+ *  Fix: bypass the service worker entirely for the update. Unregister every SW and
+ *  delete the shell caches (Cache API only — IndexedDB photo queues are untouched),
+ *  THEN reload. With no SW controlling and no shell cache, the reload comes straight
+ *  from the network = the new build, guaranteed, in one click. The fresh bundle
+ *  re-registers the SW and re-caches the shell on that load. */
+let _applying = false;
 function applyUpdate(): void {
-  const reg = _reg;
-  if (reg?.waiting) {
-    _updating = true;
-    try { reg.waiting.postMessage('SKIP_WAITING'); return; } catch { /* fall through to reload */ }
-  }
-  window.location.reload();
+  if (_applying) return;
+  _applying = true;
+  void (async () => {
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister().catch(() => false)));
+      }
+      if (typeof caches !== 'undefined') {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k).catch(() => false)));
+      }
+    } catch { /* best-effort — reload regardless */ }
+    window.location.reload();
+  })();
 }
 
 function watchInstalling(reg: ServiceWorkerRegistration) {
