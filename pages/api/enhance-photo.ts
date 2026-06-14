@@ -27,7 +27,8 @@ export const config = {
 };
 
 const MAX_FRAMES = 8;
-const MAX_EDGE = 2048;      // working resolution cap — keeps detail while bounding memory/time
+const MAX_EDGE = 2048;      // working (merge) resolution cap — bounds memory/time
+const OUT_EDGE = 3024;      // final output res — match the single-shot path so HD is never softer
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -67,19 +68,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     if (rawFrames.length < 2) return res.status(400).json({ error: 'Frames could not be decoded' });
 
-    // Align + merge (the denoise).
-    const merged = mergeBurst(rawFrames, { width: W, height: H, channels: 3, maxShift: 24, rejectThreshold: 26 });
+    // Align + merge (the denoise). A looser reject threshold includes more
+    // aligned samples → more noise cancellation (alignment is robust, so ghosting
+    // risk stays low).
+    const merged = mergeBurst(rawFrames, { width: W, height: H, channels: 3, maxShift: 24, rejectThreshold: 38 });
 
-    // Sharpen the denoised result (unsharp mask) and encode a high-quality JPEG.
+    // Upscale the clean, denoised result to the output resolution (so HD is never
+    // softer than the single-shot path) and apply a strong unsharp mask — a clean
+    // upscaled image takes sharpening far better than a noisy native-res one.
+    const outFit = Math.min(OUT_EDGE / Math.max(W, H), 2); // never upscale beyond 2×
+    const outW = Math.max(W, Math.round(W * outFit));
+    const outH = Math.max(H, Math.round(H * outFit));
     const out = await sharp(Buffer.from(merged.data), { raw: { width: W, height: H, channels: 3 } })
-      .sharpen({ sigma: 1.0, m1: 0.6, m2: 2.5 })
+      .resize(outW, outH, { kernel: 'lanczos3' })
+      .sharpen({ sigma: 1.3, m1: 0.8, m2: 3 })
       .jpeg({ quality: 92, mozjpeg: true })
       .toBuffer();
 
     return res.status(200).json({
       base64: out.toString('base64'),
-      width: W,
-      height: H,
+      width: outW,
+      height: outH,
       frames: rawFrames.length,
       samples: Math.round(merged.avgSamplesPerPixel * 100) / 100,
     });

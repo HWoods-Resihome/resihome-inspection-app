@@ -1473,13 +1473,13 @@ export function CameraCapture({
     // is enqueued preCropped (no second crop).
     if (hdOn && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
       const frames: string[] = [];
-      const N = 6;
+      const N = 8;
       let i = 0;
       const grabNext = () => {
         const b64 = grabBurstFrameB64(video);
         if (b64) frames.push(b64);
         i++;
-        if (i < N) { window.setTimeout(grabNext, 32); return; } // ~6 frames over ~190ms
+        if (i < N) { window.setTimeout(grabNext, 30); return; } // ~8 frames over ~210ms
         if (frames.length < 2) { buildAndEnqueue(video, video.videoWidth, video.videoHeight, endCapture); return; }
         const ctrl = new AbortController();
         const to = window.setTimeout(() => ctrl.abort(), 12000);
