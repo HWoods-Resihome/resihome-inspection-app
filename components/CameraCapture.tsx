@@ -359,6 +359,11 @@ export function CameraCapture({
   const freezeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [frozen, setFrozen] = useState(false);
   const pendingCaptureCountRef = useRef(0);
+  // HD mode: capture a short burst and merge it server-side (multi-frame denoise)
+  // for the cleanest possible shot — best for low light & zoomed-in detail. Adds
+  // a couple of seconds per photo, so it's opt-in (rapid fire stays on the fast
+  // single-shot path when off).
+  const [hdOn, setHdOn] = useState(false);
   // Cache one ImageCapture per video track — reused across shots so rapid fire
   // pays no construction cost. Recreated when the track changes; nulled on stop.
   const imageCaptureRef = useRef<any>(null);
@@ -1384,6 +1389,30 @@ export function CameraCapture({
     if (pendingCaptureCountRef.current === 0) setFrozen(false);
   }, []);
 
+  // Grab one burst frame for HD merge: the CURRENT zoom-cropped view, capped to
+  // 2048px (matches the server), as a bare base64 JPEG (no data: prefix).
+  const grabBurstFrameB64 = useCallback((video: HTMLVideoElement): string | null => {
+    const srcW = video.videoWidth, srcH = video.videoHeight;
+    if (!srcW || !srcH) return null;
+    const z = effZoom();
+    const cropW = z > 1.001 ? srcW / z : srcW;
+    const cropH = z > 1.001 ? srcH / z : srcH;
+    const fit = Math.min(1, 2048 / Math.max(cropW, cropH));
+    const cw = Math.max(2, Math.round(cropW * fit)), ch = Math.max(2, Math.round(cropH * fit));
+    const canvas = document.createElement('canvas');
+    canvas.width = cw; canvas.height = ch;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.imageSmoothingQuality = 'high';
+    try {
+      if (z > 1.001) ctx.drawImage(video, (srcW - cropW) / 2, (srcH - cropH) / 2, cropW, cropH, 0, 0, cw, ch);
+      else ctx.drawImage(video, 0, 0, srcW, srcH, 0, 0, cw, ch);
+    } catch { return null; }
+    const url = canvas.toDataURL('image/jpeg', 0.9);
+    const comma = url.indexOf(',');
+    return comma >= 0 ? url.slice(comma + 1) : null;
+  }, [effZoom]);
+
   const capturePhoto = useCallback(() => {
     // Count in-flight captures too, so a rapid burst can't blow past the cap
     // before any have finished enqueuing.
@@ -1405,7 +1434,7 @@ export function CameraCapture({
     // Draw a source (live frame OR full-sensor still) to a capped canvas with the
     // digital-zoom crop + evidence stamp, encode + enqueue. `finish` runs exactly
     // once when the photo is saved (or on error) — that's when the freeze lifts.
-    const buildAndEnqueue = (source: CanvasImageSource, srcW: number, srcH: number, finish: () => void) => {
+    const buildAndEnqueue = (source: CanvasImageSource, srcW: number, srcH: number, finish: () => void, preCropped = false) => {
       let finished = false;
       const done = () => { if (!finished) { finished = true; finish(); } };
       try {
@@ -1420,8 +1449,9 @@ export function CameraCapture({
         if (!ctx) { done(); return; }
         ctx.imageSmoothingQuality = 'high';
         // effZoom()===1 when the sensor is zooming (frame used as-is); otherwise
-        // crop the central 1/z (digital zoom on iOS).
-        const z = effZoom();
+        // crop the central 1/z (digital zoom on iOS). preCropped sources (the HD
+        // merge result) are ALREADY cropped → draw whole.
+        const z = preCropped ? 1 : effZoom();
         if (z > 1.001) {
           const sw = srcW / z, sh = srcH / z;
           ctx.drawImage(source, (srcW - sw) / 2, (srcH - sh) / 2, sw, sh, 0, 0, vw, vh);
@@ -1446,6 +1476,47 @@ export function CameraCapture({
         done();
       }
     };
+
+    // HD MODE: capture a short burst from the live video and merge it server-side
+    // (our own multi-frame denoise — works on iPhone + Android). Falls back to the
+    // single-shot path on any failure / when offline. Adds a couple seconds, so
+    // it's opt-in. The burst frames are already zoom-cropped, so the merged result
+    // is enqueued preCropped (no second crop).
+    if (hdOn && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+      const frames: string[] = [];
+      const N = 6;
+      let i = 0;
+      const grabNext = () => {
+        const b64 = grabBurstFrameB64(video);
+        if (b64) frames.push(b64);
+        i++;
+        if (i < N) { window.setTimeout(grabNext, 32); return; } // ~6 frames over ~190ms
+        if (frames.length < 2) { buildAndEnqueue(video, video.videoWidth, video.videoHeight, endCapture); return; }
+        const ctrl = new AbortController();
+        const to = window.setTimeout(() => ctrl.abort(), 12000);
+        fetch('/api/enhance-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ frames }),
+          signal: ctrl.signal,
+        })
+          .then(async (r) => { if (!r.ok) throw new Error(`enhance ${r.status}`); return r.json(); })
+          .then(async (data) => {
+            if (!data?.base64) throw new Error('no image');
+            const blob = await (await fetch(`data:image/jpeg;base64,${data.base64}`)).blob();
+            const bmp = await createImageBitmap(blob);
+            buildAndEnqueue(bmp, bmp.width, bmp.height, endCapture, true);
+            try { (bmp as any).close?.(); } catch { /* noop */ }
+          })
+          .catch(() => {
+            // Enhancement unavailable/slow — never lose the shot; use a single frame.
+            buildAndEnqueue(video, video.videoWidth, video.videoHeight, endCapture);
+          })
+          .finally(() => window.clearTimeout(to));
+      };
+      grabNext();
+      return;
+    }
 
     // QUALITY-FIRST: prefer ImageCapture.takePhoto() — the camera's real STILL
     // pipeline (multi-frame denoise + proper exposure/HDR), the fix for grainy
@@ -1483,7 +1554,7 @@ export function CameraCapture({
 
     // No ImageCapture (iOS Safari, etc.) → instant live-frame grab.
     buildAndEnqueue(video, video.videoWidth, video.videoHeight, endCapture);
-  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines, effZoom, showFreezeFrame, endCapture, getImageCapture, takeBestPhoto]);
+  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines, effZoom, showFreezeFrame, endCapture, getImageCapture, takeBestPhoto, hdOn, grabBurstFrameB64]);
 
   // ----- Per-photo retake/delete -----
 
@@ -1737,6 +1808,18 @@ export function CameraCapture({
         aria-pressed={aiOn}
       >
         {aiOn ? 'Turn AI off' : 'Turn AI on'}
+      </button>
+      {/* HD: multi-frame burst denoise (cleaner low-light / zoom; slower per shot). */}
+      <button
+        type="button"
+        onClick={() => setHdOn((v) => !v)}
+        className={`inline-flex items-center gap-1 text-[11px] font-heading font-semibold px-2.5 py-1 rounded-full border transition-colors ${hdOn ? 'border-amber-300 bg-amber-500 text-black' : 'border-white/30 text-white/90 hover:bg-white/10'}`}
+        aria-pressed={hdOn}
+        aria-label="Toggle HD multi-frame capture"
+        title="HD: merges several frames for a cleaner, less grainy photo (a bit slower)"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 9v6M7 12h3M10 9v6M14 9v6h2a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2z" /></svg>
+        {hdOn ? 'HD on' : 'HD off'}
       </button>
     </div>
   );
