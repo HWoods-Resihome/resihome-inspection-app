@@ -30,6 +30,8 @@ const SRC = {
   reinspect: '7c233f5b-1000015057.jpg',
   download: 'd27f0ad4-1000015061.jpg',
   masterpdf: '78c0f983-1000015063.jpg',
+  tagphoto: 'f6a7d0c8-1000015080.jpg',
+  managesections: '0eec3acf-1000015078.jpg',
 };
 async function loadShot(file) {
   const full = path.join(SHOT_DIR, file);
@@ -234,20 +236,20 @@ function ContentPage(...secs) {
     T(S.intro, 'Photos and video are the backbone of every inspection. The in-app camera does a lot.'),
     H2('Capturing'),
     LI('Two Levels:', 'add photos to a line item, or to a whole section/room.'),
-    LI('Photos:', 'tap the shutter; rapid-fire is supported for capturing several shots fast.'),
-    LI('Video:', 'tap the video toggle to switch to video mode, tap record to start, then tap again to stop — clips save right alongside your photos.'),
-    LI('Location-Stamped:', 'each capture stamps address, time, GPS, and on-site vs. off-site distance — proof of where it was taken.'),
-    LI('Lenses & Zoom:', 'pinch/drag to zoom; tap the lens chips to switch to a sharper lens (remembered next time).'),
+    LI('Photos & Video:', 'tap the shutter (rapid-fire for fast shots); use the video toggle to record clips, which save alongside your photos.'),
+    LI('Location-Stamped:', 'stamps address, time, GPS, and on-site vs. off-site distance.'),
+    LI('Lenses & Zoom:', 'pinch/drag to zoom; tap a lens chip for a sharper lens (remembered).'),
     LI('Flash:', 'switch to the phone’s native camera when you need the flash.'),
     LI('Tap to Focus:', 'tap anywhere on the frame — even while recording video.'),
     H2('Review & Mark Up'),
     LI('Swipe:', 'move through photos and video clips together in one viewer.'),
     LI('Mark Up:', 'annotate with arrows, circles, or a pen in brand colors.'),
     LI('Built-In Gallery:', 'pull in an existing photo right from the camera — no separate upload.'),
-    LI('Tag to a Line Item:', 'attach a photo or clip to the exact scope line it documents.'),
+    LI('Tag to a Line Item:', 'open a captured photo and choose the line item to attach it to.'),
     FIG([
-      { shot: I.camera, cap: 'In-app camera: location badge, lens chips, gallery, mark & shutter.' },
-      { shot: I.markup, cap: 'Markup: arrows & circles over the location-stamped photo.' },
+      { shot: I.camera, cap: 'In-app camera with location badge & lens chips.' },
+      { shot: I.markup, cap: 'Markup: arrows & circles on the photo.' },
+      { shot: I.tagphoto, cap: 'Tap a photo to tag its line item.' },
     ]),
   );
 
@@ -266,7 +268,7 @@ function ContentPage(...secs) {
     H1('7', 'The Scope Rate Card Inspection'),
     T(S.intro, 'The full turn scope and the financial heart of the app — you build the work room by room and it prices it.'),
     H2('Build the Scope'),
-    LI('Sections (Rooms):', 'add, rename (pencil), or delete (X) sections.'),
+    LI('Sections (Rooms):', 'add, rename, or delete rooms inline; the settings menu’s Manage Sections also lets you reorder (drag) and clear a room’s lines & photos — by room or in bulk (Clear All).'),
     LI('Line Items:', 'pick a category, sub-category, and item; set quantity; choose the vendor; adjust the vendor price or tenant bill-back %.'),
     LI('Auto-Proration:', 'the tenant chargeback is automatically prorated by how long the tenant lived there.'),
     LI('Internal Resolution:', 'assign a line to "Internal Resolution" for work your team completes in-house (with a Now/Later choice and after-photos).'),
@@ -277,6 +279,7 @@ function ContentPage(...secs) {
     FIG([
       { shot: I.addline, cap: 'Add a line — category, qty, vendor, tenant %, live pricing.' },
       { shot: I.drilldown, cap: 'Expand-all drill-down by category, with the live totals strip.' },
+      { shot: I.managesections, cap: 'Manage Sections: drag to reorder, rename, clear, or delete rooms.' },
     ]),
   );
 
