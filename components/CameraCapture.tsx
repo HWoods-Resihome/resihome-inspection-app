@@ -425,6 +425,12 @@ export function CameraCapture({
   const [previewReady, setPreviewReady] = useState(false);
   const [previewStuck, setPreviewStuck] = useState(false);
   const previewWatchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Hard escape from a hung start: if NO frame paints within this window — even
+  // when getUserMedia itself never resolves (iOS sometimes hangs it when the
+  // camera is still held from a previous open) — flip to the Retry / Phone-camera
+  // UI instead of an infinite "Starting camera…" spinner. Independent of the
+  // post-acquisition watchdog, which only arms AFTER getUserMedia resolves.
+  const stuckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Id of the captured photo currently open in the annotator (null = closed).
   const [annotatingId, setAnnotatingId] = useState<string | null>(null);
   // Index (within ALL items — photos AND videos) open in the swipeable viewer.
@@ -448,6 +454,7 @@ export function CameraCapture({
 
   const stopStream = useCallback(() => {
     if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; }
+    if (stuckTimerRef.current) { clearTimeout(stuckTimerRef.current); stuckTimerRef.current = null; }
     if (streamRef.current) {
       for (const track of streamRef.current.getTracks()) {
         track.stop();
@@ -459,7 +466,7 @@ export function CameraCapture({
     }
   }, []);
 
-  const startStream = useCallback(async () => {
+  const startStream = useCallback(async (attempt = 0) => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setPermissionState('unsupported');
       setPermissionError('This browser does not support in-app camera capture.');
@@ -468,6 +475,11 @@ export function CameraCapture({
     try {
       // Stop any existing stream before starting a new one (e.g., when switching facing)
       stopStream();
+      // Arm the hard escape: if nothing has painted in 7s (a hung getUserMedia, a
+      // black no-frame stream, the camera held by another app), show Retry instead
+      // of spinning forever. Cleared the instant a frame paints, or on stopStream.
+      if (stuckTimerRef.current) clearTimeout(stuckTimerRef.current);
+      stuckTimerRef.current = setTimeout(() => { setPreviewStuck(true); }, 7000);
       // Reset (digital) zoom to 1× for the new stream.
       zoomRef.current = 1; setZoom(1); updatePreviewTransform();
       // New track → invalidate the cached ImageCapture and clear any freeze.
@@ -494,8 +506,21 @@ export function CameraCapture({
       // mic can't delay or break the camera — it opens and captures fully
       // independent of the AI layer. The AI layer opens its OWN mic only if/when
       // it activates (it already falls back to that when there's no shared audio).
+      // getUserMedia with a hard timeout. On iOS it can hang forever when the
+      // camera is still held from a prior open; race it so a stall becomes a
+      // catchable TimeoutError (→ auto-retry below) instead of an infinite wait.
+      // If the real call resolves LATE (after we gave up), stop its tracks so the
+      // zombie stream doesn't keep holding the camera and block the next attempt.
+      const GUM_TIMEOUT_MS = 10000;
       const tryGUM = async (vc: MediaTrackConstraints) => {
-        return await navigator.mediaDevices.getUserMedia({ video: vc });
+        const gum = navigator.mediaDevices.getUserMedia({ video: vc });
+        return await Promise.race([
+          gum,
+          new Promise<MediaStream>((_, reject) => setTimeout(() => {
+            reject(Object.assign(new Error('camera start timed out'), { name: 'TimeoutError' }));
+            gum.then((s) => { try { s.getTracks().forEach((t) => t.stop()); } catch { /* noop */ } }, () => { /* already failed */ });
+          }, GUM_TIMEOUT_MS)),
+        ]);
       };
       let stream: MediaStream;
       try {
@@ -534,7 +559,10 @@ export function CameraCapture({
         // black/stalled preview: nudge play() a few times, then surface the
         // phone-camera fallback if frames never arrive (e.g. on an active call).
         const vid = videoRef.current as any;
-        const markReady = () => { setPreviewReady(true); setPreviewStuck(false); };
+        const markReady = () => {
+          setPreviewReady(true); setPreviewStuck(false);
+          if (stuckTimerRef.current) { clearTimeout(stuckTimerRef.current); stuckTimerRef.current = null; }
+        };
         if (typeof vid.requestVideoFrameCallback === 'function') {
           try { vid.requestVideoFrameCallback(() => markReady()); }
           catch { vid.addEventListener?.('loadeddata', markReady, { once: true }); }
@@ -552,7 +580,11 @@ export function CameraCapture({
           const vv = videoRef.current;
           const stop = () => { if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; } };
           if (!vv || !streamRef.current) { stop(); return; }
-          if (vv.videoWidth > 0 && vv.readyState >= 2) { setPreviewReady(true); setPreviewStuck(false); stop(); return; }
+          if (vv.videoWidth > 0 && vv.readyState >= 2) {
+            setPreviewReady(true); setPreviewStuck(false);
+            if (stuckTimerRef.current) { clearTimeout(stuckTimerRef.current); stuckTimerRef.current = null; }
+            stop(); return;
+          }
           const elapsed = Date.now() - startedAt;
           if (nudges < 3 && elapsed >= (nudges + 1) * 1000) { nudges++; vv.play().catch(() => { /* keep nudging */ }); }
           if (elapsed > 5000) { setPreviewStuck(true); stop(); } // offer Retry / Phone Camera
@@ -672,6 +704,24 @@ export function CameraCapture({
       // Don't leave a lens-switch freeze stuck if the new lens failed to open.
       if (lensSwitchFreezeRef.current) { lensSwitchFreezeRef.current = false; if (pendingCaptureCountRef.current === 0) setFrozen(false); }
       const name = e?.name || '';
+      // Transient: the camera was busy / slow to hand over (very common on iOS
+      // right after a previous camera session). Auto-retry ONCE after releasing
+      // and pausing briefly — that turns most "camera won't open" into a clean
+      // start without the inspector touching anything. If it still fails, keep
+      // the camera view and show the friendly Retry / Phone-camera overlay rather
+      // than the dead-end "permission denied" screen.
+      const transient = name === 'TimeoutError' || name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError';
+      if (transient) {
+        if (attempt < 1) {
+          stopStream();
+          await new Promise((r) => setTimeout(r, 500));
+          return startStream(attempt + 1);
+        }
+        if (stuckTimerRef.current) { clearTimeout(stuckTimerRef.current); stuckTimerRef.current = null; }
+        setPreviewReady(false);
+        setPreviewStuck(true);
+        return;
+      }
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
         setPermissionState('denied');
         setPermissionError('Camera permission was denied. Please grant access in your browser settings or use the Choose Files option instead.');
