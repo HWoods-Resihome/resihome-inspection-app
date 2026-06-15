@@ -947,12 +947,16 @@ export function RateCardForm(props: RateCardFormProps) {
       for (const [sid, lines] of Object.entries(cur)) {
         let sectionChanged = false;
         const updatedLines = lines.map((l) => {
-          const photos = l.photoUrls || [];
           let lineChanged = false;
-          const swapped = photos.map((u) => { const real = lineUrlMap.get(u); if (real) { lineChanged = true; return real; } return u; });
+          const swap = (arr?: string[]) => (arr || []).map((u) => { const real = lineUrlMap.get(u); if (real) { lineChanged = true; return real; } return u; });
+          // Swap BOTH regular photos AND Internal-Resolution after-photos — an
+          // after-photo draft that syncs must attach to the line too (otherwise
+          // the uploaded photo never shows on the line).
+          const swappedPhotos = swap(l.photoUrls);
+          const swappedAfter = swap(l.afterPhotoUrls);
           if (!lineChanged) return l;
           sectionChanged = true;
-          const updated = { ...l, photoUrls: swapped };
+          const updated = { ...l, photoUrls: swappedPhotos, afterPhotoUrls: swappedAfter };
           toPersist.push({ sectionId: sid, line: updated });
           return updated;
         });
@@ -1321,6 +1325,15 @@ export function RateCardForm(props: RateCardFormProps) {
     // other (and the inspection record) at HubSpot. recordId is read at
     // execution time so a create that just stitched back its id is reused.
     // Returns the real outcome so callers (voice) can report the truth.
+    // Never persist device-local draft (blob:) URLs to HubSpot — keep them in
+    // local state for display; the photo queue uploads them and the flush swaps
+    // in the real URL + re-saves. Persist real URLs only.
+    const noBlob = (a?: string[]) => (a || []).filter((u) => !u.startsWith('blob:'));
+    const persistLine: RateCardLineInput = {
+      ...line,
+      photoUrls: noBlob(line.photoUrls),
+      afterPhotoUrls: noBlob(line.afterPhotoUrls),
+    };
     return enqueueSave<{ ok: boolean; error?: string }>(async () => {
       // Declared outside try so the offline-enqueue path in catch can reuse it.
       const recordId = recordIdsByExternalId[line.externalId];
@@ -1329,7 +1342,7 @@ export function RateCardForm(props: RateCardFormProps) {
         // the inspector saw "Added" isn't silently lost. A 4xx (bad request) is
         // not retryable — fail fast so the real error surfaces.
         const body = JSON.stringify({
-          upserts: [{ recordId, line }],
+          upserts: [{ recordId, line: persistLine }],
           archives: [],
           bumpStatusToInProgress: true,
         });
@@ -1379,9 +1392,9 @@ export function RateCardForm(props: RateCardFormProps) {
             inspectionRecordId: props.inspectionRecordId,
             endpoint: `/api/inspections/${props.inspectionRecordId}/rate-card-lines`,
             method: 'POST',
-            body: { upserts: [{ recordId, line }], archives: [], bumpStatusToInProgress: true },
+            body: { upserts: [{ recordId, line: persistLine }], archives: [], bumpStatusToInProgress: true },
             kind: 'line',
-            meta: { sectionId: effSectionId, line, externalId: line.externalId },
+            meta: { sectionId: effSectionId, line: persistLine, externalId: line.externalId },
           });
           setPendingSync(outboxCountFor(props.inspectionRecordId));
           setSaveStatus({ kind: 'saved', at: Date.now() });
@@ -2841,11 +2854,16 @@ export function RateCardForm(props: RateCardFormProps) {
   // separate from the section photo pool (these are line-level proof-of-work).
   const [afterCameraTarget, setAfterCameraTarget] = useState<{ sectionId: string; lineExternalId: string } | null>(null);
   async function handleAfterPhotoCapture(target: { sectionId: string; lineExternalId: string }, urls: string[]) {
-    const real = (urls || []).filter((u) => !u.startsWith('blob:'));
-    if (real.length === 0) return;
+    // Accept ALL returned URLs (real AND offline drafts). Drafts show right away
+    // and are persisted real-only by the save (handleSaveLineForSection strips
+    // blob:); the queued draft uploads + swaps to its real URL on the next flush.
+    // (Previously this dropped everything when only drafts came back on a weak
+    // signal — the "I take after-photos and nothing shows up" bug.)
+    const incoming = (urls || []).filter(Boolean);
+    if (incoming.length === 0) return;
     const line = (linesBySectionRef.current[target.sectionId] || []).find((l) => l.externalId === target.lineExternalId);
     if (!line) return;
-    const updated = { ...line, afterPhotoUrls: Array.from(new Set([...(line.afterPhotoUrls || []), ...real])) };
+    const updated = { ...line, afterPhotoUrls: Array.from(new Set([...(line.afterPhotoUrls || []), ...incoming])) };
     setLinesBySection((m) => ({
       ...m,
       [target.sectionId]: (m[target.sectionId] || []).map((l) => (l.externalId === target.lineExternalId ? updated : l)),

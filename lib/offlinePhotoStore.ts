@@ -182,7 +182,10 @@ export async function uploadPhotoOrQueue(
     return queueDraft();
   }
   try {
-    return await uploadJpegBlob(blob, filename, { attempts: 2, timeoutMs: 12000 });
+    // Fail fast (1 attempt, 10s) so a weak signal resolves to a durable draft
+    // quickly instead of leaving the capture "uploading" long enough to be
+    // dropped by the camera's Done flush. Good signal still uploads in ~1-2s.
+    return await uploadJpegBlob(blob, filename, { attempts: 1, timeoutMs: 10000 });
   } catch (e) {
     if (!isOfflineErr(e) || !idbAvailable()) throw e;
     return queueDraft();
@@ -240,7 +243,7 @@ export async function uploadVideoEntryOrQueue(
     return queueDraft();
   }
   try {
-    const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename, { attempts: 2, timeoutMs: 12000 }), uploadVideo(videoFile)]);
+    const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename, { attempts: 1, timeoutMs: 10000 }), uploadVideo(videoFile)]);
     return makeVideoEntry(pUrl, vUrl);
   } catch (e) {
     if (!isOfflineErr(e) || !idbAvailable()) throw e;
