@@ -2853,6 +2853,13 @@ export function RateCardForm(props: RateCardFormProps) {
   // captured URLs are appended to that line's afterPhotoUrls and saved. Kept
   // separate from the section photo pool (these are line-level proof-of-work).
   const [afterCameraTarget, setAfterCameraTarget] = useState<{ sectionId: string; lineExternalId: string } | null>(null);
+  // True when ANY in-app camera is open (full-screen overlay). While it is, the
+  // form beneath is invisible, so we STOP rendering its photo grids — that frees
+  // every decoded full-res thumbnail from memory during capture. Keeping a
+  // section's existing photos decoded under the open camera is what pushed iOS
+  // WebKit past its memory ceiling and black-screen-crashed it after a shot or
+  // two. The grids re-render the instant the camera closes.
+  const anyCameraOpen = cameraSectionId !== null || aiCameraTarget !== null || afterCameraTarget !== null;
   async function handleAfterPhotoCapture(target: { sectionId: string; lineExternalId: string }, urls: string[]) {
     // Accept ALL returned URLs (real AND offline drafts). Drafts show right away
     // and are persisted real-only by the save (handleSaveLineForSection strips
@@ -3783,7 +3790,7 @@ export function RateCardForm(props: RateCardFormProps) {
                         </div>
                       )}
                     </div>
-                    {photos.length > 0 && !photosCollapsed[s.id] && (
+                    {photos.length > 0 && !photosCollapsed[s.id] && !anyCameraOpen && (
                       <div className="flex gap-1.5 overflow-x-auto pb-1 mt-2 -mx-0.5 px-0.5">
                         {photos.map((url, idx) => (
                           // Tagged photos live on their line card, not the room strip.

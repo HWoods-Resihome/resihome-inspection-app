@@ -1519,12 +1519,22 @@ export function CameraCapture({
   const endCapture = useCallback(() => {
     pendingCaptureCountRef.current = Math.max(0, pendingCaptureCountRef.current - 1);
     if (pendingCaptureCountRef.current === 0) setFrozen(false);
-    // iOS quirk: the <video> can PAUSE after a capture (it gets briefly covered
-    // by the freeze frame), leaving a black preview. A gentle play() resumes the
-    // SAME stream — no re-acquire, no permission prompt — so the live preview
-    // comes back after every shot. Safe no-op if it's already playing.
-    const v = videoRef.current;
-    if (v && v.paused) v.play().catch(() => { /* autoplay rejection is non-fatal */ });
+    // iOS quirk: the <video> can PAUSE/stall after a capture, leaving a black
+    // preview. Recover by re-binding the SAME stream + playing — NEVER a new
+    // getUserMedia (no permission prompt, no black re-acquire). Staggered retries
+    // cover a play() that races a pause. (Memory is kept low elsewhere so the
+    // track itself shouldn't die mid-session.)
+    const kick = () => {
+      const v = videoRef.current; const s = streamRef.current;
+      if (!v || !s) return;
+      const track = s.getVideoTracks?.()[0];
+      if (track && track.readyState === 'ended') return; // dead track → visibility/resume path handles it
+      if (v.srcObject !== s) { try { v.srcObject = s; } catch { /* noop */ } }
+      if (v.paused) v.play().catch(() => { /* autoplay rejection is non-fatal */ });
+    };
+    kick();
+    setTimeout(kick, 120);
+    setTimeout(kick, 350);
   }, []);
 
   const capturePhoto = useCallback(() => {
