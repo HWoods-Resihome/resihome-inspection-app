@@ -947,7 +947,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           // Drop a spurious "how many square feet?" when a whole-house SF line
           // was auto-filled this turn — the square footage is already applied.
           if (t && filledWholeHouseSf && /\bsquare\s*f(eet|ootage)\b/i.test(t) && /\?\s*$/.test(t)) t = '';
-          const keep = !!t && (/\?\s*$/.test(t) || (/\bbid\b/i.test(t) && /\$\s*\d/.test(t)));
+          // The app already announces + speaks what changed. Keep the model's text
+          // ONLY when it's a genuine follow-up QUESTION about ANOTHER item (no add
+          // narration, no price) or a bid-item price callout. Otherwise drop it —
+          // a narration like "Added X — $984. Anything else?" restates the add
+          // (often with a wrong/duplicate price) and ends in "?" just enough to
+          // sneak past a naive end-with-question check.
+          const looksLikeNarration = /\b(added|adding|updated|i'?ve|i have|here'?s)\b/i.test(t) || /\$\s*\d/.test(t);
+          const isFollowUpQuestion = /\?\s*$/.test(t) && !looksLikeNarration;
+          const isBidCallout = /\bbid\b/i.test(t) && /\$\s*\d/.test(t);
+          const keep = !!t && (isFollowUpQuestion || isBidCallout);
           sse(res, 'message', { text: keep ? t : '', awaitingReply: true });
         } else {
           // It only wants more info — a clarifying question.
