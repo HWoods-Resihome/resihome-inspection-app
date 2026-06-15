@@ -561,16 +561,32 @@ export function CameraCapture({
           const labeled = vids.some((v) => !!v.label);
           let backs = labeled ? vids.filter((v) => isBack(v.label) && !isBad(v.label)) : vids;
           if (labeled && backs.length === 0) backs = vids.filter((v) => !isBad(v.label));
-          const named = backs.filter((v) => v.deviceId).map((v) => ({ id: v.deviceId, label: lensLabel(v.label) }));
-          // De-dupe by label (a phone often exposes several lenses that all read
-          // as "1×", e.g. the virtual + physical wide cameras) and sort into the
-          // natural 0.5× · 1× · 2× order, so the chip row is clean instead of
-          // "1× · 0.5× · Lens 3".
+          // Distinct physical back lenses (drop exact-duplicate deviceIds).
+          const byId = new Map<string, { id: string; label: string }>();
+          for (const v of backs) {
+            if (v.deviceId && !byId.has(v.deviceId)) byId.set(v.deviceId, { id: v.deviceId, label: lensLabel(v.label) });
+          }
+          const distinct = Array.from(byId.values());
+          // Clean path: when the device gives DESCRIPTIVE labels, several entries
+          // can map to the same friendly label (the virtual + physical wide, etc.)
+          // — collapse those into one chip per label, sorted 0.5× · 1× · 2×.
           const seen = new Set<string>();
-          const deduped = named
+          const byLabel = distinct
             .filter((n) => (seen.has(n.label) ? false : (seen.add(n.label), true)))
             .sort((a, b) => lensOrder(a.label) - lensOrder(b.label));
-          setBackLenses(deduped.length >= 2 ? deduped : []); // only show the control when there's a real choice
+          if (byLabel.length >= 2) {
+            setBackLenses(byLabel);
+          } else if (distinct.length >= 2) {
+            // Generic-label fallback. Many Android phones report labels WITHOUT
+            // wide/ultra/tele keywords (every lens reads as "1×"), so the
+            // label-dedup above would collapse to one and hide the switch
+            // entirely — that's the regression where Android lost lens toggling.
+            // Keep the distinct physical lenses and just number them so the
+            // inspector can still cycle (a dead/duplicate lens auto-reverts below).
+            setBackLenses(distinct.slice(0, 4).map((n, i) => ({ id: n.id, label: `Lens ${i + 1}` })));
+          } else {
+            setBackLenses([]); // genuinely only one back lens → no control
+          }
         } catch { setBackLenses([]); }
       })();
 
