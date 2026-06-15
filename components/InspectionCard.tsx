@@ -87,11 +87,11 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
               {/* Client-billable total alongside the template, kept in brand pink —
                   Scope Rate Cards (with lines) and Re-Inspects (source scope total). */}
               {clientTotal != null && (
-                <span> &middot; Client: {fmtMoney(clientTotal)}</span>
+                <span> (Client: {fmtMoney(clientTotal)})</span>
               )}
             </p>
           )}
-          <h3 className="font-heading font-bold text-[15px] text-ink break-words leading-snug">
+          <h3 className="font-bold text-[15px] text-ink break-words leading-snug">
             {street}
           </h3>
           {locality && (

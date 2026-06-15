@@ -587,8 +587,25 @@ export default function Home() {
               placeholder="Search address, name, or inspector…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="focus-brand w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg bg-white"
+              className="focus-brand w-full pl-9 pr-9 py-2.5 text-sm border border-gray-300 rounded-lg bg-white"
             />
+            {/* Clear search — right-aligned; wipes the term and returns the full
+                unfiltered list. Only shown when there's something to clear. */}
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                aria-label="Clear search"
+                title="Clear search"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-brand p-0.5"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
           </div>
 
           {/* Status filter chips — two full-width rows; each chip stretches to
