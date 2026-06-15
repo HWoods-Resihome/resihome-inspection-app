@@ -15,6 +15,17 @@ interface MeUser { userId: string; email: string; name: string; }
 type StatusFilter = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
 type StatusCounts = { all: number; scheduled: number; in_progress: number; pending_approval: number; completed: number };
 
+// The five sortable fields, in dropdown order. Value is what the server's
+// ?sort= accepts; label is what the Sort menu shows.
+type SortField = 'updated' | 'scheduled' | 'address' | 'inspector' | 'price';
+const SORT_OPTIONS: { value: SortField; label: string }[] = [
+  { value: 'updated', label: 'Updated' },
+  { value: 'scheduled', label: 'Scheduled' },
+  { value: 'address', label: 'Address' },
+  { value: 'inspector', label: 'Inspector' },
+  { value: 'price', label: 'Client $' },
+];
+
 function isCancelledStatus(s?: string): boolean {
   const x = (s || '').trim().toLowerCase();
   return x === 'cancelled' || x === 'canceled';
@@ -84,8 +95,13 @@ export default function Home() {
 
   const [search, setSearch] = useState<string>(savedView.search ?? '');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(savedView.statusFilter ?? 'all');
-  // Sort field + direction. Default: most-recently-updated first.
-  const [sortField, setSortField] = useState<'updated' | 'scheduled'>(savedView.sortField ?? 'updated');
+  // Sort field + direction. Default: most-recently-updated first. The server
+  // accepts updated | scheduled | address | inspector | price.
+  const [sortField, setSortField] = useState<SortField>(
+    SORT_OPTIONS.some((o) => o.value === savedView.sortField) ? savedView.sortField : 'updated');
+  // "Sort" dropdown open state (single control replacing the old field + arrow).
+  const [sortOpen, setSortOpen] = useState(false);
+  const sortMenuRef = useRef<HTMLDivElement | null>(null);
   // 'desc' = newest first (default), 'asc' = oldest first.
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>(savedView.sortDir ?? 'desc');
   // Filter by inspector name(s). Empty = no filter; multi-select supported.
@@ -272,6 +288,18 @@ export default function Home() {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [load]);
+
+  // Close the Sort dropdown on an outside click / Escape.
+  useEffect(() => {
+    if (!sortOpen) return;
+    function onDown(e: MouseEvent) {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) setSortOpen(false);
+    }
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setSortOpen(false); }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [sortOpen]);
 
   // Filter dropdown options (facets) load SEPARATELY and never block the cards.
   // They're constrained by the other active filters, so the key tracks those.
@@ -616,37 +644,53 @@ export default function Home() {
               />
             </div>
 
-            {/* Sort field toggle (Updated / Scheduled) */}
-            <button
-              type="button"
-              onClick={() => setSortField(sortField === 'updated' ? 'scheduled' : 'updated')}
-              className="shrink-0 inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-2 py-1.5 border border-gray-300 rounded-md bg-white whitespace-nowrap"
-              title="Switch between sorting by last-updated and scheduled date"
-            >
-              <span>{sortField === 'updated' ? 'Updated' : 'Scheduled'}</span>
-            </button>
-
-            {/* Sort direction toggle */}
-            <button
-              type="button"
-              onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}
-              className="shrink-0 inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-2 py-1.5 border border-gray-300 rounded-md bg-white whitespace-nowrap"
-              title={sortDir === 'desc' ? 'Newest first. Tap for oldest first.' : 'Oldest first. Tap for newest first.'}
-            >
-              {sortDir === 'desc' ? (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <polyline points="19 12 12 19 5 12" />
-                </svg>
-              ) : (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="19" x2="12" y2="5" />
-                  <polyline points="5 12 12 5 19 12" />
-                </svg>
+            {/* Sort dropdown — one control for all five fields. Tap to open;
+                tap a field to sort by it; tap the ACTIVE field again to flip
+                ascending/descending (the arrow next to it shows the direction). */}
+            <div className="relative shrink-0" ref={sortMenuRef}>
+              <button
+                type="button"
+                onClick={() => setSortOpen((o) => !o)}
+                aria-expanded={sortOpen}
+                className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-2.5 py-1.5 border border-gray-300 rounded-md bg-white whitespace-nowrap"
+                title="Choose how to sort. Tap the selected field again to reverse the order."
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="6" x2="20" y2="6" /><line x1="7" y1="12" x2="17" y2="12" /><line x1="10" y1="18" x2="14" y2="18" /></svg>
+                <span>Sort</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${sortOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+              </button>
+              {sortOpen && (
+                <div className="absolute right-0 z-30 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+                  {SORT_OPTIONS.map((opt) => {
+                    const active = sortField === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => {
+                          // First tap selects the field; tapping the ACTIVE field
+                          // again flips the direction.
+                          if (active) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+                          else setSortField(opt.value);
+                        }}
+                        className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-heading font-semibold text-left ${
+                          active ? 'text-brand bg-pink-50' : 'text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span>{opt.label}</span>
+                        {active && (
+                          sortDir === 'desc' ? (
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="19 12 12 19 5 12" /></svg>
+                          ) : (
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
+                          )
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-            </button>
+            </div>
 
             {/* Clear-all link, only shown when any filter is active */}
             {(inspectorFilter.length > 0 || templateFilter.length > 0) && (

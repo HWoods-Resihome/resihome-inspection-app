@@ -702,7 +702,7 @@ const INSPECTION_LIST_PROPERTIES = [
   'hs_createdate',
   'last_edited_at', 'hs_lastmodifieddate',
   'total_client_cost',
-  'source_rate_card_id', 'source_rate_card_name',
+  'source_rate_card_id', 'source_rate_card_name', 'qc_verdict',
 ];
 
 /** Map a HubSpot inspection search result into a lightweight InspectionSummary. */
@@ -738,7 +738,7 @@ function mapInspectionRow(r: any): InspectionSummary {
     pdfGeneratedAt: null,
     sourceRateCardId: p.source_rate_card_id || null,
     sourceRateCardName: p.source_rate_card_name || null,
-    qcVerdict: null,
+    qcVerdict: (p.qc_verdict === 'pass' || p.qc_verdict === 'fail') ? p.qc_verdict : null,
     qcPassCount: null,
     qcFailCount: null,
     submittedAt: null,
@@ -817,7 +817,7 @@ const STATUS_VARIANTS: Record<string, string[]> = {
 const CANCELLED_VARIANTS = ['cancelled', 'canceled', 'Cancelled', 'Canceled'];
 
 export type InspectionStatusKey = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
-export type InspectionSortField = 'updated' | 'scheduled';
+export type InspectionSortField = 'updated' | 'scheduled' | 'address' | 'inspector' | 'price';
 
 export interface InspectionQuery {
   search?: string;
@@ -868,6 +868,9 @@ function inspectionFilterGroups(q: InspectionQuery): any[] {
 const SORT_PROPERTY: Record<InspectionSortField, string> = {
   updated: 'hs_lastmodifieddate',
   scheduled: 'scheduled_date',
+  address: 'property_address_snapshot',
+  inspector: 'inspector_name',
+  price: 'total_client_cost',
 };
 
 /**
@@ -882,7 +885,8 @@ export async function searchInspectionsPage(params: InspectionQuery & {
   pageSize?: number;
 }): Promise<{ items: InspectionSummary[]; total: number }> {
   const { inspection: typeId } = typeIds();
-  const sortField: InspectionSortField = params.sortField === 'scheduled' ? 'scheduled' : 'updated';
+  const sortField: InspectionSortField = params.sortField && SORT_PROPERTY[params.sortField]
+    ? params.sortField : 'updated';
   const direction = params.sortDir === 'asc' ? 'ASCENDING' : 'DESCENDING';
   const pageSize = Math.min(100, Math.max(1, params.pageSize || 20));
   const page = Math.max(1, params.page || 1);
@@ -3224,6 +3228,77 @@ export async function backfillInspectionTotals(opts: { after?: string; max?: num
         } catch (e) {
           errors++;
           console.warn(`[inspection-totals-backfill] record ${r.id} failed:`, e);
+        }
+      }));
+    }
+    after = resp.paging?.next?.after;
+    if (!after) return { processed, updated, skipped, errors, nextAfter: null };
+    if (processed >= max) return { processed, updated, skipped, errors, nextAfter: after };
+  }
+  return { processed, updated, skipped, errors, nextAfter: after || null };
+}
+
+/**
+ * Backfill `inspector_name` across existing inspections from the LATEST HubSpot
+ * user data, matched by `inspector_email`. Fixes inspections whose stored name
+ * was blank or has since changed (e.g. a name was filled in on the user record
+ * after inspections were created). Paginated + resumable like the other
+ * backfills. Only writes when the resolved name is non-empty AND differs from
+ * what's stored, so it's idempotent and a no-op once everything is in sync.
+ *
+ * `email→name` is built once from fetchUsers() and reused across the whole run.
+ */
+export async function backfillInspectorNames(
+  opts: { after?: string; max?: number; nameByEmail?: Map<string, string> } = {},
+): Promise<{ processed: number; updated: number; skipped: number; errors: number; nextAfter: string | null }> {
+  const { inspection: typeId } = typeIds();
+  const max = opts.max ?? 1000;
+  let after = opts.after;
+  let processed = 0, updated = 0, skipped = 0, errors = 0;
+
+  // Build the email→latest-name map once (callers can pass it in to share it
+  // across resumed pages).
+  let nameByEmail = opts.nameByEmail;
+  if (!nameByEmail) {
+    nameByEmail = new Map<string, string>();
+    for (const u of await fetchUsers()) {
+      const email = (u.email || '').trim().toLowerCase();
+      const name = (u.fullName || '').trim();
+      if (email && name) nameByEmail.set(email, name);
+    }
+  }
+
+  const CONCURRENCY = 5;
+  while (processed < max) {
+    const body: any = {
+      filterGroups: [],
+      properties: ['inspector_email', 'inspector_name'],
+      limit: 100,
+    };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    const results = resp.results || [];
+    for (let i = 0; i < results.length; i += CONCURRENCY) {
+      const chunk = results.slice(i, i + CONCURRENCY);
+      await Promise.all(chunk.map(async (r: any) => {
+        processed++;
+        try {
+          const p = r.properties || {};
+          const email = String(p.inspector_email || '').trim().toLowerCase();
+          const current = String(p.inspector_name || '').trim();
+          const latest = email ? nameByEmail!.get(email) : undefined;
+          if (latest && latest !== current) {
+            await updateInspection(r.id, { inspector_name: latest });
+            updated++;
+          } else {
+            skipped++;
+          }
+        } catch (e) {
+          errors++;
+          console.warn(`[inspector-name-backfill] record ${r.id} failed:`, e);
         }
       }));
     }

@@ -105,7 +105,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ? (statusRaw as InspectionStatusKey) : 'all';
   const inspectors = arr(req.query.inspector);
   const templatesRaw = arr(req.query.template);
-  const sortField: InspectionSortField = str(req.query.sort) === 'scheduled' ? 'scheduled' : 'updated';
+  const SORT_FIELDS: InspectionSortField[] = ['updated', 'scheduled', 'address', 'inspector', 'price'];
+  const sortRaw = str(req.query.sort);
+  const sortField: InspectionSortField = (SORT_FIELDS as string[]).includes(sortRaw)
+    ? (sortRaw as InspectionSortField) : 'updated';
   const sortDir: 'asc' | 'desc' = str(req.query.dir) === 'asc' ? 'asc' : 'desc';
   const pageSize = Math.min(100, Math.max(1, parseInt(str(req.query.pageSize), 10) || 20));
   const page = Math.max(1, parseInt(str(req.query.page), 10) || 1);

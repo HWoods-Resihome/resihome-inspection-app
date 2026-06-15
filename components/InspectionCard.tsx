@@ -73,6 +73,7 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
   const tmpl = templateLabel(i.templateType);
 
   const { street, locality } = splitAddress(i.propertyAddressSnapshot || i.inspectionName);
+  const isReinspect = i.templateType === 'pm_turn_reinspect_qc';
 
   const inner = (
     <>
@@ -81,6 +82,11 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
           {tmpl && (
             <p className="text-[11px] font-heading font-semibold uppercase tracking-wide text-brand mb-0.5 truncate">
               {tmpl}
+              {/* Client-billable total alongside the template — Scope Rate Cards
+                  (with lines) and Re-Inspects (the source scope's total). */}
+              {clientTotal != null && (
+                <span className="text-gray-500 normal-case"> (Client: {fmtMoney(clientTotal)})</span>
+              )}
             </p>
           )}
           <h3 className="font-heading font-bold text-base text-ink break-words leading-snug">
@@ -92,8 +98,18 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
             </p>
           )}
         </div>
-        <div className="shrink-0">
+        <div className="shrink-0 flex flex-col items-end gap-1">
           <StatusBadge status={i.status} />
+          {/* Overall QC outcome for a Turn Re-Inspect, shown under the status. */}
+          {isReinspect && i.qcVerdict && (
+            <span className={`inline-block text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
+              i.qcVerdict === 'pass'
+                ? 'bg-emerald-100 text-emerald-700'
+                : 'bg-red-100 text-red-700'
+            }`}>
+              {i.qcVerdict === 'pass' ? 'Pass' : 'Fail'}
+            </span>
+          )}
         </div>
       </div>
       {/* Meta row: Created date · inspector on the left, Updated date on the right. */}
@@ -103,12 +119,6 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
         {i.inspectorName && <span className="truncate">{i.inspectorName}</span>}
         {updated && <span className="text-gray-400 ml-auto shrink-0 whitespace-nowrap">Updated {updated}</span>}
       </div>
-      {/* Client-billable total — Scope Rate Cards (with lines) and Re-Inspects. */}
-      {clientTotal != null && (
-        <div className="mt-1.5 text-xs font-heading font-semibold text-brand">
-          Client: {fmtMoney(clientTotal)}
-        </div>
-      )}
     </>
   );
 
