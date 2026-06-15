@@ -849,13 +849,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               }
               const vendorStated = tu.input?.vendor != null && VENDORS.includes(String(tu.input.vendor));
               const pctStated = tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent));
+              // Sanity clamp: no real line exceeds this, so a mis-transcribed
+              // quantity ("10 million feet") can never create a runaway line.
+              const safeQty = Math.min(qty, 100000);
               const line: RateCardLineInput = {
                 externalId: `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
                 section: lineSection, location: lineLocation, lineItemCode: item.lineItemCode,
-                quantity: qty, tenantBillBackPercent: pct, assignedTo: vendor,
+                quantity: safeQty, tenantBillBackPercent: pct, assignedTo: vendor,
                 note: tu.input?.note ? String(tu.input.note) : '', photoUrls: [],
               };
-              sse(res, 'proposal', { action: 'add', line, sectionId: lineSectionId, summary: lineToSummary(item, qty, vendor, pct, region, regions, { showVendor: vendorStated, showPct: pctStated }), spokenSummary: item.laborShortDescription, awaitingReply: false });
+              sse(res, 'proposal', { action: 'add', line, sectionId: lineSectionId, summary: lineToSummary(item, safeQty, vendor, pct, region, regions, { showVendor: vendorStated, showPct: pctStated }), spokenSummary: item.laborShortDescription, awaitingReply: false });
               didAct = true;
               addsThisTurn++;
               result = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ ok: true, added: item.laborShortDescription, note: 'Line added. If the inspector listed more items, continue; otherwise stop.' }) };
