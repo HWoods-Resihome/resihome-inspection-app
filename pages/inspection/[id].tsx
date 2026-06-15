@@ -349,11 +349,12 @@ export default function ExistingInspection() {
               as the page content below: status (left) · downloads (center) ·
               Re-Open (right). */}
           <div className="max-w-7xl mx-auto px-3 sm:px-6 flex items-center gap-2 flex-nowrap">
-            {/* Left zone: status. Equal flex-basis with the right zone so the
-                center button stays truly centered regardless of text width. */}
-            <span className="flex-1 min-w-0 truncate text-xs sm:text-sm text-amber-900 font-heading font-semibold">
-              {isCompleted ? 'Inspection Completed' : 'Inspection Cancelled'}
-            </span>
+            {/* Left zone: empty spacer (equal flex-basis with the right zone) so
+                the center button stays truly centered. The status itself is
+                already shown by the badge directly below this bar, so the old
+                "Inspection Completed/Cancelled" label was redundant — and it
+                truncated on narrow screens — so it's been removed. */}
+            <span className="flex-1 min-w-0" aria-hidden="true" />
 
             {/* Center: download options (brand-colored to match the scheme) */}
             <div className="flex items-center justify-center gap-2 shrink-0">
