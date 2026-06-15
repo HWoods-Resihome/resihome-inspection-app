@@ -23,7 +23,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (req.method === 'PATCH') {
       const text = String((req.body || {}).text || '').trim();
       if (!text) return res.status(400).json({ error: 'Knowledge text is required.' });
-      await updateKnowledgeEntry(id, text);
+      // `expected` present (even empty) means this is an example being edited.
+      const hasExpected = (req.body || {}).expected !== undefined;
+      const expected = hasExpected ? String((req.body || {}).expected || '').trim() : undefined;
+      await updateKnowledgeEntry(id, text, expected);
       return res.status(200).json({ ok: true });
     }
     if (req.method === 'DELETE') {

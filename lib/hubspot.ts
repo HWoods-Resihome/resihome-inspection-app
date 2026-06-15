@@ -2454,6 +2454,12 @@ export interface AiKnowledgeEntry {
   // Stable fingerprint of the learned signal, so regenerating refreshes the same
   // entry in place rather than duplicating it (auto entries only).
   signature?: string;
+  // Entry kind. 'rule' (default) = a free-text house rule. 'example' = a worked
+  // utterance→action pair (few-shot): `text` is what the inspector says and
+  // `expected` is the correct action. Examples are the "gold list" the operator
+  // curates here; they're injected into EVERY AI as worked examples.
+  kind?: 'rule' | 'example';
+  expected?: string;
   // Why the loop wrote this (sample size, example phrases, catalog code) — shown
   // to admins for context. Auto entries only.
   meta?: Record<string, string | number | string[] | undefined>;
@@ -2524,10 +2530,12 @@ async function writeKnowledgeEntries(entries: AiKnowledgeEntry[]): Promise<void>
   _kbEntriesCache = null; // invalidate the live-camera cache
 }
 
-/** Append a new entry (inspector-submitted). Goes live immediately. */
-export async function addKnowledgeEntry(input: { text: string; addedByEmail: string; addedByName?: string }): Promise<AiKnowledgeEntry> {
+/** Append a new entry (inspector-submitted). Goes live immediately. Pass
+ *  `expected` to record a worked EXAMPLE (utterance → correct action). */
+export async function addKnowledgeEntry(input: { text: string; addedByEmail: string; addedByName?: string; expected?: string }): Promise<AiKnowledgeEntry> {
   const text = (input.text || '').trim();
   if (!text) throw new Error('Empty knowledge text.');
+  const expected = (input.expected || '').trim();
   const entries = await readKnowledgeEntries();
   const entry: AiKnowledgeEntry = {
     id: `kb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -2535,20 +2543,59 @@ export async function addKnowledgeEntry(input: { text: string; addedByEmail: str
     addedByEmail: input.addedByEmail || '',
     addedByName: input.addedByName || '',
     createdAt: Date.now(),
+    ...(expected ? { kind: 'example' as const, expected: expected.slice(0, 1000) } : {}),
   };
   entries.unshift(entry);
   await writeKnowledgeEntries(entries.slice(0, 500)); // hard cap to keep the property small
   return entry;
 }
 
+/**
+ * Import a set of worked EXAMPLES (the curated "gold list") into the knowledge
+ * base. Idempotent: skips any example whose utterance is already present, so it
+ * can be re-run safely. Seeded examples are admin-owned (the learning loop won't
+ * overwrite them). Used by the "Import starter examples" admin action.
+ */
+export async function seedKnowledgeExamples(
+  seed: Array<{ utterance: string; expected: string }>,
+  addedByEmail: string,
+): Promise<{ added: number; skipped: number }> {
+  const entries = await readKnowledgeEntries();
+  const existing = new Set(
+    entries.filter((e) => e.kind === 'example').map((e) => String(e.text).trim().toLowerCase()),
+  );
+  let added = 0, skipped = 0;
+  for (const s of seed) {
+    const text = String(s?.utterance || '').trim();
+    const expected = String(s?.expected || '').trim();
+    if (!text || !expected) { skipped++; continue; }
+    if (existing.has(text.toLowerCase())) { skipped++; continue; }
+    entries.unshift({
+      id: `kb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      text: text.slice(0, 1000),
+      expected: expected.slice(0, 1000),
+      kind: 'example',
+      source: 'admin',
+      addedByEmail: addedByEmail || '',
+      createdAt: Date.now(),
+    });
+    existing.add(text.toLowerCase());
+    added++;
+  }
+  if (added) await writeKnowledgeEntries(entries.slice(0, 500));
+  return { added, skipped };
+}
+
 /** Admin: edit an entry's text. Editing an AUTO entry ADOPTS it as admin-owned
  *  so the self-improvement loop won't overwrite the curated wording. */
-export async function updateKnowledgeEntry(id: string, text: string): Promise<void> {
+export async function updateKnowledgeEntry(id: string, text: string, expected?: string): Promise<void> {
   const entries = await readKnowledgeEntries();
   const i = entries.findIndex((e) => e.id === id);
   if (i < 0) throw new Error('Entry not found.');
   const adopt = entries[i].source === 'auto' ? { source: 'admin' as const } : {};
-  entries[i] = { ...entries[i], text: (text || '').trim().slice(0, 1000), updatedAt: Date.now(), ...adopt };
+  // When `expected` is provided, update the worked-example action too.
+  const expectedPatch = expected !== undefined ? { expected: expected.trim().slice(0, 1000) } : {};
+  entries[i] = { ...entries[i], text: (text || '').trim().slice(0, 1000), updatedAt: Date.now(), ...adopt, ...expectedPatch };
   await writeKnowledgeEntries(entries);
 }
 
@@ -2624,7 +2671,7 @@ export async function upsertAutoKnowledgeEntries(candidates: AutoKnowledgeCandid
  * system prompt. Cached ~60s so the high-frequency camera polling doesn't hit
  * HubSpot every tick. Never throws.
  */
-export async function getKnowledgeBasePromptText(maxChars = 2400): Promise<string> {
+export async function getKnowledgeBasePromptText(maxChars = 4000): Promise<string> {
   if (_kbEntriesCache && Date.now() - _kbEntriesCache.at < 60_000) {
     // fallthrough below to format from cache
   } else {
@@ -2637,8 +2684,20 @@ export async function getKnowledgeBasePromptText(maxChars = 2400): Promise<strin
   }
   const entries = (_kbEntriesCache?.entries || []).filter((e) => e.status !== 'dismissed');
   if (!entries.length) return '';
-  const lines = entries.map((e) => `- ${String(e.text).replace(/\s+/g, ' ').trim()}`);
-  return lines.join('\n').slice(0, maxChars);
+  const clean = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
+  // Rules render as bullets; curated examples render as a worked few-shot block.
+  // Both flow into the SAME knowledge text injected into every AI.
+  const rules = entries.filter((e) => e.kind !== 'example');
+  const examples = entries.filter((e) => e.kind === 'example' && clean(e.expected));
+  const parts: string[] = [];
+  if (rules.length) parts.push(rules.map((e) => `- ${clean(e.text)}`).join('\n'));
+  if (examples.length) {
+    parts.push(
+      'WORKED EXAMPLES — when the inspector says the left, the correct action is on the right. Follow these literally:\n'
+      + examples.map((e) => `- "${clean(e.text)}" → ${clean(e.expected)}`).join('\n'),
+    );
+  }
+  return parts.join('\n\n').slice(0, maxChars);
 }
 
 // ---------------------------------------------------------------------------

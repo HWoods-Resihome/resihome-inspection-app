@@ -20,6 +20,7 @@ import { calculateLine } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { AI_REVIEW_KNOWLEDGE } from '@/lib/aiReviewKnowledge';
+import { getKnowledgeBasePromptText } from '@/lib/hubspot';
 import { depreciationRates } from '@/lib/depreciation';
 import type { RegionRate } from '@/lib/types';
 
@@ -373,6 +374,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return valid ? norm : null;
     };
 
+    // The editable AI Knowledge Base (operator rules + curated worked examples)
+    // drives reasoning on EVERY AI surface — fold it into the review's system
+    // prompt too so house rules (e.g. tenant-% conventions) shape the review.
+    const reviewKb = await getKnowledgeBasePromptText().catch(() => '');
+    const reviewSystemText = reviewKb
+      ? `${AI_REVIEW_KNOWLEDGE}\n\nOPERATOR KNOWLEDGE BASE — house rules and worked examples curated by the team. Treat as authoritative:\n${reviewKb}`
+      : AI_REVIEW_KNOWLEDGE;
+
     let finished = false;
     // The breakpoint on the most-recently-appended tool_results, so the growing
     // conversation prefix is cache-read on the next round (the model otherwise
@@ -389,7 +398,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           // breakpoint on the system block caches both together). Re-read at
           // ~0.1x on rounds 2-4 of this loop and across reviews within the TTL.
           model: MODEL, max_tokens: 4000,
-          system: [{ type: 'text', text: AI_REVIEW_KNOWLEDGE, cache_control: { type: 'ephemeral' } }],
+          system: [{ type: 'text', text: reviewSystemText, cache_control: { type: 'ephemeral' } }],
           tools: reviewTools,
           tool_choice: round === MAX_TOOL_ROUNDS - 1 ? { type: 'tool', name: 'finish_review' } : { type: 'auto' },
           messages,

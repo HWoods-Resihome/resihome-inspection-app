@@ -21,6 +21,7 @@ import sharp from 'sharp';
 import { getSessionFromRequest } from '@/lib/auth';
 import { matchCatalog } from '@/lib/voiceCatalogMatch';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
+import { getKnowledgeBasePromptText } from '@/lib/hubspot';
 import {
   aliasFor, correctCleanLevel, correctBlinds, wholeHouseExempt,
   measuredUnitOf, measurementWord, isStairCount, resolveTenantPct,
@@ -151,6 +152,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const catalog = await getCachedCatalog();
     if (catalog.length === 0) return res.status(500).json({ error: 'Catalog not loaded.' });
 
+    // The editable AI Knowledge Base (operator rules + the curated worked
+    // examples) drives reasoning on EVERY AI surface — inject it here too.
+    const kb = await getKnowledgeBasePromptText().catch(() => '');
+    const systemText = kb
+      ? `${SYSTEM}\n\nOPERATOR KNOWLEDGE BASE — house rules and worked examples curated by the team. Treat as authoritative; follow the worked examples literally:\n${kb}`
+      : SYSTEM;
+
     const userContent: any[] = [
       { type: 'text', text:
         `Room: ${sectionName}.` +
@@ -169,7 +177,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // Cache the static instructions + tool (the per-room frames live in the
         // user message, so they stay out of the cached prefix). Saves on the
         // fixed prefix across back-to-back room scans within the TTL.
-        system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }],
         tools: [SUGGEST_TOOL],
         tool_choice: { type: 'auto' },
         messages: [{ role: 'user', content: userContent }],

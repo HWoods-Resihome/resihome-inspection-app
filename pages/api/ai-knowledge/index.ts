@@ -33,12 +33,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === 'POST') {
-    // Any authenticated inspector can teach the AI.
+    // Any authenticated inspector can teach the AI. Pass `expected` to record a
+    // worked EXAMPLE (utterance → correct action) instead of a plain rule.
     try {
       const text = String((req.body || {}).text || '').trim();
+      const expected = String((req.body || {}).expected || '').trim();
       if (!text) return res.status(400).json({ error: 'Knowledge text is required.' });
       const entry = await addKnowledgeEntry({
         text,
+        expected: expected || undefined,
         addedByEmail: session.email,
         addedByName: session.name,
       });
