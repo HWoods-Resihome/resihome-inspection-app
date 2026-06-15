@@ -173,23 +173,15 @@ export async function uploadPhotoOrQueue(
     return url;
   };
 
-  // UPLOAD-FIRST: on a working connection upload RIGHT NOW so the photo saves to
-  // HubSpot in real time (returns the real URL). Only when offline, or the upload
-  // fails fast (~2 × 12s) on a weak signal, do we cache a durable draft that the
-  // background flush syncs later. This keeps capture non-blocking (the camera
-  // fires this in the background) AND saves photos live when there's service.
-  if (typeof navigator !== 'undefined' && navigator.onLine === false && idbAvailable()) {
-    return queueDraft();
-  }
-  try {
-    // Fail fast (1 attempt, 10s) so a weak signal resolves to a durable draft
-    // quickly instead of leaving the capture "uploading" long enough to be
-    // dropped by the camera's Done flush. Good signal still uploads in ~1-2s.
-    return await uploadJpegBlob(blob, filename, { attempts: 1, timeoutMs: 10000 });
-  } catch (e) {
-    if (!isOfflineErr(e) || !idbAvailable()) throw e;
-    return queueDraft();
-  }
+  // QUEUE-FIRST: write the photo to the durable queue and return a draft URL
+  // IMMEDIATELY (no network), so capture and the camera's "Done" are instant —
+  // the inspector snaps freely, taps Done, returns to the inspection, and the
+  // photos upload IN THE BACKGROUND from there (the form's flush is kicked the
+  // moment the camera closes, and retries every 15s + on reconnect). Nothing
+  // ever blocks on a slow/flaky upload. (No IndexedDB — e.g. private mode — is
+  // the only case we must upload inline.)
+  if (idbAvailable()) return queueDraft();
+  return uploadJpegBlob(blob, filename, { attempts: 2, timeoutMs: 20000 });
 }
 
 /**
@@ -237,18 +229,11 @@ export async function uploadVideoEntryOrQueue(
     void requestPhotoBackgroundSync();
     return entry;
   };
-  // UPLOAD-FIRST (see uploadPhotoOrQueue): upload live on a working connection;
-  // queue a durable draft only when offline / on a fast-fail weak signal.
-  if (typeof navigator !== 'undefined' && navigator.onLine === false && idbAvailable()) {
-    return queueDraft();
-  }
-  try {
-    const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename, { attempts: 1, timeoutMs: 10000 }), uploadVideo(videoFile)]);
-    return makeVideoEntry(pUrl, vUrl);
-  } catch (e) {
-    if (!isOfflineErr(e) || !idbAvailable()) throw e;
-    return queueDraft();
-  }
+  // QUEUE-FIRST (see uploadPhotoOrQueue): return a draft entry now; the
+  // background flush uploads the poster + clip after the camera closes.
+  if (idbAvailable()) return queueDraft();
+  const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename, { attempts: 2, timeoutMs: 20000 }), uploadVideo(videoFile)]);
+  return makeVideoEntry(pUrl, vUrl);
 }
 
 export async function countQueuedPhotos(inspectionRecordId: string): Promise<number> {
@@ -308,7 +293,7 @@ export async function rehydrateQueuedPhotos(
  * sync feel "very slow." Each upload also fails fast (2 attempts) so a single
  * stuck photo can't hog a slot; the periodic flush retries it next tick.
  */
-const FLUSH_CONCURRENCY = 3;
+const FLUSH_CONCURRENCY = 2; // gentle on HubSpot Files (too many parallel uploads timed out)
 
 export async function flushQueuedPhotos(
   inspectionRecordId: string,
@@ -351,10 +336,10 @@ export async function flushQueuedPhotos(
     try {
       if (rec.kind === 'video' && rec.videoBlob) {
         const vFile = new File([rec.videoBlob], `clip.${/(webm)/i.test(rec.videoType || '') ? 'webm' : /(quicktime|mov)/i.test(rec.videoType || '') ? 'mov' : 'mp4'}`, { type: rec.videoType || 'video/mp4' });
-        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(rec.blob, rec.filename, { attempts: 2, timeoutMs: 15000 }), uploadVideo(vFile)]);
+        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(rec.blob, rec.filename, { attempts: 3, timeoutMs: 25000 }), uploadVideo(vFile)]);
         newUrl = makeVideoEntry(pUrl, vUrl);
       } else {
-        newUrl = await uploadJpegBlob(rec.blob, rec.filename, { attempts: 2, timeoutMs: 15000 });
+        newUrl = await uploadJpegBlob(rec.blob, rec.filename, { attempts: 3, timeoutMs: 25000 });
       }
     } catch (e: any) {
       lastError = `Photo upload failed (${String(e?.message || e).slice(0, 90)}).`;

@@ -1720,13 +1720,14 @@ export function CameraCapture({
   // Wait for any in-flight uploads (hard ceiling), then return uploaded URLs
   // and clean up object URLs / clear the tray. Shared by Done and room-switch.
   const flushUploads = useCallback(async (): Promise<{ urls: string[]; failures: number }> => {
-    // Wait for each capture to RESOLVE before returning its URL to the parent —
-    // otherwise a still-uploading photo isn't handed back and the save drops it
-    // ("nothing shows up"). The uploader fails fast (~10s) to a durable draft, so
-    // every item resolves (real URL on good signal, draft on weak) well within
-    // this ceiling; on good signal Done returns the instant uploads finish.
+    // Captures resolve LOCALLY (queue-first: compress + durable-queue write, no
+    // network), so this only waits the few ms for the last queue write to land a
+    // draft URL — Done is effectively instant. The photos then upload in the
+    // background from the inspection page (the form's flush is kicked on close).
+    // The short cap is just a safety net; anything still pending lands in the
+    // durable queue and is reconciled by that flush, so it's never lost.
     const startedAt = Date.now();
-    const TIMEOUT_MS = 14_000;
+    const TIMEOUT_MS = 6_000;
     while (Date.now() - startedAt < TIMEOUT_MS) {
       const current = itemsRef.current;
       if (!current.some((it) => it.status === 'uploading')) break;
