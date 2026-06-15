@@ -22,6 +22,12 @@ body {
   background-color: #ffffff;
   color: #1a1a1a;
   font-family: Arial, system-ui, sans-serif;
+  /* Force LINING figures everywhere. Raleway (our heading font) defaults to
+     old-style/text figures, where 3/4/5/7/9 dip below the baseline while 0/1/2
+     sit on it — which made numbers in addresses, prices, and counts look
+     vertically misaligned. lining-nums lands every digit on a single baseline. */
+  font-variant-numeric: lining-nums;
+  font-feature-settings: "lnum" 1;
 }
 
 /* Kill the grey mobile tap flash — we provide our own active states. */
@@ -67,6 +73,14 @@ h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-raleway), Arial, sans-serif;
   font-weight: 700;
   letter-spacing: -0.01em;
+}
+
+/* Headings + form controls re-declare font, so re-assert lining figures here
+   (font-variant-numeric inherits, but these elements reset font properties). */
+h1, h2, h3, h4, h5, h6,
+button, input, select, textarea {
+  font-variant-numeric: lining-nums;
+  font-feature-settings: "lnum" 1;
 }
 
 /* Two-line clamp for help text */
