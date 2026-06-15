@@ -21,7 +21,13 @@ import type { RateCardLineInput, RateCardLineItem, RegionRate } from '@/lib/type
  */
 interface CaptureItem {
   id: string;                    // local unique id
-  blobUrl: string;               // object URL for local preview thumbnail
+  blobUrl: string;               // object URL for the FULL-RES image (viewer/markup)
+  // Small (~400px) data-URL thumbnail for the capture strip. iOS holds the full
+  // decoded bitmap of every <img> on screen, so rendering N full-res blobs in the
+  // strip exhausts memory and crashes WebKit ("A problem repeatedly occurred").
+  // The strip uses this tiny thumb; full-res is only decoded in the 1-at-a-time
+  // viewer/annotator. Falls back to blobUrl when a thumb wasn't generated.
+  thumbUrl?: string;
   file: File;                    // the captured file
   status: 'uploading' | 'uploaded' | 'failed';
   hubspotUrl?: string;           // populated when upload succeeds (videos: poster#v=video entry)
@@ -1134,11 +1140,11 @@ export function CameraCapture({
 
   // Upload one File through the background pipeline + optimistic thumbnail.
   // Shared by the in-app shutter and the native-camera fallback.
-  const enqueueFile = useCallback((file: File) => {
+  const enqueueFile = useCallback((file: File, thumbUrl?: string) => {
     const id = `${Date.now()}_${(typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 8)}`;
     const blobUrl = URL.createObjectURL(file);
     const abortController = new AbortController();
-    const item: CaptureItem = { id, blobUrl, file, status: 'uploading', abortController };
+    const item: CaptureItem = { id, blobUrl, thumbUrl, file, status: 'uploading', abortController };
     setItems((prev) => [...prev, item]);
     uploadPhoto(file).then((hubspotUrl) => {
       if (abortController.signal.aborted) return;
@@ -1562,10 +1568,23 @@ export function CameraCapture({
         // Resume the live preview immediately (iOS pauses the <video> after the
         // freeze covers it). Gentle play() — same stream, no re-acquire/prompt.
         if (video && (video as HTMLVideoElement).paused) (video as HTMLVideoElement).play().catch(() => { /* non-fatal */ });
+        // Build a SMALL strip thumbnail from this same canvas (no extra decode),
+        // so the capture strip never holds N full-res decoded images (the iOS
+        // OOM / "problem repeatedly occurred" crash).
+        let thumbUrl: string | undefined;
+        try {
+          const tEdge = 400;
+          const ts = Math.min(1, tEdge / Math.max(vw, vh));
+          const tw = Math.max(1, Math.round(vw * ts)), th = Math.max(1, Math.round(vh * ts));
+          const tcanvas = document.createElement('canvas');
+          tcanvas.width = tw; tcanvas.height = th;
+          const tctx = tcanvas.getContext('2d');
+          if (tctx) { tctx.drawImage(canvas, 0, 0, tw, th); thumbUrl = tcanvas.toDataURL('image/jpeg', 0.6); }
+        } catch { /* thumb is best-effort; strip falls back to the full-res blob */ }
         canvas.toBlob((blob) => {
           if (blob) {
             const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-            enqueueFile(new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' }));
+            enqueueFile(new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' }), thumbUrl);
           }
           done();
         }, 'image/jpeg', PHOTO_SAVE_QUALITY);
@@ -2401,7 +2420,7 @@ export function CameraCapture({
               <div key={it.id} className="relative shrink-0">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={it.blobUrl}
+                  src={it.thumbUrl || it.blobUrl}
                   alt=""
                   onClick={() => {
                     // Photos AND videos share one swipeable gallery now.
