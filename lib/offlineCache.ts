@@ -92,6 +92,28 @@ export function saveCachedProperties(query: string, results: any[]): void {
   }
 }
 
+// ---- signed-in user caching ----
+// The auth cookie stays valid offline, but /api/auth/me can't be reached to
+// CONFIRM it, which made the app think the inspector was signed out (blocking
+// "New Inspection"). Cache the last known authenticated user so offline we can
+// keep treating them as signed in.
+const ME_KEY = 'resiwalk_me_v1';
+
+export function loadCachedMe<T = any>(): T | null {
+  if (typeof window === 'undefined') return null;
+  try { const raw = localStorage.getItem(ME_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+
+export function saveCachedMe(data: any): void {
+  if (typeof window === 'undefined' || !data) return;
+  try { localStorage.setItem(ME_KEY, JSON.stringify(data)); } catch { /* non-fatal */ }
+}
+
+export function clearCachedMe(): void {
+  if (typeof window === 'undefined') return;
+  try { localStorage.removeItem(ME_KEY); } catch { /* non-fatal */ }
+}
+
 // ---- inspection detail caching (keyed by record id) ----
 // The full GET /api/inspections/[id] payload (inspection + answers + property
 // context), so an inspection that's been opened once with service — or warmed
@@ -144,3 +166,48 @@ export function saveCachedQuestions(template: string, questions: any[]): void {
   try { localStorage.setItem(QTMPL_PREFIX + template, JSON.stringify(questions)); }
   catch { /* quota / disabled — non-fatal */ }
 }
+
+// Small LRU-by-id cache helper, shared by the keyed caches below.
+function lruGet<T>(prefix: string, id: string): T | null {
+  if (typeof window === 'undefined' || !id) return null;
+  try { const raw = localStorage.getItem(prefix + id); return raw ? (JSON.parse(raw) as T) : null; } catch { return null; }
+}
+function lruPut(prefix: string, indexKey: string, max: number, id: string, payload: any): void {
+  if (typeof window === 'undefined' || !id || payload == null) return;
+  try {
+    localStorage.setItem(prefix + id, JSON.stringify(payload));
+    let index: string[] = [];
+    try { index = JSON.parse(localStorage.getItem(indexKey) || '[]'); } catch { index = []; }
+    index = [id, ...index.filter((k) => k !== id)];
+    while (index.length > max) { const e = index.pop(); if (e !== undefined) localStorage.removeItem(prefix + e); }
+    localStorage.setItem(indexKey, JSON.stringify(index));
+  } catch { /* quota / disabled — non-fatal */ }
+}
+function lruRemove(prefix: string, indexKey: string, id: string): void {
+  if (typeof window === 'undefined' || !id) return;
+  try {
+    localStorage.removeItem(prefix + id);
+    let index: string[] = [];
+    try { index = JSON.parse(localStorage.getItem(indexKey) || '[]'); } catch { index = []; }
+    localStorage.setItem(indexKey, JSON.stringify(index.filter((k) => k !== id)));
+  } catch { /* non-fatal */ }
+}
+
+// ---- QC re-inspect data caching (keyed by record id) ----
+// The /api/inspections/[id]/qc-data payload (copied lines + before/after photos)
+// so a Turn Re-Inspect QC opens offline like the other templates.
+const QC_PREFIX = 'qcdata_v1:';
+const QC_INDEX = 'qcdata_index_v1';
+export function loadCachedQcData<T = any>(id: string): T | null { return lruGet<T>(QC_PREFIX, id); }
+export function saveCachedQcData(id: string, payload: any): void { lruPut(QC_PREFIX, QC_INDEX, 15, id, payload); }
+
+// ---- questionnaire answer drafts (keyed by record id) ----
+// A mirror of the form's answer map, so offline edits re-appear if the
+// inspector closes and reopens the inspection in a dead zone (the durable
+// outbox guarantees they SYNC; this restores their VISIBILITY). Cleared on
+// submit.
+const ANS_PREFIX = 'ansdraft_v1:';
+const ANS_INDEX = 'ansdraft_index_v1';
+export function loadCachedAnswers<T = any>(id: string): T | null { return lruGet<T>(ANS_PREFIX, id); }
+export function saveCachedAnswers(id: string, answers: any): void { lruPut(ANS_PREFIX, ANS_INDEX, 15, id, answers); }
+export function clearCachedAnswers(id: string): void { lruRemove(ANS_PREFIX, ANS_INDEX, id); }

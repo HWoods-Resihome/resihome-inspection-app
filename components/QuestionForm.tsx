@@ -7,6 +7,7 @@ import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadFilesBatch } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume } from '@/lib/offlinePhotoStore';
 import { flushOutbox } from '@/lib/offlineOutbox';
+import { loadCachedAnswers, saveCachedAnswers, clearCachedAnswers } from '@/lib/offlineCache';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
@@ -967,6 +968,39 @@ export function QuestionForm({
       }
     }).catch(() => {}).finally(() => { void runPhotoFlushRef.current(); });
   }, [readOnly, inspectionRecordId]);
+
+  // Offline answer drafts (VISIBILITY) ------------------------------------------
+  // The outbox guarantees offline answers SYNC; this mirror restores what the
+  // inspector typed if they close + reopen the inspection still in a dead zone.
+  // On first mount, overlay any stashed draft onto the known answer slots.
+  const answerDraftMergedRef = useRef(false);
+  useEffect(() => {
+    if (readOnly || answerDraftMergedRef.current) return;
+    answerDraftMergedRef.current = true;
+    const draft = loadCachedAnswers<Record<string, AnswerInput>>(inspectionRecordId);
+    if (draft && typeof draft === 'object') {
+      setAnswers((prev) => {
+        const next = { ...prev };
+        for (const [k, v] of Object.entries(draft)) {
+          if (next[k] && v && typeof v === 'object') next[k] = { ...next[k], ...v };
+        }
+        return next;
+      });
+    }
+  }, [readOnly, inspectionRecordId]);
+
+  // Persist the draft while there are UNSYNCED edits; clear it once everything
+  // has saved (so a stale draft can never overlay newer server data).
+  useEffect(() => {
+    if (readOnly) return;
+    const id = inspectionRecordId;
+    const synced = autosave.saveState.kind === 'saved' || autosave.saveState.kind === 'idle';
+    const t = setTimeout(() => {
+      if (synced) clearCachedAnswers(id);
+      else saveCachedAnswers(id, answers);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [answers, autosave.saveState, readOnly, inspectionRecordId]);
 
   // Auto-retry: flush on reconnect + periodic reconcile + when a camera session
   // closes (the flush is suspended while a camera is open, so resuming kicks this

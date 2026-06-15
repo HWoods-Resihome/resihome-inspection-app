@@ -23,14 +23,31 @@ const SW_VERSION = (() => {
 })();
 const CACHE = 'resiwalk-shell-' + SW_VERSION;
 
-self.addEventListener('install', () => {
+// Brand assets that must ALWAYS render offline (e.g. the header logo). The
+// stale-while-revalidate handler only caches an asset AFTER it's fetched once,
+// and a new deploy wipes the prior cache (see activate) — so right after a
+// deploy, going offline before these were re-fetched left a broken logo. Pull
+// them into the fresh cache at install time so that can't happen. Tolerant: a
+// missing/renamed file never fails the whole install.
+const PRECACHE_ASSETS = ['/app-icon.svg', '/icon-192.png', '/icon-512.png', '/'];
+
+self.addEventListener('install', (event) => {
   // Activate immediately. The SW's bytes only change when the page that
   // registers it loads with a new /sw.js?v=<build> — i.e. AFTER the user has
-  // already reloaded onto the new bundle. Letting it WAIT then just left a
-  // pending worker that re-triggered the "new version" banner, forcing a SECOND
-  // reload to promote it. skipWaiting + clients.claim (in activate) means the
-  // fresh SW takes over in that same load — one reload, no lingering banner.
+  // already reloaded onto the new bundle. skipWaiting + clients.claim (in
+  // activate) means the fresh SW takes over in that same load.
   self.skipWaiting();
+  event.waitUntil((async () => {
+    try {
+      const cache = await caches.open(CACHE);
+      await Promise.all(PRECACHE_ASSETS.map(async (url) => {
+        try {
+          const res = await fetch(url, { cache: 'no-store' });
+          if (res && res.status === 200) await cache.put(url, res.clone());
+        } catch { /* offline at install / missing asset — non-fatal */ }
+      }));
+    } catch { /* cache open failed — non-fatal */ }
+  })());
 });
 
 self.addEventListener('activate', (event) => {

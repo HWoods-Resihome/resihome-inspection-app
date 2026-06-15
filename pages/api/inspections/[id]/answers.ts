@@ -70,6 +70,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({ success: true, results: upsertResults, elapsedMs: elapsed });
   } catch (e: any) {
     console.error(`POST /api/inspections/${id}/answers failed:`, e);
-    return res.status(500).json({ error: String(e.message || e) });
+    // Surface HubSpot's validation detail (this is an internal staff write path,
+    // so the real reason — e.g. which property/value was rejected — is far more
+    // useful than a generic "Upstream request failed (400)" when diagnosing a
+    // failed submit in the field).
+    const detail = e && (e as any).detail ? ` — ${String((e as any).detail).slice(0, 300)}` : '';
+    return res.status(500).json({ error: `${String(e.message || e)}${detail}` });
   }
 }

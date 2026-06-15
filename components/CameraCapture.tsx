@@ -526,25 +526,21 @@ export function CameraCapture({
           vid.addEventListener?.('loadeddata', markReady, { once: true });
         }
         if (previewWatchdogRef.current) clearInterval(previewWatchdogRef.current);
-        let tries = 0;
+        const startedAt = Date.now();
+        let nudges = 0;
+        // Poll FAST (250ms) so the "Starting camera…" cover lifts within a frame
+        // or two of the preview actually painting — the camera needs no signal,
+        // so it should appear effectively immediately. Nudge a stalled play() at
+        // 1/2/3s; only after 5s with zero frames do we treat it as stuck.
         previewWatchdogRef.current = setInterval(() => {
           const vv = videoRef.current;
-          if (!vv || !streamRef.current) {
-            if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; }
-            return;
-          }
-          if (vv.videoWidth > 0 && vv.readyState >= 2) {
-            setPreviewReady(true); setPreviewStuck(false);
-            if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; }
-            return;
-          }
-          tries++;
-          if (tries <= 3) { vv.play().catch(() => { /* keep nudging */ }); }
-          else {
-            setPreviewStuck(true); // give up auto-retry → offer Retry / Phone Camera
-            if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; }
-          }
-        }, 1000);
+          const stop = () => { if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; } };
+          if (!vv || !streamRef.current) { stop(); return; }
+          if (vv.videoWidth > 0 && vv.readyState >= 2) { setPreviewReady(true); setPreviewStuck(false); stop(); return; }
+          const elapsed = Date.now() - startedAt;
+          if (nudges < 3 && elapsed >= (nudges + 1) * 1000) { nudges++; vv.play().catch(() => { /* keep nudging */ }); }
+          if (elapsed > 5000) { setPreviewStuck(true); stop(); } // offer Retry / Phone Camera
+        }, 250);
       }
 
       // ----- Manual lens selector: discover back lenses + note the active one -----

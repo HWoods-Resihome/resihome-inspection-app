@@ -8,7 +8,7 @@ import type {
 } from '@/lib/types';
 import { Combobox } from '@/components/Combobox';
 import { NumberField } from '@/components/NumberPad';
-import { loadCachedProperties, saveCachedProperties } from '@/lib/offlineCache';
+import { loadCachedProperties, saveCachedProperties, loadCachedMe, saveCachedMe } from '@/lib/offlineCache';
 import { EXTERNAL_TEMPLATE } from '@/lib/userAccess';
 
 type Stage = 'setup' | 'loading_questions' | 'error';
@@ -140,19 +140,30 @@ export default function NewInspection() {
     return () => { cancelled = true; clearTimeout(timer); ctrl.abort(); };
   }, [propertyQuery]);
 
-  // Session (inspector identity) — loaded once.
+  // Session (inspector identity) — loaded once. Hydrate from the cached identity
+  // first so an offline open still shows the inspector as signed in (the auth
+  // cookie is valid; we just can't reach /api/auth/me to confirm it).
   useEffect(() => {
+    const cached = loadCachedMe<{ user: any; isExternal?: boolean }>();
+    if (cached?.user) {
+      setSessionUser(cached.user);
+      if (cached.isExternal) { setIsExternal(true); setSelectedTemplate(EXTERNAL_TEMPLATE); }
+      setSessionLoading(false);
+    }
     fetch('/api/auth/me')
       .then((r) => r.json())
       .then((data) => {
-        if (data.authenticated) setSessionUser(data.user);
+        if (data.authenticated) {
+          setSessionUser(data.user);
+          saveCachedMe({ user: data.user, isAdmin: !!data.isAdmin, isExternal: !!data.isExternal });
+        }
         if (data.isExternal) {
           setIsExternal(true);
           // External users can only create the 1099 template — pre-select it.
           setSelectedTemplate(EXTERNAL_TEMPLATE);
         }
       })
-      .catch(() => {})
+      .catch(() => { /* offline — keep the cached identity */ })
       .finally(() => setSessionLoading(false));
   }, []);
 

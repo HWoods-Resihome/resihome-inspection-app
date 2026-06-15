@@ -10,6 +10,8 @@ import {
   loadCachedRateCard, saveCachedRateCard,
   loadCachedInspection, saveCachedInspection,
   loadCachedQuestions, saveCachedQuestions,
+  loadCachedMe, saveCachedMe,
+  saveCachedQcData,
 } from '@/lib/offlineCache';
 import { warmAi } from '@/lib/aiWarm';
 import { templateLabel } from '@/lib/templateLabels';
@@ -138,10 +140,19 @@ export default function Home() {
   }, [search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, pageSize, page]);
 
   useEffect(() => {
+    // Hydrate from the last known signed-in user immediately so a dead-zone
+    // open doesn't read as "signed out" while /api/auth/me is unreachable.
+    const cachedMe = loadCachedMe<{ user: MeUser; isAdmin?: boolean }>();
+    if (cachedMe?.user) { setMe(cachedMe.user); setIsAdmin(!!cachedMe.isAdmin); }
     fetch('/api/auth/me')
       .then((r) => r.json())
-      .then((data) => { if (data.authenticated) { setMe(data.user); setIsAdmin(!!data.isAdmin); } })
-      .catch(() => {});
+      .then((data) => {
+        if (data.authenticated) {
+          setMe(data.user); setIsAdmin(!!data.isAdmin);
+          saveCachedMe({ user: data.user, isAdmin: !!data.isAdmin });
+        }
+      })
+      .catch(() => { /* offline — keep the cached identity */ });
   }, []);
 
   // Warm the Rate Card catalog cache from the home screen while there's signal,
@@ -171,13 +182,16 @@ export default function Home() {
   // skipping anything already cached. Best-effort — never blocks the UI.
   useEffect(() => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-    if (!me || inspections.length === 0) return;
-    const mine = inspections.filter((i) => {
+    if (inspections.length === 0) return;
+    // Warm the actionable (Scheduled / In Progress) inspections visible on this
+    // page — that's the field work most likely to be opened in a dead zone. Not
+    // filtered to the current user (an admin/dispatcher viewing the whole board
+    // still gets the day's inspections cached). Bounded + skips already-cached.
+    const actionable = inspections.filter((i) => {
       const s = (i.status || '').trim().toLowerCase();
-      const actionable = s === 'scheduled' || s.includes('progress');
-      return actionable && !!i.inspectorName && !!me.name && i.inspectorName === me.name;
+      return s === 'scheduled' || s.includes('progress');
     });
-    const todo = mine.filter((i) => !loadCachedInspection(i.recordId)).slice(0, 12);
+    const todo = actionable.filter((i) => !loadCachedInspection(i.recordId)).slice(0, 15);
     if (todo.length === 0) return;
     let cancelled = false;
     const t = setTimeout(() => {
@@ -197,6 +211,14 @@ export default function Home() {
                     const qr = await fetch(`/api/questions?template=${encodeURIComponent(tmpl)}`, { cache: 'no-store' });
                     const qd = await qr.json();
                     if (qr.ok && Array.isArray(qd.questions)) saveCachedQuestions(tmpl, qd.questions);
+                  } catch { /* best-effort */ }
+                }
+                // Turn Re-Inspect QC: also warm its before/after data so it opens offline.
+                if (tmpl === 'pm_turn_reinspect_qc') {
+                  try {
+                    const qcr = await fetch(`/api/inspections/${insp.recordId}/qc-data`, { cache: 'no-store' });
+                    const qcd = await qcr.json();
+                    if (qcr.ok && qcd && !qcd.error) saveCachedQcData(insp.recordId, qcd);
                   } catch { /* best-effort */ }
                 }
               }
@@ -565,6 +587,10 @@ export default function Home() {
                     src="/app-icon.svg"
                     alt="ResiWalk"
                     className="h-11 w-11 object-cover"
+                    // If the icon ever fails to load (e.g. not yet cached offline
+                    // right after a deploy), hide the broken-image glyph rather
+                    // than show a torn icon in the header.
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
                   />
                 </Link>
                 <div className="min-w-0">

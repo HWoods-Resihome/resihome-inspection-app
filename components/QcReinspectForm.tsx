@@ -19,6 +19,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatMoney, formatQty } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { loadCachedQcData, saveCachedQcData } from '@/lib/offlineCache';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { vendorPillStyle, VENDORS } from '@/lib/vendors';
@@ -149,11 +150,8 @@ export function QcReinspectForm(props: Props) {
     (async () => {
       setLoading(true);
       setLoadError(null);
-      try {
-        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/qc-data`);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const d = await r.json();
-        if (cancelled) return;
+      // Apply a qc-data payload (live or cached) to state.
+      const apply = (d: any) => {
         const loadedLines: QcLine[] = d.lines || [];
         setLines(loadedLines);
         setBeforeMap(d.beforePhotos || {});
@@ -172,8 +170,20 @@ export function QcReinspectForm(props: Props) {
         // Default: all sections expanded so the reviewer can see every line
         // item at a glance. (They can still collapse individually.)
         setCollapsed(new Set());
+      };
+      try {
+        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/qc-data`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        if (cancelled) return;
+        apply(d);
+        saveCachedQcData(props.inspectionRecordId, d); // warm offline cache
       } catch (e: any) {
-        if (!cancelled) setLoadError(String(e?.message || e));
+        // Offline / fetch failed → fall back to the cached qc-data so the
+        // re-inspect still opens; Pass/Fail + after-photos queue and sync later.
+        const cached = loadCachedQcData(props.inspectionRecordId);
+        if (cached && !cancelled) { apply(cached); }
+        else if (!cancelled) { setLoadError(String(e?.message || e)); }
       } finally {
         if (!cancelled) setLoading(false);
       }
