@@ -31,8 +31,13 @@ import type { InspectionSummary } from '@/lib/types';
  * Mutations (create / bulk-cancel) call bustInspectionsCache().
  */
 
-const TTL_MS = 15 * 1000;            // lists + counts: near-live for the field
-const FACET_TTL_MS = 5 * 60 * 1000;  // inspector/template options change rarely
+// Lists + counts: cached long enough to spare HubSpot's search API under
+// multi-user field load (each uncached query = 1 list search + 5 count
+// searches). Mutations (create/cancel/line-save) bust this cache immediately
+// via bustInspectionsCache(), so a longer TTL doesn't make a real change feel
+// stale — it just stops repeated reads from re-searching and tripping 429s.
+const TTL_MS = 45 * 1000;
+const FACET_TTL_MS = 10 * 60 * 1000; // inspector/template options change rarely
 const MAX_KEYS = 80;                 // bound memory across query variants
 
 type ListResult = { items: InspectionSummary[]; total: number };

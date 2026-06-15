@@ -281,28 +281,12 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [listCacheKey, load, applyListData]);
 
-  // Prefetch the OTHER status views (page 1) into the client cache in the
-  // background, so the FIRST tap on any chip — including Completed — paints
-  // instantly from cache instead of waiting on the network. Cheap: the status
-  // counts are a shared server cache, and each list is one small page. Online
-  // only; skips views already cached; re-runs when the non-status filters/sort
-  // change (which is what invalidates those cached views).
-  useEffect(() => {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-    const statuses: StatusFilter[] = ['all', 'scheduled', 'in_progress', 'pending_approval', 'completed'];
-    const t = setTimeout(() => {
-      for (const st of statuses) {
-        if (st === statusFilter) continue; // current view is already loading
-        const key = buildListParams({ status: st, page: 1 }).toString();
-        if (lsRead(RESULTS_CACHE)[key]) continue; // already warm
-        fetch(`/api/inspections?${key}`, { cache: 'no-store' })
-          .then((r) => r.json())
-          .then((d) => { if (d && !d.error) lsWrite(RESULTS_CACHE, key, { inspections: d.inspections || [], total: d.total, counts: d.counts }); })
-          .catch(() => { /* prefetch is best-effort */ });
-      }
-    }, 500); // after the current view paints
-    return () => clearTimeout(t);
-  }, [buildListParams, statusFilter, search, sortField, sortDir, pageSize, inspectorFilter, templateFilter]);
+  // NOTE: a background prefetch of the OTHER status views was REMOVED — it fired
+  // ~4 extra inspection searches per home load on top of the list + 5 count
+  // searches + facet scan, and under real multi-user load (and rapid reloads)
+  // that tipped HubSpot's search API into 429 rate-limiting, which made the
+  // list, saves, and submit all flaky. Status toggles still feel fast via the
+  // client stale-while-revalidate cache + the warm 30s server cache.
 
   // Honor the "just_*" query hint (fresh create) with a delayed re-fetch, since
   // HubSpot's search index can lag a beat behind a brand-new record.
