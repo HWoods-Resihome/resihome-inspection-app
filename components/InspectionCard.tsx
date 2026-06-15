@@ -89,7 +89,7 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
               {/* Client-billable total alongside the template, kept in brand pink
                   but smaller/lighter so the template name stays the standout. */}
               {clientTotal != null && (
-                <span className="text-[11px] font-semibold"> (Client: {fmtMoney(clientTotal)})</span>
+                <span className="text-[11px] font-semibold"> ({fmtMoney(clientTotal)})</span>
               )}
             </p>
           )}
