@@ -8,6 +8,10 @@ import type {
 } from '@/lib/types';
 import type { SavedAnswer } from '@/lib/hubspot';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
+import {
+  saveCachedInspection, loadCachedInspection,
+  saveCachedQuestions, loadCachedQuestions,
+} from '@/lib/offlineCache';
 
 
 // The three inspection forms are heavy and MUTUALLY EXCLUSIVE — exactly one
@@ -86,11 +90,9 @@ export default function ExistingInspection() {
     if (!inspectionId) return;
     let cancelled = false;
     (async () => {
-      try {
-        const r = await fetch(`/api/inspections/${inspectionId}`);
-        const data = await r.json();
-        if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
-        if (cancelled) return;
+      // Apply a GET /api/inspections/[id] payload to state. Shared by the live
+      // fetch and the offline-cache fallback so both paths render identically.
+      const applyInspectionData = (data: any) => {
         setInspection(data.inspection);
         setShareLinks(data.shareLinks || null);
         setPropertyRecordId(data.propertyRecordId || '');
@@ -115,39 +117,61 @@ export default function ExistingInspection() {
         setCommunityName(typeof data.communityName === 'string' ? data.communityName : null);
         setFilterSizeOptions(Array.isArray(data.filterSizeOptions) ? data.filterSizeOptions : []);
         setExistingAnswers(data.answers || []);
+      };
 
-        // Now load the template questions
-        const tmpl = data.inspection.templateType;
-        if (!tmpl) {
-          setErrorMsg('Inspection has no template type set');
-          setStage('error');
-          return;
+      // Load a questionnaire template's questions, caching for offline reuse and
+      // falling back to the cached copy when the network is unavailable.
+      const loadQuestionsFor = async (tmpl: string): Promise<Question[] | null> => {
+        try {
+          const qr = await fetch(`/api/questions?template=${encodeURIComponent(tmpl)}`);
+          const qData = await qr.json();
+          if (!qr.ok || qData.error) throw new Error(qData.error || `Questions HTTP ${qr.status}`);
+          const qs: Question[] = qData.questions || [];
+          saveCachedQuestions(tmpl, qs);
+          return qs;
+        } catch {
+          return loadCachedQuestions<Question>(tmpl);
         }
-        // Rate Card doesn't use questions — its content comes from the catalog
-        // via RateCardForm. Skip the questions fetch and go straight to the form.
-        if (tmpl === 'pm_scope_rate_card') {
-          setQuestions([]);
-          setStage('form');
-          return;
-        }
-        // QC Turn Re-Inspect loads its own data (copied lines + before/after
-        // photos) via /api/inspections/[id]/qc-data, so it skips questions too.
-        if (tmpl === 'pm_turn_reinspect_qc') {
-          setQuestions([]);
-          setStage('form');
-          return;
+      };
+
+      // Render once we have an inspection payload (live OR cached): apply it,
+      // then load questions for questionnaire templates.
+      const finish = async (data: any, fromCache: boolean) => {
+        if (cancelled) return;
+        applyInspectionData(data);
+        const tmpl = data.inspection?.templateType;
+        if (!tmpl) { setErrorMsg('Inspection has no template type set'); setStage('error'); return; }
+        // Rate Card + QC supply their own content (catalog / qc-data) — no questions.
+        if (tmpl === 'pm_scope_rate_card' || tmpl === 'pm_turn_reinspect_qc') {
+          setQuestions([]); setStage('form'); return;
         }
         setStage('loading_questions');
-        const qr = await fetch(`/api/questions?template=${encodeURIComponent(tmpl)}`);
-        const qData = await qr.json();
-        if (!qr.ok || qData.error) throw new Error(qData.error || `Questions HTTP ${qr.status}`);
+        const qs = await loadQuestionsFor(tmpl);
         if (cancelled) return;
-        setQuestions(qData.questions || []);
-        setStage('form');
-      } catch (e: any) {
-        if (cancelled) return;
-        setErrorMsg(String(e.message || e));
+        if (qs) { setQuestions(qs); setStage('form'); return; }
+        setErrorMsg(fromCache
+          ? 'This inspection isn’t cached for offline use yet — open it once with a connection to enable it offline.'
+          : 'Could not load questions.');
         setStage('error');
+      };
+
+      try {
+        const r = await fetch(`/api/inspections/${inspectionId}`);
+        const data = await r.json();
+        if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
+        if (cancelled) return;
+        saveCachedInspection(inspectionId, data); // warm the offline cache for dead-zone re-opens
+        await finish(data, false);
+      } catch (e: any) {
+        // Offline / fetch failed → use the cached payload so the inspection still
+        // opens and is fully editable; saves queue and sync when service returns.
+        const cached = loadCachedInspection(inspectionId);
+        if (cached && !cancelled) {
+          await finish(cached, true);
+        } else if (!cancelled) {
+          setErrorMsg(String(e?.message || e));
+          setStage('error');
+        }
       }
     })();
     return () => { cancelled = true; };

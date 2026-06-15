@@ -6,6 +6,7 @@ import { CameraCapture } from './CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadFilesBatch } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume } from '@/lib/offlinePhotoStore';
+import { flushOutbox } from '@/lib/offlineOutbox';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
@@ -972,11 +973,14 @@ export function QuestionForm({
   // to drain the just-captured photos right away).
   useEffect(() => {
     if (readOnly) return;
-    const onOnline = () => { void runPhotoFlushRef.current(); };
-    window.addEventListener('online', onOnline);
-    const iv = setInterval(() => { void runPhotoFlushRef.current(); }, 15000);
+    // Drain BOTH queues: photos (IndexedDB) and the durable outbox (answers
+    // entered offline that were stashed so they survive closing the app).
+    const kick = () => { void runPhotoFlushRef.current(); void flushOutbox(); };
+    window.addEventListener('online', kick);
+    const iv = setInterval(kick, 15000);
     const unsub = onPhotoFlushResume(() => { void runPhotoFlushRef.current(); });
-    return () => { window.removeEventListener('online', onOnline); clearInterval(iv); unsub(); };
+    void flushOutbox(); // sync anything queued from a prior offline session on mount
+    return () => { window.removeEventListener('online', kick); clearInterval(iv); unsub(); };
   }, [readOnly]);
 
   // (Legacy widget visibility — the synthetic HVAC/Smart widgets were replaced

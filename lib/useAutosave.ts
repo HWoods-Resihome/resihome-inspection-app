@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AnswerInput } from '@/lib/types';
 import { buildQaAnswerProps } from '@/lib/answerProps';
+import { enqueueAnswers, clearAnswersEntry } from '@/lib/offlineOutbox';
 
 /**
  * State of each answer in the autosave queue.
@@ -189,9 +190,21 @@ export function useAutosave(opts: Options) {
     }
 
     // Offline: don't repeatedly fire the network (which would flicker the
-    // indicator every tick). Show a steady "offline" state and wait for the
-    // `online` event (or the next forced flush) to retry.
-    if (!forceAll && typeof navigator !== 'undefined' && navigator.onLine === false) {
+    // indicator every tick). Durably STASH the full unsaved set to the offline
+    // outbox first, so answers entered in a dead zone survive closing the app
+    // (they replay idempotently when service returns) — then show a steady
+    // "offline" state and wait for the `online` event to retry.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      try {
+        const dirty = Array.from(answerStatesRef.current.values()).filter((s) => s.dirtySince != null);
+        if (dirty.length > 0 || toArchive.length > 0) {
+          enqueueAnswers(inspectionRecordId, `/api/inspections/${inspectionRecordId}/answers`, {
+            upserts: dirty.map((state) => buildUpsertFromState(state)),
+            archives: toArchive,
+            bumpStatusToInProgress: !hasEverSaved,
+          });
+        }
+      } catch { /* best-effort durability — in-memory retry still covers the open session */ }
       setSaveState((s) => (s.kind === 'offline' ? s : { kind: 'offline' }));
       return false;
     }
@@ -257,9 +270,11 @@ export function useAutosave(opts: Options) {
       // Remove archived from archive queue
       for (const a of toArchive) archiveQueueRef.current.delete(a);
 
-      // Success — clear any retry backoff.
+      // Success — clear any retry backoff, and drop the durable offline stash
+      // (these answers are now persisted server-side, so it mustn't double-replay).
       consecutiveErrorsRef.current = 0;
       errorBackoffUntilRef.current = 0;
+      try { clearAnswersEntry(inspectionRecordId); } catch { /* non-fatal */ }
 
       onSaveSuccess?.(updatedKeys);
       // First successful save of this session → record an "edited" audit event.

@@ -17,7 +17,7 @@ export type OutboxEntry = {
   endpoint: string;
   method: 'POST' | 'PATCH';
   body: any;
-  kind: 'line' | 'lineArchive' | 'sectionList' | 'sectionPhoto';
+  kind: 'line' | 'lineArchive' | 'sectionList' | 'sectionPhoto' | 'answers';
   // For 'line': the section id + line so the UI can re-show it after a reload
   // that happened before the entry synced.
   meta?: { sectionId?: string; line?: any; externalId?: string };
@@ -64,6 +64,27 @@ export function enqueue(entry: Omit<OutboxEntry, 'id' | 'createdAt'>): void {
     createdAt: Date.now(),
   });
   write(list);
+}
+
+/**
+ * Durably stash a questionnaire's unsaved answers so they survive closing the
+ * app in a dead zone. Unlike line saves (one entry per line), answers are kept
+ * as ONE consolidated, REPLACE-on-write entry per inspection holding the full
+ * current dirty set — so repeated offline ticks don't pile up. Replays
+ * idempotently (the server upserts by answer_id_external) when service returns.
+ */
+export function enqueueAnswers(inspectionRecordId: string, endpoint: string, body: any): void {
+  const list = read().filter((e) => !(e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId));
+  list.push({
+    id: `ob_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    inspectionRecordId, endpoint, method: 'POST', body, kind: 'answers', createdAt: Date.now(),
+  });
+  write(list);
+}
+
+/** Drop the consolidated answers entry once an online save has persisted them. */
+export function clearAnswersEntry(inspectionRecordId: string): void {
+  write(read().filter((e) => !(e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId)));
 }
 
 export function entriesFor(inspectionRecordId: string): OutboxEntry[] {

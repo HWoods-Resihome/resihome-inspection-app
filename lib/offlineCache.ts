@@ -91,3 +91,56 @@ export function saveCachedProperties(query: string, results: any[]): void {
     /* quota / disabled — non-fatal */
   }
 }
+
+// ---- inspection detail caching (keyed by record id) ----
+// The full GET /api/inspections/[id] payload (inspection + answers + property
+// context), so an inspection that's been opened once with service — or warmed
+// from the home list — opens and is fully editable in a dead zone. LRU-capped.
+const INSP_PREFIX = 'insp_v1:';
+const INSP_INDEX = 'insp_index_v1';
+const INSP_MAX = 15;
+
+export function loadCachedInspection<T = any>(id: string): T | null {
+  if (typeof window === 'undefined' || !id) return null;
+  try {
+    const raw = localStorage.getItem(INSP_PREFIX + id);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch { return null; }
+}
+
+export function saveCachedInspection(id: string, payload: any): void {
+  if (typeof window === 'undefined' || !id || !payload) return;
+  try {
+    localStorage.setItem(INSP_PREFIX + id, JSON.stringify(payload));
+    let index: string[] = [];
+    try { index = JSON.parse(localStorage.getItem(INSP_INDEX) || '[]'); } catch { index = []; }
+    index = [id, ...index.filter((k) => k !== id)];
+    while (index.length > INSP_MAX) {
+      const evict = index.pop();
+      if (evict !== undefined) localStorage.removeItem(INSP_PREFIX + evict);
+    }
+    localStorage.setItem(INSP_INDEX, JSON.stringify(index));
+  } catch {
+    /* quota / disabled — non-fatal: online still works, offline just lacks this one */
+  }
+}
+
+// ---- question template caching (keyed by template type) ----
+// Question templates rarely change and are shared across inspections, so one
+// cache per template lets a questionnaire inspection open fully offline.
+const QTMPL_PREFIX = 'qtmpl_v1:';
+
+export function loadCachedQuestions<T = any>(template: string): T[] | null {
+  if (typeof window === 'undefined' || !template) return null;
+  try {
+    const raw = localStorage.getItem(QTMPL_PREFIX + template);
+    const arr = raw ? JSON.parse(raw) : null;
+    return Array.isArray(arr) ? arr : null;
+  } catch { return null; }
+}
+
+export function saveCachedQuestions(template: string, questions: any[]): void {
+  if (typeof window === 'undefined' || !template || !Array.isArray(questions)) return;
+  try { localStorage.setItem(QTMPL_PREFIX + template, JSON.stringify(questions)); }
+  catch { /* quota / disabled — non-fatal */ }
+}
