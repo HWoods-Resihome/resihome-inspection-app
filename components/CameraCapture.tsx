@@ -1443,6 +1443,63 @@ export function CameraCapture({
   const openGallery = useCallback(() => {
     galleryInputRef.current?.click();
   }, []);
+  // Burn the SAME evidence stamp (address + timestamp + GPS proximity) into a
+  // photo that did NOT come from the in-app shutter — i.e. the in-overlay
+  // "Upload" (gallery) and the native-camera fallback. In-app captures get the
+  // stamp via buildAndEnqueue; these imported files used to skip it entirely, so
+  // a 1099 inspector who tapped Upload (or the native camera when the live
+  // preview struggled) ended up with UN-stamped evidence. Best-effort: on any
+  // decode/encode failure the original file is enqueued unchanged rather than
+  // dropped — a photo is never lost to a stamp error.
+  const stampImportedFile = useCallback(async (file: File): Promise<File> => {
+    if (!file.type.startsWith('image/')) return file; // videos pass through untouched
+    let objectUrl: string | null = null;
+    let bmp: ImageBitmap | null = null;
+    try {
+      let src: CanvasImageSource;
+      let sw: number, sh: number;
+      if (typeof createImageBitmap === 'function') {
+        // Honor EXIF orientation so a portrait phone photo isn't stamped sideways.
+        bmp = await createImageBitmap(file, { imageOrientation: 'from-image' } as any);
+        src = bmp; sw = bmp.width; sh = bmp.height;
+      } else {
+        objectUrl = URL.createObjectURL(file);
+        const img = await new Promise<HTMLImageElement>((res, rej) => {
+          const i = new Image();
+          i.onload = () => res(i);
+          i.onerror = () => rej(new Error('decode failed'));
+          i.src = objectUrl as string;
+        });
+        src = img; sw = img.naturalWidth; sh = img.naturalHeight;
+      }
+      if (!sw || !sh) return file;
+      const scale = Math.min(1, MAX_SAVE_EDGE / Math.max(sw, sh));
+      const vw = Math.max(1, Math.round(sw * scale));
+      const vh = Math.max(1, Math.round(sh * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = vw; canvas.height = vh;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return file;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(src, 0, 0, sw, sh, 0, 0, vw, vh);
+      const stampLines: StampLine[] = [];
+      if (addressSnapshot) stampLines.push({ text: addressSnapshot });
+      stampLines.push({ text: new Date().toLocaleString() });
+      stampLines.push(...buildGeoStampLines());
+      drawEvidenceStamp(ctx, vw, vh, stampLines);
+      const blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/jpeg', PHOTO_SAVE_QUALITY));
+      canvas.width = 0; canvas.height = 0; // free the backing store (iOS memory)
+      if (!blob) return file;
+      const base = (file.name || '').replace(/\.[^.]+$/, '') || `import_${Date.now()}`;
+      return new File([blob], `${base}_stamped.jpg`, { type: 'image/jpeg' });
+    } catch {
+      return file; // never block the upload on a stamp failure
+    } finally {
+      try { bmp?.close(); } catch { /* noop */ }
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    }
+  }, [addressSnapshot, buildGeoStampLines]);
+
   const handleNativeFiles = useCallback((files: FileList | null) => {
     if (!files || files.length === 0) return;
     const room = Math.max(0, maxPhotos - itemsRef.current.length);
@@ -1450,8 +1507,10 @@ export function CameraCapture({
     if (picked.length < files.length) {
       void dialog.alert(`Only the first ${room} photo(s) were added (max ${maxPhotos} per session).`);
     }
-    for (const f of picked) enqueueFile(f);
-  }, [enqueueFile, maxPhotos]);
+    // Stamp (async decode→draw→encode), then enqueue each as it finishes so the
+    // strip fills in progressively and the burned-in evidence matches in-app shots.
+    for (const f of picked) void stampImportedFile(f).then((stamped) => enqueueFile(stamped));
+  }, [enqueueFile, maxPhotos, dialog, stampImportedFile]);
 
   // Cached ImageCapture for the current track (recreated only when the track
   // changes), so rapid fire pays no per-shot construction cost.
