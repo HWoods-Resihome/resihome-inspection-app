@@ -258,6 +258,7 @@ const SYSTEM_RULES = [
   `SIZE / TIER variants: many items come in size or level variants. ALWAYS default to the lowest / standard tier and propose it — for CLEANS ("sales clean", "turn clean") that means LEVEL 1 (never Level 2 unless the inspector says "level 2"); for rooms, the standard / regular size. Do NOT ask the inspector to choose a size or level — only use a higher tier when they explicitly say so ("level 2", "large room", "deep").`,
   `BLINDS default to FAUX WOOD: a broken / missing / damaged blind is a FAUX WOOD BLIND replacement — search "replace faux wood blind". Never default a blind to a valance, vertical blind, or wand unless the inspector specifically names that part.`,
   ``,
+  `ADD ONLY WHAT THEY SAID — NEVER ADJACENT WORK. Add a line ONLY for work the inspector explicitly named. Do NOT add related, implied, or "while we're at it" items they did not say. E.g. "trim 10 bushes" → add ONLY bush trimming — NOT stump removal, NOT a trash-out, NOT debris haul. "the carpet is stained" → ONLY carpet — not pad, not baseboards. If you are tempted to add something they didn't say, don't. The number of lines you add must match the number of distinct items they actually requested.`,
   `ONE request = ONE line. NEVER add two or three variants of the SAME requested item (e.g. trash-out small AND medium AND large). If the catalog returns several distinct sizes/scopes for one request: for routine size tiers, pick the standard/lowest per the rule above; but when the right choice genuinely depends on the property and can't be defaulted (most notably TRASH-OUT / debris haul, where it's small vs medium vs large by volume), ask ONE short question to pick the size, then propose that single line. Do not add multiple options for the inspector to sort out later.`,
   ``,
   `TRASH-OUT: a trash out / debris removal / haul-away is the labor line only. Do NOT also add a dumpster (or roll-off / container) line unless the inspector explicitly says "dumpster". Ask which trash-out size (small/medium/large or the volume) before adding, and add just that one line.`,
@@ -518,6 +519,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     })();
     const allUserText = clientMessages.filter((m) => m.role === 'user').map((m) => m.content).join(' ');
 
+    // Over-add guard: bound the number of NEW lines a single turn may add to the
+    // number of distinct item-phrases the inspector actually said (connectors:
+    // "and"/"also"/"plus"/comma). A one-phrase utterance ("trim 10 bushes") adds
+    // at most ONE line — so the model can't expand it into adjacent work the
+    // inspector never named (e.g. bushes → stump removal + trash-out). Compound
+    // requests split into more phrases and get a correspondingly higher ceiling.
+    const utterancePhraseCount = (() => {
+      const u = lastUtterance.trim();
+      if (!u) return 1;
+      const parts = u.split(/\b(?:and then|and also|and|also|plus)\b|[,;]/i)
+        .map((s) => s.trim()).filter((s) => s.length >= 3);
+      return Math.max(1, Math.min(5, parts.length || 1));
+    })();
+    const maxNewLines = utterancePhraseCount;
+    // New lines emitted across all rounds of THIS turn (edits/switches don't count).
+    let addsThisTurn = 0;
+
     const messages: any[] = clientMessages.map((m) => ({ role: m.role, content: m.content }));
     // Room navigation context.
     const rooms: { id: string; name: string }[] = Array.isArray(body?.rooms)
@@ -709,6 +727,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const emitAdd = (tu: any): any => {
         const cached = builtResults.get(tu.id);
         if (cached) return cached;
+        // Over-add guard: once this turn has added the number of lines the
+        // inspector actually named, refuse further adds — they're almost always
+        // the model expanding into adjacent work that wasn't requested.
+        if (addsThisTurn >= maxNewLines) {
+          const capResult = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: `You have already added the ${maxNewLines} item(s) the inspector named in this request. Do NOT add any more lines for related or adjacent work they did not explicitly say. Stop here.` }) };
+          builtResults.set(tu.id, capResult);
+          return capResult;
+        }
         let result: any;
         if (tu.name === 'propose_bid_item') {
           const description = String(tu.input?.description || '').trim();
@@ -751,6 +777,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               };
               sse(res, 'proposal', { action: 'add', line, sectionId: bidSectionId, summary: `Bid item: ${description} — $${bidPrice.toFixed(2)}${bidTail}`, spokenSummary: 'bid item', awaitingReply: false });
               didAct = true;
+              addsThisTurn++;
               result = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ ok: true, addedBidItem: description, price: bidPrice, note: 'Bid item added. Briefly tell the inspector the price you used so they can change it.' }) };
             }
           }
@@ -830,6 +857,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               };
               sse(res, 'proposal', { action: 'add', line, sectionId: lineSectionId, summary: lineToSummary(item, qty, vendor, pct, region, regions, { showVendor: vendorStated, showPct: pctStated }), spokenSummary: item.laborShortDescription, awaitingReply: false });
               didAct = true;
+              addsThisTurn++;
               result = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ ok: true, added: item.laborShortDescription, note: 'Line added. If the inspector listed more items, continue; otherwise stop.' }) };
             }
           }
