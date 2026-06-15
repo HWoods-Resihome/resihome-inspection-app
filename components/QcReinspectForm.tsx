@@ -20,6 +20,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { formatMoney, formatQty } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { loadCachedQcData, saveCachedQcData } from '@/lib/offlineCache';
+import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { vendorPillStyle, VENDORS } from '@/lib/vendors';
@@ -101,6 +102,9 @@ export function QcReinspectForm(props: Props) {
   const submittingRef = useRef(false);
   const [result, setResult] = useState<null | { verdict: string; passCount: number; failCount: number; pdf: { name: string; url: string }; resultSync?: { verdictSynced: boolean; inspectionResultSynced: boolean; fields: string[] } }>(null);
   const [cameraKey, setCameraKey] = useState<string | null>(null);
+  // While a camera overlay is open, don't render before/after thumbnails — keeps
+  // them from sitting decoded in memory under the camera (the iOS WebKit crash).
+  const cameraOpenAnywhere = useAnyCameraOpen();
   // Photo viewer (swipe / markup / delete / tag-to-line / video). `phase`
   // distinguishes the read-only source "before" photos from editable "after".
   const [qcLightbox, setQcLightbox] = useState<{ phase: 'before' | 'after'; key: string; index: number } | null>(null);
@@ -704,7 +708,7 @@ export function QcReinspectForm(props: Props) {
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5 min-w-0">
                     <PhotoStrip
                       label="Before"
-                      photoUrls={s.beforePhotos}
+                      photoUrls={cameraOpenAnywhere ? [] : s.beforePhotos}
                       size={64}
                       accent="gray"
                       emptyLabel="No before photos on source"
@@ -717,7 +721,7 @@ export function QcReinspectForm(props: Props) {
                   <div className="rounded-lg border-2 border-teal-300 bg-teal-50/60 p-2.5 min-w-0">
                     <PhotoStrip
                       label={after.length === 0 ? 'After • required' : 'After'}
-                      photoUrls={after}
+                      photoUrls={cameraOpenAnywhere ? [] : after}
                       size={64}
                       accent="teal"
                       collapsed={!!photosCollapsed[s.key]}

@@ -4,6 +4,7 @@ import { PhotoAnnotator } from '@/components/PhotoAnnotator';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadVideo } from '@/lib/photoUpload';
 import { onPhotoSynced, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
+import { pushCameraOpen, popCameraOpen } from '@/lib/cameraOpenState';
 import { makeVideoEntry } from '@/lib/media';
 import { CameraAILayer } from '@/components/CameraAILayer';
 import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
@@ -678,6 +679,14 @@ export function CameraCapture({
   // Offline" badge live AND means Done hands the parent the REAL url (a
   // not-yet-synced item still hands back its draft, which the inspection page
   // keeps uploading — so the inspector can exit mid-sync without losing a thing).
+  // Tell every form that a camera is open so they free their photo grids from
+  // memory (the iOS black-screen crash). Balanced push/pop per open session.
+  useEffect(() => {
+    if (!isOpen) return;
+    pushCameraOpen();
+    return () => { popCameraOpen(); };
+  }, [isOpen]);
+
   useEffect(() => {
     if (!isOpen) return;
     const unsub = onPhotoSynced(({ oldUrl, newUrl }) => {

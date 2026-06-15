@@ -6,6 +6,7 @@ import { NumberField } from '@/components/NumberPad';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { useAppDialog } from '@/components/AppDialog';
 import { displayImageSrc } from '@/lib/photoDisplay';
+import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { isVideoEntry } from '@/lib/media';
 
 // Check once whether the browser supports the camera API. Hidden behind a
@@ -76,6 +77,10 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  // While ANY camera overlay is open, don't render this question's photo
+  // thumbnails — they're invisible behind the camera and keeping them decoded
+  // is what OOM-crashes iOS WebKit after a shot or two. They re-render on close.
+  const cameraOpenAnywhere = useAnyCameraOpen();
 
   // Replace a photo with its marked-up version (re-upload + swap at index).
   async function replacePhoto(index: number, file: File) {
@@ -206,12 +211,12 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             if (urls.length > 0) onUpdate({ photoUrls: [...answer.photoUrls, ...urls] });
           }}
         />
-        {answer.photoUrls.length > 0 && (
+        {answer.photoUrls.length > 0 && !cameraOpenAnywhere && (
           <div className="grid grid-cols-4 gap-2 mt-2">
             {answer.photoUrls.map((url, idx) => (
               <div key={`${url}-${idx}`} className="relative">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={displayImageSrc(url)} alt="" onClick={() => setLightboxIndex(idx)}
+                <img src={displayImageSrc(url)} alt="" loading="lazy" decoding="async" onClick={() => setLightboxIndex(idx)}
                   className="w-full h-16 object-cover rounded cursor-pointer" />
                 {url.startsWith('blob:') && (
                   <span className="absolute bottom-0 inset-x-0 bg-amber-500/95 text-white text-[8px] font-heading font-bold text-center leading-tight py-0.5 rounded-b pointer-events-none" title="Saved Offline · Will Sync When Online">Saved Offline</span>
@@ -368,13 +373,16 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
               Photos {photoRequired ? <span className="text-brand">(Required)</span> : <span className="text-gray-400 font-normal">(Optional)</span>}
             </label>
             <div className="flex flex-wrap gap-2 items-center mt-1">
-              {/* Existing photos (tap to view / mark up / delete) */}
-              {answer.photoUrls.map((url, idx) => (
+              {/* Existing photos (tap to view / mark up / delete). Hidden while a
+                  camera is open to free their decoded memory (iOS crash). */}
+              {!cameraOpenAnywhere && answer.photoUrls.map((url, idx) => (
                 <div key={`${url}-${idx}`} className="relative">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={displayImageSrc(url)}
                     alt=""
+                    loading="lazy"
+                    decoding="async"
                     onClick={() => setLightboxIndex(idx)}
                     title="Tap to view, mark up, or delete"
                     className="w-14 h-14 object-cover rounded border border-gray-200 cursor-pointer"

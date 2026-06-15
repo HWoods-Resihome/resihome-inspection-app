@@ -8,6 +8,7 @@ import { uploadFilesBatch } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume } from '@/lib/offlinePhotoStore';
 import { flushOutbox } from '@/lib/offlineOutbox';
 import { loadCachedAnswers, saveCachedAnswers, clearCachedAnswers } from '@/lib/offlineCache';
+import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
@@ -569,6 +570,9 @@ export function QuestionForm({
   // Only one camera can be open at a time; this also tells us where to append
   // captured photos when the user taps Done.
   const [sectionCameraInstance, setSectionCameraInstance] = useState<string | null>(null);
+  // While ANY camera overlay is open, stop rendering section photo thumbnails so
+  // they don't sit decoded in memory under the camera (the iOS WebKit crash).
+  const cameraOpenAnywhere = useAnyCameraOpen();
 
   // Map of instanceKey -> HubSpot Answer recordId for section_photo records
   const sectionPhotoRecordIdsRef = useRef<Map<string, string>>(new Map());
@@ -1695,7 +1699,7 @@ export function QuestionForm({
                         </div>
                       )}
                     </div>
-                    {sectionPhotoUrls.length > 0 && !photosCollapsed[inst.instanceKey] && (
+                    {sectionPhotoUrls.length > 0 && !photosCollapsed[inst.instanceKey] && !cameraOpenAnywhere && (
                       <div className="flex gap-1.5 overflow-x-auto pb-1 mt-2 -mx-0.5 px-0.5">
                         {sectionPhotoUrls.map((url, idx) => (
                           <div key={`${url}-${idx}`} className="relative shrink-0">

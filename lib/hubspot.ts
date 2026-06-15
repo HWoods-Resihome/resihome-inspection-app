@@ -3550,24 +3550,31 @@ export async function upsertAnswers(
   const results: Array<{ recordId: string; answerIdExternal: string }> = [];
 
   // ----- Updates (PATCH each) -----
-  // HubSpot supports batch/update for properties. Use it.
+  // HubSpot supports batch/update for properties. Use it — but if a chunk is
+  // rejected (one bad property value 400s the WHOLE batch), retry it per-item so
+  // the good answers still save and only the offending one is skipped (logged
+  // with its props so the bad property is diagnosable). This keeps a single bad
+  // answer from blocking an entire submit.
   if (toUpdate.length > 0) {
     for (let i = 0; i < toUpdate.length; i += HUBSPOT_BATCH_LIMIT) {
       const chunk = toUpdate.slice(i, i + HUBSPOT_BATCH_LIMIT);
-      const resp = await hubspotFetch(`/crm/v3/objects/${tids.answer}/batch/update`, {
+      const runUpdate = (items: typeof chunk) => hubspotFetch(`/crm/v3/objects/${tids.answer}/batch/update`, {
         method: 'POST',
-        body: JSON.stringify({
-          inputs: chunk.map((u) => ({
-            id: u.recordId,
-            properties: u.answerProps,
-          })),
-        }),
+        body: JSON.stringify({ inputs: items.map((u) => ({ id: u.recordId, properties: u.answerProps })) }),
       });
-      for (const r of resp.results || []) {
-        results.push({
-          recordId: r.id,
-          answerIdExternal: r.properties?.answer_id_external || '',
-        });
+      try {
+        const resp = await runUpdate(chunk);
+        for (const r of resp.results || []) results.push({ recordId: r.id, answerIdExternal: r.properties?.answer_id_external || '' });
+      } catch (batchErr: any) {
+        console.warn(`[upsertAnswers] batch/update of ${chunk.length} failed — retrying per item:`, String(batchErr?.detail || batchErr?.message || batchErr).slice(0, 200));
+        for (const u of chunk) {
+          try {
+            const r = await runUpdate([u]);
+            for (const x of r.results || []) results.push({ recordId: x.id, answerIdExternal: x.properties?.answer_id_external || '' });
+          } catch (itemErr: any) {
+            console.error(`[upsertAnswers] SKIPPED update of answer ${u.answerProps?.answer_id_external} (${u.answerProps?.question_id_external}) — ${String(itemErr?.detail || itemErr?.message || itemErr).slice(0, 300)}`);
+          }
+        }
       }
     }
   }
@@ -3575,24 +3582,30 @@ export async function upsertAnswers(
   // ----- Creates (batch/create) -----
   if (toCreate.length > 0) {
     const newAnswers: Array<{ externalId: string; recordId: string }> = [];
+    const collect = (resp: any) => {
+      for (const r of resp.results || []) {
+        newAnswers.push({ externalId: r.properties?.answer_id_external || '', recordId: r.id });
+        results.push({ recordId: r.id, answerIdExternal: r.properties?.answer_id_external || '' });
+      }
+    };
     for (let i = 0; i < toCreate.length; i += HUBSPOT_BATCH_LIMIT) {
       const chunk = toCreate.slice(i, i + HUBSPOT_BATCH_LIMIT);
-      const resp = await hubspotFetch(`/crm/v3/objects/${tids.answer}/batch/create`, {
+      const runCreate = (items: typeof chunk) => hubspotFetch(`/crm/v3/objects/${tids.answer}/batch/create`, {
         method: 'POST',
-        body: JSON.stringify({
-          inputs: chunk.map((u) => ({ properties: u.answerProps })),
-        }),
+        body: JSON.stringify({ inputs: items.map((u) => ({ properties: u.answerProps })) }),
       });
-      for (let j = 0; j < (resp.results || []).length; j++) {
-        const r = resp.results[j];
-        newAnswers.push({
-          externalId: r.properties?.answer_id_external || '',
-          recordId: r.id,
-        });
-        results.push({
-          recordId: r.id,
-          answerIdExternal: r.properties?.answer_id_external || '',
-        });
+      try {
+        collect(await runCreate(chunk));
+      } catch (batchErr: any) {
+        // One bad property value 400s the whole batch — retry per item so the
+        // good answers still save and only the offender is skipped (logged).
+        console.warn(`[upsertAnswers] batch/create of ${chunk.length} failed — retrying per item:`, String(batchErr?.detail || batchErr?.message || batchErr).slice(0, 200));
+        for (const u of chunk) {
+          try { collect(await runCreate([u])); }
+          catch (itemErr: any) {
+            console.error(`[upsertAnswers] SKIPPED create of answer ${u.answerProps?.answer_id_external} (${u.answerProps?.question_id_external}) — ${String(itemErr?.detail || itemErr?.message || itemErr).slice(0, 300)}`);
+          }
+        }
       }
     }
 
