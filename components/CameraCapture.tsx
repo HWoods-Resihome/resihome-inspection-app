@@ -469,17 +469,12 @@ export function CameraCapture({
       // whatever lens can — frequently the ULTRA-WIDE — which made the camera
       // open on the wide lens. The continuous AF/AE/AWB is applied AFTER
       // acquisition (applyAutoFocus below) where it can't change the lens.
-      // In AI mode we capture audio on the SAME stream so the AI layer can use a
-      // single, high-quality mic feed (a separate getUserMedia mic is low-gain /
-      // flaky on mobile). If the combined request fails, fall back to video-only
-      // so the camera itself NEVER breaks because of the mic.
+      // VIDEO-ONLY open: the camera NEVER requests the mic, so a slow/blocked
+      // mic can't delay or break the camera — it opens and captures fully
+      // independent of the AI layer. The AI layer opens its OWN mic only if/when
+      // it activates (it already falls back to that when there's no shared audio).
       const tryGUM = async (vc: MediaTrackConstraints) => {
-        try {
-          return await navigator.mediaDevices.getUserMedia({ video: vc, audio: !!aiAssist });
-        } catch (e) {
-          if (aiAssist) return await navigator.mediaDevices.getUserMedia({ video: vc, audio: false });
-          throw e;
-        }
+        return await navigator.mediaDevices.getUserMedia({ video: vc });
       };
       let stream: MediaStream;
       try {
@@ -1746,11 +1741,39 @@ export function CameraCapture({
   const [aiStatus, setAiStatus] = useState<{ text: string; tone: 'idle' | 'listen' | 'heard' | 'think' | 'err' } | null>(null);
   // AI assist can be paused mid-session (e.g. on low service the voice/call-outs
   // get noisy). Starts on whenever the camera was opened in AI mode.
-  const [aiOn, setAiOn] = useState<boolean>(!!aiAssist);
+  // AI assist starts OFF so the camera opens INSTANTLY as a clean, fully-working
+  // plain camera. When the AI camera is in use we then probe connectivity (below)
+  // and only switch it on if service can actually support it.
+  const [aiOn, setAiOn] = useState<boolean>(false);
   // Set when the AI layer auto-turned itself OFF on poor service, so we can show
   // why (and the inspector can re-enable once signal is back).
   const [aiAutoPaused, setAiAutoPaused] = useState(false);
   const handleAiAutoDisable = useCallback(() => { setAiOn(false); setAiAutoPaused(true); }, []);
+
+  // AI activation gate: the camera is already open + capturing; quietly check
+  // that the connection can reach the server, and ONLY then bring AI online.
+  // On weak/no service the probe fails fast and AI stays off — the heavy
+  // voice+vision loops never load, so they can't lag the camera or cause the
+  // black screen. Re-runs each open; cleared on close. The manual toggle still
+  // lets the inspector force AI on/off.
+  useEffect(() => {
+    if (!isOpen || !aiAssist) return;
+    let cancelled = false;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2500);
+    fetch('/api/version', { signal: ctrl.signal, cache: 'no-store' })
+      .then((r) => {
+        if (cancelled) return;
+        if (r.ok) { setAiOn(true); setAiAutoPaused(false); }
+        else setAiAutoPaused(true);
+      })
+      .catch(() => { if (!cancelled) setAiAutoPaused(true); })
+      .finally(() => clearTimeout(timer));
+    return () => {
+      cancelled = true; clearTimeout(timer); ctrl.abort();
+      setAiOn(false); setAiAutoPaused(false); // reset so a reopen re-probes cleanly
+    };
+  }, [isOpen, aiAssist]);
   // "Teach the AI" voice-training popup (feeds the live knowledge base).
   const [kbTrainerOpen, setKbTrainerOpen] = useState(false);
   const [renamingRoomId, setRenamingRoomId] = useState<string | null>(null);
