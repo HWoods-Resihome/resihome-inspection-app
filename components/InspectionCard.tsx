@@ -67,57 +67,59 @@ function splitAddress(snapshot: string): { street: string; locality: string } {
 }
 
 export function InspectionCard({ inspection: i, selectMode, selected, selectable, onToggleSelect, onLongPress }: Props) {
-  const created = fmtShort(i.createdAt);
-  const updated = fmtShort(i.updatedAt);
   const clientTotal = clientTotalToShow(i);
   const tmpl = templateLabel(i.templateType);
 
   const { street, locality } = splitAddress(i.propertyAddressSnapshot || i.inspectionName);
   const isReinspect = i.templateType === 'pm_turn_reinspect_qc';
+  // One date on the left: the scheduled date when set (the planned visit),
+  // otherwise the last-updated date. Single label keeps the meta row uncluttered.
+  const dateLabel = i.scheduledDate ? 'Scheduled' : 'Updated';
+  const dateValue = fmtShort(i.scheduledDate || i.updatedAt);
 
   const inner = (
     <>
-      <div className="flex items-start justify-between gap-3 mb-1.5">
+      <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex-1 min-w-0">
           {tmpl && (
-            <p className="text-[11px] font-heading font-semibold uppercase tracking-wide text-brand mb-0.5 truncate">
+            <p className="text-[11px] font-heading font-semibold uppercase tracking-wide text-brand mb-1 truncate">
               {tmpl}
-              {/* Client-billable total alongside the template — Scope Rate Cards
-                  (with lines) and Re-Inspects (the source scope's total). */}
+              {/* Client-billable total alongside the template, kept in brand pink —
+                  Scope Rate Cards (with lines) and Re-Inspects (source scope total). */}
               {clientTotal != null && (
-                <span className="text-gray-500 normal-case"> (Client: {fmtMoney(clientTotal)})</span>
+                <span> &middot; Client: {fmtMoney(clientTotal)}</span>
               )}
             </p>
           )}
-          <h3 className="font-heading font-bold text-base text-ink break-words leading-snug">
+          <h3 className="font-heading font-bold text-[15px] text-ink break-words leading-snug">
             {street}
           </h3>
           {locality && (
-            <p className="font-heading text-sm text-gray-600 break-words leading-snug mt-0.5">
+            <p className="text-[13px] text-gray-500 break-words leading-snug mt-0.5">
               {locality}
             </p>
           )}
         </div>
-        <div className="shrink-0 flex flex-col items-end gap-1">
+        <div className="shrink-0 flex flex-col items-end gap-1.5">
           <StatusBadge status={i.status} />
-          {/* Overall QC outcome for a Turn Re-Inspect, shown under the status. */}
+          {/* Overall QC outcome for a Turn Re-Inspect — plain colored text with a
+              glyph (not a filled pill) so a Pass doesn't read as green-on-green
+              next to the green Completed badge. */}
           {isReinspect && i.qcVerdict && (
-            <span className={`inline-block text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
-              i.qcVerdict === 'pass'
-                ? 'bg-emerald-100 text-emerald-700'
-                : 'bg-red-100 text-red-700'
+            <span className={`inline-flex items-center gap-0.5 text-[11px] font-heading font-bold ${
+              i.qcVerdict === 'pass' ? 'text-emerald-600' : 'text-red-600'
             }`}>
-              {i.qcVerdict === 'pass' ? 'Pass' : 'Fail'}
+              {i.qcVerdict === 'pass' ? '✓ Pass' : '✕ Fail'}
             </span>
           )}
         </div>
       </div>
-      {/* Meta row: Created date · inspector on the left, Updated date on the right. */}
-      <div className="flex items-center gap-x-2 text-xs text-gray-500 mt-0.5">
-        {created && <span className="shrink-0 whitespace-nowrap">Created {created}</span>}
-        {created && i.inspectorName && <span className="shrink-0">&middot;</span>}
-        {i.inspectorName && <span className="truncate">{i.inspectorName}</span>}
-        {updated && <span className="text-gray-400 ml-auto shrink-0 whitespace-nowrap">Updated {updated}</span>}
+      {/* Meta row: one date on the left, inspector right-aligned. */}
+      <div className="flex items-center justify-between gap-3 text-xs text-gray-500">
+        {dateValue
+          ? <span className="shrink-0 whitespace-nowrap">{dateLabel} {dateValue}</span>
+          : <span />}
+        {i.inspectorName && <span className="truncate text-right">{i.inspectorName}</span>}
       </div>
     </>
   );
