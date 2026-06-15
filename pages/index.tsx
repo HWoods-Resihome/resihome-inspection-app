@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import Head from 'next/head';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppDialog } from '@/components/AppDialog';
 import { useRouter } from 'next/router';
 import type { InspectionSummary } from '@/lib/types';
@@ -14,6 +14,20 @@ interface MeUser { userId: string; email: string; name: string; }
 
 type StatusFilter = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
 type StatusCounts = { all: number; scheduled: number; in_progress: number; pending_approval: number; completed: number };
+
+function isCancelledStatus(s?: string): boolean {
+  const x = (s || '').trim().toLowerCase();
+  return x === 'cancelled' || x === 'canceled';
+}
+// Which status-chip bucket an inspection counts toward (null = cancelled/other).
+function statusBucket(s?: string): keyof Omit<StatusCounts, 'all'> | null {
+  const x = (s || '').trim().toLowerCase();
+  if (x === 'scheduled') return 'scheduled';
+  if (x === 'in progress' || x === 'in-progress' || x === 'in_progress') return 'in_progress';
+  if (x === 'pending approval' || x === 'pending-approval' || x === 'pending_approval' || x === 'pendingapproval') return 'pending_approval';
+  if (x === 'completed' || x === 'complete' || x === 'submitted') return 'completed';
+  return null;
+}
 
 // Stale-while-revalidate caches (localStorage), so a slow cell connection shows
 // the LAST results instantly instead of a blank "Loading…" while the network
@@ -49,6 +63,12 @@ export default function Home() {
   // scale to 10,000+ inspections instead of being derived from a 500-row window).
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<StatusCounts>({ all: 0, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0 });
+  // Real-time cancel: ids cancelled this session (so a lagging server refetch
+  // can't re-show them) + the optimistic counts/total to display until the
+  // HubSpot search index catches up.
+  const cancelledIdsRef = useRef<Set<string>>(new Set());
+  const optimisticCountsRef = useRef<StatusCounts | null>(null);
+  const optimisticTotalRef = useRef<number | null>(null);
   const [facets, setFacets] = useState<{ inspectors: string[]; templates: string[] }>({ inspectors: [], templates: [] });
 
   // Restore the list view (filters/sort/search/paging) from the last time the
@@ -163,9 +183,27 @@ export default function Home() {
   const listCacheKey = useMemo(() => buildListParams().toString(), [buildListParams]);
 
   const applyListData = useCallback((d: any) => {
-    setInspections(d.inspections || []);
-    setTotal(typeof d.total === 'number' ? d.total : (d.inspections || []).length);
-    if (d.counts) setCounts(d.counts);
+    const raw: InspectionSummary[] = d.inspections || [];
+    const cancelledSet = cancelledIdsRef.current;
+    // Defensive: never render a cancelled-status row OR a row we just cancelled
+    // this session. HubSpot's search index lags a status write, so a refetch can
+    // still return a just-cancelled inspection (its properties already say
+    // "Cancelled" — that's the stale-index window) — drop it so it falls off now.
+    const filtered = raw.filter((i) => !isCancelledStatus(i.status) && !cancelledSet.has(i.recordId));
+    setInspections(filtered);
+    // While a cancel is still working through the index (the server keeps
+    // returning a just-cancelled id), keep the optimistic counts/total we set at
+    // cancel time. Once the server stops returning them, it has reindexed — adopt
+    // its authoritative counts and clear the optimistic state.
+    const pendingStillReturned = cancelledSet.size > 0 && raw.some((r) => cancelledSet.has(r.recordId));
+    if (cancelledSet.size > 0 && pendingStillReturned) {
+      if (optimisticCountsRef.current) setCounts(optimisticCountsRef.current);
+      if (optimisticTotalRef.current != null) setTotal(optimisticTotalRef.current);
+    } else {
+      if (cancelledSet.size > 0) { cancelledSet.clear(); optimisticCountsRef.current = null; optimisticTotalRef.current = null; }
+      setTotal(typeof d.total === 'number' ? d.total : raw.length);
+      if (d.counts) setCounts(d.counts);
+    }
   }, []);
 
   // Revalidate the list+counts from the network and refresh the cache. On a
@@ -331,9 +369,31 @@ export default function Home() {
       const data = await r.json();
       if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
       exitSelectMode();
-      // Refresh; HubSpot's index can lag so give it a beat.
+      // Optimistic, REAL-TIME fall-off: drop the cancelled inspections from the
+      // list and decrement the chip counts + total NOW, instead of waiting for
+      // HubSpot's search index to reindex (which lags a few seconds and would
+      // otherwise keep them visible with stale counts).
+      const cancelledIds: string[] = Array.isArray(data.cancelled) ? data.cancelled : ids;
+      const removed = inspections.filter((i) => cancelledIds.includes(i.recordId));
+      if (cancelledIds.length) {
+        const nextCounts: StatusCounts = { ...counts };
+        for (const i of removed) {
+          nextCounts.all = Math.max(0, nextCounts.all - 1);
+          const b = statusBucket(i.status);
+          if (b) nextCounts[b] = Math.max(0, nextCounts[b] - 1);
+        }
+        for (const cid of cancelledIds) cancelledIdsRef.current.add(cid);
+        optimisticCountsRef.current = nextCounts;
+        optimisticTotalRef.current = Math.max(0, total - removed.length);
+        setCounts(nextCounts);
+        setTotal((t) => Math.max(0, t - removed.length));
+        setInspections((prev) => prev.filter((i) => !cancelledIds.includes(i.recordId)));
+      }
+      // Reconcile against the server (it serves authoritative counts once the
+      // index catches up; until then applyListData keeps the optimistic numbers).
       await load({ refresh: true });
-      setTimeout(() => { void load({ refresh: true }); }, 1200);
+      setTimeout(() => { void load({ refresh: true }); }, 1500);
+      setTimeout(() => { void load({ refresh: true }); }, 5000);
       const skippedCompleted = (data.skipped || []).filter((s: any) => s.reason === 'completed').length;
       if (skippedCompleted > 0) {
         void dialog.alert(`${data.cancelled.length} cancelled. ${skippedCompleted} completed inspection${skippedCompleted === 1 ? ' was' : 's were'} skipped (completed inspections can't be cancelled).`);
