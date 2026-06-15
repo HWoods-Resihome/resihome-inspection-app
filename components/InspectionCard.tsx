@@ -72,10 +72,12 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
 
   const { street, locality } = splitAddress(i.propertyAddressSnapshot || i.inspectionName);
   const isReinspect = i.templateType === 'pm_turn_reinspect_qc';
-  // One date on the left: the scheduled date when set (the planned visit),
-  // otherwise the last-updated date. Single label keeps the meta row uncluttered.
-  const dateLabel = i.scheduledDate ? 'Scheduled' : 'Updated';
-  const dateValue = fmtShort(i.scheduledDate || i.updatedAt);
+  // Date on the left: the scheduled date ONLY while the inspection is still
+  // Scheduled (the planned visit is the meaningful date then); once work starts
+  // it switches to the last-updated date.
+  const isScheduled = (i.status || '').trim().toLowerCase() === 'scheduled';
+  const dateLabel = isScheduled ? 'Scheduled' : 'Updated';
+  const dateValue = fmtShort(isScheduled ? (i.scheduledDate || i.updatedAt) : i.updatedAt);
 
   const inner = (
     <>
