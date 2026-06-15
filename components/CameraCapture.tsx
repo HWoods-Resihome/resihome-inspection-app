@@ -136,13 +136,14 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.restore();
 }
 
-// Target capture resolution (4:3). Requested HIGH so the live preview is sharp
-// and zoomable (the browser negotiates down per device). On capture we prefer
-// ImageCapture.takePhoto() (the camera's full still pipeline — far cleaner in
-// low light) and fall back to grabbing this high-res preview frame when that's
-// unsupported or slow. See capturePhoto().
-const CAPTURE_WIDTH = 3840;
-const CAPTURE_HEIGHT = 2880;
+// Target preview resolution (4:3). Kept MODERATE (not 4K): a very high request
+// makes the camera slow + flaky to open on iOS (long black screen while it
+// negotiates 4K). 1920×1440 starts fast and reliably everywhere. On Android we
+// still grab a FULL-resolution still via ImageCapture.takePhoto() (independent
+// of this), so photo quality there is unaffected; on iOS (no ImageCapture) the
+// photo is this preview frame, which at ~2.7MP is plenty for inspection shots.
+const CAPTURE_WIDTH = 1920;
+const CAPTURE_HEIGHT = 1440;
 
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
@@ -204,16 +205,25 @@ const ZOOM_DRAG_PX = 520; // thumb travel (px) for the full 1x→MAX_ZOOM range 
 const ZOOM_DEADZONE_PX = 18; // ignore tiny thumb wobble before zoom kicks in
 const LENS_LS_KEY = 'rw_cam_lens'; // persists the chosen back-lens deviceId across sessions
 
-// Friendly label for a back lens from its (best-effort) device label. Many
-// Android builds give uninformative labels ("camera2 0, facing back") → we fall
-// back to "Lens N" and the inspector just taps to find the one they want.
-function lensLabel(raw: string, index: number): string {
+// Friendly zoom-style label for a back lens from its (best-effort) device label,
+// matching what people expect from the native camera (0.5× / 1× / 2× / 3×).
+// Order matters: "Ultra Wide" also contains "wide", so test ultra/tele BEFORE
+// the generic wide/main case. Unknown lenses default to 1× (the main lens)
+// rather than a confusing "Lens N".
+function lensLabel(raw: string): string {
   const l = (raw || '').toLowerCase();
   if (/ultra|0\.5/.test(l)) return '0.5×';
-  if (/tele|telephoto/.test(l)) return 'Tele';
   if (/macro/.test(l)) return 'Macro';
-  if (/wide|main|back camera 0|rear camera 0/.test(l)) return '1×';
-  return `Lens ${index + 1}`;
+  if (/tele|telephoto/.test(l)) return /\b3(\.0)?x\b|triple tele/.test(l) ? '3×' : '2×';
+  return '1×'; // wide / main / dual / triple / plain "Back Camera" / unknown
+}
+// Sort order for the chip row so it reads left-to-right like a real camera.
+function lensOrder(label: string): number {
+  if (label === '0.5×') return 0;
+  if (label === '1×') return 1;
+  const m = /^(\d+)×$/.exec(label);
+  if (m) return 1 + Number(m[1]); // 2× -> 3, 3× -> 4
+  return 9; // Macro / other last
 }
 
 // Pick the best MediaRecorder mime type this browser supports (Safari → mp4,
@@ -386,6 +396,14 @@ export function CameraCapture({
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
   const [permissionError, setPermissionError] = useState<string>('');
   const [busy, setBusy] = useState(false);
+  // Live-preview readiness. The stream can be acquired (lens chips populate) yet
+  // the <video> still shows BLACK — common on iOS when the camera is slow to
+  // hand over frames, or when another app / an active phone call is holding it.
+  // We show a "Starting camera…" state instead of a blank black screen, watchdog
+  // a stall (retry play, then surface a fallback), and clear it on first frame.
+  const [previewReady, setPreviewReady] = useState(false);
+  const [previewStuck, setPreviewStuck] = useState(false);
+  const previewWatchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Id of the captured photo currently open in the annotator (null = closed).
   const [annotatingId, setAnnotatingId] = useState<string | null>(null);
   // Index (within ALL items — photos AND videos) open in the swipeable viewer.
@@ -408,6 +426,7 @@ export function CameraCapture({
   // ----- Camera lifecycle -----
 
   const stopStream = useCallback(() => {
+    if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; }
     if (streamRef.current) {
       for (const track of streamRef.current.getTracks()) {
         track.stop();
@@ -433,6 +452,9 @@ export function CameraCapture({
       // New track → invalidate the cached ImageCapture and clear any freeze.
       imageCaptureRef.current = null; imageCaptureTrackRef.current = null; photoCapsRef.current = null;
       pendingCaptureCountRef.current = 0; setFrozen(false);
+      // New acquisition → show "Starting camera…" until the first frame paints.
+      setPreviewReady(false); setPreviewStuck(false);
+      if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; }
       // When a specific back lens is chosen, pin it by deviceId; otherwise let
       // the OS pick the default for the facing direction.
       const videoConstraint: MediaTrackConstraints = {
@@ -491,6 +513,38 @@ export function CameraCapture({
             setTimeout(lift, 1500); // safety net
           } else { setTimeout(lift, 250); }
         }
+
+        // Clear "Starting camera…" on the first painted frame, and watchdog a
+        // black/stalled preview: nudge play() a few times, then surface the
+        // phone-camera fallback if frames never arrive (e.g. on an active call).
+        const vid = videoRef.current as any;
+        const markReady = () => { setPreviewReady(true); setPreviewStuck(false); };
+        if (typeof vid.requestVideoFrameCallback === 'function') {
+          try { vid.requestVideoFrameCallback(() => markReady()); }
+          catch { vid.addEventListener?.('loadeddata', markReady, { once: true }); }
+        } else {
+          vid.addEventListener?.('loadeddata', markReady, { once: true });
+        }
+        if (previewWatchdogRef.current) clearInterval(previewWatchdogRef.current);
+        let tries = 0;
+        previewWatchdogRef.current = setInterval(() => {
+          const vv = videoRef.current;
+          if (!vv || !streamRef.current) {
+            if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; }
+            return;
+          }
+          if (vv.videoWidth > 0 && vv.readyState >= 2) {
+            setPreviewReady(true); setPreviewStuck(false);
+            if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; }
+            return;
+          }
+          tries++;
+          if (tries <= 3) { vv.play().catch(() => { /* keep nudging */ }); }
+          else {
+            setPreviewStuck(true); // give up auto-retry → offer Retry / Phone Camera
+            if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; }
+          }
+        }, 1000);
       }
 
       // ----- Manual lens selector: discover back lenses + note the active one -----
@@ -506,8 +560,16 @@ export function CameraCapture({
           const labeled = vids.some((v) => !!v.label);
           let backs = labeled ? vids.filter((v) => isBack(v.label) && !isBad(v.label)) : vids;
           if (labeled && backs.length === 0) backs = vids.filter((v) => !isBad(v.label));
-          const named = backs.filter((v) => v.deviceId).map((v, i) => ({ id: v.deviceId, label: lensLabel(v.label, i) }));
-          setBackLenses(named.length >= 2 ? named : []); // only show the control when there's a choice
+          const named = backs.filter((v) => v.deviceId).map((v) => ({ id: v.deviceId, label: lensLabel(v.label) }));
+          // De-dupe by label (a phone often exposes several lenses that all read
+          // as "1×", e.g. the virtual + physical wide cameras) and sort into the
+          // natural 0.5× · 1× · 2× order, so the chip row is clean instead of
+          // "1× · 0.5× · Lens 3".
+          const seen = new Set<string>();
+          const deduped = named
+            .filter((n) => (seen.has(n.label) ? false : (seen.add(n.label), true)))
+            .sort((a, b) => lensOrder(a.label) - lensOrder(b.label));
+          setBackLenses(deduped.length >= 2 ? deduped : []); // only show the control when there's a real choice
         } catch { setBackLenses([]); }
       })();
 
@@ -2119,6 +2181,37 @@ export function CameraCapture({
               // layer that Chrome re-rasterizes at scale thresholds (~2×) — which was
               // the new hitch around 2×.
             />
+            {/* "Starting camera…" — shown over the (black) preview until the
+                first frame paints, so a slow/stalled start reads as progress,
+                not a broken screen. If it stalls (another app or an active phone
+                call is holding the camera), offer Retry + the phone-camera path. */}
+            {!previewReady && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-black px-6 text-center">
+                {!previewStuck ? (
+                  <>
+                    <div className="w-9 h-9 rounded-full border-2 border-white/25 border-t-white animate-spin" />
+                    <p className="text-white/80 text-sm font-heading">Starting camera…</p>
+                  </>
+                ) : (
+                  <div className="max-w-sm">
+                    <p className="text-white text-sm font-heading font-semibold mb-1">Camera didn’t start</p>
+                    <p className="text-white/70 text-xs mb-4">
+                      Another app may be using it, or you’re on a phone call. End the call (or close the other app) and retry, or use your phone’s camera.
+                    </p>
+                    <div className="flex items-center justify-center gap-2">
+                      <button type="button" onClick={() => startStream()}
+                        className="bg-brand text-white font-heading font-semibold px-4 py-2 rounded-lg text-sm">
+                        Retry
+                      </button>
+                      <button type="button" onClick={openNativeCamera}
+                        className="bg-white text-black font-heading font-semibold px-4 py-2 rounded-lg text-sm">
+                        Use Phone Camera
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {/* Freeze-frame overlay: holds the captured frame while the real
                 still is taken + saved, so the preview never goes dark. Already
                 zoom-cropped to match the live view, so no transform needed. */}
