@@ -13,5 +13,9 @@
   { "utterance": "ceiling fan is broken", "expectDescriptionIncludes": "fan" },
   { "utterance": "refrigerator not cooling", "expectDescriptionIncludes": "refrigerator" },
   { "utterance": "replace the water heater", "expectDescriptionIncludes": "water heater" },
-  { "utterance": "light fixture in the kitchen is out", "expectDescriptionIncludes": "light" }
+  { "utterance": "light fixture in the kitchen is out", "expectDescriptionIncludes": "light" },
+  { "utterance": "trim the bushes in the front yard", "expectDescriptionIncludes": "bush", "note": "must not pull in stump/trash-out — see the over-add cap" },
+  { "utterance": "level 2 sales clean for the whole house", "expectDescriptionIncludes": "clean", "note": "tier handled by correctCleanLevel guard" },
+  { "utterance": "whole house mismatch paint", "expectDescriptionIncludes": "paint", "note": "mist-match alias + whole-house exemption" },
+  { "utterance": "replace light bulb in the kitchen", "expectDescriptionIncludes": "light" }
 ]

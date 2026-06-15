@@ -28,6 +28,7 @@ import { aliasFor } from '@/lib/voiceAliases';
 import {
   correctCleanLevel, correctBlinds, wholeHouseExempt,
   measuredUnitOf, measurementWord, isStairCount, resolveTenantPct,
+  roomFromUtterance, countItemPhrases,
 } from '@/lib/rateCardAiCore';
 import { calculateLine } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
@@ -411,24 +412,6 @@ function money(n: number): string {
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function reEsc(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-
-// Route a line to a room the inspector NAMED in their utterance even when the
-// model didn't set `room` (e.g. "replace light bulb kitchen" → Kitchen). Matches
-// each room by its significant name tokens (≥4 chars) and returns a room ONLY
-// when exactly one distinct room matches — ambiguous words like "bedroom" across
-// Bedroom 1/2/3 yield null, leaving the routing to the model.
-const ROOM_STOPWORDS = new Set(['room', 'area', 'main', 'unit']);
-function roomFromUtterance(text: string, rooms: { id: string; name: string }[]): { id: string; name: string } | null {
-  const hay = ` ${(text || '').toLowerCase()} `;
-  const matched: { id: string; name: string }[] = [];
-  for (const r of rooms) {
-    const tokens = (r.name || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !ROOM_STOPWORDS.has(w));
-    if (tokens.length && tokens.some((tok) => new RegExp(`\\b${reEsc(tok)}\\b`).test(hay))) matched.push(r);
-  }
-  const uniq = Array.from(new Map(matched.map((m) => [m.id, m])).values());
-  return uniq.length === 1 ? uniq[0] : null;
-}
 
 // Build the line confirmation shown on screen. Per the inspector's preference,
 // the vendor assignment and tenant chargeback % are NOT shown unless they
@@ -525,14 +508,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // at most ONE line — so the model can't expand it into adjacent work the
     // inspector never named (e.g. bushes → stump removal + trash-out). Compound
     // requests split into more phrases and get a correspondingly higher ceiling.
-    const utterancePhraseCount = (() => {
-      const u = lastUtterance.trim();
-      if (!u) return 1;
-      const parts = u.split(/\b(?:and then|and also|and|also|plus)\b|[,;]/i)
-        .map((s) => s.trim()).filter((s) => s.length >= 3);
-      return Math.max(1, Math.min(5, parts.length || 1));
-    })();
-    const maxNewLines = utterancePhraseCount;
+    const maxNewLines = countItemPhrases(lastUtterance);
     // New lines emitted across all rounds of THIS turn (edits/switches don't count).
     let addsThisTurn = 0;
 
