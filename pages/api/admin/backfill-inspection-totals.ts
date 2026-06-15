@@ -17,6 +17,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { backfillInspectionTotals } from '@/lib/hubspot';
+import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
+import { getCachedRegions } from '@/pages/api/rate-card/regions';
 
 export const config = { maxDuration: 300 };
 
@@ -33,9 +35,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   let nextAfter: string | null = after || null;
 
   try {
+    // Load the catalog + region matrix once so every inspection is RE-PRICED
+    // live (matching the form), correcting rollups built from stale snapshots.
+    const [catalog, regions] = await Promise.all([getCachedCatalog(), getCachedRegions()]);
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const r = await backfillInspectionTotals({ after, max: 150 });
+      const r = await backfillInspectionTotals({ after, max: 150, catalog, regions });
       processed += r.processed; updated += r.updated; skipped += r.skipped; errors += r.errors;
       nextAfter = r.nextAfter;
       if (!r.nextAfter) break;

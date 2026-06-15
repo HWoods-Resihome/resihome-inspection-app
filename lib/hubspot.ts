@@ -3,6 +3,7 @@
 import type { Question, Property, HubSpotUser, InspectionSummary } from './types';
 import { isInternalResolution } from './vendors';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from './answerProps';
+import { calculateLine } from './rateCardMath';
 
 const API_BASE = 'https://api.hubapi.com';
 
@@ -3155,30 +3156,70 @@ export async function backfillInspectionUrls(opts: { after?: string; max?: numbe
 /**
  * Recompute the inspection-wide cost totals from its rate-card lines and write
  * them to `total_vendor_cost` / `total_client_cost` / `total_tenant_cost` on the
- * inspection. Sums the per-line stored totals (the exact numbers the form + PDFs
- * show), so the inspection object always reflects the current scope — through
- * editing, approval, and finalize. Best-effort on the write (tolerates the
- * properties not existing yet); never throws. Returns the totals + line count.
+ * inspection, so the inspection object (and the home card / price sort that read
+ * these rollups) always reflects the current scope — through editing, approval,
+ * and finalize. Best-effort on the write (tolerates the properties not existing
+ * yet); never throws. Returns the totals + line count.
  *
- * Call after any change to an inspection's rate-card lines (save/archive) and at
- * finalize. `skipIfNoLines` avoids stamping 0 onto non-scope inspections during
- * the backfill (the live save path leaves it false so deleting the last line
- * correctly writes 0).
+ * Pricing source:
+ *  - When `catalog` + `regions` are supplied, each line is RE-PRICED LIVE with
+ *    the same `calculateLine` the form uses (against the inspection's region),
+ *    so the rollup matches exactly what the inspector sees — even for older
+ *    lines whose stored cost snapshots are stale. This is the correct path and
+ *    is what the save flow + backfill pass.
+ *  - Otherwise it falls back to summing each line's STORED cost snapshot
+ *    (legacy behavior) — fine right after a save (snapshots are fresh) but can
+ *    drift from the form for lines saved under different/old pricing.
+ *
+ * `skipIfNoLines` avoids stamping 0 onto non-scope inspections during a backfill
+ * (the live save path leaves it false so deleting the last line writes 0).
  */
 export async function recomputeInspectionTotals(
   inspectionId: string,
-  opts: { skipIfNoLines?: boolean } = {},
+  opts: {
+    skipIfNoLines?: boolean;
+    catalog?: RateCardLineItem[];
+    regions?: RegionRate[];
+    region?: string; // inspection region; fetched from the record if omitted
+  } = {},
 ): Promise<{ vendor: number; client: number; tenant: number; lineCount: number; wrote: boolean }> {
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
   const answers = await fetchAnswersForInspection(inspectionId);
+  const lineAnswers = answers.filter((a) => a.answerType === 'rate_card_line' && a.rateCardLine);
+
+  // Live re-pricing when a catalog + region matrix are provided.
+  const live = !!(opts.catalog && opts.regions);
+  const catalogByCode = live ? new Map(opts.catalog!.map((c) => [c.lineItemCode, c])) : null;
+  let region = opts.region;
+  if (live && region == null) {
+    try { region = (await fetchInspectionById(inspectionId))?.regionSnapshot || ''; }
+    catch { region = ''; }
+  }
+
   let vendor = 0, client = 0, tenant = 0, lineCount = 0;
-  for (const a of answers) {
-    if (a.answerType !== 'rate_card_line' || !a.rateCardLine) continue;
-    const rc = a.rateCardLine;
-    vendor += round2(Number(rc.vendorCost) || 0);
-    client += round2(Number(rc.clientCost) || 0);
-    tenant += round2(Number(rc.tenantCost) || 0);
+  for (const a of lineAnswers) {
+    const rc = a.rateCardLine!;
     lineCount++;
+    const item = live ? catalogByCode!.get(rc.lineItemCode) : undefined;
+    if (live && item) {
+      // Re-price from the line's inputs exactly like the form does.
+      const calc = calculateLine(item, region || '', opts.regions!, {
+        quantity: Number(rc.quantityDecimal) || 0,
+        tenantBillBackPercent: Number(rc.tenantBillBackPercent) || 0,
+        customLaborRate: rc.customLaborRate ?? null,
+        customAdjustedMaterialCost: rc.customAdjustedMaterialCost ?? null,
+        customVendorCost: rc.customVendorCost ?? null,
+      });
+      vendor += round2(calc.vendorCost);
+      client += round2(calc.clientCost);
+      tenant += round2(calc.tenantCost);
+    } else {
+      // Stored-snapshot fallback (no catalog provided, or the code is no longer
+      // in the catalog — keep the line's last known cost rather than dropping it).
+      vendor += round2(Number(rc.vendorCost) || 0);
+      client += round2(Number(rc.clientCost) || 0);
+      tenant += round2(Number(rc.tenantCost) || 0);
+    }
   }
   vendor = round2(vendor); client = round2(client); tenant = round2(tenant);
   if (lineCount === 0 && opts.skipIfNoLines) return { vendor, client, tenant, lineCount, wrote: false };
@@ -3202,8 +3243,14 @@ export async function recomputeInspectionTotals(
  * Backfill `total_vendor_cost` / `total_client_cost` / `total_tenant_cost` across
  * existing inspections. Paginated like the other backfills; skips inspections
  * with no rate-card lines (so questionnaires aren't stamped with 0s).
+ *
+ * Pass `catalog` + `regions` to RE-PRICE each line live (matching the form) so
+ * the backfill corrects rollups built from stale stored snapshots, not just
+ * re-sums them. The admin endpoint loads these from the cached catalog/region.
  */
-export async function backfillInspectionTotals(opts: { after?: string; max?: number } = {}): Promise<{ processed: number; updated: number; skipped: number; errors: number; nextAfter: string | null }> {
+export async function backfillInspectionTotals(
+  opts: { after?: string; max?: number; catalog?: RateCardLineItem[]; regions?: RegionRate[] } = {},
+): Promise<{ processed: number; updated: number; skipped: number; errors: number; nextAfter: string | null }> {
   const { inspection: typeId } = typeIds();
   const max = opts.max ?? 1000;
   let after = opts.after;
@@ -3228,7 +3275,11 @@ export async function backfillInspectionTotals(opts: { after?: string; max?: num
       await Promise.all(chunk.map(async (r: any) => {
         processed++;
         try {
-          const out = await recomputeInspectionTotals(r.id, { skipIfNoLines: true });
+          const out = await recomputeInspectionTotals(r.id, {
+            skipIfNoLines: true,
+            catalog: opts.catalog,
+            regions: opts.regions,
+          });
           if (out.wrote) updated++; else skipped++;
         } catch (e) {
           errors++;

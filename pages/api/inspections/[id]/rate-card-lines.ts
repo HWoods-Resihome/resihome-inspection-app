@@ -10,6 +10,7 @@ import {
   type AnswerUpsert,
 } from '@/lib/hubspot';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
+import { bustInspectionsCache } from '@/pages/api/inspections';
 import { getSessionFromRequest } from '@/lib/auth';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
@@ -308,9 +309,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Keep the inspection's rolled-up cost totals (total_vendor/client/tenant_cost)
     // in sync with the current scope after this add/edit/delete. Best-effort —
     // never fail the save over the summary write.
-    await recomputeInspectionTotals(inspectionRecordId).catch((e) => {
+    await recomputeInspectionTotals(inspectionRecordId, { catalog: catalogList, regions, region }).catch((e) => {
       console.warn(`[rate-card-lines] totals recompute failed for ${inspectionRecordId} (non-fatal):`, e);
     });
+    // Drop the cached home list/counts so the updated Client $ total shows on the
+    // card the moment the inspector returns to the list (no 15s cache lag).
+    bustInspectionsCache();
 
     // Stitch the math result back to each saved record so the client can update
     // its UI without re-fetching.

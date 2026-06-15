@@ -4,6 +4,8 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
 import { externalAccessDenial, isExternalEmail } from '@/lib/userAccess';
+import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
+import { getCachedRegions } from '@/pages/api/rate-card/regions';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -183,9 +185,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // re-inspect now sorts by the scope it re-inspects instead of $0.
       // Best-effort — never blocks creation.
       if (copiedLines > 0) {
-        await recomputeInspectionTotals(inspectionId).catch((e) => {
+        try {
+          const [catalog, regions] = await Promise.all([getCachedCatalog(), getCachedRegions()]);
+          await recomputeInspectionTotals(inspectionId, { catalog, regions });
+        } catch (e) {
           console.warn(`[create] QC totals recompute failed for ${inspectionId}:`, e);
-        });
+        }
       }
     }
 
