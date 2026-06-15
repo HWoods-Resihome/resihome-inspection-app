@@ -354,8 +354,10 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   // True while TTS is actively speaking — used to ignore echo (the recognizer
   // hearing the AI's own voice through the speaker).
   const speakingRef = useRef(false);
-  // externalId + short label of the most recent voice-added line, for "undo".
-  const lastAddedRef = useRef<{ externalId: string; label: string; lineItemCode?: string; query?: string; section?: string } | null>(null);
+  // The most recent voice-added line — for "undo" AND so a follow-up deictic edit
+  // ("change that quantity to two") resolves to the line JUST added, even if the
+  // panel's current room now shows a different, older line.
+  const lastAddedRef = useRef<{ externalId: string; label: string; lineItemCode?: string; query?: string; section?: string; quantity?: number; assignedTo?: string; tenantBillBackPercent?: number } | null>(null);
   // The section the agent is working on DURING the current stream. Starts at the
   // panel's current room and is updated by navigate events mid-stream so a line
   // proposed after a room switch is saved to the new room.
@@ -430,6 +432,17 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
             // Property square footage → server fills whole-house SF lines with
             // the real quantity so the confirmation price matches what's saved.
             squareFootage: squareFootage || 0,
+            // The line JUST added (possibly in another room) so a deictic edit
+            // ("change THAT quantity") targets it, not the current room's newest line.
+            lastAdded: lastAddedRef.current ? {
+              externalId: lastAddedRef.current.externalId,
+              lineItemCode: lastAddedRef.current.lineItemCode,
+              label: lastAddedRef.current.label,
+              sectionId: lastAddedRef.current.section,
+              quantity: lastAddedRef.current.quantity,
+              assignedTo: lastAddedRef.current.assignedTo,
+              tenantBillBackPercent: lastAddedRef.current.tenantBillBackPercent,
+            } : undefined,
             // Room context so the agent can navigate ("go to Bedroom 2").
             currentRoom: currentRoomName,
             rooms: sections.map((s) => ({ id: s.id, name: s.displayName || s.label })),
@@ -530,7 +543,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
                   ? (ret as Promise<SaveResult>)
                   : Promise.resolve({ ok: true } as SaveResult);
                 savePromises.push(p.then((r) => r || { ok: true }).catch((e) => ({ ok: false, error: String(e?.message || e) })));
-                if (action === 'add') lastAddedRef.current = { externalId: line.externalId, label: spokenLabel, lineItemCode: line.lineItemCode, query: userUtterance, section: targetId };
+                if (action === 'add') lastAddedRef.current = { externalId: line.externalId, label: spokenLabel, lineItemCode: line.lineItemCode, query: userUtterance, section: targetId, quantity: line.quantity, assignedTo: line.assignedTo, tenantBillBackPercent: line.tenantBillBackPercent };
                 // Flywheel: the inspector accepted this voice match (utterance →
                 // catalog code). Edits keep the code, so both count as 'add'.
                 sendAiFeedback({
@@ -897,7 +910,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
     try {
       onAddLine(p.line);
       // Remember adds (not edits) so "undo" can remove the last one.
-      if (p.action === 'add') lastAddedRef.current = { externalId: p.line.externalId, label: p.spoken, lineItemCode: p.line.lineItemCode, query: p.query };
+      if (p.action === 'add') lastAddedRef.current = { externalId: p.line.externalId, label: p.spoken, lineItemCode: p.line.lineItemCode, query: p.query, section: p.line.section, quantity: p.line.quantity, assignedTo: p.line.assignedTo, tenantBillBackPercent: p.line.tenantBillBackPercent };
       // Flywheel: inspector confirmed this voice match (utterance → catalog code).
       sendAiFeedback({
         source: 'voice_assist',

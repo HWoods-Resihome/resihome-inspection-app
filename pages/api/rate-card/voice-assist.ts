@@ -71,6 +71,17 @@ interface BodyShape {
   currentRoom?: string;
   tenantMonths?: number;
   squareFootage?: number;
+  // The line just added this session (possibly in another room) — so a deictic
+  // edit ("change that quantity") resolves to it, not the current room's newest.
+  lastAdded?: {
+    externalId: string;
+    lineItemCode?: string;
+    label?: string;
+    sectionId?: string;
+    quantity?: number;
+    assignedTo?: string;
+    tenantBillBackPercent?: number;
+  };
 }
 
 // Pick the catalog's bid-item line to use for a voice bid item. Prefers a code
@@ -495,6 +506,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const tenantMonths = Number.isFinite(tenantMonthsRaw) && tenantMonthsRaw > 0 ? tenantMonthsRaw : 12;
     const currentLines: CurrentLine[] = Array.isArray(body?.currentLines) ? body.currentLines : [];
     const linesByExternalId = new Map(currentLines.map((l) => [l.externalId, l]));
+    // The line just added this session — make it editable even if it's in a
+    // different room than the panel currently shows, so a deictic edit
+    // ("change that quantity") can resolve to it.
+    const lastAdded = body?.lastAdded && body.lastAdded.externalId ? body.lastAdded : null;
+    if (lastAdded && !linesByExternalId.has(lastAdded.externalId)) {
+      linesByExternalId.set(lastAdded.externalId, {
+        externalId: lastAdded.externalId,
+        lineItemCode: String(lastAdded.lineItemCode || ''),
+        quantity: Number(lastAdded.quantity) || 1,
+        assignedTo: String(lastAdded.assignedTo || 'Vendor 1'),
+        tenantBillBackPercent: Number(lastAdded.tenantBillBackPercent) || 100,
+      });
+    }
     // The inspector's latest spoken line + all their text this conversation —
     // used by the server-side routing/level guards in emitAdd below.
     const lastUtterance = (() => {
@@ -531,7 +555,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // across turns within the 5-min window, cutting time-to-first-token and
     // input cost — meaningful when ~100 inspectors are dictating at once.
     if (roomTools.length) (roomTools[roomTools.length - 1] as any).cache_control = { type: 'ephemeral' };
-    const sysContext = systemContext(body.section || '', body.location || '', describeLines(byCode, currentLines), currentRoom, rooms);
+    let sysContext = systemContext(body.section || '', body.location || '', describeLines(byCode, currentLines), currentRoom, rooms);
+    // Anchor deictic edits to the line the inspector JUST added (which may be in
+    // another room than the one shown), so "change that quantity"/"make that 2"/
+    // "the last one" edits the right line instead of the current room's newest.
+    if (lastAdded) {
+      const li = byCode.get(String(lastAdded.lineItemCode || ''));
+      const desc = lastAdded.label || (li ? li.laborShortDescription : lastAdded.lineItemCode) || 'the last line';
+      sysContext += `\n\nMOST RECENTLY ADDED line (this session): id=${lastAdded.externalId} | ${desc} | qty ${Number(lastAdded.quantity) || 1}. When the inspector says "that", "it", "this", "the last one", or "change that …" WITHOUT naming a different item, they mean THIS line — call edit_line with id=${lastAdded.externalId}. Only target a different id if they clearly name another existing line.`;
+    }
 
     // The room a newly-proposed line belongs to. switch_room updates these so a
     // line added AFTER a switch is written to the new room, not the old one.
@@ -1085,9 +1117,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const editSummary = bidCost != null
             ? `Bid item: ${bidDesc || (item ? item.laborShortDescription : existing.lineItemCode)} — $${bidCost.toFixed(2)}${editTail}`
             : item ? lineToSummary(item, qty, vendor, pct, region, regions, { showVendor: editVendorStated, showPct: editPctStated }) : `${existing.lineItemCode} — ${qty}`;
+          // If this edits the just-added line, route it to THAT line's room (it
+          // may live in a different room than the panel currently shows).
+          const editSectionId = (lastAdded && externalId === lastAdded.externalId && lastAdded.sectionId)
+            ? String(lastAdded.sectionId) : undefined;
           sse(res, 'proposal', {
             action: 'edit',
             line,
+            sectionId: editSectionId,
             summary: editSummary,
             spokenSummary: item ? item.laborShortDescription : existing.lineItemCode,
             awaitingReply: false,
