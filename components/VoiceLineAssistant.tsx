@@ -49,6 +49,9 @@ interface Props {
   catalog?: RateCardLineItem[];
   // Tenant months in home — paint/flooring depreciation default for voice adds.
   tenantMonths?: number;
+  // Property square footage — so the server can fill whole-house SF lines with
+  // the real quantity (and show the right price) instead of a placeholder 1.
+  squareFootage?: number | null;
   disabled?: boolean;
   // Reports when the conversation panel opens/closes (engaged) so the parent can
   // keep the mic visible over other screens only while a conversation is active.
@@ -261,7 +264,7 @@ function speak(
   }
 }
 
-export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, linesBySection, currentLines, catalog, tenantMonths = 12, disabled, onEngagedChange, inspectionId }: Props) {
+export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, linesBySection, currentLines, catalog, tenantMonths = 12, squareFootage, disabled, onEngagedChange, inspectionId }: Props) {
   // The room the assistant is working on right now.
   const currentSection = useMemo(
     () => sections.find((s) => s.id === currentSectionId) || sections[0],
@@ -424,6 +427,9 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
             region,
             // Tenant months in home → drives paint/flooring depreciation default.
             tenantMonths,
+            // Property square footage → server fills whole-house SF lines with
+            // the real quantity so the confirmation price matches what's saved.
+            squareFootage: squareFootage || 0,
             // Room context so the agent can navigate ("go to Bedroom 2").
             currentRoom: currentRoomName,
             rooms: sections.map((s) => ({ id: s.id, name: s.displayName || s.label })),
@@ -638,7 +644,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         setBusy(false);
       }
     },
-    [section, location, region, tenantMonths, currentLines, onAddLine, onAddLineTo, sections, onNavigate, currentRoomName, currentSection, currentSectionId, inspectionId]
+    [section, location, region, tenantMonths, squareFootage, currentLines, onAddLine, onAddLineTo, sections, onNavigate, currentRoomName, currentSection, currentSectionId, inspectionId]
   );
 
   const submitUtterance = useCallback(

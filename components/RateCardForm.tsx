@@ -4178,6 +4178,7 @@ export function RateCardForm(props: RateCardFormProps) {
                   currentLines={linesBySection[voiceSectionId] || []}
                   catalog={catalog}
                   tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
+                  squareFootage={props.squareFootage}
                   onAddLine={(line) => { const p = handleSaveLineForSection(voiceSectionId, line); if (!cameraOpen) revealSection(voiceSectionId, line.externalId); return p; }}
                   onRemoveLine={(externalId) => handleDeleteLine(voiceSectionId, externalId)}
                   onAddLineTo={(sectionId, line) => { const p = handleSaveLineForSection(sectionId, line); if (!cameraOpen) revealSection(sectionId, line.externalId); return p; }}

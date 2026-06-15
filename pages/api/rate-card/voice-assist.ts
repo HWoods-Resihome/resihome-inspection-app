@@ -70,6 +70,7 @@ interface BodyShape {
   rooms?: { id: string; name: string }[];
   currentRoom?: string;
   tenantMonths?: number;
+  squareFootage?: number;
 }
 
 // Pick the catalog's bid-item line to use for a voice bid item. Prefers a code
@@ -511,6 +512,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const maxNewLines = countItemPhrases(lastUtterance);
     // New lines emitted across all rounds of THIS turn (edits/switches don't count).
     let addsThisTurn = 0;
+    // Property square footage → fill whole-house SF lines with the real quantity
+    // (so the confirmation price matches what the app saves), not a placeholder 1.
+    const propertySquareFootage = Number(body?.squareFootage) > 0 ? Math.round(Number(body.squareFootage)) : 0;
+    // Set when a whole-house SF line was auto-filled this turn, so we can drop the
+    // model's spurious "how many square feet?" wrap-up question (it's already filled).
+    let filledWholeHouseSf = false;
 
     const messages: any[] = clientMessages.map((m) => ({ role: m.role, content: m.content }));
     // Room navigation context.
@@ -825,9 +832,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               }
               const vendorStated = tu.input?.vendor != null && VENDORS.includes(String(tu.input.vendor));
               const pctStated = tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent));
+              // Whole-house SF line: fill it with the property square footage so
+              // the confirmation price reflects what the app actually saves
+              // (otherwise the model's placeholder qty of 1 would show a 1-SF
+              // price). Also flag it so we drop any "how many square feet?" the
+              // model still tacks on — it's already filled.
+              let effQty = qty;
+              if (isWholeHouse && unit === 'SF' && propertySquareFootage > 0) {
+                effQty = propertySquareFootage;
+                filledWholeHouseSf = true;
+              }
               // Sanity clamp: no real line exceeds this, so a mis-transcribed
               // quantity ("10 million feet") can never create a runaway line.
-              const safeQty = Math.min(qty, 100000);
+              const safeQty = Math.min(effQty, 100000);
               const line: RateCardLineInput = {
                 externalId: `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
                 section: lineSection, location: lineLocation, lineItemCode: item.lineItemCode,
@@ -837,7 +854,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               sse(res, 'proposal', { action: 'add', line, sectionId: lineSectionId, summary: lineToSummary(item, safeQty, vendor, pct, region, regions, { showVendor: vendorStated, showPct: pctStated }), spokenSummary: item.laborShortDescription, awaitingReply: false });
               didAct = true;
               addsThisTurn++;
-              result = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ ok: true, added: item.laborShortDescription, note: 'Line added. If the inspector listed more items, continue; otherwise stop.' }) };
+              result = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ ok: true, added: item.laborShortDescription, note: filledWholeHouseSf ? 'Line added with the property square footage applied automatically — do NOT ask the inspector for square feet. If they listed more items, continue; otherwise stop.' : 'Line added. If the inspector listed more items, continue; otherwise stop.' }) };
             }
           }
         }
@@ -894,7 +911,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           // both redundant and a source of wrong/duplicate numbers — suppress it.
           // Keep the text ONLY when it's a genuine follow-up question (ends with
           // "?") or a bid-item price callout (the one case we ask it to speak).
-          const t = (textBlocks || '').trim();
+          let t = (textBlocks || '').trim();
+          // Drop a spurious "how many square feet?" when a whole-house SF line
+          // was auto-filled this turn — the square footage is already applied.
+          if (t && filledWholeHouseSf && /\bsquare\s*f(eet|ootage)\b/i.test(t) && /\?\s*$/.test(t)) t = '';
           const keep = !!t && (/\?\s*$/.test(t) || (/\bbid\b/i.test(t) && /\$\s*\d/.test(t)));
           sse(res, 'message', { text: keep ? t : '', awaitingReply: true });
         } else {
