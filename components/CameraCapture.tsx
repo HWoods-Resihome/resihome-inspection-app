@@ -1514,9 +1514,10 @@ export function CameraCapture({
     // Tactile "shot taken" confirmation (Android; a no-op on iOS Safari).
     try { navigator.vibrate?.(15); } catch { /* unsupported */ }
 
-    // Hold the frame on screen so the preview never blacks out while the real
-    // still is captured + saved (native-camera behavior), then count this shot.
-    showFreezeFrame(video);
+    // Count this shot. The freeze-frame is shown ONLY on the slow
+    // ImageCapture.takePhoto() path (below) to mask its delay — NOT on the
+    // instant live-frame grab (iOS), because covering the <video> there makes
+    // iOS pause it (black flash that felt like the camera restarting).
     pendingCaptureCountRef.current += 1;
 
     // Draw a source (live frame OR full-sensor still) to a capped canvas with the
@@ -1583,6 +1584,9 @@ export function CameraCapture({
     const track = streamRef.current?.getVideoTracks?.()[0];
     const ic = track ? getImageCapture(track) : null;
     if (track && ic) {
+      // Mask the (slower) full-res still with the freeze frame — Android only;
+      // iOS has no ImageCapture and takes the instant path below (no freeze).
+      showFreezeFrame(video);
       let settled = false;
       const liveFallback = () => {
         if (settled) return;
