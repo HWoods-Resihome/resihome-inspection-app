@@ -75,6 +75,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // useful than a generic "Upstream request failed (400)" when diagnosing a
     // failed submit in the field).
     const detail = e && (e as any).detail ? ` — ${String((e as any).detail).slice(0, 300)}` : '';
-    return res.status(500).json({ error: `${String(e.message || e)}${detail}` });
+    // Return a HubSpot 4xx AS a 4xx so a permanent bad-request drops from the
+    // offline queue instead of retrying forever (which wedges sync + blocks submit).
+    const upstream = (e as any)?.status;
+    const status = (typeof upstream === 'number' && upstream >= 400 && upstream < 500 && upstream !== 429) ? upstream : 500;
+    return res.status(status).json({ error: `${String(e.message || e)}${detail}` });
   }
 }
