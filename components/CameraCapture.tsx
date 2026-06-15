@@ -1747,6 +1747,10 @@ export function CameraCapture({
   // AI assist can be paused mid-session (e.g. on low service the voice/call-outs
   // get noisy). Starts on whenever the camera was opened in AI mode.
   const [aiOn, setAiOn] = useState<boolean>(!!aiAssist);
+  // Set when the AI layer auto-turned itself OFF on poor service, so we can show
+  // why (and the inspector can re-enable once signal is back).
+  const [aiAutoPaused, setAiAutoPaused] = useState(false);
+  const handleAiAutoDisable = useCallback(() => { setAiOn(false); setAiAutoPaused(true); }, []);
   // "Teach the AI" voice-training popup (feeds the live knowledge base).
   const [kbTrainerOpen, setKbTrainerOpen] = useState(false);
   const [renamingRoomId, setRenamingRoomId] = useState<string | null>(null);
@@ -1885,8 +1889,10 @@ export function CameraCapture({
         </>
       ) : (
         <>
-          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-white/40" />
-          <span className="truncate text-white/70">AI paused — voice &amp; call-outs off</span>
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${aiAutoPaused ? 'bg-amber-400' : 'bg-white/40'}`} />
+          <span className={`truncate ${aiAutoPaused ? 'text-amber-200' : 'text-white/70'}`}>
+            {aiAutoPaused ? 'AI paused — weak signal (camera still works)' : 'AI paused — voice & call-outs off'}
+          </span>
         </>
       )}
     </div>
@@ -1906,7 +1912,7 @@ export function CameraCapture({
       {/* Toggle the AI voice + live call-outs on/off (e.g. on low service). */}
       <button
         type="button"
-        onClick={() => setAiOn((v) => !v)}
+        onClick={() => setAiOn((v) => { const next = !v; if (next) setAiAutoPaused(false); return next; })}
         className={`text-[11px] font-heading font-semibold px-2.5 py-1 rounded-full border transition-colors ${aiOn ? 'border-white/30 text-white/90 hover:bg-white/10' : 'border-violet-400 bg-violet-600 text-white'}`}
         aria-pressed={aiOn}
       >
@@ -1926,6 +1932,7 @@ export function CameraCapture({
           getZoom={() => effZoom()}
           getLastManualCaptureAt={() => lastManualCaptureRef.current}
           onStatus={setAiStatus}
+          onAutoDisable={handleAiAutoDisable}
           getActiveRoom={() => {
             const r = rooms?.find((x) => x.id === currentRoomId);
             if (r) return { id: r.id, name: r.name, photoCount: r.photoCount };

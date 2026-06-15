@@ -117,6 +117,10 @@ interface Props {
   onStill: (sectionId: string, url: string) => void;
   // Report the live status up so the host camera can render it in its header.
   onStatus?: (s: { text: string; tone: 'idle' | 'listen' | 'heard' | 'think' | 'err' }) => void;
+  // Called when the AI detects POOR SERVICE (repeated request failures / sustained
+  // offline). The host turns AI off so the heavy voice+vision loops can't lag the
+  // camera — the plain camera keeps working. Fired once per enable.
+  onAutoDisable?: () => void;
 }
 
 function genId(): string {
@@ -178,6 +182,22 @@ export function CameraAILayer(props: Props) {
 
   const openRef = useRef(false);
   const inFlight = useRef(false);
+  // Poor-service auto-disable: count consecutive failed/offline inference ticks
+  // and, once past the threshold, tell the host to turn AI off (so the heavy
+  // voice+vision loops stop lagging the camera). Fires once per enable.
+  const poorStreakRef = useRef(0);
+  const autoDisabledRef = useRef(false);
+  const onAutoDisableRef = useRef(props.onAutoDisable);
+  onAutoDisableRef.current = props.onAutoDisable;
+  const POOR_SERVICE_STREAK = 2; // ~5s of failing ticks (2.5s interval) → AI off
+  const notePoorService = () => {
+    poorStreakRef.current += 1;
+    if (poorStreakRef.current >= POOR_SERVICE_STREAK && !autoDisabledRef.current) {
+      autoDisabledRef.current = true;
+      try { onAutoDisableRef.current?.(); } catch { /* noop */ }
+    }
+  };
+  const noteGoodService = () => { poorStreakRef.current = 0; };
   const inferTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const stillTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRecRef = useRef<MediaRecorder | null>(null);
@@ -371,6 +391,7 @@ export function CameraAILayer(props: Props) {
   useEffect(() => {
     if (!enabled) return;
     openRef.current = true;
+    poorStreakRef.current = 0; autoDisabledRef.current = false; // fresh per enable
     dbg('layer enabled');
     (async () => {
       const [ref, fix] = await Promise.all([
@@ -834,7 +855,7 @@ export function CameraAILayer(props: Props) {
     // Offline: don't burn the periodic vision tick on a fetch that will fail —
     // voice call-outs are banked as clips (transcribeChunk) and replayed on
     // reconnect, so nothing is lost. Try to drain anything already queued.
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) { void drainPendingClips(); return; }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { notePoorService(); void drainPendingClips(); return; }
     const room = getActiveRoomRef.current();
     if (!room) { setErrText('No active room'); return; }
     const newText = transcriptBufRef.current.trim();
@@ -881,12 +902,16 @@ export function CameraAILayer(props: Props) {
       if (!openRef.current) return;
       if (!r.ok) {
         rebufferOnFail();
+        // 5xx / 429 = server/rate trouble (treat as poor service); a 4xx is a
+        // request problem, not connectivity, so don't auto-disable on those.
+        if (r.status >= 500 || r.status === 429) notePoorService(); else noteGoodService();
         const e = await r.json().catch(() => ({}));
         dbg(`vision ✗ ${r.status} ${String(e?.error || '').slice(0, 40)}`);
         setErrText(`AI ${r.status}: ${String(e?.error || '').slice(0, 80) || 'request failed'}`);
         return;
       }
       setErrText('');
+      noteGoodService(); // a clean response = service is fine; reset the streak
 
       // One supporting still per inference cycle, shared across its call-outs —
       // captured lazily on the FIRST suggestion so silent/no-op ticks cost nothing.
@@ -984,6 +1009,7 @@ export function CameraAILayer(props: Props) {
       }
     } catch (e: any) {
       rebufferOnFail();
+      notePoorService(); // network failure / timeout — count toward auto-disable
       if (openRef.current) setErrText(`AI offline: ${String(e?.message || e).slice(0, 60)}`);
     } finally {
       inFlight.current = false;
