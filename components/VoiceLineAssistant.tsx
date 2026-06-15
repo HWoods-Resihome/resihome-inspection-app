@@ -361,6 +361,10 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
   // ("change that quantity to two") resolves to the line JUST added, even if the
   // panel's current room now shows a different, older line.
   const lastAddedRef = useRef<{ externalId: string; label: string; lineItemCode?: string; query?: string; section?: string; quantity?: number; assignedTo?: string; tenantBillBackPercent?: number } | null>(null);
+  // Idempotency: signatures (room|code|qty) of recent voice ADDs, so a fast
+  // repeat / double-fire / retried stream can't double-insert the same line.
+  const recentAddsRef = useRef<Array<{ key: string; at: number }>>([]);
+  const DEDUPE_WINDOW_MS = 10_000;
   // The section the agent is working on DURING the current stream. Starts at the
   // panel's current room and is updated by navigate events mid-stream so a line
   // proposed after a room switch is saved to the new room.
@@ -566,6 +570,20 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               const targetId = (data.sectionId && sections.some((s) => s.id === data.sectionId))
                 ? data.sectionId
                 : (refId && sections.some((s) => s.id === refId)) ? refId : currentSectionId;
+              // Idempotency: skip an identical ADD (same room + code + qty) within
+              // a short window — guards against a fast repeat / double-fire /
+              // retried stream double-inserting a rate_card_line row. (Edits and
+              // moves are exempt; an intentional re-add lands fine after the window.)
+              if (action === 'add') {
+                const dKey = `${targetId}|${line.lineItemCode}|${line.quantity}`;
+                const nowT = Date.now();
+                recentAddsRef.current = recentAddsRef.current.filter((e) => nowT - e.at < DEDUPE_WINDOW_MS);
+                if (recentAddsRef.current.some((e) => e.key === dKey)) {
+                  setMessages((m) => [...m, { role: 'assistant', content: `(Skipped duplicate — ${spokenLabel} was just added)` }]);
+                  continue;
+                }
+                recentAddsRef.current.push({ key: dKey, at: nowT });
+              }
               try {
                 const ret = onAddLineTo ? onAddLineTo(targetId, line) : onAddLine(line);
                 // The parent now returns a promise that resolves once the SAVE

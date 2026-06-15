@@ -104,6 +104,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // run the math, build answer properties.
     const answerUpserts: AnswerUpsert[] = [];
     const calcByExternalId = new Map<string, ReturnType<typeof calculateLine>>();
+    // Per-line "the requested region wasn't in the matrix, so this priced off the
+    // GA: Atlanta fallback" flag — surfaced (not blocked) so a silent mispricing
+    // is at least visible/auditable.
+    const regionFallbackByExternalId = new Map<string, boolean>();
 
     // Resolve the region we'll use. Saved on the inspection at creation time
     // (region_snapshot). If empty, math falls back to GA:Atlanta.
@@ -156,6 +160,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         customVendorCost: line.customVendorCost ?? null,
       });
       calcByExternalId.set(line.externalId, calc);
+      // Flag a region fallback: we asked for a specific region but the matrix
+      // didn't have it, so calc used GA: Atlanta. (Empty requested region = no
+      // region chosen yet → fallback is expected, not a flag.)
+      const reqRegion = (region || '').trim();
+      const norm = (s: string) => s.replace(/\s+/g, '').toLowerCase();
+      regionFallbackByExternalId.set(line.externalId, !!reqRegion && norm(reqRegion) !== norm(String(calc.regionSnapshot || '')));
 
       // Build the answer record properties.
       // Reuse the existing answer schema (we extended it in Phase 1, Step 3).
@@ -306,9 +316,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // its UI without re-fetching.
     const results = upsertResults.map((r) => {
       const calc = calcByExternalId.get(r.answerIdExternal);
+      const regionFallback = regionFallbackByExternalId.get(r.answerIdExternal) === true;
+      // Structured audit record for a VOICE-added line (externalId prefix
+      // "voice_"). Joins to the [voice-line] log emitted by the voice endpoint
+      // (which carries the utterance + match confidence) via answerIdExternal, so
+      // a wrong match is fully reconstructable after the fact: utterance →
+      // transcript → matched code → confidence → written row → priced region.
+      if (calc && /^voice_/.test(r.answerIdExternal)) {
+        try {
+          console.log(`[voice-line] ${JSON.stringify({
+            event: 'written',
+            inspectionId: inspectionRecordId,
+            answerIdExternal: r.answerIdExternal,
+            recordId: r.recordId,
+            regionUsed: calc.regionSnapshot,
+            regionFallback,
+            vendorCost: roundMoney(calc.vendorCost),
+            clientCost: roundMoney(calc.clientCost),
+            tenantCost: roundMoney(calc.tenantCost),
+          })}`);
+        } catch { /* logging is best-effort */ }
+      }
       return {
         recordId: r.recordId,
         answerIdExternal: r.answerIdExternal,
+        regionFallback,
         totals: calc
           ? {
               laborTotal: roundMoney(calc.laborTotal),
@@ -317,6 +349,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               clientCost: roundMoney(calc.clientCost),
               tenantCost: roundMoney(calc.tenantCost),
               regionUsed: calc.regionSnapshot,
+              regionFallback,
               isCustomPriced: calc.isCustomPriced,
             }
           : null,

@@ -277,6 +277,7 @@ const SYSTEM_RULES = [
   `TRASH-OUT: a trash out / debris removal / haul-away is the labor line only. Do NOT also add a dumpster (or roll-off / container) line unless the inspector explicitly says "dumpster". Ask which trash-out size (small/medium/large or the volume) before adding, and add just that one line.`,
   `4. When you have a code and quantity AND the match is confident, call propose_line. The app adds the line automatically and announces it — you do NOT need the inspector to say yes first, and you must NOT claim you added it in your own words. If the match is not confident (see step 1), ask first instead of proposing.`,
   ``,
+  `MID-SENTENCE RETRACTION: if the inspector corrects themselves within one utterance — "add a doorstop, no scratch that, a light bulb", "replace the carpet, actually never mind", "not that, I meant the faucet" — the item BEFORE the retraction ("scratch that"/"never mind"/"not that"/"I meant…") is CANCELLED. Do NOT add the retracted item; only add what they say AFTER the correction. When in doubt about a half-retracted item, ask rather than add it.`,
   `RELOCATING a line (MOVE, not add): when the inspector says a line they already added belongs in a DIFFERENT room — "that should go in bathroom one", "move that to the kitchen", "put the tub refinish in the master bath", "actually that's in the garage" — call move_line with the line's id (the MOST RECENTLY ADDED line for "that"/"it"/"the last one") and the destination roomId. NEVER search the catalog or propose_line for a relocate request, and do NOT use switch_room (that only changes where NEW lines go). A room name in this kind of sentence is a destination, not a new item.`,
   `EDITING vs ADDING: naming a NEW item — a clean, paint, a repair, a fixture, etc. (e.g. "level one sales clean", "replace the microwave") — is always an ADD via propose_line, EVEN IF it comes right after another line. edit_line is ONLY for changing an EXISTING line's quantity / vendor / tenant percent (or a bid item's price / description); it can never set a note or a description on a regular catalog line. If in doubt, add a new line.`,
   `EDITING an existing line (e.g. "make that 50% tenant", "change the paint line to PPW", "that should be 3 not 1"):`,
@@ -555,6 +556,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Set when a whole-house SF line was auto-filled this turn, so we can drop the
     // model's spurious "how many square feet?" wrap-up question (it's already filled).
     let filledWholeHouseSf = false;
+    // Best catalog-match cosine score seen for each code this turn (from
+    // pre-search + any search_catalog) — recorded on the [voice-line] audit log
+    // so a wrong match's confidence is reconstructable after the fact.
+    const codeConfidence = new Map<string, number>();
+    const noteConfidence = (code: string, score: number) => {
+      if (!code || !isFinite(score)) return;
+      const prev = codeConfidence.get(code);
+      if (prev == null || score > prev) codeConfidence.set(code, score);
+    };
 
     const messages: any[] = clientMessages.map((m) => ({ role: m.role, content: m.content }));
     // Room navigation context.
@@ -646,7 +656,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         );
         const blocks: string[] = [];
         for (const m of matches) {
-          if (!m || !m.r.confident || !m.r.candidates.length) continue;
+          if (!m || !m.r.candidates.length) continue;
+          for (const c of m.r.candidates) noteConfidence(c.item.lineItemCode, c.score);
+          if (!m.r.confident) continue;
           const top = m.r.candidates.slice(0, 4).map((c) =>
             `${c.item.lineItemCode} — ${c.item.laborShortDescription} [${c.item.category}/${c.item.subcategory}, ${c.item.laborMeas}]`
           ).join('; ');
@@ -896,7 +908,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 quantity: safeQty, tenantBillBackPercent: pct, assignedTo: vendor,
                 note: tu.input?.note ? String(tu.input.note) : '', photoUrls: [],
               };
-              sse(res, 'proposal', { action: 'add', line, sectionId: lineSectionId, summary: lineToSummary(item, safeQty, vendor, pct, region, regions, { showVendor: vendorStated, showPct: pctStated }), spokenSummary: item.laborShortDescription, awaitingReply: false });
+              const confidence = codeConfidence.has(item.lineItemCode) ? Number(codeConfidence.get(item.lineItemCode)!.toFixed(3)) : null;
+              // Audit (joins to the [voice-line] write log by answerIdExternal):
+              // utterance → matched code → confidence for this auto-added line.
+              try {
+                console.log(`[voice-line] ${JSON.stringify({
+                  event: 'proposed', answerIdExternal: line.externalId,
+                  utterance: lastUtterance.slice(0, 200), code: item.lineItemCode,
+                  description: item.laborShortDescription, confidence,
+                  section: lineSection, quantity: safeQty,
+                })}`);
+              } catch { /* best-effort */ }
+              sse(res, 'proposal', { action: 'add', line, sectionId: lineSectionId, confidence, summary: lineToSummary(item, safeQty, vendor, pct, region, regions, { showVendor: vendorStated, showPct: pctStated }), spokenSummary: item.laborShortDescription, awaitingReply: false });
               didAct = true;
               addsThisTurn++;
               result = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ ok: true, added: item.laborShortDescription, note: filledWholeHouseSf ? 'Line added with the property square footage applied automatically — do NOT ask the inspector for square feet. If they listed more items, continue; otherwise stop.' : 'Line added. If the inspector listed more items, continue; otherwise stop.' }) };
@@ -1011,6 +1034,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             const effQuery = alias ? alias.query : q;
             const effHint = hint || alias?.categoryHint;
             const result = await matchCatalog(effQuery, catalog, { topK: 8, categoryHint: effHint, sectionName });
+            for (const m of result.candidates) noteConfidence(m.item.lineItemCode, m.score);
             return {
               query: q,
               confident: result.confident,
