@@ -312,11 +312,34 @@ export async function rehydrateQueuedPhotos(
  */
 const FLUSH_CONCURRENCY = 2; // gentle on HubSpot Files (too many parallel uploads timed out)
 
+type FlushResult = { synced: number; remaining: number; lastError?: string };
+type FlushOnSynced = (info: { localId: string; sectionId: string; oldUrl: string; newUrl: string; replacesUrl?: string; lineExternalId?: string }) => void;
+
+// Coalesce overlapping flushes per inspection. The 15s interval, the 'online'
+// event, kickFlush() after a capture, visibility/foreground kicks, and a
+// service-worker nudge can all fire within a beat of each other — without this
+// guard two flushes read the SAME queued records and BOTH upload them
+// (duplicate HubSpot files + a delete race). A concurrent caller just awaits the
+// in-flight flush's result, so callers that read `remaining` still get truth.
+const flushInFlight = new Map<string, Promise<FlushResult>>();
+
 export async function flushQueuedPhotos(
   inspectionRecordId: string,
-  onSynced: (info: { localId: string; sectionId: string; oldUrl: string; newUrl: string; replacesUrl?: string; lineExternalId?: string }) => void,
-): Promise<{ synced: number; remaining: number; lastError?: string }> {
+  onSynced: FlushOnSynced,
+): Promise<FlushResult> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
+  const existing = flushInFlight.get(inspectionRecordId);
+  if (existing) return existing;
+  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced);
+  flushInFlight.set(inspectionRecordId, run);
+  try { return await run; }
+  finally { flushInFlight.delete(inspectionRecordId); }
+}
+
+async function doFlushQueuedPhotos(
+  inspectionRecordId: string,
+  onSynced: FlushOnSynced,
+): Promise<FlushResult> {
   let lastError: string | undefined;
   // Only flush THIS inspection's photos — the mounted form is what persists the
   // section answer record after upload, so another inspection's photos must wait

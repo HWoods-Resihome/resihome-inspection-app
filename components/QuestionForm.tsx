@@ -1017,8 +1017,19 @@ export function QuestionForm({
     window.addEventListener('online', kick);
     const iv = setInterval(kick, 15000);
     const unsub = onPhotoFlushResume(() => { void runPhotoFlushRef.current(); });
+    // iOS suspends JS timers when the PWA is backgrounded / the screen locks, and
+    // it has NO Background Sync — so a foregrounded app is the only window in
+    // which queued photos can upload. Kick the instant the app becomes visible
+    // again (and on bfcache restore) so sync resumes immediately instead of
+    // waiting up to 15s — the main reason photos sat on "Saved Offline" on iPhone.
+    const onVisible = () => { if (typeof document === 'undefined' || document.visibilityState === 'visible') kick(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('pageshow', onVisible);
     void flushOutbox(); // sync anything queued from a prior offline session on mount
-    return () => { window.removeEventListener('online', kick); clearInterval(iv); unsub(); };
+    return () => {
+      window.removeEventListener('online', kick); clearInterval(iv); unsub();
+      document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('pageshow', onVisible);
+    };
   }, [readOnly]);
 
   // (Legacy widget visibility — the synthetic HVAC/Smart widgets were replaced

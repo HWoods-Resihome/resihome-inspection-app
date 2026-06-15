@@ -1040,12 +1040,20 @@ export function RateCardForm(props: RateCardFormProps) {
     // The photo flush is suspended while a camera session is open; resuming on
     // close kicks this so the just-captured photos start uploading immediately.
     const unsubResume = onPhotoFlushResume(() => { void runFlush(); });
+    // iOS suspends timers when backgrounded and has no Background Sync, so resume
+    // the flush the instant the app is foregrounded (and on bfcache restore)
+    // rather than waiting up to 15s — otherwise photos sit on "Saved Offline".
+    const onVisible = () => { if (typeof document === 'undefined' || document.visibilityState === 'visible') void runFlush(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('pageshow', onVisible);
     return () => {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
       navigator.serviceWorker?.removeEventListener?.('message', onSwMessage);
       clearInterval(iv);
       unsubResume();
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pageshow', onVisible);
     };
   }, [runFlush, refreshPending, props.inspectionRecordId]);
 
