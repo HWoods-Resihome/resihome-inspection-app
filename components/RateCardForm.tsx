@@ -33,7 +33,7 @@ import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 const FC_PHOTO_SECTION = '__final_checklist__';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
 import { reportSyncOutcome } from '@/lib/syncTelemetry';
-import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos, onPhotoFlushResume } from '@/lib/offlinePhotoStore';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
 import { setErrorContext } from '@/lib/clientErrorReporter';
@@ -1033,11 +1033,15 @@ export function RateCardForm(props: RateCardFormProps) {
       }).catch(() => {});
     }, 15000);
     void runFlush(); // attempt anything left from a previous session
+    // The photo flush is suspended while a camera session is open; resuming on
+    // close kicks this so the just-captured photos start uploading immediately.
+    const unsubResume = onPhotoFlushResume(() => { void runFlush(); });
     return () => {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
       navigator.serviceWorker?.removeEventListener?.('message', onSwMessage);
       clearInterval(iv);
+      unsubResume();
     };
   }, [runFlush, refreshPending, props.inspectionRecordId]);
 

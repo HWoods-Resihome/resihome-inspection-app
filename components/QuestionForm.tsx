@@ -5,7 +5,7 @@ import { QuestionItem, answerTone, isNA } from './QuestionItem';
 import { CameraCapture } from './CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadFilesBatch } from '@/lib/photoUpload';
-import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume } from '@/lib/offlinePhotoStore';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
@@ -967,13 +967,16 @@ export function QuestionForm({
     }).catch(() => {}).finally(() => { void runPhotoFlushRef.current(); });
   }, [readOnly, inspectionRecordId]);
 
-  // Auto-retry: flush on reconnect + periodic reconcile.
+  // Auto-retry: flush on reconnect + periodic reconcile + when a camera session
+  // closes (the flush is suspended while a camera is open, so resuming kicks this
+  // to drain the just-captured photos right away).
   useEffect(() => {
     if (readOnly) return;
     const onOnline = () => { void runPhotoFlushRef.current(); };
     window.addEventListener('online', onOnline);
     const iv = setInterval(() => { void runPhotoFlushRef.current(); }, 15000);
-    return () => { window.removeEventListener('online', onOnline); clearInterval(iv); };
+    const unsub = onPhotoFlushResume(() => { void runPhotoFlushRef.current(); });
+    return () => { window.removeEventListener('online', onOnline); clearInterval(iv); unsub(); };
   }, [readOnly]);
 
   // (Legacy widget visibility — the synthetic HVAC/Smart widgets were replaced

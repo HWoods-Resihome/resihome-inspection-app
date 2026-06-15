@@ -50,6 +50,27 @@ const MAX_ATTEMPTS = 6;
 // entry, and revokables holds both underlying object URLs.
 const urlByLocalId = new Map<string, { displayUrl: string; revokables: string[] }>();
 
+// ---- Flush suspension --------------------------------------------------------
+// While the in-app camera is open, capture queues drafts to IndexedDB but we
+// SUSPEND the background flush. Otherwise the periodic flush could upload (and
+// then delete + revoke) a draft the still-open camera is holding, breaking the
+// URL it later hands back on Done. The camera suspends on open and resumes on
+// close; resume kicks any registered flush listeners so the backlog uploads at
+// once. Counter (not bool) so nested/overlapping cameras are safe.
+let flushSuspendCount = 0;
+const flushKickListeners = new Set<() => void>();
+export function suspendPhotoFlush(): void { flushSuspendCount++; }
+export function resumePhotoFlush(): void {
+  flushSuspendCount = Math.max(0, flushSuspendCount - 1);
+  if (flushSuspendCount === 0) { for (const l of flushKickListeners) { try { l(); } catch { /* noop */ } } }
+}
+/** Register a callback that runs when the flush un-suspends (camera closed), so
+ *  the mounted form can drain the queue promptly. Returns an unsubscribe fn. */
+export function onPhotoFlushResume(listener: () => void): () => void {
+  flushKickListeners.add(listener);
+  return () => { flushKickListeners.delete(listener); };
+}
+
 function idbAvailable(): boolean {
   return typeof window !== 'undefined' && 'indexedDB' in window;
 }
@@ -139,8 +160,7 @@ export async function uploadPhotoOrQueue(
   const blob = await compressToJpeg(file);
   const filename = toJpegName(file.name);
   // Cache the compressed blob to the durable IndexedDB queue and return a local
-  // draft URL for immediate display. Shared by the offline fast-path and the
-  // upload-failed fallback so the photo is NEVER lost to a stuck spinner.
+  // draft URL for immediate display. The photo is NEVER lost to a stuck spinner.
   const queueDraft = async (): Promise<string> => {
     const localId = `idbph_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     await putRecord({
@@ -153,20 +173,32 @@ export async function uploadPhotoOrQueue(
     return url;
   };
 
-  // Fast path: if the browser reports offline, don't even attempt the upload —
-  // cache it straight away so the camera resolves instantly.
-  if (typeof navigator !== 'undefined' && navigator.onLine === false && idbAvailable()) {
-    return queueDraft();
-  }
+  // QUEUE-FIRST: persist to the durable queue and return a draft URL IMMEDIATELY,
+  // then let the background flush upload it. This is what keeps capture and the
+  // camera's "Done" instant even in low/no cell service — nothing ever blocks on
+  // the network. (When IndexedDB is unavailable — e.g. private mode — fall back
+  // to a direct upload, which is the only durable option there.)
+  if (idbAvailable()) return queueDraft();
+  return uploadJpegBlob(blob, filename, { attempts: 2, timeoutMs: 12000 });
+}
 
-  try {
-    // Fail fast (2 attempts, shorter timeout): queuing is non-destructive and
-    // auto-syncs, so it's better to cache quickly on a weak signal than to spin.
-    return await uploadJpegBlob(blob, filename, { attempts: 2, timeoutMs: 12000 });
-  } catch (e) {
-    if (!isOfflineErr(e) || !idbAvailable()) throw e;
-    return queueDraft();
+/**
+ * Discard queued drafts by their display URL — used when the camera session is
+ * cancelled, so photos taken-then-cancelled don't silently sync. Matches both
+ * photo and video (composite) display URLs; deletes the IndexedDB record and
+ * revokes the object URLs. Best-effort; unknown URLs are ignored.
+ */
+export async function discardQueuedByUrls(urls: string[]): Promise<number> {
+  if (!idbAvailable() || urls.length === 0) return 0;
+  const wanted = new Set(urls);
+  let n = 0;
+  for (const [localId, entry] of Array.from(urlByLocalId.entries())) {
+    if (!wanted.has(entry.displayUrl)) continue;
+    try { await deleteRecord(localId); n++; } catch { /* noop */ }
+    for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
+    urlByLocalId.delete(localId);
   }
+  return n;
 }
 
 /**
@@ -195,16 +227,11 @@ export async function uploadVideoEntryOrQueue(
     void requestPhotoBackgroundSync();
     return entry;
   };
-  if (typeof navigator !== 'undefined' && navigator.onLine === false && idbAvailable()) {
-    return queueDraft();
-  }
-  try {
-    const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename, { attempts: 2, timeoutMs: 12000 }), uploadVideo(videoFile)]);
-    return makeVideoEntry(pUrl, vUrl);
-  } catch (e) {
-    if (!isOfflineErr(e) || !idbAvailable()) throw e;
-    return queueDraft();
-  }
+  // QUEUE-FIRST (see uploadPhotoOrQueue): persist + return a draft entry now;
+  // the background flush uploads the poster + clip later.
+  if (idbAvailable()) return queueDraft();
+  const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename, { attempts: 2, timeoutMs: 12000 }), uploadVideo(videoFile)]);
+  return makeVideoEntry(pUrl, vUrl);
 }
 
 export async function countQueuedPhotos(inspectionRecordId: string): Promise<number> {
@@ -271,6 +298,12 @@ export async function flushQueuedPhotos(
   onSynced: (info: { localId: string; sectionId: string; oldUrl: string; newUrl: string; replacesUrl?: string; lineExternalId?: string }) => void,
 ): Promise<{ synced: number; remaining: number; lastError?: string }> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
+  // Suspended while a camera session is open — don't upload/revoke drafts the
+  // open camera is still holding. Resumes (and kicks a flush) on camera close.
+  if (flushSuspendCount > 0) {
+    const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
+    return { synced: 0, remaining };
+  }
   let lastError: string | undefined;
   // Only flush THIS inspection's photos — the mounted form is what persists the
   // section answer record after upload, so another inspection's photos must wait

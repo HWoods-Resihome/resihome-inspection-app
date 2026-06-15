@@ -3,6 +3,7 @@ import { useAppDialog } from '@/components/AppDialog';
 import { PhotoAnnotator } from '@/components/PhotoAnnotator';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadVideo } from '@/lib/photoUpload';
+import { suspendPhotoFlush, resumePhotoFlush, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
 import { makeVideoEntry } from '@/lib/media';
 import { CameraAILayer } from '@/components/CameraAILayer';
 import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
@@ -607,6 +608,17 @@ export function CameraCapture({
     return () => stopStream();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, facing, lensDeviceId]);
+
+  // While the camera is open, SUSPEND the background photo-upload flush. Captures
+  // queue to the durable store instantly (so the shutter + Done never block on
+  // the network), but the parent's periodic flush must not upload/revoke those
+  // drafts while the camera still holds them. Resuming on close kicks the flush
+  // so the whole session's photos upload at once, in the background.
+  useEffect(() => {
+    if (!isOpen) return;
+    suspendPhotoFlush();
+    return () => { resumePhotoFlush(); };
+  }, [isOpen]);
 
   // iOS pinch-zoom guard. While the camera is open, iOS Safari / WKWebView
   // treats a pinch as a PAGE zoom — it scales the whole screen, pushing the
@@ -1623,12 +1635,17 @@ export function CameraCapture({
   // Wait for any in-flight uploads (hard ceiling), then return uploaded URLs
   // and clean up object URLs / clear the tray. Shared by Done and room-switch.
   const flushUploads = useCallback(async (): Promise<{ urls: string[]; failures: number }> => {
+    // Captures resolve LOCALLY now (compress + durable-queue write, no network),
+    // so this only waits the few ms for the last in-flight queue write to land a
+    // draft URL — Done is effectively instant even with no signal. The short cap
+    // is just a safety net; anything still pending after it lands in the durable
+    // queue and is reconciled by the parent's flush/rehydrate, so it's never lost.
     const startedAt = Date.now();
-    const TIMEOUT_MS = 60_000;
+    const TIMEOUT_MS = 4_000;
     while (Date.now() - startedAt < TIMEOUT_MS) {
       const current = itemsRef.current;
       if (!current.some((it) => it.status === 'uploading')) break;
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 100));
     }
     const finalItems = itemsRef.current;
     const urls = finalItems
@@ -1690,7 +1707,11 @@ export function CameraCapture({
   }, [flushUploads, onComplete, stopStream, dialog]);
 
   const handleCancel = useCallback(() => {
-    // Abort all in-flight uploads and discard all photos
+    // Abort all in-flight uploads and discard all photos. Captures are queued to
+    // the durable store on the fly, so also remove THIS session's queued drafts
+    // (by their draft URL) — otherwise cancelled photos would still sync.
+    const draftUrls = items.map((it) => it.hubspotUrl).filter(Boolean) as string[];
+    if (draftUrls.length) void discardQueuedByUrls(draftUrls);
     for (const it of items) {
       it.abortController?.abort();
       try { URL.revokeObjectURL(it.blobUrl); } catch { /* harmless */ }
