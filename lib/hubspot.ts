@@ -914,14 +914,19 @@ export async function searchInspectionsPage(params: InspectionQuery & {
 }
 
 /**
- * For each pm_turn_reinspect_qc row that points at a source scope rate card,
- * fill in `totalClientCost` from that scope's `total_client_cost`. Batched and
- * best-effort — never throws, so a list never fails on the enrichment.
+ * Display FALLBACK for older re-inspects: a re-inspect's own `total_client_cost`
+ * is stamped at create (from its copied scope lines) and by the totals backfill,
+ * so the price SORT — which orders on that stored property server-side — and the
+ * card's "Client: $x" agree. For re-inspects created before that stamping (whose
+ * stored total is still empty), fill the display value from the SOURCE scope's
+ * total here so the card isn't blank in the meantime. Only fills the gaps; never
+ * overrides a stamped value (which would let display disagree with the sort).
+ * Batched, best-effort — never throws.
  */
 async function enrichReinspectClientTotals(items: InspectionSummary[], typeId: string): Promise<void> {
   const needIds = Array.from(new Set(
     items
-      .filter((i) => i.templateType === 'pm_turn_reinspect_qc' && i.sourceRateCardId)
+      .filter((i) => i.templateType === 'pm_turn_reinspect_qc' && i.sourceRateCardId && i.totalClientCost == null)
       .map((i) => String(i.sourceRateCardId)),
   ));
   if (needIds.length === 0) return;
@@ -939,7 +944,7 @@ async function enrichReinspectClientTotals(items: InspectionSummary[], typeId: s
       }
     }
     for (const it of items) {
-      if (it.templateType === 'pm_turn_reinspect_qc' && it.sourceRateCardId) {
+      if (it.templateType === 'pm_turn_reinspect_qc' && it.sourceRateCardId && it.totalClientCost == null) {
         const t = totalById.get(String(it.sourceRateCardId));
         if (t != null) it.totalClientCost = t;
       }

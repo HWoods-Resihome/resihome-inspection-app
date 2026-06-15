@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection } from '@/lib/hubspot';
+import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
@@ -176,6 +176,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         console.error(`QC line copy failed for inspection ${inspectionId}:`, e);
         // Don't fail the create — the QC exists; the form will just show no
         // lines and the user can retry/reopen. Surface a soft warning.
+      }
+      // Stamp the QC's own cost rollups from the copied lines so its
+      // `total_client_cost` reflects the source scope's value. This is what the
+      // home list shows as "Client: $x" AND what the price sort orders on, so a
+      // re-inspect now sorts by the scope it re-inspects instead of $0.
+      // Best-effort — never blocks creation.
+      if (copiedLines > 0) {
+        await recomputeInspectionTotals(inspectionId).catch((e) => {
+          console.warn(`[create] QC totals recompute failed for ${inspectionId}:`, e);
+        });
       }
     }
 
