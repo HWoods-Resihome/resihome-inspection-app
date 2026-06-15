@@ -33,6 +33,15 @@ const TARGET_MAX_DIMENSION = 3024;  // ~9MP long edge — near native still res,
  * the already-compressed blob (small, ~600KB) rather than the raw file.
  */
 export async function compressToJpeg(file: File): Promise<Blob> {
+  // FAST PATH: an already-small JPEG needs no recompression. The in-app camera
+  // produces a sized JPEG (≤ ~9MP, q0.9) on capture, so re-running the heavy
+  // main-thread imageCompression pass on it just stalls the UI between shots —
+  // the cause of iPhone "one photo at a time." Skip it. (HEIC, oversized, or
+  // non-JPEG inputs from the gallery still fall through to full compression.)
+  if (/image\/jpe?g/i.test(file.type) && file.size > 0 && file.size <= TARGET_MAX_SIZE_MB * 1024 * 1024) {
+    return file;
+  }
+
   // HEIC/HEIF (the default iPhone format) does NOT render in <img> tags in most
   // browsers, nor in the PDF renderer — so we must always end up with a JPEG.
   const isHeic = /image\/(heic|heif)/i.test(file.type) || /\.(heic|heif)$/i.test(file.name || '');

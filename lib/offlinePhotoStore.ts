@@ -255,10 +255,17 @@ export async function rehydrateQueuedPhotos(
 }
 
 /**
- * Upload all queued photos (oldest first). For each one that uploads, calls
+ * Upload all queued photos for an inspection. For each one that uploads, calls
  * onSynced with the local placeholder URL to replace and the new HubSpot URL.
- * Stops at the first offline failure so it retries cleanly next time.
+ *
+ * Uploads run with bounded CONCURRENCY (not one-at-a-time) so a backlog from a
+ * weak-signal property drains in parallel instead of serially — the old serial
+ * loop could take ~1 minute PER photo on a bad signal, which is what made the
+ * sync feel "very slow." Each upload also fails fast (2 attempts) so a single
+ * stuck photo can't hog a slot; the periodic flush retries it next tick.
  */
+const FLUSH_CONCURRENCY = 3;
+
 export async function flushQueuedPhotos(
   inspectionRecordId: string,
   onSynced: (info: { localId: string; sectionId: string; oldUrl: string; newUrl: string; replacesUrl?: string; lineExternalId?: string }) => void,
@@ -272,53 +279,9 @@ export async function flushQueuedPhotos(
     .filter((r) => r.inspectionRecordId === inspectionRecordId)
     .sort((a, b) => a.createdAt - b.createdAt);
   let synced = 0;
-  for (const rec of all) {
-    let newUrl: string;
-    // Already uploaded by the background-sync service worker (tab was closed) —
-    // skip the network and go straight to attaching it.
-    if (rec.uploadedUrl) {
-      newUrl = rec.uploadedUrl;
-      const entry = urlByLocalId.get(rec.localId);
-      const oldUrl = entry?.displayUrl || '';
-      await deleteRecord(rec.localId);
-      onSynced({ localId: rec.localId, sectionId: rec.sectionId, oldUrl, newUrl, replacesUrl: rec.replacesUrl, lineExternalId: rec.lineExternalId });
-      if (entry) {
-        for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
-        urlByLocalId.delete(rec.localId);
-      }
-      synced++;
-      continue;
-    }
-    try {
-      if (rec.kind === 'video' && rec.videoBlob) {
-        const vFile = new File([rec.videoBlob], `clip.${/(webm)/i.test(rec.videoType || '') ? 'webm' : /(quicktime|mov)/i.test(rec.videoType || '') ? 'mov' : 'mp4'}`, { type: rec.videoType || 'video/mp4' });
-        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(rec.blob, rec.filename), uploadVideo(vFile)]);
-        newUrl = makeVideoEntry(pUrl, vUrl);
-      } else {
-        newUrl = await uploadJpegBlob(rec.blob, rec.filename);
-      }
-    } catch (e: any) {
-      lastError = `Photo upload failed (${String(e?.message || e).slice(0, 90)}).`;
-      // Genuinely offline → keep everything and stop.
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) { lastError = 'Device is offline — photos will upload when back online.'; break; }
-      if (isOfflineErr(e)) {
-        // Online but the upload failed in a network-ish way (HubSpot hiccup,
-        // oversized blob, etc.). Count the attempt; after too many, drop+skip
-        // so one wedged photo can't block the queue (and the banner) forever.
-        const attempts = (rec.attempts || 0) + 1;
-        if (attempts >= MAX_ATTEMPTS) {
-          console.error(`[offlinePhotoStore] dropping ${rec.localId} after ${MAX_ATTEMPTS} failed attempts`);
-          await deleteRecord(rec.localId);
-          continue;
-        }
-        try { await putRecord({ ...rec, attempts }); } catch { /* noop */ }
-        break;
-      }
-      // Permanent failure (decodable 4xx etc.): drop so it can't wedge the queue.
-      console.error(`[offlinePhotoStore] dropping ${rec.localId} after permanent error`, e);
-      await deleteRecord(rec.localId);
-      continue;
-    }
+  let stop = false; // set when offline/transient — stop taking NEW work, retry next tick
+
+  const finishSynced = async (rec: QueuedPhoto, newUrl: string) => {
     const entry = urlByLocalId.get(rec.localId);
     const oldUrl = entry?.displayUrl || '';
     await deleteRecord(rec.localId);
@@ -328,7 +291,60 @@ export async function flushQueuedPhotos(
       urlByLocalId.delete(rec.localId);
     }
     synced++;
-  }
+  };
+
+  const processOne = async (rec: QueuedPhoto) => {
+    // Already uploaded by the background-sync service worker (tab was closed) —
+    // skip the network and go straight to attaching it.
+    if (rec.uploadedUrl) { await finishSynced(rec, rec.uploadedUrl); return; }
+    let newUrl: string;
+    try {
+      if (rec.kind === 'video' && rec.videoBlob) {
+        const vFile = new File([rec.videoBlob], `clip.${/(webm)/i.test(rec.videoType || '') ? 'webm' : /(quicktime|mov)/i.test(rec.videoType || '') ? 'mov' : 'mp4'}`, { type: rec.videoType || 'video/mp4' });
+        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(rec.blob, rec.filename, { attempts: 2, timeoutMs: 15000 }), uploadVideo(vFile)]);
+        newUrl = makeVideoEntry(pUrl, vUrl);
+      } else {
+        newUrl = await uploadJpegBlob(rec.blob, rec.filename, { attempts: 2, timeoutMs: 15000 });
+      }
+    } catch (e: any) {
+      lastError = `Photo upload failed (${String(e?.message || e).slice(0, 90)}).`;
+      // Genuinely offline → keep everything and stop taking new work.
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) { lastError = 'Device is offline — photos will upload when back online.'; stop = true; return; }
+      if (isOfflineErr(e)) {
+        // Online but the upload failed in a network-ish way (HubSpot hiccup,
+        // oversized blob, etc.). Count the attempt; after too many, drop+skip
+        // so one wedged photo can't block the queue (and the banner) forever.
+        const attempts = (rec.attempts || 0) + 1;
+        if (attempts >= MAX_ATTEMPTS) {
+          console.error(`[offlinePhotoStore] dropping ${rec.localId} after ${MAX_ATTEMPTS} failed attempts`);
+          await deleteRecord(rec.localId);
+          return;
+        }
+        try { await putRecord({ ...rec, attempts }); } catch { /* noop */ }
+        stop = true; // back off the rest of the batch; the periodic flush retries
+        return;
+      }
+      // Permanent failure (decodable 4xx etc.): drop so it can't wedge the queue.
+      console.error(`[offlinePhotoStore] dropping ${rec.localId} after permanent error`, e);
+      await deleteRecord(rec.localId);
+      return;
+    }
+    await finishSynced(rec, newUrl);
+  };
+
+  // Worker pool: each worker pulls the next record until the list is exhausted
+  // or a worker signals stop (offline/backoff). Records are independent, so
+  // parallelism is safe; ordering doesn't matter for attach.
+  let idx = 0;
+  const worker = async () => {
+    while (!stop) {
+      const i = idx++;
+      if (i >= all.length) break;
+      await processOne(all[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(FLUSH_CONCURRENCY, all.length) }, worker));
+
   const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
   return { synced, remaining, lastError };
 }

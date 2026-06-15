@@ -146,13 +146,16 @@ const CAPTURE_HEIGHT = 2880;
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
 const JPEG_QUALITY = 0.92;
-// Saved-photo ceiling (long edge). The capture source is the preview frame
-// (≤ CAPTURE_WIDTH), so this is just safety headroom; quality 0.9 keeps zoom-in
-// detail crisp. The PDF is unaffected (it embeds a 520px thumbnail).
-const MAX_SAVE_EDGE = 4096;
-// High intermediate quality — this JPEG is recompressed once more on upload, so
-// keep it near-lossless here to avoid stacking compression artifacts.
-const PHOTO_SAVE_QUALITY = 0.95;
+// Saved-photo ceiling (long edge). Matches the upload target (TARGET_MAX_DIMENSION
+// in photoUpload), so the captured JPEG is ALREADY upload-ready — the upload path
+// skips its second compression pass (see compressToJpeg's fast path). ~9MP keeps
+// zoomed-in defect detail; the PDF is unaffected (it embeds a 520px thumbnail).
+// Capturing at the final size (rather than 4096 + recompress) is what keeps rapid
+// fire responsive on phones — there's no heavy main-thread re-encode between shots.
+const MAX_SAVE_EDGE = 3024;
+// Final upload quality — no second compression downstream, so this IS the stored
+// quality. 0.9 is visually lossless for inspection photos at a small file size.
+const PHOTO_SAVE_QUALITY = 0.9;
 
 // Photo geostamp proximity check: how close (meters) the device GPS must be to
 // the property's reference location to stamp a ✓ rather than a ✗. Generous by
