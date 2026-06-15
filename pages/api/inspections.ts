@@ -131,20 +131,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // key includes them all.
   const facetKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, forceTemplate });
 
+  // The filter dropdown options (facets) require a multi-page scan and are NOT
+  // needed to render the inspection cards. On a slow connection that scan would
+  // hold up the whole response, so the client fetches them separately:
+  //   ?only=facets  → return just the facets (dropdown options)
+  //   ?facets=0     → skip facets; return the list + counts as fast as possible
+  const only = str(req.query.only);
+  const wantFacets = str(req.query.facets) !== '0';
+
   try {
+    if (only === 'facets') {
+      const facetData = await withCache(facets, facetKey, FACET_TTL_MS, refresh, () => inspectionFacets(baseQuery));
+      return res.status(200).json({ facets: facetData });
+    }
     const [list, statusCounts, facetData] = await Promise.all([
       withCache(lists, listKey, TTL_MS, refresh, () =>
         searchInspectionsPage({ ...baseQuery, sortField, sortDir, page, pageSize })),
       withCache(counts, countKey, TTL_MS, refresh, () =>
         countInspectionsByStatus(baseQuery)),
-      withCache(facets, facetKey, FACET_TTL_MS, false, () =>
-        inspectionFacets(baseQuery)),
+      // Only compute facets inline when asked (back-compat for any caller that
+      // doesn't split them out). The home screen passes facets=0.
+      wantFacets
+        ? withCache(facets, facetKey, FACET_TTL_MS, false, () => inspectionFacets(baseQuery))
+        : Promise.resolve(undefined),
     ]);
     return res.status(200).json({
       inspections: list.items,
       total: list.total,
       counts: statusCounts,
-      facets: facetData,
+      ...(facetData ? { facets: facetData } : {}),
       page,
       pageSize,
     });

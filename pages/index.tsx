@@ -15,6 +15,27 @@ interface MeUser { userId: string; email: string; name: string; }
 type StatusFilter = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
 type StatusCounts = { all: number; scheduled: number; in_progress: number; pending_approval: number; completed: number };
 
+// Stale-while-revalidate caches (localStorage), so a slow cell connection shows
+// the LAST results instantly instead of a blank "Loading…" while the network
+// crawls. Best-effort: any storage error is swallowed.
+const RESULTS_CACHE = 'resiwalk_home_results_v1';
+const FACETS_CACHE = 'resiwalk_home_facets_v1';
+function lsRead(store: string): Record<string, { d: any; at: number }> {
+  if (typeof window === 'undefined') return {};
+  try { return JSON.parse(window.localStorage.getItem(store) || '{}') || {}; } catch { return {}; }
+}
+function lsWrite(store: string, key: string, d: any, cap = 12): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const m = lsRead(store);
+    m[key] = { d, at: Date.now() };
+    const keep = Object.keys(m).sort((a, b) => m[b].at - m[a].at).slice(0, cap); // keep most-recent N queries
+    const trimmed: Record<string, { d: any; at: number }> = {};
+    for (const k of keep) trimmed[k] = m[k];
+    window.localStorage.setItem(store, JSON.stringify(trimmed));
+  } catch { /* storage full/blocked — caching is best-effort */ }
+}
+
 export default function Home() {
   const dialog = useAppDialog();
   const router = useRouter();
@@ -119,48 +140,65 @@ export default function Home() {
     return () => clearTimeout(t);
   }, []);
 
-  // Fetch one server-side page for the current filter/sort/search/paging state.
-  // The server evaluates filters, sorting, search, pagination, and the status
-  // counts (so none of it depends on how many inspections are loaded client-side).
+  // The list query for the current filter/sort/paging state. Facets (dropdown
+  // options) are fetched SEPARATELY (facets=0 here) so the multi-page facet scan
+  // never holds up the cards on a slow connection.
+  const buildListParams = useCallback((opts?: { refresh?: boolean }) => {
+    const p = new URLSearchParams();
+    const term = search.trim();
+    if (term) p.set('search', term);
+    if (statusFilter !== 'all') p.set('status', statusFilter);
+    for (const name of inspectorFilter) p.append('inspector', name);
+    for (const t of templateFilter) p.append('template', t);
+    p.set('sort', sortField);
+    p.set('dir', sortDir);
+    p.set('page', String(page));
+    p.set('pageSize', String(pageSize));
+    p.set('facets', '0');
+    if (opts?.refresh) p.set('refresh', '1');
+    return p;
+  }, [search, statusFilter, inspectorFilter, templateFilter, sortField, sortDir, page, pageSize]);
+
+  // Cache key = the query WITHOUT the volatile refresh flag.
+  const listCacheKey = useMemo(() => buildListParams().toString(), [buildListParams]);
+
+  const applyListData = useCallback((d: any) => {
+    setInspections(d.inspections || []);
+    setTotal(typeof d.total === 'number' ? d.total : (d.inspections || []).length);
+    if (d.counts) setCounts(d.counts);
+  }, []);
+
+  // Revalidate the list+counts from the network and refresh the cache. On a
+  // failure we KEEP whatever is on screen (the cached list) rather than blanking
+  // it — only surface an error when there is nothing cached to show.
   const load = useCallback(async (opts?: { refresh?: boolean }) => {
     try {
-      const params = new URLSearchParams();
-      const term = search.trim();
-      if (term) params.set('search', term);
-      if (statusFilter !== 'all') params.set('status', statusFilter);
-      for (const name of inspectorFilter) params.append('inspector', name);
-      for (const t of templateFilter) params.append('template', t);
-      params.set('sort', sortField);
-      params.set('dir', sortDir);
-      params.set('page', String(page));
-      params.set('pageSize', String(pageSize));
-      if (opts?.refresh) params.set('refresh', '1');
-      const r = await fetch(`/api/inspections?${params.toString()}`, { cache: 'no-store' });
+      const r = await fetch(`/api/inspections?${buildListParams(opts).toString()}`, { cache: 'no-store' });
       const data = await r.json();
       if (data.error) {
-        setError(data.error);
+        if (!lsRead(RESULTS_CACHE)[listCacheKey]) setError(data.error);
       } else {
-        setInspections(data.inspections || []);
-        setTotal(typeof data.total === 'number' ? data.total : (data.inspections || []).length);
-        if (data.counts) setCounts(data.counts);
-        if (data.facets) setFacets(data.facets);
+        applyListData(data);
+        lsWrite(RESULTS_CACHE, listCacheKey, { inspections: data.inspections || [], total: data.total, counts: data.counts });
         setError(null);
       }
     } catch (e: any) {
-      setError(String(e.message || e));
+      if (!lsRead(RESULTS_CACHE)[listCacheKey]) setError(String(e.message || e));
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, inspectorFilter, templateFilter, sortField, sortDir, page, pageSize]);
+  }, [buildListParams, listCacheKey, applyListData]);
 
-  // Load whenever any query input changes. `load`'s identity changes with its
-  // deps, so this single debounced effect covers typing in search, tapping a
-  // filter, changing sort, and paging — coalescing rapid changes into one fetch.
+  // On any query change: paint cached results INSTANTLY (stale-while-revalidate),
+  // then revalidate from the network (debounced). On a slow connection the last
+  // list shows immediately instead of a blank screen; on first-ever load (no
+  // cache) we fetch right away.
   useEffect(() => {
-    setLoading(true);
-    const t = setTimeout(() => { void load(); }, 250);
+    const cached = lsRead(RESULTS_CACHE)[listCacheKey];
+    if (cached?.d) { applyListData(cached.d); setLoading(false); } else { setLoading(true); }
+    const t = setTimeout(() => { void load(); }, cached ? 300 : 0);
     return () => clearTimeout(t);
-  }, [load]);
+  }, [listCacheKey, load, applyListData]);
 
   // Honor the "just_*" query hint (fresh create) with a delayed re-fetch, since
   // HubSpot's search index can lag a beat behind a brand-new record.
@@ -172,16 +210,40 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-fetch when the user returns to this tab (app switching, alt-tab). This
-  // goes through the server cache + single-flight (NOT a forced refresh): with
-  // many field users backgrounding/foregrounding the app, force-refreshing on
-  // every focus would bypass the cache and storm HubSpot. The short list TTL
-  // keeps it near-live anyway.
+  // Re-fetch when the user returns to this tab (app switching, alt-tab). Goes
+  // through the cache + server single-flight (NOT a forced refresh).
   useEffect(() => {
     function onFocus() { void load(); }
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [load]);
+
+  // Filter dropdown options (facets) load SEPARATELY and never block the cards.
+  // They're constrained by the other active filters, so the key tracks those.
+  // Cached + stale-while-revalidate like the list, and fired slightly after it.
+  const facetQuery = useMemo(() => {
+    const p = new URLSearchParams();
+    const term = search.trim();
+    if (term) p.set('search', term);
+    if (statusFilter !== 'all') p.set('status', statusFilter);
+    for (const name of inspectorFilter) p.append('inspector', name);
+    for (const t of templateFilter) p.append('template', t);
+    p.set('only', 'facets');
+    return p.toString();
+  }, [search, statusFilter, inspectorFilter, templateFilter]);
+
+  useEffect(() => {
+    const cached = lsRead(FACETS_CACHE)[facetQuery];
+    if (cached?.d) setFacets(cached.d);
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/inspections?${facetQuery}`, { cache: 'no-store' });
+        const d = await r.json();
+        if (d?.facets) { setFacets(d.facets); lsWrite(FACETS_CACHE, facetQuery, d.facets); }
+      } catch { /* keep cached options */ }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [facetQuery]);
 
   async function handleLogout() {
     try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
