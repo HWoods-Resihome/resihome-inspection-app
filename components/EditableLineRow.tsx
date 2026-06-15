@@ -368,6 +368,22 @@ export function EditableLineRow(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [line?.lineItemCode, catalog.length]);
 
+  // Keep the VIEW-mode price in sync when the line changes EXTERNALLY — e.g. the
+  // voice assistant edits this line's quantity / vendor / tenant %. The local
+  // fields seed the editor and otherwise mirror the saved line, but they're only
+  // set at mount and on entering edit, so re-sync them from the prop whenever the
+  // saved values change and we are NOT mid-edit (so an in-progress manual edit is
+  // never clobbered). Without this, a voice qty change updated the line but the
+  // row's price — derived from the stale local quantity — stayed put.
+  useEffect(() => {
+    if (isEditing) return;
+    setQuantity(line?.quantity != null ? String(line.quantity) : '1');
+    setTenantPct(line?.tenantBillBackPercent ?? DEFAULT_TENANT_PCT);
+    setVendor(line?.assignedTo || DEFAULT_VENDOR);
+    setCustomVendorCost(line?.customVendorCost != null ? String(line.customVendorCost) : '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [line?.quantity, line?.tenantBillBackPercent, line?.assignedTo, line?.customVendorCost, isEditing]);
+
   // -------------------------------------------------------------------
   // Track the row container so we can detect "clicked outside" for autosave
   // -------------------------------------------------------------------
