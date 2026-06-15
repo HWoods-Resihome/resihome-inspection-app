@@ -38,27 +38,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return;
     }
     const inspection = data.inspection;
-    const answers = await fetchAnswersForInspection(id);
+    // Run the three slow reads CONCURRENTLY instead of serially: the QC's own
+    // answers, the SOURCE scope's "before" photos (another full answer fetch),
+    // and the catalog. This roughly halves the re-inspect's open time on a real
+    // connection (it was inspection → answers → catalog → source, one after the
+    // other). Source photos / catalog are best-effort (don't fail the load).
+    const [answers, beforePhotos, catalog] = await Promise.all([
+      fetchAnswersForInspection(id),
+      inspection.sourceRateCardId
+        ? fetchSourceSectionPhotos(inspection.sourceRateCardId).catch((e) => {
+            console.warn(`[qc-data] could not load source before-photos for ${id}:`, e);
+            return {} as Record<string, string[]>;
+          })
+        : Promise.resolve({} as Record<string, string[]>),
+      getCachedCatalog().catch((e) => {
+        console.warn('[qc-data] catalog load failed; columns will be sparse:', e);
+        return [] as Awaited<ReturnType<typeof getCachedCatalog>>;
+      }),
+    ]);
 
     // Catalog lookup (code -> category/subcategory/unit) to enrich the copied
     // lines so the QC view can show the same columns as the Scope Rate Card.
     const lineAnswers = answers.filter((a) => a.answerType === 'rate_card_line');
-    let catByCode: Record<string, { category: string; subcategory: string; unit: string; shortDescription: string; subtext: string }> = {};
-    if (lineAnswers.length > 0) {
-      try {
-        const catalog = await getCachedCatalog();
-        for (const c of catalog) {
-          catByCode[c.lineItemCode] = {
-            category: c.category || '',
-            subcategory: c.subcategory || '',
-            unit: c.laborMeas || '',
-            shortDescription: c.laborShortDescription || '',
-            subtext: (c.laborSubtext && c.laborSubtext.trim()) || c.laborFullDescription || '',
-          };
-        }
-      } catch (e) {
-        console.warn('[qc-data] catalog load failed; columns will be sparse:', e);
-      }
+    const catByCode: Record<string, { category: string; subcategory: string; unit: string; shortDescription: string; subtext: string }> = {};
+    for (const c of catalog) {
+      catByCode[c.lineItemCode] = {
+        category: c.category || '',
+        subcategory: c.subcategory || '',
+        unit: c.laborMeas || '',
+        shortDescription: c.laborShortDescription || '',
+        subtext: (c.laborSubtext && c.laborSubtext.trim()) || c.laborFullDescription || '',
+      };
     }
 
     // QC's copied line items, enriched with catalog category/sub/unit.
@@ -140,15 +150,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // Source inspection's section photos -> "before" (multi-keyed).
-    let beforePhotos: Record<string, string[]> = {};
-    if (inspection.sourceRateCardId) {
-      try {
-        beforePhotos = await fetchSourceSectionPhotos(inspection.sourceRateCardId);
-      } catch (e) {
-        console.warn(`[qc-data] could not load source before-photos for ${id}:`, e);
-      }
-    }
+    // (beforePhotos was loaded above, in parallel with the answers + catalog.)
 
     res.status(200).json({
       inspection,

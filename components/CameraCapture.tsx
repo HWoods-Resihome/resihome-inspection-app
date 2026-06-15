@@ -898,6 +898,29 @@ export function CameraCapture({
     };
   }, [isOpen, startStream]);
 
+  // Ongoing liveness watchdog. Heavy work right after a capture (especially in
+  // AI mode: vision encodes + uploads on a flaky connection) can leave the
+  // <video> PAUSED/stalled — a black preview with no visibility event to trigger
+  // the resume handler above. Poll while open and nudge a paused/stalled preview
+  // back to life (re-acquire if the track died). Cheap and self-healing, so the
+  // preview can't stay black after the first photo.
+  useEffect(() => {
+    if (!isOpen) return;
+    const iv = setInterval(() => {
+      if (recordingRef.current) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      const v = videoRef.current;
+      const track = streamRef.current?.getVideoTracks?.()[0];
+      if (!v) return;
+      if (!streamRef.current || !track || track.readyState === 'ended') { startStream(); return; }
+      // Paused, or playing but producing no frames (stalled) → nudge play().
+      if (v.paused || v.readyState < 2 || v.videoWidth === 0) {
+        v.play().catch(() => { /* autoplay rejection is non-fatal */ });
+      }
+    }, 1500);
+    return () => clearInterval(iv);
+  }, [isOpen, startStream]);
+
   // Lock the page behind the camera while it's open. Without this the
   // inspection underneath stays scrollable, so on mobile it scrolls up through
   // the full-screen camera (you could see the form below it). Freezing the
