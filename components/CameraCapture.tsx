@@ -142,14 +142,17 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.restore();
 }
 
-// Target preview resolution (4:3). Kept MODERATE (not 4K): a very high request
-// makes the camera slow + flaky to open on iOS (long black screen while it
-// negotiates 4K). 1920×1440 starts fast and reliably everywhere. On Android we
-// still grab a FULL-resolution still via ImageCapture.takePhoto() (independent
-// of this), so photo quality there is unaffected; on iOS (no ImageCapture) the
-// photo is this preview frame, which at ~2.7MP is plenty for inspection shots.
-const CAPTURE_WIDTH = 1920;
-const CAPTURE_HEIGHT = 1440;
+// Target preview resolution (4:3). Kept LOW (1280×960 ≈ 1.2MP) on purpose: on
+// iOS the standalone PWA's WebKit content process has a tight memory ceiling,
+// and the preview frame IS the saved photo there — so a high res means a big
+// live stream + a big per-shot canvas + big stored blobs, which (across a
+// photo-heavy session) jettisons the content process: the "A problem repeatedly
+// occurred" black screen. 1.2MP is plenty for inspection evidence (the PDF
+// embeds a 520px thumbnail) and keeps memory well under the ceiling. Android
+// still grabs a higher-res still via ImageCapture.takePhoto() (capped by
+// MAX_SAVE_EDGE), independent of this.
+const CAPTURE_WIDTH = 1280;
+const CAPTURE_HEIGHT = 960;
 
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
@@ -160,7 +163,7 @@ const JPEG_QUALITY = 0.92;
 // zoomed-in defect detail; the PDF is unaffected (it embeds a 520px thumbnail).
 // Capturing at the final size (rather than 4096 + recompress) is what keeps rapid
 // fire responsive on phones — there's no heavy main-thread re-encode between shots.
-const MAX_SAVE_EDGE = 3024;
+const MAX_SAVE_EDGE = 2048;
 // Final upload quality — no second compression downstream, so this IS the stored
 // quality. 0.9 is visually lossless for inspection photos at a small file size.
 const PHOTO_SAVE_QUALITY = 0.9;
@@ -678,7 +681,20 @@ export function CameraCapture({
   useEffect(() => {
     if (!isOpen) return;
     const unsub = onPhotoSynced(({ oldUrl, newUrl }) => {
-      setItems((prev) => prev.map((it) => (it.hubspotUrl === oldUrl ? { ...it, hubspotUrl: newUrl } : it)));
+      setItems((prev) => prev.map((it) => {
+        if (it.hubspotUrl !== oldUrl) return it;
+        // Synced → swap to the real URL AND free the device memory this photo
+        // was holding: revoke the full-res object URL and drop the File bytes
+        // (the small strip thumbnail stays; the viewer/markup load the real URL
+        // on demand). This caps session memory so a long burst can't OOM iOS.
+        try { if (it.blobUrl.startsWith('blob:')) URL.revokeObjectURL(it.blobUrl); } catch { /* noop */ }
+        return {
+          ...it,
+          hubspotUrl: newUrl,
+          blobUrl: newUrl,
+          file: new File([], it.file.name, { type: it.file.type || 'image/jpeg' }),
+        };
+      }));
     });
     return () => { unsub(); };
   }, [isOpen]);
@@ -1584,12 +1600,18 @@ export function CameraCapture({
           tcanvas.width = tw; tcanvas.height = th;
           const tctx = tcanvas.getContext('2d');
           if (tctx) { tctx.drawImage(canvas, 0, 0, tw, th); thumbUrl = tcanvas.toDataURL('image/jpeg', 0.6); }
+          tcanvas.width = 0; tcanvas.height = 0; // free the thumb canvas backing store
         } catch { /* thumb is best-effort; strip falls back to the full-res blob */ }
         canvas.toBlob((blob) => {
           if (blob) {
             const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
             enqueueFile(new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' }), thumbUrl);
           }
+          // Release the (large) capture canvas immediately — on iOS the canvas
+          // backing store isn't GC'd promptly, and rapid back-to-back shots
+          // stack several of these and jettison the content process. Zeroing the
+          // dimensions frees it now.
+          canvas.width = 0; canvas.height = 0;
           done();
         }, 'image/jpeg', PHOTO_SAVE_QUALITY);
       } catch (e: any) {
@@ -2427,6 +2449,7 @@ export function CameraCapture({
                 <img
                   src={it.thumbUrl || it.blobUrl}
                   alt=""
+                  decoding="async"
                   onClick={() => {
                     // Photos AND videos share one swipeable gallery now.
                     const idx = items.findIndex((p) => p.id === it.id);

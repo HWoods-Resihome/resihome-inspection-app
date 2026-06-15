@@ -3793,6 +3793,8 @@ export function RateCardForm(props: RateCardFormProps) {
                             <img
                               src={displayImageSrc(url)}
                               alt=""
+                              loading="lazy"
+                              decoding="async"
                               onClick={() => setLightbox({ kind: 'section', sectionId: s.id, index: idx })}
                               className="w-16 h-16 object-cover rounded border border-gray-200 cursor-pointer"
                               title={isVideoEntry(url) ? 'Tap to play, tag, or delete' : 'Tap to view, mark up, or delete'}
