@@ -1493,6 +1493,12 @@ export function CameraCapture({
   const endCapture = useCallback(() => {
     pendingCaptureCountRef.current = Math.max(0, pendingCaptureCountRef.current - 1);
     if (pendingCaptureCountRef.current === 0) setFrozen(false);
+    // iOS quirk: the <video> can PAUSE after a capture (it gets briefly covered
+    // by the freeze frame), leaving a black preview. A gentle play() resumes the
+    // SAME stream — no re-acquire, no permission prompt — so the live preview
+    // comes back after every shot. Safe no-op if it's already playing.
+    const v = videoRef.current;
+    if (v && v.paused) v.play().catch(() => { /* autoplay rejection is non-fatal */ });
   }, []);
 
   const capturePhoto = useCallback(() => {
@@ -1552,6 +1558,9 @@ export function CameraCapture({
         // big still); the screen returns the instant the shot is grabbed, not after
         // it finishes saving.
         if (pendingCaptureCountRef.current <= 1) setFrozen(false);
+        // Resume the live preview immediately (iOS pauses the <video> after the
+        // freeze covers it). Gentle play() — same stream, no re-acquire/prompt.
+        if (video && (video as HTMLVideoElement).paused) (video as HTMLVideoElement).play().catch(() => { /* non-fatal */ });
         canvas.toBlob((blob) => {
           if (blob) {
             const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -2178,6 +2187,16 @@ export function CameraCapture({
               autoPlay
               playsInline
               muted
+              // iOS pauses the <video> after a capture (it gets briefly covered
+              // by the freeze frame), which would leave a black preview. Resume
+              // it the instant it pauses — same stream, no re-acquire, no prompt.
+              // Fires only on a real pause event, so there's no polling loop.
+              onPause={() => {
+                if (recordingRef.current) return;
+                if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+                const v = videoRef.current;
+                if (v && v.paused) v.play().catch(() => { /* non-fatal */ });
+              }}
               className="absolute inset-0 w-full h-full object-cover"
               // Zoom is an imperative transform: scale(s) set in updatePreviewTransform
               // (always set, never toggled — that toggle was the ~1× glitch). We do

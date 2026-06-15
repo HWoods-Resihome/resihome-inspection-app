@@ -173,13 +173,20 @@ export async function uploadPhotoOrQueue(
     return url;
   };
 
-  // QUEUE-FIRST: persist to the durable queue and return a draft URL IMMEDIATELY,
-  // then let the background flush upload it. This is what keeps capture and the
-  // camera's "Done" instant even in low/no cell service — nothing ever blocks on
-  // the network. (When IndexedDB is unavailable — e.g. private mode — fall back
-  // to a direct upload, which is the only durable option there.)
-  if (idbAvailable()) return queueDraft();
-  return uploadJpegBlob(blob, filename, { attempts: 2, timeoutMs: 12000 });
+  // UPLOAD-FIRST: on a working connection upload RIGHT NOW so the photo saves to
+  // HubSpot in real time (returns the real URL). Only when offline, or the upload
+  // fails fast (~2 × 12s) on a weak signal, do we cache a durable draft that the
+  // background flush syncs later. This keeps capture non-blocking (the camera
+  // fires this in the background) AND saves photos live when there's service.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false && idbAvailable()) {
+    return queueDraft();
+  }
+  try {
+    return await uploadJpegBlob(blob, filename, { attempts: 2, timeoutMs: 12000 });
+  } catch (e) {
+    if (!isOfflineErr(e) || !idbAvailable()) throw e;
+    return queueDraft();
+  }
 }
 
 /**
@@ -227,11 +234,18 @@ export async function uploadVideoEntryOrQueue(
     void requestPhotoBackgroundSync();
     return entry;
   };
-  // QUEUE-FIRST (see uploadPhotoOrQueue): persist + return a draft entry now;
-  // the background flush uploads the poster + clip later.
-  if (idbAvailable()) return queueDraft();
-  const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename, { attempts: 2, timeoutMs: 12000 }), uploadVideo(videoFile)]);
-  return makeVideoEntry(pUrl, vUrl);
+  // UPLOAD-FIRST (see uploadPhotoOrQueue): upload live on a working connection;
+  // queue a durable draft only when offline / on a fast-fail weak signal.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false && idbAvailable()) {
+    return queueDraft();
+  }
+  try {
+    const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename, { attempts: 2, timeoutMs: 12000 }), uploadVideo(videoFile)]);
+    return makeVideoEntry(pUrl, vUrl);
+  } catch (e) {
+    if (!isOfflineErr(e) || !idbAvailable()) throw e;
+    return queueDraft();
+  }
 }
 
 export async function countQueuedPhotos(inspectionRecordId: string): Promise<number> {
