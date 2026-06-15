@@ -277,6 +277,7 @@ const SYSTEM_RULES = [
   `TRASH-OUT: a trash out / debris removal / haul-away is the labor line only. Do NOT also add a dumpster (or roll-off / container) line unless the inspector explicitly says "dumpster". Ask which trash-out size (small/medium/large or the volume) before adding, and add just that one line.`,
   `4. When you have a code and quantity AND the match is confident, call propose_line. The app adds the line automatically and announces it — you do NOT need the inspector to say yes first, and you must NOT claim you added it in your own words. If the match is not confident (see step 1), ask first instead of proposing.`,
   ``,
+  `RELOCATING a line (MOVE, not add): when the inspector says a line they already added belongs in a DIFFERENT room — "that should go in bathroom one", "move that to the kitchen", "put the tub refinish in the master bath", "actually that's in the garage" — call move_line with the line's id (the MOST RECENTLY ADDED line for "that"/"it"/"the last one") and the destination roomId. NEVER search the catalog or propose_line for a relocate request, and do NOT use switch_room (that only changes where NEW lines go). A room name in this kind of sentence is a destination, not a new item.`,
   `EDITING vs ADDING: naming a NEW item — a clean, paint, a repair, a fixture, etc. (e.g. "level one sales clean", "replace the microwave") — is always an ADD via propose_line, EVEN IF it comes right after another line. edit_line is ONLY for changing an EXISTING line's quantity / vendor / tenant percent (or a bid item's price / description); it can never set a note or a description on a regular catalog line. If in doubt, add a new line.`,
   `EDITING an existing line (e.g. "make that 50% tenant", "change the paint line to PPW", "that should be 3 not 1"):`,
   `  - Identify which existing line they mean (the most recent one if they say "that"/"the last one", or by description). Use the id from the existing-lines list below.`,
@@ -414,6 +415,18 @@ function tools(rooms: { id: string; name: string }[] = []) {
           },
         },
         required: ['roomId'],
+      },
+    } as any);
+    base.push({
+      name: 'move_line',
+      description: 'MOVE an EXISTING line item to a DIFFERENT room/area. Use this when the inspector says a line they already added belongs in another room — e.g. "that should go in bathroom one", "move that to the kitchen", "put the tub refinish in the master bath", "actually that\'s in the garage". This is NOT a new line (do NOT search the catalog) and NOT switch_room (which only changes where NEW lines go). Resolve the line by id — use the MOST RECENTLY ADDED line for "that"/"it"/"the last one" — and the destination to a room id below.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          externalId: { type: 'string', description: 'The id of the existing line to move (from the existing-lines list, or the most-recently-added line for "that"/"the last one").' },
+          roomId: { type: 'string', description: `The destination room id. Available rooms (id → name): ${rooms.map((r) => `${r.id} → ${r.name}`).join('; ')}.` },
+        },
+        required: ['externalId', 'roomId'],
       },
     } as any);
   }
@@ -953,7 +966,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           // a narration like "Added X — $984. Anything else?" restates the add
           // (often with a wrong/duplicate price) and ends in "?" just enough to
           // sneak past a naive end-with-question check.
-          const looksLikeNarration = /\b(added|adding|updated|i'?ve|i have|here'?s)\b/i.test(t) || /\$\s*\d/.test(t);
+          const looksLikeNarration = /\b(added|adding|updated|moved|moving|i'?ve|i have|here'?s)\b/i.test(t) || /\$\s*\d/.test(t);
           const isFollowUpQuestion = /\?\s*$/.test(t) && !looksLikeNarration;
           const isBidCallout = /\bbid\b/i.test(t) && /\$\s*\d/.test(t);
           const keep = !!t && (isFollowUpQuestion || isBidCallout);
@@ -1164,6 +1177,53 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           toolResults.push({
             type: 'tool_result', tool_use_id: tu.id,
             content: JSON.stringify({ ok: true, switchedTo: room.name, note: 'Now working in this room. If the inspector also asked to add or change a line, continue with that now.' }),
+          });
+          continue;
+        } else if (tu.name === 'move_line') {
+          const externalId = String(tu.input?.externalId || '');
+          const existing = linesByExternalId.get(externalId);
+          const roomId = String(tu.input?.roomId || '');
+          const room = rooms.find((r) => r.id === roomId)
+            || rooms.find((r) => r.name.toLowerCase() === roomId.toLowerCase())
+            || rooms.find((r) => r.name.toLowerCase().includes(roomId.toLowerCase()));
+          if (!existing) {
+            toolResults.push({ type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: `No existing line with id ${externalId} to move. Use the most-recently-added line's id, or an id from the existing-lines list.` }) });
+            continue;
+          }
+          if (!room) {
+            toolResults.push({ type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: `No room matching "${roomId}". Available: ${rooms.map((r) => r.name).join(', ')}.` }) });
+            continue;
+          }
+          const item = byCode.get(existing.lineItemCode);
+          // Re-save the line (same id) stamped to the destination room; the client
+          // removes it from its old room and re-adds it here.
+          const line: RateCardLineInput = {
+            externalId,
+            section: room.name,
+            location: room.name,
+            lineItemCode: existing.lineItemCode,
+            quantity: existing.quantity,
+            tenantBillBackPercent: existing.tenantBillBackPercent,
+            assignedTo: existing.assignedTo,
+            note: existing.note || '',
+            customVendorCost: existing.customVendorCost ?? null,
+            customLaborFullDescription: existing.customLaborFullDescription ?? undefined,
+            photoUrls: [],
+          };
+          const fromSectionId = (lastAdded && lastAdded.externalId === externalId && lastAdded.sectionId) ? String(lastAdded.sectionId) : undefined;
+          sse(res, 'proposal', {
+            action: 'move',
+            line,
+            sectionId: room.id,
+            fromSectionId,
+            summary: item ? lineToSummary(item, existing.quantity, existing.assignedTo, existing.tenantBillBackPercent, region, regions) : existing.lineItemCode,
+            spokenSummary: item ? item.laborShortDescription : existing.lineItemCode,
+            awaitingReply: false,
+          });
+          didAct = true;
+          toolResults.push({
+            type: 'tool_result', tool_use_id: tu.id,
+            content: JSON.stringify({ ok: true, moved: existing.lineItemCode, to: room.name, note: 'Line moved to the new room. Do NOT add a new line for this; continue only if the inspector asked for something else.' }),
           });
           continue;
         } else {

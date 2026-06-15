@@ -40,6 +40,9 @@ interface Props {
   // (not whatever the panel shows when the stream finishes).
   onAddLineTo?: (sectionId: string, line: RateCardLineInput) => Promise<SaveResult> | void;
   onRemoveLineFrom?: (sectionId: string, externalId: string) => void;
+  // Move an existing line to another room (update-in-place by externalId — NOT a
+  // delete + re-create). Used for "that should go in bathroom one".
+  onMoveLine?: (fromSectionId: string, toSectionId: string, line: RateCardLineInput) => Promise<SaveResult> | void;
   // Lines per section, so edits/undo after a mid-turn room switch can resolve
   // existing lines in the room the agent is now working on.
   linesBySection?: Record<string, RateCardLineInput[]>;
@@ -264,7 +267,7 @@ function speak(
   }
 }
 
-export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, linesBySection, currentLines, catalog, tenantMonths = 12, squareFootage, disabled, onEngagedChange, inspectionId }: Props) {
+export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, onMoveLine, linesBySection, currentLines, catalog, tenantMonths = 12, squareFootage, disabled, onEngagedChange, inspectionId }: Props) {
   // The room the assistant is working on right now.
   const currentSection = useMemo(
     () => sections.find((s) => s.id === currentSectionId) || sections[0],
@@ -406,6 +409,8 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
       streamSectionRef.current = currentSectionId;
       let addedThisTurn = 0;
       const addedRoomIds = new Set<string>();
+      let movedThisTurn = 0;
+      let movedToRoom = '';
       // Save round-trips kicked off by proposals this turn. We await ALL of them
       // before composing the closing line, so we report what actually persisted
       // (and surface any save error) rather than optimistically claiming success.
@@ -512,6 +517,33 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
                 // Brief on-screen note; only SPEAK if nothing else follows (the
                 // closing message will speak otherwise). Keep it quiet inline.
                 setMessages((m) => [...m, { role: 'assistant', content: `→ ${target.displayName || target.label}` }]);
+              }
+            } else if (ev === 'proposal' && data.action === 'move') {
+              // MOVE an existing line to a different room ("that should go in
+              // bathroom one"): remove it from wherever it currently lives and
+              // re-add it in the target room.
+              const line: RateCardLineInput = data.line;
+              const targetId = (data.sectionId && sections.some((s) => s.id === data.sectionId)) ? data.sectionId : null;
+              const fromId = (data.fromSectionId && sections.some((s) => s.id === data.fromSectionId))
+                ? data.fromSectionId
+                : Object.keys(linesBySection || {}).find((sid) => (linesBySection![sid] || []).some((l) => l.externalId === line.externalId)) || null;
+              if (targetId && fromId !== targetId) {
+                try {
+                  // Prefer an in-place move (re-home the record by externalId).
+                  // Fall back to add (+ best-effort remove) only if no move handler.
+                  const ret = onMoveLine
+                    ? onMoveLine(fromId || targetId, targetId, line)
+                    : (() => { if (fromId && onRemoveLineFrom) onRemoveLineFrom(fromId, line.externalId); return onAddLineTo ? onAddLineTo(targetId, line) : onAddLine(line); })();
+                  const p: Promise<SaveResult> = ret && typeof (ret as any).then === 'function' ? (ret as Promise<SaveResult>) : Promise.resolve({ ok: true } as SaveResult);
+                  savePromises.push(p.then((r) => r || { ok: true }).catch((e) => ({ ok: false, error: String(e?.message || e) })));
+                  if (lastAddedRef.current && lastAddedRef.current.externalId === line.externalId) lastAddedRef.current.section = targetId;
+                  movedThisTurn++;
+                  const tgt = sections.find((s) => s.id === targetId);
+                  movedToRoom = tgt ? (tgt.displayName || tgt.label) : '';
+                  setMessages((m) => [...m, { role: 'assistant', content: `Moved: ${data.spokenSummary || data.summary} → ${movedToRoom}` }]);
+                } catch (e: any) {
+                  savePromises.push(Promise.resolve({ ok: false, error: String(e?.message || e) }));
+                }
               }
             } else if (ev === 'proposal') {
               // A line matched. AUTO-ADD it to the stream-local room (which a
@@ -624,6 +656,13 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               setMessages((m) => [...m, { role: 'assistant', content: `Heads up — ${failed.length} line${failed.length === 1 ? '' : 's'} didn't save${detail}. Check the sync banner and retry.` }]);
             }
           }).catch(() => { /* non-fatal */ });
+        } else if (movedThisTurn > 0) {
+          // A line was relocated to another room ("that should go in bathroom one").
+          const followUp = (finalData?.text ? String(finalData.text).trim() : '');
+          const base = movedToRoom ? `Moved to ${movedToRoom}.` : `Moved ${movedThisTurn} item${movedThisTurn === 1 ? '' : 's'}.`;
+          const spoken = followUp ? `${base} ${followUp}` : `${base} Anything else?`;
+          setMessages((m) => [...m, { role: 'assistant', content: spoken }]);
+          speakThenListenRef.current(spoken);
         } else if (finalType === 'question') {
           // The agent needs more info (e.g. ambiguous item, missing quantity).
           const text = finalData?.text || accumulated || 'Could you clarify that?';

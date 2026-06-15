@@ -1214,6 +1214,20 @@ export function RateCardForm(props: RateCardFormProps) {
   // we eliminate that window entirely. The trade-off is slightly more network
   // chatter (one save per row edit instead of per 2s burst) but for an
   // inspector typing maybe 20-30 lines per inspection that's fine.
+  // Move an existing line to another room (voice: "that should go in bathroom
+  // one"). Remove it from the old room's LOCAL state, then save it into the new
+  // room — the save upserts by externalId, so the record is re-homed in place
+  // (no delete + re-create, no external-id churn).
+  async function handleMoveLineToSection(fromSectionId: string, toSectionId: string, line: RateCardLineInput) {
+    if (fromSectionId && fromSectionId !== toSectionId) {
+      setLinesBySection((m) => {
+        if (!m[fromSectionId]) return m;
+        return { ...m, [fromSectionId]: m[fromSectionId].filter((l) => l.externalId !== line.externalId) };
+      });
+    }
+    return handleSaveLineForSection(toSectionId, line);
+  }
+
   async function handleSaveLineForSection(sectionId: string, line: RateCardLineInput): Promise<{ ok: boolean; error?: string; requested?: string; routedTo?: string; reRouted?: boolean; recordId?: string; skippedSave?: boolean }> {
     // Stamp the line's section/location from the TARGET section. Voice proposals
     // may have been generated for a different room earlier in the same turn
@@ -4183,6 +4197,7 @@ export function RateCardForm(props: RateCardFormProps) {
                   onRemoveLine={(externalId) => handleDeleteLine(voiceSectionId, externalId)}
                   onAddLineTo={(sectionId, line) => { const p = handleSaveLineForSection(sectionId, line); if (!cameraOpen) revealSection(sectionId, line.externalId); return p; }}
                   onRemoveLineFrom={(sectionId, externalId) => handleDeleteLine(sectionId, externalId)}
+                  onMoveLine={(fromSectionId, toSectionId, line) => handleMoveLineToSection(fromSectionId, toSectionId, line)}
                   linesBySection={linesBySection}
                   onEngagedChange={setVoiceEngaged}
                 />
