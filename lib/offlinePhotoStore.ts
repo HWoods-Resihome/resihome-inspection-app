@@ -50,25 +50,40 @@ const MAX_ATTEMPTS = 6;
 // entry, and revokables holds both underlying object URLs.
 const urlByLocalId = new Map<string, { displayUrl: string; revokables: string[] }>();
 
-// ---- Flush suspension --------------------------------------------------------
-// While the in-app camera is open, capture queues drafts to IndexedDB but we
-// SUSPEND the background flush. Otherwise the periodic flush could upload (and
-// then delete + revoke) a draft the still-open camera is holding, breaking the
-// URL it later hands back on Done. The camera suspends on open and resumes on
-// close; resume kicks any registered flush listeners so the backlog uploads at
-// once. Counter (not bool) so nested/overlapping cameras are safe.
-let flushSuspendCount = 0;
+// ---- Foreground flush coordination ------------------------------------------
+// The background flush runs CONTINUOUSLY — including while the camera is open —
+// so photos upload as they're taken ("Saved Offline" -> synced) and the
+// inspector can exit mid-sync (Done is instant; remaining drafts keep uploading
+// from the inspection page). Two lightweight signals coordinate it:
+//   • kickFlush()      — ask the mounted form to drain the queue NOW (after a
+//                        capture / on camera close), instead of waiting for its
+//                        15s tick. Debounced so a burst kicks one flush.
+//   • onPhotoSynced()  — notify listeners (the open camera) when a queued draft
+//                        finishes uploading, so it can swap its draft URL for the
+//                        real one (clears the badge; Done then hands back real
+//                        URLs instead of a stale draft).
 const flushKickListeners = new Set<() => void>();
-export function suspendPhotoFlush(): void { flushSuspendCount++; }
-export function resumePhotoFlush(): void {
-  flushSuspendCount = Math.max(0, flushSuspendCount - 1);
-  if (flushSuspendCount === 0) { for (const l of flushKickListeners) { try { l(); } catch { /* noop */ } } }
-}
-/** Register a callback that runs when the flush un-suspends (camera closed), so
- *  the mounted form can drain the queue promptly. Returns an unsubscribe fn. */
+let kickTimer: ReturnType<typeof setTimeout> | null = null;
 export function onPhotoFlushResume(listener: () => void): () => void {
   flushKickListeners.add(listener);
   return () => { flushKickListeners.delete(listener); };
+}
+export function kickFlush(): void {
+  if (kickTimer) return; // debounce a burst into one flush
+  kickTimer = setTimeout(() => {
+    kickTimer = null;
+    for (const l of flushKickListeners) { try { l(); } catch { /* noop */ } }
+  }, 700);
+}
+
+type PhotoSyncedInfo = { localId: string; oldUrl: string; newUrl: string };
+const photoSyncedListeners = new Set<(info: PhotoSyncedInfo) => void>();
+export function onPhotoSynced(listener: (info: PhotoSyncedInfo) => void): () => void {
+  photoSyncedListeners.add(listener);
+  return () => { photoSyncedListeners.delete(listener); };
+}
+function notifyPhotoSynced(info: PhotoSyncedInfo): void {
+  for (const l of photoSyncedListeners) { try { l(info); } catch { /* noop */ } }
 }
 
 function idbAvailable(): boolean {
@@ -170,6 +185,7 @@ export async function uploadPhotoOrQueue(
     const url = URL.createObjectURL(blob);
     urlByLocalId.set(localId, { displayUrl: url, revokables: [url] });
     void requestPhotoBackgroundSync();
+    kickFlush(); // upload promptly in the background (during the session too)
     return url;
   };
 
@@ -227,6 +243,7 @@ export async function uploadVideoEntryOrQueue(
     const entry = makeVideoEntry(pObj, vObj);
     urlByLocalId.set(localId, { displayUrl: entry, revokables: [pObj, vObj] });
     void requestPhotoBackgroundSync();
+    kickFlush();
     return entry;
   };
   // QUEUE-FIRST (see uploadPhotoOrQueue): return a draft entry now; the
@@ -300,12 +317,6 @@ export async function flushQueuedPhotos(
   onSynced: (info: { localId: string; sectionId: string; oldUrl: string; newUrl: string; replacesUrl?: string; lineExternalId?: string }) => void,
 ): Promise<{ synced: number; remaining: number; lastError?: string }> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
-  // Suspended while a camera session is open — don't upload/revoke drafts the
-  // open camera is still holding. Resumes (and kicks a flush) on camera close.
-  if (flushSuspendCount > 0) {
-    const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
-    return { synced: 0, remaining };
-  }
   let lastError: string | undefined;
   // Only flush THIS inspection's photos — the mounted form is what persists the
   // section answer record after upload, so another inspection's photos must wait
@@ -321,6 +332,9 @@ export async function flushQueuedPhotos(
     const oldUrl = entry?.displayUrl || '';
     await deleteRecord(rec.localId);
     onSynced({ localId: rec.localId, sectionId: rec.sectionId, oldUrl, newUrl, replacesUrl: rec.replacesUrl, lineExternalId: rec.lineExternalId });
+    // Also tell any open camera so it can swap its draft URL for the real one
+    // (clears "Saved Offline" live; Done then returns real URLs, not stale drafts).
+    if (oldUrl) notifyPhotoSynced({ localId: rec.localId, oldUrl, newUrl });
     if (entry) {
       for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
       urlByLocalId.delete(rec.localId);

@@ -3,7 +3,7 @@ import { useAppDialog } from '@/components/AppDialog';
 import { PhotoAnnotator } from '@/components/PhotoAnnotator';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadVideo } from '@/lib/photoUpload';
-import { suspendPhotoFlush, resumePhotoFlush, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
+import { onPhotoSynced, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
 import { makeVideoEntry } from '@/lib/media';
 import { CameraAILayer } from '@/components/CameraAILayer';
 import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
@@ -668,15 +668,19 @@ export function CameraCapture({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, facing, lensDeviceId]);
 
-  // While the camera is open, SUSPEND the background photo-upload flush. Captures
-  // queue to the durable store instantly (so the shutter + Done never block on
-  // the network), but the parent's periodic flush must not upload/revoke those
-  // drafts while the camera still holds them. Resuming on close kicks the flush
-  // so the whole session's photos upload at once, in the background.
+  // Captures queue to the durable store instantly (so the shutter + Done never
+  // block on the network) and upload IN THE BACKGROUND — even while the camera
+  // is still open. As each queued draft finishes uploading, swap its draft URL
+  // for the real one on the matching capture item: that clears the "Saved
+  // Offline" badge live AND means Done hands the parent the REAL url (a
+  // not-yet-synced item still hands back its draft, which the inspection page
+  // keeps uploading — so the inspector can exit mid-sync without losing a thing).
   useEffect(() => {
     if (!isOpen) return;
-    suspendPhotoFlush();
-    return () => { resumePhotoFlush(); };
+    const unsub = onPhotoSynced(({ oldUrl, newUrl }) => {
+      setItems((prev) => prev.map((it) => (it.hubspotUrl === oldUrl ? { ...it, hubspotUrl: newUrl } : it)));
+    });
+    return () => { unsub(); };
   }, [isOpen]);
 
   // iOS pinch-zoom guard. While the camera is open, iOS Safari / WKWebView
