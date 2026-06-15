@@ -43,7 +43,6 @@ export default function AiKnowledgePage() {
   const [newText, setNewText] = useState('');
   const [newExpected, setNewExpected] = useState('');
   const [busy, setBusy] = useState(false);
-  const [seedMsg, setSeedMsg] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -104,19 +103,6 @@ export default function AiKnowledgePage() {
       setNewExpected('');
       await load();
     } finally { setBusy(false); }
-  }
-
-  // Import the starter "gold list" of worked examples into the KB (idempotent).
-  async function importStarterExamples() {
-    setBusy(true); setSeedMsg(null); setError(null);
-    try {
-      const r = await fetch('/api/ai-knowledge/seed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      const d = await r.json();
-      if (!r.ok) { setError(d.error || 'Import failed'); return; }
-      setSeedMsg(`Imported starter examples: ${d.added} added${d.skipped ? `, ${d.skipped} already present` : ''}.`);
-      await load();
-    } catch (e: any) { setError(String(e?.message || e)); }
-    finally { setBusy(false); }
   }
 
   async function saveEdit(id: string) {
@@ -185,19 +171,6 @@ export default function AiKnowledgePage() {
           <button type="button" onClick={learnNow} disabled={busy}
             className="h-9 px-4 rounded-lg bg-violet-600 text-white font-heading font-bold text-sm hover:bg-violet-700 disabled:bg-gray-300 shrink-0">
             {busy ? 'Learning…' : 'Learn now'}
-          </button>
-        </div>
-
-        {/* Import the starter gold list of worked examples. */}
-        <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 mb-5 flex items-center justify-between gap-3 flex-wrap">
-          <div className="text-[13px] text-sky-900 min-w-0">
-            <span className="font-heading font-semibold">Starter examples (the “gold list”)</span>
-            <span className="block text-sky-700/80 text-xs">Import the curated utterance → correct-action examples. They become editable entries here and drive every AI (mic, camera, review). Safe to re-run.</span>
-            {seedMsg && <span className="block text-xs text-emerald-700 font-heading font-semibold mt-1">{seedMsg}</span>}
-          </div>
-          <button type="button" onClick={importStarterExamples} disabled={busy}
-            className="h-9 px-4 rounded-lg bg-sky-600 text-white font-heading font-bold text-sm hover:bg-sky-700 disabled:bg-gray-300 shrink-0">
-            {busy ? 'Importing…' : 'Import starter examples'}
           </button>
         </div>
 
