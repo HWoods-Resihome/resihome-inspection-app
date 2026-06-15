@@ -8,10 +8,7 @@ import { InspectionCard } from '@/components/InspectionCard';
 import { ListPicker } from '@/components/ListPicker';
 import {
   loadCachedRateCard, saveCachedRateCard,
-  loadCachedInspection, saveCachedInspection,
-  loadCachedQuestions, saveCachedQuestions,
   loadCachedMe, saveCachedMe,
-  saveCachedQcData,
 } from '@/lib/offlineCache';
 import { warmAi } from '@/lib/aiWarm';
 import { templateLabel } from '@/lib/templateLabels';
@@ -175,62 +172,12 @@ export default function Home() {
     return () => { clearTimeout(timer); ctrl.abort(); };
   }, []);
 
-  // Warm the OFFLINE cache for the inspector's own upcoming work, so those
-  // inspections open + are fully editable in a dead zone even if they were never
-  // tapped while in service. Bounded to this user's actionable (Scheduled /
-  // In Progress) inspections on the current page, online only, concurrency 2,
-  // skipping anything already cached. Best-effort — never blocks the UI.
-  useEffect(() => {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-    if (inspections.length === 0) return;
-    // Warm the actionable (Scheduled / In Progress) inspections visible on this
-    // page — that's the field work most likely to be opened in a dead zone. Not
-    // filtered to the current user (an admin/dispatcher viewing the whole board
-    // still gets the day's inspections cached). Bounded + skips already-cached.
-    const actionable = inspections.filter((i) => {
-      const s = (i.status || '').trim().toLowerCase();
-      return s === 'scheduled' || s.includes('progress');
-    });
-    const todo = actionable.filter((i) => !loadCachedInspection(i.recordId)).slice(0, 15);
-    if (todo.length === 0) return;
-    let cancelled = false;
-    const t = setTimeout(() => {
-      let idx = 0;
-      const worker = async () => {
-        while (!cancelled && idx < todo.length) {
-          const insp = todo[idx++];
-          try {
-            const r = await fetch(`/api/inspections/${insp.recordId}`, { cache: 'no-store' });
-            if (r.ok) {
-              const d = await r.json();
-              if (d && !d.error) {
-                saveCachedInspection(insp.recordId, d);
-                const tmpl = d.inspection?.templateType;
-                if (tmpl && tmpl !== 'pm_scope_rate_card' && tmpl !== 'pm_turn_reinspect_qc' && !loadCachedQuestions(tmpl)) {
-                  try {
-                    const qr = await fetch(`/api/questions?template=${encodeURIComponent(tmpl)}`, { cache: 'no-store' });
-                    const qd = await qr.json();
-                    if (qr.ok && Array.isArray(qd.questions)) saveCachedQuestions(tmpl, qd.questions);
-                  } catch { /* best-effort */ }
-                }
-                // Turn Re-Inspect QC: also warm its before/after data so it opens offline.
-                if (tmpl === 'pm_turn_reinspect_qc') {
-                  try {
-                    const qcr = await fetch(`/api/inspections/${insp.recordId}/qc-data`, { cache: 'no-store' });
-                    const qcd = await qcr.json();
-                    if (qcr.ok && qcd && !qcd.error) saveCachedQcData(insp.recordId, qcd);
-                  } catch { /* best-effort */ }
-                }
-              }
-            }
-          } catch { /* best-effort */ }
-          await new Promise((res) => setTimeout(res, 150)); // gentle on the API
-        }
-      };
-      void Promise.all([worker(), worker()]); // concurrency 2
-    }, 1200); // after the list + catalog warm settle
-    return () => { cancelled = true; clearTimeout(t); };
-  }, [inspections, me]);
+  // NOTE: a home-screen prefetch that warmed each inspection's full detail (+QC
+  // data) for offline use was REMOVED — it fired dozens of heavy HubSpot calls
+  // per home load and tripped HubSpot's account-wide rate limit (429s that even
+  // failed the inspection list). Offline access instead relies on caching an
+  // inspection the moment it's opened (see pages/inspection/[id]) — which is the
+  // real field flow — without any background call storm.
 
   // Pre-warm the AI assistants from the HOME screen — the first authenticated
   // page after login — so the heavy cold-start work (catalog embeddings, the
