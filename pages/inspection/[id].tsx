@@ -280,7 +280,7 @@ export default function ExistingInspection() {
           <div className="font-heading font-bold mb-1">Could not load inspection</div>
           <div>{errorMsg}</div>
           <button onClick={() => router.push('/')} className="mt-3 text-brand underline text-xs">
-            Back to inspections list
+            Back to Inspections List
           </button>
         </div>
       </Layout>
@@ -311,7 +311,7 @@ export default function ExistingInspection() {
     return (
       <Layout>
         <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-sm text-green-800 mb-3">
-          <div className="font-heading font-bold text-lg mb-2">Inspection submitted</div>
+          <div className="font-heading font-bold text-lg mb-2">Inspection Submitted</div>
           <div className="mb-3">This Inspection is now marked Completed in HubSpot.</div>
           {submitResultUrl && (
             <a href={submitResultUrl} target="_blank" rel="noreferrer" className="text-brand underline block mb-2">
@@ -320,11 +320,11 @@ export default function ExistingInspection() {
           )}
           {pdfUrl && (
             <a href={pdfUrl} target="_blank" rel="noreferrer" className="text-brand underline block">
-              View PDF report
+              View PDF Report
             </a>
           )}
           <button onClick={() => router.push('/?just_submitted=1')} className="mt-4 bg-brand text-white font-heading font-semibold px-4 py-2 rounded-lg">
-            Back to inspections list
+            Back to Inspections List
           </button>
         </div>
       </Layout>
