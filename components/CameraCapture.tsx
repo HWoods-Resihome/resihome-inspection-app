@@ -169,6 +169,17 @@ const MAX_SAVE_EDGE = 2048;
 // quality. 0.9 is visually lossless for inspection photos at a small file size.
 const PHOTO_SAVE_QUALITY = 0.9;
 
+// iOS (incl. iPadOS) WebKit. On iPhone we run a PURE DIGITAL live-frame camera:
+// the live <video> is NEVER covered by a freeze-frame still — every capture and
+// lens switch leaves it running. Covering it is exactly what made iOS pause the
+// stream and flash black (the "black screen of death" inspectors kept hitting);
+// the freeze-mask only ever existed to hide Android's slower ImageCapture still,
+// which iOS doesn't use anyway. So on iOS the freeze is a hard no-op and capture
+// is a straight grab-live-frame → stamp → enqueue. Android keeps the freeze-mask.
+const IS_IOS = typeof navigator !== 'undefined'
+  && (/iP(hone|ad|od)/i.test(navigator.userAgent || '')
+    || (/Macintosh/.test(navigator.userAgent || '') && ((navigator as any).maxTouchPoints || 0) > 1));
+
 // Photo geostamp proximity check: how close (meters) the device GPS must be to
 // the property's reference location to stamp a ✓ rather than a ✗. Generous by
 // default to absorb GPS drift and rooftop-vs-parcel geocode offset; overridable.
@@ -1576,6 +1587,7 @@ export function CameraCapture({
   // show it. The live <video> keeps running underneath; this overlay simply
   // holds the captured frame so the screen never goes dark during takePhoto.
   const showFreezeFrame = useCallback((video: HTMLVideoElement) => {
+    if (IS_IOS) return; // iOS: never cover the live preview — pure digital camera
     const c = freezeCanvasRef.current;
     if (!c) return;
     const srcW = video.videoWidth, srcH = video.videoHeight;
