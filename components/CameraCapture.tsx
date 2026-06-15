@@ -893,29 +893,6 @@ export function CameraCapture({
     };
   }, [isOpen, startStream]);
 
-  // Ongoing liveness watchdog. Heavy work right after a capture (especially in
-  // AI mode: vision encodes + uploads on a flaky connection) can leave the
-  // <video> PAUSED/stalled — a black preview with no visibility event to trigger
-  // the resume handler above. Poll while open and nudge a paused/stalled preview
-  // back to life (re-acquire if the track died). Cheap and self-healing, so the
-  // preview can't stay black after the first photo.
-  useEffect(() => {
-    if (!isOpen) return;
-    const iv = setInterval(() => {
-      if (recordingRef.current) return;
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      const v = videoRef.current;
-      const track = streamRef.current?.getVideoTracks?.()[0];
-      if (!v) return;
-      if (!streamRef.current || !track || track.readyState === 'ended') { startStream(); return; }
-      // Paused, or playing but producing no frames (stalled) → nudge play().
-      if (v.paused || v.readyState < 2 || v.videoWidth === 0) {
-        v.play().catch(() => { /* autoplay rejection is non-fatal */ });
-      }
-    }, 1500);
-    return () => clearInterval(iv);
-  }, [isOpen, startStream]);
-
   // Lock the page behind the camera while it's open. Without this the
   // inspection underneath stays scrollable, so on mobile it scrolls up through
   // the full-screen camera (you could see the form below it). Freezing the
@@ -1741,39 +1718,18 @@ export function CameraCapture({
   const [aiStatus, setAiStatus] = useState<{ text: string; tone: 'idle' | 'listen' | 'heard' | 'think' | 'err' } | null>(null);
   // AI assist can be paused mid-session (e.g. on low service the voice/call-outs
   // get noisy). Starts on whenever the camera was opened in AI mode.
-  // AI assist starts OFF so the camera opens INSTANTLY as a clean, fully-working
-  // plain camera. When the AI camera is in use we then probe connectivity (below)
-  // and only switch it on if service can actually support it.
+  // AI assist starts OFF and is MANUAL-only: the camera opens instantly as a
+  // clean, fully-working plain camera, and the heavy voice+vision loops (and the
+  // mic) only ever load if the inspector explicitly taps "Turn AI on". This is
+  // what keeps photo-taking bulletproof in the field — AI can never auto-engage,
+  // re-prompt for the mic, or interfere with capture.
   const [aiOn, setAiOn] = useState<boolean>(false);
-  // Set when the AI layer auto-turned itself OFF on poor service, so we can show
-  // why (and the inspector can re-enable once signal is back).
+  // Set when the AI layer auto-turned itself OFF on poor service (only possible
+  // once the inspector has manually turned it on), so we can show why.
   const [aiAutoPaused, setAiAutoPaused] = useState(false);
   const handleAiAutoDisable = useCallback(() => { setAiOn(false); setAiAutoPaused(true); }, []);
-
-  // AI activation gate: the camera is already open + capturing; quietly check
-  // that the connection can reach the server, and ONLY then bring AI online.
-  // On weak/no service the probe fails fast and AI stays off — the heavy
-  // voice+vision loops never load, so they can't lag the camera or cause the
-  // black screen. Re-runs each open; cleared on close. The manual toggle still
-  // lets the inspector force AI on/off.
-  useEffect(() => {
-    if (!isOpen || !aiAssist) return;
-    let cancelled = false;
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 2500);
-    fetch('/api/version', { signal: ctrl.signal, cache: 'no-store' })
-      .then((r) => {
-        if (cancelled) return;
-        if (r.ok) { setAiOn(true); setAiAutoPaused(false); }
-        else setAiAutoPaused(true);
-      })
-      .catch(() => { if (!cancelled) setAiAutoPaused(true); })
-      .finally(() => clearTimeout(timer));
-    return () => {
-      cancelled = true; clearTimeout(timer); ctrl.abort();
-      setAiOn(false); setAiAutoPaused(false); // reset so a reopen re-probes cleanly
-    };
-  }, [isOpen, aiAssist]);
+  // AI never persists across camera opens — always start clean.
+  useEffect(() => { if (!isOpen) { setAiOn(false); setAiAutoPaused(false); } }, [isOpen]);
   // "Teach the AI" voice-training popup (feeds the live knowledge base).
   const [kbTrainerOpen, setKbTrainerOpen] = useState(false);
   const [renamingRoomId, setRenamingRoomId] = useState<string | null>(null);
