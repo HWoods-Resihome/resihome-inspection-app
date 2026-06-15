@@ -701,6 +701,8 @@ const INSPECTION_LIST_PROPERTIES = [
   'pdf_attachment_url',
   'hs_createdate',
   'last_edited_at', 'hs_lastmodifieddate',
+  'total_client_cost',
+  'source_rate_card_id', 'source_rate_card_name',
 ];
 
 /** Map a HubSpot inspection search result into a lightweight InspectionSummary. */
@@ -734,8 +736,8 @@ function mapInspectionRow(r: any): InspectionSummary {
     pdfChargebackXlsxUrl: null,
     pdfVendorUrlsJson: null,
     pdfGeneratedAt: null,
-    sourceRateCardId: null,
-    sourceRateCardName: null,
+    sourceRateCardId: p.source_rate_card_id || null,
+    sourceRateCardName: p.source_rate_card_name || null,
     qcVerdict: null,
     qcPassCount: null,
     qcFailCount: null,
@@ -744,6 +746,8 @@ function mapInspectionRow(r: any): InspectionSummary {
     approvedByName: null,
     approvedAt: null,
     resolutionTimingJson: null,
+    totalClientCost: p.total_client_cost != null && p.total_client_cost !== ''
+      ? Number(p.total_client_cost) : null,
   };
 }
 
@@ -897,7 +901,48 @@ export async function searchInspectionsPage(params: InspectionQuery & {
   });
   const items = (resp.results || []).map(mapInspectionRow);
   const total = typeof resp.total === 'number' ? resp.total : items.length;
+  // Enrich Turn Re-Inspect QC rows with the client total of the SCOPE they
+  // re-inspect (the re-inspect itself carries no rate-card lines, so its own
+  // total_client_cost is empty). One batched read across the distinct source
+  // scope ids on this page; best-effort (a failed read just leaves it null).
+  await enrichReinspectClientTotals(items, typeId);
   return { items, total };
+}
+
+/**
+ * For each pm_turn_reinspect_qc row that points at a source scope rate card,
+ * fill in `totalClientCost` from that scope's `total_client_cost`. Batched and
+ * best-effort — never throws, so a list never fails on the enrichment.
+ */
+async function enrichReinspectClientTotals(items: InspectionSummary[], typeId: string): Promise<void> {
+  const needIds = Array.from(new Set(
+    items
+      .filter((i) => i.templateType === 'pm_turn_reinspect_qc' && i.sourceRateCardId)
+      .map((i) => String(i.sourceRateCardId)),
+  ));
+  if (needIds.length === 0) return;
+  try {
+    const totalById = new Map<string, number | null>();
+    for (let i = 0; i < needIds.length; i += 100) {
+      const chunk = needIds.slice(i, i + 100);
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/batch/read`, {
+        method: 'POST',
+        body: JSON.stringify({ properties: ['total_client_cost'], inputs: chunk.map((id) => ({ id })) }),
+      });
+      for (const rec of resp.results || []) {
+        const raw = rec.properties?.total_client_cost;
+        totalById.set(String(rec.id), raw != null && raw !== '' ? Number(raw) : null);
+      }
+    }
+    for (const it of items) {
+      if (it.templateType === 'pm_turn_reinspect_qc' && it.sourceRateCardId) {
+        const t = totalById.get(String(it.sourceRateCardId));
+        if (t != null) it.totalClientCost = t;
+      }
+    }
+  } catch {
+    /* best-effort enrichment — leave totals null on failure */
+  }
 }
 
 /**
@@ -1704,6 +1749,7 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
       approvedByName: null,
       approvedAt: null,
       resolutionTimingJson: null,
+      totalClientCost: null,
     };
   } catch (e: any) {
     if (String(e).includes('404')) return null;
@@ -1762,6 +1808,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     'source_rate_card_id', 'source_rate_card_name', 'qc_verdict', 'qc_pass_count', 'qc_fail_count',
     // Submit/approve stamps + Internal Resolution timing map
     'submitted_at', 'submitted_by_email', 'approved_by_name', 'approved_at', 'resolution_timing_json',
+    'total_client_cost',
   ];
   try {
     const qs = properties.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
@@ -1899,6 +1946,8 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         approvedByName: p.approved_by_name || null,
         approvedAt: p.approved_at || null,
         resolutionTimingJson: p.resolution_timing_json || null,
+        totalClientCost: p.total_client_cost != null && p.total_client_cost !== ''
+          ? Number(p.total_client_cost) : null,
       },
       propertyIdRef,
       propertySquareFootage,

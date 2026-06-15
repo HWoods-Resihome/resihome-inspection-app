@@ -117,6 +117,12 @@ export interface InspectionSummary {
   // persisted at submit so the approver (any device) + the finalize gate honor
   // "Complete Later" (after-photos optional). Empty/null before set.
   resolutionTimingJson: string | null;
+  // Rolled-up client-billable total of all rate-card lines (from
+  // `total_client_cost`, maintained by recomputeInspectionTotals). Drives the
+  // "Client: $x" figure on Scope Rate Card cards. For a Turn Re-Inspect QC this
+  // is enriched server-side with the SOURCE scope's client total (the scope it
+  // re-inspects), since the re-inspect itself carries no rate-card lines.
+  totalClientCost: number | null;
 }
 
 export interface HubSpotUser {

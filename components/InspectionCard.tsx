@@ -17,25 +17,38 @@ interface Props {
   onLongPress?: (recordId: string) => void;
 }
 
-// Derive the most meaningful date to show on the card.
-// Priority: scheduledDate (planned date) > completedAt > createdAt.
-//
-// HubSpot returns Date fields as Unix epoch milliseconds (as a string), while
-// DateTime fields and built-in fields like hs_createdate come back as ISO 8601.
-// Handle both formats.
-function fmtDate(raw: string | null): string {
+// Compact "M-DD-YY" date (month not zero-padded, day + year two digits) for the
+// card meta row. HubSpot returns Date fields as epoch-ms strings and DateTime /
+// built-in fields (hs_createdate) as ISO 8601 — handle both, in UTC so the
+// displayed day matches the stored date regardless of viewer timezone.
+function fmtShort(raw: string | null): string {
   if (!raw) return '';
-  // Pure-digit string = epoch milliseconds (HubSpot Date field)
-  if (/^\d+$/.test(raw)) {
-    const d = new Date(Number(raw));
-    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-  }
-  // Otherwise assume ISO 8601 ("2026-03-19T..." -> "2026-03-19")
-  return raw.slice(0, 10);
+  const d = /^\d+$/.test(raw) ? new Date(Number(raw)) : new Date(raw);
+  if (isNaN(d.getTime())) return '';
+  const m = d.getUTCMonth() + 1;
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  const yy = String(d.getUTCFullYear()).slice(-2);
+  return `${m}-${day}-${yy}`;
 }
 
-function effectiveDate(i: InspectionSummary): string {
-  return fmtDate(i.scheduledDate || i.completedAt || i.createdAt);
+// Whole-dollar currency for the card's "Client: $x" figure.
+function fmtMoney(n: number): string {
+  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+// Show the client-billable total on rate-card-style cards: a Scope Rate Card
+// once it has lines (In Progress / Pending Approval / Completed), and every
+// Turn Re-Inspect QC (whose total is the SOURCE scope's client total, enriched
+// server-side). Scheduled scopes have no lines yet, so they're omitted.
+function clientTotalToShow(i: InspectionSummary): number | null {
+  if (i.totalClientCost == null) return null;
+  if (i.templateType === 'pm_turn_reinspect_qc') return i.totalClientCost;
+  if (i.templateType === 'pm_scope_rate_card') {
+    const s = (i.status || '').trim().toLowerCase();
+    const scheduled = s === 'scheduled';
+    return scheduled ? null : i.totalClientCost;
+  }
+  return null;
 }
 
 // Split the stored address snapshot into two display lines:
@@ -54,8 +67,9 @@ function splitAddress(snapshot: string): { street: string; locality: string } {
 }
 
 export function InspectionCard({ inspection: i, selectMode, selected, selectable, onToggleSelect, onLongPress }: Props) {
-  const date = effectiveDate(i);
-  const updated = fmtDate(i.updatedAt);
+  const created = fmtShort(i.createdAt);
+  const updated = fmtShort(i.updatedAt);
+  const clientTotal = clientTotalToShow(i);
   const tmpl = templateLabel(i.templateType);
 
   const { street, locality } = splitAddress(i.propertyAddressSnapshot || i.inspectionName);
@@ -82,13 +96,19 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
           <StatusBadge status={i.status} />
         </div>
       </div>
-      {/* One meta row: date · inspector on the left, Updated pushed to the right. */}
+      {/* Meta row: Created date · inspector on the left, Updated date on the right. */}
       <div className="flex items-center gap-x-2 text-xs text-gray-500 mt-0.5">
-        {date && <span className="shrink-0">{date}</span>}
-        {date && i.inspectorName && <span className="shrink-0">&middot;</span>}
+        {created && <span className="shrink-0 whitespace-nowrap">Created {created}</span>}
+        {created && i.inspectorName && <span className="shrink-0">&middot;</span>}
         {i.inspectorName && <span className="truncate">{i.inspectorName}</span>}
         {updated && <span className="text-gray-400 ml-auto shrink-0 whitespace-nowrap">Updated {updated}</span>}
       </div>
+      {/* Client-billable total — Scope Rate Cards (with lines) and Re-Inspects. */}
+      {clientTotal != null && (
+        <div className="mt-1.5 text-xs font-heading font-semibold text-brand">
+          Client: {fmtMoney(clientTotal)}
+        </div>
+      )}
     </>
   );
 

@@ -184,6 +184,17 @@ export default function Home() {
   // Cache key = the query WITHOUT the volatile refresh flag.
   const listCacheKey = useMemo(() => buildListParams().toString(), [buildListParams]);
 
+  // Signature of just the FILTER inputs (not page/sort). When this changes we
+  // force a fresh, server-consistent fetch (refresh=1) so the list and the chip
+  // counts can't disagree — they're served from independent short-lived server
+  // caches that otherwise drift after a mutation, which is what made "All" show
+  // a stale, scheduled-only slice while the counts said otherwise.
+  const filterSig = useMemo(
+    () => JSON.stringify({ search: search.trim(), statusFilter, inspectorFilter, templateFilter }),
+    [search, statusFilter, inspectorFilter, templateFilter]
+  );
+  const prevFilterSigRef = useRef<string | null>(null);
+
   const applyListData = useCallback((d: any) => {
     const raw: InspectionSummary[] = d.inspections || [];
     const cancelledSet = cancelledIdsRef.current;
@@ -236,9 +247,13 @@ export default function Home() {
   useEffect(() => {
     const cached = lsRead(RESULTS_CACHE)[listCacheKey];
     if (cached?.d) { applyListData(cached.d); setLoading(false); } else { setLoading(true); }
-    const t = setTimeout(() => { void load(); }, cached ? 300 : 0);
+    // First run (page mount) or a page/sort-only change → cheap cached fetch.
+    // A FILTER change → force-refresh so list+counts come back consistent.
+    const filtersChanged = prevFilterSigRef.current !== null && prevFilterSigRef.current !== filterSig;
+    prevFilterSigRef.current = filterSig;
+    const t = setTimeout(() => { void load({ refresh: filtersChanged }); }, cached ? 300 : 0);
     return () => clearTimeout(t);
-  }, [listCacheKey, load, applyListData]);
+  }, [listCacheKey, load, applyListData, filterSig]);
 
   // Honor the "just_*" query hint (fresh create) with a delayed re-fetch, since
   // HubSpot's search index can lag a beat behind a brand-new record.
@@ -445,7 +460,7 @@ export default function Home() {
         <div className="frozen-top">
         {/* Pink branded header */}
         <header className="bg-brand text-white">
-          <div className="lz-head max-w-3xl mx-auto px-4 pt-4 pb-5">
+          <div className="lz-head max-w-3xl mx-auto px-4 pt-4 pb-4">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div className="flex items-center gap-3 min-w-0">
                 {/* App icon — white house + footprint on a brand-pink tile that
@@ -498,7 +513,7 @@ export default function Home() {
             {/* Admin tools — collapsed under a single "Settings" gear. Visible to
                 app admins (dynamic list, see /admin/admins). */}
             {isAdmin && (
-              <div className="mt-2">
+              <div className="mt-4">
                 <button
                   type="button"
                   onClick={() => setSettingsOpen((o) => !o)}
