@@ -181,16 +181,18 @@ export default function Home() {
   // The list query for the current filter/sort/paging state. Facets (dropdown
   // options) are fetched SEPARATELY (facets=0 here) so the multi-page facet scan
   // never holds up the cards on a slow connection.
-  const buildListParams = useCallback((opts?: { refresh?: boolean }) => {
+  const buildListParams = useCallback((opts?: { refresh?: boolean; status?: StatusFilter; page?: number }) => {
+    const st = opts?.status ?? statusFilter;
+    const pg = opts?.page ?? page;
     const p = new URLSearchParams();
     const term = search.trim();
     if (term) p.set('search', term);
-    if (statusFilter !== 'all') p.set('status', statusFilter);
+    if (st !== 'all') p.set('status', st);
     for (const name of inspectorFilter) p.append('inspector', name);
     for (const t of templateFilter) p.append('template', t);
     p.set('sort', sortField);
     p.set('dir', sortDir);
-    p.set('page', String(page));
+    p.set('page', String(pg));
     p.set('pageSize', String(pageSize));
     p.set('facets', '0');
     if (opts?.refresh) p.set('refresh', '1');
@@ -199,17 +201,6 @@ export default function Home() {
 
   // Cache key = the query WITHOUT the volatile refresh flag.
   const listCacheKey = useMemo(() => buildListParams().toString(), [buildListParams]);
-
-  // Signature of just the FILTER inputs (not page/sort). When this changes we
-  // force a fresh, server-consistent fetch (refresh=1) so the list and the chip
-  // counts can't disagree — they're served from independent short-lived server
-  // caches that otherwise drift after a mutation, which is what made "All" show
-  // a stale, scheduled-only slice while the counts said otherwise.
-  const filterSig = useMemo(
-    () => JSON.stringify({ search: search.trim(), statusFilter, inspectorFilter, templateFilter }),
-    [search, statusFilter, inspectorFilter, templateFilter]
-  );
-  const prevFilterSigRef = useRef<string | null>(null);
 
   const applyListData = useCallback((d: any) => {
     const raw: InspectionSummary[] = d.inspections || [];
@@ -257,19 +248,42 @@ export default function Home() {
   }, [buildListParams, listCacheKey, applyListData]);
 
   // On any query change: paint cached results INSTANTLY (stale-while-revalidate),
-  // then revalidate from the network (debounced). On a slow connection the last
-  // list shows immediately instead of a blank screen; on first-ever load (no
-  // cache) we fetch right away.
+  // then revalidate from the network in the background. Switching status/filters
+  // is therefore instant whenever that view is cached (which the prefetch below
+  // keeps warm) — no forced refresh, no blank "Loading…", no full HubSpot
+  // round-trip blocking the toggle. The cache is busted on mutations
+  // (create/cancel) so a stale view can't linger after a real change.
   useEffect(() => {
     const cached = lsRead(RESULTS_CACHE)[listCacheKey];
     if (cached?.d) { applyListData(cached.d); setLoading(false); } else { setLoading(true); }
-    // First run (page mount) or a page/sort-only change → cheap cached fetch.
-    // A FILTER change → force-refresh so list+counts come back consistent.
-    const filtersChanged = prevFilterSigRef.current !== null && prevFilterSigRef.current !== filterSig;
-    prevFilterSigRef.current = filterSig;
-    const t = setTimeout(() => { void load({ refresh: filtersChanged }); }, cached ? 300 : 0);
+    // Revalidate quietly behind the cached paint; only the uncached first load
+    // fetches immediately (and shows the spinner until it lands).
+    const t = setTimeout(() => { void load(); }, cached ? 250 : 0);
     return () => clearTimeout(t);
-  }, [listCacheKey, load, applyListData, filterSig]);
+  }, [listCacheKey, load, applyListData]);
+
+  // Prefetch the OTHER status views (page 1) into the client cache in the
+  // background, so the FIRST tap on any chip — including Completed — paints
+  // instantly from cache instead of waiting on the network. Cheap: the status
+  // counts are a shared server cache, and each list is one small page. Online
+  // only; skips views already cached; re-runs when the non-status filters/sort
+  // change (which is what invalidates those cached views).
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    const statuses: StatusFilter[] = ['all', 'scheduled', 'in_progress', 'pending_approval', 'completed'];
+    const t = setTimeout(() => {
+      for (const st of statuses) {
+        if (st === statusFilter) continue; // current view is already loading
+        const key = buildListParams({ status: st, page: 1 }).toString();
+        if (lsRead(RESULTS_CACHE)[key]) continue; // already warm
+        fetch(`/api/inspections?${key}`, { cache: 'no-store' })
+          .then((r) => r.json())
+          .then((d) => { if (d && !d.error) lsWrite(RESULTS_CACHE, key, { inspections: d.inspections || [], total: d.total, counts: d.counts }); })
+          .catch(() => { /* prefetch is best-effort */ });
+      }
+    }, 500); // after the current view paints
+    return () => clearTimeout(t);
+  }, [buildListParams, statusFilter, search, sortField, sortDir, pageSize, inspectorFilter, templateFilter]);
 
   // Honor the "just_*" query hint (fresh create) with a delayed re-fetch, since
   // HubSpot's search index can lag a beat behind a brand-new record.
