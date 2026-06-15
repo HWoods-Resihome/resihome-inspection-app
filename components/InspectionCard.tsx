@@ -82,12 +82,12 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex-1 min-w-0">
           {tmpl && (
-            <p className="text-[11px] font-heading font-semibold uppercase tracking-wide text-brand mb-1 truncate">
+            <p className="text-[13px] font-heading font-bold uppercase tracking-wide text-brand mb-1 truncate">
               {tmpl}
-              {/* Client-billable total alongside the template, kept in brand pink —
-                  Scope Rate Cards (with lines) and Re-Inspects (source scope total). */}
+              {/* Client-billable total alongside the template, kept in brand pink
+                  but smaller/lighter so the template name stays the standout. */}
               {clientTotal != null && (
-                <span> (Client: {fmtMoney(clientTotal)})</span>
+                <span className="text-[11px] font-semibold"> (Client: {fmtMoney(clientTotal)})</span>
               )}
             </p>
           )}
