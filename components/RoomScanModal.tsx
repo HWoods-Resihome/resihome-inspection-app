@@ -20,7 +20,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { uploadPhoto } from '@/lib/photoUpload';
 import { NumberField } from '@/components/NumberPad';
-import { displayImageSrc } from '@/lib/photoDisplay';
+import { thumbImageSrc } from '@/lib/photoDisplay';
 import { extractAudioWav16k } from '@/lib/audioExtract';
 import {
   drawEvidenceStamp, buildStampLines, getGeoFix, resolvePropertyRefCoords, type StampLine,
@@ -371,7 +371,7 @@ export function RoomScanModal(props: Props) {
                       <div className="flex gap-3">
                         {url && (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={displayImageSrc(url)} alt="" className="w-16 h-16 object-cover rounded border border-gray-200 shrink-0" />
+                          <img src={thumbImageSrc(url)} alt="" className="w-16 h-16 object-cover rounded border border-gray-200 shrink-0" />
                         )}
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">

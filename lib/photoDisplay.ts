@@ -56,3 +56,26 @@ export function displayImageSrc(url: string): string {
   }
   return clean;
 }
+
+/**
+ * <img src> for a SMALL thumbnail (grids / strips). Routes remote (HubSpot)
+ * photos through the resizing proxy so the browser decodes a ~`w`px bitmap
+ * instead of the full 2048px image — the fix for the iOS WebKit OOM crash on
+ * photo-heavy inspections (dozens of full-res decodes jettison the content
+ * process). Local blob:/data: drafts and a just-synced cached blob are returned
+ * as-is (can't be proxied; they're few and transient). Use this everywhere a
+ * photo is shown as a small tile; use displayImageSrc for the full-size viewer.
+ */
+export function thumbImageSrc(url: string, w = 400): string {
+  if (!url) return url;
+  const v = url.indexOf('#v=');
+  const clean = v === -1 ? url : url.slice(0, v);
+  // A local blob/data url (offline draft or just-synced cached blob) can't be
+  // proxied — show it directly. It's a single image, not the dozens-of-tiles hog.
+  const cached = syncedBlobByRealUrl.get(clean);
+  if (cached) return cached;
+  if (clean.startsWith('blob:') || clean.startsWith('data:')) return clean;
+  // Remote photo → small re-encoded thumbnail through our origin.
+  return `/api/photo-proxy?url=${encodeURIComponent(clean)}&w=${w}`;
+}
+

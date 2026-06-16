@@ -46,10 +46,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const ct = (upstream.headers.get('content-type') || '').toLowerCase();
     const buf = Buffer.from(await upstream.arrayBuffer());
 
-    // HEIC/HEIF doesn't render in <img> in most browsers. Convert it to JPEG
-    // server-side (sharp) so existing .heic photos display + can be annotated.
+    // Optional thumbnail resize (?w=). Inspection forms render dozens of photos
+    // as small tiles; without this the browser decodes the FULL-RES bitmap of
+    // each (a 2048px JPEG ≈ 12MB decoded), and a photo-heavy inspection OOM-
+    // crashes the iOS WebKit content process ("A problem repeatedly occurred").
+    // Serving a ~400px thumbnail cuts the decoded size ~25–40×. We re-encode with
+    // sharp (auto-orient) and cache hard, since a given photo's thumb is immutable.
+    const wRaw = Number(req.query.w);
+    const width = Number.isFinite(wRaw) ? Math.max(64, Math.min(1024, Math.round(wRaw))) : 0;
     const isHeic = ct.includes('heic') || ct.includes('heif')
       || /\.(heic|heif)$/i.test(u.pathname);
+
+    if (width > 0 && (isHeic || ct.startsWith('image/') || !ct)) {
+      try {
+        const jpeg = await sharp(buf).rotate().resize({ width, withoutEnlargement: true }).jpeg({ quality: 78 }).toBuffer();
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+        return res.status(200).send(jpeg);
+      } catch { /* fall through to full-size handling below */ }
+    }
+
+    // HEIC/HEIF doesn't render in <img> in most browsers. Convert it to JPEG
+    // server-side (sharp) so existing .heic photos display + can be annotated.
     if (isHeic) {
       const jpeg = await sharp(buf).rotate().jpeg({ quality: 82 }).toBuffer();
       res.setHeader('Content-Type', 'image/jpeg');

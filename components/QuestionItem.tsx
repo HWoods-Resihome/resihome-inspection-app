@@ -5,7 +5,7 @@ import { ListPicker } from '@/components/ListPicker';
 import { NumberField } from '@/components/NumberPad';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { useAppDialog } from '@/components/AppDialog';
-import { displayImageSrc } from '@/lib/photoDisplay';
+import { displayImageSrc, thumbImageSrc } from '@/lib/photoDisplay';
 import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { isVideoEntry } from '@/lib/media';
 import { SyncingBadge } from '@/components/SyncingBadge';
@@ -217,7 +217,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             {answer.photoUrls.map((url, idx) => (
               <div key={`${url}-${idx}`} className="relative">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={displayImageSrc(url)} alt="" loading="lazy" decoding="async" onClick={() => setLightboxIndex(idx)}
+                <img src={thumbImageSrc(url)} alt="" loading="lazy" decoding="async" onClick={() => setLightboxIndex(idx)}
                   className="w-full h-16 object-cover rounded cursor-pointer" />
                 {url.startsWith('blob:') && (
                   <SyncingBadge />
@@ -380,7 +380,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                 <div key={`${url}-${idx}`} className="relative">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={displayImageSrc(url)}
+                    src={thumbImageSrc(url)}
                     alt=""
                     loading="lazy"
                     decoding="async"

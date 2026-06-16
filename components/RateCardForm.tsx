@@ -50,7 +50,7 @@ import {
 import { SectionsManager } from '@/components/SectionsManager';
 import { InspectionAuditTrail } from '@/components/InspectionAuditTrail';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
-import { displayImageSrc } from '@/lib/photoDisplay';
+import { thumbImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 
@@ -3807,7 +3807,7 @@ export function RateCardForm(props: RateCardFormProps) {
                           <div key={url} className="relative shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
-                              src={displayImageSrc(url)}
+                              src={thumbImageSrc(url)}
                               alt=""
                               loading="lazy"
                               decoding="async"

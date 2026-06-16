@@ -27,7 +27,7 @@ import { WheelPicker } from '@/components/WheelPicker';
 import { ListPicker } from '@/components/ListPicker';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { formatMoney, formatQty } from '@/lib/photoUpload';
-import { displayImageSrc } from '@/lib/photoDisplay';
+import { thumbImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
 import { VENDORS, vendorPillStyle, isInternalResolution, defaultVendorForCode } from '@/lib/vendors';
 import { setNativeKeyboardAccessoryBarVisible } from '@/lib/nativeBridge';
@@ -250,7 +250,7 @@ function PhotoChipRow({
           <span key={`${u}-${i}`} className="relative inline-block">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={displayImageSrc(u)}
+              src={thumbImageSrc(u)}
               alt=""
               onClick={onOpen ? (e) => { e.stopPropagation(); onOpen(i); } : undefined}
               className={`w-12 h-12 object-cover rounded border border-gray-200 ${onOpen ? 'cursor-pointer' : ''}`}
@@ -1475,7 +1475,7 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
                     <span key={`${u}-${i}`} className="relative inline-block">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={displayImageSrc(u)}
+                        src={thumbImageSrc(u)}
                         alt=""
                         onClick={(e) => { e.stopPropagation(); onOpenPhoto?.(i); }}
                         className="w-10 h-10 object-cover rounded border border-gray-200 cursor-pointer"
@@ -1616,7 +1616,7 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
               <span key={`${u}-${i}`} className="relative inline-block">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={displayImageSrc(u)}
+                  src={thumbImageSrc(u)}
                   alt=""
                   onClick={(e) => { e.stopPropagation(); onOpenPhoto?.(i); }}
                   className="w-10 h-10 object-cover rounded border border-gray-200 cursor-pointer"

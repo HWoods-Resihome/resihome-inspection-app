@@ -7,6 +7,7 @@ import { onPhotoSynced, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
 import { pushCameraOpen, popCameraOpen } from '@/lib/cameraOpenState';
 import { makeVideoEntry } from '@/lib/media';
 import { SyncingBadge } from '@/components/SyncingBadge';
+import { thumbImageSrc } from '@/lib/photoDisplay';
 import { CameraAILayer } from '@/components/CameraAILayer';
 import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
 import { useBackToClose } from '@/lib/useBackToClose';
@@ -2144,6 +2145,10 @@ export function CameraCapture({
     setItems(existing.map((url, i) => ({
       id: `pre_${currentRoomId}_${i}_${url.slice(-16)}`,
       blobUrl: url,
+      // Small proxied thumbnail for the strip so a room full of saved photos
+      // doesn't decode dozens of full-res bitmaps (iOS OOM); the full image still
+      // loads in the 1-at-a-time viewer.
+      thumbUrl: thumbImageSrc(url),
       file: new File([], 'preexisting.jpg', { type: 'image/jpeg' }),
       status: 'uploaded' as const,
       hubspotUrl: url,

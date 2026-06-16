@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { displayImageSrc } from '@/lib/photoDisplay';
+import { thumbImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry, getVideoUrl } from '@/lib/media';
 import { SyncingBadge } from '@/components/SyncingBadge';
 
@@ -77,7 +77,7 @@ export function PhotoStrip({
                   <>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={displayImageSrc(u)}
+                      src={thumbImageSrc(u)}
                       alt={label}
                       style={{ width: size, height: size }}
                       className={`object-cover rounded border ${a.thumb}`}

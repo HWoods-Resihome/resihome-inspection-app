@@ -20,7 +20,7 @@ import { ListPicker } from '@/components/ListPicker';
 import { WheelPicker } from '@/components/WheelPicker';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
-import { displayImageSrc } from '@/lib/photoDisplay';
+import { thumbImageSrc } from '@/lib/photoDisplay';
 import { SyncingBadge } from '@/components/SyncingBadge';
 
 export type { FcAnswerState, FcAnswers } from '@/lib/finalChecklist';
@@ -147,7 +147,7 @@ export function FinalChecklist(props: Props) {
         {urls.map((u, i) => (
           <div key={`${u}-${i}`} className="relative">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={displayImageSrc(u)} alt="" onClick={() => openLightbox(camKey, i)}
+            <img src={thumbImageSrc(u)} alt="" onClick={() => openLightbox(camKey, i)}
               title="Tap to view, mark up, or delete"
               className="w-14 h-14 object-cover rounded border border-gray-200 cursor-pointer" />
             {u.startsWith('blob:') && <SyncingBadge />}
