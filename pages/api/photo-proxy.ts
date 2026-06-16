@@ -37,7 +37,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const to = setTimeout(() => ctrl.abort(), 15000);
     let upstream: Response;
     try {
+      // Retry a just-uploaded file that hasn't propagated to HubSpot's CDN yet.
+      // For the first second or two after a photo syncs, fetching its file URL can
+      // return 404/403/5xx — and a one-shot <img> would be left a PERMANENT broken
+      // tile (the "thumbnail won't preview" the inspector kept seeing right after
+      // capture). A few quick retries INSIDE the proxy let the SAME image request
+      // succeed once the file goes live, fixing the broken thumbnails server-side
+      // with zero client OOM risk (no falling back to full-res images).
       upstream = await fetch(u.toString(), { redirect: 'follow', signal: ctrl.signal });
+      for (let i = 0; i < 3 && !upstream.ok
+        && (upstream.status === 404 || upstream.status === 403 || upstream.status >= 500); i++) {
+        await new Promise((r) => setTimeout(r, 600));
+        upstream = await fetch(u.toString(), { redirect: 'follow', signal: ctrl.signal });
+      }
     } finally {
       clearTimeout(to);
     }

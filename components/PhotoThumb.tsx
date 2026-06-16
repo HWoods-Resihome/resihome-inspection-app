@@ -65,3 +65,46 @@ export function PhotoThumb({
     />
   );
 }
+
+/**
+ * Self-healing tile driven by EXPLICIT primary/fallback urls (not the
+ * thumbImageSrc/displayImageSrc derivation PhotoThumb does). Used by the
+ * in-camera capture strip, whose primary is sometimes a local data-URL thumb
+ * (always renders) and sometimes a proxied server thumbnail (can transiently
+ * fail right after sync). On the primary failing it tries the fallback (the full
+ * image), then a neutral box — never the broken-image glyph.
+ */
+export function SelfHealingImg({
+  primary, fallback, alt = '', className, style, title, decoding, onClick,
+}: {
+  primary: string;
+  fallback?: string;
+  alt?: string;
+  className?: string;
+  style?: React.CSSProperties;
+  title?: string;
+  decoding?: 'async' | 'sync' | 'auto';
+  onClick?: () => void;
+}) {
+  const [stage, setStage] = useState(0);
+  const [seen, setSeen] = useState(primary);
+  if (primary !== seen) { setSeen(primary); setStage(0); }
+
+  const src = stage === 0 ? primary : fallback;
+  if (!src || stage >= 2) {
+    return <span aria-hidden className={className} style={{ ...style, backgroundColor: '#1f2937', display: 'inline-block' }} onClick={onClick} />;
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={alt}
+      title={title}
+      decoding={decoding}
+      onClick={onClick}
+      onError={() => setStage((s) => s + 1)}
+      className={className}
+      style={style}
+    />
+  );
+}

@@ -7,7 +7,8 @@ import { onPhotoSynced, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
 import { pushCameraOpen, popCameraOpen } from '@/lib/cameraOpenState';
 import { makeVideoEntry } from '@/lib/media';
 import { SyncingBadge } from '@/components/SyncingBadge';
-import { thumbImageSrc } from '@/lib/photoDisplay';
+import { thumbImageSrc, displayImageSrc } from '@/lib/photoDisplay';
+import { SelfHealingImg } from '@/components/PhotoThumb';
 import { CameraAILayer } from '@/components/CameraAILayer';
 import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
 import { useBackToClose } from '@/lib/useBackToClose';
@@ -2880,9 +2881,14 @@ export function CameraCapture({
           <div className={`flex gap-2 ${isLandscape ? 'flex-col items-center' : ''}`}>
             {items.map((it) => (
               <div key={it.id} className="relative shrink-0">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={it.thumbUrl || it.blobUrl}
+                {/* Self-healing: the strip thumb is a local data-URL thumb for a
+                    fresh shot (always renders) or a proxied server thumbnail for a
+                    seeded/synced photo (can transiently fail right after upload).
+                    On failure it falls back to the full image, then a neutral box —
+                    never the broken-image glyph the inspector saw. */}
+                <SelfHealingImg
+                  primary={it.thumbUrl || it.blobUrl}
+                  fallback={displayImageSrc(it.hubspotUrl && !it.hubspotUrl.startsWith('blob:') ? it.hubspotUrl : it.blobUrl)}
                   alt=""
                   decoding="async"
                   onClick={() => {
