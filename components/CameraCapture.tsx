@@ -412,6 +412,15 @@ export function CameraCapture({
   }, []);
   const [backLenses, setBackLenses] = useState<{ id: string; label: string }[]>([]); // selectable back lenses
   const [activeLensId, setActiveLensId] = useState<string | null>(null);              // deviceId actually in use
+  // Hardware (sensor) zoom range. On many Android phones the back camera is a
+  // "logical multi-camera" whose physical lenses (ultra-wide / main / tele) are
+  // selected by the `zoom` track capability, NOT by deviceId — deviceId switching
+  // is a silent no-op there (both ids return the same image), which is why
+  // tapping a lens chip only highlighted and never changed the picture. When a
+  // usable zoom range exists we drive the lens chips off it via applyConstraints
+  // (no stream restart), and fall back to deviceId chips only when it doesn't.
+  const [hwZoomCap, setHwZoomCap] = useState<{ min: number; max: number } | null>(null);
+  const [activeHwZoom, setActiveHwZoom] = useState<number>(1);
   const prevLensIdRef = useRef<string | null>(null);     // lens before the current switch (for auto-revert)
   const lensSwitchFreezeRef = useRef(false);             // freeze-frame is masking a lens switch
   const [permissionState, setPermissionState] = useState<'pending' | 'granted' | 'denied' | 'unsupported'>('pending');
@@ -597,7 +606,19 @@ export function CameraCapture({
           const track = streamRef.current?.getVideoTracks?.()[0];
           const curId = ((track?.getSettings?.() as any)?.deviceId as string) || null;
           setActiveLensId(curId);
-          if (facing !== 'environment') { setBackLenses([]); return; }
+          // Hardware-zoom lens range (logical multi-camera lens selector).
+          try {
+            const zc: any = (track?.getCapabilities?.() as any)?.zoom;
+            const cur = (track?.getSettings?.() as any)?.zoom;
+            if (zc && typeof zc.min === 'number' && typeof zc.max === 'number'
+              && zc.max > zc.min && zc.max / Math.max(zc.min, 0.01) >= 1.5) {
+              setHwZoomCap({ min: zc.min, max: zc.max });
+              setActiveHwZoom(typeof cur === 'number' ? cur : 1);
+            } else {
+              setHwZoomCap(null);
+            }
+          } catch { setHwZoomCap(null); }
+          if (facing !== 'environment') { setBackLenses([]); setHwZoomCap(null); return; }
           const vids = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
           const isBack = (l: string) => /back|rear|environment/i.test(l);
           const isBad = (l: string) => /depth|tof|infrared|\bir\b|mono/i.test(l);
@@ -2087,6 +2108,32 @@ export function CameraCapture({
     setLensDeviceId(id);
   }, [activeLensId, showFreezeFrame, rememberLens]);
 
+  // Lens chips driven by the hardware zoom range (logical multi-camera). 0.5×
+  // (ultra-wide), 1× (main), 2× (tele) map to sensor zoom levels — the reliable
+  // way to switch physical lenses on these devices.
+  const zoomLenses = useMemo(() => {
+    if (!hwZoomCap) return [] as { label: string; zoom: number }[];
+    const { min, max } = hwZoomCap;
+    const out: { label: string; zoom: number }[] = [];
+    if (min <= 0.7) out.push({ label: '0.5×', zoom: Math.max(min, 0.5) });
+    out.push({ label: '1×', zoom: min <= 1 && max >= 1 ? 1 : min });
+    if (max >= 2) out.push({ label: '2×', zoom: 2 });
+    const seen = new Set<string>();
+    return out.filter((o) => (seen.has(o.label) ? false : (seen.add(o.label), true)));
+  }, [hwZoomCap]);
+
+  // Switch lens via the sensor zoom (no stream restart — instant, reliable). Also
+  // reset the CSS digital zoom so a lens tap selects the OPTICAL lens cleanly;
+  // pinch/slide digital zoom then layers on top of it.
+  const switchToHwLens = useCallback((zoom: number) => {
+    const track = streamRef.current?.getVideoTracks?.()[0];
+    if (!track) return;
+    setActiveHwZoom(zoom);
+    zoomRef.current = 1; setZoom(1); updatePreviewTransform();
+    try { (track.applyConstraints as any)({ advanced: [{ zoom }] }).catch(() => { /* device rejected */ }); }
+    catch { /* unsupported */ }
+  }, [updatePreviewTransform]);
+
   const toggleTorch = useCallback(async () => {
     const track = streamRef.current?.getVideoTracks?.()[0];
     if (!track) return;
@@ -2590,23 +2637,41 @@ export function CameraCapture({
             {/* Lens selector — deliberate physical-lens switch (ultra-wide / main /
                 tele). Hidden while recording (a swap restarts the stream). Only
                 shown when the device exposes more than one back lens. */}
-            {!recording && permissionState === 'granted' && backLenses.length >= 2 && (
+            {!recording && permissionState === 'granted' && (zoomLenses.length >= 2 || backLenses.length >= 2) && (
               <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 bg-black/55 backdrop-blur-sm rounded-full px-1.5 py-1">
-                {backLenses.map((lens) => {
-                  const active = lens.id === activeLensId;
-                  return (
-                    <button
-                      key={lens.id}
-                      type="button"
-                      onClick={() => switchToLens(lens.id)}
-                      aria-pressed={active}
-                      aria-label={`Switch to ${lens.label} lens`}
-                      className={`min-w-[36px] px-2.5 py-1 rounded-full text-[11px] font-heading font-semibold transition-colors ${active ? 'bg-white text-black' : 'text-white/85 hover:bg-white/15'}`}
-                    >
-                      {lens.label}
-                    </button>
-                  );
-                })}
+                {zoomLenses.length >= 2
+                  // Hardware-zoom lens chips (reliable on logical multi-cameras).
+                  ? zoomLenses.map((lens) => {
+                      const active = Math.abs(activeHwZoom - lens.zoom) < 0.05;
+                      return (
+                        <button
+                          key={lens.label}
+                          type="button"
+                          onClick={() => switchToHwLens(lens.zoom)}
+                          aria-pressed={active}
+                          aria-label={`Switch to ${lens.label} lens`}
+                          className={`min-w-[36px] px-2.5 py-1 rounded-full text-[11px] font-heading font-semibold transition-colors ${active ? 'bg-white text-black' : 'text-white/85 hover:bg-white/15'}`}
+                        >
+                          {lens.label}
+                        </button>
+                      );
+                    })
+                  // Fallback: deviceId lens chips (when no usable sensor zoom range).
+                  : backLenses.map((lens) => {
+                      const active = lens.id === activeLensId;
+                      return (
+                        <button
+                          key={lens.id}
+                          type="button"
+                          onClick={() => switchToLens(lens.id)}
+                          aria-pressed={active}
+                          aria-label={`Switch to ${lens.label} lens`}
+                          className={`min-w-[36px] px-2.5 py-1 rounded-full text-[11px] font-heading font-semibold transition-colors ${active ? 'bg-white text-black' : 'text-white/85 hover:bg-white/15'}`}
+                        >
+                          {lens.label}
+                        </button>
+                      );
+                    })}
               </div>
             )}
             {/* Top-right control cluster: phone-camera fallback + flip. */}
