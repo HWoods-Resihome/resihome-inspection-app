@@ -18,6 +18,7 @@ import { compressToJpeg, uploadJpegBlob, uploadVideo, toJpegName } from '@/lib/p
 import { makeVideoEntry } from '@/lib/media';
 import { isQuotaError, StorageFullError } from '@/lib/storageQuota';
 import { registerSyncedBlob, registerDraftFullRes, clearDraftFullRes } from '@/lib/photoDisplay';
+import { isAnyCameraOpen } from '@/lib/cameraOpenState';
 
 // iOS/iPadOS WebKit (incl. Chrome on iOS, which is WebKit). Several canvas/bitmap
 // paths misbehave here, so we branch on it below.
@@ -432,15 +433,17 @@ export async function flushQueuedPhotos(
   onSynced: FlushOnSynced,
 ): Promise<FlushResult> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
-  // NOTE: uploads run IMMEDIATELY after each capture (kickFlush), INCLUDING while
-  // the camera is open — the owner wants photos to start saving the instant
-  // they're taken, not batched on camera close. It must never hang the camera:
-  // uploads are async/background (never block the shutter), capped at low
-  // concurrency, and the per-shot thumbnail decode is serialized (see
-  // makeThumbBlob) so concurrent full-res decodes can't spike memory and jettison
-  // the iOS WebKit process. (We previously SUSPENDED the flush while the camera
-  // was open to avoid that memory spike; serializing the decode addresses the
-  // spike without delaying the save.)
+  // iOS ONLY: suspend uploads while an in-app camera overlay is open. On iPhone's
+  // tight WebKit memory ceiling, running an upload (read blob + base64-encode +
+  // fetch) at the same instant the NEXT shot is decoding its capture canvas spikes
+  // memory and jettisons the content process — the "black screen / boot-out after
+  // the 2nd photo". Photos stay queued + shown from their local thumbnails; the
+  // form drains them the moment the camera CLOSES, and every ~10s after. Android
+  // (no such ceiling) keeps uploading IMMEDIATELY per shot, as the owner wants.
+  if (IS_IOS_WEBKIT && isAnyCameraOpen()) {
+    const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
+    return { synced: 0, remaining };
+  }
   const existing = flushInFlight.get(inspectionRecordId);
   if (existing) return existing;
   const run = doFlushQueuedPhotos(inspectionRecordId, onSynced);
