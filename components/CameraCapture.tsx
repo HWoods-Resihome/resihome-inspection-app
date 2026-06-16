@@ -2710,6 +2710,16 @@ export function CameraCapture({
               style={{ display: frozen ? 'block' : 'none' }}
               aria-hidden
             />
+            {/* Build stamp — tiny, low-opacity, ALWAYS visible in the corner of
+                the live preview. Lets us confirm from any screenshot exactly which
+                deploy the device is running, so a stale cached build can never
+                again be mistaken for a fix that didn't work. */}
+            <span
+              className="pointer-events-none absolute bottom-1 right-1.5 z-20 text-[9px] leading-none font-mono text-white/45 select-none"
+              aria-hidden
+            >
+              build {process.env.NEXT_PUBLIC_APP_VERSION || 'dev'}
+            </span>
             {/* Tap-to-focus reticle */}
             {focusPt && (
               <span
