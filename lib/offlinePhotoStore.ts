@@ -98,6 +98,19 @@ function idbAvailable(): boolean {
   return typeof window !== 'undefined' && 'indexedDB' in window;
 }
 
+// Is this upload failure a connectivity blip (→ safe to queue + retry) rather
+// than a hard server rejection (→ surface it)? Network/timeout/abort and 5xx/
+// 429/408 are transient; a hard 4xx (400/401/403/404/413…) is a real rejection
+// we shouldn't silently queue-and-retry forever (the capture strip shows a Retry
+// button for those instead).
+function isOfflineishErr(err: any): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  const msg = String(err?.message || err || '');
+  const m = /HTTP (\d{3})/.exec(msg);
+  if (m) { const s = Number(m[1]); return s >= 500 || s === 429 || s === 408; }
+  return true; // no HTTP status → network / timeout / abort → offline-ish
+}
+
 /**
  * Build a SMALL (~`maxEdge`px) jpeg thumbnail blob from a full-res photo blob.
  *
@@ -289,8 +302,32 @@ export async function uploadPhotoOrQueue(
     return url;
   };
 
-  // QUEUE-FIRST: write the photo to the durable queue and return a draft URL
-  // IMMEDIATELY (no network), so capture and the camera's "Done" are instant —
+  // iOS: UPLOAD-FIRST (restored from the flawless 6/13 build). Queue-first wrote
+  // EVERY photo's blob into IndexedDB on capture and then ran a getAll()-of-ALL-
+  // blobs background flush on every shot — and that per-shot IDB blob write +
+  // full-store read is the iOS WebKit memory pressure that jettisoned the content
+  // process on the 2nd photo (the black screen / boot-out). 6/13 never touched
+  // IndexedDB when online. So on iOS we upload DIRECTLY to HubSpot when online and
+  // fall back to the durable IDB queue ONLY when offline or the upload fails —
+  // nothing is lost on a weak signal, but the happy online path is IDB-free.
+  // Android keeps queue-first below (instant Done; no such memory ceiling).
+  if (IS_IOS_WEBKIT) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false && idbAvailable()) {
+      return queueDraft();
+    }
+    try {
+      // Fail fast on a weak signal (queuing is non-destructive + auto-syncs), so
+      // we cache quickly instead of spinning.
+      return await uploadJpegBlob(blob, filename, { attempts: 2, timeoutMs: 15000 });
+    } catch (e) {
+      if (e instanceof StorageFullError || isQuotaError(e)) throw e;
+      if (!idbAvailable() || !isOfflineishErr(e)) throw e; // hard 4xx → surface (strip shows Retry)
+      return queueDraft();
+    }
+  }
+
+  // QUEUE-FIRST (non-iOS): write the photo to the durable queue and return a draft
+  // URL IMMEDIATELY (no network), so capture and the camera's "Done" are instant —
   // the inspector snaps freely, taps Done, returns to the inspection, and the
   // photos upload IN THE BACKGROUND from there (the form's flush is kicked the
   // moment the camera closes, and retries every 15s + on reconnect). Nothing
