@@ -37,6 +37,11 @@ const PUBLIC_PATHS = new Set<string>([
   '/api/cron/sftp-watch',
   '/api/cron/blob-cleanup',
   '/api/cron/auto-cancel-stale',
+  // Image proxy/resizer. Must be public so the PUBLIC share viewer (/d/...) can
+  // render legacy HEIC photos (converted to JPEG) and request small thumbnails.
+  // Safe: it is SSRF-guarded to HubSpot file hosts and only ever returns files
+  // that are already public (PUBLIC_INDEXABLE) — it exposes nothing new.
+  '/api/photo-proxy',
 ]);
 
 function isStaticAsset(pathname: string): boolean {

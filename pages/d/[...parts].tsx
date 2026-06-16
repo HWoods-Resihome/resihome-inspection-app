@@ -14,6 +14,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { readInspectionProps, fetchAnswersForInspection, fetchInspectionById } from '@/lib/hubspot';
 import { resolveSections } from '@/lib/sections';
 import { verifyShareSig, slugifyVendor, SHARE_TYPE_TO_PROP, type ShareDocType } from '@/lib/shortLinks';
+import { displayImageSrc } from '@/lib/photoDisplay';
 
 // Short-lived in-memory cache of resolved gallery photo lists (per lambda
 // instance) so repeated opens of the same gallery don't re-query HubSpot.
@@ -188,7 +189,7 @@ function PhotoGallery({ photos, start }: { photos: string[]; start: string }) {
   // Preload the neighbours so left/right is instant.
   useEffect(() => {
     [i - 1, i + 1].forEach((n) => {
-      if (n >= 0 && n < photos.length && typeof Image !== 'undefined') { const im = new Image(); im.src = photos[n]; }
+      if (n >= 0 && n < photos.length && typeof Image !== 'undefined') { const im = new Image(); im.src = displayImageSrc(photos[n]); }
     });
   }, [i, photos]);
 
@@ -243,7 +244,7 @@ function PhotoGallery({ photos, start }: { photos: string[]; start: string }) {
       onDoubleClick={() => { setScale((s) => (s > 1 ? 1 : 2.5)); setPan({ x: 0, y: 0 }); }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={photos[i]} alt="" draggable={false}
+      <img src={displayImageSrc(photos[i])} alt="" draggable={false}
         style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transition: g.current.moved ? 'none' : 'transform 150ms ease-out', cursor: scale > 1 ? 'grab' : 'default' }} />
       <div style={{ position: 'absolute', top: 12, left: 0, right: 0, textAlign: 'center', color: '#fff', font: '600 13px sans-serif', opacity: 0.85 }}>{i + 1} / {photos.length}</div>
       {/* Close → back to the PDF (the page the photo link came from). */}
