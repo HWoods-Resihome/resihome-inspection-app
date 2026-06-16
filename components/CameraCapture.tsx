@@ -1104,6 +1104,37 @@ export function CameraCapture({
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [viewerIndex, annotatingId, isOpen, resumePreview]);
 
+  // ---- Black-preview detector + live diagnostics ----
+  // I was debugging the iOS black screen blind. This samples the actual live
+  // frame so (a) a screenshot shows the EXACT track state and (b) we can tell a
+  // genuinely-interrupted camera (perfectly uniform black) from a merely-dark
+  // inspection area (sensor noise → variance > 0), and only re-acquire for the
+  // former.
+  const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const diagRef = useRef<HTMLSpanElement | null>(null);
+  const sawLightRef = useRef(false);
+  const blackStuckTicksRef = useRef(0);
+  const reacquireBudgetRef = useRef(3);
+  const startStreamRef = useRef(startStream);
+  startStreamRef.current = startStream;
+  const sampleLuma = useCallback((v: HTMLVideoElement): { mean: number; variance: number } | null => {
+    try {
+      const c = sampleCanvasRef.current || (sampleCanvasRef.current = document.createElement('canvas'));
+      c.width = 8; c.height = 8;
+      const ctx = c.getContext('2d', { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
+      if (!ctx) return null;
+      ctx.drawImage(v, 0, 0, 8, 8);
+      const d = ctx.getImageData(0, 0, 8, 8).data;
+      let sum = 0, sumSq = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const l = (d[i] + d[i + 1] + d[i + 2]) / 3;
+        sum += l; sumSq += l * l; n++;
+      }
+      const mean = sum / n;
+      return { mean, variance: Math.max(0, sumSq / n - mean * mean) };
+    } catch { return null; }
+  }, []);
+
   // ---- Preview liveness — gentle, PROMPT-FREE ----
   // The live preview can pause/stall (the browser pauses an occluded video; iOS
   // pauses it briefly after a capture). This monitor REPLAYS the existing stream
@@ -1128,6 +1159,9 @@ export function CameraCapture({
     const TICK_MS = IS_IOS ? 700 : 1800;
     const STUCK_TICKS = Math.max(4, Math.ceil(7000 / TICK_MS)); // ~7s of truly persistent black → offer Retry
     previewRecoverTicksRef.current = 0;
+    sawLightRef.current = false;
+    blackStuckTicksRef.current = 0;
+    reacquireBudgetRef.current = 3;
     const iv = setInterval(() => {
       if (recordingRef.current) return;                          // don't disturb a recording
       if (pendingCaptureCountRef.current > 0) return;            // mid-capture
@@ -1138,21 +1172,59 @@ export function CameraCapture({
       if (!v) return;
       const track = s?.getVideoTracks?.()[0];
       const dead = !s || !track || track.readyState === 'ended';
-      const black = !dead && (v.paused || (track as any).muted === true || v.videoWidth === 0);
-      if (!dead && !black) { previewRecoverTicksRef.current = 0; return; } // healthy
-      // Gentle, prompt-free replay of the SAME stream (no getUserMedia).
-      if (!dead) {
-        if (v.srcObject !== s) { try { v.srcObject = s; } catch { /* noop */ } }
-        if (v.paused) v.play().catch(() => { /* non-fatal */ });
+      const muted = !dead && (track as any).muted === true;
+      const paused = !dead && v.paused;
+      const noSize = !dead && v.videoWidth === 0;
+
+      // Sample the live frame. An INTERRUPTED iOS camera (phone call, app switch,
+      // system) paints a PERFECTLY uniform black (mean≈0, variance≈0); a genuinely
+      // dark inspection area (closet, under a sink) has sensor noise (variance>0),
+      // so we never re-acquire just because the scene is dark. Only trust "stuck
+      // black" once we've actually seen a lit frame this session.
+      let mean = -1, variance = -1;
+      if (!dead && !paused && !noSize) {
+        const r = sampleLuma(v);
+        if (r) { mean = r.mean; variance = r.variance; if (mean > 8) sawLightRef.current = true; }
       }
+      const stuckBlack = mean >= 0 && mean < 4 && variance >= 0 && variance < 2 && sawLightRef.current;
+
+      // Live diagnostics straight to the DOM (no React re-render): a screenshot now
+      // reveals the exact failure signature instead of us guessing.
+      if (diagRef.current) {
+        diagRef.current.textContent =
+          `rs:${track ? track.readyState[0] : '-'} m:${muted ? 1 : 0} p:${paused ? 1 : 0} w:${v.videoWidth} L:${mean < 0 ? '-' : mean.toFixed(0)} var:${variance < 0 ? '-' : variance.toFixed(0)} rq:${reacquireBudgetRef.current}`;
+      }
+
+      const healthy = !dead && !muted && !paused && !noSize && !stuckBlack;
+      if (healthy) { previewRecoverTicksRef.current = 0; blackStuckTicksRef.current = 0; return; }
+
+      // A dead/muted track or a perfectly-uniform stuck-black frame will NOT come
+      // back by replaying the same stream — the camera was interrupted. Re-acquire
+      // PROMPT-FREE (permission already granted this session, and we open by
+      // facingMode only, so no stale-deviceId re-prompt), BOUNDED so it can never
+      // loop. Out of budget → surface Retry / Use Phone Camera.
+      if (dead || muted || stuckBlack) {
+        blackStuckTicksRef.current += 1;
+        if (blackStuckTicksRef.current >= 2) {
+          blackStuckTicksRef.current = 0;
+          if (reacquireBudgetRef.current > 0) {
+            reacquireBudgetRef.current -= 1;
+            startStreamRef.current?.();
+          } else {
+            setPreviewStuck(true);
+          }
+        }
+        return;
+      }
+
+      // Merely paused / zero-size with a LIVE stream → gentle replay (no re-acquire).
+      if (v.srcObject !== s) { try { v.srcObject = s; } catch { /* noop */ } }
+      if (v.paused) v.play().catch(() => { /* non-fatal */ });
       previewRecoverTicksRef.current += 1;
-      // Persistently black (replay can't revive it, or the track is gone) →
-      // surface Retry (a single user-initiated re-acquire) rather than
-      // auto-prompting for the camera over and over.
       if (previewRecoverTicksRef.current >= STUCK_TICKS) { setPreviewStuck(true); }
     }, TICK_MS);
     return () => clearInterval(iv);
-  }, [isOpen, viewerIndex, annotatingId]);
+  }, [isOpen, viewerIndex, annotatingId, sampleLuma]);
 
   // Lock the page behind the camera while it's open. Without this the
   // inspection underneath stays scrollable, so on mobile it scrolls up through
@@ -2715,10 +2787,15 @@ export function CameraCapture({
                 deploy the device is running, so a stale cached build can never
                 again be mistaken for a fix that didn't work. */}
             <span
-              className="pointer-events-none absolute bottom-1 right-1.5 z-20 text-[9px] leading-none font-mono text-white/45 select-none"
+              className="pointer-events-none absolute bottom-1 right-1.5 z-20 text-[9px] leading-none font-mono text-white/45 select-none text-right"
               aria-hidden
             >
               build {process.env.NEXT_PUBLIC_APP_VERSION || 'dev'}
+              {/* Live camera-track diagnostics — written directly to the DOM by the
+                  liveness monitor (no re-render). rs=readyState, m=muted, p=paused,
+                  w=videoWidth, L=mean luma, var=luma variance, rq=re-acquire budget. */}
+              <br />
+              <span ref={diagRef} className="text-white/40" />
             </span>
             {/* Tap-to-focus reticle */}
             {focusPt && (
