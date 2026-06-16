@@ -640,14 +640,19 @@ export function CameraCapture({
         const tappedId = lensDeviceId;
         setTimeout(() => {
           const t = streamRef.current?.getVideoTracks?.()[0];
-          const live = !!t && t.readyState === 'live' && !t.muted;
-          const w = ((t?.getSettings?.() as any)?.width as number) || videoRef.current?.videoWidth || 0;
-          if (lensDeviceIdRef.current === tappedId && (!live || w === 0)) {
+          // ONLY revert a genuinely DEAD lens (track ended / gone). A freshly
+          // acquired Android track is briefly .muted and reports width 0 BEFORE
+          // its first frame paints — treating that as "dead" (the old
+          // !live || w===0 check) bounced a VALID lens straight back to the
+          // previous one, so tapping Lens 2 just flashed the highlight and stayed
+          // put. A truly black lens is still covered by the previewStuck watchdog.
+          const dead = !t || t.readyState === 'ended';
+          if (lensDeviceIdRef.current === tappedId && dead) {
             lensSwitchFreezeRef.current = true;
             rememberLens(prevLensIdRef.current); // don't persist a dead lens
             setLensDeviceId(prevLensIdRef.current);
           }
-        }, 1200);
+        }, 1800);
       }
       // Keep the live preview continuously autofocused + auto-exposed so every
       // grabbed frame is sharp — this same <video> feeds BOTH the manual shutter
@@ -1053,10 +1058,22 @@ export function CameraCapture({
       bodyOverflow: body.style.overflow,
       bodyTouch: body.style.touchAction,
       bodyPos: body.style.position,
+      bodyTop: body.style.top,
+      bodyLeft: body.style.left,
+      bodyRight: body.style.right,
       bodyW: body.style.width,
       htmlOverflow: html.style.overflow,
       overscroll: (html.style as any).overscrollBehavior,
     };
+    // Pin the body in place (position:fixed at -scrollY) — the robust scroll-lock.
+    // Plain overflow:hidden let some mobile browsers DROP the scroll position when
+    // the form re-mounts its photo grids on camera close, snapping the inspector
+    // to the TOP instead of the section they opened the camera from.
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.left = '0';
+    body.style.right = '0';
+    body.style.width = '100%';
     body.style.overflow = 'hidden';
     body.style.touchAction = 'none';
     html.style.overflow = 'hidden';
@@ -1065,11 +1082,23 @@ export function CameraCapture({
       body.style.overflow = prev.bodyOverflow;
       body.style.touchAction = prev.bodyTouch;
       body.style.position = prev.bodyPos;
+      body.style.top = prev.bodyTop;
+      body.style.left = prev.bodyLeft;
+      body.style.right = prev.bodyRight;
       body.style.width = prev.bodyW;
       html.style.overflow = prev.htmlOverflow;
       (html.style as any).overscrollBehavior = prev.overscroll;
-      // Restore the saved scroll position after layout settles.
-      requestAnimationFrame(() => { try { window.scrollTo(0, scrollY); } catch { /* noop */ } });
+      // Re-assert the saved scroll position across several frames: the form
+      // re-mounts its photo grids (cameraOpenAnywhere) on close, which changes the
+      // document height and can clobber a single restore — so restore now and
+      // again as layout settles, landing the inspector back on the SAME section.
+      const restore = () => { try { window.scrollTo(0, scrollY); } catch { /* noop */ } };
+      restore();
+      requestAnimationFrame(restore);
+      requestAnimationFrame(() => requestAnimationFrame(restore));
+      setTimeout(restore, 80);
+      setTimeout(restore, 220);
+      setTimeout(restore, 420);
     };
   }, [isOpen]);
 
