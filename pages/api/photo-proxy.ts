@@ -8,13 +8,17 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import sharp from 'sharp';
 
-// HubSpot serves uploaded files from several hosts that vary by portal region
-// and CDN: hubspotusercontent-na1.net / -na2 / -eu1 / numbered variants, the
-// bare hubspotusercontent.net, the hubspot.net CDN (cdn2.hubspot.net), and
-// hubfs.com / hubspot.com. Match the whole family — the previous regex only
-// allowed `-na1`, so any other region/CDN host 403'd, and once EVERY thumbnail
-// started routing through here that 403'd on essentially every photo.
-const ALLOWED_HOST_RE = /(^|\.)(hubspotusercontent[a-z0-9-]*\.net|hubspot\.net|hubfs\.com|hubspot\.com)$/i;
+// HubSpot serves uploaded files from a whole family of hosts that vary by portal
+// region and CDN — and crucially across BOTH .net AND .com TLDs:
+// hubspotusercontent-na1.net / -na2 / -eu1 / numbered variants, the bare
+// hubspotusercontent.net, AND the newer hubspotusercontent*.COM hosts, plus the
+// hubspot.net / hubspot.com CDNs, hubfs.com, hs-sites.com and hubapi.com. The
+// previous regex only allowed the .NET variants, so photos served from a .COM
+// file host 403'd in the proxy — the thumbnail broke while the direct URL (which
+// bypasses this allowlist) still opened on click. Match `hubspot<anything>.net|
+// .com` to cover every region/CDN/TLD HubSpot uses. (This is the SSRF guard on the
+// INITIAL url; the proxy then follows HubSpot's own CDN redirect and trusts it.)
+const ALLOWED_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com)$/i;
 
 export const config = { api: { responseLimit: false } };
 
