@@ -40,14 +40,31 @@ export function registerSyncedBlob(realUrl: string, blobUrl: string): void {
   }
 }
 
+// Maps a DRAFT's small thumbnail blob url -> its FULL-RES local blob url. Grids
+// show the small thumb (thumbImageSrc, OOM-safe), but the full-size VIEWER must
+// show the sharp original (displayImageSrc) — otherwise an unsynced draft showed
+// its 400px thumb blown up full-screen: blurry, with an unreadable burned-in
+// stamp. Registered at capture, cleared on sync (the viewer then uses the real
+// HubSpot url).
+const fullResByDraftThumb = new Map<string, string>();
+export function registerDraftFullRes(thumbUrl: string, fullResUrl: string): void {
+  if (thumbUrl && fullResUrl) fullResByDraftThumb.set(thumbUrl, fullResUrl);
+}
+export function clearDraftFullRes(thumbUrl: string): void {
+  if (thumbUrl) fullResByDraftThumb.delete(thumbUrl);
+}
+
 export function displayImageSrc(url: string): string {
   if (!url) return url;
   // Video clips are stored as `posterUrl#v=<videoUrl>` (see lib/media.ts). For
   // an <img>, we want the poster only — drop the fragment so the src is clean.
   const v = url.indexOf('#v=');
   const clean = v === -1 ? url : url.slice(0, v);
-  // FULL-SIZE viewer: do NOT use the synced-thumb cache here — those cached blobs
-  // are SMALL (~400px) thumbnails, so the viewer must load the real full-res url.
+  // Unsynced draft → show its FULL-RES local original (not the small thumb).
+  const full = fullResByDraftThumb.get(clean);
+  if (full) return full;
+  // Synced photo: the real HubSpot url IS full-res. (Do NOT use the synced-thumb
+  // cache here — those are 400px thumbnails meant only for grids.)
   const path = clean.split('?')[0];
   if (/\.(heic|heif)$/i.test(path)) {
     return `/api/photo-proxy?url=${encodeURIComponent(clean)}`;

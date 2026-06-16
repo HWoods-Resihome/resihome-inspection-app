@@ -17,7 +17,7 @@
 import { compressToJpeg, uploadJpegBlob, uploadVideo, toJpegName } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
 import { isQuotaError, StorageFullError } from '@/lib/storageQuota';
-import { registerSyncedBlob } from '@/lib/photoDisplay';
+import { registerSyncedBlob, registerDraftFullRes, clearDraftFullRes } from '@/lib/photoDisplay';
 
 // iOS/iPadOS WebKit (incl. Chrome on iOS, which is WebKit). Several canvas/bitmap
 // paths misbehave here, so we branch on it below.
@@ -246,12 +246,16 @@ export async function uploadPhotoOrQueue(
       localId, inspectionRecordId, sectionId, kind: 'photo', blob, filename,
       replacesUrl: opts?.replacesUrl, lineExternalId: opts?.lineExternalId, createdAt: Date.now(),
     });
-    // Display a SMALL local thumbnail (not the full-res blob) so a photo-heavy
-    // offline session doesn't decode dozens of full-res bitmaps and OOM-crash iOS.
-    // The full-res original stays in IndexedDB and is what uploads.
+    // Display a SMALL local thumbnail in grids (so a photo-heavy offline session
+    // doesn't decode dozens of full-res bitmaps and OOM-crash iOS), but ALSO keep
+    // a FULL-RES local blob so the full-size viewer shows the sharp original (with
+    // a readable burned-in stamp) — mapped via registerDraftFullRes. Both are
+    // local blob bytes (not decoded until shown); the full-res is freed on sync.
     const thumb = await makeThumbBlob(blob, 400);
-    const url = URL.createObjectURL(thumb || blob);
-    urlByLocalId.set(localId, { displayUrl: url, revokables: [url] });
+    const url = URL.createObjectURL(thumb || blob);   // small thumb → grids + the photoUrls value
+    const fullUrl = URL.createObjectURL(blob);         // full-res → the viewer
+    urlByLocalId.set(localId, { displayUrl: url, revokables: [url, fullUrl] });
+    registerDraftFullRes(url, fullUrl);
     void requestPhotoBackgroundSync();
     kickFlush(); // upload promptly in the background (during the session too)
     return url;
@@ -384,11 +388,14 @@ export async function rehydrateQueuedPhotos(
         const vObj = URL.createObjectURL(r.videoBlob);
         entry = { displayUrl: makeVideoEntry(pObj, vObj), revokables: [pObj, vObj] };
       } else {
-        // Small thumbnail for display (sequential decode bounds peak memory on a
-        // heavy reopen); full-res original stays in IndexedDB for upload.
+        // Small thumbnail for grids (sequential decode bounds peak memory on a
+        // heavy reopen) + a full-res local blob for the viewer (registered so the
+        // full-size view is sharp). Full-res original also stays in IndexedDB.
         const thumb = await makeThumbBlob(r.blob, 400);
         const url = URL.createObjectURL(thumb || r.blob);
-        entry = { displayUrl: url, revokables: [url] };
+        const fullUrl = URL.createObjectURL(r.blob);
+        entry = { displayUrl: url, revokables: [url, fullUrl] };
+        registerDraftFullRes(url, fullUrl);
       }
       urlByLocalId.set(r.localId, entry);
     }
@@ -473,8 +480,16 @@ async function doFlushQueuedPhotos(
       // revoked (its poster will reload via the proxy/real url).
       if (rec.kind === 'video') {
         for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
-      } else if (oldUrl) {
-        registerSyncedBlob(newUrl, oldUrl);
+      } else {
+        // Keep the small thumb (displayUrl) alive for the grid and map the real
+        // url to it; revoke the full-res draft blob (the viewer now loads the real
+        // HubSpot url) and drop its draft→full mapping.
+        for (const u of entry.revokables) {
+          if (u === entry.displayUrl) continue; // keep the thumb
+          try { URL.revokeObjectURL(u); } catch { /* noop */ }
+        }
+        clearDraftFullRes(entry.displayUrl);
+        if (oldUrl) registerSyncedBlob(newUrl, oldUrl);
       }
       urlByLocalId.delete(rec.localId);
     }
