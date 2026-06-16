@@ -39,24 +39,40 @@ shared with Android and already correct (`iosScheme: https`,
 (see `mobile/GO_LIVE_CHECKLIST.md`) before the store build so iOS and Android ship
 pointing at the same canonical domain.
 
+## GPS evidence stamp — geolocation bridge (REQUIRED on iOS)
+The in-app camera burns a GPS evidence stamp (and a ✓/✗ on-site proximity check)
+using the web **`navigator.geolocation`** API (see `components/CameraCapture.tsx`).
+Android WebView supports that API, but a plain **WKWebView does NOT bridge
+`navigator.geolocation` to CoreLocation** — so without this, the iOS stamp reads
+"unverified" and the proximity check never evaluates, even though
+`NSLocationWhenInUseUsageDescription` is set (that string only covers the OS
+prompt, not the JS API).
+
+This is now **wired** via `@capacitor/geolocation` (already added to
+`mobile/package.json`) plus a native-iOS-gated shim that swaps
+`navigator.geolocation` for the plugin. To apply it (do it together with the
+OAuth native web-changes — both are gated no-ops in a normal browser):
+
+1. Copy `web-changes/lib/geolocationBridge.ts` → `lib/geolocationBridge.ts` in the
+   web app.
+2. Add `"@capacitor/geolocation": "^6.0.0"` to the **root** `package.json`
+   dependencies (the web app imports it; it's dynamically imported + gated, so it
+   stays out of the browser bundle's critical path).
+3. In `pages/_app.tsx`, call it at startup next to the OAuth bridge:
+   ```ts
+   import { installGeolocationBridge } from '@/lib/geolocationBridge';
+   useEffect(() => { void installOAuthBridge(); void installGeolocationBridge(); }, []);
+   ```
+4. `cd mobile && npm install && npx cap sync ios` (registers the plugin in the iOS
+   project). The plugin reads `NSLocationWhenInUseUsageDescription` from Info.plist.
+5. **Verify on TestFlight:** open the camera — the stamp should show a real
+   address/coords + distance, and the ✓/✗ proximity verdict should appear.
+
+The camera/mic auto-grant is independent of this and unaffected either way.
+
 ## Files here
 - `WebViewController.swift` — `CAPBridgeViewController` subclass: media auto-grant + OAuth→Safari.
 - `Info.plist.additions.xml` — usage strings + `resiwalk` URL scheme to merge.
-
-## Known follow-up — verify on device: GPS evidence stamp
-The in-app camera burns a GPS evidence stamp (and a ✓/✗ on-site proximity check)
-using the web **`navigator.geolocation`** API (see `components/CameraCapture.tsx`).
-Android WebView supports that API (the manifest grants
-`ACCESS_FINE/COARSE_LOCATION` and Capacitor answers the geolocation prompt), but
-**a plain WKWebView historically does NOT bridge `navigator.geolocation` to
-CoreLocation** — so on the native iOS shell the stamp may read "unverified" and
-the proximity ✓/✗ won't evaluate, even though `NSLocationWhenInUseUsageDescription`
-is set (that string only covers the OS prompt, not the JS API).
-
-**Verify first** on a TestFlight build: open the camera and check the stamp shows
-a real location + distance. If it doesn't, bridge it — either add
-`@capacitor/geolocation` plus a tiny JS shim that maps `navigator.geolocation`
-onto it, or inject a `CLLocationManager`-backed `WKScriptMessageHandler` shim in
-`WebViewController`. The camera/mic auto-grant in this scaffold is independent and
-unaffected; this only concerns the photo location stamp.
+- `web-changes/lib/geolocationBridge.ts` — native-iOS `navigator.geolocation` shim
+  over `@capacitor/geolocation` (the GPS evidence-stamp fix above).
 
