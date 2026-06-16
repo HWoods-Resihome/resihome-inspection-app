@@ -339,13 +339,17 @@ export default function Home() {
   }, [search, statusFilter, inspectorFilter, templateFilter, regionFilter]);
 
   useEffect(() => {
+    // Normalize: older cached facets (and any malformed payload) may lack a field
+    // (e.g. `regions` after that filter shipped). Always coerce to the full shape
+    // so `.map` can never hit undefined and crash the whole page.
+    const norm = (f: any) => ({ inspectors: f?.inspectors || [], templates: f?.templates || [], regions: f?.regions || [] });
     const cached = lsRead(FACETS_CACHE)[facetQuery];
-    if (cached?.d) setFacets(cached.d);
+    if (cached?.d) setFacets(norm(cached.d));
     const t = setTimeout(async () => {
       try {
         const r = await fetch(`/api/inspections?${facetQuery}`, { cache: 'no-store' });
         const d = await r.json();
-        if (d?.facets) { setFacets(d.facets); lsWrite(FACETS_CACHE, facetQuery, d.facets); }
+        if (d?.facets) { setFacets(norm(d.facets)); lsWrite(FACETS_CACHE, facetQuery, d.facets); }
       } catch { /* keep cached options */ }
     }, 350);
     return () => clearTimeout(t);
@@ -478,11 +482,11 @@ export default function Home() {
   // which page is loaded. The inspector filter value is the exact inspector_name
   // the server matches on (EQ), so value === label here.
   const inspectorOptions = useMemo(
-    () => facets.inspectors.map((name) => ({ value: name, label: name })),
+    () => (facets.inspectors || []).map((name) => ({ value: name, label: name })),
     [facets.inspectors]
   );
   const templateOptions = useMemo(
-    () => facets.templates
+    () => (facets.templates || [])
       .map((value) => ({ value, label: templateLabel(value) || value }))
       .sort((a, b) => a.label.localeCompare(b.label)),
     [facets.templates]
@@ -490,7 +494,7 @@ export default function Home() {
   // Region options come from the server-computed facets (distinct region_snapshot
   // values matching the other active filters). Value === label (server matches EQ).
   const regionOptions = useMemo(
-    () => facets.regions.map((value) => ({ value, label: value })),
+    () => (facets.regions || []).map((value) => ({ value, label: value })),
     [facets.regions]
   );
 
