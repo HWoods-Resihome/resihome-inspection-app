@@ -247,16 +247,33 @@ export async function uploadPhotoOrQueue(
       localId, inspectionRecordId, sectionId, kind: 'photo', blob, filename,
       replacesUrl: opts?.replacesUrl, lineExternalId: opts?.lineExternalId, createdAt: Date.now(),
     });
-    // Display a SMALL local thumbnail in grids (so a photo-heavy offline session
-    // doesn't decode dozens of full-res bitmaps and OOM-crash iOS), but ALSO keep
-    // a FULL-RES local blob so the full-size viewer shows the sharp original (with
-    // a readable burned-in stamp) — mapped via registerDraftFullRes. Both are
-    // local blob bytes (not decoded until shown); the full-res is freed on sync.
-    const thumb = await makeThumbBlob(blob, 400);
-    const url = URL.createObjectURL(thumb || blob);   // small thumb → grids + the photoUrls value
-    const fullUrl = URL.createObjectURL(blob);         // full-res → the viewer
-    urlByLocalId.set(localId, { displayUrl: url, revokables: [url, fullUrl] });
-    registerDraftFullRes(url, fullUrl);
+    // Build the display URL for this draft. While a camera is open on iOS, do
+    // NOT decode the full-res blob to make a thumbnail: the section grid is HIDDEN
+    // during capture (RateCardForm gates it on !anyCameraOpen) and the in-camera
+    // strip shows its OWN small thumb — so makeThumbBlob's full-res
+    // createImageBitmap is a per-shot memory SPIKE that nothing on screen needs,
+    // and stacked across rapid shots on WebKit's tight ceiling it jettisons the
+    // content process (the black screen / boot-out on the 2nd photo, exactly what
+    // 6/13 — which had no such decode — never hit). Use the full blob directly; it
+    // uploads immediately and is swapped for a proxied server thumbnail on sync,
+    // and PhotoThumb self-heals the grid. Off-camera (and on Android) we still
+    // build the small local thumb + full-res viewer blob as before.
+    let url: string;
+    if (IS_IOS_WEBKIT && isAnyCameraOpen()) {
+      url = URL.createObjectURL(blob);
+      urlByLocalId.set(localId, { displayUrl: url, revokables: [url] });
+    } else {
+      // Display a SMALL local thumbnail in grids (so a photo-heavy offline session
+      // doesn't decode dozens of full-res bitmaps and OOM-crash iOS), but ALSO keep
+      // a FULL-RES local blob so the full-size viewer shows the sharp original (with
+      // a readable burned-in stamp) — mapped via registerDraftFullRes. Both are
+      // local blob bytes (not decoded until shown); the full-res is freed on sync.
+      const thumb = await makeThumbBlob(blob, 400);
+      url = URL.createObjectURL(thumb || blob);   // small thumb → grids + the photoUrls value
+      const fullUrl = URL.createObjectURL(blob);  // full-res → the viewer
+      urlByLocalId.set(localId, { displayUrl: url, revokables: [url, fullUrl] });
+      registerDraftFullRes(url, fullUrl);
+    }
     void requestPhotoBackgroundSync();
     kickFlush(); // upload promptly in the background (during the session too)
     return url;
