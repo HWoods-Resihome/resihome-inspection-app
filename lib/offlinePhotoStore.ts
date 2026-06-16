@@ -17,7 +17,6 @@
 import { compressToJpeg, uploadJpegBlob, uploadVideo, toJpegName } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
 import { isQuotaError, StorageFullError } from '@/lib/storageQuota';
-import { registerSyncedBlob } from '@/lib/photoDisplay';
 
 export type QueuedPhoto = {
   localId: string;
@@ -89,6 +88,44 @@ function notifyPhotoSynced(info: PhotoSyncedInfo): void {
 
 function idbAvailable(): boolean {
   return typeof window !== 'undefined' && 'indexedDB' in window;
+}
+
+/**
+ * Build a SMALL (~`maxEdge`px) jpeg thumbnail blob from a full-res photo blob.
+ *
+ * The form displays queued photos as tiny tiles. If the displayed url points at
+ * the FULL-RES blob, the browser decodes the entire 1280–2048px bitmap (~5–12MB
+ * each) per tile — and a photo-heavy OFFLINE inspection (where nothing can sync
+ * to a small server thumbnail) decodes dozens at once and OOM-crashes the iOS
+ * WebKit process ("A problem repeatedly occurred"). So we show a small LOCAL
+ * thumbnail blob instead; the full-res original still rides in IndexedDB and is
+ * what actually uploads. Best-effort — returns null if decoding isn't possible,
+ * and the caller falls back to the full-res blob.
+ */
+async function makeThumbBlob(blob: Blob, maxEdge = 400): Promise<Blob | null> {
+  if (typeof document === 'undefined' || typeof createImageBitmap !== 'function') return null;
+  let bmp: ImageBitmap | null = null;
+  try {
+    // Where supported, decode straight to the target size (lowest peak memory);
+    // otherwise decode then downscale on a canvas (transient spike, released).
+    try { bmp = await createImageBitmap(blob, { resizeWidth: maxEdge, resizeQuality: 'medium' } as any); }
+    catch { bmp = await createImageBitmap(blob); }
+    const scale = Math.min(1, maxEdge / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const out = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/jpeg', 0.7));
+    canvas.width = 0; canvas.height = 0; // free the backing store now (iOS)
+    return out;
+  } catch {
+    return null;
+  } finally {
+    try { bmp?.close(); } catch { /* noop */ }
+  }
 }
 
 /**
@@ -177,7 +214,11 @@ export async function uploadPhotoOrQueue(
       localId, inspectionRecordId, sectionId, kind: 'photo', blob, filename,
       replacesUrl: opts?.replacesUrl, lineExternalId: opts?.lineExternalId, createdAt: Date.now(),
     });
-    const url = URL.createObjectURL(blob);
+    // Display a SMALL local thumbnail (not the full-res blob) so a photo-heavy
+    // offline session doesn't decode dozens of full-res bitmaps and OOM-crash iOS.
+    // The full-res original stays in IndexedDB and is what uploads.
+    const thumb = await makeThumbBlob(blob, 400);
+    const url = URL.createObjectURL(thumb || blob);
     urlByLocalId.set(localId, { displayUrl: url, revokables: [url] });
     void requestPhotoBackgroundSync();
     kickFlush(); // upload promptly in the background (during the session too)
@@ -233,7 +274,8 @@ export async function uploadVideoEntryOrQueue(
       blob: posterBlob, filename, videoBlob: videoFile, videoType: videoFile.type || 'video/mp4',
       createdAt: Date.now(),
     });
-    const pObj = URL.createObjectURL(posterBlob);
+    const pThumb = await makeThumbBlob(posterBlob, 400);
+    const pObj = URL.createObjectURL(pThumb || posterBlob);
     const vObj = URL.createObjectURL(videoFile);
     const entry = makeVideoEntry(pObj, vObj);
     urlByLocalId.set(localId, { displayUrl: entry, revokables: [pObj, vObj] });
@@ -281,11 +323,16 @@ export async function rehydrateQueuedPhotos(
     let entry = urlByLocalId.get(r.localId);
     if (!entry) {
       if (r.kind === 'video' && r.videoBlob) {
-        const pObj = URL.createObjectURL(r.blob);
+        // Poster shown small; the clip itself isn't decoded as an image.
+        const pThumb = await makeThumbBlob(r.blob, 400);
+        const pObj = URL.createObjectURL(pThumb || r.blob);
         const vObj = URL.createObjectURL(r.videoBlob);
         entry = { displayUrl: makeVideoEntry(pObj, vObj), revokables: [pObj, vObj] };
       } else {
-        const url = URL.createObjectURL(r.blob);
+        // Small thumbnail for display (sequential decode bounds peak memory on a
+        // heavy reopen); full-res original stays in IndexedDB for upload.
+        const thumb = await makeThumbBlob(r.blob, 400);
+        const url = URL.createObjectURL(thumb || r.blob);
         entry = { displayUrl: url, revokables: [url] };
       }
       urlByLocalId.set(r.localId, entry);
@@ -354,12 +401,11 @@ async function doFlushQueuedPhotos(
     // (clears "Saved Offline" live; Done then returns real URLs, not stale drafts).
     if (oldUrl) notifyPhotoSynced({ localId: rec.localId, oldUrl, newUrl });
     if (entry) {
-      // KEEP the local blob alive and map it to the real url, so the on-screen
-      // thumbnail keeps showing the same image across the offline->online swap
-      // instead of flashing blank/broken while the network image loads. (Was:
-      // revoke immediately here — the cause of the flicker / "?" tile. The blob
-      // holds only compressed jpeg bytes and the cache is capped + revokes there.)
-      registerSyncedBlob(newUrl, oldUrl);
+      // Free the local draft thumbnail; the form swaps to the real url, whose
+      // small tile loads through the resize proxy. (We do NOT keep the draft blob
+      // mapped for display anymore: it's now a small THUMBNAIL, so reusing it for
+      // the full-size viewer would show a blurry image.)
+      for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
       urlByLocalId.delete(rec.localId);
     }
     synced++;
