@@ -443,6 +443,9 @@ export function CameraCapture({
   // a stall (retry play, then surface a fallback), and clear it on first frame.
   const [previewReady, setPreviewReady] = useState(false);
   const [previewStuck, setPreviewStuck] = useState(false);
+  // True while the camera track is muted/interrupted and we're re-acquiring —
+  // drives a "Reconnecting camera…" cover so the black frame is never shown.
+  const [reconnecting, setReconnecting] = useState(false);
   const previewWatchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Hard escape from a hung start: if NO frame paints within this window — even
   // when getUserMedia itself never resolves (iOS sometimes hangs it when the
@@ -477,6 +480,8 @@ export function CameraCapture({
   const stopStream = useCallback(() => {
     if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; }
     if (stuckTimerRef.current) { clearTimeout(stuckTimerRef.current); stuckTimerRef.current = null; }
+    if (muteOverlayTimerRef.current) { clearTimeout(muteOverlayTimerRef.current); muteOverlayTimerRef.current = null; }
+    if (muteReacqTimerRef.current) { clearTimeout(muteReacqTimerRef.current); muteReacqTimerRef.current = null; }
     if (streamRef.current) {
       for (const track of streamRef.current.getTracks()) {
         track.stop();
@@ -494,6 +499,11 @@ export function CameraCapture({
   // event handler defined inside startStream can re-invoke it.
   const reacquireBudgetRef = useRef(3);
   const startStreamRef = useRef<(attempt?: number) => void>();
+  // Cover a muted/interrupted camera with a "Reconnecting…" overlay so the
+  // inspector never sees a raw black screen while we re-acquire. Debounced (a
+  // normal capture can briefly mute the track) so it only appears on a real stall.
+  const muteOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const muteReacqTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const startStream = useCallback(async (attempt = 0) => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
@@ -600,12 +610,28 @@ export function CameraCapture({
       {
         const vtrack = stream.getVideoTracks?.()[0];
         if (vtrack) {
+          const clearMuteTimers = () => {
+            if (muteOverlayTimerRef.current) { clearTimeout(muteOverlayTimerRef.current); muteOverlayTimerRef.current = null; }
+            if (muteReacqTimerRef.current) { clearTimeout(muteReacqTimerRef.current); muteReacqTimerRef.current = null; }
+          };
           vtrack.onunmute = () => {
+            // Came back on its own → drop the cover and resume.
+            clearMuteTimers();
+            setReconnecting(false);
             const v = videoRef.current;
             if (v && v.paused) v.play().catch(() => { /* non-fatal */ });
           };
           vtrack.onmute = () => {
-            window.setTimeout(() => {
+            // Show "Reconnecting…" only if the mute PERSISTS past a brief blip, so a
+            // normal capture (which can momentarily mute the track) never flickers
+            // the cover.
+            clearMuteTimers();
+            muteOverlayTimerRef.current = setTimeout(() => {
+              const t = streamRef.current?.getVideoTracks?.()[0];
+              if (t && (t as any).muted === true) setReconnecting(true);
+            }, 250);
+            // If it hasn't recovered shortly, re-acquire PROMPT-FREE (bounded).
+            muteReacqTimerRef.current = setTimeout(() => {
               const t = streamRef.current?.getVideoTracks?.()[0];
               const interrupted = !t || t.readyState === 'ended' || (t as any).muted === true || (videoRef.current?.videoWidth || 0) === 0;
               const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
@@ -613,10 +639,11 @@ export function CameraCapture({
                 reacquireBudgetRef.current -= 1;
                 startStreamRef.current?.();
               }
-            }, 1200);
+            }, 1100);
           };
           vtrack.onended = () => {
             const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
+            if (visible && !recordingRef.current) setReconnecting(true);
             if (visible && !recordingRef.current && reacquireBudgetRef.current > 0) {
               reacquireBudgetRef.current -= 1;
               startStreamRef.current?.();
@@ -647,7 +674,7 @@ export function CameraCapture({
         // phone-camera fallback if frames never arrive (e.g. on an active call).
         const vid = videoRef.current as any;
         const markReady = () => {
-          setPreviewReady(true); setPreviewStuck(false);
+          setPreviewReady(true); setPreviewStuck(false); setReconnecting(false);
           if (stuckTimerRef.current) { clearTimeout(stuckTimerRef.current); stuckTimerRef.current = null; }
         };
         if (typeof vid.requestVideoFrameCallback === 'function') {
@@ -668,7 +695,7 @@ export function CameraCapture({
           const stop = () => { if (previewWatchdogRef.current) { clearInterval(previewWatchdogRef.current); previewWatchdogRef.current = null; } };
           if (!vv || !streamRef.current) { stop(); return; }
           if (vv.videoWidth > 0 && vv.readyState >= 2) {
-            setPreviewReady(true); setPreviewStuck(false);
+            setPreviewReady(true); setPreviewStuck(false); setReconnecting(false);
             if (stuckTimerRef.current) { clearTimeout(stuckTimerRef.current); stuckTimerRef.current = null; }
             stop(); return;
           }
@@ -1242,7 +1269,7 @@ export function CameraCapture({
       }
 
       const healthy = !dead && !muted && !paused && !noSize && !stuckBlack;
-      if (healthy) { previewRecoverTicksRef.current = 0; blackStuckTicksRef.current = 0; return; }
+      if (healthy) { previewRecoverTicksRef.current = 0; blackStuckTicksRef.current = 0; setReconnecting(false); return; }
 
       // A dead/muted track or a perfectly-uniform stuck-black frame will NOT come
       // back by replaying the same stream — the camera was interrupted. Re-acquire
@@ -1250,6 +1277,7 @@ export function CameraCapture({
       // facingMode only, so no stale-deviceId re-prompt), BOUNDED so it can never
       // loop. Out of budget → surface Retry / Use Phone Camera.
       if (dead || muted || stuckBlack) {
+        setReconnecting(true); // cover the black frame with "Reconnecting…"
         blackStuckTicksRef.current += 1;
         if (blackStuckTicksRef.current >= 2) {
           blackStuckTicksRef.current = 0;
@@ -2788,6 +2816,17 @@ export function CameraCapture({
               // layer that Chrome re-rasterizes at scale thresholds (~2×) — which was
               // the new hitch around 2×.
             />
+            {/* "Reconnecting camera…" — covers the BLACK frame the instant the
+                iOS camera track mutes/interrupts (after a capture, an app switch,
+                a call), while we auto re-acquire. So the inspector sees a clear
+                recovery state, never a dead black screen. Hidden the moment a real
+                frame paints again (markReady / watchdog / onunmute). */}
+            {reconnecting && previewReady && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/90 px-6 text-center">
+                <div className="w-9 h-9 rounded-full border-2 border-white/25 border-t-white animate-spin" />
+                <p className="text-white/85 text-sm font-heading">Reconnecting camera…</p>
+              </div>
+            )}
             {/* "Starting camera…" — shown over the (black) preview until the
                 first frame paints, so a slow/stalled start reads as progress,
                 not a broken screen. If it stalls (another app or an active phone
