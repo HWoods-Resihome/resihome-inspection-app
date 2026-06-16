@@ -854,7 +854,7 @@ export function CameraCapture({
   // Chrome; iOS Safari/Chrome ignore it but autofocus continuously anyway, so
   // the reticle still gives feedback there. Reverts to continuous AF after a
   // moment so the preview doesn't stay locked on that spot.
-  const focusAt = useCallback((clientX: number, clientY: number) => {
+  const focusAt = useCallback(async (clientX: number, clientY: number) => {
     // Measure against the viewport container (NOT the <video>, which is scaled by
     // the CSS digital zoom — its bounding box would throw off both the focus
     // point and the reticle).
@@ -880,18 +880,34 @@ export function CameraCapture({
     if (!track) return;
     try {
       const caps: any = track.getCapabilities?.() || {};
-      const adv: any[] = [];
-      if ('pointsOfInterest' in caps) adv.push({ pointsOfInterest: [{ x: nx, y: ny }] });
-      // Prefer CONTINUOUS AF directed at the tapped region — it refocuses smoothly
-      // and does NOT freeze the (recording) preview the way a single-shot focus
-      // hunt does. Only fall back to single-shot if continuous isn't offered.
-      if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) adv.push({ focusMode: 'continuous' });
-      else if (Array.isArray(caps.focusMode) && caps.focusMode.includes('single-shot')) adv.push({ focusMode: 'single-shot' });
-      if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous')) adv.push({ exposureMode: 'continuous' });
-      if (!adv.length) return; // device exposes no focus controls — iOS path
-      (track.applyConstraints as any)({ advanced: adv }).catch(() => { /* unsupported */ });
-      // No revert needed — we stay in continuous AF (region-directed), so the
-      // frame keeps running and re-focuses on later scene changes too.
+      const focusModes: string[] = Array.isArray(caps.focusMode) ? caps.focusMode : [];
+      // Apply the point-of-interest and the focus mode in ONE constraint set.
+      // (Pushing them as SEPARATE `advanced` entries — the old code — let the
+      // device keep its running continuous AF and ignore the point, so the lens
+      // never actually moved: tap-to-focus looked cosmetic.) A SINGLE-SHOT hunt
+      // at the tapped point is what truly drives the lens; we hold it briefly,
+      // then return to continuous so later reframing stays sharp. During
+      // recording we stay continuous (a single-shot hunt freezes the clip).
+      const set: any = {};
+      if ('pointsOfInterest' in caps) set.pointsOfInterest = [{ x: nx, y: ny }];
+      const wantHunt = !recordingRef.current && focusModes.includes('single-shot');
+      if (wantHunt) set.focusMode = 'single-shot';
+      else if (focusModes.includes('continuous')) set.focusMode = 'continuous';
+      if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous')) set.exposureMode = 'continuous';
+      if (!Object.keys(set).length) return; // no focus controls (iOS) — reticle only
+      await (track.applyConstraints as any)({ advanced: [set] });
+      if (wantHunt) {
+        // Let the hunt settle on the point, then resume continuous AF so the
+        // preview keeps itself sharp as the inspector reframes / zooms again.
+        window.setTimeout(() => {
+          try {
+            const c: any = track.getCapabilities?.() || {};
+            if (Array.isArray(c.focusMode) && c.focusMode.includes('continuous')) {
+              (track.applyConstraints as any)({ advanced: [{ focusMode: 'continuous' }] }).catch(() => { /* noop */ });
+            }
+          } catch { /* noop */ }
+        }, 2500);
+      }
     } catch { /* best-effort */ }
   }, []);
 
