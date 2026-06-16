@@ -1,17 +1,15 @@
 name: iOS TestFlight
 
-# Manual-only. Builds the ResiWALK Capacitor iOS shell on a hosted macOS runner
-# and ships it to TestFlight. This is NATIVE-ONLY and has ZERO effect on the web
-# app: it never touches the web build and Vercel does not deploy from workflow
-# files. There is no `push`/`pull_request` trigger — nothing runs unless a human
-# presses "Run workflow" (or fires the workflow_dispatch API).
+# Builds the ResiWALK Capacitor iOS shell on a hosted macOS runner and ships it
+# to TestFlight. This is NATIVE-ONLY and has ZERO effect on the web app: it never
+# touches the web build and Vercel does not deploy from workflow files.
 #
-# Because this workflow lives on `chore/native-oauth-outbound` (NOT the default
-# branch), trigger it against that ref:
-#   gh workflow run ios-testflight.yml --ref chore/native-oauth-outbound
-# or POST .../actions/workflows/ios-testflight.yml/dispatches {"ref":"chore/native-oauth-outbound"}
-# (The Actions-tab button only appears for workflows on the default branch; put a
-# copy of this file on main later if you want the button — it won't affect the web app.)
+# This workflow lives on `chore/native-oauth-outbound` (NOT the default branch),
+# so the Actions-tab "Run workflow" button and the workflow_dispatch API only
+# work once a copy of this file is also on `main`. To run it WITHOUT touching
+# main, it triggers on push to this branch (scoped to native paths below) — so
+# pushing a native change here builds + uploads to TestFlight. `workflow_dispatch`
+# is kept too for when this file eventually lands on main.
 #
 # Required repo Secrets (Settings -> Secrets and variables -> Actions):
 #   ASC_KEY_ID      App Store Connect API Key ID
@@ -26,6 +24,15 @@ on:
         description: "Note for this build (shows in the run title)"
         required: false
         default: "Manual TestFlight build"
+  # Run on push to the native branch. Path-scoped so unrelated commits (and the
+  # web app) never spend paid macOS minutes — only native/shell/workflow changes
+  # build. (workflow_dispatch above still works once this file is on main.)
+  push:
+    branches:
+      - chore/native-oauth-outbound
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/ios-testflight.yml'
 
 concurrency:
   group: ios-testflight
