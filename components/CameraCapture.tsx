@@ -488,6 +488,13 @@ export function CameraCapture({
     }
   }, []);
 
+  // Shared with the liveness monitor + the track mute/ended handlers: a bounded
+  // budget of PROMPT-FREE re-acquires (camera interrupted → muted/ended track,
+  // which replaying can't revive), and a ref to the latest startStream so an
+  // event handler defined inside startStream can re-invoke it.
+  const reacquireBudgetRef = useRef(3);
+  const startStreamRef = useRef<(attempt?: number) => void>();
+
   const startStream = useCallback(async (attempt = 0) => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setPermissionState('unsupported');
@@ -580,6 +587,43 @@ export function CameraCapture({
         }
       }
       streamRef.current = stream;
+      // iOS interruption recovery, EVENT-DRIVEN (the reliable signal). When the
+      // OS stops feeding the camera — after a capture, an app/Control-Center
+      // switch, a call, a thermal/resource blip — the video track fires `mute`
+      // (frames stop → black preview, videoWidth→0) and later `unmute` if it
+      // resumes on its own. A muted/ended track CANNOT be revived by replaying the
+      // same stream (the poll-based monitor was too slow / unreliable here, per the
+      // on-device diagnostic m:1 w:0), so we react to the events directly: on
+      // unmute, just replay; on a mute that DOESN'T clear within a grace window,
+      // re-acquire PROMPT-FREE (permission already granted; facingMode-only), and
+      // likewise on ended — both bounded by reacquireBudgetRef so they can't loop.
+      {
+        const vtrack = stream.getVideoTracks?.()[0];
+        if (vtrack) {
+          vtrack.onunmute = () => {
+            const v = videoRef.current;
+            if (v && v.paused) v.play().catch(() => { /* non-fatal */ });
+          };
+          vtrack.onmute = () => {
+            window.setTimeout(() => {
+              const t = streamRef.current?.getVideoTracks?.()[0];
+              const interrupted = !t || t.readyState === 'ended' || (t as any).muted === true || (videoRef.current?.videoWidth || 0) === 0;
+              const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
+              if (interrupted && visible && !recordingRef.current && reacquireBudgetRef.current > 0) {
+                reacquireBudgetRef.current -= 1;
+                startStreamRef.current?.();
+              }
+            }, 1200);
+          };
+          vtrack.onended = () => {
+            const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
+            if (visible && !recordingRef.current && reacquireBudgetRef.current > 0) {
+              reacquireBudgetRef.current -= 1;
+              startStreamRef.current?.();
+            }
+          };
+        }
+      }
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => { /* play() may reject silently if autoplay is blocked; not fatal */ });
@@ -804,6 +848,9 @@ export function CameraCapture({
       }
     }
   }, [facing, lensDeviceId, stopStream, aiAssist]);
+  // Keep the ref pointing at the latest startStream so the track mute/ended
+  // handlers (defined inside startStream) can re-invoke the current one.
+  startStreamRef.current = startStream;
 
   // Mount/unmount: start/stop the camera stream
   useEffect(() => {
@@ -1114,9 +1161,8 @@ export function CameraCapture({
   const diagRef = useRef<HTMLSpanElement | null>(null);
   const sawLightRef = useRef(false);
   const blackStuckTicksRef = useRef(0);
-  const reacquireBudgetRef = useRef(3);
-  const startStreamRef = useRef(startStream);
-  startStreamRef.current = startStream;
+  // reacquireBudgetRef + startStreamRef are declared up by stopStream (shared with
+  // the track mute/ended handlers).
   const sampleLuma = useCallback((v: HTMLVideoElement): { mean: number; variance: number } | null => {
     try {
       const c = sampleCanvasRef.current || (sampleCanvasRef.current = document.createElement('canvas'));
