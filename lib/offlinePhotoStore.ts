@@ -230,10 +230,24 @@ export async function uploadPhotoOrQueue(
   // the inspector snaps freely, taps Done, returns to the inspection, and the
   // photos upload IN THE BACKGROUND from there (the form's flush is kicked the
   // moment the camera closes, and retries every 15s + on reconnect). Nothing
-  // ever blocks on a slow/flaky upload. (No IndexedDB — e.g. private mode — is
-  // the only case we must upload inline.)
-  if (idbAvailable()) return queueDraft();
-  return uploadJpegBlob(blob, filename, { attempts: 2, timeoutMs: 20000 });
+  // ever blocks on a slow/flaky upload.
+  if (idbAvailable()) {
+    try {
+      return await queueDraft();
+    } catch (e) {
+      // Genuine out-of-storage → surface it so the inspector frees space; the
+      // photo can't be queued and we shouldn't pretend otherwise.
+      if (e instanceof StorageFullError || isQuotaError(e)) throw e;
+      // The IndexedDB write failed for another reason. iOS Safari in particular
+      // rejects IDB writes intermittently (and in private / locked-down modes),
+      // which used to dead-end a captured photo on "couldn't be saved / Retry"
+      // with NOTHING queued to sync — so it never uploaded even after reconnect.
+      // Don't lose the shot: fall through to a direct inline upload instead.
+      console.warn('[offlinePhotoStore] queue write failed; uploading inline instead', e);
+    }
+  }
+  // No IndexedDB (private mode) OR the queue write failed → upload inline.
+  return uploadJpegBlob(blob, filename, { attempts: 3, timeoutMs: 20000 });
 }
 
 /**
@@ -285,8 +299,17 @@ export async function uploadVideoEntryOrQueue(
   };
   // QUEUE-FIRST (see uploadPhotoOrQueue): return a draft entry now; the
   // background flush uploads the poster + clip after the camera closes.
-  if (idbAvailable()) return queueDraft();
-  const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename, { attempts: 2, timeoutMs: 20000 }), uploadVideo(videoFile)]);
+  if (idbAvailable()) {
+    try {
+      return await queueDraft();
+    } catch (e) {
+      if (e instanceof StorageFullError || isQuotaError(e)) throw e;
+      // IDB write failed (iOS Safari intermittent / private mode) — don't lose
+      // the clip; fall through to a direct inline upload (see uploadPhotoOrQueue).
+      console.warn('[offlinePhotoStore] video queue write failed; uploading inline instead', e);
+    }
+  }
+  const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename, { attempts: 3, timeoutMs: 20000 }), uploadVideo(videoFile)]);
   return makeVideoEntry(pUrl, vUrl);
 }
 
