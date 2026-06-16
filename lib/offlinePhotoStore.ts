@@ -17,6 +17,7 @@
 import { compressToJpeg, uploadJpegBlob, uploadVideo, toJpegName } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
 import { isQuotaError, StorageFullError } from '@/lib/storageQuota';
+import { isAnyCameraOpen } from '@/lib/cameraOpenState';
 
 export type QueuedPhoto = {
   localId: string;
@@ -393,6 +394,18 @@ export async function flushQueuedPhotos(
   onSynced: FlushOnSynced,
 ): Promise<FlushResult> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
+  // SUSPEND uploads while an in-app camera overlay is open. Uploading a photo
+  // (network + blob handling) at the same instant the camera is capturing the
+  // NEXT shot (a full-res canvas decode + JPEG re-encode) spikes memory and
+  // jettisons the iOS WebKit content process — the "black screen / freeze after
+  // the 2nd photo". Captured photos stay safely queued in IndexedDB and shown
+  // from their local thumbnails; the form drains the batch the moment the camera
+  // closes, and every ~10s while it's closed. Offline behavior is unchanged (the
+  // queue persists and syncs on reconnect once the camera is shut).
+  if (isAnyCameraOpen()) {
+    const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
+    return { synced: 0, remaining };
+  }
   const existing = flushInFlight.get(inspectionRecordId);
   if (existing) return existing;
   const run = doFlushQueuedPhotos(inspectionRecordId, onSynced);

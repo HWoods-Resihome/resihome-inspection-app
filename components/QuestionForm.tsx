@@ -1072,7 +1072,10 @@ export function QuestionForm({
     // entered offline that were stashed so they survive closing the app).
     const kick = () => { void runPhotoFlushRef.current(); void flushOutbox(); };
     window.addEventListener('online', kick);
-    const iv = setInterval(kick, 15000);
+    // Batch every 10s in the background (photo uploads are suspended while a
+    // camera overlay is open — see flushQueuedPhotos — so this tick only does
+    // work once the camera is closed).
+    const iv = setInterval(kick, 10000);
     const unsub = onPhotoFlushResume(() => { void runPhotoFlushRef.current(); });
     // iOS suspends JS timers when the PWA is backgrounded / the screen locks, and
     // it has NO Background Sync — so a foregrounded app is the only window in
@@ -1088,6 +1091,18 @@ export function QuestionForm({
       document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('pageshow', onVisible);
     };
   }, [readOnly]);
+
+  // When the in-app camera CLOSES, drain the photos captured during that session
+  // right away. Photo uploads are suspended while a camera is open (to keep iOS
+  // from OOM-crashing when an upload overlaps the next capture), so closing the
+  // camera is exactly when the queued batch should sync.
+  const prevCameraOpenRef = useRef(cameraOpenAnywhere);
+  useEffect(() => {
+    if (prevCameraOpenRef.current && !cameraOpenAnywhere) {
+      void runPhotoFlushRef.current();
+    }
+    prevCameraOpenRef.current = cameraOpenAnywhere;
+  }, [cameraOpenAnywhere]);
 
   // (Legacy widget visibility — the synthetic HVAC/Smart widgets were replaced
   // by the reused FinalChecklist, so every remaining question is always shown.)
