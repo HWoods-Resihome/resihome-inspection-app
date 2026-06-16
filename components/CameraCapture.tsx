@@ -512,7 +512,14 @@ export function CameraCapture({
       // When a specific back lens is chosen, pin it by deviceId; otherwise let
       // the OS pick the default for the facing direction.
       const videoConstraint: MediaTrackConstraints = {
-        ...(lensDeviceId && facing === 'environment'
+        // iOS: ALWAYS open by facingMode and ignore any stored lens deviceId.
+        // Pinning an exact deviceId on iOS Safari is unreliable — a stale/exact id
+        // can reject, forcing the fallback path to fire a SECOND getUserMedia,
+        // which on iOS re-prompts for camera permission (the repeat "allow camera"
+        // + transient "Camera unavailable" seen in the field). The lens chips are
+        // hidden on iOS anyway, so there's no lens to honor. This restores the
+        // simple, reliable 6/13 acquisition (one getUserMedia, facingMode only).
+        ...(!IS_IOS && lensDeviceId && facing === 'environment'
           ? { deviceId: { exact: lensDeviceId } }
           : { facingMode: { ideal: facing } }),
         width: { ideal: CAPTURE_WIDTH },
@@ -627,7 +634,12 @@ export function CameraCapture({
       }
 
       // ----- Manual lens selector: discover back lenses + note the active one -----
+      // iOS: SKIP entirely. The lens chips + hardware-zoom selector are hidden on
+      // iOS (pure-digital camera), and the discovery's validation timer below can
+      // call setLensDeviceId → re-run startStream → another getUserMedia/re-prompt.
+      // 6/13-simple: open once by facingMode and leave it alone.
       void (async () => {
+        if (IS_IOS) { setBackLenses([]); setHwZoomCap(null); return; }
         try {
           const track = streamRef.current?.getVideoTracks?.()[0];
           const curId = ((track?.getSettings?.() as any)?.deviceId as string) || null;
@@ -683,7 +695,9 @@ export function CameraCapture({
       // Light validation: if the lens we just switched TO is dead (a depth/IR
       // sensor that opened but yields no video), revert to the previous lens.
       // Only triggers on a genuinely dead track — never false-reverts a real lens.
-      if (lensDeviceId && lensDeviceId !== prevLensIdRef.current) {
+      // (Skipped on iOS — no lens switching there, and setLensDeviceId would
+      // re-run startStream → another getUserMedia/re-prompt.)
+      if (!IS_IOS && lensDeviceId && lensDeviceId !== prevLensIdRef.current) {
         const tappedId = lensDeviceId;
         setTimeout(() => {
           const t = streamRef.current?.getVideoTracks?.()[0];
