@@ -1746,6 +1746,28 @@ export function CameraCapture({
     }
   }, [addressSnapshot, buildGeoStampLines]);
 
+  // Small (~400px) data-URL thumbnail for an arbitrary image File — used so
+  // IMPORTED / native-camera photos render small in the strip too (the shutter
+  // path already passes a thumb). Without this the strip would show their
+  // full-res blob and add to the iOS memory crash. Best-effort → undefined.
+  const fileThumbDataUrl = useCallback(async (file: File): Promise<string | undefined> => {
+    if (typeof createImageBitmap !== 'function' || !file.type.startsWith('image/')) return undefined;
+    let bmp: ImageBitmap | null = null;
+    try {
+      try { bmp = await createImageBitmap(file, { resizeWidth: 400, resizeQuality: 'medium' } as any); }
+      catch { bmp = await createImageBitmap(file); }
+      const scale = Math.min(1, 400 / Math.max(bmp.width, bmp.height));
+      const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const ctx = c.getContext('2d'); if (!ctx) return undefined;
+      ctx.drawImage(bmp, 0, 0, w, h);
+      const url = c.toDataURL('image/jpeg', 0.6);
+      c.width = 0; c.height = 0;
+      return url;
+    } catch { return undefined; }
+    finally { try { bmp?.close(); } catch { /* noop */ } }
+  }, []);
+
   const handleNativeFiles = useCallback((files: FileList | null) => {
     if (!files || files.length === 0) return;
     const room = Math.max(0, maxPhotos - itemsRef.current.filter((it) => !it.preexisting).length);
@@ -1753,10 +1775,15 @@ export function CameraCapture({
     if (picked.length < files.length) {
       void dialog.alert(`Only the first ${room} photo(s) were added (max ${maxPhotos} per session).`);
     }
-    // Stamp (async decode→draw→encode), then enqueue each as it finishes so the
-    // strip fills in progressively and the burned-in evidence matches in-app shots.
-    for (const f of picked) void stampImportedFile(f).then((stamped) => enqueueFile(stamped));
-  }, [enqueueFile, maxPhotos, dialog, stampImportedFile]);
+    // Stamp (async decode→draw→encode), build a SMALL strip thumbnail (so imported
+    // photos don't render full-res in the strip — iOS memory), then enqueue each.
+    for (const f of picked) {
+      void stampImportedFile(f).then(async (stamped) => {
+        const thumb = await fileThumbDataUrl(stamped);
+        enqueueFile(stamped, thumb);
+      });
+    }
+  }, [enqueueFile, maxPhotos, dialog, stampImportedFile, fileThumbDataUrl]);
 
   // Cached ImageCapture for the current track (recreated only when the track
   // changes), so rapid fire pays no per-shot construction cost.
