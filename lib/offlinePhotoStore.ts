@@ -119,6 +119,16 @@ function idbAvailable(): boolean {
 // so a queued decode never risks the capture.
 let _thumbChain: Promise<unknown> = Promise.resolve();
 function makeThumbBlob(blob: Blob, maxEdge = 400): Promise<Blob | null> {
+  // PREEMPTIVE iOS SAFEGUARD (central, covers every caller — photo, video poster,
+  // and rehydrate). While a camera is open on iOS, NEVER decode a full-res bitmap
+  // to build a thumbnail: createImageBitmap allocates a GPU/IOSurface that iOS is
+  // slow to release, and stacked across rapid shots it jettisons the WebKit
+  // content process — the 2nd-photo black screen. The flawless 6/13 build had no
+  // such decode at all. Callers already handle null by falling back to the full
+  // blob, which uploads immediately and is swapped for a proxied server thumbnail
+  // on sync (PhotoThumb self-heals the grid). Off-camera and on Android, the
+  // small-thumbnail path is unchanged.
+  if (IS_IOS_WEBKIT && isAnyCameraOpen()) return Promise.resolve(null);
   const run = _thumbChain.then(() => _makeThumbBlob(blob, maxEdge));
   _thumbChain = run.then(() => undefined, () => undefined);
   return run;
