@@ -19,6 +19,12 @@ import { makeVideoEntry } from '@/lib/media';
 import { isQuotaError, StorageFullError } from '@/lib/storageQuota';
 import { isAnyCameraOpen } from '@/lib/cameraOpenState';
 
+// iOS/iPadOS WebKit (incl. Chrome on iOS, which is WebKit). Several canvas/bitmap
+// paths misbehave here, so we branch on it below.
+const IS_IOS_WEBKIT = typeof navigator !== 'undefined'
+  && (/iP(hone|ad|od)/i.test(navigator.userAgent || '')
+    || (/Macintosh/.test(navigator.userAgent || '') && ((navigator as any).maxTouchPoints || 0) > 1));
+
 export type QueuedPhoto = {
   localId: string;
   inspectionRecordId: string;
@@ -107,10 +113,22 @@ async function makeThumbBlob(blob: Blob, maxEdge = 400): Promise<Blob | null> {
   if (typeof document === 'undefined' || typeof createImageBitmap !== 'function') return null;
   let bmp: ImageBitmap | null = null;
   try {
-    // Where supported, decode straight to the target size (lowest peak memory);
-    // otherwise decode then downscale on a canvas (transient spike, released).
-    try { bmp = await createImageBitmap(blob, { resizeWidth: maxEdge, resizeQuality: 'medium' } as any); }
-    catch { bmp = await createImageBitmap(blob); }
+    // iOS WebKit's createImageBitmap RESIZE options (resizeWidth/resizeQuality)
+    // frequently decode to an ALL-BLACK bitmap — the cause of black thumbnail
+    // tiles on iPhone while the full-res photo (same blob) opens fine. The catch
+    // below only traps THROWS, not a silently-black result, so on iOS we skip the
+    // resize path and downscale on the canvas instead. This decodes one full-res
+    // bitmap transiently (released immediately via .close()), and makeThumbBlob is
+    // awaited one photo at a time — NOT the dozens-at-once grid decode the resize
+    // option was guarding against, so the memory cost is safe.
+    if (IS_IOS_WEBKIT) {
+      bmp = await createImageBitmap(blob);
+    } else {
+      // Elsewhere, decode straight to target size (lowest peak memory); fall back
+      // to decode-then-downscale if the resize option isn't supported.
+      try { bmp = await createImageBitmap(blob, { resizeWidth: maxEdge, resizeQuality: 'medium' } as any); }
+      catch { bmp = await createImageBitmap(blob); }
+    }
     const scale = Math.min(1, maxEdge / Math.max(bmp.width, bmp.height));
     const w = Math.max(1, Math.round(bmp.width * scale));
     const h = Math.max(1, Math.round(bmp.height * scale));
