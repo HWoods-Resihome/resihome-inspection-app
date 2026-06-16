@@ -237,6 +237,12 @@ export function QuestionForm({
   // way the rate card does: one JSON-blob Answer record (answer_id_external
   // FINALCHECKLIST-<id>). No line-item behavior here (no onAddLine).
   const FC_ONLY = useMemo(() => ['hvac_air_filters', 'smart_home_tech', 'utilities'], []);
+  // Offline-queue sectionId tag for Final Checklist photos (HVAC label stickers,
+  // etc.). The camKey (`qid:key`) rides in lineExternalId. The flush recognizes
+  // this tag and swaps the synced URL back into fcAnswers — WITHOUT it, FC photos
+  // upload but their draft blob: URL is revoked and never replaced, leaving the
+  // broken "?" tile. (Mirrors RateCardForm's handling.)
+  const FC_PHOTO_SECTION = '__final_checklist__';
   const [fcAnswers, setFcAnswers] = useState<FcAnswers>({});
   const fcRecordIdRef = useRef<string | null>(null);
   const fcHydratedRef = useRef(false);
@@ -916,6 +922,28 @@ export function QuestionForm({
     if (readOnly || !photoRehydratedRef.current) return;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
     await flushQueuedPhotos(inspectionRecordId, ({ sectionId, oldUrl, newUrl, replacesUrl, lineExternalId }) => {
+      // Final Checklist photo (HVAC label stickers, etc.): swap the draft/original
+      // URL for the real one inside fcAnswers (photoUrls + per-slot stickerPhotos),
+      // then persist. MUST run before the lineExternalId guard — FC photos carry
+      // their camKey in lineExternalId. Without this the synced photo's draft URL
+      // is revoked and never replaced (the broken "?" tile + "photo disappeared").
+      if (sectionId === FC_PHOTO_SECTION) {
+        const matchesFc = (u: string) => u === oldUrl || (!!replacesUrl && u === replacesUrl);
+        setFcAnswers((cur) => {
+          let changed = false;
+          const swap = (arr?: string[]) => (arr || []).map((u) => (matchesFc(u) ? ((changed = true), newUrl) : u));
+          const next: FcAnswers = {};
+          for (const [qid, a] of Object.entries(cur)) {
+            const n: FcAnswerState = { ...a };
+            if (a.photoUrls) n.photoUrls = swap(a.photoUrls);
+            if (a.stickerPhotos) n.stickerPhotos = Object.fromEntries(Object.entries(a.stickerPhotos).map(([k, v]) => [k, swap(v)]));
+            next[qid] = n;
+          }
+          if (changed) void saveFc(next);
+          return changed ? next : cur;
+        });
+        return;
+      }
       if (lineExternalId) return;
       const matches = (u: string) => u === oldUrl || (!!replacesUrl && u === replacesUrl);
       if (sectionId.includes('::')) {
@@ -938,7 +966,7 @@ export function QuestionForm({
         return { ...cur, [sectionId]: arr.map((u) => (matches(u) ? newUrl : u)) };
       });
     }).catch(() => {});
-  }, [readOnly, inspectionRecordId]);
+  }, [readOnly, inspectionRecordId, saveFc]);
   const runPhotoFlushRef = useRef(runPhotoFlush);
   runPhotoFlushRef.current = runPhotoFlush;
 
@@ -949,10 +977,33 @@ export function QuestionForm({
     void rehydrateQueuedPhotos(inspectionRecordId).then((drafts) => {
       const bySection: Record<string, string[]> = {};
       const byQuestion: Record<string, string[]> = {};
+      // Final Checklist drafts (HVAC label stickers, etc.) carry their camKey
+      // (`qid:key`) in lineExternalId — restore them into fcAnswers so a draft
+      // taken offline re-shows in its slot after a reopen.
+      const fcDrafts = drafts.filter((d) => d.sectionId === FC_PHOTO_SECTION && !!d.lineExternalId);
       for (const d of drafts) {
         if (d.lineExternalId) continue;
         if (d.sectionId.includes('::')) (byQuestion[d.sectionId] = byQuestion[d.sectionId] || []).push(d.url);
         else (bySection[d.sectionId] = bySection[d.sectionId] || []).push(d.url);
+      }
+      if (fcDrafts.length) {
+        setFcAnswers((cur) => {
+          const next: FcAnswers = { ...cur };
+          for (const d of fcDrafts) {
+            const [qid, key] = (d.lineExternalId || '').split(':');
+            if (!qid || !key) continue;
+            const a: FcAnswerState = { ...(next[qid] || {}) };
+            if (key === 'photo') {
+              a.photoUrls = Array.from(new Set([...(a.photoUrls || []), d.url]));
+            } else {
+              const sp = { ...(a.stickerPhotos || {}) };
+              sp[key] = Array.from(new Set([...(sp[key] || []), d.url]));
+              a.stickerPhotos = sp;
+            }
+            next[qid] = a;
+          }
+          return next;
+        });
       }
       if (Object.keys(bySection).length) {
         setSectionPhotos((cur) => {
@@ -1379,7 +1430,7 @@ export function QuestionForm({
       openAllToken={fcOpenToken}
       answers={fcAnswers}
       onPatch={onFcPatch}
-      uploadPhoto={(file, fieldKey) => uploadPhotoOrQueue(file, inspectionRecordId, fieldKey || 'fc')}
+      uploadPhoto={(file, fieldKey) => uploadPhotoOrQueue(file, inspectionRecordId, FC_PHOTO_SECTION, { lineExternalId: fieldKey })}
       propertyName={propertyName}
       propertyRecordId={propertyRecordId}
       propertyValues={propertyValues}
