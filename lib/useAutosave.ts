@@ -70,6 +70,10 @@ export function useAutosave(opts: Options) {
   // Retry backoff after failures so we don't hammer the network (esp. offline).
   const consecutiveErrorsRef = useRef(0);
   const errorBackoffUntilRef = useRef(0);
+  // Per-answer count of flushes where the server did NOT echo the answer back in
+  // `results` (neither a success nor a reported failure). After a few we GIVE UP
+  // re-saving it, so a mismatch can't pin the form on "Saving…" forever.
+  const unconfirmedRef = useRef<Map<string, number>>(new Map());
   // Audit: log ONE "edited" event per editing session — on the first successful
   // save after opening the inspection, and again after the app is re-entered
   // (backgrounded long enough then reopened). Not every keystroke. Reset on
@@ -242,27 +246,62 @@ export function useAutosave(opts: Options) {
       console.log(`[autosave] saved OK: ${(data.results || []).length} records persisted`);
 
       // Update record IDs in our state map based on what came back
-      const results: Array<{ recordId: string; answerIdExternal: string }> = data.results || [];
+      const results: Array<{ recordId: string; answerIdExternal: string; failed?: boolean; reason?: string }> = data.results || [];
       const externalIdToKey = new Map<string, string>();
       for (const { key, state } of toUpsert) {
         const eid = buildAnswerExternalId(state.answer.questionIdExternal, state.instanceKey);
         externalIdToKey.set(eid, key);
       }
       const updatedKeys: Array<{ key: string; recordId: string }> = [];
+      let rejectedReason: string | null = null;
       for (const r of results) {
         const matchKey = externalIdToKey.get(r.answerIdExternal);
-        if (matchKey) {
-          const current = answerStatesRef.current.get(matchKey);
-          if (current) {
-            // If this answer hasn't been edited again since the flush started, clear its dirty flag
-            const stillDirty = current.dirtySince != null && current.dirtySince > now;
-            answerStatesRef.current.set(matchKey, {
-              ...current,
-              recordId: r.recordId,
-              lastSavedAt: Date.now(),
-              dirtySince: stillDirty ? current.dirtySince : null,
-            });
-            updatedKeys.push({ key: matchKey, recordId: r.recordId });
+        if (!matchKey) continue;
+        const current = answerStatesRef.current.get(matchKey);
+        if (!current) continue;
+        // If this answer hasn't been edited again since the flush started, clear its dirty flag
+        const stillDirty = current.dirtySince != null && current.dirtySince > now;
+        if (r.failed) {
+          // HubSpot REJECTED this answer (e.g. a bad/read-only property value).
+          // Clear its dirty flag so we STOP re-saving it every tick — the
+          // perpetual "Saving…" loop — and surface the reason instead of hiding
+          // it. Keep the existing recordId (don't blank it on a failed write).
+          rejectedReason = r.reason || rejectedReason || 'A field was rejected by the server.';
+          console.error(`[autosave] server rejected ${matchKey}: ${r.reason || 'unknown'}`);
+          answerStatesRef.current.set(matchKey, {
+            ...current,
+            dirtySince: stillDirty ? current.dirtySince : null,
+          });
+        } else {
+          answerStatesRef.current.set(matchKey, {
+            ...current,
+            recordId: r.recordId,
+            lastSavedAt: Date.now(),
+            dirtySince: stillDirty ? current.dirtySince : null,
+          });
+          updatedKeys.push({ key: matchKey, recordId: r.recordId });
+        }
+      }
+
+      // Backstop for the OTHER loop cause: an answer the server neither confirmed
+      // nor reported as failed (e.g. its answer_id_external didn't come back in
+      // the response). Such an answer stays dirty and re-saves every tick. Count
+      // consecutive unconfirmed flushes and give up after a few so it can't pin
+      // the form on "Saving…" — the save very likely DID land (we just couldn't
+      // match it); continuing forever is worse than trusting it.
+      const returnedEids = new Set(results.map((r) => r.answerIdExternal).filter(Boolean));
+      for (const { key, state } of toUpsert) {
+        const eid = buildAnswerExternalId(state.answer.questionIdExternal, state.instanceKey);
+        if (returnedEids.has(eid)) { unconfirmedRef.current.delete(key); continue; }
+        const n = (unconfirmedRef.current.get(key) || 0) + 1;
+        unconfirmedRef.current.set(key, n);
+        if (n >= 3) {
+          const current = answerStatesRef.current.get(key);
+          const stillDirty = current?.dirtySince != null && current.dirtySince > now;
+          if (current && !stillDirty) {
+            answerStatesRef.current.set(key, { ...current, dirtySince: null });
+            unconfirmedRef.current.delete(key);
+            console.error(`[autosave] giving up on ${key} after ${n} unconfirmed saves (server didn't echo it back)`);
           }
         }
       }
@@ -288,6 +327,11 @@ export function useAutosave(opts: Options) {
       const anyDirty = Array.from(answerStatesRef.current.values()).some((s) => s.dirtySince != null);
       if (anyDirty) {
         setSaveState({ kind: 'dirty' });
+      } else if (rejectedReason) {
+        // Everything else saved, but HubSpot rejected at least one field. Show a
+        // clear error (with the reason) instead of a false "Saved" — and we are
+        // no longer looping on it because its dirty flag was cleared above.
+        setSaveState({ kind: 'error', message: `Some answers couldn’t be saved: ${rejectedReason}` });
       } else {
         setSaveState({ kind: 'saved', at: Date.now() });
       }

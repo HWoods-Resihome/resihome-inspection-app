@@ -3539,7 +3539,7 @@ export interface AnswerUpsert {
 export async function upsertAnswers(
   inspectionRecordId: string,
   upserts: AnswerUpsert[]
-): Promise<Array<{ recordId: string; answerIdExternal: string }>> {
+): Promise<Array<{ recordId: string; answerIdExternal: string; failed?: boolean; reason?: string }>> {
   if (upserts.length === 0) return [];
   const tids = typeIds();
 
@@ -3547,7 +3547,10 @@ export async function upsertAnswers(
   const toCreate = upserts.filter((u) => !u.recordId);
   const toUpdate = upserts.filter((u) => u.recordId);
 
-  const results: Array<{ recordId: string; answerIdExternal: string }> = [];
+  // Failed items are RETURNED (not silently dropped): the client must know which
+  // answers HubSpot rejected and WHY, otherwise the autosave never sees them come
+  // back, keeps them "dirty", and re-saves forever — the perpetual "Saving…" loop.
+  const results: Array<{ recordId: string; answerIdExternal: string; failed?: boolean; reason?: string }> = [];
 
   // ----- Updates (PATCH each) -----
   // HubSpot supports batch/update for properties. Use it — but if a chunk is
@@ -3572,7 +3575,9 @@ export async function upsertAnswers(
             const r = await runUpdate([u]);
             for (const x of r.results || []) results.push({ recordId: x.id, answerIdExternal: x.properties?.answer_id_external || '' });
           } catch (itemErr: any) {
-            console.error(`[upsertAnswers] SKIPPED update of answer ${u.answerProps?.answer_id_external} (${u.answerProps?.question_id_external}) — ${String(itemErr?.detail || itemErr?.message || itemErr).slice(0, 300)}`);
+            const reason = String(itemErr?.detail || itemErr?.message || itemErr).slice(0, 300);
+            console.error(`[upsertAnswers] SKIPPED update of answer ${u.answerProps?.answer_id_external} (${u.answerProps?.question_id_external}) — ${reason}`);
+            results.push({ recordId: u.recordId || '', answerIdExternal: u.answerProps?.answer_id_external || '', failed: true, reason });
           }
         }
       }
@@ -3603,7 +3608,9 @@ export async function upsertAnswers(
         for (const u of chunk) {
           try { collect(await runCreate([u])); }
           catch (itemErr: any) {
-            console.error(`[upsertAnswers] SKIPPED create of answer ${u.answerProps?.answer_id_external} (${u.answerProps?.question_id_external}) — ${String(itemErr?.detail || itemErr?.message || itemErr).slice(0, 300)}`);
+            const reason = String(itemErr?.detail || itemErr?.message || itemErr).slice(0, 300);
+            console.error(`[upsertAnswers] SKIPPED create of answer ${u.answerProps?.answer_id_external} (${u.answerProps?.question_id_external}) — ${reason}`);
+            results.push({ recordId: '', answerIdExternal: u.answerProps?.answer_id_external || '', failed: true, reason });
           }
         }
       }
