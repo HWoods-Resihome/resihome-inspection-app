@@ -526,15 +526,29 @@ export function CameraCapture({
       // If the real call resolves LATE (after we gave up), stop its tracks so the
       // zombie stream doesn't keep holding the camera and block the next attempt.
       const GUM_TIMEOUT_MS = 10000;
-      const tryGUM = async (vc: MediaTrackConstraints) => {
+      const tryGUM = (vc: MediaTrackConstraints): Promise<MediaStream> => {
         const gum = navigator.mediaDevices.getUserMedia({ video: vc });
-        return await Promise.race([
-          gum,
-          new Promise<MediaStream>((_, reject) => setTimeout(() => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let timedOut = false;
+        const timeout = new Promise<MediaStream>((_, reject) => {
+          timer = setTimeout(() => {
+            timedOut = true;
             reject(Object.assign(new Error('camera start timed out'), { name: 'TimeoutError' }));
-            gum.then((s) => { try { s.getTracks().forEach((t) => t.stop()); } catch { /* noop */ } }, () => { /* already failed */ });
-          }, GUM_TIMEOUT_MS)),
-        ]);
+          }, GUM_TIMEOUT_MS);
+        });
+        // CRITICAL: clear the timer the instant getUserMedia settles, so on a
+        // normal (fast) open the timeout callback NEVER runs. The previous version
+        // left it armed and its callback stopped the LIVE stream's tracks ~10s
+        // into the session — THE root cause of the preview going black mid-use for
+        // no reason ("the timeout issue"), re-armed by every lens switch/re-acquire.
+        // The timeout now ONLY fires when getUserMedia genuinely hangs past 10s;
+        // and if a hung call resolves LATE we stop that zombie stream's tracks so
+        // it can't hold the camera and block the next attempt.
+        gum.then(
+          (s) => { if (timer) clearTimeout(timer); if (timedOut) { try { s.getTracks().forEach((t) => t.stop()); } catch { /* noop */ } } },
+          () => { if (timer) clearTimeout(timer); },
+        );
+        return Promise.race([gum, timeout]);
       };
       let stream: MediaStream;
       try {
