@@ -53,8 +53,12 @@ platform :ios do
       export_method: "app-store",
       clean: true,
       output_directory: "build",
-      # Cloud signing via the API key for both archive and export.
-      xcargs: "#{auth_args} DEVELOPMENT_TEAM=#{team_id} CURRENT_PROJECT_VERSION=#{build_num}",
+      # Cloud signing via the API key for both archive and export. Force the
+      # "Apple Distribution" identity so the ARCHIVE provisions an App Store
+      # distribution profile (needs no registered devices) instead of a
+      # Development profile — Capacitor's project otherwise defaults to dev
+      # signing, which fails on CI with "no devices ... iOS App Development".
+      xcargs: "#{auth_args} DEVELOPMENT_TEAM=#{team_id} CODE_SIGN_IDENTITY=\"Apple Distribution\" CURRENT_PROJECT_VERSION=#{build_num}",
       export_xcargs: auth_args,
       export_options: {
         signingStyle: "automatic",
