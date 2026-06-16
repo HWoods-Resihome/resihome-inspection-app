@@ -41,7 +41,7 @@ const FACET_TTL_MS = 10 * 60 * 1000; // inspector/template options change rarely
 const MAX_KEYS = 80;                 // bound memory across query variants
 
 type ListResult = { items: InspectionSummary[]; total: number };
-type Facets = { inspectors: string[]; templates: string[] };
+type Facets = { inspectors: string[]; templates: string[]; regions: string[] };
 type CacheEntry<T> = { data: T; at: number };
 
 function makeCache<T>() {
@@ -110,6 +110,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ? (statusRaw as InspectionStatusKey) : 'all';
   const inspectors = arr(req.query.inspector);
   const templatesRaw = arr(req.query.template);
+  const regions = arr(req.query.region);
   const SORT_FIELDS: InspectionSortField[] = ['updated', 'scheduled', 'address', 'inspector', 'price'];
   const sortRaw = str(req.query.sort);
   const sortField: InspectionSortField = (SORT_FIELDS as string[]).includes(sortRaw)
@@ -125,19 +126,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const forceTemplate = external ? EXTERNAL_TEMPLATE : null;
   const templates = external ? [] : templatesRaw;
 
-  const baseQuery: InspectionQuery = { search, status, inspectors, templates, forceTemplate };
+  const baseQuery: InspectionQuery = { search, status, inspectors, templates, regions, forceTemplate };
   // Stable key parts: sort the multi-value arrays so equivalent selections share
   // a cache entry regardless of click order.
   const insKey = [...inspectors].sort();
   const tmpKey = [...templates].sort();
+  const regKey = [...regions].sort();
   // Counts ignore the selected status (each chip shows its own total) and the
   // page/sort, so cache them on just the constraining filters.
-  const countKey = JSON.stringify({ search, inspectors: insKey, templates: tmpKey, forceTemplate });
-  const listKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, forceTemplate, sortField, sortDir, page, pageSize });
+  const countKey = JSON.stringify({ search, inspectors: insKey, templates: tmpKey, regions: regKey, forceTemplate });
+  const listKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, forceTemplate, sortField, sortDir, page, pageSize });
   // Facets are DEPENDENT: each dropdown is constrained by the other active
-  // filters (status, search, and the other dimension's selection), so the cache
+  // filters (status, search, and the other dimensions' selections), so the cache
   // key includes them all.
-  const facetKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, forceTemplate });
+  const facetKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, forceTemplate });
 
   // The filter dropdown options (facets) require a multi-page scan and are NOT
   // needed to render the inspection cards. On a slow connection that scan would
@@ -180,7 +182,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         inspections: staleList.items,
         total: staleList.total,
         counts: counts.cache.get(countKey)?.data || ZERO_COUNTS,
-        facets: facets.cache.get(facetKey)?.data || { inspectors: [], templates: [] },
+        facets: facets.cache.get(facetKey)?.data || { inspectors: [], templates: [], regions: [] },
         page,
         pageSize,
         stale: true,

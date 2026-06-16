@@ -825,6 +825,7 @@ export interface InspectionQuery {
   status?: InspectionStatusKey;
   inspectors?: string[];         // exact inspector_name values; empty = no filter
   templates?: string[];          // exact template_type values; empty = no filter
+  regions?: string[];            // exact region_snapshot values; empty = no filter
   forceTemplate?: string | null; // external (1099) users are locked to one template
 }
 
@@ -850,6 +851,8 @@ function inspectionAndFilters(q: InspectionQuery): any[] {
   if (templates.length) filters.push({ propertyName: 'template_type', operator: 'IN', values: templates });
   const inspectors = (q.inspectors || []).map((n) => n.trim()).filter((n) => n && n !== 'all');
   if (inspectors.length) filters.push({ propertyName: 'inspector_name', operator: 'IN', values: inspectors });
+  const regions = (q.regions || []).map((r) => r.trim()).filter((r) => r && r !== 'all');
+  if (regions.length) filters.push({ propertyName: 'region_snapshot', operator: 'IN', values: regions });
   return filters;
 }
 
@@ -1019,38 +1022,44 @@ const distinct = (vals: any[]): string[] =>
  * actually appear on inspections. External (1099) users only ever see their one
  * template.
  */
-export async function inspectionFacets(query: InspectionQuery): Promise<{ inspectors: string[]; templates: string[] }> {
+export async function inspectionFacets(query: InspectionQuery): Promise<{ inspectors: string[]; templates: string[]; regions: string[] }> {
   const ext = query.forceTemplate || null;
-  // Inspector options ignore the inspector selection (so you can change it);
-  // template options ignore the template selection.
-  const inspectorQ: InspectionQuery = { search: query.search, status: query.status, templates: query.templates, forceTemplate: ext };
-  const templateQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, forceTemplate: ext };
-  const sameConstraint = (query.inspectors?.length || 0) === 0 && (query.templates?.length || 0) === 0;
+  // Each dimension's options IGNORE that dimension's own selection (so you can
+  // change it) but respect the OTHER active filters.
+  const inspectorQ: InspectionQuery = { search: query.search, status: query.status, templates: query.templates, regions: query.regions, forceTemplate: ext };
+  const templateQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, regions: query.regions, forceTemplate: ext };
+  const regionQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, templates: query.templates, forceTemplate: ext };
+  const noneSelected = (query.inspectors?.length || 0) === 0
+    && (query.templates?.length || 0) === 0
+    && (query.regions?.length || 0) === 0;
 
   let inspectors: string[] = [];
   let templates: string[] = ext ? [ext] : [];
+  let regions: string[] = [];
   try {
-    if (ext) {
-      // Template is fixed; only the inspector list needs scanning.
-      inspectors = distinct((await scanInspectionProps(inspectorQ, ['inspector_name'])).map((p) => p.inspector_name));
-    } else if (sameConstraint) {
-      // Neither dimension is selected → both share one constraint; single scan.
-      const rows = await scanInspectionProps(inspectorQ, ['inspector_name', 'template_type']);
+    if (noneSelected) {
+      // No dimension selected → all share one constraint; single combined scan.
+      const rows = await scanInspectionProps(inspectorQ, ['inspector_name', 'template_type', 'region_snapshot']);
       inspectors = distinct(rows.map((p) => p.inspector_name));
-      templates = distinct(rows.map((p) => p.template_type));
+      if (!ext) templates = distinct(rows.map((p) => p.template_type));
+      regions = distinct(rows.map((p) => p.region_snapshot));
     } else {
-      const [iRows, tRows] = await Promise.all([
+      // A dimension is selected → scan each list under the OTHER filters (parallel).
+      const [iRows, tRows, rRows] = await Promise.all([
         scanInspectionProps(inspectorQ, ['inspector_name']),
-        scanInspectionProps(templateQ, ['template_type']),
+        ext ? Promise.resolve([] as any[]) : scanInspectionProps(templateQ, ['template_type']),
+        scanInspectionProps(regionQ, ['region_snapshot']),
       ]);
       inspectors = distinct(iRows.map((p) => p.inspector_name));
-      templates = distinct(tRows.map((p) => p.template_type));
+      if (!ext) templates = distinct(tRows.map((p) => p.template_type));
+      regions = distinct(rRows.map((p) => p.region_snapshot));
     }
   } catch (e) {
     console.warn('[facets] scan failed:', e);
   }
   inspectors.sort((a, b) => a.localeCompare(b));
-  return { inspectors, templates };
+  regions = regions.filter(Boolean).sort((a, b) => a.localeCompare(b));
+  return { inspectors, templates, regions };
 }
 
 /**

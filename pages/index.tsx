@@ -85,7 +85,7 @@ export default function Home() {
   const cancelledIdsRef = useRef<Set<string>>(new Set());
   const optimisticCountsRef = useRef<StatusCounts | null>(null);
   const optimisticTotalRef = useRef<number | null>(null);
-  const [facets, setFacets] = useState<{ inspectors: string[]; templates: string[] }>({ inspectors: [], templates: [] });
+  const [facets, setFacets] = useState<{ inspectors: string[]; templates: string[]; regions: string[] }>({ inspectors: [], templates: [], regions: [] });
 
   // Restore the list view (filters/sort/search/paging) from the last time the
   // user was on this page, so backing out of an inspection lands them exactly
@@ -114,6 +114,10 @@ export default function Home() {
   // Filter by template internal name(s). Empty = no filter; multi-select supported.
   const [templateFilter, setTemplateFilter] = useState<string[]>(
     () => (Array.isArray(savedView.templateFilter) ? savedView.templateFilter : []));
+  // Filter by region(s). Empty = no filter; multi-select supported. Values are
+  // exact region_snapshot strings the server matches on.
+  const [regionFilter, setRegionFilter] = useState<string[]>(
+    () => (Array.isArray(savedView.regionFilter) ? savedView.regionFilter : []));
 
   // Bulk-select mode + selection set + busy flag for the cancel action.
   const [selectMode, setSelectMode] = useState(false);
@@ -131,10 +135,10 @@ export default function Home() {
     if (typeof window === 'undefined') return;
     try {
       window.sessionStorage.setItem('resiwalk_home_view_v1', JSON.stringify({
-        search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, pageSize, page,
+        search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, regionFilter, pageSize, page,
       }));
     } catch { /* storage disabled — view just won't persist */ }
-  }, [search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, pageSize, page]);
+  }, [search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, regionFilter, pageSize, page]);
 
   useEffect(() => {
     // Hydrate from the last known signed-in user immediately so a dead-zone
@@ -209,6 +213,7 @@ export default function Home() {
     if (st !== 'all') p.set('status', st);
     for (const name of inspectorFilter) p.append('inspector', name);
     for (const t of templateFilter) p.append('template', t);
+    for (const r of regionFilter) p.append('region', r);
     p.set('sort', sortField);
     p.set('dir', sortDir);
     p.set('page', String(pg));
@@ -216,7 +221,7 @@ export default function Home() {
     p.set('facets', '0');
     if (opts?.refresh) p.set('refresh', '1');
     return p;
-  }, [search, statusFilter, inspectorFilter, templateFilter, sortField, sortDir, page, pageSize]);
+  }, [search, statusFilter, inspectorFilter, templateFilter, regionFilter, sortField, sortDir, page, pageSize]);
 
   // Cache key = the query WITHOUT the volatile refresh flag.
   const listCacheKey = useMemo(() => buildListParams().toString(), [buildListParams]);
@@ -328,9 +333,10 @@ export default function Home() {
     if (statusFilter !== 'all') p.set('status', statusFilter);
     for (const name of inspectorFilter) p.append('inspector', name);
     for (const t of templateFilter) p.append('template', t);
+    for (const r of regionFilter) p.append('region', r);
     p.set('only', 'facets');
     return p.toString();
-  }, [search, statusFilter, inspectorFilter, templateFilter]);
+  }, [search, statusFilter, inspectorFilter, templateFilter, regionFilter]);
 
   useEffect(() => {
     const cached = lsRead(FACETS_CACHE)[facetQuery];
@@ -358,14 +364,14 @@ export default function Home() {
   // search, sort, or page size) so the user isn't stranded past the last page.
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, inspectorFilter, templateFilter, sortField, sortDir, pageSize]);
+  }, [search, statusFilter, inspectorFilter, templateFilter, regionFilter, sortField, sortDir, pageSize]);
 
   // Page math derives from the server's total match count for this query.
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageStart = (currentPage - 1) * pageSize;
   const anyFilterActive = !!search.trim()
-    || statusFilter !== 'all' || inspectorFilter.length > 0 || templateFilter.length > 0;
+    || statusFilter !== 'all' || inspectorFilter.length > 0 || templateFilter.length > 0 || regionFilter.length > 0;
 
   // ---- Bulk-select helpers ----
   // A card is selectable for cancellation unless it's completed.
@@ -481,6 +487,12 @@ export default function Home() {
       .sort((a, b) => a.label.localeCompare(b.label)),
     [facets.templates]
   );
+  // Region options come from the server-computed facets (distinct region_snapshot
+  // values matching the other active filters). Value === label (server matches EQ).
+  const regionOptions = useMemo(
+    () => facets.regions.map((value) => ({ value, label: value })),
+    [facets.regions]
+  );
 
   // Trigger summaries for the multi-select dropdowns.
   const inspectorTriggerLabel = inspectorFilter.length === 0
@@ -489,6 +501,9 @@ export default function Home() {
   const templateTriggerLabel = templateFilter.length === 0
     ? 'All Templates'
     : templateFilter.length === 1 ? (templateLabel(templateFilter[0]) || templateFilter[0]) : `${templateFilter.length} templates`;
+  const regionTriggerLabel = regionFilter.length === 0
+    ? 'All Regions'
+    : regionFilter.length === 1 ? regionFilter[0] : `${regionFilter.length} regions`;
 
 
   return (
@@ -682,6 +697,23 @@ export default function Home() {
               />
             </div>
 
+            {/* Region filter — tap to filter by one, press & hold for multi-select */}
+            <div className="flex-1 min-w-0 max-w-[160px]">
+              <ListPicker
+                value={regionFilter[0] ?? 'all'}
+                options={[{ value: 'all', label: 'All Regions' }, ...regionOptions]}
+                onChange={() => { /* multi-mode uses onApply */ }}
+                multiple
+                selectedValues={regionFilter}
+                onApply={setRegionFilter}
+                triggerLabel={regionTriggerLabel}
+                ariaLabel="Filter by region"
+                className={`w-full truncate text-xs font-heading font-semibold pl-2.5 pr-2 py-1.5 border rounded-md bg-white flex items-center justify-between ${
+                  regionFilter.length > 0 ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'
+                }`}
+              />
+            </div>
+
             {/* Sort dropdown — one control for all five fields. Tap to open;
                 tap a field to sort by it; tap the ACTIVE field again to flip
                 ascending/descending (the arrow next to it shows the direction). */}
@@ -731,12 +763,12 @@ export default function Home() {
             </div>
 
             {/* Clear-all link, only shown when any filter is active */}
-            {(inspectorFilter.length > 0 || templateFilter.length > 0) && (
+            {(inspectorFilter.length > 0 || templateFilter.length > 0 || regionFilter.length > 0) && (
               <button
                 type="button"
-                onClick={() => { setInspectorFilter([]); setTemplateFilter([]); }}
+                onClick={() => { setInspectorFilter([]); setTemplateFilter([]); setRegionFilter([]); }}
                 className="shrink-0 text-xs text-gray-500 hover:text-brand font-heading underline whitespace-nowrap"
-                title="Clear inspector and template filters"
+                title="Clear inspector, template, and region filters"
               >
                 Clear
               </button>
