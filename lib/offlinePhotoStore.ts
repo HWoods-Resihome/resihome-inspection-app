@@ -17,7 +17,7 @@
 import { compressToJpeg, uploadJpegBlob, uploadVideo, toJpegName } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
 import { isQuotaError, StorageFullError } from '@/lib/storageQuota';
-import { isAnyCameraOpen } from '@/lib/cameraOpenState';
+import { registerSyncedBlob } from '@/lib/photoDisplay';
 
 // iOS/iPadOS WebKit (incl. Chrome on iOS, which is WebKit). Several canvas/bitmap
 // paths misbehave here, so we branch on it below.
@@ -109,7 +109,20 @@ function idbAvailable(): boolean {
  * what actually uploads. Best-effort — returns null if decoding isn't possible,
  * and the caller falls back to the full-res blob.
  */
-async function makeThumbBlob(blob: Blob, maxEdge = 400): Promise<Blob | null> {
+// Serialize thumbnail decodes. Rapid capture (now uploading immediately, no
+// batching) enqueues many at once; running several full-res createImageBitmap
+// decodes CONCURRENTLY is what spiked iOS memory and jettisoned the WebKit
+// process. Chaining them means only ONE decodes at a time — each is tiny and
+// transient, so this keeps immediate per-shot saving from ever hanging the
+// camera. The photo is already persisted to IndexedDB before its thumb is built,
+// so a queued decode never risks the capture.
+let _thumbChain: Promise<unknown> = Promise.resolve();
+function makeThumbBlob(blob: Blob, maxEdge = 400): Promise<Blob | null> {
+  const run = _thumbChain.then(() => _makeThumbBlob(blob, maxEdge));
+  _thumbChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+async function _makeThumbBlob(blob: Blob, maxEdge = 400): Promise<Blob | null> {
   if (typeof document === 'undefined' || typeof createImageBitmap !== 'function') return null;
   let bmp: ImageBitmap | null = null;
   try {
@@ -412,18 +425,15 @@ export async function flushQueuedPhotos(
   onSynced: FlushOnSynced,
 ): Promise<FlushResult> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
-  // SUSPEND uploads while an in-app camera overlay is open. Uploading a photo
-  // (network + blob handling) at the same instant the camera is capturing the
-  // NEXT shot (a full-res canvas decode + JPEG re-encode) spikes memory and
-  // jettisons the iOS WebKit content process — the "black screen / freeze after
-  // the 2nd photo". Captured photos stay safely queued in IndexedDB and shown
-  // from their local thumbnails; the form drains the batch the moment the camera
-  // closes, and every ~10s while it's closed. Offline behavior is unchanged (the
-  // queue persists and syncs on reconnect once the camera is shut).
-  if (isAnyCameraOpen()) {
-    const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
-    return { synced: 0, remaining };
-  }
+  // NOTE: uploads run IMMEDIATELY after each capture (kickFlush), INCLUDING while
+  // the camera is open — the owner wants photos to start saving the instant
+  // they're taken, not batched on camera close. It must never hang the camera:
+  // uploads are async/background (never block the shutter), capped at low
+  // concurrency, and the per-shot thumbnail decode is serialized (see
+  // makeThumbBlob) so concurrent full-res decodes can't spike memory and jettison
+  // the iOS WebKit process. (We previously SUSPENDED the flush while the camera
+  // was open to avoid that memory spike; serializing the decode addresses the
+  // spike without delaying the save.)
   const existing = flushInFlight.get(inspectionRecordId);
   if (existing) return existing;
   const run = doFlushQueuedPhotos(inspectionRecordId, onSynced);
@@ -455,12 +465,16 @@ async function doFlushQueuedPhotos(
     // (clears "Saved Offline" live; Done then returns real URLs, not stale drafts).
     if (oldUrl) notifyPhotoSynced({ localId: rec.localId, oldUrl, newUrl });
     if (entry) {
-      // For a PHOTO, keep the small (~400px) draft thumbnail blob ALIVE: revoking
-      // it the instant we sync raced the form's blob->real swap and left a broken
-      // "?" tile (and would do so permanently on any swap miss). It's tiny and is
-      // GC'd on page unload. For a VIDEO we still revoke — the clip blob is large.
+      // Keep the small (~400px) local thumbnail blob ALIVE and map the photo's
+      // REAL url to it, so grids keep showing that reliable local tile after the
+      // offline->online swap instead of depending on the /api/photo-proxy fetch
+      // (which, when it hiccuped, left broken/disappearing tiles). It's tiny and
+      // GC'd on page unload (cache capped). A VIDEO's blobs are large → still
+      // revoked (its poster will reload via the proxy/real url).
       if (rec.kind === 'video') {
         for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
+      } else if (oldUrl) {
+        registerSyncedBlob(newUrl, oldUrl);
       }
       urlByLocalId.delete(rec.localId);
     }

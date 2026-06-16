@@ -46,10 +46,8 @@ export function displayImageSrc(url: string): string {
   // an <img>, we want the poster only — drop the fragment so the src is clean.
   const v = url.indexOf('#v=');
   const clean = v === -1 ? url : url.slice(0, v);
-  // Prefer the still-alive local blob for a just-synced photo, so the thumbnail
-  // never flickers blank/broken on the offline->online swap.
-  const cached = syncedBlobByRealUrl.get(clean);
-  if (cached) return cached;
+  // FULL-SIZE viewer: do NOT use the synced-thumb cache here — those cached blobs
+  // are SMALL (~400px) thumbnails, so the viewer must load the real full-res url.
   const path = clean.split('?')[0];
   if (/\.(heic|heif)$/i.test(path)) {
     return `/api/photo-proxy?url=${encodeURIComponent(clean)}`;
@@ -72,12 +70,15 @@ export function thumbImageSrc(url: string, w = 400): string {
   const clean = v === -1 ? url : url.slice(0, v);
   // Local draft (offline) or data: thumb — show directly; can't be proxied, and
   // it's a single transient image, not the dozens-of-remote-tiles memory hog.
-  // NOTE: we deliberately do NOT use the just-synced full-res blob cache here —
-  // that blob decodes at full resolution and would defeat the resize for exactly
-  // the freshly-taken photos that fill the screen (the iOS OOM crash). Remote
-  // photos always go through the small proxy below; the full-res cached blob is
-  // used only by the one-at-a-time viewer (displayImageSrc).
   if (clean.startsWith('blob:') || clean.startsWith('data:')) return clean;
+  // A just-synced photo keeps its SMALL local thumbnail blob alive (registered on
+  // sync). Prefer it: it's already ~400px (perfect for a tile), it's local, and
+  // it never depends on the /api/photo-proxy network call — which is what was
+  // leaving broken/disappearing tiles when the proxy hiccuped after the
+  // offline->online swap. Falls through to the proxy only when there's no local
+  // thumb (e.g. a photo synced in a previous session / after reload).
+  const cached = syncedBlobByRealUrl.get(clean);
+  if (cached) return cached;
   // Remote photo → small re-encoded thumbnail through our origin.
   return `/api/photo-proxy?url=${encodeURIComponent(clean)}&w=${w}`;
 }
