@@ -614,41 +614,50 @@ export function CameraCapture({
             if (muteOverlayTimerRef.current) { clearTimeout(muteOverlayTimerRef.current); muteOverlayTimerRef.current = null; }
             if (muteReacqTimerRef.current) { clearTimeout(muteReacqTimerRef.current); muteReacqTimerRef.current = null; }
           };
+          // Replay on unmute is harmless everywhere (resumes a paused video).
           vtrack.onunmute = () => {
-            // Came back on its own → drop the cover and resume.
             clearMuteTimers();
             setReconnecting(false);
             const v = videoRef.current;
             if (v && v.paused) v.play().catch(() => { /* non-fatal */ });
           };
-          vtrack.onmute = () => {
-            // Show "Reconnecting…" only if the mute PERSISTS past a brief blip, so a
-            // normal capture (which can momentarily mute the track) never flickers
-            // the cover.
-            clearMuteTimers();
-            muteOverlayTimerRef.current = setTimeout(() => {
-              const t = streamRef.current?.getVideoTracks?.()[0];
-              if (t && (t as any).muted === true) setReconnecting(true);
-            }, 250);
-            // If it hasn't recovered shortly, re-acquire PROMPT-FREE (bounded).
-            muteReacqTimerRef.current = setTimeout(() => {
-              const t = streamRef.current?.getVideoTracks?.()[0];
-              const interrupted = !t || t.readyState === 'ended' || (t as any).muted === true || (videoRef.current?.videoWidth || 0) === 0;
+          // The PROMPT-FREE auto re-acquire on mute/ended is iOS-ONLY. Only iOS
+          // mutes a live camera track after a capture/interruption; Chrome &
+          // Android keep the track LIVE, so re-acquiring there is both unnecessary
+          // and harmful — a second getUserMedia is what surfaced "Camera permission
+          // denied / Camera unavailable" and limited Chrome users to one shot. On
+          // those browsers we leave the working stream alone (the gentle replay
+          // monitor + Retry handle the rare genuine stall).
+          if (IS_IOS) {
+            vtrack.onmute = () => {
+              // Show "Reconnecting…" only if the mute PERSISTS past a brief blip, so
+              // a normal capture (which can momentarily mute the track) never
+              // flickers the cover.
+              clearMuteTimers();
+              muteOverlayTimerRef.current = setTimeout(() => {
+                const t = streamRef.current?.getVideoTracks?.()[0];
+                if (t && (t as any).muted === true) setReconnecting(true);
+              }, 250);
+              // If it hasn't recovered shortly, re-acquire PROMPT-FREE (bounded).
+              muteReacqTimerRef.current = setTimeout(() => {
+                const t = streamRef.current?.getVideoTracks?.()[0];
+                const interrupted = !t || t.readyState === 'ended' || (t as any).muted === true || (videoRef.current?.videoWidth || 0) === 0;
+                const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
+                if (interrupted && visible && !recordingRef.current && reacquireBudgetRef.current > 0) {
+                  reacquireBudgetRef.current -= 1;
+                  startStreamRef.current?.();
+                }
+              }, 1100);
+            };
+            vtrack.onended = () => {
               const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
-              if (interrupted && visible && !recordingRef.current && reacquireBudgetRef.current > 0) {
+              if (visible && !recordingRef.current) setReconnecting(true);
+              if (visible && !recordingRef.current && reacquireBudgetRef.current > 0) {
                 reacquireBudgetRef.current -= 1;
                 startStreamRef.current?.();
               }
-            }, 1100);
-          };
-          vtrack.onended = () => {
-            const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
-            if (visible && !recordingRef.current) setReconnecting(true);
-            if (visible && !recordingRef.current && reacquireBudgetRef.current > 0) {
-              reacquireBudgetRef.current -= 1;
-              startStreamRef.current?.();
-            }
-          };
+            };
+          }
         }
       }
       if (videoRef.current) {
@@ -1255,7 +1264,7 @@ export function CameraCapture({
       // so we never re-acquire just because the scene is dark. Only trust "stuck
       // black" once we've actually seen a lit frame this session.
       let mean = -1, variance = -1;
-      if (!dead && !paused && !noSize) {
+      if (IS_IOS && !dead && !paused && !noSize) {
         const r = sampleLuma(v);
         if (r) { mean = r.mean; variance = r.variance; if (mean > 8) sawLightRef.current = true; }
       }
@@ -1271,12 +1280,13 @@ export function CameraCapture({
       const healthy = !dead && !muted && !paused && !noSize && !stuckBlack;
       if (healthy) { previewRecoverTicksRef.current = 0; blackStuckTicksRef.current = 0; setReconnecting(false); return; }
 
-      // A dead/muted track or a perfectly-uniform stuck-black frame will NOT come
-      // back by replaying the same stream — the camera was interrupted. Re-acquire
-      // PROMPT-FREE (permission already granted this session, and we open by
-      // facingMode only, so no stale-deviceId re-prompt), BOUNDED so it can never
-      // loop. Out of budget → surface Retry / Use Phone Camera.
-      if (dead || muted || stuckBlack) {
+      // iOS ONLY: a muted/dead/stuck-black track was INTERRUPTED by the OS and
+      // won't recover by replaying — re-acquire PROMPT-FREE (permission already
+      // granted; facingMode-only), BOUNDED, covered by "Reconnecting…". Chrome &
+      // Android keep their track LIVE; re-acquiring there is what broke them
+      // ("Camera unavailable"), so they NEVER take this branch — they fall through
+      // to the gentle replay below and only surface Retry on a genuine stall.
+      if (IS_IOS && (dead || muted || stuckBlack)) {
         setReconnecting(true); // cover the black frame with "Reconnecting…"
         blackStuckTicksRef.current += 1;
         if (blackStuckTicksRef.current >= 2) {
@@ -1291,9 +1301,11 @@ export function CameraCapture({
         return;
       }
 
-      // Merely paused / zero-size with a LIVE stream → gentle replay (no re-acquire).
-      if (v.srcObject !== s) { try { v.srcObject = s; } catch { /* noop */ } }
-      if (v.paused) v.play().catch(() => { /* non-fatal */ });
+      // All platforms: gentle replay of the SAME stream (NO getUserMedia) for a
+      // paused/zero-size (and, on non-iOS, a muted/dead) preview. Persistent
+      // failure → Retry. This is the only recovery Chrome/Android use.
+      if (!dead && v.srcObject !== s) { try { v.srcObject = s; } catch { /* noop */ } }
+      if (!dead && v.paused) v.play().catch(() => { /* non-fatal */ });
       previewRecoverTicksRef.current += 1;
       if (previewRecoverTicksRef.current >= STUCK_TICKS) { setPreviewStuck(true); }
     }, TICK_MS);
