@@ -11,10 +11,15 @@
 
 require 'xcodeproj'
 
-pbxproj_path = ARGV[0] or abort('usage: add_to_xcodeproj.rb <project.pbxproj> <Filename>')
-filename = ARGV[1] or abort('usage: add_to_xcodeproj.rb <project.pbxproj> <Filename>')
+arg_path = ARGV[0] or abort('usage: add_to_xcodeproj.rb <App.xcodeproj|project.pbxproj> <Filename>')
+filename = ARGV[1] or abort('usage: add_to_xcodeproj.rb <App.xcodeproj|project.pbxproj> <Filename>')
 
-project = Xcodeproj::Project.open(pbxproj_path)
+# Xcodeproj::Project.open wants the `.xcodeproj` bundle directory, not the
+# `project.pbxproj` file inside it — if handed the file it looks for
+# `<file>/project.pbxproj` and fails. Accept either form.
+xcodeproj_path = File.basename(arg_path) == 'project.pbxproj' ? File.dirname(arg_path) : arg_path
+
+project = Xcodeproj::Project.open(xcodeproj_path)
 target = project.targets.find { |t| t.name == 'App' } or abort('App target not found')
 
 # Already a build file in the target? Then we're done (idempotent re-runs).
