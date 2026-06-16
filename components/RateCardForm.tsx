@@ -50,7 +50,7 @@ import {
 import { SectionsManager } from '@/components/SectionsManager';
 import { InspectionAuditTrail } from '@/components/InspectionAuditTrail';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
-import { thumbImageSrc } from '@/lib/photoDisplay';
+import { PhotoThumb } from '@/components/PhotoThumb';
 import { isVideoEntry } from '@/lib/media';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 
@@ -3805,9 +3805,13 @@ export function RateCardForm(props: RateCardFormProps) {
                           // Tagged photos live on their line card, not the room strip.
                           taggedSet.has(url) ? null : (
                           <div key={url} className="relative shrink-0">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={thumbImageSrc(url)}
+                            {/* Self-healing tile: if the proxied thumbnail fails
+                                (CDN propagation right after sync, a transient 5xx,
+                                or a dead draft blob after a reload) it falls back to
+                                the direct url, then a neutral box — never the broken
+                                "?" glyph the inspector kept seeing. */}
+                            <PhotoThumb
+                              url={url}
                               alt=""
                               loading="lazy"
                               decoding="async"
