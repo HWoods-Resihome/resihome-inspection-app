@@ -401,11 +401,13 @@ async function doFlushQueuedPhotos(
     // (clears "Saved Offline" live; Done then returns real URLs, not stale drafts).
     if (oldUrl) notifyPhotoSynced({ localId: rec.localId, oldUrl, newUrl });
     if (entry) {
-      // Free the local draft thumbnail; the form swaps to the real url, whose
-      // small tile loads through the resize proxy. (We do NOT keep the draft blob
-      // mapped for display anymore: it's now a small THUMBNAIL, so reusing it for
-      // the full-size viewer would show a blurry image.)
-      for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
+      // For a PHOTO, keep the small (~400px) draft thumbnail blob ALIVE: revoking
+      // it the instant we sync raced the form's blob->real swap and left a broken
+      // "?" tile (and would do so permanently on any swap miss). It's tiny and is
+      // GC'd on page unload. For a VIDEO we still revoke — the clip blob is large.
+      if (rec.kind === 'video') {
+        for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
+      }
       urlByLocalId.delete(rec.localId);
     }
     synced++;

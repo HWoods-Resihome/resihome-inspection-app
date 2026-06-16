@@ -43,6 +43,11 @@ export async function createSessionCookie(user: SessionUser): Promise<string> {
     sameSite: 'lax',
     path: '/',
     maxAge: SESSION_DURATION_HOURS * 60 * 60,
+    // Set BOTH Max-Age and an explicit Expires: some iOS Safari / standalone-PWA
+    // versions drop a Max-Age-only cookie on app close (treating it as a session
+    // cookie), which forced inspectors to re-sign-in every time they reopened the
+    // app. A concrete Expires date makes it a persistent 30-day cookie everywhere.
+    expires: new Date(Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000),
   });
 }
 

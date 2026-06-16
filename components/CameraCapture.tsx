@@ -449,11 +449,9 @@ export function CameraCapture({
   // UI instead of an infinite "Starting camera…" spinner. Independent of the
   // post-acquisition watchdog, which only arms AFTER getUserMedia resolves.
   const stuckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Bulletproof preview recovery: consecutive "black/stalled" checks, and a
-  // bounded count of re-acquires per open so a truly dead camera surfaces Retry
-  // instead of churning getUserMedia forever.
+  // Consecutive "black/stalled" preview checks — after several, surface Retry
+  // (a single user-initiated re-acquire) instead of auto-prompting the camera.
   const previewRecoverTicksRef = useRef(0);
-  const previewReacquireCountRef = useRef(0);
   // Id of the captured photo currently open in the annotator (null = closed).
   const [annotatingId, setAnnotatingId] = useState<string | null>(null);
   // Index (within ALL items — photos AND videos) open in the swipeable viewer.
@@ -1091,23 +1089,19 @@ export function CameraCapture({
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [viewerIndex, annotatingId, isOpen, resumePreview]);
 
-  // ---- Bulletproof preview liveness — ALL operating systems ----
-  // The live preview can go black mid-session for several distinct reasons and
-  // every one of them used to be a dead end:
-  //   • the browser PAUSES an occluded/backgrounded <video> (no resume event),
-  //   • the OS MUTES or ENDS the camera track under memory pressure (the
-  //     "goes black after N photos" crash — now seen on Android too),
-  //   • a slow hand-off never paints (the "timeout, black before I even shot").
-  // This monitor recovers ALL of them with ONE policy: gently replay the SAME
-  // stream first (no permission prompt), and only if it STAYS black re-acquire
-  // VIDEO-ONLY (the mic is never touched, so it can't prompt-loop) — bounded, and
-  // then surface Retry so it can never churn forever. Healthy frames reset it.
-  // Deliberately conservative (acts only on a genuinely black/dead preview, never
-  // a healthy one) so it can't recreate the old re-acquire-loop regression.
+  // ---- Preview liveness — gentle, PROMPT-FREE ----
+  // The live preview can pause/stall (the browser pauses an occluded video; iOS
+  // pauses it briefly after a capture). This monitor REPLAYS the existing stream
+  // to recover — it NEVER calls getUserMedia, because on an iOS standalone PWA
+  // every getUserMedia re-prompts for camera permission, and auto-re-acquiring
+  // after each post-capture pause is what spammed "authorize the camera" after
+  // every photo. Replaying the SAME stream resumes a paused preview with no
+  // prompt. If the preview stays black for several seconds (a stream that replay
+  // can't revive), we surface the Retry / Phone-camera overlay — ONE intentional,
+  // user-initiated re-acquire — instead of auto-prompting.
   useEffect(() => {
     if (!isOpen) return;
     previewRecoverTicksRef.current = 0;
-    previewReacquireCountRef.current = 0;
     const iv = setInterval(() => {
       if (recordingRef.current) return;                          // don't disturb a recording
       if (pendingCaptureCountRef.current > 0) return;            // mid-capture
@@ -1118,37 +1112,21 @@ export function CameraCapture({
       if (!v) return;
       const track = s?.getVideoTracks?.()[0];
       const dead = !s || !track || track.readyState === 'ended';
-      // "Black while supposedly live": paused, muted, or zero-size. The first
-      // check runs at ~1.8s — by which a healthy camera has long since painted —
-      // so a zero-size live track means a stalled hand-off (the "timeout, black
-      // before I even shot a photo" case) just as much as a mid-session death.
       const black = !dead && (v.paused || (track as any).muted === true || v.videoWidth === 0);
-      if (!dead && !black) {
-        // Healthy — reset everything so a later black episode gets a fresh budget.
-        previewRecoverTicksRef.current = 0;
-        previewReacquireCountRef.current = 0;
-        return;
-      }
-      // Gentle, prompt-free recovery first: rebind the SAME stream + replay.
+      if (!dead && !black) { previewRecoverTicksRef.current = 0; return; } // healthy
+      // Gentle, prompt-free replay of the SAME stream (no getUserMedia).
       if (!dead) {
         if (v.srcObject !== s) { try { v.srcObject = s; } catch { /* noop */ } }
         if (v.paused) v.play().catch(() => { /* non-fatal */ });
       }
       previewRecoverTicksRef.current += 1;
-      // A dead track can't be replayed, and a black one that didn't recover needs
-      // a fresh stream → re-acquire (video-only), bounded per black episode.
-      if (dead || previewRecoverTicksRef.current >= 2) {
-        previewRecoverTicksRef.current = 0;
-        if (previewReacquireCountRef.current < 3) {
-          previewReacquireCountRef.current += 1;
-          startStream();
-        } else {
-          setPreviewStuck(true); // exhausted → graceful Retry / Phone-camera UI
-        }
-      }
+      // Persistently black (replay can't revive it, or the track is gone) →
+      // surface Retry (a single user-initiated re-acquire) rather than
+      // auto-prompting for the camera over and over.
+      if (previewRecoverTicksRef.current >= 4) { setPreviewStuck(true); }
     }, 1800);
     return () => clearInterval(iv);
-  }, [isOpen, startStream, viewerIndex, annotatingId, previewReady]);
+  }, [isOpen, viewerIndex, annotatingId]);
 
   // Lock the page behind the camera while it's open. Without this the
   // inspection underneath stays scrollable, so on mobile it scrolls up through
