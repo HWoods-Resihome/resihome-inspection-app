@@ -21,6 +21,7 @@ import { useAutosave, type SaveState } from '@/lib/useAutosave';
 import { buildQaAnswerProps, buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 import { isHvacSection, isSmartHomeSection } from '@/lib/scopeWidgetSections';
 import { FinalChecklist } from '@/components/FinalChecklist';
+import { SyncingBadge } from '@/components/SyncingBadge';
 import {
   finalChecklistGap, fcSectionCounts,
   type FcAnswers, type FcAnswerState, type FcCompletionCtx,
@@ -1780,7 +1781,7 @@ export function QuestionForm({
                               </span>
                             )}
                             {url.startsWith('blob:') && (
-                              <span className="absolute bottom-0 inset-x-0 bg-amber-500/95 text-white text-[8px] font-heading font-bold text-center leading-tight py-0.5 rounded-b pointer-events-none" title="Saved Offline · Will Sync When Online">Saved Offline</span>
+                              <SyncingBadge />
                             )}
                             {!readOnly && (
                               <button

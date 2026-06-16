@@ -6,6 +6,7 @@ import { uploadVideo } from '@/lib/photoUpload';
 import { onPhotoSynced, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
 import { pushCameraOpen, popCameraOpen } from '@/lib/cameraOpenState';
 import { makeVideoEntry } from '@/lib/media';
+import { SyncingBadge } from '@/components/SyncingBadge';
 import { CameraAILayer } from '@/components/CameraAILayer';
 import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
 import { useBackToClose } from '@/lib/useBackToClose';
@@ -2882,13 +2883,9 @@ export function CameraCapture({
                 )}
                 {it.status === 'uploaded' && (
                   it.hubspotUrl && it.hubspotUrl.startsWith('blob:') ? (
-                    // Offline draft — cached locally; will upload when back online.
-                    <span
-                      className="absolute bottom-0 inset-x-0 bg-amber-500/95 text-white text-[8px] font-heading font-bold text-center leading-tight py-0.5 rounded-b"
-                      title="Saved Offline · Will Sync When Online"
-                    >
-                      Saved Offline
-                    </span>
+                    // Still a local draft — syncing in the background (or held
+                    // offline). The badge reflects which, so it never reads as stuck.
+                    <SyncingBadge />
                   ) : (
                     <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center border-2 border-black">
                       <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white"

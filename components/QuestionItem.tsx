@@ -8,6 +8,7 @@ import { useAppDialog } from '@/components/AppDialog';
 import { displayImageSrc } from '@/lib/photoDisplay';
 import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { isVideoEntry } from '@/lib/media';
+import { SyncingBadge } from '@/components/SyncingBadge';
 
 // Check once whether the browser supports the camera API. Hidden behind a
 // constant so the "Take Photos" button can be disabled on unsupported browsers
@@ -219,7 +220,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                 <img src={displayImageSrc(url)} alt="" loading="lazy" decoding="async" onClick={() => setLightboxIndex(idx)}
                   className="w-full h-16 object-cover rounded cursor-pointer" />
                 {url.startsWith('blob:') && (
-                  <span className="absolute bottom-0 inset-x-0 bg-amber-500/95 text-white text-[8px] font-heading font-bold text-center leading-tight py-0.5 rounded-b pointer-events-none" title="Saved Offline · Will Sync When Online">Saved Offline</span>
+                  <SyncingBadge />
                 )}
                 <button type="button" onClick={() => removePhoto(idx)}
                   className="absolute -top-1 -right-1 bg-ink text-white text-xs w-5 h-5 rounded-full leading-none flex items-center justify-center hover:bg-brand transition">&times;</button>
