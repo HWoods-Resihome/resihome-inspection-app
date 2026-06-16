@@ -466,9 +466,16 @@ export default function Home() {
       await load({ refresh: true });
       setTimeout(() => { void load({ refresh: true }); }, 1500);
       setTimeout(() => { void load({ refresh: true }); }, 5000);
-      const skippedCompleted = (data.skipped || []).filter((s: any) => s.reason === 'completed').length;
-      if (skippedCompleted > 0) {
-        void dialog.alert(`${data.cancelled.length} cancelled. ${skippedCompleted} completed inspection${skippedCompleted === 1 ? ' was' : 's were'} skipped (completed inspections can't be cancelled).`);
+      const skips = (data.skipped || []) as Array<{ reason: string }>;
+      const skippedCompleted = skips.filter((s) => s.reason === 'completed').length;
+      // External (1099) users can only cancel inspections they own; selecting
+      // someone else's 1099 returns 'not allowed' so it stays in the list.
+      const skippedNotAllowed = skips.filter((s) => s.reason === 'not allowed').length;
+      const parts: string[] = [];
+      if (skippedCompleted > 0) parts.push(`${skippedCompleted} completed inspection${skippedCompleted === 1 ? ' was' : 's were'} skipped (completed inspections can't be cancelled)`);
+      if (skippedNotAllowed > 0) parts.push(`${skippedNotAllowed} ${skippedNotAllowed === 1 ? 'was' : 'were'} skipped (you can only cancel inspections assigned to you)`);
+      if (parts.length) {
+        void dialog.alert(`${data.cancelled.length} cancelled. ${parts.join('. ')}.`);
       }
     } catch (e: any) {
       void dialog.alert(`Could not cancel: ${e.message || e}`);

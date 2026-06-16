@@ -6,7 +6,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { isExternalEmail } from '@/lib/userAccess';
+import { externalAccessDenial } from '@/lib/userAccess';
 import { fetchInspectionById, updateInspection } from '@/lib/hubspot';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 
@@ -21,12 +21,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  // Cancelling inspections is an internal management action — not for external
-  // (1099) users.
-  if (isExternalEmail(session.email)) {
-    res.status(403).json({ error: 'Your account can’t cancel inspections.' });
-    return;
-  }
+  // External (1099) users CAN cancel — but only the non-completed 1099
+  // inspections they OWN. Enforced per-id below via externalAccessDenial (the
+  // same rule the single-cancel route uses), so a crafted id list can never
+  // cancel someone else's inspection or a completed one. Internal users are
+  // unrestricted (externalAccessDenial returns null for them).
 
   const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: any) => typeof x === 'string') : [];
   if (ids.length === 0) {
@@ -56,6 +55,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           cancelled.push(id); // already cancelled — idempotent success
           continue;
         }
+        // External users may only cancel a non-completed 1099 they own (this is a
+        // no-op for internal users). Anything else is skipped, never cancelled.
+        const denial = externalAccessDenial(session!.email, insp?.templateType, {
+          write: true, status: insp?.status, ownerEmail: insp?.inspectorEmail,
+        });
+        if (denial) { skipped.push({ id, reason: 'not allowed' }); continue; }
         await updateInspection(id, { status: 'cancelled' });
         cancelled.push(id);
       } catch (e: any) {
