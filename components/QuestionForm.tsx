@@ -10,7 +10,7 @@ import { flushOutbox } from '@/lib/offlineOutbox';
 import { loadCachedAnswers, saveCachedAnswers, clearCachedAnswers } from '@/lib/offlineCache';
 import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
-import { displayImageSrc, thumbImageSrc } from '@/lib/photoDisplay';
+import { PhotoThumb } from '@/components/PhotoThumb';
 import { isVideoEntry } from '@/lib/media';
 import { useAppDialog } from '@/components/AppDialog';
 
@@ -1798,9 +1798,8 @@ export function QuestionForm({
                       <div className="flex gap-1.5 overflow-x-auto pb-1 mt-2 -mx-0.5 px-0.5">
                         {sectionPhotoUrls.map((url, idx) => (
                           <div key={`${url}-${idx}`} className="relative shrink-0">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={thumbImageSrc(url)}
+                            <PhotoThumb
+                              url={url}
                               alt=""
                               onClick={() => setPhotoLightbox({ instanceKey: inst.instanceKey, index: idx })}
                               className="w-16 h-16 object-cover rounded border border-gray-200 cursor-pointer"

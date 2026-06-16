@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { thumbImageSrc } from '@/lib/photoDisplay';
+import { PhotoThumb } from '@/components/PhotoThumb';
 import { isVideoEntry, getVideoUrl } from '@/lib/media';
 import { SyncingBadge } from '@/components/SyncingBadge';
 
@@ -75,9 +75,8 @@ export function PhotoStrip({
               {photoUrls.map((u, i) => {
                 const inner = (
                   <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={thumbImageSrc(u)}
+                    <PhotoThumb
+                      url={u}
                       alt={label}
                       style={{ width: size, height: size }}
                       className={`object-cover rounded border ${a.thumb}`}
