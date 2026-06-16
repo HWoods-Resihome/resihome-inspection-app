@@ -5,7 +5,7 @@ import { QuestionItem, answerTone, isNA } from './QuestionItem';
 import { CameraCapture } from './CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadFilesBatch } from '@/lib/photoUpload';
-import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume } from '@/lib/offlinePhotoStore';
+import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume, countQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { flushOutbox } from '@/lib/offlineOutbox';
 import { loadCachedAnswers, saveCachedAnswers, clearCachedAnswers } from '@/lib/offlineCache';
 import { useAnyCameraOpen } from '@/lib/cameraOpenState';
@@ -1231,6 +1231,33 @@ export function QuestionForm({
     if (fcEnabled) {
       const gap = finalChecklistGap(fcAnswers, fcCtx, { onlySectionIds: fcGateIds, skipLineRules: true });
       if (gap) { await dialog.alert(`Please complete: ${gap}`); return; }
+    }
+    // Don't finalize while photos are still queued — the persist below strips
+    // unsynced blob: urls, so submitting now would LOSE them from the record (the
+    // field failure where photos went missing). Try one more flush, then if any
+    // remain, tell the inspector exactly what's pending and let them wait (the
+    // safe default) rather than silently dropping evidence.
+    if (!readOnly) {
+      try { await runPhotoFlushRef.current(); } catch { /* surfaced below */ }
+      let pendingPhotos = 0;
+      try { pendingPhotos = await countQueuedPhotos(inspectionRecordId); } catch { /* treat as 0 */ }
+      if (pendingPhotos > 0) {
+        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+        if (offline) {
+          await dialog.alert(
+            `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} still need${pendingPhotos === 1 ? 's' : ''} to upload, but you're offline. ` +
+            `Move to an area with signal and stay on this screen until they finish, then submit — they aren't saved yet.`,
+          );
+          return;
+        }
+        const proceed = await dialog.confirm(
+          `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} ${pendingPhotos === 1 ? 'is' : 'are'} still uploading. ` +
+          `If you submit now ${pendingPhotos === 1 ? 'it' : 'they'} may not be attached to the report. ` +
+          `Keep this screen open a few more seconds and they'll finish.`,
+          { confirmLabel: 'Submit anyway', cancelLabel: 'Keep waiting' },
+        );
+        if (!proceed) return;
+      }
     }
     const totalSectionPhotos = Object.values(sectionPhotos).flat().length;
     const totalQuestionPhotos = Object.values(answers).reduce((acc, a) => acc + a.photoUrls.length, 0);

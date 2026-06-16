@@ -34,7 +34,7 @@ export type QueuedPhoto = {
   replacesUrl?: string;
   lineExternalId?: string;
   createdAt: number;
-  attempts?: number;     // failed upload attempts; dropped after MAX_ATTEMPTS
+  attempts?: number;     // failed upload attempts (telemetry only — NEVER dropped)
   // Set by the service worker's Background Sync handler once the blob has been
   // uploaded to HubSpot with the tab closed. When present, the foreground flush
   // skips re-uploading and only performs the (cheap) attach step on next open.
@@ -153,12 +153,6 @@ async function deleteRecord(localId: string): Promise<void> {
   await tx('readwrite', (s) => s.delete(localId));
 }
 
-/** Was a thrown upload error a network/offline failure (vs a permanent 4xx)? */
-function isOfflineErr(err: any): boolean {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
-  const msg = String(err?.message || err || '');
-  return !/HTTP 4\d\d/.test(msg);
-}
 
 /**
  * Compress a captured photo and try to upload it. On success returns the real
@@ -386,25 +380,24 @@ async function doFlushQueuedPhotos(
       }
     } catch (e: any) {
       lastError = `Photo upload failed (${String(e?.message || e).slice(0, 90)}).`;
-      // Genuinely offline → keep everything and stop taking new work.
+      // Genuinely offline → keep everything and stop taking new work this pass.
       if (typeof navigator !== 'undefined' && navigator.onLine === false) { lastError = 'Device is offline — photos will upload when back online.'; stop = true; return; }
-      if (isOfflineErr(e)) {
-        // Online but the upload failed in a network-ish way (HubSpot hiccup,
-        // oversized blob, etc.). Count the attempt; after too many, drop+skip
-        // so one wedged photo can't block the queue (and the banner) forever.
-        const attempts = (rec.attempts || 0) + 1;
-        if (attempts >= MAX_ATTEMPTS) {
-          console.error(`[offlinePhotoStore] dropping ${rec.localId} after ${MAX_ATTEMPTS} failed attempts`);
-          await deleteRecord(rec.localId);
-          return;
-        }
-        try { await putRecord({ ...rec, attempts }); } catch { /* noop */ }
-        stop = true; // back off the rest of the batch; the periodic flush retries
-        return;
+      // Online but THIS upload failed (HubSpot hiccup, rate limit, oversized,
+      // transient 4xx/5xx, etc.). NEVER delete an evidence photo — it's the
+      // inspector's only copy. Keep it queued, count the attempt for telemetry,
+      // and back off the rest of this batch so we don't hammer a flaky link; the
+      // periodic flush + reconnect/foreground kicks retry it until it lands. The
+      // submit gate refuses to finalize while any photo is still queued, so a
+      // photo can no longer go silently missing — the old code dropped it after a
+      // 4xx (incl. 429 rate-limit) or after N attempts, which is what made photos
+      // vanish in the field.
+      const attempts = (rec.attempts || 0) + 1;
+      try { await putRecord({ ...rec, attempts }); } catch { /* keep the in-memory record; next flush retries */ }
+      if (attempts >= MAX_ATTEMPTS) {
+        lastError = `A photo has failed to upload ${attempts}×. It's kept safe and will keep retrying — check your signal before submitting.`;
+        console.warn(`[offlinePhotoStore] ${rec.localId} still failing after ${attempts} attempts — kept (never dropped)`);
       }
-      // Permanent failure (decodable 4xx etc.): drop so it can't wedge the queue.
-      console.error(`[offlinePhotoStore] dropping ${rec.localId} after permanent error`, e);
-      await deleteRecord(rec.localId);
+      stop = true; // back off; the next flush retries from where we left off
       return;
     }
     await finishSynced(rec, newUrl);
