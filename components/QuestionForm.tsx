@@ -152,6 +152,11 @@ function sectionPhotosExempt(sectionName: string, sectionOrder: number, template
   if (lower.includes('review') && lower.includes('sign')) return true;
   if (lower.includes('summary')) return true;
   if (lower.includes('hap')) return true;
+  // Vacant Units: the evidence is captured by the per-QUESTION required photos
+  // inside the section, so a separate SECTION photo is redundant — and was
+  // blocking submit on the "Vacant Units" section even when its questions had
+  // photos. Exempt any vacant-unit section from the section-photo requirement.
+  if (lower.includes('vacant')) return true;
   // 1099: the Whole House section does not require a section photo.
   if (templateType === 'leasing_agent_1099_property_inspection' && /whole\s*house/.test(lower)) return true;
   return false;
