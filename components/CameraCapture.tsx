@@ -1101,12 +1101,17 @@ export function CameraCapture({
   // user-initiated re-acquire — instead of auto-prompting.
   useEffect(() => {
     if (!isOpen) return;
-    // iOS: NO liveness monitor. The rapid-digital live-frame capture never pauses
-    // the preview on its own, so the monitor only added churn (and was part of the
-    // machinery that made iPhone capture flaky). On-open stalls are still covered
-    // by startStream's stuck-timer + Retry, and a backgrounded-then-paused video
-    // by the onPause handler + visibility resume. Android keeps the monitor.
-    if (IS_IOS) return;
+    // This monitor was DISABLED on iOS (28f538b) on the theory that rapid-digital
+    // capture never pauses the preview — but the field proved otherwise: after a
+    // shot, iOS can PAUSE/stall the <video> a beat later, leaving a PERMANENT black
+    // preview (chrome still visible) that nothing recovered, so inspectors had to
+    // reload mid-inspection. It's REPLAY-ONLY (re-binds + replays the SAME stream,
+    // NEVER getUserMedia), so it can't re-prompt for permission — the prompt-spam
+    // that got it disabled came from a getUserMedia path since removed (d053098).
+    // So iOS keeps it too, just ticking FASTER so a post-capture stall self-heals
+    // within a frame or two instead of the inspector seeing black and bailing.
+    const TICK_MS = IS_IOS ? 700 : 1800;
+    const STUCK_TICKS = Math.max(4, Math.ceil(7000 / TICK_MS)); // ~7s of truly persistent black → offer Retry
     previewRecoverTicksRef.current = 0;
     const iv = setInterval(() => {
       if (recordingRef.current) return;                          // don't disturb a recording
@@ -1129,8 +1134,8 @@ export function CameraCapture({
       // Persistently black (replay can't revive it, or the track is gone) →
       // surface Retry (a single user-initiated re-acquire) rather than
       // auto-prompting for the camera over and over.
-      if (previewRecoverTicksRef.current >= 4) { setPreviewStuck(true); }
-    }, 1800);
+      if (previewRecoverTicksRef.current >= STUCK_TICKS) { setPreviewStuck(true); }
+    }, TICK_MS);
     return () => clearInterval(iv);
   }, [isOpen, viewerIndex, annotatingId]);
 

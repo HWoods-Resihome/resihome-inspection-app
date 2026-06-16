@@ -433,20 +433,19 @@ export async function flushQueuedPhotos(
   onSynced: FlushOnSynced,
 ): Promise<FlushResult> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
-  // iOS ONLY: suspend uploads while an in-app camera overlay is open. On iPhone's
-  // tight WebKit memory ceiling, running an upload (read blob + base64-encode +
-  // fetch) at the same instant the NEXT shot is decoding its capture canvas spikes
-  // memory and jettisons the content process — the "black screen / boot-out after
-  // the 2nd photo". Photos stay queued + shown from their local thumbnails; the
-  // form drains them the moment the camera CLOSES, and every ~10s after. Android
-  // (no such ceiling) keeps uploading IMMEDIATELY per shot, as the owner wants.
-  if (IS_IOS_WEBKIT && isAnyCameraOpen()) {
-    const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
-    return { synced: 0, remaining };
-  }
   const existing = flushInFlight.get(inspectionRecordId);
   if (existing) return existing;
-  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced);
+  // Upload IMMEDIATELY per shot (the owner's ask, and how the stable build
+  // behaved) so each photo's blob LEAVES memory promptly instead of every draft
+  // — and its retained object URLs — piling up for the whole camera session. We
+  // had SUSPENDED iOS uploads while the camera was open to avoid an upload's
+  // base64 spike overlapping the next capture canvas, but that just traded a
+  // transient spike for unbounded accumulation (and the field showed it never
+  // actually stopped the black screen). Instead, while a camera is open on iOS we
+  // drain ONE AT A TIME (concurrency 1) so at most a single upload's spike is ever
+  // in flight; off-camera / Android drain at full concurrency.
+  const concurrency = (IS_IOS_WEBKIT && isAnyCameraOpen()) ? 1 : FLUSH_CONCURRENCY;
+  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, concurrency);
   flushInFlight.set(inspectionRecordId, run);
   try { return await run; }
   finally { flushInFlight.delete(inspectionRecordId); }
@@ -455,6 +454,7 @@ export async function flushQueuedPhotos(
 async function doFlushQueuedPhotos(
   inspectionRecordId: string,
   onSynced: FlushOnSynced,
+  concurrency: number = FLUSH_CONCURRENCY,
 ): Promise<FlushResult> {
   let lastError: string | undefined;
   // Only flush THIS inspection's photos — the mounted form is what persists the
@@ -548,7 +548,7 @@ async function doFlushQueuedPhotos(
       await processOne(all[i]);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(FLUSH_CONCURRENCY, all.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(concurrency, all.length) }, worker));
 
   const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
   return { synced, remaining, lastError };
