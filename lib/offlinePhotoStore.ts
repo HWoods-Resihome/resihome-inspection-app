@@ -17,6 +17,7 @@
 import { compressToJpeg, uploadJpegBlob, uploadVideo, toJpegName } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
 import { isQuotaError, StorageFullError } from '@/lib/storageQuota';
+import { registerSyncedBlob } from '@/lib/photoDisplay';
 
 export type QueuedPhoto = {
   localId: string;
@@ -359,7 +360,12 @@ async function doFlushQueuedPhotos(
     // (clears "Saved Offline" live; Done then returns real URLs, not stale drafts).
     if (oldUrl) notifyPhotoSynced({ localId: rec.localId, oldUrl, newUrl });
     if (entry) {
-      for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
+      // KEEP the local blob alive and map it to the real url, so the on-screen
+      // thumbnail keeps showing the same image across the offline->online swap
+      // instead of flashing blank/broken while the network image loads. (Was:
+      // revoke immediately here — the cause of the flicker / "?" tile. The blob
+      // holds only compressed jpeg bytes and the cache is capped + revokes there.)
+      registerSyncedBlob(newUrl, oldUrl);
       urlByLocalId.delete(rec.localId);
     }
     synced++;
