@@ -1,0 +1,94 @@
+name: iOS TestFlight
+
+# Manual-only. Builds the ResiWALK Capacitor iOS shell on a hosted macOS runner
+# and ships it to TestFlight. This is NATIVE-ONLY and has ZERO effect on the web
+# app: it never touches the web build and Vercel does not deploy from workflow
+# files. There is no `push`/`pull_request` trigger — nothing runs unless a human
+# presses "Run workflow" (or fires the workflow_dispatch API).
+#
+# Because this workflow lives on `chore/native-oauth-outbound` (NOT the default
+# branch), trigger it against that ref:
+#   gh workflow run ios-testflight.yml --ref chore/native-oauth-outbound
+# or POST .../actions/workflows/ios-testflight.yml/dispatches {"ref":"chore/native-oauth-outbound"}
+# (The Actions-tab button only appears for workflows on the default branch; put a
+# copy of this file on main later if you want the button — it won't affect the web app.)
+#
+# Required repo Secrets (Settings -> Secrets and variables -> Actions):
+#   ASC_KEY_ID      App Store Connect API Key ID
+#   ASC_ISSUER_ID   App Store Connect API issuer ID
+#   ASC_KEY_P8      the API .p8 private key, base64-encoded  (`base64 -i AuthKey_XXX.p8`)
+#   APPLE_TEAM_ID   10-char Apple Developer Team ID
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Note for this build (shows in the run title)"
+        required: false
+        default: "Manual TestFlight build"
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 75
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      BUILD_NUMBER: ${{ github.run_number }}
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+    steps:
+      - name: Checkout (native branch)
+        uses: actions/checkout@v4
+
+      - name: Preflight — required secrets present
+        run: |
+          missing=0
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
+            if [ -z "${!v}" ]; then echo "::error::Missing secret $v"; missing=1; fi
+          done
+          [ "$missing" -eq 0 ] || { echo "Set the secrets listed in this workflow's header."; exit 1; }
+
+      - name: Select latest Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.4.1.app 2>/dev/null || true
+          xcodebuild -version
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Capacitor + native deps
+        working-directory: mobile
+        run: npm install
+
+      - name: Generate + sync the iOS project
+        working-directory: mobile
+        run: |
+          if [ ! -d ios ]; then npx cap add ios; fi
+          npx cap sync ios
+
+      - name: Apply parked iOS native files (idempotent)
+        run: bash mobile/ios-pending/apply-ios.sh
+
+      - name: Build + upload to TestFlight (fastlane)
+        working-directory: mobile/ios/App
+        run: fastlane beta
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-logs
+          path: |
+            mobile/ios/App/build
+            ~/Library/Logs/gym
+          if-no-files-found: ignore
+          retention-days: 7

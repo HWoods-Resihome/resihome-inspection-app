@@ -1,0 +1,7 @@
+# Bundle id matches capacitor.config.ts `appId`.
+app_identifier "com.resihome.resiwalk"
+
+# Team id comes from the APPLE_TEAM_ID secret at build time.
+team_id ENV["APPLE_TEAM_ID"] if ENV["APPLE_TEAM_ID"]
+
+# No apple_id here on purpose — auth is the App Store Connect API key (see Fastfile).

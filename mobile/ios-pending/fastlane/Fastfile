@@ -1,0 +1,57 @@
+# ResiWALK iOS — TestFlight build lane.
+#
+# Auth + signing use ONLY an App Store Connect API key (no Apple-ID password, no
+# fastlane match repo, no committed certificates). Xcode manages signing
+# automatically via `-allowProvisioningUpdates`, creating/fetching the
+# distribution cert + provisioning profile on the runner using the API key.
+#
+# Required ENV (set as GitHub Secrets, passed through by the workflow):
+#   ASC_KEY_ID      App Store Connect API Key ID
+#   ASC_ISSUER_ID   App Store Connect API issuer ID
+#   ASC_KEY_P8      the .p8 private key, base64-encoded
+#   APPLE_TEAM_ID   10-char Apple Developer Team ID
+#   BUILD_NUMBER    unique, monotonic build number (the workflow passes github.run_number)
+
+default_platform(:ios)
+
+platform :ios do
+  desc "Build the ResiWALK shell and upload to TestFlight"
+  lane :beta do
+    # Creates a temporary CI keychain (so automatic signing has somewhere to put
+    # the fetched certificate) and tunes other CI-only defaults.
+    setup_ci
+
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_content: ENV.fetch("ASC_KEY_P8"),
+      is_key_content_base64: true,
+      in_house: false,
+    )
+
+    team_id   = ENV.fetch("APPLE_TEAM_ID")
+    build_num = ENV["BUILD_NUMBER"] || Time.now.to_i.to_s
+
+    build_app(
+      workspace: "App.xcworkspace",
+      scheme: "App",
+      configuration: "Release",
+      export_method: "app-store",
+      clean: true,
+      output_directory: "build",
+      # Let Xcode resolve signing on the runner using the API key.
+      xcargs: "-allowProvisioningUpdates DEVELOPMENT_TEAM=#{team_id} CURRENT_PROJECT_VERSION=#{build_num}",
+      export_options: {
+        signingStyle: "automatic",
+        teamID: team_id,
+      },
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      # Don't block the runner waiting for Apple's async processing — the build
+      # shows up in TestFlight a few minutes later.
+      skip_waiting_for_build_processing: true,
+    )
+  end
+end

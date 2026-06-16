@@ -10,7 +10,46 @@ shared with Android and already correct (`iosScheme: https`,
 `limitsNavigationsToAppBoundDomains: false` so getUserMedia works,
 `allowNavigation` includes resiwalk.com).
 
-## Steps (on macOS, Xcode installed)
+## Recommended: automated build → TestFlight (GitHub Actions, no Mac needed)
+`.github/workflows/ios-testflight.yml` does the whole thing on a hosted macOS
+runner (`macos-26`, Xcode 26.x, fastlane preinstalled): checkout → `npm install`
+→ `npx cap add ios && npx cap sync ios` → `mobile/ios-pending/apply-ios.sh`
+(idempotent) → `fastlane beta` (build, auto-sign, upload to TestFlight). It is
+**native-only and never touches the web app** (no web build; Vercel ignores
+workflow files). It runs **only on manual dispatch** — nothing auto-runs.
+
+**One-time setup — add these repo Secrets** (Settings → Secrets and variables →
+Actions). Auth + signing use *only* an App Store Connect API key — no Apple-ID
+password, no committed certificates, no `match` repo:
+
+| Secret | What |
+|---|---|
+| `ASC_KEY_ID` | App Store Connect API Key ID |
+| `ASC_ISSUER_ID` | API issuer ID |
+| `ASC_KEY_P8` | the `AuthKey_*.p8` contents, **base64-encoded** (`base64 -i AuthKey_XXX.p8 \| pbcopy`) |
+| `APPLE_TEAM_ID` | 10-char Apple Developer Team ID |
+
+Create the API key in App Store Connect → Users and Access → Integrations → keys,
+with **App Manager** access. The app record (bundle id `com.resihome.resiwalk`)
+must exist in App Store Connect first.
+
+**Trigger it** (the workflow lives on `chore/native-oauth-outbound`, not the
+default branch, so dispatch against that ref):
+```
+gh workflow run ios-testflight.yml --ref chore/native-oauth-outbound
+```
+The Actions-tab "Run workflow" button only appears for workflows on the default
+branch; copy this one file onto `main` later if you want the button (it has zero
+effect on the web app). First run may need a tweak or two — re-dispatch to iterate.
+
+`apply-ios.sh` applies the three build-relevant native pieces: the
+`WebViewController` (added to the Xcode target via `add_to_xcodeproj.rb`), the
+storyboard custom-class swap, and the Info.plist usage strings + `resiwalk://`
+scheme. The **geolocation + OAuth-return bridges are web changes** that only take
+effect once they're live on the web app at `server.url` — the shell loads the
+live site, so they are intentionally NOT compiled into the binary.
+
+## Manual alternative (on macOS, Xcode installed)
 1. Generate + sync the project:
    ```
    cd mobile
