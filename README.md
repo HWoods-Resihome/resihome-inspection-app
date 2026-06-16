@@ -2,6 +2,29 @@
 
 Next.js field-inspection app branded to ResiHome.
 
+## ⚠️ Working in this repo — multi-session git workflow (READ FIRST)
+
+Multiple people **and multiple Claude Code sessions** may be editing this repo at
+the same time, all shipping to `main`. To make concurrent work **stack** instead
+of collide, do this every time:
+
+1. **Pull the latest BEFORE making any edits:**
+   `git fetch origin main && git rebase origin/main`
+   (or `git pull --rebase origin main`). This bases your work on everyone else's
+   latest so you're never editing a stale copy.
+2. **Fetch + rebase again right BEFORE every push, then push:**
+   `git fetch origin main && git rebase origin/main && git push origin main`.
+   If the push is rejected (someone pushed while you worked), rebase and retry.
+3. **Never force-push `main`.** A normal push can't erase anyone's commits — git
+   rejects a non-fast-forward push, so you must integrate first. A `--force` is
+   the only thing that *can* overwrite others' work, so it's forbidden here.
+4. **On a conflict, keep BOTH sides** (resolve, don't discard), then continue the
+   rebase.
+
+Result: changes to *different* files/lines merge automatically and both survive;
+only edits to the *same lines* need a quick manual merge. Nothing is silently
+overwritten.
+
 ## What's new in v0.10 (Round B)
 
 This is the big one. Round B introduces inspection lifecycle and auto-save.

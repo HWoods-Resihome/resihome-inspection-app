@@ -68,6 +68,20 @@ is needed** — it flows through `server.url` on the next deploy.
   `main`. (Native-only work is the sole standing exception →
   `chore/native-oauth-outbound`.) Do not resurrect old per-task branches.
 
+## Multi-session git safety (DO THIS EVERY TASK)
+Other Claude sessions and people may be pushing to `main` **at the same time**.
+Never edit a stale clone or race a push:
+- **Pull BEFORE you edit.** At the very start of every task (before the first
+  edit), run `git fetch origin main && git rebase origin/main` (or
+  `git pull --rebase origin main`) so you're working on the latest code.
+- **Rebase BEFORE every push.** `git fetch origin main && git rebase origin/main
+  && git push origin main`. If the push is rejected (someone pushed while you
+  worked), rebase onto their commits and retry — do NOT `--force`.
+- Non-overlapping changes stack automatically and both survive; only edits to the
+  *same lines* conflict — resolve keeping BOTH sides, then continue the rebase.
+- If the owner says another session is active, prefer working in different files
+  to avoid conflicts, and fetch+rebase between each push.
+
 ## Build / verify
 - Web: `npx tsc --noEmit` + `npm run build` before committing.
 - Native: `cd mobile && npm install && npx cap sync android`, open
