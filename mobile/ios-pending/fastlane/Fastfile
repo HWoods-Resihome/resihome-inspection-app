@@ -39,7 +39,11 @@ platform :ios do
       export_method: "app-store",
       clean: true,
       output_directory: "build",
-      # Let Xcode resolve signing on the runner using the API key.
+      # Pass the API key so gym forwards -authenticationKeyID/-IssuerID/-Path to
+      # xcodebuild. Without this, `-allowProvisioningUpdates` has no credentials
+      # ("No Accounts") and can't create the distribution cert/profile.
+      api_key: api_key,
+      # Let Xcode resolve signing on the runner using the API key (cloud signing).
       xcargs: "-allowProvisioningUpdates DEVELOPMENT_TEAM=#{team_id} CURRENT_PROJECT_VERSION=#{build_num}",
       export_options: {
         signingStyle: "automatic",
