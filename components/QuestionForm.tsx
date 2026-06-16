@@ -1943,13 +1943,15 @@ export function QuestionForm({
         uploadPhoto={(file) => uploadPhotoOrQueue(file, inspectionRecordId, sectionCameraInstance || '')}
         uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, inspectionRecordId, sectionCameraInstance || '')}
         rooms={sectionInstances.map((inst) => {
-          const count = (sectionPhotos[inst.instanceKey] || []).length;
+          const roomPhotos = sectionPhotos[inst.instanceKey] || [];
+          const count = roomPhotos.length;
           const required = !sectionPhotosExempt(inst.baseSectionName, inst.sectionOrder, templateType);
           return {
             id: inst.instanceKey,
             name: inst.displayName,
             photoCount: count,
             needsPhotos: required && count === 0,
+            photos: roomPhotos,
           };
         })}
         currentRoomId={sectionCameraInstance || undefined}

@@ -36,6 +36,10 @@ interface CaptureItem {
   abortController?: AbortController;
   kind?: 'photo' | 'video';      // 'video' = press-and-hold clip (blobUrl is its poster)
   videoUrl?: string;             // video only: object URL of the clip (for in-gallery playback)
+  // Already-saved photo for THIS room, seeded into the strip so the inspector can
+  // still preview a room's shots after navigating away and back. EXCLUDED from the
+  // flush-back urls (the parent already has it) so it's never double-counted.
+  preexisting?: boolean;
 }
 
 interface CameraRoom {
@@ -43,6 +47,9 @@ interface CameraRoom {
   name: string;
   photoCount: number;
   needsPhotos: boolean;
+  // The room's already-saved photo URLs — seeded into the camera strip so they
+  // can be previewed when the inspector navigates back to this room.
+  photos?: string[];
 }
 
 interface Props {
@@ -1529,7 +1536,7 @@ export function CameraCapture({
     if (!video || !videoTrack) return;
     const mime = pickClipMime();
     if (!mime) { void dialog.alert('Video recording isn’t supported in this browser. Use the phone-camera button (top right) to record with your phone’s camera app.'); return; }
-    if (items.length >= maxPhotos) { void dialog.alert(`You can capture up to ${maxPhotos} items per session. Tap Done to finish.`); return; }
+    if (items.filter((it) => !it.preexisting).length >= maxPhotos) { void dialog.alert(`You can capture up to ${maxPhotos} items per session. Tap Done to finish.`); return; }
 
     // Best-effort audio narration; fall back to a silent clip if the mic is denied.
     let audioTracks: MediaStreamTrack[] = [];
@@ -1739,7 +1746,7 @@ export function CameraCapture({
 
   const handleNativeFiles = useCallback((files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const room = Math.max(0, maxPhotos - itemsRef.current.length);
+    const room = Math.max(0, maxPhotos - itemsRef.current.filter((it) => !it.preexisting).length);
     const picked = Array.from(files).slice(0, room);
     if (picked.length < files.length) {
       void dialog.alert(`Only the first ${room} photo(s) were added (max ${maxPhotos} per session).`);
@@ -1846,7 +1853,7 @@ export function CameraCapture({
   const capturePhoto = useCallback(() => {
     // Count in-flight captures too, so a rapid burst can't blow past the cap
     // before any have finished enqueuing.
-    if (itemsRef.current.length + pendingCaptureCountRef.current >= maxPhotos) {
+    if (itemsRef.current.filter((it) => !it.preexisting).length + pendingCaptureCountRef.current >= maxPhotos) {
       void dialog.alert(`You can capture up to ${maxPhotos} photos per session. Tap Done to finish.`);
       return;
     }
@@ -2076,11 +2083,14 @@ export function CameraCapture({
       await new Promise((r) => setTimeout(r, 100));
     }
     const finalItems = itemsRef.current;
+    // Preexisting (seeded) photos are already saved on the room — exclude them
+    // from the flush-back urls and the failure count so they're never re-counted.
     const urls = finalItems
-      .filter((it) => it.status === 'uploaded' && it.hubspotUrl)
+      .filter((it) => !it.preexisting && it.status === 'uploaded' && it.hubspotUrl)
       .map((it) => it.hubspotUrl!) as string[];
-    const failures = finalItems.filter((it) => it.status !== 'uploaded').length;
+    const failures = finalItems.filter((it) => !it.preexisting && it.status !== 'uploaded').length;
     for (const it of finalItems) {
+      if (it.preexisting) continue; // its blobUrl is a real URL, not an object URL
       try { URL.revokeObjectURL(it.blobUrl); } catch { /* harmless */ }
     }
     setItems([]);
@@ -2114,6 +2124,32 @@ export function CameraCapture({
   const multiRoom = !!(rooms && rooms.length && currentRoomId && onRoomChange);
   const currentRoom = multiRoom ? rooms!.find((r) => r.id === currentRoomId) : undefined;
   const currentIdx = multiRoom ? rooms!.findIndex((r) => r.id === currentRoomId) : -1;
+
+  // Seed the strip with the room's ALREADY-SAVED photos whenever the camera lands
+  // on a room (on open and after a room switch), so navigating away and back still
+  // shows that room's shots for preview instead of an empty strip. Seeded once per
+  // room visit (guarded) so it never wipes the inspector's new captures, and the
+  // seeded items are flagged preexisting so they're excluded from the flush-back
+  // urls (the parent already has them — no double-counting).
+  const seededRoomRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen) { seededRoomRef.current = null; return; }
+    if (!multiRoom || !currentRoomId) return;
+    if (seededRoomRef.current === currentRoomId) return;
+    seededRoomRef.current = currentRoomId;
+    const room = rooms!.find((r) => r.id === currentRoomId);
+    const existing = (room?.photos || []).filter(Boolean);
+    if (existing.length === 0) { setItems([]); return; }
+    setItems(existing.map((url, i) => ({
+      id: `pre_${currentRoomId}_${i}_${url.slice(-16)}`,
+      blobUrl: url,
+      file: new File([], 'preexisting.jpg', { type: 'image/jpeg' }),
+      status: 'uploaded' as const,
+      hubspotUrl: url,
+      kind: url.includes('#v=') ? ('video' as const) : ('photo' as const),
+      preexisting: true,
+    })));
+  }, [isOpen, multiRoom, currentRoomId, rooms]);
 
   // Switch to another room: push the current room's captures back to the
   // inspection, clear the tray, and keep the camera open on the new room.

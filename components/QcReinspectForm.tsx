@@ -1024,12 +1024,14 @@ export function QcReinspectForm(props: Props) {
           uploadPhoto={uploadHelper}
           uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, props.inspectionRecordId, cameraKey || '')}
           rooms={sections.map((s) => {
-            const count = (afterPhotos[s.key] || []).length;
+            const roomPhotos = afterPhotos[s.key] || [];
+            const count = roomPhotos.length;
             return {
               id: s.key,
               name: s.displayName,
               photoCount: count,
               needsPhotos: count === 0, // QC requires an after-photo per section
+              photos: roomPhotos,
             };
           })}
           currentRoomId={cameraKey}

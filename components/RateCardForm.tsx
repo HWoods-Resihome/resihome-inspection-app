@@ -4151,12 +4151,14 @@ export function RateCardForm(props: RateCardFormProps) {
           uploadPhoto={(file) => uploadPhotoOrQueue(file, props.inspectionRecordId, cameraSectionId || currentSectionId)}
           uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, props.inspectionRecordId, cameraSectionId || currentSectionId)}
           rooms={sections.map((s) => {
-            const count = (photosBySection[s.id] || []).length;
+            const roomPhotos = photosBySection[s.id] || [];
+            const count = roomPhotos.length;
             return {
               id: s.id,
               name: s.displayName || s.label,
               photoCount: count,
               needsPhotos: !s.photoOptional && !sectionPhotoExempt(s.displayName || s.label) && count === 0,
+              photos: roomPhotos,
             };
           })}
           currentRoomId={cameraSectionId}
