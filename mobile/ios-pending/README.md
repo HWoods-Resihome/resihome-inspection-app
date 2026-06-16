@@ -42,3 +42,21 @@ pointing at the same canonical domain.
 ## Files here
 - `WebViewController.swift` — `CAPBridgeViewController` subclass: media auto-grant + OAuth→Safari.
 - `Info.plist.additions.xml` — usage strings + `resiwalk` URL scheme to merge.
+
+## Known follow-up — verify on device: GPS evidence stamp
+The in-app camera burns a GPS evidence stamp (and a ✓/✗ on-site proximity check)
+using the web **`navigator.geolocation`** API (see `components/CameraCapture.tsx`).
+Android WebView supports that API (the manifest grants
+`ACCESS_FINE/COARSE_LOCATION` and Capacitor answers the geolocation prompt), but
+**a plain WKWebView historically does NOT bridge `navigator.geolocation` to
+CoreLocation** — so on the native iOS shell the stamp may read "unverified" and
+the proximity ✓/✗ won't evaluate, even though `NSLocationWhenInUseUsageDescription`
+is set (that string only covers the OS prompt, not the JS API).
+
+**Verify first** on a TestFlight build: open the camera and check the stamp shows
+a real location + distance. If it doesn't, bridge it — either add
+`@capacitor/geolocation` plus a tiny JS shim that maps `navigator.geolocation`
+onto it, or inject a `CLLocationManager`-backed `WKScriptMessageHandler` shim in
+`WebViewController`. The camera/mic auto-grant in this scaffold is independent and
+unaffected; this only concerns the photo location stamp.
+
