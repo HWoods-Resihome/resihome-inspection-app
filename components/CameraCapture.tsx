@@ -998,28 +998,44 @@ export function CameraCapture({
   // locks the phone / changes tabs), the browser stops the camera tracks, so on
   // return the <video> is frozen and won't capture. Re-acquire the stream (or
   // just replay a merely-paused video) when the page becomes visible again.
+  const resumePreview = useCallback(() => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+    if (recordingRef.current) return; // don't clobber an in-progress recording
+    const track = streamRef.current?.getVideoTracks?.()[0];
+    const dead = !streamRef.current || !track || track.readyState === 'ended';
+    if (dead) {
+      startStream();
+    } else if (videoRef.current?.paused) {
+      videoRef.current.play().catch(() => { /* autoplay rejection is non-fatal */ });
+    }
+  }, [startStream]);
+
   useEffect(() => {
     if (!isOpen) return;
-    const resume = () => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      if (recordingRef.current) return; // don't clobber an in-progress recording
-      const track = streamRef.current?.getVideoTracks?.()[0];
-      const dead = !streamRef.current || !track || track.readyState === 'ended';
-      if (dead) {
-        startStream();
-      } else if (videoRef.current?.paused) {
-        videoRef.current.play().catch(() => { /* autoplay rejection is non-fatal */ });
-      }
-    };
-    document.addEventListener('visibilitychange', resume);
-    window.addEventListener('focus', resume);
-    window.addEventListener('pageshow', resume);
+    document.addEventListener('visibilitychange', resumePreview);
+    window.addEventListener('focus', resumePreview);
+    window.addEventListener('pageshow', resumePreview);
     return () => {
-      document.removeEventListener('visibilitychange', resume);
-      window.removeEventListener('focus', resume);
-      window.removeEventListener('pageshow', resume);
+      document.removeEventListener('visibilitychange', resumePreview);
+      window.removeEventListener('focus', resumePreview);
+      window.removeEventListener('pageshow', resumePreview);
     };
-  }, [isOpen, startStream]);
+  }, [isOpen, resumePreview]);
+
+  // When the photo viewer / annotator CLOSES, the live <video> underneath may
+  // have been paused by the browser while it sat fully covered (notably Android
+  // Chrome pauses an occluded video) — and NO new 'pause' event fires when it's
+  // revealed, so the onPause auto-resume never triggers and the preview is left
+  // BLACK. Nudge it back to playing (or re-acquire a dead track) on close, with a
+  // couple of staggered retries to beat the reveal repaint.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (viewerIndex !== null || annotatingId !== null) return; // an overlay is still open
+    resumePreview();
+    const t1 = setTimeout(resumePreview, 150);
+    const t2 = setTimeout(resumePreview, 400);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [viewerIndex, annotatingId, isOpen, resumePreview]);
 
   // Lock the page behind the camera while it's open. Without this the
   // inspection underneath stays scrollable, so on mobile it scrolls up through
