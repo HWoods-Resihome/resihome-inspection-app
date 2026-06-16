@@ -1101,6 +1101,12 @@ export function CameraCapture({
   // user-initiated re-acquire — instead of auto-prompting.
   useEffect(() => {
     if (!isOpen) return;
+    // iOS: NO liveness monitor. The rapid-digital live-frame capture never pauses
+    // the preview on its own, so the monitor only added churn (and was part of the
+    // machinery that made iPhone capture flaky). On-open stalls are still covered
+    // by startStream's stuck-timer + Retry, and a backgrounded-then-paused video
+    // by the onPause handler + visibility resume. Android keeps the monitor.
+    if (IS_IOS) return;
     previewRecoverTicksRef.current = 0;
     const iv = setInterval(() => {
       if (recordingRef.current) return;                          // don't disturb a recording
@@ -2761,8 +2767,11 @@ export function CameraCapture({
             )}
             {/* Lens selector — deliberate physical-lens switch (ultra-wide / main /
                 tele). Hidden while recording (a swap restarts the stream). Only
-                shown when the device exposes more than one back lens. */}
-            {!recording && permissionState === 'granted' && (zoomLenses.length >= 2 || backLenses.length >= 2) && (
+                shown when the device exposes more than one back lens.
+                NOT on iOS: physical lens switching (applyConstraints zoom / stream
+                restart) is the flaky machinery we're reverting away from — iPhone
+                uses pure digital pinch/slide zoom, so the capture never restarts. */}
+            {!IS_IOS && !recording && permissionState === 'granted' && (zoomLenses.length >= 2 || backLenses.length >= 2) && (
               <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 bg-black/55 backdrop-blur-sm rounded-full px-1.5 py-1">
                 {zoomLenses.length >= 2
                   // Hardware-zoom lens chips (reliable on logical multi-cameras).
