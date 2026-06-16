@@ -49,6 +49,9 @@ platform :ios do
 
     upload_to_testflight(
       api_key: api_key,
+      # The app's numeric App Store Connect ID (not a secret) — lets fastlane
+      # resolve the app directly instead of searching by bundle id.
+      apple_id: "6780963726",
       # Don't block the runner waiting for Apple's async processing — the build
       # shows up in TestFlight a few minutes later.
       skip_waiting_for_build_processing: true,
