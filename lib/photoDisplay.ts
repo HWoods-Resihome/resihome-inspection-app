@@ -70,10 +70,13 @@ export function thumbImageSrc(url: string, w = 400): string {
   if (!url) return url;
   const v = url.indexOf('#v=');
   const clean = v === -1 ? url : url.slice(0, v);
-  // A local blob/data url (offline draft or just-synced cached blob) can't be
-  // proxied — show it directly. It's a single image, not the dozens-of-tiles hog.
-  const cached = syncedBlobByRealUrl.get(clean);
-  if (cached) return cached;
+  // Local draft (offline) or data: thumb — show directly; can't be proxied, and
+  // it's a single transient image, not the dozens-of-remote-tiles memory hog.
+  // NOTE: we deliberately do NOT use the just-synced full-res blob cache here —
+  // that blob decodes at full resolution and would defeat the resize for exactly
+  // the freshly-taken photos that fill the screen (the iOS OOM crash). Remote
+  // photos always go through the small proxy below; the full-res cached blob is
+  // used only by the one-at-a-time viewer (displayImageSrc).
   if (clean.startsWith('blob:') || clean.startsWith('data:')) return clean;
   // Remote photo → small re-encoded thumbnail through our origin.
   return `/api/photo-proxy?url=${encodeURIComponent(clean)}&w=${w}`;

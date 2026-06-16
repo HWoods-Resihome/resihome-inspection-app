@@ -1512,6 +1512,14 @@ export async function uploadFile(
   form.append('options', JSON.stringify({
     access: 'PUBLIC_INDEXABLE',
     overwrite,
+    // IDEMPOTENT RETRIES: a photo's first upload can reach HubSpot while the
+    // CLIENT sees a timeout/error (weak signal), then the retry re-sends the SAME
+    // filename. With the default strategy HubSpot rejects that with 409 Conflict
+    // — which (now that failed photos are kept + retried, never dropped) looped
+    // forever and blocked sync/submit. RETURN_EXISTING makes a same-name upload
+    // return the already-stored file's URL instead, so the retry simply succeeds.
+    duplicateValidationStrategy: 'RETURN_EXISTING',
+    duplicateValidationScope: 'EXACT_FOLDER',
   }));
   form.append('folderPath', folderPath);
 
