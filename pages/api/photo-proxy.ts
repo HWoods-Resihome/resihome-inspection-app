@@ -8,9 +8,13 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import sharp from 'sharp';
 
-// Matches hubspotusercontent-na1.net, *.hubspotusercontent-na1.net, hubspot.com,
-// *.hubfs.com, etc. — the hosts HubSpot serves uploaded files from.
-const ALLOWED_HOST_RE = /(^|\.)(hubspotusercontent-na1\.net|hubspotusercontent\.net|hubspot\.com|hubfs\.com)$/i;
+// HubSpot serves uploaded files from several hosts that vary by portal region
+// and CDN: hubspotusercontent-na1.net / -na2 / -eu1 / numbered variants, the
+// bare hubspotusercontent.net, the hubspot.net CDN (cdn2.hubspot.net), and
+// hubfs.com / hubspot.com. Match the whole family — the previous regex only
+// allowed `-na1`, so any other region/CDN host 403'd, and once EVERY thumbnail
+// started routing through here that 403'd on essentially every photo.
+const ALLOWED_HOST_RE = /(^|\.)(hubspotusercontent[a-z0-9-]*\.net|hubspot\.net|hubfs\.com|hubspot\.com)$/i;
 
 export const config = { api: { responseLimit: false } };
 
@@ -22,11 +26,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(403).json({ error: 'Host not allowed' });
   }
   try {
-    // SSRF hardening: follow redirects (HubSpot file URLs commonly 302 to a CDN
-    // host — rejecting that broke markup/preview of freshly-uploaded photos: the
-    // annotator showed "Couldn't open this photo for markup"), but re-validate
-    // the FINAL resolved host is still an allowed HubSpot host. Cap the upstream
-    // fetch so a slow origin can't tie up the function.
+    // The INITIAL host check above is the SSRF guard — we only ever fetch a URL
+    // HubSpot itself produced. HubSpot file URLs commonly 302 to a signed CDN
+    // (CloudFront/Akamai/cdn2) whose host ISN'T a hubspot.* domain; re-rejecting
+    // that final host (the old behavior) 403'd legitimate photos. So we follow
+    // the redirect and TRUST it — a validated HubSpot URL redirecting to its own
+    // CDN is not an SSRF vector. Cap the fetch so a slow origin can't tie up the
+    // function.
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 15000);
     let upstream: Response;
@@ -35,13 +41,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     } finally {
       clearTimeout(to);
     }
-    // Reject if a redirect carried us off an allowed host.
-    try {
-      const finalHost = new URL(upstream.url || u.toString()).hostname;
-      if (!ALLOWED_HOST_RE.test(finalHost)) {
-        return res.status(403).json({ error: 'Redirected to a host that is not allowed' });
-      }
-    } catch { /* no resolvable final URL — fall through to the status check */ }
     if (!upstream.ok) return res.status(upstream.status).json({ error: `Upstream ${upstream.status}` });
     const ct = (upstream.headers.get('content-type') || '').toLowerCase();
     const buf = Buffer.from(await upstream.arrayBuffer());
