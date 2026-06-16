@@ -152,28 +152,34 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.restore();
 }
 
-// Target preview resolution (4:3). Kept LOW (1280×960 ≈ 1.2MP) on purpose: on
-// iOS the standalone PWA's WebKit content process has a tight memory ceiling,
-// and the preview frame IS the saved photo there — so a high res means a big
-// live stream + a big per-shot canvas + big stored blobs, which (across a
-// photo-heavy session) jettisons the content process: the "A problem repeatedly
-// occurred" black screen. 1.2MP is plenty for inspection evidence (the PDF
-// embeds a 520px thumbnail) and keeps memory well under the ceiling. Android
-// still grabs a higher-res still via ImageCapture.takePhoto() (capped by
-// MAX_SAVE_EDGE), independent of this.
-const CAPTURE_WIDTH = 1280;
-const CAPTURE_HEIGHT = 960;
+// Target preview resolution (4:3). On iOS the standalone PWA's WebKit content
+// process has a tight memory ceiling, and the preview frame IS the saved photo
+// there (no ImageCapture) — so this is the lever for iOS photo SHARPNESS. We had
+// dropped it to 1280×960 (1.2MP) chasing the "A problem repeatedly occurred" OOM,
+// but that made evidence photos blurry with an unreadable burned-in stamp — the
+// quality regression inspectors hit. The OOM is now contained by the things that
+// actually caused it (full-res GRID decodes → small thumbnails; concurrent
+// upload+capture on iOS → upload-suspend; per-shot canvases freed immediately),
+// NOT by starving the capture resolution. 1920×1440 (≈2.7MP) restores crisp,
+// readable photos while staying well under the ceiling — and iOS getUserMedia
+// caps what it actually hands back anyway, so this is close to what the camera
+// delivered before the device-camera detour. Android grabs an even higher-res
+// still via ImageCapture.takePhoto() (capped by MAX_SAVE_EDGE), independent of this.
+const CAPTURE_WIDTH = 1920;
+const CAPTURE_HEIGHT = 1440;
 
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
 const JPEG_QUALITY = 0.92;
 // Saved-photo ceiling (long edge). Matches the upload target (TARGET_MAX_DIMENSION
 // in photoUpload), so the captured JPEG is ALREADY upload-ready — the upload path
-// skips its second compression pass (see compressToJpeg's fast path). ~9MP keeps
-// zoomed-in defect detail; the PDF is unaffected (it embeds a 520px thumbnail).
-// Capturing at the final size (rather than 4096 + recompress) is what keeps rapid
-// fire responsive on phones — there's no heavy main-thread re-encode between shots.
-const MAX_SAVE_EDGE = 2048;
+// skips its second compression pass (see compressToJpeg's fast path). 2560 keeps
+// zoomed-in defect detail and a legible stamp; the PDF is unaffected (it embeds a
+// 520px thumbnail). The per-shot canvas at this size is transient and freed
+// immediately (canvas.width=0 after toBlob), so it doesn't accumulate — capturing
+// at the final size (rather than 4096 + recompress) keeps rapid fire responsive
+// on phones with no heavy main-thread re-encode between shots.
+const MAX_SAVE_EDGE = 2560;
 // Final upload quality — no second compression downstream, so this IS the stored
 // quality. 0.9 is visually lossless for inspection photos at a small file size.
 const PHOTO_SAVE_QUALITY = 0.9;
