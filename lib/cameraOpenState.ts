@@ -35,6 +35,18 @@ export function isAnyCameraOpen(): boolean {
   return openCount > 0;
 }
 
+/**
+ * Subscribe (outside React) to camera open/close transitions. Used by the
+ * offline photo store to kick the upload flush the instant the LAST camera
+ * closes: on iOS the flush is suspended while a camera is open, so without this
+ * the queued photos would sit until the form's next 15s tick — making post-Done
+ * sync feel laggy. Returns an unsubscribe fn.
+ */
+export function subscribeCameraOpen(listener: (open: boolean) => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
 /** Re-renders the caller whenever a camera opens/closes anywhere in the app. */
 export function useAnyCameraOpen(): boolean {
   const [open, setOpen] = useState<boolean>(openCount > 0);

@@ -6,6 +6,8 @@ import { uploadVideo } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
 import { CameraAILayer } from '@/components/CameraAILayer';
 import { SyncingBadge } from '@/components/SyncingBadge';
+import { SelfHealingImg } from '@/components/PhotoThumb';
+import { displayImageSrc } from '@/lib/photoDisplay';
 import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
 import { useBackToClose } from '@/lib/useBackToClose';
 import { setNativeStatusBarColor } from '@/lib/nativeBridge';
@@ -21,7 +23,11 @@ import type { RateCardLineInput, RateCardLineItem, RegionRate } from '@/lib/type
  */
 interface CaptureItem {
   id: string;                    // local unique id
-  blobUrl: string;               // object URL for local preview thumbnail
+  blobUrl: string;               // object URL for the FULL-RES image (viewer/markup)
+  // Small (~400px) data-URL thumbnail for the capture strip, so the strip shows a
+  // tiny tile instead of decoding the full-res blob per photo. Falls back to
+  // blobUrl when a thumb wasn't generated.
+  thumbUrl?: string;
   file: File;                    // the captured file
   status: 'uploading' | 'uploaded' | 'failed';
   hubspotUrl?: string;           // populated when upload succeeds (videos: poster#v=video entry)
@@ -956,11 +962,11 @@ export function CameraCaptureLegacy({
 
   // Upload one File through the background pipeline + optimistic thumbnail.
   // Shared by the in-app shutter and the native-camera fallback.
-  const enqueueFile = useCallback((file: File) => {
+  const enqueueFile = useCallback((file: File, thumbUrl?: string) => {
     const id = `${Date.now()}_${(typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 8)}`;
     const blobUrl = URL.createObjectURL(file);
     const abortController = new AbortController();
-    const item: CaptureItem = { id, blobUrl, file, status: 'uploading', abortController };
+    const item: CaptureItem = { id, blobUrl, thumbUrl, file, status: 'uploading', abortController };
     setItems((prev) => [...prev, item]);
     uploadPhoto(file).then((hubspotUrl) => {
       if (abortController.signal.aborted) return;
@@ -1275,10 +1281,25 @@ export function CameraCaptureLegacy({
         stampLines.push(...buildGeoStampLines());
         drawEvidenceStamp(ctx, vw, vh, stampLines);
         lastManualCaptureRef.current = Date.now();
+        // Build a SMALL (~400px) strip thumbnail from this same canvas (no extra
+        // decode) so the capture strip renders tiny tiles instead of the full-res
+        // blob per photo — keeps strip memory low; the viewer still uses the full
+        // blob. Best-effort: the strip falls back to the full blob if this fails.
+        let thumbUrl: string | undefined;
+        try {
+          const tEdge = 400;
+          const ts = Math.min(1, tEdge / Math.max(vw, vh));
+          const tw = Math.max(1, Math.round(vw * ts)), th = Math.max(1, Math.round(vh * ts));
+          const tcanvas = document.createElement('canvas');
+          tcanvas.width = tw; tcanvas.height = th;
+          const tctx = tcanvas.getContext('2d');
+          if (tctx) { tctx.drawImage(canvas, 0, 0, tw, th); thumbUrl = tcanvas.toDataURL('image/jpeg', 0.6); }
+          tcanvas.width = 0; tcanvas.height = 0; // free the thumb canvas now
+        } catch { /* thumb is best-effort */ }
         canvas.toBlob((blob) => {
           if (!blob) return;
           const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          enqueueFile(new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' }));
+          enqueueFile(new File([blob], `capture_${id}.jpg`, { type: 'image/jpeg' }), thumbUrl);
         }, 'image/jpeg', PHOTO_SAVE_QUALITY);
       } catch (e: any) {
         console.error('Capture error:', e);
@@ -1952,9 +1973,11 @@ export function CameraCaptureLegacy({
           <div className={`flex gap-2 ${isLandscape ? 'flex-col items-center' : ''}`}>
             {items.map((it) => (
               <div key={it.id} className="relative shrink-0">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={it.blobUrl}
+                {/* Self-healing tile: small local thumb first (tiny + reliable),
+                    then the full image, then a neutral box — never a broken glyph. */}
+                <SelfHealingImg
+                  primary={it.thumbUrl || it.blobUrl}
+                  fallback={displayImageSrc(it.hubspotUrl && !it.hubspotUrl.startsWith('blob:') ? it.hubspotUrl : it.blobUrl)}
                   alt=""
                   onClick={() => {
                     if (it.kind === 'video') return;

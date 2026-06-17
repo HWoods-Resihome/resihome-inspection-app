@@ -18,7 +18,7 @@ import { compressToJpeg, uploadJpegBlob, uploadVideo, toJpegName } from '@/lib/p
 import { makeVideoEntry } from '@/lib/media';
 import { isQuotaError, StorageFullError } from '@/lib/storageQuota';
 import { registerSyncedBlob, registerDraftFullRes, clearDraftFullRes } from '@/lib/photoDisplay';
-import { isAnyCameraOpen } from '@/lib/cameraOpenState';
+import { isAnyCameraOpen, subscribeCameraOpen } from '@/lib/cameraOpenState';
 
 // iOS/iPadOS WebKit (incl. Chrome on iOS, which is WebKit). Several canvas/bitmap
 // paths misbehave here, so we branch on it below.
@@ -82,6 +82,15 @@ export function kickFlush(): void {
     kickTimer = null;
     for (const l of flushKickListeners) { try { l(); } catch { /* noop */ } }
   }, 700);
+}
+
+// On iOS the flush is SUSPENDED while a camera is open (memory safeguard), so the
+// per-capture kickFlush() calls are no-ops during the session and the queue would
+// otherwise sit untouched until the form's next 15s tick after Done. Kick the
+// flush the instant the LAST camera closes so the queued photos start uploading
+// immediately — this is what makes post-Done sync feel fast on iOS.
+if (typeof window !== 'undefined') {
+  subscribeCameraOpen((open) => { if (!open) kickFlush(); });
 }
 
 type PhotoSyncedInfo = { localId: string; oldUrl: string; newUrl: string };
