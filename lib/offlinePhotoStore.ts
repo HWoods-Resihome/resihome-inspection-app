@@ -226,7 +226,22 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-async function tx<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest): Promise<T> {
+// Serialize ALL IndexedDB transactions through one chain. iOS WebKit stalls/
+// deadlocks when readwrite transactions on the same store OVERLAP — which is
+// exactly what happens DURING the camera: new captures putRecord() at the same
+// moment the flush deleteRecord()s a just-synced photo. That contention is why
+// only the last photo synced (and only after leaving the camera, once captures
+// stopped). Running every op strictly one-at-a-time (each is a few ms) removes the
+// overlap, so mid-session uploads work without wedging. Opening one connection at
+// a time also avoids the open-blocked path.
+let _idbChain: Promise<unknown> = Promise.resolve();
+function tx<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest): Promise<T> {
+  const run = _idbChain.then(() => txInner<T>(mode, fn));
+  _idbChain = run.then(() => undefined, () => undefined); // chain continues past success OR failure
+  return run;
+}
+
+async function txInner<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest): Promise<T> {
   const db = await withIdbTimeout(openDb(), 'open');
   return withIdbTimeout(new Promise<T>((resolve, reject) => {
     const t = db.transaction(STORE, mode);
