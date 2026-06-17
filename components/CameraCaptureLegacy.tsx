@@ -36,6 +36,7 @@ interface CaptureItem {
   error?: string;                // populated when upload fails
   abortController?: AbortController;
   kind?: 'photo' | 'video';      // 'video' = press-and-hold clip (blobUrl is its poster)
+  videoUrl?: string;             // video only: object URL of the clip, for in-gallery playback
 }
 
 interface CameraRoom {
@@ -1070,7 +1071,8 @@ export function CameraCaptureLegacy({
     const posterUrl = URL.createObjectURL(posterBlob);
     const abortController = new AbortController();
     const posterFile = new File([posterBlob], `clip_${id}_poster.jpg`, { type: 'image/jpeg' });
-    const item: CaptureItem = { id, blobUrl: posterUrl, file: videoFile, status: 'uploading', abortController, kind: 'video' };
+    const videoUrl = URL.createObjectURL(videoFile); // playable in the in-camera swipe gallery
+    const item: CaptureItem = { id, blobUrl: posterUrl, file: videoFile, status: 'uploading', abortController, kind: 'video', videoUrl };
     setItems((prev) => [...prev, item]);
     // Prefer the queue-aware combined uploader (offline-capable); fall back to
     // the direct poster + clip uploads when not provided.
@@ -2054,13 +2056,12 @@ export function CameraCaptureLegacy({
                   fallback={displayImageSrc(it.hubspotUrl && !it.hubspotUrl.startsWith('blob:') ? it.hubspotUrl : it.blobUrl)}
                   alt=""
                   onClick={() => {
-                    if (it.kind === 'video') return;
-                    const photoItems = items.filter((p) => p.kind !== 'video');
-                    const vIdx = photoItems.findIndex((p) => p.id === it.id);
-                    if (vIdx >= 0) setViewerIndex(vIdx);
+                    // Photos AND videos share one swipeable gallery now.
+                    const idx = items.findIndex((p) => p.id === it.id);
+                    if (idx >= 0) setViewerIndex(idx);
                   }}
-                  className={`w-16 h-16 object-cover rounded border border-white/20 ${it.kind === 'video' ? '' : 'cursor-pointer'}`}
-                  title={it.kind === 'video' ? 'Video clip' : 'Tap to view'}
+                  className="w-16 h-16 object-cover rounded border border-white/20 cursor-pointer"
+                  title={it.kind === 'video' ? 'Tap to play clip' : 'Tap to view'}
                 />
                 {it.kind === 'video' && (
                   <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -2217,34 +2218,32 @@ export function CameraCaptureLegacy({
         onChange={(e) => { handleNativeFiles(e.target.files); e.currentTarget.value = ''; }}
       />
 
-      {/* Swipeable viewer for captured photos (markup is opt-in, not auto-on) */}
-      {viewerIndex !== null && (() => {
-        const photoItems = items.filter((p) => p.kind !== 'video');
-        if (photoItems.length === 0) { return null; }
-        const idx = Math.min(viewerIndex, photoItems.length - 1);
+      {/* Swipeable viewer for captured photos AND videos (markup is opt-in) */}
+      {viewerIndex !== null && items.length > 0 && (() => {
+        // ONE swipeable gallery for photos AND videos (matches Android). Videos
+        // are passed as poster#v=video composite entries — PhotoLightbox plays the
+        // clip on the active slide and shows the poster for neighbors. Index maps
+        // directly into `items` (no photo-only filtering).
+        const entries = items.map((it) =>
+          it.kind === 'video' && it.videoUrl ? makeVideoEntry(it.blobUrl, it.videoUrl) : it.blobUrl);
+        const idx = Math.min(viewerIndex, items.length - 1);
         return (
           <PhotoLightbox
-            groups={[{ id: 'session', name: 'Photos' }]}
-            photosByGroup={{ session: photoItems.map((p) => p.blobUrl) }}
+            groups={[{ id: 'session', name: 'Captures' }]}
+            photosByGroup={{ session: entries }}
             initialGroupId="session"
             initialIndex={idx}
             onClose={() => setViewerIndex(null)}
-            onDelete={(_g, i) => {
-              const target = items.filter((p) => p.kind !== 'video')[i];
-              if (target) deletePhoto(target.id);
-            }}
-            onReplace={(_g, i, file) => {
-              const target = items.filter((p) => p.kind !== 'video')[i];
-              if (target) handleAnnotated(target.id, file);
-            }}
+            onDelete={(_g, i) => { const t = items[i]; if (t) deletePhoto(t.id); }}
+            onReplace={(_g, i, file) => { const t = items[i]; if (t) handleAnnotated(t.id, file); }}
             // Tag-to-line — only when the active room actually has line items.
             tagLinesByGroup={tagLines && tagLines.length > 0 ? { session: tagLines } : undefined}
             onTagToLine={tagLines && tagLines.length > 0 && onTagPhotoToLine
               ? (_g, i, lineId) => {
-                  const target = items.filter((p) => p.kind !== 'video')[i];
+                  const target = items[i];
                   if (!target) return;
                   if (target.status !== 'uploaded' || !target.hubspotUrl) {
-                    void dialog.alert('This photo is still uploading — tag it again in a moment.');
+                    void dialog.alert('This capture is still uploading — tag it again in a moment.');
                     return;
                   }
                   const prevUrl = target.hubspotUrl;

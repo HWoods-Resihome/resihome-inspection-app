@@ -278,8 +278,8 @@ button, input, select, textarea {
   -moz-appearance: textfield;     /* Firefox */
 }
 
-/* Lightbox video: hide the browser's built-in CENTER overlay play button — it
-   renders off-center on some Android builds. We draw our own centered button
-   (see PhotoLightbox). The scrubber / timeline controls stay. */
-.lightbox-video::-webkit-media-controls-overlay-play-button { display: none !important; }
-.lightbox-video::-webkit-media-controls-start-playback-button { display: none !important; }
+/* Lightbox video uses the browser's NATIVE controls (including its center play
+   button) so there's exactly one play affordance on every platform. We used to
+   hide the native button and draw our own, but iOS Safari won't reliably honor
+   display:none on its start-playback button, so both showed — a double play
+   button. Native-only is the robust fix. */

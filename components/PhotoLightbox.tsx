@@ -43,12 +43,6 @@ export function PhotoLightbox({
   const [annotating, setAnnotating] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Custom centered play button for video slides (the native overlay play button
-  // renders off-center on some browsers; we hide it via CSS and draw our own).
-  const videoElRef = useRef<HTMLVideoElement | null>(null);
-  const [videoPaused, setVideoPaused] = useState(true);
-  // Reset to "paused" (show the play button) whenever the slide changes.
-  useEffect(() => { setVideoPaused(true); }, [index, groupId]);
 
   // Carousel drag state.
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -184,34 +178,18 @@ export function PhotoLightbox({
                   // clip you swiped past stops instead of playing audio
                   // off-screen; neighbors show the poster image.
                   i === index ? (
-                    <div className="relative max-w-full max-h-full flex items-center justify-center">
-                      <video
-                        ref={videoElRef}
-                        src={playableVideoSrc(p)}
-                        poster={displayImageSrc(p)}
-                        controls
-                        playsInline
-                        preload="metadata"
-                        className="lightbox-video max-w-full max-h-full"
-                        onPlay={() => setVideoPaused(false)}
-                        onPause={() => setVideoPaused(true)}
-                        onEnded={() => setVideoPaused(true)}
-                        // No stopPropagation: a horizontal swipe navigates like a photo.
-                      />
-                      {/* Our own CENTERED play button (native overlay one is hidden
-                          via .lightbox-video CSS). Shown while paused. */}
-                      {videoPaused && (
-                        <button
-                          type="button"
-                          aria-label="Play clip"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => { e.stopPropagation(); videoElRef.current?.play().catch(() => {}); }}
-                          className="absolute inset-0 m-auto w-16 h-16 rounded-full bg-black/55 text-white flex items-center justify-center"
-                        >
-                          <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
-                        </button>
-                      )}
-                    </div>
+                    // Native controls only — ONE play button on every platform.
+                    // (A custom overlay button used to double up with iOS Safari's
+                    // own start-playback button, which iOS won't reliably hide.)
+                    <video
+                      src={playableVideoSrc(p)}
+                      poster={displayImageSrc(p)}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      className="lightbox-video max-w-full max-h-full"
+                      // No stopPropagation: a horizontal swipe navigates like a photo.
+                    />
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={displayImageSrc(p)} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
