@@ -360,6 +360,13 @@ export default function ExistingInspection() {
       <Head>
         <title>{inspection.propertyAddressSnapshot || 'Inspection'} - ResiHome</title>
       </Head>
+      {/* Single fixed scroll container so the DOCUMENT never scrolls — the only
+          way to stop iOS's native WKWebView rubber-band (CSS overscroll-behavior
+          doesn't govern it). The pinned top block sticks to the top of THIS
+          element; the fixed bottom action bar stays viewport-relative (this
+          element has no transform, so it isn't a containing block for
+          position:fixed). RateCardForm scrolls this via #page-scroll. */}
+      <div id="page-scroll" className="fixed inset-0 overflow-y-auto overscroll-none">
       {externalViewOnly && (
         <div className="bg-sky-50 border-b border-sky-200 py-2">
           <div className="max-w-7xl mx-auto px-3 sm:px-6 text-xs sm:text-sm text-sky-900 font-heading font-semibold">
@@ -501,6 +508,7 @@ export default function ExistingInspection() {
         />
         </>
       )}
+      </div>
     </>
   );
 }

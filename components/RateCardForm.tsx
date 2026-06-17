@@ -534,6 +534,24 @@ export function RateCardForm(props: RateCardFormProps) {
     return Math.round(h) + 12;
   };
 
+  // The inspection page wraps us in a fixed #page-scroll container (so iOS can't
+  // rubber-band the document). Scroll THAT element, not the window — falling back
+  // to the window when we're rendered outside that wrapper (e.g. previews).
+  const pageScroller = (): HTMLElement | null =>
+    (typeof document !== 'undefined' ? document.getElementById('page-scroll') : null);
+  // Document/viewport-top offset of an element, expressed in the active scroller's
+  // own scroll coordinates.
+  const elementScrollTop = (el: Element): number => {
+    const rect = el.getBoundingClientRect();
+    const sc = pageScroller();
+    if (sc) return sc.scrollTop + (rect.top - sc.getBoundingClientRect().top);
+    return window.scrollY + rect.top;
+  };
+  const scrollPageTo = (top: number) => {
+    const sc = pageScroller();
+    (sc || window).scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  };
+
   // Switch the assistant's working room: expand it and scroll it into view.
   const navigateToSection = useCallback((sectionId: string) => {
     setCurrentSectionId(sectionId);
@@ -544,9 +562,7 @@ export function RateCardForm(props: RateCardFormProps) {
     setTimeout(() => {
       const el = sectionRefs.current[sectionId];
       if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const top = window.scrollY + rect.top - stickyOffset();
-      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      scrollPageTo(elementScrollTop(el) - stickyOffset());
     }, 60);
   }, [sections]);
 
@@ -567,9 +583,7 @@ export function RateCardForm(props: RateCardFormProps) {
       }
       if (!el) el = sectionRefs.current[sectionId] || null;
       if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const top = window.scrollY + rect.top - stickyOffset();
-      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      scrollPageTo(elementScrollTop(el) - stickyOffset());
     }, 120);
   }, [sections]);
   // form mounts, so the FIRST "add line item" click is instant instead of
@@ -2832,7 +2846,7 @@ export function RateCardForm(props: RateCardFormProps) {
       setAiModalOpen(false);
       // Return to the inspection and scroll to the top so the inspector sees the
       // updated totals / submit.
-      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* noop */ }
+      try { scrollPageTo(0); } catch { /* noop */ }
     } catch (e: any) {
       setAiError(`Could not apply all changes: ${e?.message || e}`);
     } finally {

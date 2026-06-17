@@ -417,14 +417,18 @@ export default function NewInspection() {
       <Head>
         <title>New Inspection</title>
       </Head>
-      {/* Fill the viewport and don't rubber-band: the form fits on one screen,
-          so lock it to the device height and contain overscroll (no iOS bounce).
-          If a short device can't fit it, it scrolls internally rather than the
-          whole page bouncing. env(safe-area-inset-top) clears the notch (0 in a
-          normal browser). h-[100dvh] tracks the dynamic viewport on mobile. */}
+      {/* Fill the screen and don't rubber-band. position:fixed makes this the
+          ONLY scroller (the document/body has nothing to scroll, so iOS can't
+          bounce it); overscroll-none kills this element's own end-bounce. The
+          form fits on one screen; on a short device it scrolls internally.
+          env(safe-area-inset-*) clears the notch and home indicator (0 in a
+          normal browser, so web/PWA is unchanged). */}
       <main
-        className="h-[100dvh] overflow-y-auto overscroll-none p-4 sm:p-6 bg-white"
-        style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top))' }}
+        className="fixed inset-0 overflow-y-auto overscroll-none p-4 sm:p-6 bg-white"
+        style={{
+          paddingTop: 'calc(1rem + env(safe-area-inset-top))',
+          paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))',
+        }}
       >
         <div className="max-w-xl mx-auto">
           <div className="flex items-center justify-between mb-4">
