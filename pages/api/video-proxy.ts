@@ -26,14 +26,33 @@ const ALLOWED_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites
 
 export const config = { api: { responseLimit: false } };
 
-// Map a file extension to a video Content-Type. HubSpot often serves clips as
-// application/octet-stream, which iOS refuses to play — so we set the type from
-// the URL's extension instead of trusting upstream.
+// Map a file extension to a video Content-Type. Used only as a fallback when
+// the bytes themselves don't identify the container (see sniffVideoType).
 function videoTypeFor(pathname: string): string {
   if (/\.webm$/i.test(pathname)) return 'video/webm';
   if (/\.(mov|qt)$/i.test(pathname)) return 'video/quicktime';
   if (/\.m4v$/i.test(pathname)) return 'video/x-m4v';
   return 'video/mp4';
+}
+
+// Identify the REAL container from the file's magic bytes, so we serve the
+// correct Content-Type even when the stored extension/label is wrong. iOS Safari
+// trusts Content-Type strictly and refuses to decode a real H.264/mp4 clip that
+// was mislabeled (e.g. ".webm" from a recorder fallback) — the exact "slashed
+// play button" failure. Returns null when the bytes don't match a known
+// container (caller falls back to the extension guess).
+//   - ISO-BMFF (mp4/m4v/mov): bytes 4..8 == 'ftyp'
+//   - Matroska/WebM:          starts with 1A 45 DF A3 (EBML)
+function sniffVideoType(buf: Buffer): string | null {
+  if (buf.length >= 12 && buf.toString('latin1', 4, 8) === 'ftyp') {
+    const brand = buf.toString('latin1', 8, 12).toLowerCase();
+    // 'qt  ' = QuickTime; everything else ISO-BMFF plays as mp4 on iOS.
+    return brand.startsWith('qt') ? 'video/quicktime' : 'video/mp4';
+  }
+  if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) {
+    return 'video/webm';
+  }
+  return null;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -67,7 +86,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const buf = Buffer.from(await upstream.arrayBuffer());
     const total = buf.length;
-    const contentType = videoTypeFor(u.pathname);
+    // Prefer the container detected from the actual bytes; fall back to the
+    // extension only when the bytes are inconclusive. This rescues mislabeled
+    // clips (the real cause of iOS's "can't play / slashed play button").
+    const contentType = sniffVideoType(buf) || videoTypeFor(u.pathname);
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Accept-Ranges', 'bytes');

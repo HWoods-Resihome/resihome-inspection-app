@@ -1132,8 +1132,8 @@ export function CameraCaptureLegacy({
     // Preserve a hardware/wide zoom across recording; only reset digital zoom.
     if (!hwZoomRef.current) { zoomRef.current = 1; setZoom(1); }
     if (!chunks.length) return;
-    const ext = /mp4/i.test(mime) ? 'mp4' : 'webm';
-    const type = (mime.split(';')[0] || `video/${ext}`);
+    const type = (mime.split(';')[0] || 'video/mp4').toLowerCase();
+    const ext = /mp4/.test(type) ? 'mp4' : /quicktime|mov/.test(type) ? 'mov' : 'webm';
     const blob = new Blob(chunks, { type });
     const file = new File([blob], `clip_${Date.now()}.${ext}`, { type });
     if (!poster) poster = await grabPoster();
@@ -1192,7 +1192,10 @@ export function CameraCaptureLegacy({
     }
     recordedChunksRef.current = [];
     recorder.ondataavailable = (e) => { if (e.data && e.data.size) recordedChunksRef.current.push(e.data); };
-    recorder.onstop = () => { void finalizeClip(mime); };
+    // Label the clip by what the recorder ACTUALLY produced (recorder.mimeType),
+    // not just what we requested — the two can differ when the constructor falls
+    // back to a default, and a mislabeled clip won't play on iOS.
+    recorder.onstop = () => { void finalizeClip(recorder.mimeType || mime); };
     mediaRecorderRef.current = recorder;
     try { recorder.start(); } catch { teardownCanvasPipeline(); return; }
     recordingRef.current = true;
