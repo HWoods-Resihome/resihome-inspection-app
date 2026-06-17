@@ -1028,17 +1028,20 @@ export function RateCardForm(props: RateCardFormProps) {
     // drained or after a background-sync upload.
     const iv = setInterval(() => {
       const outbox = outboxCountFor(props.inspectionRecordId);
+      const onlineNow = typeof navigator === 'undefined' || navigator.onLine !== false;
+      // Flush whenever online — do NOT gate on the queued-photo COUNT. countQueuedPhotos
+      // reads IndexedDB and returns 0 on a timeout/error (getAllRecords swallows errors
+      // as []), which previously SUPPRESSED the periodic retry exactly when iOS IDB was
+      // under pressure — the case we most need to retry. runFlush is a cheap no-op when
+      // the queue is genuinely empty.
+      if (onlineNow) void runFlush();
+      // Reconcile the displayed counts + stuck detection (display only now).
       void countQueuedPhotos(props.inspectionRecordId).then((photos) => {
-        // Reconcile the displayed counts (clears a stale banner).
         setPendingSync(outbox);
         setPendingPhotos(photos);
         const total = outbox + photos;
-        const onlineNow = typeof navigator === 'undefined' || navigator.onLine !== false;
-        // "Stuck" = still pending and not shrinking since the last tick while
-        // online (the flush isn't making progress). Surfaces Retry/Clear.
         setSyncStuck(total > 0 && onlineNow && total >= lastPendingRef.current);
         lastPendingRef.current = total;
-        if (total > 0 && onlineNow) void runFlush();
       }).catch(() => {});
     }, 15000);
     void runFlush(); // attempt anything left from a previous session

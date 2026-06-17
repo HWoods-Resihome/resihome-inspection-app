@@ -8,6 +8,8 @@ import { CameraAILayer } from '@/components/CameraAILayer';
 import { SyncingBadge } from '@/components/SyncingBadge';
 import { SelfHealingImg } from '@/components/PhotoThumb';
 import { displayImageSrc } from '@/lib/photoDisplay';
+import { onPhotoSynced } from '@/lib/offlinePhotoStore';
+import { pushCameraOpen, popCameraOpen } from '@/lib/cameraOpenState';
 import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
 import { useBackToClose } from '@/lib/useBackToClose';
 import { setNativeStatusBarColor } from '@/lib/nativeBridge';
@@ -311,6 +313,36 @@ export function CameraCaptureLegacy({
   // latest value without depending on state closures.
   const itemsRef = useRef<CaptureItem[]>([]);
   useEffect(() => { itemsRef.current = items; }, [items]);
+
+  // Tell every form a camera is open (so they free their photo grids — iOS memory),
+  // and so the offline store engages its camera-open safeguards AND kicks the flush
+  // the instant the camera closes. The 026c935 base this file is restored from
+  // never wired this up, so on iOS isAnyCameraOpen() was permanently false.
+  useEffect(() => {
+    if (!isOpen) return;
+    pushCameraOpen();
+    return () => { popCameraOpen(); };
+  }, [isOpen]);
+
+  // CRITICAL: when a queued photo finishes uploading in the background, swap THIS
+  // camera item's draft (blob:) URL for the real HubSpot URL. That clears the
+  // "Syncing…" badge AND means Done hands the inspection the REAL url instead of an
+  // orphaned draft. The 026c935 base lacked this subscription entirely — which is
+  // why iOS photos stuck on "Syncing…" forever and the uploaded file's real url
+  // never reached the inspection (the root cause of the whole sync hang on iOS).
+  useEffect(() => {
+    if (!isOpen) return;
+    const unsub = onPhotoSynced(({ oldUrl, newUrl }) => {
+      setItems((prev) => prev.map((it) => {
+        if (it.hubspotUrl !== oldUrl) return it;
+        // Synced → swap to the real URL and free the full-res object URL + File
+        // bytes (the small strip thumb stays; the viewer loads the real url).
+        try { if (it.blobUrl.startsWith('blob:')) URL.revokeObjectURL(it.blobUrl); } catch { /* noop */ }
+        return { ...it, hubspotUrl: newUrl, blobUrl: newUrl, file: new File([], it.file.name, { type: it.file.type || 'image/jpeg' }) };
+      }));
+    });
+    return () => { unsub(); };
+  }, [isOpen]);
   // Captured-photo strip auto-scroll: always reveal the LATEST shot (appended at
   // the end) as photos come in — horizontally in portrait, vertically in
   // landscape. Setting both axes is safe; the non-scrollable one clamps to 0.
