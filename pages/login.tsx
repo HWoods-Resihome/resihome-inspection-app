@@ -28,8 +28,40 @@ const ERROR_MESSAGES: Record<string, string> = {
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // App Store / Play review demo account: when the reviewer types this email, a
+  // password field appears and sign-in goes through the password path (which
+  // bypasses Google/2FA, validated server-side). Email is not a secret (it's in
+  // App Store Connect); the password lives only in a server env var.
+  const REVIEW_EMAIL = (process.env.NEXT_PUBLIC_APP_REVIEW_EMAIL || 'apptest@resihome.com').trim().toLowerCase();
+  const isReviewEmail = email.trim().toLowerCase() === REVIEW_EMAIL;
+
+  // App-review password sign-in (no Google). Mints the session server-side.
+  async function reviewLogin() {
+    if (!password) { setError('Please enter the password'); return; }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const r = await fetch('/api/auth/review-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) {
+        setError(data.error || 'Sign-in failed');
+        setSubmitting(false);
+        return;
+      }
+      window.location.href = '/';
+    } catch (err: any) {
+      setError(String(err.message || err));
+      setSubmitting(false);
+    }
+  }
 
   // Surface errors bounced back from the Google sign-in flow.
   useEffect(() => {
@@ -79,6 +111,7 @@ export default function LoginPage() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (isReviewEmail) { void reviewLogin(); return; }
     void startLogin('google');
   }
 
@@ -122,6 +155,26 @@ export default function LoginPage() {
               className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base mb-1"
             />
 
+            {/* App-review demo account: password field appears when the
+                reviewer enters the review email. Validated server-side. */}
+            {isReviewEmail && (
+              <div className="mt-4">
+                <label htmlFor="review-password" className="block text-sm font-heading font-semibold text-ink mb-1.5">
+                  Password
+                </label>
+                <input
+                  id="review-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError(null); }}
+                  placeholder="Password"
+                  disabled={submitting}
+                  className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base"
+                />
+              </div>
+            )}
+
             {error && (
               <div className="mt-2 mb-1 text-sm text-brand font-heading font-semibold">
                 {error}
@@ -130,10 +183,10 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={submitting || !email.trim()}
+              disabled={submitting || !email.trim() || (isReviewEmail && !password)}
               className="w-full bg-brand hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-heading font-semibold py-3.5 px-4 rounded-lg transition mt-5 active:scale-[0.98]"
             >
-              {submitting ? 'Redirecting…' : 'Continue with Google'}
+              {submitting ? (isReviewEmail ? 'Signing in…' : 'Redirecting…') : (isReviewEmail ? 'Sign in' : 'Continue with Google')}
             </button>
 
             {/* Microsoft/Outlook is for EXTERNAL (1099) agents only — internal

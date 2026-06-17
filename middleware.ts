@@ -14,6 +14,10 @@ const PUBLIC_PATHS = new Set<string>([
   '/manifest.webmanifest',
   '/api/auth/login',
   '/api/auth/logout',
+  // App Store review sign-in: a server-validated email+password path (password
+  // is a server env secret, disabled unless set) that mints a session without
+  // Google/2FA — for Apple's App Review demo account. Pre-session like /login.
+  '/api/auth/review-login',
   // Pre-auth Google sign-in: these run before a session exists. The callback
   // does its own verification (login flow needs no session; the legacy connect
   // flow checks the session itself).
