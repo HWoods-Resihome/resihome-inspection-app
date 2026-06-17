@@ -195,6 +195,22 @@ export async function requestPhotoBackgroundSync(): Promise<void> {
   } catch { /* unsupported / permission denied — foreground flush still works */ }
 }
 
+// EVERY IndexedDB op is wrapped in a hard timeout. iOS WebKit can STALL an IDB
+// open/transaction under camera memory pressure — no success/error event ever
+// fires — which used to hang the photo flush FOREVER: an upload that finished
+// could never delete its queue record, so the flush promise never settled, the
+// in-flight guard never cleared, and EVERY photo stuck on "Syncing…" (even after
+// Done). This is exactly why photos taken in airplane mode synced fine later (that
+// path returns before any IDB write) but photos taken online didn't. A timeout
+// turns a stall into a fast rejection the flush recovers from on the next tick.
+const IDB_OP_TIMEOUT_MS = 8000;
+function withIdbTimeout<T>(p: Promise<T>, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`IndexedDB ${label} timed out`)), IDB_OP_TIMEOUT_MS)),
+  ]);
+}
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -206,19 +222,22 @@ function openDb(): Promise<IDBDatabase> {
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error('IndexedDB open blocked'));
   });
 }
 
 async function tx<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest): Promise<T> {
-  const db = await openDb();
-  return new Promise<T>((resolve, reject) => {
+  const db = await withIdbTimeout(openDb(), 'open');
+  return withIdbTimeout(new Promise<T>((resolve, reject) => {
     const t = db.transaction(STORE, mode);
     const store = t.objectStore(STORE);
     const req = fn(store);
     req.onsuccess = () => resolve(req.result as T);
     req.onerror = () => reject(req.error);
-    t.oncomplete = () => db.close();
-  });
+    t.oncomplete = () => { try { db.close(); } catch { /* noop */ } };
+    t.onerror = () => reject(t.error || new Error('IndexedDB tx error'));
+    t.onabort = () => reject(t.error || new Error('IndexedDB tx aborted'));
+  }), mode);
 }
 
 async function getAllRecords(): Promise<QueuedPhoto[]> {
@@ -474,22 +493,17 @@ export async function flushQueuedPhotos(
   onSynced: FlushOnSynced,
 ): Promise<FlushResult> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
-  // iOS: SUSPEND uploads while an in-app camera is open — just QUEUE the photos,
-  // exactly like the offline path does, and drain them with ONE clean flush the
-  // instant the camera closes (kickFlush-on-close) + every ~15s after. The field
-  // proved this is the reliable sequence: photos shot in AIRPLANE mode upload
-  // perfectly once you come back online (a single clean post-session flush),
-  // whereas attempting uploads DURING the iOS camera session left them wedged on
-  // "Syncing…". So mirror the working offline→online flow: queue during the
-  // session, flush once it's over. (Android has no such issue and keeps flushing
-  // during the session.)
-  if (IS_IOS_WEBKIT && isAnyCameraOpen()) {
-    const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
-    return { synced: 0, remaining };
-  }
   const existing = flushInFlight.get(inspectionRecordId);
   if (existing) return existing;
-  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, FLUSH_CONCURRENCY);
+  // iOS uploads DURING the camera session too — photos save as they're taken, not
+  // piled up until Done. This is now safe because the actual cause of the wedged
+  // "Syncing…" is fixed at the root: every IndexedDB op is timeout-guarded (see
+  // tx/openDb), so an iOS IDB stall during the camera can no longer hang the flush
+  // forever. While a camera is open we still drain ONE AT A TIME (a single upload's
+  // encode never overlaps the next capture) and skip the per-shot thumbnail decode
+  // (makeThumbBlob guard); full concurrency once the camera is closed.
+  const concurrency = (IS_IOS_WEBKIT && isAnyCameraOpen()) ? 1 : FLUSH_CONCURRENCY;
+  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, concurrency);
   flushInFlight.set(inspectionRecordId, run);
   try { return await run; }
   finally { flushInFlight.delete(inspectionRecordId); }
