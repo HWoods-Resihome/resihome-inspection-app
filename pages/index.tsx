@@ -1025,7 +1025,7 @@ function GmailConnectChip({ email }: { email?: string }) {
         // so web keeps using the standard connect flow via the href.
         if (!email) return; // no email yet → let the href handle it
         e.preventDefault();
-        const startUrl = `/api/auth/google-login?email=${encodeURIComponent(email)}`;
+        const startUrl = `/api/auth/google-login?email=${encodeURIComponent(email)}&reconnect=1`;
         if (await openOAuthStartNative(startUrl)) return;
         window.location.href = '/api/auth/gmail/connect';
       }}

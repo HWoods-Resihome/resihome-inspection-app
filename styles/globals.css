@@ -16,11 +16,17 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  /* iOS: kill the document rubber-band so pages can't be "pulled" past their
+     edges, and paint the area BEHIND the webview white so any residual bounce
+     never flashes the black native background (the "black bar" at the top). */
+  background-color: #ffffff;
+  overscroll-behavior: none;
 }
 
 body {
   background-color: #ffffff;
   color: #1a1a1a;
+  overscroll-behavior: none;
   font-family: Arial, system-ui, sans-serif;
   /* Force LINING figures everywhere. Raleway (our heading font) defaults to
      old-style/text figures, where 3/4/5/7/9 dip below the baseline while 0/1/2
@@ -195,15 +201,17 @@ button, input, select, textarea {
   .lz-done { position: static !important; transform: none !important; right: auto !important; top: auto !important; }
 }
 
-/* The Home "frozen" layout (sticky header + footer, only the list scrolls) must
-   ONLY apply on genuinely large screens. On a landscape PHONE (wide but short)
-   it would freeze the header tall enough to leave the list zero height — you
-   couldn't scroll to any inspections. Requiring min-height keeps landscape
-   phones on normal document flow (whole page scrolls). */
-@media (min-width: 768px) and (min-height: 640px) {
-  .frozen-shell { height: 100vh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+/* The Home "frozen" layout (pinned header + footer, only the list scrolls).
+   Applies to any reasonably TALL viewport — including portrait phones — so on
+   iOS the page can't be pulled/bounced and the pink header never scrolls away.
+   We only gate on min-height (NOT min-width): a landscape PHONE (wide but short)
+   would freeze the header tall enough to leave the list zero height, so those
+   stay on normal document flow. Uses 100dvh so it tracks the mobile dynamic
+   viewport (browser chrome show/hide) instead of overshooting with 100vh. */
+@media (min-height: 640px) {
+  .frozen-shell { height: 100vh; height: 100dvh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .frozen-top { flex-shrink: 0; }
-  .frozen-scroll { flex: 1 1 0%; min-height: 0; overflow-y: auto; }
+  .frozen-scroll { flex: 1 1 0%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   .frozen-foot { flex-shrink: 0; }
 }
 /* The saved thumbnail flies up briefly then settles, like a camera roll grab. */

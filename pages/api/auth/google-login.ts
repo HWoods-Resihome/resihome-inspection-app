@@ -80,11 +80,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // emails. (The Gmail send scope is what makes the OAuth app "restricted"; only
   // internal sign-ins exercise it.)
   const hasGmailToken = !!req.cookies?.[GMAIL_TOKEN_COOKIE];
+  // reconnect=1 (the in-app "Connect Gmail" button) MUST force the consent
+  // screen: Google only returns a refresh_token on an explicit consent, so a
+  // bare account-picker would re-auth without granting a usable Gmail token and
+  // the app would keep showing "Connect Gmail".
+  const reconnect = req.query.reconnect === '1';
   const url = buildGmailConsentUrl(cfg, {
     state,
     loginHint: email,
     scope: external ? IDENTITY_SCOPES : LOGIN_SCOPES,
-    prompt: external ? 'select_account' : (hasGmailToken ? 'select_account' : 'consent'),
+    prompt: external ? 'select_account' : ((hasGmailToken && !reconnect) ? 'select_account' : 'consent'),
   });
   res.redirect(302, url);
 }

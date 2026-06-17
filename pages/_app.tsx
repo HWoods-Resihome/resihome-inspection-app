@@ -8,7 +8,7 @@ import { FieldStatusOverlays } from '@/components/FieldStatusOverlays';
 import { initErrorReporting } from '@/lib/clientErrorReporter';
 import { installSessionGuard } from '@/lib/sessionGuard';
 import { registerServiceWorker } from '@/lib/useAppUpdate';
-import { installOAuthBridge, installPushBridge } from '@/lib/nativeBridge';
+import { installOAuthBridge, installPushBridge, primeLocationPermissionNative } from '@/lib/nativeBridge';
 import { initPushOnLoad } from '@/lib/pushClient';
 import { Raleway } from 'next/font/google';
 import '../styles/globals.css';
@@ -49,6 +49,10 @@ export default function App({ Component, pageProps }: AppProps) {
     // Native-only: register the FCM/APNs device token in the Capacitor shell.
     // No-op in a browser (the PWA path above handles web push).
     void installPushBridge();
+    // Native-only: ask for Location up front so evidence photos can be GPS-
+    // stamped from the first capture. No-op on web/PWA. (Requires the native
+    // build to declare the location usage string — see mobile/ runbooks.)
+    primeLocationPermissionNative();
   }, []);
 
   return (

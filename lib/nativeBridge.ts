@@ -98,6 +98,30 @@ export function setNativeKeyboardAccessoryBarVisible(visible: boolean): void {
   try { kb.setAccessoryBarVisible({ isVisible: visible }); } catch { /* plugin unavailable — fine */ }
 }
 
+// Prompt for Location ("When In Use") early, on first app open, instead of
+// waiting until the first photo is captured — so GPS is ready to stamp evidence
+// photos from the start. We use the WEB geolocation API (the camera/evidence
+// code already uses navigator.geolocation), which inside the Capacitor WKWebView
+// surfaces the OS permission sheet IFF the native build declares the usage
+// string (iOS Info.plist NSLocationWhenInUseUsageDescription; Android
+// ACCESS_FINE/COARSE_LOCATION in the manifest). NATIVE-ONLY: never prompts on
+// web/PWA, where asking for location at launch (before any feature needs it)
+// would be intrusive. Best-effort and silent — a denial/timeout just no-ops and
+// the evidence stamp falls back to "no GPS" as it does today.
+export function primeLocationPermissionNative(): void {
+  if (typeof window === 'undefined') return;
+  const cap = (window as any).Capacitor;
+  if (!cap?.isNativePlatform?.()) return;
+  if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+  try {
+    navigator.geolocation.getCurrentPosition(
+      () => { /* granted — fix discarded; we only wanted the prompt */ },
+      () => { /* denied/unavailable — silent, feature degrades gracefully */ },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 }
+    );
+  } catch { /* no geolocation — fine */ }
+}
+
 export async function installOAuthBridge(): Promise<void> {
   // SSR / non-browser guard.
   if (typeof window === 'undefined') return;
