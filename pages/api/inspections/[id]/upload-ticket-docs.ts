@@ -21,28 +21,40 @@ import { vendorGetsOwnPdf } from '@/lib/vendors';
 // Browser automation can take a while — allow up to 5 minutes.
 export const config = { maxDuration: 300 };
 
-async function buildFilesForInspection(id: string): Promise<TicketUploadFile[] | null> {
+// Build the upload plan for an inspection: which PDFs to attach, and whether to
+// force the ticket type to Turnkey. Scope attaches the Master + per-vendor PDFs
+// and forces Turnkey; other templates (1099 / vacancy) attach their single
+// completed PDF and leave the type alone (ensureTicketType:false). An optional
+// freshly-generated pdfUrl avoids a read race right after /api/pdf.
+async function buildUploadPlan(id: string, bodyPdfUrl?: string): Promise<{ files: TicketUploadFile[]; ensureTicketType: boolean } | null> {
   const data = await fetchInspectionWithPropertyRef(id);
   if (!data) return null;
-  // Master first, then each per-vendor PDF (eviction excluded). Direct HubSpot URLs.
   const nameFromUrl = (url: string, fallback: string) => {
     try { const seg = new URL(url).pathname.split('/').pop(); if (seg) return decodeURIComponent(seg); } catch { /* keep */ }
     return fallback;
   };
+  const isScope = (data.inspection.templateType || '').toLowerCase() === 'pm_scope_rate_card';
   const files: TicketUploadFile[] = [];
-  const masterUrl = data.inspection.pdfMasterUrl || '';
-  if (masterUrl) files.push({ name: nameFromUrl(masterUrl, 'Master Rate Card.pdf'), url: masterUrl });
-  if (data.inspection.pdfVendorUrlsJson) {
-    try {
-      const map = JSON.parse(data.inspection.pdfVendorUrlsJson) || {};
-      for (const [vendor, url] of Object.entries(map)) {
-        if (vendorGetsOwnPdf(vendor) && typeof url === 'string' && url) {
-          files.push({ name: nameFromUrl(url, `${vendor} Rate Card.pdf`), url });
+  if (isScope) {
+    // Master first, then each per-vendor PDF (eviction excluded). Direct HubSpot URLs.
+    const masterUrl = data.inspection.pdfMasterUrl || '';
+    if (masterUrl) files.push({ name: nameFromUrl(masterUrl, 'Master Rate Card.pdf'), url: masterUrl });
+    if (data.inspection.pdfVendorUrlsJson) {
+      try {
+        const map = JSON.parse(data.inspection.pdfVendorUrlsJson) || {};
+        for (const [vendor, url] of Object.entries(map)) {
+          if (vendorGetsOwnPdf(vendor) && typeof url === 'string' && url) {
+            files.push({ name: nameFromUrl(url, `${vendor} Rate Card.pdf`), url });
+          }
         }
-      }
-    } catch { /* malformed — fall through */ }
+      } catch { /* malformed — fall through */ }
+    }
+  } else {
+    // 1099 / vacancy / other Q&A templates: the single completed inspection PDF.
+    const pdfUrl = (bodyPdfUrl && bodyPdfUrl.trim()) || data.inspection.pdfUrl || '';
+    if (pdfUrl) files.push({ name: nameFromUrl(pdfUrl, `${data.inspection.templateType || 'Inspection'}.pdf`), url: pdfUrl });
   }
-  return files;
+  return { files, ensureTicketType: isScope };
 }
 
 const esc = (s: string) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
@@ -63,10 +75,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).send('Add ?ticketId=<HoneyBadger ticket id> (the number in the ticket URL …/EditTicket/<id>).');
     }
     try {
-      const files = await buildFilesForInspection(id);
-      if (!files) return res.status(404).send('Inspection not found.');
-      if (!files.length) return res.status(200).send('No PDFs found on this inspection to upload.');
-      const upload = await uploadTicketDocuments({ ticketId, files });
+      const plan = await buildUploadPlan(id, typeof req.query.pdfUrl === 'string' ? req.query.pdfUrl : undefined);
+      if (!plan) return res.status(404).send('Inspection not found.');
+      if (!plan.files.length) return res.status(200).send('No PDFs found on this inspection to upload.');
+      const upload = await uploadTicketDocuments({ ticketId, files: plan.files, ensureTicketType: plan.ensureTicketType });
       const shotImg = upload.screenshot ? `<img src="${upload.screenshot}" style="max-width:100%;border:1px solid #ccc"/>` : '<em>no screenshot</em>';
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       return res.status(200).send(
@@ -94,11 +106,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const files = await buildFilesForInspection(id);
-    if (!files) return res.status(404).json({ error: 'Inspection not found' });
-    if (!files.length) return res.status(200).json({ ok: false, skipped: true, reason: 'no files' });
+    const plan = await buildUploadPlan(id, typeof req.body?.pdfUrl === 'string' ? req.body.pdfUrl : undefined);
+    if (!plan) return res.status(404).json({ error: 'Inspection not found' });
+    if (!plan.files.length) return res.status(200).json({ ok: false, skipped: true, reason: 'no files' });
 
-    const upload = await uploadTicketDocuments({ ticketId, files });
+    const upload = await uploadTicketDocuments({ ticketId, files: plan.files, ensureTicketType: plan.ensureTicketType });
     if (!upload.configured) {
       return res.status(200).json({ ok: false, skipped: true, reason: 'not configured' });
     }

@@ -20,7 +20,6 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { fetchInspectionWithPropertyRef } from '@/lib/hubspot';
 import { isExternalEmail } from '@/lib/userAccess';
 import { createMaintenanceTicket, buildInspectionTicketDescription, buildTicketUrl } from '@/lib/maintenanceAi';
-import { uploadTicketDocuments, type TicketUploadFile } from '@/lib/ticketUpload';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 
 // Work-order category for 1099 / vacancy maintenance tickets (Scope uses 23).
@@ -30,13 +29,9 @@ const TICKET_CATEGORY_INSPECTION = Number(process.env.MAINTENANCE_AI_INSPECTION_
 // once and left alone. Overridable via env.
 const TICKET_TYPE_INSPECTION = Number(process.env.MAINTENANCE_AI_INSPECTION_TICKET_TYPE_ID) || 1826;
 
-// Browser automation (PDF upload) can take a while — allow up to 5 min.
-export const config = { maxDuration: 300 };
-
-function nameFromUrl(url: string, fallback: string): string {
-  try { const seg = new URL(url).pathname.split('/').pop(); if (seg) return decodeURIComponent(seg); } catch { /* keep */ }
-  return fallback;
-}
+// Creating the ticket is a single fast API call (the slow PDF upload runs
+// separately in the background), so the default function timeout is plenty.
+export const config = { maxDuration: 30 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -55,9 +50,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!description) {
     return res.status(400).json({ error: 'A ticket description is required.' });
   }
-  // The client passes the freshly-generated PDF url (avoids a read race right
-  // after /api/pdf); we fall back to the stored pdf_attachment_url.
-  const bodyPdfUrl = String(req.body?.pdfUrl || '').trim();
 
   try {
     const data = await fetchInspectionWithPropertyRef(id);
@@ -109,17 +101,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const url = buildTicketUrl(ticketId);
     console.log(`[create-inspection-ticket] inspection ${id}: created ticket #${ticketId} (category ${TICKET_CATEGORY_INSPECTION}) on property ${hbmmId} (req ${result.requestId})`);
 
-    // Attach the completed inspection PDF — same as Scope, but WITHOUT forcing
-    // the ticket type (ensureTicketType: false). Best-effort.
-    const pdfUrl = bodyPdfUrl || data.inspection.pdfUrl || '';
-    let upload: Awaited<ReturnType<typeof uploadTicketDocuments>> | null = null;
-    if (pdfUrl) {
-      const files: TicketUploadFile[] = [{ name: nameFromUrl(pdfUrl, `${templateLabel} Inspection.pdf`), url: pdfUrl }];
-      upload = await uploadTicketDocuments({ ticketId, files, ensureTicketType: false });
-      console.log(`[create-inspection-ticket] ticket #${ticketId} upload: ok=${upload.ok} uploaded=${upload.uploaded}${upload.error ? ` error=${upload.error}` : ''}`);
-    }
-
-    return res.status(200).json({ ok: true, ticketId, url, propertyId: hbmmId, requestId: result.requestId, upload });
+    // NOTE: the completed PDF is attached SEPARATELY (and in the BACKGROUND) by
+    // /api/inspections/[id]/upload-ticket-docs, fired by the client after this
+    // returns — so the slow HoneyBadger browser automation never blocks the
+    // completion screen. This endpoint only creates the ticket and returns its
+    // link fast.
+    return res.status(200).json({ ok: true, ticketId, url, propertyId: hbmmId, requestId: result.requestId });
   } catch (e: any) {
     console.error(`[create-inspection-ticket] inspection ${id} failed:`, e);
     return res.status(200).json({ ok: false, error: String(e?.message || e).slice(0, 300) });

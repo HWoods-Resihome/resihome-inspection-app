@@ -3,6 +3,7 @@ import Head from 'next/head';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/router';
 import { useAppDialog } from '@/components/AppDialog';
+import { useFlash } from '@/components/Flash';
 import type {
   Question, AnswerInput, TemplateType, InspectionSummary,
 } from '@/lib/types';
@@ -38,6 +39,7 @@ interface ShareLinks {
 
 export default function ExistingInspection() {
   const dialog = useAppDialog();
+  const { runTicketUpload } = useFlash();
   const router = useRouter();
   const idParam = router.query.id;
   const inspectionId = typeof idParam === 'string' ? idParam : '';
@@ -242,8 +244,9 @@ export default function ExistingInspection() {
       }
 
       // Failed 1099 / vacancy sign-off where the inspector asked for a ticket:
-      // raise it on the maintenance API (category 19, no type change) and attach
-      // the completed PDF — then surface the MM link on the done screen. Best-
+      // CREATE the ticket (fast — single API call) so we have the link, then
+      // attach the completed PDF in the BACKGROUND (the HoneyBadger browser
+      // automation is slow; it must never block the completion screen). Best-
       // effort: the inspection is already completed regardless of the outcome.
       if (meta?.maintenanceTicket?.wanted && meta.maintenanceTicket.description) {
         setStage('creating_ticket');
@@ -251,10 +254,17 @@ export default function ExistingInspection() {
           const tr = await fetch(`/api/inspections/${inspectionId}/create-inspection-ticket`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ description: meta.maintenanceTicket.description, pdfUrl: generatedPdfUrl }),
+            body: JSON.stringify({ description: meta.maintenanceTicket.description }),
           });
           const td = await tr.json().catch(() => ({}));
-          setTicketResult(td?.ok ? { ok: true, url: td.url } : { ok: false, error: td?.error || 'Ticket could not be created.' });
+          if (td?.ok) {
+            setTicketResult({ ok: true, url: td.url });
+            // Fire-and-forget the PDF attach via the app-root Flash runner, which
+            // toasts the result and survives navigation away from this page.
+            runTicketUpload(inspectionId, td.ticketId, generatedPdfUrl);
+          } else {
+            setTicketResult({ ok: false, error: td?.error || 'Ticket could not be created.' });
+          }
         } catch (e: any) {
           setTicketResult({ ok: false, error: String(e?.message || e) });
         }

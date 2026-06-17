@@ -16,7 +16,7 @@ interface FlashApi {
    * inspection and toast the result. Safe to call then navigate away — this
    * runs at the app root, so the toast still appears when it resolves.
    */
-  runTicketUpload: (inspectionId: string, ticketId?: number | null) => void;
+  runTicketUpload: (inspectionId: string, ticketId?: number | null, pdfUrl?: string) => void;
 }
 
 const FlashContext = createContext<FlashApi | null>(null);
@@ -32,7 +32,7 @@ export function FlashProvider({ children }: { children: React.ReactNode }) {
     if (ms > 0) timer.current = setTimeout(() => setToast(null), ms);
   }, []);
 
-  const runTicketUpload = useCallback((inspectionId: string, ticketId?: number | null) => {
+  const runTicketUpload = useCallback((inspectionId: string, ticketId?: number | null, pdfUrl?: string) => {
     // Pending toast (no auto-dismiss until the result replaces it).
     flash('Attaching documents to the maintenance ticket…', 'info', 0);
     (async () => {
@@ -40,7 +40,7 @@ export function FlashProvider({ children }: { children: React.ReactNode }) {
         const r = await fetch(`/api/inspections/${inspectionId}/upload-ticket-docs`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(ticketId ? { ticketId } : {}),
+          body: JSON.stringify({ ...(ticketId ? { ticketId } : {}), ...(pdfUrl ? { pdfUrl } : {}) }),
         });
         const data = await r.json().catch(() => ({}));
         if (data?.skipped) { setToast(null); return; } // not configured / nothing to do → silent
