@@ -25,6 +25,10 @@ import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 
 // Work-order category for 1099 / vacancy maintenance tickets (Scope uses 23).
 const TICKET_CATEGORY_INSPECTION = Number(process.env.MAINTENANCE_AI_INSPECTION_CATEGORY_ID) || 19;
+// Ticket type to set ON CREATE for these tickets. We send it on the create call
+// but DON'T run the post-create type-change steps (skipTypeUpdate) — so it's set
+// once and left alone. Overridable via env.
+const TICKET_TYPE_INSPECTION = Number(process.env.MAINTENANCE_AI_INSPECTION_TICKET_TYPE_ID) || 1826;
 
 // Browser automation (PDF upload) can take a while — allow up to 5 min.
 export const config = { maxDuration: 300 };
@@ -92,7 +96,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       propertyId: hbmmId,
       description: fullDescription,
       categoryIds: [TICKET_CATEGORY_INSPECTION],
-      skipTypeUpdate: true, // leave the ticket type as the API assigns it
+      ticketTypeId: TICKET_TYPE_INSPECTION, // set on create…
+      skipTypeUpdate: true,                 // …but no post-create type-change step
     });
     if (!result.configured) {
       return res.status(200).json({ ok: false, configured: false, error: 'Maintenance AI is not configured (MAINTENANCE_AI_API_KEY).' });
