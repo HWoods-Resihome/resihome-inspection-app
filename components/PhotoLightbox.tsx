@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PhotoAnnotator } from '@/components/PhotoAnnotator';
 import { displayImageSrc } from '@/lib/photoDisplay';
-import { isVideoEntry, getVideoUrl } from '@/lib/media';
+import { isVideoEntry, playableVideoSrc } from '@/lib/media';
 
 interface Props {
   groups: { id: string; name: string }[];
@@ -187,7 +187,7 @@ export function PhotoLightbox({
                     <div className="relative max-w-full max-h-full flex items-center justify-center">
                       <video
                         ref={videoElRef}
-                        src={getVideoUrl(p)}
+                        src={playableVideoSrc(p)}
                         poster={displayImageSrc(p)}
                         controls
                         playsInline

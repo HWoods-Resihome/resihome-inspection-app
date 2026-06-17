@@ -44,3 +44,25 @@ export function getVideoUrl(entry: string): string {
     return entry.slice(i + VIDEO_MARKER.length);
   }
 }
+
+// HubSpot file hosts (region/CDN/TLD variants) — clips stored on HubSpot Files.
+const HUBSPOT_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com)$/i;
+
+/**
+ * The <video> src to actually render. iOS Safari only plays a source whose
+ * server returns a real video/* Content-Type AND honors HTTP Range (206) —
+ * HubSpot's File Manager CDN doesn't reliably do either, so HubSpot-hosted clips
+ * (which played on Android but showed a black frame + dead play button on
+ * iPhones) are routed through /api/video-proxy, which forces the right type and
+ * implements Range. blob: URLs (offline, pre-upload) and Vercel Blob URLs
+ * (larger clips — Blob supports Range natively) are returned as-is.
+ */
+export function playableVideoSrc(entry: string): string {
+  const url = getVideoUrl(entry) || entry;
+  if (!url || url.startsWith('blob:') || url.startsWith('data:')) return url;
+  try {
+    const host = new URL(url).hostname;
+    if (HUBSPOT_HOST_RE.test(host)) return `/api/video-proxy?url=${encodeURIComponent(url)}`;
+  } catch { /* not an absolute URL — return as-is */ }
+  return url;
+}

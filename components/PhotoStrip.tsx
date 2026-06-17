@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { PhotoThumb } from '@/components/PhotoThumb';
-import { isVideoEntry, getVideoUrl } from '@/lib/media';
+import { isVideoEntry, playableVideoSrc } from '@/lib/media';
 import { SyncingBadge } from '@/components/SyncingBadge';
 
 interface PhotoStripProps {
@@ -98,7 +98,7 @@ export function PhotoStrip({
                   {onPhotoClick ? (
                     <button type="button" onClick={() => onPhotoClick(i)} className="block cursor-pointer">{inner}</button>
                   ) : (
-                    <a href={isVideoEntry(u) ? getVideoUrl(u) : u} target="_blank" rel="noopener noreferrer" className="block">{inner}</a>
+                    <a href={isVideoEntry(u) ? playableVideoSrc(u) : u} target="_blank" rel="noopener noreferrer" className="block">{inner}</a>
                   )}
                   {onRemove && (
                     <button
