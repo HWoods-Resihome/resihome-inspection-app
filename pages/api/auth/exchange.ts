@@ -22,6 +22,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { verifyOAuthExchangeToken, createSessionCookie } from '@/lib/auth';
+import { decryptToken, gmailTokenCookie } from '@/lib/gmailAuth';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const token = typeof req.query.t === 'string' ? req.query.t : '';
@@ -30,8 +31,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  const user = await verifyOAuthExchangeToken(token);
-  if (!user) {
+  const result = await verifyOAuthExchangeToken(token);
+  if (!result) {
     // Expired (>60s), tampered, or not an exchange token. No session is set.
     res.redirect(302, '/login?error=exchange_invalid');
     return;
@@ -39,7 +40,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   // Mint the SAME session cookie the normal browser flow sets — same name,
   // attributes, and 30-day lifetime — but now in the app webview's cookie jar.
-  const sessionCookie = await createSessionCookie(user);
-  res.setHeader('Set-Cookie', sessionCookie);
+  const { gmailEnc, ...user } = result;
+  const cookies: string[] = [await createSessionCookie(user)];
+
+  // If the login carried a Gmail refresh token, set the gmail cookie here too so
+  // Gmail-send is connected in the webview jar (not just the system browser's).
+  if (gmailEnc) {
+    const refreshToken = decryptToken(gmailEnc);
+    if (refreshToken) cookies.push(gmailTokenCookie(refreshToken));
+  }
+
+  res.setHeader('Set-Cookie', cookies);
   res.redirect(302, '/');
 }

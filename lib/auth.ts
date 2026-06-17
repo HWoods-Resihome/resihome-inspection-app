@@ -128,13 +128,22 @@ export async function requireSession(
 const EXCHANGE_TOKEN_TTL_SECONDS = 60;
 const EXCHANGE_TOKEN_TYPE = 'oauth_exchange';
 
-export async function createOAuthExchangeToken(user: SessionUser): Promise<string> {
-  return new SignJWT({
+export async function createOAuthExchangeToken(user: SessionUser, gmailEnc?: string): Promise<string> {
+  const claims: JWTPayload = {
     typ: EXCHANGE_TOKEN_TYPE,
     userId: user.userId,
     email: user.email,
     name: user.name,
-  } as JWTPayload)
+  };
+  // Optionally carry the Gmail refresh token so the app webview ends up with the
+  // SAME gmail cookie the browser flow would set (otherwise the token granted
+  // during the system-browser login lands only in the browser's cookie jar and
+  // the webview keeps showing "Connect Gmail"). The value passed here is ALREADY
+  // AES-encrypted (lib/gmailAuth.encryptToken) — never a raw credential — so even
+  // though this JWT is signed-not-encrypted and rides a resiwalk:// deep link,
+  // an interceptor can't read the refresh token without the server's key.
+  if (gmailEnc) claims.gt = gmailEnc;
+  return new SignJWT(claims)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(`${EXCHANGE_TOKEN_TTL_SECONDS}s`)
@@ -144,7 +153,9 @@ export async function createOAuthExchangeToken(user: SessionUser): Promise<strin
 // Validate an exchange token and return the bound session user, or null.
 // Rejects anything that isn't a well-formed, unexpired, correctly-typed
 // exchange token (e.g. a session JWT presented here won't have the right typ).
-export async function verifyOAuthExchangeToken(token: string): Promise<SessionUser | null> {
+export async function verifyOAuthExchangeToken(
+  token: string
+): Promise<(SessionUser & { gmailEnc?: string }) | null> {
   try {
     const { payload } = await jwtVerify(token, sessionSecret());
     if (payload.typ !== EXCHANGE_TOKEN_TYPE) return null;
@@ -153,6 +164,7 @@ export async function verifyOAuthExchangeToken(token: string): Promise<SessionUs
       userId: String(payload.userId),
       email: String(payload.email),
       name: String(payload.name),
+      gmailEnc: typeof payload.gt === 'string' ? payload.gt : undefined,
     };
   } catch {
     return null;

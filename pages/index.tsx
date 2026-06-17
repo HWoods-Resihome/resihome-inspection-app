@@ -12,6 +12,7 @@ import {
 } from '@/lib/offlineCache';
 import { warmAi } from '@/lib/aiWarm';
 import { templateLabel } from '@/lib/templateLabels';
+import { openOAuthStartNative } from '@/lib/nativeBridge';
 
 interface MeUser { userId: string; email: string; name: string; }
 
@@ -527,10 +528,16 @@ export default function Home() {
           pagination bar is frozen at the bottom. On mobile it's normal document
           flow (everything scrolls together). */}
       <main className="frozen-shell min-h-screen bg-gray-50">
-        {/* Frozen top region (large screens only): header + search + filters + bulk bar */}
-        <div className="frozen-top">
-        {/* Pink branded header */}
-        <header className="bg-brand text-white">
+        {/* Pink branded header — ALWAYS pinned to the top so it never scrolls
+            away (sticky on phones; on large screens it's a non-scrolling flex
+            child of the frozen shell, where sticky is a harmless no-op). The
+            env(safe-area-inset-top) padding lets the pink bleed under the iOS
+            status bar / Dynamic Island while keeping the title+icon below it
+            (0 in normal browsers, so web/PWA is unchanged). */}
+        <header
+          className="bg-brand text-white sticky top-0 z-30 shrink-0"
+          style={{ paddingTop: 'env(safe-area-inset-top)' }}
+        >
           <div className="lz-head max-w-3xl mx-auto px-4 pt-4 pb-4">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div className="flex items-center gap-3 min-w-0">
@@ -560,7 +567,7 @@ export default function Home() {
                 </div>
               </div>
               <div className="flex items-center gap-3 whitespace-nowrap">
-                <GmailConnectChip />
+                <GmailConnectChip email={me?.email} />
                 <button
                   onClick={handleLogout}
                   className="text-xs font-heading font-semibold text-white/90 hover:text-white"
@@ -620,6 +627,8 @@ export default function Home() {
           </div>
         </header>
 
+        {/* Frozen top region (large screens only): search + filters + bulk bar */}
+        <div className="frozen-top">
         {/* Search + Filters */}
         <div className="lz-head max-w-3xl mx-auto px-4 pt-4 pb-2">
           <div className="relative mb-3">
@@ -958,7 +967,7 @@ function FilterChip({ label, active, onClick, className = '' }: ChipProps) {
  * disconnect. Hidden entirely when the server isn't configured for Gmail
  * (no OAuth client), since there's nothing to connect to.
  */
-function GmailConnectChip() {
+function GmailConnectChip({ email }: { email?: string }) {
   const [state, setState] = useState<{ configured: boolean; connected: boolean } | null>(null);
 
   useEffect(() => {
@@ -1005,6 +1014,21 @@ function GmailConnectChip() {
     <a
       href="/api/auth/gmail/connect"
       title="Connect your Gmail to send inspection emails"
+      onClick={async (e) => {
+        // In the native (Capacitor) shell the in-webview /api/auth/gmail/connect
+        // can't complete: Google blocks OAuth in the webview, and the gmail
+        // cookie would land in the system browser's jar (not the webview's). So
+        // re-run the Google login in the SYSTEM browser tagged client=native —
+        // it forces the Gmail consent (the browser has no gmail cookie) and
+        // returns the refresh token to the webview via the resiwalk:// deep link
+        // + /api/auth/exchange. No-op in a normal browser (helper returns false),
+        // so web keeps using the standard connect flow via the href.
+        if (!email) return; // no email yet → let the href handle it
+        e.preventDefault();
+        const startUrl = `/api/auth/google-login?email=${encodeURIComponent(email)}`;
+        if (await openOAuthStartNative(startUrl)) return;
+        window.location.href = '/api/auth/gmail/connect';
+      }}
       className="text-xs font-semibold bg-white/15 hover:bg-white/25 rounded px-2 py-1 flex items-center gap-1"
     >
       <span className="inline-block w-2 h-2 rounded-full bg-white/50" />

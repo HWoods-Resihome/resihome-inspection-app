@@ -417,7 +417,15 @@ export default function NewInspection() {
       <Head>
         <title>New Inspection</title>
       </Head>
-      <main className="min-h-screen p-4 sm:p-6 bg-white">
+      {/* Fill the viewport and don't rubber-band: the form fits on one screen,
+          so lock it to the device height and contain overscroll (no iOS bounce).
+          If a short device can't fit it, it scrolls internally rather than the
+          whole page bouncing. env(safe-area-inset-top) clears the notch (0 in a
+          normal browser). h-[100dvh] tracks the dynamic viewport on mobile. */}
+      <main
+        className="h-[100dvh] overflow-y-auto overscroll-none p-4 sm:p-6 bg-white"
+        style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top))' }}
+      >
         <div className="max-w-xl mx-auto">
           <div className="flex items-center justify-between mb-4">
             <Link href="/" className="text-sm text-gray-500 hover:text-ink font-heading">&larr; Home</Link>

@@ -17,6 +17,7 @@ import {
   exchangeCodeForRefreshToken,
   gmailTokenCookie,
   emailFromIdToken,
+  encryptToken,
 } from '@/lib/gmailAuth';
 import { fetchActiveUsers } from '@/lib/hubspot';
 import { isInternalEmail } from '@/lib/userAccess';
@@ -130,11 +131,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // deep link; the app loads /api/auth/exchange?t=... in its own webview to
     // set the session cookie in the webview jar. Browser users never hit this.
     if (isNativeClient) {
+      // Carry the Gmail refresh token (encrypted) through the exchange token so
+      // the app webview gets the gmail cookie too — otherwise Gmail-send stays
+      // "not connected" in the app even though the system-browser login granted
+      // it. encryptToken matches what gmailTokenCookie stores, so the value on
+      // the deep link is never a usable credential.
+      const gmailEnc = refreshToken ? encryptToken(refreshToken) : undefined;
       const exchangeToken = await createOAuthExchangeToken({
         userId: match.id,
         email: match.email,
         name: match.fullName,
-      });
+      }, gmailEnc);
       res.redirect(302, `resiwalk://auth-callback?t=${encodeURIComponent(exchangeToken)}`);
       return;
     }

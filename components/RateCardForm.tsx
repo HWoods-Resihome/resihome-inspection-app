@@ -529,7 +529,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // section to just below the header rather than under it.
   const stickyOffset = () => {
     const h = (typeof document !== 'undefined'
-      ? document.getElementById('sticky-totals-header')?.getBoundingClientRect().height
+      ? document.getElementById('inspection-top-block')?.getBoundingClientRect().height
       : 0) || 0;
     return Math.round(h) + 12;
   };
@@ -3297,6 +3297,16 @@ export function RateCardForm(props: RateCardFormProps) {
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-2.5">
+      {/* Pinned top block — the title/status row, sync/storage banners, and the
+          property + $ totals all stay fixed while the rooms list scrolls beneath.
+          env(safe-area-inset-top) keeps it clear of the iOS notch/Dynamic Island
+          (0 in a normal browser, so web/PWA is unchanged). The -mx/px pair lets
+          the gray surface bleed full-width over the page padding. */}
+      <div
+        id="inspection-top-block"
+        className="sticky top-0 z-30 -mx-5 sm:-mx-6 px-5 sm:px-6 bg-gray-50"
+        style={{ paddingTop: 'env(safe-area-inset-top)' }}
+      >
       {/* Header */}
       <header className="mb-2">
         <div className="flex items-start justify-between gap-3">
@@ -3462,7 +3472,7 @@ export function RateCardForm(props: RateCardFormProps) {
         </div>
       )}
 
-      <div id="sticky-totals-header" className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
+      <div id="sticky-totals-header" className="-mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
         <div className="sm:flex sm:items-center sm:justify-between sm:gap-4">
           <div className="flex items-center justify-center sm:justify-start gap-2 mb-2 sm:mb-0 min-w-0">
             {/* ResiWalk app icon — pink house + footprint on a white tile so the
@@ -3541,6 +3551,7 @@ export function RateCardForm(props: RateCardFormProps) {
           </div>
         </div>
       </div>
+      </div>{/* /inspection-top-block (end pinned top) */}
 
       {/* Totals drill-down: category roll-up → line items, same $ columns. */}
       {overviewExpanded && (
