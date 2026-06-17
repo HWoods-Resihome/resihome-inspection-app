@@ -67,6 +67,11 @@ is needed** — it flows through `server.url` on the next deploy.
   branch when the owner explicitly asks for it; otherwise everything web goes to
   `main`. (Native-only work is the sole standing exception →
   `chore/native-oauth-outbound`.) Do not resurrect old per-task branches.
+- **Work DIRECTLY on `main` — do NOT create a branch first.** This applies to the
+  local `claude` CLI especially: stay on the checked-out `main`, commit there, and
+  `git push origin main`. Do not branch-first, and do not open a PR unless the
+  owner asks. (The auto-created `claude/...` session branch is a Claude-Code-on-the-web
+  artifact, not a delivery target — ignore it; the CLI doesn't create one.)
 
 ## Multi-session git safety (DO THIS EVERY TASK)
 Other Claude sessions and people may be pushing to `main` **at the same time**.
