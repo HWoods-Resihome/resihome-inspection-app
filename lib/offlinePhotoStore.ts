@@ -474,22 +474,18 @@ export async function flushQueuedPhotos(
   onSynced: FlushOnSynced,
 ): Promise<FlushResult> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
-  // iOS ONLY: SUSPEND the background flush while an in-app camera is open. On
-  // iPhone's tight WebKit content-process ceiling, running an upload (read blob +
-  // base64-encode + fetch) AND the read-all-queued-blobs `getAll` scan at the same
-  // time the inspector is rapid-firing the next shot is the memory pattern that
-  // pressured the process. Photos are still saved instantly to the durable queue
-  // and shown from their local thumbnail; the form drains them the moment the
-  // camera CLOSES (kickFlush on close) and every ~15s after. So Done is instant,
-  // capture stays light, and the actual uploads happen once the camera is gone.
-  // Android (no such ceiling) keeps flushing during the session.
-  if (IS_IOS_WEBKIT && isAnyCameraOpen()) {
-    const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
-    return { synced: 0, remaining };
-  }
   const existing = flushInFlight.get(inspectionRecordId);
   if (existing) return existing;
-  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, FLUSH_CONCURRENCY);
+  // iOS uploads DURING the camera session too — photos should save as they're
+  // taken, not pile up until Done (which left some looking "stuck"). But while a
+  // camera is open we drain ONE AT A TIME so a single upload's base64 spike never
+  // overlaps the next capture canvas — the gentle middle ground, and effectively
+  // what the stable 6/13 build did (it uploaded serially during the session). The
+  // per-shot thumbnail DECODE stays skipped while the camera is open
+  // (makeThumbBlob guard), so capture itself stays light. Full concurrency once
+  // the camera is closed so any backlog drains fast.
+  const concurrency = (IS_IOS_WEBKIT && isAnyCameraOpen()) ? 1 : FLUSH_CONCURRENCY;
+  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, concurrency);
   flushInFlight.set(inspectionRecordId, run);
   try { return await run; }
   finally { flushInFlight.delete(inspectionRecordId); }
