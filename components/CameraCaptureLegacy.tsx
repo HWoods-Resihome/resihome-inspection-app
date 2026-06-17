@@ -1836,7 +1836,7 @@ export function CameraCaptureLegacy({
           a row so the controls become a right-side rail and the preview fills. */}
       <div className={`flex-1 flex min-h-0 ${isLandscape ? 'flex-row' : 'flex-col'}`}>
       {/* Camera viewport */}
-      <div ref={viewportRef} className="flex-1 relative bg-black overflow-hidden"
+      <div ref={viewportRef} className="flex-1 min-h-0 relative bg-black overflow-hidden"
         onTouchStart={onViewportTouchStart} onTouchMove={onViewportTouchMove}
         onTouchEnd={onViewportTouchEnd} onTouchCancel={onViewportTouchEnd}>
         {permissionState === 'denied' || permissionState === 'unsupported' ? (
@@ -2076,7 +2076,7 @@ export function CameraCaptureLegacy({
 
       {/* Shutter row. `relative` so the voice assistant's pop-up panel (anchored
           bottom-full to the mic) floats above this bar and stays on-screen. */}
-      <div className={`lz-foot relative bg-black ${isLandscape ? 'self-stretch flex flex-col items-center justify-center gap-6 px-2 py-4' : 'flex items-center justify-center gap-8 px-4 py-4'}`}>
+      <div className={`lz-foot relative shrink-0 bg-black ${isLandscape ? 'self-stretch flex flex-col items-center justify-center gap-6 px-2 py-4' : 'flex items-center justify-center gap-8 px-4 py-4'}`}>
         {/* Gallery — pick one or more existing photos from the device (replaces
             the separate "Upload" button that used to live on the form). */}
         <button
