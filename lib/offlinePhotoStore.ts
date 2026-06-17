@@ -571,7 +571,13 @@ async function doFlushQueuedPhotos(
         lastError = `A photo has failed to upload ${attempts}×. It's kept safe and will keep retrying — check your signal before submitting.`;
         console.warn(`[offlinePhotoStore] ${rec.localId} still failing after ${attempts} attempts — kept (never dropped)`);
       }
-      stop = true; // back off; the next flush retries from where we left off
+      // DON'T stop the whole batch — skip THIS photo and keep uploading the rest.
+      // Previously a single failing/timing-out photo set stop=true and backed off
+      // EVERY remaining photo; because the queue is processed oldest-first, one bad
+      // shot got retried first each pass, failed, and left ALL photos stuck on
+      // "Syncing…" forever. Genuine offline is handled above (that DOES stop). The
+      // failed photo stays queued (never dropped) and retries on the next tick while
+      // the others go through now.
       return;
     }
     await finishSynced(rec, newUrl);
