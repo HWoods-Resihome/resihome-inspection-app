@@ -343,6 +343,27 @@ export function CameraCaptureLegacy({
     });
     return () => { unsub(); };
   }, [isOpen]);
+
+  // Resume a paused preview when returning to the tab (app-switch, lock/unlock) or
+  // on regaining focus. PROMPT-FREE: replays the SAME stream, never getUserMedia —
+  // so it recovers a stalled/black preview without re-asking for camera permission.
+  useEffect(() => {
+    if (!isOpen) return;
+    const resume = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (recordingRef.current) return;
+      const v = videoRef.current;
+      if (v && v.paused) v.play().catch(() => { /* non-fatal */ });
+    };
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('focus', resume);
+    window.addEventListener('pageshow', resume);
+    return () => {
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('pageshow', resume);
+    };
+  }, [isOpen]);
   // Captured-photo strip auto-scroll: always reveal the LATEST shot (appended at
   // the end) as photos come in — horizontally in portrait, vertically in
   // landscape. Setting both axes is safe; the non-scrollable one clamps to 0.
@@ -1874,6 +1895,17 @@ export function CameraCaptureLegacy({
               autoPlay
               playsInline
               muted
+              // iOS can PAUSE the live preview after a capture or a brief
+              // interruption, leaving it black with nothing to recover it (the
+              // 026c935 base had no handler). Replaying the SAME stream on pause
+              // resumes it — this NEVER calls getUserMedia, so it can't trigger a
+              // permission re-prompt (the problem the heavier recovery had).
+              onPause={() => {
+                if (recordingRef.current) return;
+                if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+                const v = videoRef.current;
+                if (v && v.paused) v.play().catch(() => { /* non-fatal */ });
+              }}
               className="absolute inset-0 w-full h-full object-cover"
               style={(!hwZoom && zoom > 1) ? { transform: `scale(${zoom})`, transformOrigin: 'center' } : undefined}
             />
