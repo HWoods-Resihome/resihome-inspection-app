@@ -28,6 +28,38 @@ const isOAuthStartPath = (u: string) => typeof u === 'string' && OAUTH_START_PAT
 
 let installed = false;
 
+// Start an OAuth provider sign-in from the SYSTEM browser when running inside
+// the Capacitor shell, tagged `client=native` so the server returns via the
+// resiwalk:// deep link (handled by installOAuthBridge's appUrlOpen listener
+// below → /api/auth/exchange). Call this from the login UI BEFORE the in-webview
+// navigation fallback:
+//
+//   if (await openOAuthStartNative(url)) return;   // native handled it
+//   window.location.href = url;                    // normal browser
+//
+// Returns true ONLY if it opened the system browser (native). In a normal
+// browser it returns false and does nothing, so web/PWA is byte-for-byte
+// unchanged. Unlike installOAuthBridge's window.location monkey-patch (which is
+// unreliable in the iOS WKWebView and silently no-ops — the reason the iOS
+// deep-link return previously failed), this is an explicit, reliable call.
+export async function openOAuthStartNative(rawUrl: string): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  let Capacitor: typeof import('@capacitor/core').Capacitor;
+  try { ({ Capacitor } = await import('@capacitor/core')); } catch { return false; }
+  if (!Capacitor.isNativePlatform()) return false;
+  try {
+    const { Browser } = await import('@capacitor/browser');
+    const abs = rawUrl.startsWith('http')
+      ? rawUrl
+      : `${window.location.origin}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
+    const marked = abs + (abs.includes('?') ? '&' : '?') + 'client=native';
+    await Browser.open({ url: marked });
+    return true;
+  } catch {
+    return false; // fall back to normal in-webview navigation
+  }
+}
+
 // Recolor the NATIVE status bar in the Capacitor shell (Android). The web/PWA
 // status bar is handled separately by swapping the <meta name="theme-color">.
 // Driven through the runtime-registered global plugin (window.Capacitor.Plugins

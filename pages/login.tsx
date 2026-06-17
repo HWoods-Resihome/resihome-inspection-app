@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { isExternalEmail } from '@/lib/userAccess';
+import { openOAuthStartNative } from '@/lib/nativeBridge';
 
 // Friendly messages for ?error= codes bounced back from the Google flow.
 const ERROR_MESSAGES: Record<string, string> = {
@@ -63,7 +64,13 @@ export default function LoginPage() {
       // Email is a valid HubSpot user. Hand off to the chosen provider to prove
       // ownership. Full-page navigation (OAuth redirect); keep `submitting` true.
       const route = provider === 'microsoft' ? 'microsoft-login' : 'google-login';
-      window.location.href = `/api/auth/${route}?email=${encodeURIComponent(email.trim())}`;
+      const startUrl = `/api/auth/${route}?email=${encodeURIComponent(email.trim())}`;
+      // In the native (Capacitor) shell, open the OAuth start in the system
+      // browser tagged client=native so it returns via the resiwalk:// deep link
+      // and /api/auth/exchange. (Reliable on iOS, where the location monkey-patch
+      // in installOAuthBridge silently no-ops.) No-op in a normal browser.
+      if (await openOAuthStartNative(startUrl)) return;
+      window.location.href = startUrl;
     } catch (err: any) {
       setError(String(err.message || err));
       setSubmitting(false);
