@@ -2499,10 +2499,13 @@ export function RateCardForm(props: RateCardFormProps) {
       lines: flatLines,
       photosBySection: photosBySectionPayload,
       // Lines the inspector chose to "Ignore" for photo evidence — the
-      // review won't re-flag these for a photo.
-      ignoredLineIds: getIgnoredPhotoLines(props.inspectionRecordId),
+      // review won't re-flag these for a photo. Scoped by stage so the approver
+      // (pending_approval) gets a fresh list and can overrule the inspector.
+      ignoredLineIds: getIgnoredPhotoLines(props.inspectionRecordId, props.inspectionStatus === 'pending_approval' ? 'approval' : undefined),
       // Items already reviewed (decided on) in a prior run — don't re-flag them.
-      reviewedSignatures: getReviewedItems(props.inspectionRecordId),
+      // Also stage-scoped: resets for the approver so prior inspector decisions
+      // resurface for re-evaluation.
+      reviewedSignatures: getReviewedItems(props.inspectionRecordId, props.inspectionStatus === 'pending_approval' ? 'approval' : undefined),
       property: {
         bedrooms: props.bedrooms,
         bathrooms: props.bathrooms,
@@ -4078,14 +4081,14 @@ export function RateCardForm(props: RateCardFormProps) {
           // later re-review of this inspection doesn't re-flag the same call-outs.
           try {
             const sigs = aiAdjustments.filter((a) => aiDecisions[a.id]).map((a) => reviewSignature(a));
-            addReviewedItems(props.inspectionRecordId, sigs);
+            addReviewedItems(props.inspectionRecordId, sigs, props.inspectionStatus === 'pending_approval' ? 'approval' : undefined);
           } catch { /* non-fatal */ }
           applyApproved(approved);
         }}
         previewTenantDollars={previewTenantDollars}
         onAddPhoto={addPhotoForAdjustment}
         onAddLineItems={addLineItemsForReview}
-        onIgnore={(a) => { if (a.lineExternalId) addIgnoredPhotoLine(props.inspectionRecordId, a.lineExternalId); }}
+        onIgnore={(a) => { if (a.lineExternalId) addIgnoredPhotoLine(props.inspectionRecordId, a.lineExternalId, props.inspectionStatus === 'pending_approval' ? 'approval' : undefined); }}
         initialDecisions={aiDecisions}
         onDecisionsChange={setAiDecisions}
         inspectionId={props.inspectionRecordId}

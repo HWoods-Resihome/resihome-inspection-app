@@ -140,6 +140,21 @@ export function setPassedReviewHash(inspectionId: string, hash: string): void {
   } catch { /* storage disabled — gating falls back to in-memory state */ }
 }
 
+// ----- Per-inspection storage key, scoped by review STAGE -----------------
+// The inspector's review decisions and the approver's must NOT share a bucket:
+// once an inspection goes to pending_approval the approver should get a FRESH
+// list of AI prompts (so they can re-evaluate — and overrule — what the
+// inspector decided). We namespace by stage: the inspector uses the plain
+// inspection id (back-compat with existing stored data); the approver gets a
+// separate '::approval' bucket that starts empty and then accumulates the
+// approver's OWN decisions (so re-running the review mid-approval still skips
+// what the approver already handled). Reopening to In Progress leaves the
+// inspector's original bucket intact.
+export type ReviewStage = 'approval' | undefined;
+function stageKey(inspectionId: string, stage?: ReviewStage): string {
+  return stage === 'approval' ? `${inspectionId}::approval` : inspectionId;
+}
+
 // ----- Ignored photo-gap lines (per inspection) ---------------------------
 // When the inspector taps "Ignore" on a photo-evidence flag, we remember that
 // line so future AI reviews don't keep calling it out. Sent to the endpoint as
@@ -152,17 +167,18 @@ function readIgnore(): Record<string, string[]> {
   catch { return {}; }
 }
 
-export function getIgnoredPhotoLines(inspectionId: string): string[] {
-  return readIgnore()[inspectionId] || [];
+export function getIgnoredPhotoLines(inspectionId: string, stage?: ReviewStage): string[] {
+  return readIgnore()[stageKey(inspectionId, stage)] || [];
 }
 
-export function addIgnoredPhotoLine(inspectionId: string, lineExternalId: string): void {
+export function addIgnoredPhotoLine(inspectionId: string, lineExternalId: string, stage?: ReviewStage): void {
   if (typeof window === 'undefined' || !lineExternalId) return;
   try {
     const all = readIgnore();
-    const list = all[inspectionId] || [];
+    const key = stageKey(inspectionId, stage);
+    const list = all[key] || [];
     if (!list.includes(lineExternalId)) list.push(lineExternalId);
-    all[inspectionId] = list;
+    all[key] = list;
     window.localStorage.setItem(IGNORE_KEY, JSON.stringify(all));
   } catch { /* storage disabled */ }
 }
@@ -189,17 +205,18 @@ function readReviewed(): Record<string, string[]> {
   catch { return {}; }
 }
 
-export function getReviewedItems(inspectionId: string): string[] {
-  return readReviewed()[inspectionId] || [];
+export function getReviewedItems(inspectionId: string, stage?: ReviewStage): string[] {
+  return readReviewed()[stageKey(inspectionId, stage)] || [];
 }
 
-export function addReviewedItems(inspectionId: string, signatures: string[]): void {
+export function addReviewedItems(inspectionId: string, signatures: string[], stage?: ReviewStage): void {
   if (typeof window === 'undefined' || !inspectionId || !signatures.length) return;
   try {
     const all = readReviewed();
-    const set = new Set(all[inspectionId] || []);
+    const key = stageKey(inspectionId, stage);
+    const set = new Set(all[key] || []);
     for (const s of signatures) if (s) set.add(s);
-    all[inspectionId] = Array.from(set);
+    all[key] = Array.from(set);
     window.localStorage.setItem(REVIEWED_KEY, JSON.stringify(all));
   } catch { /* storage disabled */ }
 }
