@@ -257,15 +257,25 @@ function lensOrder(label: string): number {
   return 9; // Macro / other last
 }
 
-// Pick the best MediaRecorder mime type this browser supports (Safari → mp4,
-// Chrome/Android → webm). Returns '' if recording is unsupported entirely.
+// Pick the best MediaRecorder mime type this browser supports, strongly
+// preferring H.264-in-mp4 — the ONE container/codec both iOS Safari AND
+// Android/Chrome can play. A clip recorded as webm (vp8/vp9) plays on Android
+// but is undecodable on iOS Safari (no webm support at all), which is why
+// Android-recorded clips showed a black frame + dead play button on iPhones.
+// Bare 'video/mp4' returns false on Android Chrome — it needs an explicit avc1
+// codec string — so we try those first; modern Android Chrome (~116+) supports
+// them and produces an iOS-playable file. Returns '' if recording is
+// unsupported entirely. Order = most-compatible → least.
 function pickClipMime(): string {
   if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
   const candidates = [
-    'video/mp4',
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2', // H.264 baseline + AAC (universal)
+    'video/mp4;codecs=avc1.4D401E,mp4a.40.2', // H.264 main + AAC
+    'video/mp4;codecs=h264,aac',
+    'video/mp4',                              // Safari reports this directly
+    'video/webm;codecs=h264,opus',            // H.264 in webm (some Android)
     'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
-    'video/webm;codecs=h264',
     'video/webm',
   ];
   return candidates.find((c) => MediaRecorder.isTypeSupported(c)) || '';
