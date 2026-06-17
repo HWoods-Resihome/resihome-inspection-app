@@ -694,7 +694,7 @@ export default function Home() {
                 onApply={setInspectorFilter}
                 triggerLabel={inspectorTriggerLabel}
                 ariaLabel="Filter by inspector"
-                className={`w-full truncate text-xs font-heading font-semibold pl-2.5 pr-2 py-1.5 border rounded-md bg-white flex items-center justify-between ${
+                className={`w-full truncate text-[11px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-md bg-white flex items-center justify-between ${
                   inspectorFilter.length > 0 ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'
                 }`}
               />
@@ -711,7 +711,7 @@ export default function Home() {
                 onApply={setTemplateFilter}
                 triggerLabel={templateTriggerLabel}
                 ariaLabel="Filter by template"
-                className={`w-full truncate text-xs font-heading font-semibold pl-2.5 pr-2 py-1.5 border rounded-md bg-white flex items-center justify-between ${
+                className={`w-full truncate text-[11px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-md bg-white flex items-center justify-between ${
                   templateFilter.length > 0 ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'
                 }`}
               />
@@ -728,7 +728,7 @@ export default function Home() {
                 onApply={setRegionFilter}
                 triggerLabel={regionTriggerLabel}
                 ariaLabel="Filter by region"
-                className={`w-full truncate text-xs font-heading font-semibold pl-2.5 pr-2 py-1.5 border rounded-md bg-white flex items-center justify-between ${
+                className={`w-full truncate text-[11px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-md bg-white flex items-center justify-between ${
                   regionFilter.length > 0 ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'
                 }`}
               />
