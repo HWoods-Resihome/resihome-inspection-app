@@ -85,5 +85,7 @@ echo "==> [4/4] fastlane config -> $IOS_APP/fastlane"
 mkdir -p "$IOS_APP/fastlane"
 cp "$PENDING/fastlane/Fastfile" "$IOS_APP/fastlane/Fastfile"
 cp "$PENDING/fastlane/Appfile" "$IOS_APP/fastlane/Appfile"
+# Gemfile pins fastlane >= 2.236.1 (the runner's 2.236.0 breaks altool upload).
+cp "$PENDING/Gemfile" "$IOS_APP/Gemfile"
 
 echo "==> apply-ios.sh complete"

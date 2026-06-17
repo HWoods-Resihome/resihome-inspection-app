@@ -104,7 +104,9 @@ jobs:
 
       - name: Build + upload to TestFlight (fastlane)
         working-directory: mobile/ios/App
-        run: fastlane beta
+        run: |
+          bundle install
+          bundle exec fastlane beta
 
       - name: Upload build logs on failure
         if: failure()

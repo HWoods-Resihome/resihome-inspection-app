@@ -1,0 +1,9 @@
+# Pin fastlane to >= 2.236.1. The runner's preinstalled 2.236.0 has a transporter
+# bug ("Decode Base64 key content for .p8 file generation in Altool") that mangles
+# the base64 App Store Connect API key handed to altool, so TestFlight upload fails
+# with: "The file couldn't be opened because it isn't in the correct format. (259)".
+# 2.236.1 reverts that change. apply-ios.sh copies this next to the Xcode project
+# and the workflow runs `bundle exec fastlane`.
+source "https://rubygems.org"
+
+gem "fastlane", ">= 2.236.1"
