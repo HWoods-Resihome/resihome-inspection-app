@@ -1962,7 +1962,7 @@ export function RateCardForm(props: RateCardFormProps) {
         return;
       }
       const body = isArchive
-        ? { upserts: [], archives: [existingRecordId] }
+        ? { upserts: [], archives: [existingRecordId], bumpStatusToInProgress: true }
         : {
             upserts: [{
               recordId: existingRecordId,
@@ -1977,6 +1977,10 @@ export function RateCardForm(props: RateCardFormProps) {
               questionHubspotRecordId: null,
             }],
             archives: [],
+            // Adding photos IS starting the inspection — flip Scheduled → In Progress
+            // (server only bumps if still Scheduled). Previously omitted here, so an
+            // inspection where the user ONLY added photos stayed "Scheduled".
+            bumpStatusToInProgress: true,
           };
       try {
         const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
