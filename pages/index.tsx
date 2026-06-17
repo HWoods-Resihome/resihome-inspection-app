@@ -898,7 +898,14 @@ export default function Home() {
             Per-page selector (20/50/100) + Back/Next. Hidden while loading,
             erroring, or when there are no results. */}
         {!loading && !error && total > 0 && (
-          <div className="frozen-foot lz-foot bg-white border-t border-gray-200">
+          <div
+            className="frozen-foot bg-white border-t border-gray-200"
+            // In normal flow, the home indicator is already cleared by the native
+            // shell's contentInset (app) / Safari's chrome (browser), so lz-foot's
+            // full env(safe-area-inset-bottom) just doubled it into a big white
+            // gap. Cap it to a small buffer (a hair left to guard a standalone PWA).
+            style={{ paddingBottom: 'min(env(safe-area-inset-bottom), 0.5rem)' }}
+          >
             <div className="max-w-3xl mx-auto px-4 py-1.5 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 shrink-0">
                 <span className="text-xs text-gray-500 font-heading whitespace-nowrap">Per page</span>
