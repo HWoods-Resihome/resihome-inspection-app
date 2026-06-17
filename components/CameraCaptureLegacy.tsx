@@ -5,6 +5,7 @@ import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadVideo } from '@/lib/photoUpload';
 import { makeVideoEntry } from '@/lib/media';
 import { CameraAILayer } from '@/components/CameraAILayer';
+import { SyncingBadge } from '@/components/SyncingBadge';
 import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
 import { useBackToClose } from '@/lib/useBackToClose';
 import { setNativeStatusBarColor } from '@/lib/nativeBridge';
@@ -1971,16 +1972,12 @@ export function CameraCaptureLegacy({
                     </span>
                   </span>
                 )}
-                {/* Status overlay */}
-                {it.status === 'uploading' && (
-                  <div className="absolute inset-0 bg-black/60 rounded flex items-center justify-center">
-                    <svg className="animate-spin" width="20" height="20" viewBox="0 0 24 24"
-                         fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                    </svg>
-                  </div>
-                )}
-                {it.status === 'failed' && (
+                {/* Status overlay. Queue-first → a shot is saved to the local queue
+                    instantly and shown as a draft, so instead of a spinner we show
+                    the same "Syncing…" (online) / "Saved Offline" (offline) banner
+                    Android uses; it flips to a green check once it actually lands on
+                    HubSpot, and to a Retry button only on a hard failure. */}
+                {it.status === 'failed' ? (
                   <button
                     type="button"
                     onClick={() => retryUpload(it.id)}
@@ -1989,25 +1986,16 @@ export function CameraCaptureLegacy({
                   >
                     Retry
                   </button>
-                )}
-                {it.status === 'uploaded' && (
-                  it.hubspotUrl && it.hubspotUrl.startsWith('blob:') ? (
-                    // Offline draft — cached locally; will upload when back online.
-                    <span
-                      className="absolute bottom-0 inset-x-0 bg-amber-500/95 text-white text-[8px] font-heading font-bold text-center leading-tight py-0.5 rounded-b"
-                      title="Saved Offline · Will Sync When Online"
-                    >
-                      Saved Offline
-                    </span>
-                  ) : (
-                    <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center border-2 border-black">
-                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white"
-                           strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    </div>
-                  )
-                )}
+                ) : (it.status === 'uploading' || (!!it.hubspotUrl && it.hubspotUrl.startsWith('blob:'))) ? (
+                  <SyncingBadge />
+                ) : it.status === 'uploaded' ? (
+                  <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center border-2 border-black">
+                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white"
+                         strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  </div>
+                ) : null}
                 {/* Delete button */}
                 <button
                   type="button"

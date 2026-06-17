@@ -98,19 +98,6 @@ function idbAvailable(): boolean {
   return typeof window !== 'undefined' && 'indexedDB' in window;
 }
 
-// Is this upload failure a connectivity blip (→ safe to queue + retry) rather
-// than a hard server rejection (→ surface it)? Network/timeout/abort and 5xx/
-// 429/408 are transient; a hard 4xx (400/401/403/404/413…) is a real rejection
-// we shouldn't silently queue-and-retry forever (the capture strip shows a Retry
-// button for those instead).
-function isOfflineishErr(err: any): boolean {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
-  const msg = String(err?.message || err || '');
-  const m = /HTTP (\d{3})/.exec(msg);
-  if (m) { const s = Number(m[1]); return s >= 500 || s === 429 || s === 408; }
-  return true; // no HTTP status → network / timeout / abort → offline-ish
-}
-
 /**
  * Build a SMALL (~`maxEdge`px) jpeg thumbnail blob from a full-res photo blob.
  *
@@ -302,36 +289,17 @@ export async function uploadPhotoOrQueue(
     return url;
   };
 
-  // iOS: UPLOAD-FIRST (restored from the flawless 6/13 build). Queue-first wrote
-  // EVERY photo's blob into IndexedDB on capture and then ran a getAll()-of-ALL-
-  // blobs background flush on every shot — and that per-shot IDB blob write +
-  // full-store read is the iOS WebKit memory pressure that jettisoned the content
-  // process on the 2nd photo (the black screen / boot-out). 6/13 never touched
-  // IndexedDB when online. So on iOS we upload DIRECTLY to HubSpot when online and
-  // fall back to the durable IDB queue ONLY when offline or the upload fails —
-  // nothing is lost on a weak signal, but the happy online path is IDB-free.
-  // Android keeps queue-first below (instant Done; no such memory ceiling).
-  if (IS_IOS_WEBKIT) {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false && idbAvailable()) {
-      return queueDraft();
-    }
-    try {
-      // Fail fast on a weak signal (queuing is non-destructive + auto-syncs), so
-      // we cache quickly instead of spinning.
-      return await uploadJpegBlob(blob, filename, { attempts: 2, timeoutMs: 15000 });
-    } catch (e) {
-      if (e instanceof StorageFullError || isQuotaError(e)) throw e;
-      if (!idbAvailable() || !isOfflineishErr(e)) throw e; // hard 4xx → surface (strip shows Retry)
-      return queueDraft();
-    }
-  }
-
-  // QUEUE-FIRST (non-iOS): write the photo to the durable queue and return a draft
-  // URL IMMEDIATELY (no network), so capture and the camera's "Done" are instant —
-  // the inspector snaps freely, taps Done, returns to the inspection, and the
-  // photos upload IN THE BACKGROUND from there (the form's flush is kicked the
-  // moment the camera closes, and retries every 15s + on reconnect). Nothing
-  // ever blocks on a slow/flaky upload.
+  // QUEUE-FIRST (all platforms): write the photo to the durable queue and return a
+  // draft URL IMMEDIATELY (no network), so capture and the camera's "Done" are
+  // instant — the inspector snaps freely, taps Done, and the photos upload IN THE
+  // BACKGROUND afterward (the form kicks the flush on camera close + every 15s + on
+  // reconnect). iOS is queue-first too now: the black screen was a muted camera
+  // TRACK (a getUserMedia/stream issue), NOT this path. The two things that made
+  // queue-first heavy on iOS are neutralized WHILE THE CAMERA IS OPEN — the
+  // per-shot thumbnail DECODE is skipped (makeThumbBlob's IS_IOS_WEBKIT guard) and
+  // the background flush (read-all-blobs + concurrent upload) is SUSPENDED until
+  // the camera closes (flushQueuedPhotos) — so capture only does one lightweight
+  // IndexedDB write per shot.
   if (idbAvailable()) {
     try {
       return await queueDraft();
@@ -497,19 +465,22 @@ export async function flushQueuedPhotos(
   onSynced: FlushOnSynced,
 ): Promise<FlushResult> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
+  // iOS ONLY: SUSPEND the background flush while an in-app camera is open. On
+  // iPhone's tight WebKit content-process ceiling, running an upload (read blob +
+  // base64-encode + fetch) AND the read-all-queued-blobs `getAll` scan at the same
+  // time the inspector is rapid-firing the next shot is the memory pattern that
+  // pressured the process. Photos are still saved instantly to the durable queue
+  // and shown from their local thumbnail; the form drains them the moment the
+  // camera CLOSES (kickFlush on close) and every ~15s after. So Done is instant,
+  // capture stays light, and the actual uploads happen once the camera is gone.
+  // Android (no such ceiling) keeps flushing during the session.
+  if (IS_IOS_WEBKIT && isAnyCameraOpen()) {
+    const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
+    return { synced: 0, remaining };
+  }
   const existing = flushInFlight.get(inspectionRecordId);
   if (existing) return existing;
-  // Upload IMMEDIATELY per shot (the owner's ask, and how the stable build
-  // behaved) so each photo's blob LEAVES memory promptly instead of every draft
-  // — and its retained object URLs — piling up for the whole camera session. We
-  // had SUSPENDED iOS uploads while the camera was open to avoid an upload's
-  // base64 spike overlapping the next capture canvas, but that just traded a
-  // transient spike for unbounded accumulation (and the field showed it never
-  // actually stopped the black screen). Instead, while a camera is open on iOS we
-  // drain ONE AT A TIME (concurrency 1) so at most a single upload's spike is ever
-  // in flight; off-camera / Android drain at full concurrency.
-  const concurrency = (IS_IOS_WEBKIT && isAnyCameraOpen()) ? 1 : FLUSH_CONCURRENCY;
-  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, concurrency);
+  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, FLUSH_CONCURRENCY);
   flushInFlight.set(inspectionRecordId, run);
   try { return await run; }
   finally { flushInFlight.delete(inspectionRecordId); }
