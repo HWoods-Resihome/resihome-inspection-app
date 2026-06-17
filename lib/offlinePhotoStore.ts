@@ -474,18 +474,22 @@ export async function flushQueuedPhotos(
   onSynced: FlushOnSynced,
 ): Promise<FlushResult> {
   if (!idbAvailable()) return { synced: 0, remaining: 0 };
+  // iOS: SUSPEND uploads while an in-app camera is open — just QUEUE the photos,
+  // exactly like the offline path does, and drain them with ONE clean flush the
+  // instant the camera closes (kickFlush-on-close) + every ~15s after. The field
+  // proved this is the reliable sequence: photos shot in AIRPLANE mode upload
+  // perfectly once you come back online (a single clean post-session flush),
+  // whereas attempting uploads DURING the iOS camera session left them wedged on
+  // "Syncing…". So mirror the working offline→online flow: queue during the
+  // session, flush once it's over. (Android has no such issue and keeps flushing
+  // during the session.)
+  if (IS_IOS_WEBKIT && isAnyCameraOpen()) {
+    const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
+    return { synced: 0, remaining };
+  }
   const existing = flushInFlight.get(inspectionRecordId);
   if (existing) return existing;
-  // iOS uploads DURING the camera session too — photos should save as they're
-  // taken, not pile up until Done (which left some looking "stuck"). But while a
-  // camera is open we drain ONE AT A TIME so a single upload's base64 spike never
-  // overlaps the next capture canvas — the gentle middle ground, and effectively
-  // what the stable 6/13 build did (it uploaded serially during the session). The
-  // per-shot thumbnail DECODE stays skipped while the camera is open
-  // (makeThumbBlob guard), so capture itself stays light. Full concurrency once
-  // the camera is closed so any backlog drains fast.
-  const concurrency = (IS_IOS_WEBKIT && isAnyCameraOpen()) ? 1 : FLUSH_CONCURRENCY;
-  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, concurrency);
+  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, FLUSH_CONCURRENCY);
   flushInFlight.set(inspectionRecordId, run);
   try { return await run; }
   finally { flushInFlight.delete(inspectionRecordId); }
