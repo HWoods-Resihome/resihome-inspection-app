@@ -508,13 +508,13 @@ export default function Home() {
 
   // Trigger summaries for the multi-select dropdowns.
   const inspectorTriggerLabel = inspectorFilter.length === 0
-    ? 'All Inspectors'
+    ? 'Inspectors'
     : inspectorFilter.length === 1 ? inspectorFilter[0] : `${inspectorFilter.length} inspectors`;
   const templateTriggerLabel = templateFilter.length === 0
-    ? 'All Templates'
+    ? 'Templates'
     : templateFilter.length === 1 ? (templateLabel(templateFilter[0]) || templateFilter[0]) : `${templateFilter.length} templates`;
   const regionTriggerLabel = regionFilter.length === 0
-    ? 'All Regions'
+    ? 'Regions'
     : regionFilter.length === 1 ? regionFilter[0] : `${regionFilter.length} regions`;
 
 
