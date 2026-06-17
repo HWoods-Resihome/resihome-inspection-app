@@ -14,6 +14,7 @@ TENANT RESPONSIBILITY: the tenant had control of the home. The DEFAULT assumptio
 
 VENDOR ASSIGNMENT DEFAULTS: certain work is always handled by a specific vendor — assign it there by default when adding the line (the inspector can still override):
   - GRASS CUTS / MOWING / lawn cutting → the "PPW" vendor (our landscaping vendor). Any grass-cut line, regardless of lot size, defaults to PPW.
+  - FULL MAJOR-APPLIANCE REPLACEMENTS → the "GE Appliances" vendor: replacing a whole refrigerator/fridge, dishwasher, microwave, range/oven/stove/cooktop, dryer, or washing machine. This is ONLY for full-unit replacements — appliance REPAIRS and part/component swaps (filters, racks, ice makers, elements, hoods, etc.) and all other appliance work stay on "Vendor 1".
 
 MISSING / REMOVED ITEMS — default to 100% tenant and are NOT cap-eligible: door stops, towel bars / rings, blind wands / slats, deadbolts / knobs, light bulbs, smoke / CO batteries, screens, outlet covers, fixtures, hardware. If the inspection set one of these to 0% (or a low tenant %), call it out and suggest raising it to 100%.
 

@@ -43,13 +43,27 @@ const CODE_VENDOR_DEFAULTS: Record<string, string> = {
 
 // Description/keyword DEFAULT vendor rules — for work whose catalog code varies
 // (e.g. grass cuts are priced per lot size, so a single code list is brittle).
-// Matched case-insensitively against the line item's description/category; first
+// `match` runs against the line item's description/category (lower-cased); first
 // match wins. Applied AFTER the per-code rules above (code rules take priority).
-// To add a rule, drop a { test, vendor } entry (the vendor must be in VENDORS).
-const DESC_VENDOR_DEFAULTS: Array<{ test: RegExp; vendor: string }> = [
+// To add a rule, drop a { match, vendor } entry (the vendor must be in VENDORS).
+const DESC_VENDOR_DEFAULTS: Array<{ match: (s: string) => boolean; vendor: string }> = [
   // All grass cuts / mowing → PPW (our landscaping vendor). Covers every
   // grass-cut catalog code regardless of lot size, current or future.
-  { test: /\b(grass[\s-]*cut(?:ting)?|mow(?:ing)?|lawn[\s-]*(?:cut|mow))\b/i, vendor: 'PPW' },
+  {
+    match: (s) => /\b(grass[\s-]*cut(?:ting)?|mow(?:ing)?|lawn[\s-]*(?:cut|mow))\b/i.test(s),
+    vendor: 'PPW',
+  },
+  // FULL major-appliance REPLACEMENTS → GE Appliances. Must be a whole-unit
+  // replace (description says replac* + a major-appliance noun) and NOT a repair
+  // or a part/component swap (filter, rack, ice maker, element, hood, etc.) —
+  // those, and all other appliance work, stay on Vendor 1.
+  {
+    match: (s) =>
+      /\breplac/i.test(s)
+      && /\b(refrigerator|fridge|dishwasher|microwave|range|oven|stove|cooktop|dryer|washing\s*machine)\b/i.test(s)
+      && !/\b(repair|filter|rack|shelf|bin|drawer|ice[\s-]*maker|water[\s-]*(?:line|valve|filter)|element|igniter|burner|knob|handle|gasket|seal|hose|valve|board|light|bulb|hinge|vent|hood|cord|leveling|anti[\s-]*tip|grate|tray|duct|part)\b/i.test(s),
+    vendor: 'GE Appliances',
+  },
 ];
 
 /** The default vendor for a catalog code, or null if it has no special rule. */
@@ -73,7 +87,7 @@ export function defaultVendorForItem(
   const hay = [item.laborShortDescription, item.laborFullDescription, item.description, item.category, item.subcategory]
     .filter(Boolean).join(' ');
   if (!hay) return null;
-  for (const r of DESC_VENDOR_DEFAULTS) if (r.test.test(hay)) return r.vendor;
+  for (const r of DESC_VENDOR_DEFAULTS) if (r.match(hay)) return r.vendor;
   return null;
 }
 
