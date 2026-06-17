@@ -44,12 +44,16 @@ platform :ios do
     # NOTE: on an ephemeral runner this creates a NEW distribution certificate each
     # run; Apple caps those (~2–3). For ongoing use switch to `match` (shared,
     # reused cert) — see mobile/BUILD_RUNBOOK.md follow-up.
+    # setup_ci's lane-context KEYCHAIN_PATH is "~/Library/Keychains/
+    # fastlane_tmp_keychain" (no suffix), but the real file is "...-db", so
+    # get_certificates' existence check fails on it. Point at the actual file.
+    ci_keychain = File.expand_path("~/Library/Keychains/fastlane_tmp_keychain-db")
     get_certificates(
       api_key: api_key,
       # Import into the temp keychain setup_ci created (password is empty),
       # otherwise cert lands in login.keychain and can't be configured for
       # signing ("no local code signing identities found").
-      keychain_path: lane_context[SharedValues::KEYCHAIN_PATH],
+      keychain_path: ci_keychain,
       keychain_password: "",
     )
     profile_name = get_provisioning_profile(
