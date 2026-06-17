@@ -538,8 +538,8 @@ export default function Home() {
           className="bg-brand text-white sticky top-0 z-30 shrink-0"
           style={{ paddingTop: 'env(safe-area-inset-top)' }}
         >
-          <div className="lz-head max-w-3xl mx-auto px-4 pt-4 pb-4">
-            <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="lz-head max-w-3xl mx-auto px-4 pt-2 pb-3">
+            <div className="flex items-center justify-between gap-3 mb-2">
               <div className="flex items-center gap-3 min-w-0">
                 {/* App icon — white house + footprint on a brand-pink tile that
                     matches the header. Edge-to-edge (no rounding) so it reads as
@@ -580,7 +580,7 @@ export default function Home() {
             {/* + New Inspection button */}
             <Link
               href="/inspection/new"
-              className="flex items-center gap-3 bg-pink-100 hover:bg-pink-200 rounded-xl px-4 py-3 transition active:scale-[0.99] shadow-md"
+              className="flex items-center gap-3 bg-pink-100 hover:bg-pink-200 rounded-xl px-4 py-2.5 transition active:scale-[0.99] shadow-md"
             >
               <div className="w-9 h-9 bg-brand rounded-lg flex items-center justify-center shrink-0">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -896,7 +896,7 @@ export default function Home() {
             erroring, or when there are no results. */}
         {!loading && !error && total > 0 && (
           <div className="frozen-foot lz-foot bg-white border-t border-gray-200">
-            <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
+            <div className="max-w-3xl mx-auto px-4 py-1.5 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 shrink-0">
                 <span className="text-xs text-gray-500 font-heading whitespace-nowrap">Per page</span>
                 <ListPicker

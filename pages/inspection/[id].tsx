@@ -12,6 +12,7 @@ import {
   saveCachedInspection, loadCachedInspection,
   saveCachedQuestions, loadCachedQuestions,
 } from '@/lib/offlineCache';
+import { getGeoFix } from '@/lib/evidenceStamp';
 
 
 // The three inspection forms are heavy and MUTUALLY EXCLUSIVE — exactly one
@@ -61,6 +62,18 @@ export default function ExistingInspection() {
       })
       .catch(() => { /* non-fatal: lockout still enforced server-side */ });
     return () => { cancelled = true; };
+  }, []);
+
+  // Prime the browser's Location permission as soon as an inspection opens, so
+  // the OS/Safari prompt resolves BEFORE the first photo is taken and GPS is
+  // ready to stamp evidence. The native shell already primes at app launch
+  // (primeLocationPermissionNative), but on web/PWA — where there's no launch
+  // hook — the only place location was requested was on camera-open, which is
+  // late and easy to miss. getCurrentPosition is idempotent: the browser shows
+  // its prompt once, then silently grants/denies on later calls. Best-effort
+  // and silent; a denial/timeout just no-ops and the stamp falls back to no GPS.
+  useEffect(() => {
+    void getGeoFix().catch(() => { /* denied/unavailable — silent */ });
   }, []);
 
   const [inspection, setInspection] = useState<InspectionSummary | null>(null);

@@ -431,12 +431,12 @@ export default function NewInspection() {
         }}
       >
         <div className="max-w-xl mx-auto">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-2">
             <Link href="/" className="text-sm text-gray-500 hover:text-ink font-heading">&larr; Home</Link>
           </div>
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm px-6 pt-4 pb-6">
             <h1 className="text-2xl font-heading font-bold mb-1">New Inspection</h1>
-            <p className="text-sm text-gray-500 mb-6 font-heading uppercase tracking-wider">
+            <p className="text-sm text-gray-500 mb-5 font-heading uppercase tracking-wider">
               Pick a template and property to begin
             </p>
 
