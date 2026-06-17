@@ -1194,7 +1194,6 @@ export function CameraCaptureModern({
   // inspection area (sensor noise → variance > 0), and only re-acquire for the
   // former.
   const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const diagRef = useRef<HTMLSpanElement | null>(null);
   const sawLightRef = useRef(false);
   const blackStuckTicksRef = useRef(0);
   // reacquireBudgetRef + startStreamRef are declared up by stopStream (shared with
@@ -1269,13 +1268,6 @@ export function CameraCaptureModern({
         if (r) { mean = r.mean; variance = r.variance; if (mean > 8) sawLightRef.current = true; }
       }
       const stuckBlack = mean >= 0 && mean < 4 && variance >= 0 && variance < 2 && sawLightRef.current;
-
-      // Live diagnostics straight to the DOM (no React re-render): a screenshot now
-      // reveals the exact failure signature instead of us guessing.
-      if (diagRef.current) {
-        diagRef.current.textContent =
-          `rs:${track ? track.readyState[0] : '-'} m:${muted ? 1 : 0} p:${paused ? 1 : 0} w:${v.videoWidth} L:${mean < 0 ? '-' : mean.toFixed(0)} var:${variance < 0 ? '-' : variance.toFixed(0)} rq:${reacquireBudgetRef.current}`;
-      }
 
       const healthy = !dead && !muted && !paused && !noSize && !stuckBlack;
       if (healthy) { previewRecoverTicksRef.current = 0; blackStuckTicksRef.current = 0; setReconnecting(false); return; }
@@ -2879,21 +2871,6 @@ export function CameraCaptureModern({
               style={{ display: frozen ? 'block' : 'none' }}
               aria-hidden
             />
-            {/* Build stamp — tiny, low-opacity, ALWAYS visible in the corner of
-                the live preview. Lets us confirm from any screenshot exactly which
-                deploy the device is running, so a stale cached build can never
-                again be mistaken for a fix that didn't work. */}
-            <span
-              className="pointer-events-none absolute bottom-1 right-1.5 z-20 text-[9px] leading-none font-mono text-white/45 select-none text-right"
-              aria-hidden
-            >
-              build {process.env.NEXT_PUBLIC_APP_VERSION || 'dev'}
-              {/* Live camera-track diagnostics — written directly to the DOM by the
-                  liveness monitor (no re-render). rs=readyState, m=muted, p=paused,
-                  w=videoWidth, L=mean luma, var=luma variance, rq=re-acquire budget. */}
-              <br />
-              <span ref={diagRef} className="text-white/40" />
-            </span>
             {/* Tap-to-focus reticle */}
             {focusPt && (
               <span
