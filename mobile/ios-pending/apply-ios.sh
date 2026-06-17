@@ -40,10 +40,15 @@ echo "==> [2/4] Storyboard bridge VC -> WebViewController"
 if grep -q 'customClass="WebViewController"' "$STORYBOARD"; then
   echo "   already set"
 elif grep -q 'customClass="CAPBridgeViewController"' "$STORYBOARD"; then
+  # Capacitor's bridge VC element already carries customModule="Capacitor"
+  # customModuleProvider="target". Only RETARGET the class + module values —
+  # adding new customModule/customModuleProvider attributes makes the storyboard
+  # compiler fail with "Attribute customModule redefined".
   /usr/bin/sed -i '' \
-    's#customClass="CAPBridgeViewController"#customClass="WebViewController" customModule="App" customModuleProvider="target"#g' \
+    -e 's#customClass="CAPBridgeViewController"#customClass="WebViewController"#g' \
+    -e 's#customModule="Capacitor"#customModule="App"#g' \
     "$STORYBOARD"
-  echo "   set customClass=WebViewController"
+  echo "   set customClass=WebViewController, customModule=App"
 else
   echo "   WARN: bridge VC customClass not found in $STORYBOARD — verify manually." >&2
 fi
