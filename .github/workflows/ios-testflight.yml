@@ -16,6 +16,12 @@ name: iOS TestFlight
 #   ASC_ISSUER_ID   App Store Connect API issuer ID
 #   ASC_KEY_P8      the API .p8 private key, base64-encoded  (`base64 -i AuthKey_XXX.p8`)
 #   APPLE_TEAM_ID   10-char Apple Developer Team ID
+#   MATCH_PASSWORD  passphrase that encrypts the match cert/profile git storage
+#
+# Signing uses fastlane match: the distribution cert + App Store profile are
+# stored ENCRYPTED on the `ios-signing-certs` branch of this repo and reused by
+# every build. The job's GITHUB_TOKEN (contents: write) authenticates match's
+# git access via the url.insteadOf config in the "Configure git auth" step.
 
 on:
   workflow_dispatch:
@@ -42,11 +48,20 @@ jobs:
   build:
     runs-on: macos-26
     timeout-minutes: 75
+    # match stores the encrypted cert/profile on a branch in this repo; the
+    # GITHUB_TOKEN needs write access to push it.
+    permissions:
+      contents: write
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      # One-time bootstrap: revoke orphaned distribution certs so match can mint
+      # and store a fresh one. REMOVE this line once the first match run succeeds
+      # (otherwise every build would revoke the match cert).
+      RESET_DIST_CERTS: '1'
       BUILD_NUMBER: ${{ github.run_number }}
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
@@ -57,10 +72,16 @@ jobs:
       - name: Preflight — required secrets present
         run: |
           missing=0
-          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID MATCH_PASSWORD; do
             if [ -z "${!v}" ]; then echo "::error::Missing secret $v"; missing=1; fi
           done
           [ "$missing" -eq 0 ] || { echo "Set the secrets listed in this workflow's header."; exit 1; }
+
+      - name: Configure git auth for match (encrypted cert storage in this repo)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Select latest Xcode
         run: |

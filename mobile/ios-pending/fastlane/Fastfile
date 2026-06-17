@@ -1,24 +1,34 @@
 # ResiWALK iOS — TestFlight build lane.
 #
-# Auth + signing use ONLY an App Store Connect API key (no Apple-ID password, no
-# fastlane match repo, no committed certificates). Xcode manages signing
-# automatically via `-allowProvisioningUpdates`, creating/fetching the
-# distribution cert + provisioning profile on the runner using the API key.
+# Auth uses an App Store Connect API key. Code signing uses fastlane `match`:
+# ONE Apple Distribution certificate + App Store provisioning profile are created
+# once, stored ENCRYPTED in this repo on the `ios-signing-certs` branch, and
+# REUSED by every build (no per-run certificate creation, no Apple cert-cap).
 #
 # Required ENV (set as GitHub Secrets, passed through by the workflow):
 #   ASC_KEY_ID      App Store Connect API Key ID
 #   ASC_ISSUER_ID   App Store Connect API issuer ID
 #   ASC_KEY_P8      the .p8 private key, base64-encoded
 #   APPLE_TEAM_ID   10-char Apple Developer Team ID
-#   BUILD_NUMBER    unique, monotonic build number (the workflow passes github.run_number)
+#   MATCH_PASSWORD  passphrase that encrypts the match cert/profile storage
+#   BUILD_NUMBER    unique, monotonic build number (workflow passes github.run_number)
+#
+# One-time bootstrap ENV (set ONLY for the first match run, then removed):
+#   RESET_DIST_CERTS=1  revoke existing distribution certs so match can mint a
+#                       fresh, storable one (needed when the account is at the
+#                       distribution-cert cap with no locally-usable key).
+
+APP_ID = "com.resihome.resiwalk".freeze
+MATCH_GIT_URL = "https://github.com/HWoods-Resihome/resihome-inspection-app.git".freeze
+MATCH_GIT_BRANCH = "ios-signing-certs".freeze
 
 default_platform(:ios)
 
 platform :ios do
   desc "Build the ResiWALK shell and upload to TestFlight"
   lane :beta do
-    # Creates a temporary CI keychain (so automatic signing has somewhere to put
-    # the fetched certificate) and tunes other CI-only defaults.
+    # Temporary CI keychain (match installs the cert here; setup_ci makes it the
+    # default and exports MATCH_KEYCHAIN_NAME/PASSWORD that match reads).
     setup_ci
 
     api_key = app_store_connect_api_key(
@@ -32,35 +42,47 @@ platform :ios do
     team_id   = ENV.fetch("APPLE_TEAM_ID")
     build_num = ENV["BUILD_NUMBER"] || Time.now.to_i.to_s
 
-    # --- Signing (explicit, manual) ---
-    # Automatic/cloud signing archived as "Development" (needs registered devices)
-    # and forcing the identity globally also broke the Pods targets. Instead:
-    #   1. create/fetch an Apple Distribution certificate (private key lands in the
-    #      temp CI keychain that setup_ci made default),
-    #   2. create/fetch an App Store provisioning profile (needs NO devices),
-    # both via the API key, then apply manual distribution signing to the App
-    # target ONLY — Pods keep their own (unsigned) settings.
-    #
-    # NOTE: on an ephemeral runner this creates a NEW distribution certificate each
-    # run; Apple caps those (~2–3). For ongoing use switch to `match` (shared,
-    # reused cert) — see mobile/BUILD_RUNBOOK.md follow-up.
-    # setup_ci's lane-context KEYCHAIN_PATH is "~/Library/Keychains/
-    # fastlane_tmp_keychain" (no suffix), but the real file is "...-db", so
-    # get_certificates' existence check fails on it. Point at the actual file.
-    ci_keychain = File.expand_path("~/Library/Keychains/fastlane_tmp_keychain-db")
-    get_certificates(
+    # One-time cleanup (guarded): earlier "create a cert per run" builds left
+    # orphaned distribution certs with no locally-usable private key, hitting
+    # Apple's cap so match can't mint a new one. Revoke distribution certs via
+    # the API key to free slots. Runs ONLY when RESET_DIST_CERTS=1 so it never
+    # nukes the match-managed cert on normal builds.
+    if ENV["RESET_DIST_CERTS"] == "1"
+      require "base64"
+      Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.create(
+        key_id: ENV.fetch("ASC_KEY_ID"),
+        issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+        key: Base64.decode64(ENV.fetch("ASC_KEY_P8")),
+      )
+      dist_types = %w[DISTRIBUTION IOS_DISTRIBUTION]
+      Spaceship::ConnectAPI::Certificate.all.each do |cert|
+        next unless dist_types.include?(cert.certificate_type)
+        UI.important("Revoking distribution certificate #{cert.id} (#{cert.display_name})")
+        if cert.respond_to?(:delete!)
+          cert.delete!
+        else
+          Spaceship::ConnectAPI.delete_certificate(certificate_id: cert.id)
+        end
+      end
+    end
+
+    # Fetch (or, on first run, create + store) the shared distribution cert and
+    # App Store profile. readonly:false lets the first run populate the storage
+    # branch; later runs just download and import.
+    match(
+      type: "appstore",
       api_key: api_key,
-      # Import into the temp keychain setup_ci created (password is empty),
-      # otherwise cert lands in login.keychain and can't be configured for
-      # signing ("no local code signing identities found").
-      keychain_path: ci_keychain,
-      keychain_password: "",
-    )
-    profile_name = get_provisioning_profile(
-      api_key: api_key,
-      app_identifier: "com.resihome.resiwalk",
+      app_identifier: APP_ID,
+      git_url: MATCH_GIT_URL,
+      git_branch: MATCH_GIT_BRANCH,
+      readonly: false,
     )
 
+    profile_name = lane_context[SharedValues::MATCH_PROVISIONING_PROFILE_MAPPING]&.fetch(APP_ID, nil) ||
+                   ENV["sigh_#{APP_ID}_appstore_profile-name"]
+
+    # Manual distribution signing on the App target ONLY (Pods keep their own
+    # settings, otherwise the storyboard/Pods targets fail to sign).
     update_code_signing_settings(
       use_automatic_signing: false,
       path: "App.xcodeproj",
@@ -83,7 +105,7 @@ platform :ios do
         signingStyle: "manual",
         teamID: team_id,
         provisioningProfiles: {
-          "com.resihome.resiwalk" => profile_name,
+          APP_ID => profile_name,
         },
       },
     )
