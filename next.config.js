@@ -12,14 +12,18 @@ const nextConfig = {
     // Keep the headless-browser packages external (not webpack-bundled) so
     // @sparticuz/chromium resolves its binary correctly. Used by
     // lib/ticketUpload.ts (PDF upload into tickets).
-    serverComponentsExternalPackages: ['@sparticuz/chromium', 'puppeteer-core'],
+    serverComponentsExternalPackages: ['@sparticuz/chromium', 'puppeteer-core', 'ffmpeg-static'],
     // Force the chromium payload (chromium.br + the al2/al2023 lib tarballs that
     // hold libnss3 etc.) into the upload function's deployment — otherwise the
-    // browser launches but can't find its shared libraries.
+    // browser launches but can't find its shared libraries. Likewise force the
+    // ffmpeg-static binary into the two routes that faststart-remux mp4 clips so
+    // iOS can play them (nft doesn't reliably trace the binary on its own).
     outputFileTracingIncludes: {
       '/api/inspections/[id]/create-maintenance-ticket': [
         './node_modules/@sparticuz/chromium/bin/**',
       ],
+      '/api/upload': ['./node_modules/ffmpeg-static/ffmpeg'],
+      '/api/video-proxy': ['./node_modules/ffmpeg-static/ffmpeg'],
     },
   },
   env: {

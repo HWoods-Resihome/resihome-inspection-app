@@ -20,11 +20,12 @@
  * memory/response limits). Clips here are the small (≤3MB) HubSpot-hosted ones.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { ensureFaststart } from '@/lib/videoFaststart';
 
 // Same HubSpot host family as photo-proxy (region/CDN/TLD variants).
 const ALLOWED_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com)$/i;
 
-export const config = { api: { responseLimit: false } };
+export const config = { api: { responseLimit: false }, maxDuration: 60 };
 
 // Map a file extension to a video Content-Type. Used only as a fallback when
 // the bytes themselves don't identify the container (see sniffVideoType).
@@ -84,12 +85,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     if (!upstream.ok) return res.status(upstream.status).json({ error: `Upstream ${upstream.status}` });
 
-    const buf = Buffer.from(await upstream.arrayBuffer());
-    const total = buf.length;
+    let buf = Buffer.from(await upstream.arrayBuffer());
     // Prefer the container detected from the actual bytes; fall back to the
     // extension only when the bytes are inconclusive. This rescues mislabeled
     // clips (the real cause of iOS's "can't play / slashed play button").
     const contentType = sniffVideoType(buf) || videoTypeFor(u.pathname);
+    // iOS Safari won't play an mp4 whose moov atom is at the end (what WebKit's
+    // in-app recorder produces). Relocate it to the front so it plays — covers
+    // EXISTING clips too, since every HubSpot clip serves through here. No-op for
+    // already-faststart clips and a safe passthrough on any failure.
+    if (contentType === 'video/mp4') buf = await ensureFaststart(buf);
+    const total = buf.length;
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Accept-Ranges', 'bytes');

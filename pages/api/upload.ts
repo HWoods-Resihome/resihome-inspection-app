@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { uploadFile } from '@/lib/hubspot';
+import { ensureFaststart } from '@/lib/videoFaststart';
 
 export const config = {
   api: {
@@ -11,6 +12,9 @@ export const config = {
       sizeLimit: '48mb',
     },
   },
+  // Headroom for the mp4 faststart remux (lossless -c copy is quick, but give a
+  // generous ceiling so a larger clip never trips the default function timeout).
+  maxDuration: 60,
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -51,11 +55,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       safeName += '.jpg';
     }
 
-    const buffer = Buffer.from(base64, 'base64');
+    let buffer = Buffer.from(base64, 'base64');
     // Reject empty / clearly-bogus payloads.
     if (buffer.length === 0) {
       return res.status(400).json({ error: 'Empty file payload' });
     }
+    // Store mp4 clips faststart (moov atom at the front) so iOS Safari can play
+    // them — the in-app recorder emits moov-at-end mp4 that iOS won't play from a
+    // URL. Lossless remux (no re-encode); safe passthrough if ffmpeg is absent.
+    if (safeContentType === 'video/mp4') buffer = await ensureFaststart(buffer);
     const url = await uploadFile(buffer, safeName, safeContentType);
     return res.status(200).json({ url });
   } catch (e: any) {
