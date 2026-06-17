@@ -426,7 +426,7 @@ export default function NewInspection() {
       <main
         className="fixed inset-0 overflow-y-auto overscroll-none p-4 sm:p-6 bg-white"
         style={{
-          paddingTop: 'calc(1rem + env(safe-area-inset-top))',
+          paddingTop: 'calc(0.35rem + env(safe-area-inset-top))',
           paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))',
         }}
       >

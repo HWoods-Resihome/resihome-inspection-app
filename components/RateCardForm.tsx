@@ -3313,7 +3313,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // ----- Render --------------------------------------------------------
 
   return (
-    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-2.5">
+    <div className="max-w-7xl mx-auto px-5 sm:px-6 pt-1 pb-2.5">
       {/* Pinned top block — the title/status row, sync/storage banners, and the
           property + $ totals all stay fixed while the rooms list scrolls beneath.
           env(safe-area-inset-top) keeps it clear of the iOS notch/Dynamic Island

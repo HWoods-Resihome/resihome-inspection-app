@@ -530,13 +530,16 @@ export default function Home() {
       <main className="frozen-shell min-h-screen bg-gray-50">
         {/* Pink branded header — ALWAYS pinned to the top so it never scrolls
             away (sticky on phones; on large screens it's a non-scrolling flex
-            child of the frozen shell, where sticky is a harmless no-op). The
-            env(safe-area-inset-top) padding lets the pink bleed under the iOS
-            status bar / Dynamic Island while keeping the title+icon below it
-            (0 in normal browsers, so web/PWA is unchanged). */}
+            child of the frozen shell, where sticky is a harmless no-op). This
+            header is in NORMAL flow, so the status bar is already cleared by the
+            native shell's contentInset (app) or Safari's chrome (browser) — the
+            full env(safe-area-inset-top) on top of that just doubled the gap and
+            left a big pink band. Cap it to a small buffer so the header pushes to
+            the top like Android (0 there); a hair of inset still guards a
+            standalone PWA. */}
         <header
           className="bg-brand text-white sticky top-0 z-30 shrink-0"
-          style={{ paddingTop: 'env(safe-area-inset-top)' }}
+          style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}
         >
           <div className="lz-head max-w-3xl mx-auto px-4 pt-2 pb-3">
             <div className="flex items-center justify-between gap-3 mb-2">
