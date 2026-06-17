@@ -450,8 +450,12 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                     </div>
                                   ) : (() => {
                                     const unit = a.suggested?.unit || a.current?.unit;
+                                    // A code SWAP to a different unit of measure must not inherit the
+                                    // old quantity (e.g. 1,685 SF → a per-EA clean should be qty 1).
+                                    const isSwap = !!a.suggested?.lineItemCode
+                                      && (a.suggested?.unit || '').toUpperCase() !== (a.current?.unit || '').toUpperCase();
                                     const tenantStr = edits[a.id]?.tenantPct ?? String(a.suggested?.tenantBillBackPercent ?? a.current?.tenantBillBackPercent ?? '');
-                                    const qtyStr = edits[a.id]?.quantity ?? String(a.suggested?.quantity ?? a.current?.quantity ?? '');
+                                    const qtyStr = edits[a.id]?.quantity ?? String(a.suggested?.quantity ?? (isSwap ? 1 : a.current?.quantity) ?? '');
                                     const tenantNum = tenantStr === '' ? undefined : Number(tenantStr);
                                     const qtyNum = qtyStr === '' ? undefined : Number(qtyStr);
                                     const previewDollars = previewTenantDollars
@@ -463,9 +467,20 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                                         {a.type === 'add'
                                           ? <div className="text-xs text-emerald-700 mb-1">+ {a.suggested?.description || a.suggested?.lineItemCode}</div>
                                           : a.current && (
-                                            <div className="text-[11px] text-gray-400 mb-1">
-                                              now: {a.current.tenantBillBackPercent != null && `${a.current.tenantBillBackPercent}% Tenant`}{a.current.tenantDollars != null && ` (${money(a.current.tenantDollars)})`}{a.current.quantity != null && ` · qty ${formatQty(a.current.quantity)}${unit ? ` ${unit}` : ''}`}
-                                            </div>
+                                            <>
+                                              {/* When the scope is being SWAPPED to a different line item,
+                                                  spell out from → to so it's clear what's changing. */}
+                                              {isSwap && a.suggested?.description && (
+                                                <div className="text-xs text-gray-700 mb-1">
+                                                  <span className="text-gray-500">Change:</span> {a.current.description}
+                                                  <span className="text-gray-400"> → </span>
+                                                  <span className="text-emerald-700">{a.suggested.description}</span>
+                                                </div>
+                                              )}
+                                              <div className="text-[11px] text-gray-400 mb-1">
+                                                now: {a.current.tenantBillBackPercent != null && `${a.current.tenantBillBackPercent}% Tenant`}{a.current.tenantDollars != null && ` (${money(a.current.tenantDollars)})`}{a.current.quantity != null && ` · qty ${formatQty(a.current.quantity)}${a.current.unit ? ` ${a.current.unit}` : ''}`}
+                                              </div>
+                                            </>
                                           )}
                                         <div className="flex items-end gap-2 flex-wrap">
                                           <label className="text-[11px] text-gray-500">

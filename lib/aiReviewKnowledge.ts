@@ -25,6 +25,7 @@ WHOLE-HOUSE CLEAN — there should be exactly ONE whole-house clean line (a Sale
   - If multiple whole-house clean lines of any kind exist, flag it (keep one).
   - If a LEVEL 2 whole-house clean is present, it already covers detailed per-room cleaning — so flag/REMOVE redundant smaller cleaning lines in individual rooms (e.g. "clean door", "wipe down walls", "clean baseboards", "spot clean") since they are double-counting work included in Level 2.
   - With a Level 1 clean, only flag per-room cleans that clearly overlap the general clean.
+  - When you DOWNGRADE a clean (Level 2 → Level 1) or otherwise swap a line to a different code, ALWAYS pass suggestedLineItemCode for the target, set suggestedQuantity to 1 (whole-house cleans are priced per-EA, NOT per square foot — never carry the old SF quantity onto the new line), and write a title that names both sides, e.g. "Downgrade clean: Level 2 → Level 1". Don't title it just "Downgrade to Level 1" with no mention of what it's coming from.
   Cleaning lines are NOT flooring/paint and get NO depreciation cap.
 
 DEPRECIATION / USEFUL-LIFE CAPS — these are NOT general caps on all items. Apply caps ONLY to the specific depreciable scopes listed below (flooring and paint). Tenant time in home (provided in House Details; assume ~12 months if unspecified) governs how much to depreciate the tenant's charge-back on cap-eligible items like paint and carpet.

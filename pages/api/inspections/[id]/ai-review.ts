@@ -322,6 +322,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const suggested: any = {};
       if (sCode && byCode.has(sCode)) { suggested.lineItemCode = sCode; suggested.description = sItem?.laborShortDescription; suggested.unit = sItem?.laborMeas; }
       if (a?.suggestedQuantity != null && isFinite(Number(a.suggestedQuantity))) suggested.quantity = Number(a.suggestedQuantity);
+      // Unit-swap quantity guard: when the suggestion swaps to a line item with a
+      // DIFFERENT unit of measure than the current line (e.g. a per-SF scope
+      // downgraded to a per-EA whole-house clean), the old quantity must NOT carry
+      // over — a 1,685 SF line otherwise became "1,685 EA cleans" priced at $339k.
+      // Default the swapped line to qty 1 unless the model gave an explicit one.
+      if (suggested.lineItemCode && suggested.quantity == null) {
+        const curUnit = ((cur ? byCode.get(cur.lineItemCode)?.laborMeas : '') || '').trim().toUpperCase();
+        const newUnit = (sItem?.laborMeas || '').trim().toUpperCase();
+        if (!cur || curUnit !== newUnit) suggested.quantity = 1;
+      }
       if (a?.suggestedTenantBillBackPercent != null && isFinite(Number(a.suggestedTenantBillBackPercent))) suggested.tenantBillBackPercent = Math.max(0, Math.min(100, Math.round(Number(a.suggestedTenantBillBackPercent) / 5) * 5));
       if (a?.suggestedVendorCost != null && isFinite(Number(a.suggestedVendorCost))) suggested.customVendorCost = Number(a.suggestedVendorCost);
       // NOTE: vendor reassignment intentionally NOT applied — the AI review must
