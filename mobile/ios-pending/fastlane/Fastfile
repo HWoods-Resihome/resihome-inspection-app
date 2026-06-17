@@ -44,7 +44,14 @@ platform :ios do
     # NOTE: on an ephemeral runner this creates a NEW distribution certificate each
     # run; Apple caps those (~2–3). For ongoing use switch to `match` (shared,
     # reused cert) — see mobile/BUILD_RUNBOOK.md follow-up.
-    get_certificates(api_key: api_key)
+    get_certificates(
+      api_key: api_key,
+      # Import into the temp keychain setup_ci created (password is empty),
+      # otherwise cert lands in login.keychain and can't be configured for
+      # signing ("no local code signing identities found").
+      keychain_path: lane_context[SharedValues::KEYCHAIN_PATH],
+      keychain_password: "",
+    )
     profile_name = get_provisioning_profile(
       api_key: api_key,
       app_identifier: "com.resihome.resiwalk",
