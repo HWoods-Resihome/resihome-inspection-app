@@ -884,45 +884,49 @@ export function RateCardForm(props: RateCardFormProps) {
   const runFlush = useCallback(async () => {
     setFlushing(true);
     try {
-    const outboxRes = await flushOutbox((entry, data) => {
-      // Stitch results back so the in-memory state stays correct without a reload.
-      if (entry.kind === 'line') {
-        const result = data?.results?.[0];
-        if (result?.recordId && result?.answerIdExternal) {
-          setRecordIdsByExternalId((cur) => ({ ...cur, [result.answerIdExternal]: result.recordId }));
-        }
-      } else if (entry.kind === 'sectionList' && entry.body?.section_list_json) {
-        lastSavedSectionJsonRef.current = entry.body.section_list_json;
-      } else if (entry.kind === 'sectionPhoto' && entry.meta?.sectionId) {
-        const rid = data?.results?.[0]?.recordId;
-        if (rid) setSectionPhotoRecordIds((cur) => ({ ...cur, [entry.meta!.sectionId as string]: rid }));
-      }
-    });
-
-    // Upload queued offline photos/videos. Accumulate the URL swaps (draft -> real,
-    // and for annotations the replaced original -> real) and apply them ONCE after
-    // the loop, computing the new lists from the committed refs (reliable) rather
-    // than reading state straight after setState (which hasn't applied yet).
+    // Photos and the answer/line OUTBOX sync INDEPENDENTLY and CONCURRENTLY. A
+    // stuck outbox change (server slow / retrying) must NEVER block photo uploads:
+    // runFlush used to `await flushOutbox(...)` BEFORE the photo flush, so a single
+    // wedged answer-save left EVERY photo on "Syncing…" forever. Running them in
+    // parallel (each with its own .catch so one can't reject the other) lets each
+    // drain on its own. The URL-swap maps are populated by the photo callback and
+    // applied AFTER both settle.
     const sectionUrlMap = new Map<string, string>();   // url-to-replace -> real url (in section strips)
     const lineUrlMap = new Map<string, string>();      // url-to-replace -> real url (on line photos)
     const fcUrlMap = new Map<string, string>();        // url-to-replace -> real url (in the Final Checklist)
-    const photoRes = await flushQueuedPhotos(props.inspectionRecordId, ({ oldUrl, newUrl, replacesUrl, lineExternalId, sectionId }) => {
-      if (sectionId === FC_PHOTO_SECTION) {
-        if (oldUrl) fcUrlMap.set(oldUrl, newUrl);
-        if (replacesUrl) fcUrlMap.set(replacesUrl, newUrl);
-        return;
-      }
-      if (lineExternalId) {
-        // Line-photo annotation: the draft (oldUrl) and the original (replacesUrl)
-        // both map to the real URL on that line.
-        if (oldUrl) lineUrlMap.set(oldUrl, newUrl);
-        if (replacesUrl) lineUrlMap.set(replacesUrl, newUrl);
-      } else {
-        if (oldUrl) sectionUrlMap.set(oldUrl, newUrl);
-        // Section-photo annotation: keep any line tagged with the original in sync.
-        if (replacesUrl) lineUrlMap.set(replacesUrl, newUrl);
-      }
-    }).catch(() => ({ synced: 0 } as any));
+    const [outboxRes, photoRes] = await Promise.all([
+      flushOutbox((entry, data) => {
+        // Stitch results back so the in-memory state stays correct without a reload.
+        if (entry.kind === 'line') {
+          const result = data?.results?.[0];
+          if (result?.recordId && result?.answerIdExternal) {
+            setRecordIdsByExternalId((cur) => ({ ...cur, [result.answerIdExternal]: result.recordId }));
+          }
+        } else if (entry.kind === 'sectionList' && entry.body?.section_list_json) {
+          lastSavedSectionJsonRef.current = entry.body.section_list_json;
+        } else if (entry.kind === 'sectionPhoto' && entry.meta?.sectionId) {
+          const rid = data?.results?.[0]?.recordId;
+          if (rid) setSectionPhotoRecordIds((cur) => ({ ...cur, [entry.meta!.sectionId as string]: rid }));
+        }
+      }).catch(() => ({ synced: 0, remaining: 0 } as any)),
+      flushQueuedPhotos(props.inspectionRecordId, ({ oldUrl, newUrl, replacesUrl, lineExternalId, sectionId }) => {
+        if (sectionId === FC_PHOTO_SECTION) {
+          if (oldUrl) fcUrlMap.set(oldUrl, newUrl);
+          if (replacesUrl) fcUrlMap.set(replacesUrl, newUrl);
+          return;
+        }
+        if (lineExternalId) {
+          // Line-photo annotation: the draft (oldUrl) and the original (replacesUrl)
+          // both map to the real URL on that line.
+          if (oldUrl) lineUrlMap.set(oldUrl, newUrl);
+          if (replacesUrl) lineUrlMap.set(replacesUrl, newUrl);
+        } else {
+          if (oldUrl) sectionUrlMap.set(oldUrl, newUrl);
+          // Section-photo annotation: keep any line tagged with the original in sync.
+          if (replacesUrl) lineUrlMap.set(replacesUrl, newUrl);
+        }
+      }).catch(() => ({ synced: 0 } as any)),
+    ]);
 
     if (sectionUrlMap.size > 0) {
       const cur = photosBySectionRef.current;
