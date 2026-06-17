@@ -1529,6 +1529,16 @@ export function QuestionForm({
   const maintTicketEligible =
     (templateType === 'leasing_agent_1099_property_inspection' || isVacancy)
     && overallResult === 'fail';
+  // The failed sign-off question's id — the maintenance-ticket widget renders
+  // directly under it (above Additional Comments), in line with the Fail tap.
+  const summaryFailQuestionId: string | null = useMemo(() => {
+    if (!summaryInstance) return null;
+    for (const q of summaryInstance.questions) {
+      const a = answers[answerKey(q.questionIdExternal, summaryInstance.instanceKey)];
+      if (answerTone(a?.answerValue || '') === 'fail') return q.questionIdExternal;
+    }
+    return null;
+  }, [summaryInstance, answers]);
   // Smart Home renders right after the Yard / Exterior section; HVAC + Utilities
   // stay grouped at the bottom (above Review & Sign-Off).
   const yardKey = sectionInstances.find((i) => /yard|exterior/i.test(i.baseSectionName))?.instanceKey;
@@ -1917,8 +1927,15 @@ export function QuestionForm({
                       fields are filtered out). */}
                   {inst.questions.filter((q) => isWidgetVisible(q.questionIdExternal, inst.instanceKey) && !isHiddenWhenOccupied(q)).map((q) => {
                     const key = answerKey(q.questionIdExternal, inst.instanceKey);
+                    // Render the maintenance-ticket widget immediately AFTER the
+                    // failed Pass/Fail question (so it sits above Additional
+                    // Comments, in line with the Fail tap).
+                    const showTicketWidget = maintTicketEligible
+                      && inst.instanceKey === firstSummaryKey
+                      && q.questionIdExternal === summaryFailQuestionId;
                     return (
-                      <div key={key} id={`q-${inst.instanceKey}-${q.questionIdExternal}`} className="scroll-mt-24">
+                      <Fragment key={key}>
+                      <div id={`q-${inst.instanceKey}-${q.questionIdExternal}`} className="scroll-mt-24">
                         <QuestionItem
                           question={q}
                           answer={answers[key]}
@@ -1931,51 +1948,49 @@ export function QuestionForm({
                           compactOptions={isCommunity}
                         />
                       </div>
+                      {showTicketWidget && (
+                        <div id="maint-ticket-widget" className="scroll-mt-24 mt-3 rounded-lg border border-brand/30 bg-brand/5 p-4">
+                          <div className="font-heading font-semibold text-ink mb-2">Do you want to submit a maintenance ticket?</div>
+                          <div className="flex gap-2">
+                            {(['Yes', 'No'] as const).map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                disabled={readOnly}
+                                onClick={() => { setMaintTicketWanted(opt); if (opt === 'No') setMaintTicketDescription(''); }}
+                                className={`px-4 py-2 rounded-lg text-sm font-heading font-semibold border transition-colors ${
+                                  maintTicketWanted === opt
+                                    ? 'bg-brand text-white border-brand'
+                                    : 'bg-white text-ink border-gray-300 hover:border-brand/50'
+                                }`}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                          {maintTicketWanted === 'Yes' && (
+                            <div className="mt-3">
+                              <label htmlFor="maint-ticket-desc" className="block text-sm font-heading font-semibold text-ink mb-1.5">
+                                Ticket description <span className="text-brand">*</span>
+                              </label>
+                              <textarea
+                                id="maint-ticket-desc"
+                                value={maintTicketDescription}
+                                disabled={readOnly}
+                                onChange={(e) => setMaintTicketDescription(e.target.value)}
+                                rows={3}
+                                placeholder="Describe the issue / work needed. This becomes the maintenance ticket description."
+                                className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base bg-white"
+                              />
+                              <div className="text-xs text-gray-500 mt-1">Required before you can submit.</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      </Fragment>
                     );
                   })}
 
-                  {/* 1099 / vacancy: on a FAILED sign-off, offer to raise a
-                      maintenance ticket. Yes reveals a required description that
-                      is sent to the maintenance API on submit. */}
-                  {maintTicketEligible && inst.instanceKey === firstSummaryKey && (
-                    <div id="maint-ticket-widget" className="scroll-mt-24 mt-2 rounded-lg border border-brand/30 bg-brand/5 p-4">
-                      <div className="font-heading font-semibold text-ink mb-2">Do you want to submit a maintenance ticket?</div>
-                      <div className="flex gap-2">
-                        {(['Yes', 'No'] as const).map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            disabled={readOnly}
-                            onClick={() => { setMaintTicketWanted(opt); if (opt === 'No') setMaintTicketDescription(''); }}
-                            className={`px-4 py-2 rounded-lg text-sm font-heading font-semibold border transition-colors ${
-                              maintTicketWanted === opt
-                                ? 'bg-brand text-white border-brand'
-                                : 'bg-white text-ink border-gray-300 hover:border-brand/50'
-                            }`}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                      {maintTicketWanted === 'Yes' && (
-                        <div className="mt-3">
-                          <label htmlFor="maint-ticket-desc" className="block text-sm font-heading font-semibold text-ink mb-1.5">
-                            Ticket description <span className="text-brand">*</span>
-                          </label>
-                          <textarea
-                            id="maint-ticket-desc"
-                            value={maintTicketDescription}
-                            disabled={readOnly}
-                            onChange={(e) => setMaintTicketDescription(e.target.value)}
-                            rows={4}
-                            placeholder="Describe the issue / work needed. This becomes the maintenance ticket description."
-                            className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base bg-white"
-                          />
-                          <div className="text-xs text-gray-500 mt-1">Required before you can submit.</div>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
             </section>

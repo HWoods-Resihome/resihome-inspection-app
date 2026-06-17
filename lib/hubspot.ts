@@ -217,7 +217,12 @@ async function hubspotFetchInner(url: string, method: string, path: string, init
       lastError = new Error(`Upstream request failed (${res.status})`);
       (lastError as any).status = res.status;
       (lastError as any).detail = text.slice(0, 500);
-      hsNoteFailure();
+      // Circuit breaker counts ONLY true upstream failures (5xx). A 4xx is
+      // request-specific (bad/duplicate/validation) and PROVES HubSpot is up and
+      // answering — so it must NOT trip the breaker (that would fail-fast every
+      // inspector's save over a few bad requests). Treat 4xx as a healthy
+      // response for breaker purposes: reset the counter, then throw.
+      if (res.status >= 500) hsNoteFailure(); else hsNoteSuccess();
       throw lastError;
     }
     if (res.status === 204) { hsNoteSuccess(); return null; }
