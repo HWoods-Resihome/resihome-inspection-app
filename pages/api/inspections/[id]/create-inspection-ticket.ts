@@ -1,0 +1,122 @@
+/**
+ * POST /api/inspections/[id]/create-inspection-ticket
+ *
+ * Raise a maintenance ticket from a FAILED 1099 (leasing-agent) or vacancy /
+ * occupancy inspection where the inspector chose "submit a maintenance ticket"
+ * and entered a description.
+ *
+ * Mirrors the Scope finalize ticket flow, with these differences:
+ *   - work-order category = 19 (vs 23 for Scope)
+ *   - ticket TYPE is left as the API assigns it (skipTypeUpdate; no Turnkey force)
+ *   - description = the inspector's text + a provenance line
+ *   - the attached document is the single completed inspection PDF
+ *
+ * Best-effort: returns { ok:false, ... } (HTTP 200) when the property has no
+ * hbmm_property_id or the API/upload fails, so the client can surface it without
+ * blocking the already-completed inspection.
+ */
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { getSessionFromRequest } from '@/lib/auth';
+import { fetchInspectionWithPropertyRef } from '@/lib/hubspot';
+import { isExternalEmail } from '@/lib/userAccess';
+import { createMaintenanceTicket, buildInspectionTicketDescription, buildTicketUrl } from '@/lib/maintenanceAi';
+import { uploadTicketDocuments, type TicketUploadFile } from '@/lib/ticketUpload';
+import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
+
+// Work-order category for 1099 / vacancy maintenance tickets (Scope uses 23).
+const TICKET_CATEGORY_INSPECTION = Number(process.env.MAINTENANCE_AI_INSPECTION_CATEGORY_ID) || 19;
+
+// Browser automation (PDF upload) can take a while — allow up to 5 min.
+export const config = { maxDuration: 300 };
+
+function nameFromUrl(url: string, fallback: string): string {
+  try { const seg = new URL(url).pathname.split('/').pop(); if (seg) return decodeURIComponent(seg); } catch { /* keep */ }
+  return fallback;
+}
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const session = await getSessionFromRequest(req);
+  if (!session) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const { id } = req.query;
+  if (!id || typeof id !== 'string') {
+    return res.status(400).json({ error: 'Missing inspection id' });
+  }
+
+  const description = String(req.body?.description || '').trim();
+  if (!description) {
+    return res.status(400).json({ error: 'A ticket description is required.' });
+  }
+  // The client passes the freshly-generated PDF url (avoids a read race right
+  // after /api/pdf); we fall back to the stored pdf_attachment_url.
+  const bodyPdfUrl = String(req.body?.pdfUrl || '').trim();
+
+  try {
+    const data = await fetchInspectionWithPropertyRef(id);
+    if (!data) return res.status(404).json({ error: 'Inspection not found' });
+
+    // Ownership: external (1099) users may only raise tickets for their own
+    // inspections. We do NOT use the write guard here — the inspection is already
+    // Completed at this point (raising a ticket isn't editing it), and that guard
+    // blocks writes to completed records. Internal users are unrestricted.
+    if (isExternalEmail(session.email)) {
+      const owner = (data.inspection.inspectorEmail || '').trim().toLowerCase();
+      const me = (session.email || '').trim().toLowerCase();
+      if (owner && owner !== me) {
+        return res.status(403).json({ error: 'You can only raise tickets for your own inspections.' });
+      }
+    }
+
+    const hbmmId = Number(data.propertyHbmmId || '');
+    if (!data.propertyHbmmId || !Number.isFinite(hbmmId)) {
+      // Best-effort: inspection is already complete; just report the gap.
+      return res.status(200).json({
+        ok: false,
+        configured: true,
+        error: 'This property has no hbmm_property_id set in HubSpot, so it can\'t be mapped to a Maintenance system property.',
+      });
+    }
+
+    const templateLabel = templateLabelFor(data.inspection.templateType) || data.inspection.templateType;
+    const fullDescription = buildInspectionTicketDescription({
+      inspectorDescription: description,
+      inspectorName: data.inspection.inspectorName,
+      templateLabel,
+    });
+
+    const result = await createMaintenanceTicket({
+      propertyId: hbmmId,
+      description: fullDescription,
+      categoryIds: [TICKET_CATEGORY_INSPECTION],
+      skipTypeUpdate: true, // leave the ticket type as the API assigns it
+    });
+    if (!result.configured) {
+      return res.status(200).json({ ok: false, configured: false, error: 'Maintenance AI is not configured (MAINTENANCE_AI_API_KEY).' });
+    }
+    if (!result.ok || !result.ticketId) {
+      return res.status(200).json({ ok: false, configured: true, error: result.error || 'Ticket creation failed.', status: result.status });
+    }
+    const ticketId = result.ticketId;
+    const url = buildTicketUrl(ticketId);
+    console.log(`[create-inspection-ticket] inspection ${id}: created ticket #${ticketId} (category ${TICKET_CATEGORY_INSPECTION}) on property ${hbmmId} (req ${result.requestId})`);
+
+    // Attach the completed inspection PDF — same as Scope, but WITHOUT forcing
+    // the ticket type (ensureTicketType: false). Best-effort.
+    const pdfUrl = bodyPdfUrl || data.inspection.pdfUrl || '';
+    let upload: Awaited<ReturnType<typeof uploadTicketDocuments>> | null = null;
+    if (pdfUrl) {
+      const files: TicketUploadFile[] = [{ name: nameFromUrl(pdfUrl, `${templateLabel} Inspection.pdf`), url: pdfUrl }];
+      upload = await uploadTicketDocuments({ ticketId, files, ensureTicketType: false });
+      console.log(`[create-inspection-ticket] ticket #${ticketId} upload: ok=${upload.ok} uploaded=${upload.uploaded}${upload.error ? ` error=${upload.error}` : ''}`);
+    }
+
+    return res.status(200).json({ ok: true, ticketId, url, propertyId: hbmmId, requestId: result.requestId, upload });
+  } catch (e: any) {
+    console.error(`[create-inspection-ticket] inspection ${id} failed:`, e);
+    return res.status(200).json({ ok: false, error: String(e?.message || e).slice(0, 300) });
+  }
+}

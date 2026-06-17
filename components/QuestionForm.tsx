@@ -27,6 +27,14 @@ import {
   type FcAnswers, type FcAnswerState, type FcCompletionCtx,
 } from '@/lib/finalChecklist';
 
+// Extra outcome data passed up at submit (beyond answers/photos): the overall
+// Review & Sign-Off verdict (→ inspection_result) and, for 1099/vacancy fails,
+// whether the inspector asked to raise a maintenance ticket + its description.
+export interface QuestionFormSubmitMeta {
+  inspectionResult: 'pass' | 'fail' | null;
+  maintenanceTicket: { wanted: boolean; description: string };
+}
+
 type Props = {
   questions: Question[];
   templateType: TemplateType;
@@ -63,7 +71,7 @@ type Props = {
   propertyAirFiltersType3?: string | null;
   /** Air-filter size dropdown options (from the HubSpot property field defs). */
   filterSizeOptions?: string[];
-  onSubmit: (answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>) => void;
+  onSubmit: (answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>, meta?: QuestionFormSubmitMeta) => void;
   onCancel: () => void;
 
   // Round B additions:
@@ -585,6 +593,11 @@ export function QuestionForm({
   // While ANY camera overlay is open, stop rendering section photo thumbnails so
   // they don't sit decoded in memory under the camera (the iOS WebKit crash).
   const cameraOpenAnywhere = useAnyCameraOpen();
+
+  // 1099 / vacancy "raise a maintenance ticket on a failed review" widget state.
+  // Shown in the Review & Sign-Off section only when its verdict is Fail.
+  const [maintTicketWanted, setMaintTicketWanted] = useState<'' | 'Yes' | 'No'>('');
+  const [maintTicketDescription, setMaintTicketDescription] = useState('');
 
   // Map of instanceKey -> HubSpot Answer recordId for section_photo records
   const sectionPhotoRecordIdsRef = useRef<Map<string, string>>(new Map());
@@ -1225,6 +1238,14 @@ export function QuestionForm({
         }
       }
     }
+    // Maintenance-ticket widget: a description is required once "Yes" is chosen.
+    if (maintTicketEligible && maintTicketWanted === 'Yes' && !maintTicketDescription.trim()) {
+      return {
+        message: 'Enter the maintenance ticket description, or choose “No”.',
+        scrollToDomId: 'maint-ticket-widget',
+        instanceKey: firstSummaryKey || '',
+      };
+    }
     return null;
   }
 
@@ -1400,7 +1421,31 @@ export function QuestionForm({
     // Make sure the HVAC/Smart Home checklist blob is persisted before finalize.
     if (fcEnabled) { try { await saveFc(fcAnswers); } catch { /* surfaced via answers save */ } }
 
-    onSubmit(finalAnswers, sectionPhotoUrlsForApi);
+    // Maintenance-ticket outcome (1099 / vacancy fails). Append the inspector's
+    // answers so they print on the PDF, and pass the structured outcome up so the
+    // page can write inspection_result + raise the ticket after PDF generation.
+    const wantsTicket = maintTicketEligible && maintTicketWanted === 'Yes' && !!maintTicketDescription.trim();
+    const summarySection = summaryInstance?.baseSectionName || 'Review & Sign-Off';
+    if (maintTicketEligible && maintTicketWanted) {
+      finalAnswers.push({
+        questionIdExternal: 'maint_ticket_request', questionHubspotRecordId: '',
+        questionText: 'Submit a maintenance ticket?', section: summarySection,
+        answerValue: maintTicketWanted, note: '', quantity: null, photoUrls: [],
+      });
+      if (wantsTicket) {
+        finalAnswers.push({
+          questionIdExternal: 'maint_ticket_description', questionHubspotRecordId: '',
+          questionText: 'Maintenance ticket description', section: summarySection,
+          answerValue: maintTicketDescription.trim(), note: '', quantity: null, photoUrls: [],
+        });
+      }
+    }
+    const meta: QuestionFormSubmitMeta = {
+      inspectionResult: overallResult,
+      maintenanceTicket: { wanted: wantsTicket, description: wantsTicket ? maintTicketDescription.trim() : '' },
+    };
+
+    onSubmit(finalAnswers, sectionPhotoUrlsForApi, meta);
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -1462,6 +1507,28 @@ export function QuestionForm({
   // Scope HVAC/Smart Home/Utilities bubbles. (After the cleanup these merge into
   // one "Review & Sign-Off" section.)
   const firstSummaryKey = sectionInstances.find((i) => /summary|review|sign.?off/i.test(i.baseSectionName))?.instanceKey;
+
+  // Overall Pass/Fail verdict from the Review & Sign-Off section: any failing
+  // answer → 'fail', else any passing answer → 'pass', else null. Synced to the
+  // inspection's `inspection_result` field at submit (same as QC) and drives the
+  // maintenance-ticket widget below.
+  const summaryInstance = sectionInstances.find((i) => i.instanceKey === firstSummaryKey);
+  const overallResult: 'pass' | 'fail' | null = useMemo(() => {
+    if (!summaryInstance) return null;
+    let hasFail = false, hasGood = false;
+    for (const q of summaryInstance.questions) {
+      const a = answers[answerKey(q.questionIdExternal, summaryInstance.instanceKey)];
+      const tone = answerTone(a?.answerValue || '');
+      if (tone === 'fail') hasFail = true;
+      else if (tone === 'good') hasGood = true;
+    }
+    return hasFail ? 'fail' : hasGood ? 'pass' : null;
+  }, [summaryInstance, answers]);
+  // The maintenance-ticket prompt is offered only on the two templates with a
+  // pass/fail sign-off, and only when that verdict is Fail.
+  const maintTicketEligible =
+    (templateType === 'leasing_agent_1099_property_inspection' || isVacancy)
+    && overallResult === 'fail';
   // Smart Home renders right after the Yard / Exterior section; HVAC + Utilities
   // stay grouped at the bottom (above Review & Sign-Off).
   const yardKey = sectionInstances.find((i) => /yard|exterior/i.test(i.baseSectionName))?.instanceKey;
@@ -1866,6 +1933,49 @@ export function QuestionForm({
                       </div>
                     );
                   })}
+
+                  {/* 1099 / vacancy: on a FAILED sign-off, offer to raise a
+                      maintenance ticket. Yes reveals a required description that
+                      is sent to the maintenance API on submit. */}
+                  {maintTicketEligible && inst.instanceKey === firstSummaryKey && (
+                    <div id="maint-ticket-widget" className="scroll-mt-24 mt-2 rounded-lg border border-brand/30 bg-brand/5 p-4">
+                      <div className="font-heading font-semibold text-ink mb-2">Do you want to submit a maintenance ticket?</div>
+                      <div className="flex gap-2">
+                        {(['Yes', 'No'] as const).map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            disabled={readOnly}
+                            onClick={() => { setMaintTicketWanted(opt); if (opt === 'No') setMaintTicketDescription(''); }}
+                            className={`px-4 py-2 rounded-lg text-sm font-heading font-semibold border transition-colors ${
+                              maintTicketWanted === opt
+                                ? 'bg-brand text-white border-brand'
+                                : 'bg-white text-ink border-gray-300 hover:border-brand/50'
+                            }`}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                      {maintTicketWanted === 'Yes' && (
+                        <div className="mt-3">
+                          <label htmlFor="maint-ticket-desc" className="block text-sm font-heading font-semibold text-ink mb-1.5">
+                            Ticket description <span className="text-brand">*</span>
+                          </label>
+                          <textarea
+                            id="maint-ticket-desc"
+                            value={maintTicketDescription}
+                            disabled={readOnly}
+                            onChange={(e) => setMaintTicketDescription(e.target.value)}
+                            rows={4}
+                            placeholder="Describe the issue / work needed. This becomes the maintenance ticket description."
+                            className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base bg-white"
+                          />
+                          <div className="text-xs text-gray-500 mt-1">Required before you can submit.</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </section>

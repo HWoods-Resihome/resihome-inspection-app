@@ -13,6 +13,7 @@ import {
   saveCachedQuestions, loadCachedQuestions,
 } from '@/lib/offlineCache';
 import { getGeoFix } from '@/lib/evidenceStamp';
+import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
 
 
 // The three inspection forms are heavy and MUTUALLY EXCLUSIVE — exactly one
@@ -25,7 +26,7 @@ const QuestionForm = dynamic(() => import('@/components/QuestionForm').then((m) 
 const RateCardForm = dynamic(() => import('@/components/RateCardForm').then((m) => m.RateCardForm), { loading: FormLoading, ssr: false });
 const QcReinspectForm = dynamic(() => import('@/components/QcReinspectForm').then((m) => m.QcReinspectForm), { loading: FormLoading, ssr: false });
 
-type Stage = 'loading' | 'loading_questions' | 'form' | 'submitting' | 'generating_pdf' | 'done' | 'error';
+type Stage = 'loading' | 'loading_questions' | 'form' | 'submitting' | 'generating_pdf' | 'creating_ticket' | 'done' | 'error';
 
 interface ShareLinks {
   master: string | null;
@@ -94,6 +95,9 @@ export default function ExistingInspection() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [submitResultUrl, setSubmitResultUrl] = useState<string>('');
   const [pdfUrl, setPdfUrl] = useState<string>('');
+  // Maintenance ticket raised from a failed 1099/vacancy sign-off (null = none
+  // attempted). Shown on the completed screen with a link into the MM system.
+  const [ticketResult, setTicketResult] = useState<{ ok: boolean; url?: string | null; error?: string } | null>(null);
   // Clean short links (resolve to the real files) for downloads — covers all
   // templates. Computed server-side; null until loaded.
   const [shareLinks, setShareLinks] = useState<ShareLinks | null>(null);
@@ -190,7 +194,7 @@ export default function ExistingInspection() {
     return () => { cancelled = true; };
   }, [inspectionId]);
 
-  async function handleSubmit(answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>) {
+  async function handleSubmit(answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>, meta?: QuestionFormSubmitMeta) {
     if (!inspection) return;
     setStage('submitting');
     try {
@@ -202,13 +206,14 @@ export default function ExistingInspection() {
       const r = await fetch(`/api/inspections/${inspectionId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ totalQuestionsAnswered, totalPhotos }),
+        body: JSON.stringify({ totalQuestionsAnswered, totalPhotos, inspectionResult: meta?.inspectionResult ?? null }),
       });
       const data = await r.json();
       if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
       setSubmitResultUrl(data.hubspotUrl || '');
 
       setStage('generating_pdf');
+      let generatedPdfUrl = '';
       try {
         const pdfReq = {
           inspectionRecordId: inspectionId,
@@ -230,10 +235,29 @@ export default function ExistingInspection() {
         });
         if (pdfResp.ok) {
           const pdfData = await pdfResp.json();
-          if (pdfData.pdfUrl) setPdfUrl(pdfData.pdfUrl);
+          if (pdfData.pdfUrl) { generatedPdfUrl = pdfData.pdfUrl; setPdfUrl(pdfData.pdfUrl); }
         }
       } catch (e) {
         console.warn('PDF generation failed (non-fatal):', e);
+      }
+
+      // Failed 1099 / vacancy sign-off where the inspector asked for a ticket:
+      // raise it on the maintenance API (category 19, no type change) and attach
+      // the completed PDF — then surface the MM link on the done screen. Best-
+      // effort: the inspection is already completed regardless of the outcome.
+      if (meta?.maintenanceTicket?.wanted && meta.maintenanceTicket.description) {
+        setStage('creating_ticket');
+        try {
+          const tr = await fetch(`/api/inspections/${inspectionId}/create-inspection-ticket`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: meta.maintenanceTicket.description, pdfUrl: generatedPdfUrl }),
+          });
+          const td = await tr.json().catch(() => ({}));
+          setTicketResult(td?.ok ? { ok: true, url: td.url } : { ok: false, error: td?.error || 'Ticket could not be created.' });
+        } catch (e: any) {
+          setTicketResult({ ok: false, error: String(e?.message || e) });
+        }
       }
 
       setStage('done');
@@ -320,6 +344,16 @@ export default function ExistingInspection() {
     );
   }
 
+  if (stage === 'creating_ticket') {
+    return (
+      <Layout>
+        <div className="text-center py-12">
+          <div className="text-sm text-brand font-heading font-semibold">Creating maintenance ticket...</div>
+        </div>
+      </Layout>
+    );
+  }
+
   if (stage === 'done') {
     return (
       <Layout>
@@ -335,6 +369,25 @@ export default function ExistingInspection() {
             <a href={pdfUrl} target="_blank" rel="noreferrer" className="text-brand underline block">
               View PDF Report
             </a>
+          )}
+          {ticketResult && (
+            <div className={`mt-3 rounded-lg border p-3 ${ticketResult.ok ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+              {ticketResult.ok ? (
+                <>
+                  <div className="font-heading font-bold text-emerald-800">Maintenance ticket created</div>
+                  {ticketResult.url && (
+                    <a href={ticketResult.url} target="_blank" rel="noreferrer" className="text-brand underline block mt-1">
+                      View ticket in Maintenance system
+                    </a>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="font-heading font-bold text-red-800">Maintenance ticket not created</div>
+                  <div className="text-xs text-red-900 mt-1">{ticketResult.error || 'Reason unknown.'} The inspection is still completed.</div>
+                </>
+              )}
+            </div>
           )}
           <button onClick={() => router.push('/?just_submitted=1')} className="mt-4 bg-brand text-white font-heading font-semibold px-4 py-2 rounded-lg">
             Back to Inspections List

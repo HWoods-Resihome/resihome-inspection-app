@@ -72,9 +72,13 @@ async function downloadToTmp(file: TicketUploadFile, dir: string, idx: number): 
 /**
  * Upload the given files to a ticket via the HoneyBadger UI. Best-effort.
  */
-export async function uploadTicketDocuments(args: { ticketId: number; files: TicketUploadFile[] }): Promise<TicketUploadResult> {
+export async function uploadTicketDocuments(args: { ticketId: number; files: TicketUploadFile[]; ensureTicketType?: boolean }): Promise<TicketUploadResult> {
   const steps: string[] = [];
   const log = (s: string) => { steps.push(s); };
+  // Whether to run the "force Ticket Type = Turnkey" UI step. Scope wants it
+  // (default true); the 1099/vacancy flow passes false so it leaves the type
+  // alone. Falls back to the HBMM_ENSURE_TICKET_TYPE env when not specified.
+  const ensureType = args.ensureTicketType ?? (env('HBMM_ENSURE_TICKET_TYPE', '1') !== '0');
 
   const username = (process.env.HBMM_USERNAME || '').trim();
   const password = process.env.HBMM_PASSWORD || '';
@@ -287,7 +291,7 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     // "Maintenance"), so we confirm via the UI and fix it: read the Ticket Type,
     // and if it isn't the target, click Edit → select Turnkey → Save. Entirely
     // best-effort and env-tunable — it NEVER blocks the upload.
-    if (env('HBMM_ENSURE_TICKET_TYPE', '1') !== '0') {
+    if (ensureType) {
       const target = env('HBMM_TICKET_TYPE_TARGET', 'Turnkey');
       const targetRe = new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       // Read the value shown next to the "Ticket Type :" label. CRITICAL: only

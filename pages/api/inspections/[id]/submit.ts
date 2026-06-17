@@ -31,6 +31,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const body = req.body || {};
     const totalQuestionsAnswered: number | undefined = body.totalQuestionsAnswered;
     const totalPhotos: number | undefined = body.totalPhotos;
+    // Overall Pass/Fail for templates with a Review & Sign-Off verdict (1099 /
+    // vacancy). Written to the standardized `inspection_result` enum, the same
+    // field QC uses. 'pass' | 'fail' only.
+    const rawResult = String(body.inspectionResult || '').toLowerCase();
+    const inspectionResult: 'pass' | 'fail' | null =
+      rawResult === 'pass' || rawResult === 'fail' ? rawResult : null;
 
     // Look up the inspection first so we know which template it is. Rate Card
     // inspections go to Pending Approval; everything else goes straight to Completed.
@@ -60,6 +66,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     await updateInspection(id, props);
     // Non-rate-card templates complete here → stamp first completion timestamp.
     if (!isRateCard) await stampFirstCompleted(id, nowIso);
+    // Persist the overall verdict to the standardized `inspection_result` field
+    // (same property QC writes). Separate, best-effort write so a missing
+    // property never blocks the status flip above.
+    if (inspectionResult) {
+      try {
+        await updateInspection(id, { inspection_result: inspectionResult });
+      } catch (e) {
+        console.warn('[submit] could not write inspection_result (run scripts/rate_card_phase5/phase5_step2_add_inspection_result.py to create the property):', e);
+      }
+    }
     // Record WHO submitted for approval and WHEN — used to lock the submitter out
     // of self-finalizing for a short window (a second reviewer must approve, or
     // they wait it out). Best-effort: if the HubSpot properties don't exist yet,

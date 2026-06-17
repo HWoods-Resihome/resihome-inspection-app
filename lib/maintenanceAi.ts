@@ -95,6 +95,28 @@ export function buildTicketDescription(vendorUrls: Record<string, string>, maste
   return out.length > DESCRIPTION_MAX ? out.slice(0, DESCRIPTION_MAX) : out;
 }
 
+/**
+ * Description for a maintenance ticket raised from a FAILED 1099 / vacancy
+ * inspection: the inspector's own write-up, followed by a provenance line so the
+ * coordinator knows where it came from and to vet it before dispatching.
+ */
+export function buildInspectionTicketDescription(args: {
+  inspectorDescription: string;
+  inspectorName?: string | null;
+  templateLabel?: string | null;
+  date?: Date;
+}): string {
+  const who = (args.inspectorName || 'an inspector').trim();
+  const form = (args.templateLabel || 'an').trim();
+  const when = formatDateMMDDYYYY(args.date || new Date());
+  const provenance =
+    `Submitted by ${who} on ${when} via the ${form} inspection. ` +
+    `Please validate scope and confirm work is necessary before dispatching this work order.`;
+  const body = (args.inspectorDescription || '').trim();
+  const out = body ? `${body}\n\n${provenance}` : provenance;
+  return out.length > DESCRIPTION_MAX ? out.slice(0, DESCRIPTION_MAX) : out;
+}
+
 /** Format a Date as MM-DD-YYYY (en-US), the format the ticket API expects. */
 function formatDateMMDDYYYY(d: Date): string {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -123,6 +145,11 @@ export interface CreateTicketInput {
   categoryIds?: number[];
   locationId?: number;
   ticketTypeId?: number;
+  /** When true, do NOT set/override the ticket type: omit ticketTypeId from the
+   *  create body and skip the post-create updateTicketType step. Used by the
+   *  1099 / vacancy "needs a maintenance ticket" flow, which leaves the type as
+   *  the API assigns it (unlike the Scope flow, which forces Turnkey). */
+  skipTypeUpdate?: boolean;
 }
 
 export interface TicketTypeUpdateResult { ok: boolean; status?: number; body?: string; error?: string }
@@ -184,9 +211,8 @@ export async function createMaintenanceTicket(input: CreateTicketInput): Promise
   const d1 = new Date(now); d1.setDate(d1.getDate() + APPOINTMENT_1_OFFSET_DAYS);
   const d2 = new Date(now); d2.setDate(d2.getDate() + APPOINTMENT_2_OFFSET_DAYS);
 
-  const body = {
+  const body: Record<string, any> = {
     propertyId: input.propertyId,
-    ticketTypeId: input.ticketTypeId ?? TICKET_TYPE_TURNKEY,
     priorityId: input.priorityId ?? TICKET_PRIORITY_MEDIUM,
     categoryIds: input.categoryIds ?? [TICKET_CATEGORY_UNIT_TURNS],
     description: input.description,
@@ -196,6 +222,14 @@ export async function createMaintenanceTicket(input: CreateTicketInput): Promise
     appointmentDate2: formatDateMMDDYYYY(d2),
     appointmentTimeslot2: APPOINTMENT_TIMESLOT,
   };
+  // Ticket type: the Scope flow forces Turnkey; the 1099/vacancy flow leaves it
+  // to the API (skipTypeUpdate) — so only send ticketTypeId when we're NOT
+  // skipping, falling back to the documented Turnkey default.
+  if (!input.skipTypeUpdate) {
+    body.ticketTypeId = input.ticketTypeId ?? TICKET_TYPE_TURNKEY;
+  } else if (input.ticketTypeId != null) {
+    body.ticketTypeId = input.ticketTypeId;
+  }
 
   const requestId = genRequestId();
   try {
@@ -218,8 +252,12 @@ export async function createMaintenanceTicket(input: CreateTicketInput): Promise
       const tid = typeof ticketId === 'number' ? ticketId : undefined;
       // The API does NOT set the type on CREATE — it must be applied via a
       // SEPARATE update, so we run it here as the authoritative step. Observable
-      // (the result is returned + logged); never fatal to finalize.
-      const typeUpdate = tid ? await updateTicketType(baseUrl, version, apiKey, tid, body.ticketTypeId) : undefined;
+      // (the result is returned + logged); never fatal to finalize. Skipped
+      // entirely for the 1099/vacancy flow (skipTypeUpdate), which keeps the
+      // type the API assigned.
+      const typeUpdate = (tid && !input.skipTypeUpdate)
+        ? await updateTicketType(baseUrl, version, apiKey, tid, body.ticketTypeId)
+        : undefined;
       return { ok: true, configured: true, status, requestId, ticketId: tid, typeUpdate };
     }
 
