@@ -32,11 +32,11 @@ if [ ! -d "$APP_SRC" ]; then
   exit 1
 fi
 
-echo "==> [1/4] WebViewController.swift -> App target"
+echo "==> [1/5] WebViewController.swift -> App target"
 cp "$PENDING/WebViewController.swift" "$APP_SRC/WebViewController.swift"
 ruby "$PENDING/add_to_xcodeproj.rb" "$PBXPROJ" "WebViewController.swift"
 
-echo "==> [2/4] Storyboard bridge VC -> WebViewController"
+echo "==> [2/5] Storyboard bridge VC -> WebViewController"
 if grep -q 'customClass="WebViewController"' "$STORYBOARD"; then
   echo "   already set"
 elif grep -q 'customClass="CAPBridgeViewController"' "$STORYBOARD"; then
@@ -53,7 +53,7 @@ else
   echo "   WARN: bridge VC customClass not found in $STORYBOARD — verify manually." >&2
 fi
 
-echo "==> [3/4] Info.plist usage strings + URL scheme"
+echo "==> [3/5] Info.plist usage strings + URL scheme"
 pb() { /usr/libexec/PlistBuddy -c "$1" "$PLIST"; }
 add_str() {
   pb "Print :$1" >/dev/null 2>&1 || pb "Add :$1 string $2"
@@ -61,6 +61,11 @@ add_str() {
 add_str "NSCameraUsageDescription" "ResiWALK uses the camera to photograph and record inspection evidence."
 add_str "NSMicrophoneUsageDescription" "ResiWALK uses the microphone for voice call-outs during inspections."
 add_str "NSLocationWhenInUseUsageDescription" "ResiWALK stamps inspection photos with the property location to verify you're on site."
+
+# Export compliance: the app uses only standard/exempt encryption (HTTPS), so
+# declare it up front — TestFlight builds then skip the "Provide Export
+# Compliance Information" prompt instead of sitting in "Missing Compliance".
+pb "Print :ITSAppUsesNonExemptEncryption" >/dev/null 2>&1 || pb "Add :ITSAppUsesNonExemptEncryption bool false"
 
 if ! pb "Print :CFBundleURLTypes" >/dev/null 2>&1; then
   pb "Add :CFBundleURLTypes array"
@@ -81,11 +86,25 @@ else
   echo "   appended resiwalk:// URL scheme"
 fi
 
-echo "==> [4/4] fastlane config -> $IOS_APP/fastlane"
+echo "==> [4/5] fastlane config -> $IOS_APP/fastlane"
 mkdir -p "$IOS_APP/fastlane"
 cp "$PENDING/fastlane/Fastfile" "$IOS_APP/fastlane/Fastfile"
 cp "$PENDING/fastlane/Appfile" "$IOS_APP/fastlane/Appfile"
 # Gemfile pins fastlane >= 2.236.1 (the runner's 2.236.0 breaks altool upload).
 cp "$PENDING/Gemfile" "$IOS_APP/Gemfile"
+
+echo "==> [5/5] App icon + splash branding (ResiWALK #ff0060)"
+# Replace Capacitor's placeholder AppIcon/Splash with the ResiWALK brand assets
+# (generated from the web app-icon.svg on main). Overwrite wholesale so no stale
+# placeholder entries remain.
+XCASSETS="$APP_SRC/Assets.xcassets"
+if [ -d "$XCASSETS" ]; then
+  rm -rf "$XCASSETS/AppIcon.appiconset" "$XCASSETS/Splash.imageset"
+  cp -R "$PENDING/Assets/AppIcon.appiconset" "$XCASSETS/AppIcon.appiconset"
+  cp -R "$PENDING/Assets/Splash.imageset" "$XCASSETS/Splash.imageset"
+  echo "   installed AppIcon.appiconset + Splash.imageset"
+else
+  echo "   WARN: $XCASSETS not found — skipped branding." >&2
+fi
 
 echo "==> apply-ios.sh complete"
