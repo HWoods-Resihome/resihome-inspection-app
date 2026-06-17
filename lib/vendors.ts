@@ -41,10 +41,40 @@ const CODE_VENDOR_DEFAULTS: Record<string, string> = {
   FLORL1011: 'Vendor 2',
 };
 
+// Description/keyword DEFAULT vendor rules — for work whose catalog code varies
+// (e.g. grass cuts are priced per lot size, so a single code list is brittle).
+// Matched case-insensitively against the line item's description/category; first
+// match wins. Applied AFTER the per-code rules above (code rules take priority).
+// To add a rule, drop a { test, vendor } entry (the vendor must be in VENDORS).
+const DESC_VENDOR_DEFAULTS: Array<{ test: RegExp; vendor: string }> = [
+  // All grass cuts / mowing → PPW (our landscaping vendor). Covers every
+  // grass-cut catalog code regardless of lot size, current or future.
+  { test: /\b(grass[\s-]*cut(?:ting)?|mow(?:ing)?|lawn[\s-]*(?:cut|mow))\b/i, vendor: 'PPW' },
+];
+
 /** The default vendor for a catalog code, or null if it has no special rule. */
 export function defaultVendorForCode(lineItemCode: string | null | undefined): string | null {
   const c = (lineItemCode || '').trim().toUpperCase();
   return CODE_VENDOR_DEFAULTS[c] || null;
+}
+
+/**
+ * The default vendor for a catalog ITEM: the per-code rule first (eviction,
+ * flooring…), then the description/keyword rules (grass cuts → PPW). Use this
+ * wherever the full item is available so the inspector's NEW line pre-selects the
+ * right vendor automatically (still editable). Returns null when no rule matches.
+ */
+export function defaultVendorForItem(
+  item: { lineItemCode?: string | null; laborShortDescription?: string | null; laborFullDescription?: string | null; description?: string | null; category?: string | null; subcategory?: string | null } | null | undefined,
+): string | null {
+  if (!item) return null;
+  const byCode = defaultVendorForCode(item.lineItemCode);
+  if (byCode) return byCode;
+  const hay = [item.laborShortDescription, item.laborFullDescription, item.description, item.category, item.subcategory]
+    .filter(Boolean).join(' ');
+  if (!hay) return null;
+  for (const r of DESC_VENDOR_DEFAULTS) if (r.test.test(hay)) return r.vendor;
+  return null;
 }
 
 /** True when a line's vendor is the in-house Internal Resolution team. */

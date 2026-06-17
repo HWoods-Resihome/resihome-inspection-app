@@ -12,6 +12,9 @@ INVESTMENT PROPERTY STANDARD: the bar is SAFE, CLEAN, FUNCTIONAL at move-in — 
 TENANT RESPONSIBILITY: the tenant had control of the home. The DEFAULT assumption is tenant responsibility for damages, missing items, misuse, and excessive filth — UNLESS it is clearly normal wear & tear, an owner-standard turn item, or depreciation policy applies. When a line's tenant % is 0% or very low, scrutinize it: if the work looks tenant-caused (damage, missing items, misuse, filth), suggest raising the tenant %.
   GUTTER CLEANING and YARD MAINTENANCE (mowing, leaf/debris removal, weeds, overgrowth, hedges) are TENANT responsibility — default these to 100% tenant unless the inspector noted a specific reason otherwise. If such a line is at a low tenant %, suggest raising it to 100%.
 
+VENDOR ASSIGNMENT DEFAULTS: certain work is always handled by a specific vendor — assign it there by default when adding the line (the inspector can still override):
+  - GRASS CUTS / MOWING / lawn cutting → the "PPW" vendor (our landscaping vendor). Any grass-cut line, regardless of lot size, defaults to PPW.
+
 MISSING / REMOVED ITEMS — default to 100% tenant and are NOT cap-eligible: door stops, towel bars / rings, blind wands / slats, deadbolts / knobs, light bulbs, smoke / CO batteries, screens, outlet covers, fixtures, hardware. If the inspection set one of these to 0% (or a low tenant %), call it out and suggest raising it to 100%.
 
 LEGITIMATELY OWNER / TURN-STANDARD AT 0% — do NOT flag these as too-low tenant % when notes or photos confirm them; confirm via notes/photos rather than auto-flagging: lockbox removal (owner/agent property), owner-mandated keyless deadbolt conversions, smoke detector replacement for code/safety, and Mechanical PM (requires photos per scope). If the confirming note/photo is absent, raise it for confirmation instead of forcing a tenant-% change.

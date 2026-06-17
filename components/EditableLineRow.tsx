@@ -29,7 +29,7 @@ import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { formatMoney, formatQty } from '@/lib/photoUpload';
 import { thumbImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
-import { VENDORS, vendorPillStyle, isInternalResolution, defaultVendorForCode } from '@/lib/vendors';
+import { VENDORS, vendorPillStyle, isInternalResolution, defaultVendorForItem } from '@/lib/vendors';
 import { setNativeKeyboardAccessoryBarVisible } from '@/lib/nativeBridge';
 import { NumberField } from '@/components/NumberPad';
 import type {
@@ -499,10 +499,11 @@ export function EditableLineRow(props: Props) {
     lastDescItemRef.current = code || null;
     descTouchedRef.current = false;
     setCustomDescription(selectedItem ? catalogDescription(selectedItem) : '');
-    // Per-code default vendor: pre-select the rule's vendor (e.g. eviction codes
-    // → Eviction Vendor; flooring FLORL1011 → Vendor 2). Only when the new code
-    // has a rule — otherwise leave the current vendor as-is. Still editable.
-    const dv = defaultVendorForCode(code);
+    // Per-code / per-description default vendor: pre-select the rule's vendor
+    // (e.g. eviction codes → Eviction Vendor; flooring FLORL1011 → Vendor 2;
+    // grass cuts / mowing → PPW). Only when the new item matches a rule —
+    // otherwise leave the current vendor as-is. Still editable.
+    const dv = defaultVendorForItem(selectedItem);
     if (dv) setVendor(dv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedItem]);

@@ -253,6 +253,7 @@ const SYSTEM_RULES = [
   ``,
   `Defaults (apply silently unless the inspector says otherwise):`,
   `  - Vendor: "Vendor 1".  - Tenant chargeback: 100%.  - Size/level: standard / regular.`,
+  `  - GRASS CUTS / MOWING / lawn cutting → vendor "PPW" (set vendor:"PPW" on propose_line for any grass-cut/mowing line, regardless of lot size). The inspector can still override.`,
   `Never ask about vendor or tenant percent. Only use a different value if the inspector states one (e.g. "assign to PPW", "50 percent tenant").`,
   `TENANT % for PAINT and FLOORING items: do NOT set tenantBillBackPercent on propose_line for paint or flooring lines unless the inspector explicitly states a percent — the app auto-applies the depreciation schedule for those. For all other items, omit it too (defaults to 100). Only pass tenantBillBackPercent when the inspector actually says a number.`,
   `STYLE: flat and terse. The app announces every add/edit and speaks it, so you almost never need to speak. When you must, it is ONE short question — no greetings, no "Great"/"Got it", no recapping what you did. Just the question.`,

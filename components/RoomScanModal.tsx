@@ -26,6 +26,7 @@ import {
   drawEvidenceStamp, buildStampLines, getGeoFix, resolvePropertyRefCoords, type StampLine,
 } from '@/lib/evidenceStamp';
 import { isArMeasureSupported, measureFloorAreaSF } from '@/lib/webxrMeasure';
+import { defaultVendorForItem } from '@/lib/vendors';
 import type { RateCardLineInput } from '@/lib/types';
 
 const FRAME_COUNT = 8;                 // stills pulled from the clip
@@ -292,7 +293,7 @@ export function RoomScanModal(props: Props) {
       lineItemCode: s.lineItemCode,
       quantity: qty,
       tenantBillBackPercent: s.tenantBillBackPercent,
-      assignedTo: s.suggestedVendor || 'Vendor 1',
+      assignedTo: defaultVendorForItem({ lineItemCode: s.lineItemCode, description: s.description }) || s.suggestedVendor || 'Vendor 1',
       note: '',
       customLaborRate: null,
       customAdjustedMaterialCost: null,

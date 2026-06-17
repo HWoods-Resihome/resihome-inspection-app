@@ -19,7 +19,7 @@ import {
 import { buildSectionPhotoAnswerProps, buildQaAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
-import { isInternalResolution, VENDORS, defaultVendorForCode } from '@/lib/vendors';
+import { isInternalResolution, VENDORS, defaultVendorForItem } from '@/lib/vendors';
 import { isAiWarm, warmAi } from '@/lib/aiWarm';
 import { ListPicker } from '@/components/ListPicker';
 import { getResolutionTimings, setResolutionTiming } from '@/lib/resolutionTiming';
@@ -2764,7 +2764,7 @@ export function RateCardForm(props: RateCardFormProps) {
             lineItemCode: a.suggested.lineItemCode,
             quantity: a.suggested.quantity ?? 1,
             tenantBillBackPercent: a.suggested.tenantBillBackPercent ?? 100,
-            assignedTo: defaultVendorForCode(a.suggested.lineItemCode) || a.suggested.assignedTo || 'Vendor 1',
+            assignedTo: defaultVendorForItem({ lineItemCode: a.suggested.lineItemCode, description: a.suggested.description }) || a.suggested.assignedTo || 'Vendor 1',
             note: '',
             customVendorCost: a.suggested.customVendorCost ?? null,
             photoUrls: [],
