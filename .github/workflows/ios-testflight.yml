@@ -58,10 +58,6 @@ jobs:
       ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
-      # One-time bootstrap: revoke orphaned distribution certs so match can mint
-      # and store a fresh one. REMOVE this line once the first match run succeeds
-      # (otherwise every build would revoke the match cert).
-      RESET_DIST_CERTS: '1'
       BUILD_NUMBER: ${{ github.run_number }}
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8

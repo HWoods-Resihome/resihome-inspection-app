@@ -44,7 +44,13 @@ class WebViewController: CAPBridgeViewController {
             decisionHandler(.cancel)
             return
         }
-        super.webView(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
+        // Not an OAuth start URL — allow it. (We can't chain to
+        // `super.webView(_:decidePolicyFor:decisionHandler:)` because the
+        // `webView` property on CAPBridgeViewController shadows the method name,
+        // so the call won't compile. Allowing is the correct default here: the
+        // app only loads its own site and the OAuth return arrives via the
+        // resiwalk:// deep link, not in-WebView navigation.)
+        decisionHandler(.allow)
     }
 
     private func shouldDivertToSystemBrowser(_ url: URL) -> Bool {
