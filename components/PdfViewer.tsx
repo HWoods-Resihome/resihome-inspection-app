@@ -91,18 +91,58 @@ export default function PdfViewer({ url, title, onClose }: Props) {
           const base = page.getViewport({ scale: 1 });
           const cssScale = containerWidth / base.width;
           const viewport = page.getViewport({ scale: cssScale * dpr });
+          const cssHeight = base.height * cssScale;
+          // Per-page wrapper so link annotations can be overlaid on the canvas.
+          const wrapper = document.createElement('div');
+          wrapper.style.position = 'relative';
+          wrapper.style.width = `${containerWidth}px`;
+          wrapper.style.height = `${cssHeight}px`;
+          wrapper.style.margin = '0 auto 10px';
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width;
           canvas.height = viewport.height;
           canvas.style.width = `${containerWidth}px`;
-          canvas.style.height = `${base.height * cssScale}px`;
+          canvas.style.height = `${cssHeight}px`;
           canvas.style.display = 'block';
-          canvas.style.margin = '0 auto 10px';
           canvas.style.background = '#fff';
           canvas.style.boxShadow = '0 1px 6px rgba(0,0,0,0.35)';
           const cctx = canvas.getContext('2d');
-          pagesEl.appendChild(canvas);
+          wrapper.appendChild(canvas);
+          pagesEl.appendChild(wrapper);
           await page.render({ canvasContext: cctx, viewport }).promise;
+          // Link annotation overlay: the report embeds clickable photo links
+          // (to the photo gallery) and the HubSpot/PDF links. Canvas rendering
+          // drops these, so re-create them as positioned anchors. CSS-px
+          // viewport (no dpr) so rects line up with the canvas's display size;
+          // the parent zoom transform scales anchors with the page.
+          try {
+            const annotations = await page.getAnnotations();
+            const linkViewport = page.getViewport({ scale: cssScale });
+            for (const a of annotations) {
+              if (cancelled) return;
+              if (a.subtype !== 'Link' || !a.url) continue;
+              const r = linkViewport.convertToViewportRectangle(a.rect);
+              const x = Math.min(r[0], r[2]);
+              const y = Math.min(r[1], r[3]);
+              const w = Math.abs(r[2] - r[0]);
+              const h = Math.abs(r[3] - r[1]);
+              const link = document.createElement('a');
+              link.href = a.url;
+              link.target = '_blank';
+              link.rel = 'noreferrer';
+              link.setAttribute('aria-label', 'Open');
+              link.style.position = 'absolute';
+              link.style.left = `${x}px`;
+              link.style.top = `${y}px`;
+              link.style.width = `${w}px`;
+              link.style.height = `${h}px`;
+              link.style.cursor = 'pointer';
+              link.style.zIndex = '2';
+              wrapper.appendChild(link);
+            }
+          } catch (annotErr) {
+            console.warn('[PdfViewer] annotation layer failed (links disabled on this page):', annotErr);
+          }
         }
         if (!cancelled) setStatus('ready');
       } catch (e) {
