@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PhotoAnnotator } from '@/components/PhotoAnnotator';
 import { displayImageSrc } from '@/lib/photoDisplay';
-import { isVideoEntry, playableVideoSrc } from '@/lib/media';
+import { isVideoEntry, playableVideoSrc, getPosterUrl } from '@/lib/media';
 
 interface Props {
   groups: { id: string; name: string }[];
@@ -301,7 +301,11 @@ export function PhotoLightbox({
         <PhotoAnnotator
           // Local blob/data URLs (e.g. in-camera previews) load directly; remote
           // HubSpot URLs go through the proxy to avoid canvas cross-origin taint.
-          src={/^(blob:|data:)/.test(url) ? url : `/api/photo-proxy?url=${encodeURIComponent(url)}`}
+          // Request a re-encoded ~1920px JPEG (&w=1920) rather than the raw
+          // full-size passthrough — iOS WebKit can fail to decode big raw photos,
+          // but the sharp-re-encoded JPEG (same path the grid thumbnails use) is
+          // decoded reliably. 1920 matches the annotator's canvas cap.
+          src={/^(blob:|data:)/.test(url) ? url : `/api/photo-proxy?url=${encodeURIComponent(getPosterUrl(url))}&w=1920`}
           onCancel={() => setAnnotating(false)}
           onSave={(file) => { setAnnotating(false); onReplace(groupId, index, file); }}
         />

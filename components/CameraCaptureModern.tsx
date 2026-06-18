@@ -3242,8 +3242,20 @@ export function CameraCaptureModern({
         // poster#v=video composite entries — PhotoLightbox plays the clip on the
         // active slide and shows the poster for neighbors. Index maps directly
         // into `items` (no photo-only filtering).
-        const entries = items.map((it) =>
-          it.kind === 'video' && it.videoUrl ? makeVideoEntry(it.blobUrl, it.videoUrl) : it.blobUrl);
+        const entries = items.map((it) => {
+          if (it.kind === 'video') {
+            // Prefer the UPLOADED clip once it's ready: the server faststarts it
+            // (moov atom moved to the front) and serves it Range-capable via
+            // /api/video-proxy, which is what lets iOS play it. The raw local
+            // recording blob has its moov at the END, which iOS's <video> can't
+            // play (Android/desktop can) — so it only fills in while the upload
+            // is still in flight, and the slide swaps to the playable URL the
+            // moment the upload completes.
+            if (it.status === 'uploaded' && it.hubspotUrl) return it.hubspotUrl;
+            if (it.videoUrl) return makeVideoEntry(it.blobUrl, it.videoUrl);
+          }
+          return it.blobUrl;
+        });
         const idx = Math.min(viewerIndex, items.length - 1);
         return (
           <PhotoLightbox

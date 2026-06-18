@@ -67,8 +67,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // crashes the iOS WebKit content process ("A problem repeatedly occurred").
     // Serving a ~400px thumbnail cuts the decoded size ~25–40×. We re-encode with
     // sharp (auto-orient) and cache hard, since a given photo's thumb is immutable.
+    // Cap at 2048 so the markup editor can request a large-but-clean re-encoded
+    // JPEG (?w=1920). The raw full-size passthrough can fail to decode in iOS
+    // WebKit on big photos — re-encoding through sharp produces a baseline JPEG
+    // iOS reliably decodes. Thumbnails request small widths and stay memory-light.
     const wRaw = Number(req.query.w);
-    const width = Number.isFinite(wRaw) ? Math.max(64, Math.min(1024, Math.round(wRaw))) : 0;
+    const width = Number.isFinite(wRaw) ? Math.max(64, Math.min(2048, Math.round(wRaw))) : 0;
     const isHeic = ct.includes('heic') || ct.includes('heif')
       || /\.(heic|heif)$/i.test(u.pathname);
 
