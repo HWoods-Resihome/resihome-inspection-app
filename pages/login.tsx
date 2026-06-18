@@ -31,6 +31,51 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Email sign-in code (OTP) fallback — for users who can't use Google/Microsoft
+  // OAuth (e.g. a Zoho mailbox). 'idle' shows the link; 'sent' shows the code box.
+  const [otpStage, setOtpStage] = useState<'idle' | 'sent'>('idle');
+  const [code, setCode] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
+
+  async function requestOtp() {
+    if (!email.trim()) { setError('Please enter your email'); return; }
+    setOtpBusy(true);
+    setError(null);
+    try {
+      const r = await fetch('/api/auth/otp-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(data.error || 'Could not send a code.'); setOtpBusy(false); return; }
+      setOtpStage('sent');
+      setCode('');
+    } catch (err: any) {
+      setError(String(err.message || err));
+    } finally {
+      setOtpBusy(false);
+    }
+  }
+
+  async function verifyOtp() {
+    if (!code.trim()) { setError('Enter the code from your email'); return; }
+    setOtpBusy(true);
+    setError(null);
+    try {
+      const r = await fetch('/api/auth/otp-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), code: code.trim() }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) { setError(data.error || 'Sign-in failed'); setOtpBusy(false); return; }
+      window.location.href = '/';
+    } catch (err: any) {
+      setError(String(err.message || err));
+      setOtpBusy(false);
+    }
+  }
 
   // App Store / Play review demo account: when the reviewer types this email, a
   // password field appears and sign-in goes through the password path (which
@@ -111,6 +156,7 @@ export default function LoginPage() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (otpStage === 'sent') { void verifyOtp(); return; }
     if (isReviewEmail) { void reviewLogin(); return; }
     void startLogin('google');
   }
@@ -175,12 +221,56 @@ export default function LoginPage() {
               </div>
             )}
 
+            {/* Email sign-in code (OTP): the 6-digit box appears after a code is
+                sent. Works for any provider (e.g. Zoho). */}
+            {otpStage === 'sent' && !isReviewEmail && (
+              <div className="mt-4">
+                <label htmlFor="otp-code" className="block text-sm font-heading font-semibold text-ink mb-1.5">
+                  Enter the code we emailed to {email.trim()}
+                </label>
+                <input
+                  id="otp-code"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={code}
+                  onChange={(e) => { setCode(e.target.value.replace(/\D/g, '')); setError(null); }}
+                  placeholder="123456"
+                  disabled={otpBusy}
+                  className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base tracking-[0.4em] text-center"
+                />
+              </div>
+            )}
+
             {error && (
               <div className="mt-2 mb-1 text-sm text-brand font-heading font-semibold">
                 {error}
               </div>
             )}
 
+            {otpStage === 'sent' && !isReviewEmail ? (
+              <>
+                <button
+                  type="submit"
+                  disabled={otpBusy || code.trim().length < 4}
+                  className="w-full bg-brand hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-heading font-semibold py-3.5 px-4 rounded-lg transition mt-5 active:scale-[0.98]"
+                >
+                  {otpBusy ? 'Verifying…' : 'Verify & sign in'}
+                </button>
+                <div className="flex items-center justify-between mt-3">
+                  <button type="button" onClick={() => void requestOtp()} disabled={otpBusy}
+                    className="text-sm text-brand font-heading font-semibold hover:underline disabled:opacity-50">
+                    Resend code
+                  </button>
+                  <button type="button" onClick={() => { setOtpStage('idle'); setCode(''); setError(null); }} disabled={otpBusy}
+                    className="text-sm text-gray-500 font-heading font-semibold hover:underline disabled:opacity-50">
+                    Use a different method
+                  </button>
+                </div>
+              </>
+            ) : (
+            <>
             <button
               type="submit"
               disabled={submitting || !email.trim() || (isReviewEmail && !password)}
@@ -203,8 +293,23 @@ export default function LoginPage() {
               </button>
             )}
 
+            {/* Universal fallback: email a one-time code. Works for any provider
+                (e.g. Zoho) that can't complete Google/Microsoft OAuth. */}
+            {!isReviewEmail && (
+              <button
+                type="button"
+                onClick={() => void requestOtp()}
+                disabled={otpBusy || !email.trim()}
+                className="w-full text-sm text-brand font-heading font-semibold hover:underline disabled:opacity-50 mt-4"
+              >
+                {otpBusy ? 'Sending code…' : 'Can’t use Google or Microsoft? Email me a sign-in code'}
+              </button>
+            )}
+            </>
+            )}
+
             <p className="text-xs text-gray-400 text-center mt-5">
-              Access is restricted to active HubSpot users. You&apos;ll verify ownership of your email through Google.
+              Access is restricted to active HubSpot users. You&apos;ll verify ownership of your email through Google, Microsoft, or an emailed code.
             </p>
           </form>
 

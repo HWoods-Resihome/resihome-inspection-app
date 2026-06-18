@@ -308,6 +308,34 @@ function buildReplyMime(input: ReplyEmailInput): string {
   return lines.join('\r\n');
 }
 
+/**
+ * Send a transactional email from the SYSTEM mailbox (no user cookie needed) —
+ * used by pre-auth flows like the email sign-in code, which run before any user
+ * is logged in. Requires two server env vars:
+ *   SYSTEM_GMAIL_REFRESH_TOKEN  — a refresh token for the sending mailbox
+ *   SYSTEM_GMAIL_FROM           — the From address (e.g. no-reply@resihome.com)
+ * Returns { sent:false, error:'system_email_not_configured' } when unset so the
+ * caller can surface a clear "email login isn't set up yet" message.
+ */
+export async function sendSystemEmail(input: {
+  to: string;
+  subject: string;
+  htmlBody: string;
+  textBody: string;
+}): Promise<{ sent: boolean; error?: string }> {
+  const refreshToken = process.env.SYSTEM_GMAIL_REFRESH_TOKEN || '';
+  const fromEmail = process.env.SYSTEM_GMAIL_FROM || '';
+  if (!refreshToken || !fromEmail) return { sent: false, error: 'system_email_not_configured' };
+  return sendReplyEmailWithToken({
+    refreshToken,
+    fromEmail,
+    to: [input.to],
+    subject: input.subject,
+    htmlBody: input.htmlBody,
+    textBody: input.textBody,
+  });
+}
+
 export async function sendReplyEmailWithToken(
   input: ReplyEmailInput
 ): Promise<{ sent: boolean; error?: string }> {

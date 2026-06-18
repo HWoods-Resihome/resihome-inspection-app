@@ -18,6 +18,10 @@ const PUBLIC_PATHS = new Set<string>([
   // is a server env secret, disabled unless set) that mints a session without
   // Google/2FA — for Apple's App Review demo account. Pre-session like /login.
   '/api/auth/review-login',
+  // Email sign-in code (OTP) — fallback for users who can't complete Google/
+  // Microsoft OAuth (e.g. a Zoho mailbox). Both run before a session exists.
+  '/api/auth/otp-request',
+  '/api/auth/otp-verify',
   // Pre-auth Google sign-in: these run before a session exists. The callback
   // does its own verification (login flow needs no session; the legacy connect
   // flow checks the session itself).
