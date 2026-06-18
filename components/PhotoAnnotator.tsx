@@ -100,7 +100,10 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
       try {
         const bust = tries > 0 ? `${src.includes('?') ? '&' : '?'}r=${tries}` : '';
         const resp = await fetch(src + bust, { cache: 'no-store', signal: ctrl.signal });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => '');
+          throw new Error(`HTTP ${resp.status}${body ? ` ${body.slice(0, 90)}` : ''}`);
+        }
         const blob = await resp.blob();
         if (cancelled) return;
         if (blob.size === 0) throw new Error('empty response');

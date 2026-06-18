@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { uploadFile } from '@/lib/hubspot';
-import { ensureFaststart } from '@/lib/videoFaststart';
+import { transcodeToH264Mp4 } from '@/lib/videoFaststart';
 
 export const config = {
   api: {
@@ -60,11 +60,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (buffer.length === 0) {
       return res.status(400).json({ error: 'Empty file payload' });
     }
-    // Store mp4 clips faststart (moov atom at the front) so iOS Safari can play
-    // them — the in-app recorder emits moov-at-end mp4 that iOS won't play from a
-    // URL. Lossless remux (no re-encode); safe passthrough if ffmpeg is absent.
-    if (safeContentType === 'video/mp4') buffer = await ensureFaststart(buffer);
-    const url = await uploadFile(buffer, safeName, safeContentType);
+    // Video clips: TRANSCODE to a universally playable H.264/AAC mp4 (yuv420p,
+    // faststart). The in-app recorder can emit clips iOS itself can't decode
+    // (non-baseline profile / wrong pixel format / webm fallback) — re-encoding
+    // guarantees iOS playback. Always output mp4. Safe: falls back to the
+    // original bytes on any ffmpeg problem.
+    let outName = safeName;
+    let outType = safeContentType;
+    if (safeContentType.startsWith('video/')) {
+      buffer = await transcodeToH264Mp4(buffer);
+      outType = 'video/mp4';
+      outName = safeName.replace(/\.[a-zA-Z0-9]{1,5}$/, '') + '.mp4';
+    }
+    const url = await uploadFile(buffer, outName, outType);
     return res.status(200).json({ url });
   } catch (e: any) {
     console.error('POST /api/upload failed:', e);

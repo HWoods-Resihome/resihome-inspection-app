@@ -94,3 +94,51 @@ export async function faststartMp4(buf: Buffer, timeoutMs = 30000): Promise<Buff
 export async function ensureFaststart(buf: Buffer): Promise<Buffer> {
   return needsFaststart(buf) ? faststartMp4(buf) : buf;
 }
+
+/**
+ * Transcode any short clip to a UNIVERSALLY playable H.264/AAC mp4 (faststart),
+ * so iOS Safari/WebKit can decode it. The in-app recorder (WebKit MediaRecorder
+ * on a canvas.captureStream) can emit clips iOS itself refuses to decode — a
+ * valid-looking mp4 with a non-baseline profile / wrong pixel format, or a webm/
+ * VP8-VP9 fallback. Faststart alone (`-c copy`) can't fix the codec, so we
+ * RE-ENCODE: H.264 High→baseline-friendly with `yuv420p` (the pixel format iOS
+ * requires), AAC audio, moov at the front. Short evidence clips (≤~20s) encode
+ * in a few seconds with `-preset veryfast`.
+ *
+ * SAFE BY DESIGN: on any failure (missing binary, timeout, bad input) it falls
+ * back to ensureFaststart(buf) and ultimately the original bytes — a clip is
+ * never corrupted or dropped.
+ */
+export async function transcodeToH264Mp4(buf: Buffer, timeoutMs = 55000): Promise<Buffer> {
+  if (!ffmpegPath || buf.length === 0) return ensureFaststart(buf);
+  let dir: string | null = null;
+  try {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'h264-'));
+    const inPath = path.join(dir, 'in');
+    const outPath = path.join(dir, 'out.mp4');
+    await fs.writeFile(inPath, buf);
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn(
+        ffmpegPath as string,
+        [
+          '-y', '-loglevel', 'error', '-i', inPath,
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24',
+          '-profile:v', 'high', '-pix_fmt', 'yuv420p',
+          '-c:a', 'aac', '-b:a', '128k',
+          '-movflags', '+faststart',
+          outPath,
+        ],
+        { stdio: 'ignore' },
+      );
+      const timer = setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* noop */ } reject(new Error('ffmpeg timeout')); }, timeoutMs);
+      proc.on('error', (e) => { clearTimeout(timer); reject(e); });
+      proc.on('close', (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`)); });
+    });
+    const out = await fs.readFile(outPath);
+    return out.length > 0 && isMp4(out) ? out : await ensureFaststart(buf);
+  } catch {
+    return ensureFaststart(buf); // never corrupt/drop the clip
+  } finally {
+    if (dir) { try { await fs.rm(dir, { recursive: true, force: true }); } catch { /* noop */ } }
+  }
+}

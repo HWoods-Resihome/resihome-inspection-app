@@ -18,7 +18,7 @@ import sharp from 'sharp';
 // bypasses this allowlist) still opened on click. Match `hubspot<anything>.net|
 // .com` to cover every region/CDN/TLD HubSpot uses. (This is the SSRF guard on the
 // INITIAL url; the proxy then follows HubSpot's own CDN redirect and trusts it.)
-const ALLOWED_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com)$/i;
+const ALLOWED_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com)$/i;
 
 export const config = { api: { responseLimit: false } };
 
@@ -27,7 +27,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   let u: URL;
   try { u = new URL(raw); } catch { return res.status(400).json({ error: 'Invalid url' }); }
   if (u.protocol !== 'https:' || !ALLOWED_HOST_RE.test(u.hostname)) {
-    return res.status(403).json({ error: 'Host not allowed' });
+    return res.status(403).json({ error: `Host not allowed: ${u.hostname}` });
   }
   try {
     // The INITIAL host check above is the SSRF guard — we only ever fetch a URL

@@ -23,7 +23,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { ensureFaststart } from '@/lib/videoFaststart';
 
 // Same HubSpot host family as photo-proxy (region/CDN/TLD variants).
-const ALLOWED_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com)$/i;
+const ALLOWED_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com)$/i;
 
 export const config = { api: { responseLimit: false }, maxDuration: 60 };
 
