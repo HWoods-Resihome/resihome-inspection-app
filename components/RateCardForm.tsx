@@ -3329,14 +3329,10 @@ export function RateCardForm(props: RateCardFormProps) {
       <header className="mb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
-              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{props.templateLabel}</h1>
-              {statusLabel && (
-                <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
-                  {statusLabel.label}
-                </span>
-              )}
-            </div>
+            {/* Template name gets the full width; status chip moved to its own
+                line below the inspector (left-aligned) so the name isn't cropped
+                by the chip + gear/Unlock/Back on the title row. */}
+            <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{props.templateLabel}</h1>
             <div className="text-xs text-gray-500 mt-0.5">
               Inspector: {props.inspectorName}
               {/* Only show "Submitted" while it's actually in a submitted state —
@@ -3345,6 +3341,11 @@ export function RateCardForm(props: RateCardFormProps) {
                 <span className="text-gray-400">{'  ·  '}{fmtStamp(props.submittedAt)} Submitted</span>
               )}
             </div>
+            {statusLabel && (
+              <span className={`inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
+                {statusLabel.label}
+              </span>
+            )}
             {props.approverName && (
               <div className="text-xs text-gray-500 mt-0.5">
                 Approver: {props.approverName}
@@ -3433,7 +3434,7 @@ export function RateCardForm(props: RateCardFormProps) {
             <button
               type="button"
               onClick={handleSaveAndClose}
-              className="inline-flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-3 py-1.5 bg-white transition-colors"
+              className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white transition-colors"
               title="Save and go back"
             >
               <span aria-hidden>←</span> Back
