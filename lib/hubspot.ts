@@ -1229,30 +1229,36 @@ export async function fetchUsers(): Promise<HubSpotUser[]> {
 }
 
 // Active HubSpot users only. A user that's deactivated/removed has their OWNER
-// record archived, so the set of non-archived owner emails is the authoritative
-// "currently active" list. Cached briefly (login hits this a few times per
-// sign-in). Returns null on error so callers can fail OPEN (don't lock everyone
-// out during an owners-API hiccup) rather than closed.
-let _activeOwnerEmailsCache: { emails: Set<string>; at: number } | null = null;
+// record archived, so the set of non-archived owners is the authoritative
+// "currently active" list. The owner record ALSO carries the person's
+// firstName/lastName — which /settings/v3/users frequently leaves blank — so we
+// capture those here too and use them to resolve a real display name (instead of
+// falling back to the email username like "asanders"). Cached briefly (login
+// hits this a few times per sign-in). Returns null on error so callers fail OPEN
+// (don't lock everyone out during an owners-API hiccup).
+interface OwnerNameInfo { email: string; firstName: string; lastName: string }
+let _activeOwnersCache: { byEmail: Map<string, OwnerNameInfo>; at: number } | null = null;
 const ACTIVE_OWNERS_TTL_MS = 5 * 60 * 1000;
-async function fetchActiveOwnerEmails(): Promise<Set<string> | null> {
-  if (_activeOwnerEmailsCache && Date.now() - _activeOwnerEmailsCache.at < ACTIVE_OWNERS_TTL_MS) {
-    return _activeOwnerEmailsCache.emails;
+async function fetchActiveOwners(): Promise<Map<string, OwnerNameInfo> | null> {
+  if (_activeOwnersCache && Date.now() - _activeOwnersCache.at < ACTIVE_OWNERS_TTL_MS) {
+    return _activeOwnersCache.byEmail;
   }
   try {
-    const emails = new Set<string>();
+    const byEmail = new Map<string, OwnerNameInfo>();
     let after: string | undefined;
     do {
       const qs = new URLSearchParams({ limit: '100', archived: 'false' });
       if (after) qs.set('after', after);
       const resp = await hubspotFetch(`/crm/v3/owners/?${qs.toString()}`);
       for (const o of resp.results || []) {
-        if (o.email) emails.add(String(o.email).trim().toLowerCase());
+        const email = String(o.email || '').trim().toLowerCase();
+        if (!email) continue;
+        byEmail.set(email, { email, firstName: o.firstName || '', lastName: o.lastName || '' });
       }
       after = resp.paging?.next?.after;
     } while (after);
-    _activeOwnerEmailsCache = { emails, at: Date.now() };
-    return emails;
+    _activeOwnersCache = { byEmail, at: Date.now() };
+    return byEmail;
   } catch (e) {
     console.warn('[auth] could not load active owners; falling back to all users:', e);
     return null;
@@ -1262,14 +1268,28 @@ async function fetchActiveOwnerEmails(): Promise<Set<string> | null> {
 /**
  * Active HubSpot users — fetchUsers() filtered to those whose owner is NOT
  * archived (i.e. the account hasn't been deactivated/removed). This is the gate
- * sign-in must use so a deactivated user can't authenticate. If the owners list
+ * sign-in must use so a deactivated user can't authenticate. It also REPAIRS the
+ * display name: /settings/v3/users often returns blank firstName/lastName (which
+ * made fullName fall back to the email username, e.g. "asanders"), so we prefer
+ * the owner record's name when the users record has none. If the owners list
  * can't be loaded, falls back to all users (fail-open) so an API hiccup can't
  * lock everyone out.
  */
 export async function fetchActiveUsers(): Promise<HubSpotUser[]> {
-  const [users, activeEmails] = await Promise.all([fetchUsers(), fetchActiveOwnerEmails()]);
-  if (!activeEmails) return users; // owners unavailable → don't break login
-  return users.filter((u) => activeEmails.has(u.email.trim().toLowerCase()));
+  const [users, owners] = await Promise.all([fetchUsers(), fetchActiveOwners()]);
+  if (!owners) return users; // owners unavailable → don't break login
+  const out: HubSpotUser[] = [];
+  for (const u of users) {
+    const owner = owners.get(u.email.trim().toLowerCase());
+    if (!owner) continue; // not an active owner → deactivated, exclude
+    const firstName = u.firstName || owner.firstName || '';
+    const lastName = u.lastName || owner.lastName || '';
+    let fullName = `${firstName} ${lastName}`.trim();
+    if (!fullName) fullName = u.email.split('@')[0] || u.fullName;
+    out.push({ ...u, firstName, lastName, fullName });
+  }
+  out.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  return out;
 }
 
 // Association type IDs are stable, provisioned-once metadata, but were being
@@ -3414,7 +3434,10 @@ export async function backfillInspectorNames(
   let nameByEmail = opts.nameByEmail;
   if (!nameByEmail) {
     nameByEmail = new Map<string, string>();
-    for (const u of await fetchUsers()) {
+    // fetchActiveUsers() (not fetchUsers()) so names are repaired from the owner
+    // record when /settings/v3/users left them blank — otherwise the backfill
+    // would re-write the email-username fallback ("asanders").
+    for (const u of await fetchActiveUsers()) {
       const email = (u.email || '').trim().toLowerCase();
       const name = (u.fullName || '').trim();
       if (email && name) nameByEmail.set(email, name);
