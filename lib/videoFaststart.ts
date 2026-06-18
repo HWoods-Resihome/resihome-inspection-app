@@ -15,9 +15,34 @@
 
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
+import { chmodSync, copyFileSync, existsSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import ffmpegPath from 'ffmpeg-static';
+
+// Resolve an EXECUTABLE ffmpeg path. On Vercel/Lambda the traced binary lands on
+// a READ-ONLY filesystem and loses its +x bit, so spawn() fails with EACCES and
+// every remux/transcode silently fell back to the original bytes (why iOS video
+// never actually got faststarted/transcoded). Copy it once into /tmp (writable)
+// and chmod it there. Cached per warm instance.
+let _ffmpegExec: string | null | undefined;
+function ffmpegExec(): string | null {
+  if (_ffmpegExec !== undefined) return _ffmpegExec;
+  if (!ffmpegPath) { _ffmpegExec = null; return null; }
+  try {
+    const tmp = path.join(os.tmpdir(), 'ffmpeg-exec');
+    if (!existsSync(tmp)) {
+      copyFileSync(ffmpegPath as string, tmp);
+      chmodSync(tmp, 0o755);
+    }
+    _ffmpegExec = tmp;
+  } catch {
+    // Couldn't stage in /tmp — try chmod in place, then use whatever we have.
+    try { chmodSync(ffmpegPath as string, 0o755); } catch { /* read-only fs */ }
+    _ffmpegExec = ffmpegPath as string;
+  }
+  return _ffmpegExec;
+}
 
 /** True if the buffer looks like an ISO-BMFF (mp4/mov) file — 'ftyp' at offset 4. */
 export function isMp4(buf: Buffer): boolean {
@@ -63,7 +88,8 @@ export function needsFaststart(buf: Buffer): boolean {
  * pathological input can't hang the function.
  */
 export async function faststartMp4(buf: Buffer, timeoutMs = 30000): Promise<Buffer> {
-  if (!ffmpegPath || !isMp4(buf)) return buf;
+  const exe = ffmpegExec();
+  if (!exe || !isMp4(buf)) return buf;
   let dir: string | null = null;
   try {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), 'faststart-'));
@@ -72,7 +98,7 @@ export async function faststartMp4(buf: Buffer, timeoutMs = 30000): Promise<Buff
     await fs.writeFile(inPath, buf);
     await new Promise<void>((resolve, reject) => {
       const proc = spawn(
-        ffmpegPath as string,
+        exe,
         ['-y', '-loglevel', 'error', '-i', inPath, '-c', 'copy', '-movflags', '+faststart', outPath],
         { stdio: 'ignore' },
       );
@@ -110,7 +136,8 @@ export async function ensureFaststart(buf: Buffer): Promise<Buffer> {
  * never corrupted or dropped.
  */
 export async function transcodeToH264Mp4(buf: Buffer, timeoutMs = 55000): Promise<Buffer> {
-  if (!ffmpegPath || buf.length === 0) return ensureFaststart(buf);
+  const exe = ffmpegExec();
+  if (!exe || buf.length === 0) return ensureFaststart(buf);
   let dir: string | null = null;
   try {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), 'h264-'));
@@ -119,7 +146,7 @@ export async function transcodeToH264Mp4(buf: Buffer, timeoutMs = 55000): Promis
     await fs.writeFile(inPath, buf);
     await new Promise<void>((resolve, reject) => {
       const proc = spawn(
-        ffmpegPath as string,
+        exe,
         [
           '-y', '-loglevel', 'error', '-i', inPath,
           '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24',
