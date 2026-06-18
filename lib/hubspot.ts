@@ -875,12 +875,12 @@ function inspectionFilterGroups(q: InspectionQuery): any[] {
 }
 
 const SORT_PROPERTY: Record<InspectionSortField, string> = {
-  // The card shows `last_edited_at || hs_lastmodifieddate` (the meaningful "last
-  // edited" time, NOT every backend touch like a PDF regeneration). Sort on the
-  // SAME field so the list order matches the dates shown on the cards — sorting
-  // on raw hs_lastmodifieddate made backend writes (regeneration) reorder the
-  // list while the displayed dates stayed put, which looked unsorted.
-  updated: 'last_edited_at',
+  // 'updated' sorts on HubSpot's built-in hs_lastmodifieddate — the known-good,
+  // always-present, sortable system property. (A prior attempt to sort on the
+  // custom last_edited_at to match the card's displayed date introduced a 400:
+  // it was paired with a SECOND sort entry, and HubSpot's CRM Search API allows
+  // only one sort property. Reverted to keep the list loading reliably.)
+  updated: 'hs_lastmodifieddate',
   scheduled: 'scheduled_date',
   address: 'property_address_snapshot',
   inspector: 'inspector_name',
@@ -905,13 +905,12 @@ export async function searchInspectionsPage(params: InspectionQuery & {
   const pageSize = Math.min(100, Math.max(1, params.pageSize || 20));
   const page = Math.max(1, params.page || 1);
   const offset = (page - 1) * pageSize;
-  // For "updated", add hs_lastmodifieddate as a secondary key so records that
-  // predate the last_edited_at property (null value) still order sensibly and
-  // stay visible — matching the card's `last_edited_at || hs_lastmodifieddate`
-  // display fallback. Other sort fields use the single property.
-  const sorts = sortField === 'updated'
-    ? [{ propertyName: 'last_edited_at', direction }, { propertyName: 'hs_lastmodifieddate', direction }]
-    : [{ propertyName: SORT_PROPERTY[sortField], direction }];
+  // HubSpot's CRM Search API accepts only ONE sort property — passing a second
+  // entry returns 400 Bad Request. So sort on the single mapped property
+  // (SORT_PROPERTY.updated = 'last_edited_at', matching the card's displayed
+  // date). Records with no last_edited_at sort last in DESC and still render via
+  // the card's `last_edited_at || hs_lastmodifieddate` display fallback.
+  const sorts = [{ propertyName: SORT_PROPERTY[sortField], direction }];
   const body: any = {
     filterGroups: inspectionFilterGroups(params),
     properties: INSPECTION_LIST_PROPERTIES,
