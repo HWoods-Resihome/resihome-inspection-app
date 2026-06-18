@@ -21,21 +21,40 @@ export default function PdfViewer({ url, title, onClose }: Props) {
   const [zoom, setZoom] = useState(1);
   const zoomRef = useRef(1);
   zoomRef.current = zoom;
+  // Photo gallery opened IN-APP (as an overlay iframe) when a photo is tapped —
+  // so it never bounces out to the browser and back into the PWA/app.
+  const [galleryUrl, setGalleryUrl] = useState<string | null>(null);
+  const galleryRef = useRef<string | null>(null);
+  galleryRef.current = galleryUrl;
 
-  // ---- history-backed close ----
-  // Push one entry on open; ANY back (button, browser, native gesture) pops it
-  // and fires popstate → onClose. The close button calls history.back() so it
-  // travels the same path (and never leaves a dangling entry).
+  // ---- history-backed close (PDF + nested gallery) ----
+  // Push one entry on open. A back (button, browser, native gesture) pops the
+  // TOP overlay: if the gallery is open it closes first, otherwise the PDF
+  // closes. Each open pushes its own entry, so the stack unwinds one tap at a
+  // time and the app is never exited mid-view.
   useEffect(() => {
     window.history.pushState({ __pdfViewer: true }, '');
-    const onPop = () => onClose();
+    const onPop = () => {
+      if (galleryRef.current) setGalleryUrl(null);
+      else onClose();
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Close the topmost layer by walking history back (so the pushed entry is
+  // consumed and popstate drives the actual close).
   const requestClose = useCallback(() => {
     if (typeof window !== 'undefined') window.history.back();
   }, []);
+  // Open a photo in the in-app gallery overlay (embed=1 hides the gallery's own
+  // close so this overlay owns it). Pushes a history entry so back closes it.
+  const openGalleryRef = useRef<(u: string) => void>(() => {});
+  openGalleryRef.current = (u: string) => {
+    const withEmbed = u + (u.includes('?') ? '&' : '?') + 'embed=1';
+    window.history.pushState({ __pdfGallery: true }, '');
+    setGalleryUrl(withEmbed);
+  };
 
   // ESC closes (desktop).
   useEffect(() => {
@@ -128,8 +147,6 @@ export default function PdfViewer({ url, title, onClose }: Props) {
               const h = Math.abs(r[3] - r[1]);
               const link = document.createElement('a');
               link.href = a.url;
-              link.target = '_blank';
-              link.rel = 'noreferrer';
               link.setAttribute('aria-label', 'Open');
               link.style.position = 'absolute';
               link.style.left = `${x}px`;
@@ -138,6 +155,14 @@ export default function PdfViewer({ url, title, onClose }: Props) {
               link.style.height = `${h}px`;
               link.style.cursor = 'pointer';
               link.style.zIndex = '2';
+              // Photo-gallery links open IN-APP as an overlay (no browser bounce);
+              // everything else (e.g. "Open in HubSpot") opens in a new tab.
+              if (/\/d\/[^/]+\/photos\//.test(a.url)) {
+                link.addEventListener('click', (ev) => { ev.preventDefault(); openGalleryRef.current(a.url); });
+              } else {
+                link.target = '_blank';
+                link.rel = 'noreferrer';
+              }
               wrapper.appendChild(link);
             }
           } catch (annotErr) {
@@ -194,6 +219,24 @@ export default function PdfViewer({ url, title, onClose }: Props) {
         )}
         <div ref={pagesRef} style={{ transform: `scale(${zoom})`, transformOrigin: 'top center', transition: 'transform 120ms ease-out' }} />
       </div>
+
+      {/* In-app photo gallery overlay — opened when a photo is tapped. The
+          gallery page (iframe, same origin) provides swipe / pinch / arrows;
+          this overlay owns the close button (the iframe runs in embed mode). */}
+      {galleryUrl && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1100, background: '#000' }}>
+          <iframe
+            src={galleryUrl}
+            title="Photo"
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }}
+          />
+          <button
+            onClick={requestClose}
+            aria-label="Close photo" title="Close"
+            style={{ position: 'absolute', top: 10, right: 12, width: 40, height: 40, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 24, lineHeight: '38px', zIndex: 2 }}
+          >×</button>
+        </div>
+      )}
     </div>
   );
 }

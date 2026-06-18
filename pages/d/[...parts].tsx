@@ -56,9 +56,12 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       const kind = typeof ctx.query.k === 'string' ? ctx.query.k : '';
       const vSlug = typeof ctx.query.v === 'string' ? ctx.query.v : '';
       const start = typeof ctx.query.u === 'string' ? ctx.query.u : '';
+      // embed=1 → rendered inside the in-app PDF viewer overlay (which provides
+      // its own close button), so the gallery hides its own × to avoid two.
+      const embed = ctx.query.embed === '1';
       const cacheKey = `${id}:${kind}:${vSlug}`;
       const hit = galleryCache.get(cacheKey);
-      if (hit && Date.now() - hit.at < GALLERY_TTL_MS) return { props: { photos: hit.photos, start } };
+      if (hit && Date.now() - hit.at < GALLERY_TTL_MS) return { props: { photos: hit.photos, start, embed } };
 
       const [insp, answers] = await Promise.all([
         fetchInspectionById(id).catch(() => null),
@@ -102,7 +105,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         for (const u of (afterBySection.get(s.id) || [])) if (!seen.has(u)) { seen.add(u); photos.push(u); }
       }
       galleryCache.set(cacheKey, { photos, at: Date.now() });
-      return { props: { photos, start } };
+      return { props: { photos, start, embed } };
     }
 
     const props = await readInspectionProps(id, [
@@ -169,17 +172,17 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   }
 };
 
-export default function ShareProxy(props: { photos?: string[]; start?: string }) {
+export default function ShareProxy(props: { photos?: string[]; start?: string; embed?: boolean }) {
   // File links stream in getServerSideProps and never render. The photo gallery
   // returns props and renders this browsable viewer.
   if (!props.photos) return null;
-  return <PhotoGallery photos={props.photos} start={props.start || ''} />;
+  return <PhotoGallery photos={props.photos} start={props.start || ''} embed={!!props.embed} />;
 }
 
 // Public, dependency-free photo gallery: full-screen image with left/right
 // (arrows, keyboard ←/→, swipe), pinch / double-tap zoom + pan, and neighbor
 // preloading. Continuous across all photos; arrows hide only at first/last.
-function PhotoGallery({ photos, start }: { photos: string[]; start: string }) {
+function PhotoGallery({ photos, start, embed }: { photos: string[]; start: string; embed?: boolean }) {
   const foundIdx = photos.indexOf(start);
   const [i, setI] = useState(foundIdx >= 0 ? foundIdx : 0);
   const [scale, setScale] = useState(1);
@@ -262,12 +265,15 @@ function PhotoGallery({ photos, start }: { photos: string[]; start: string }) {
       <img src={displayImageSrc(photos[i])} alt="" draggable={false}
         style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transition: g.current.moved ? 'none' : 'transform 150ms ease-out', cursor: scale > 1 ? 'grab' : 'default' }} />
       <div style={{ position: 'absolute', top: 12, left: 0, right: 0, textAlign: 'center', color: '#fff', font: '600 13px sans-serif', opacity: 0.85 }}>{i + 1} / {photos.length}</div>
-      {/* Close → back to the PDF (the page the photo link came from). */}
-      <button
-        onClick={() => { if (typeof window !== 'undefined') { if (window.history.length > 1) window.history.back(); else window.close(); } }}
-        aria-label="Back to PDF" title="Back to PDF"
-        style={{ position: 'absolute', top: 10, right: 12, width: 40, height: 40, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 24, lineHeight: '38px' }}
-      >×</button>
+      {/* Close → back to the PDF (the page the photo link came from). Hidden in
+          embed mode: the in-app PDF viewer overlay provides its own close. */}
+      {!embed && (
+        <button
+          onClick={() => { if (typeof window !== 'undefined') { if (window.history.length > 1) window.history.back(); else window.close(); } }}
+          aria-label="Back to PDF" title="Back to PDF"
+          style={{ position: 'absolute', top: 10, right: 12, width: 40, height: 40, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 24, lineHeight: '38px' }}
+        >×</button>
+      )}
       {i > 0 && scale <= 1.02 && (
         <button onClick={() => go(i - 1)} aria-label="Previous" style={navBtn('left')}>‹</button>
       )}
