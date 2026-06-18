@@ -2065,11 +2065,15 @@ async function listingDisplayStatusInfo(): Promise<{ prop: string; labels: Recor
     const byName = new Map<string, any>(props.map((p) => [p.name, p]));
     let chosen: any = null;
     if (override && byName.has(override)) chosen = byName.get(override);
-    // The status field is the enumeration whose options include a
-    // "deposit"/"active" option (NOT the published boolean).
-    if (!chosen) chosen = props.find((p) => Array.isArray(p.options) && p.options.some((o: any) => /deposit|active/i.test(`${o.label || ''} ${o.value || ''}`)));
-    // Fallback to common status names (not the published boolean).
-    if (!chosen) chosen = ['listing_status', 'status'].map((n) => byName.get(n)).find(Boolean);
+    // The listing's status enum is literally named `status` (fall back to
+    // `listing_status`). Prefer these by NAME — an option-set heuristic was
+    // matching a different enum that has an "active" option, making everything
+    // read "Active".
+    if (!chosen) chosen = byName.get('status') || byName.get('listing_status');
+    // Last resort: the enumeration that has a "deposit" option (uniquely the
+    // listing status). Require "deposit" specifically — "active" alone is too
+    // common across other fields.
+    if (!chosen) chosen = props.find((p) => Array.isArray(p.options) && p.options.some((o: any) => /deposit/i.test(`${o.label || ''} ${o.value || ''}`)));
     _listingDisplayStatus = chosen ? { prop: chosen.name, labels: buildLabels(chosen) } : null;
   } catch {
     _listingDisplayStatus = override ? { prop: override, labels: {} } : null;
