@@ -134,6 +134,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(result.ok ? 200 : 502).json({ ok: result.ok, results: [result] });
     }
 
+    // List mode: just return the target inspections (no regeneration) so the
+    // admin page can drive a per-id progress loop.
+    if (req.query.list) {
+      const all = await fetchInspections();
+      const items = all
+        .filter((i) => TEMPLATES.has(i.templateType) && (i.status || '').toLowerCase() === 'completed')
+        .map((i) => ({ id: i.recordId, label: templateLabelFor(i.templateType) || i.templateType, address: i.propertyAddressSnapshot }));
+      return res.status(200).json({ ok: true, items, ids: items.map((i) => i.id), count: items.length });
+    }
+
     const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
     const all = await fetchInspections();
     const targets = all.filter((i) =>
