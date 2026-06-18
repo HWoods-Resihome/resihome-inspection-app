@@ -18,7 +18,10 @@ import sharp from 'sharp';
 // bypasses this allowlist) still opened on click. Match `hubspot<anything>.net|
 // .com` to cover every region/CDN/TLD HubSpot uses. (This is the SSRF guard on the
 // INITIAL url; the proxy then follows HubSpot's own CDN redirect and trusts it.)
-const ALLOWED_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com)$/i;
+// resihome.com = HubSpot's file CDN served via the connected custom domain (this
+// portal's uploaded photos come back as https://resihome.com/hubfs/…). Without
+// it the proxy 403'd every photo → markup couldn't open the image on iOS.
+const ALLOWED_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
 
 export const config = { api: { responseLimit: false } };
 

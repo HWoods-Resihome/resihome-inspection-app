@@ -176,7 +176,24 @@ export async function uploadVideo(file: File): Promise<string> {
       handleUploadUrl: '/api/blob-upload',
       contentType,
     });
-    if (blob?.url) return blob.url;
+    if (blob?.url) {
+      // The client-direct Blob upload bypasses /api/upload's transcode, so this
+      // raw clip may be a format iOS can't decode. Transcode it server-side to an
+      // iOS-playable H.264 mp4; on any failure keep the raw URL (plays on
+      // Android — no worse than before).
+      try {
+        const r = await fetch('/api/video-transcode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: blob.url }),
+        });
+        if (r.ok) {
+          const d = await r.json().catch(() => ({}));
+          if (d?.url) return d.url as string;
+        }
+      } catch { /* fall back to the raw Blob URL */ }
+      return blob.url;
+    }
     throw new Error('Blob upload returned no url');
   } catch (e: any) {
     throw new Error(
