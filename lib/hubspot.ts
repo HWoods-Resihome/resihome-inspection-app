@@ -875,12 +875,13 @@ function inspectionFilterGroups(q: InspectionQuery): any[] {
 }
 
 const SORT_PROPERTY: Record<InspectionSortField, string> = {
-  // 'updated' sorts on HubSpot's built-in hs_lastmodifieddate — the known-good,
-  // always-present, sortable system property. (A prior attempt to sort on the
-  // custom last_edited_at to match the card's displayed date introduced a 400:
-  // it was paired with a SECOND sort entry, and HubSpot's CRM Search API allows
-  // only one sort property. Reverted to keep the list loading reliably.)
-  updated: 'hs_lastmodifieddate',
+  // 'updated' sorts on last_edited_at so the list order matches the date shown on
+  // the cards (`last_edited_at || hs_lastmodifieddate`) and backend-only writes
+  // (e.g. PDF regeneration) don't reorder the list. This MUST stay a single sort:
+  // HubSpot's CRM Search API rejects more than one sort property with a 400
+  // ("too many sorts; max allowed: 1"). Records with no last_edited_at sort last
+  // in DESC and still render via the card's display fallback.
+  updated: 'last_edited_at',
   scheduled: 'scheduled_date',
   address: 'property_address_snapshot',
   inspector: 'inspector_name',
