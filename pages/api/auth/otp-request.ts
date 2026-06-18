@@ -41,14 +41,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // 6-digit code, cryptographically random.
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
 
-  const subject = 'Your ResiWALK sign-in code';
+  const subject = 'Your ResiWalk sign-in code';
   const textBody =
-    `Your ResiWALK sign-in code is ${code}\n\n` +
+    `Your ResiWalk sign-in code is ${code}\n\n` +
     `Enter it on the sign-in screen to continue. It expires in 10 minutes.\n\n` +
     `If you didn't request this, you can ignore this email.`;
   const htmlBody =
     `<div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;padding:8px">` +
-    `<p style="font-size:15px;color:#111">Your ResiWALK sign-in code is:</p>` +
+    `<p style="font-size:15px;color:#111">Your ResiWalk sign-in code is:</p>` +
     `<p style="font-size:34px;font-weight:700;letter-spacing:6px;color:#ff0060;margin:8px 0">${code}</p>` +
     `<p style="font-size:13px;color:#555">Enter it on the sign-in screen to continue. It expires in 10 minutes.</p>` +
     `<p style="font-size:12px;color:#999;margin-top:20px">If you didn't request this, you can ignore this email.</p>` +
