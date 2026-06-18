@@ -14,6 +14,7 @@ import {
   saveCachedQuestions, loadCachedQuestions,
 } from '@/lib/offlineCache';
 import { getGeoFix } from '@/lib/evidenceStamp';
+import { openPdf } from '@/lib/pdfViewerBus';
 import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
 
 
@@ -386,7 +387,11 @@ export default function ExistingInspection() {
             </a>
           )}
           {pdfUrl && (
-            <a href={pdfUrl} target="_blank" rel="noreferrer" className="text-brand underline block">
+            <a
+              href={pdfUrl}
+              onClick={(e) => { e.preventDefault(); openPdf(pdfUrl, `${templateLabel} Report`); }}
+              className="text-brand underline block cursor-pointer"
+            >
               View PDF Report
             </a>
           )}
@@ -461,35 +466,30 @@ export default function ExistingInspection() {
         </div>
       )}
       {statusReadOnly && (
-        <div className="bg-amber-50 border-b border-amber-200 py-2">
-          {/* Symmetrical 3-zone header, aligned to the same max-width container
-              as the page content below: status (left) · downloads (center) ·
-              Re-Open (right). */}
+        <div className="bg-amber-50 border-b border-amber-200 py-1.5">
+          {/* Banner: status (left, the single source of truth for the read-only
+              state — no longer duplicated in the form header) · the Scope
+              multi-report menu (center, Scope only — every other template shows
+              an in-app "View PDF Report" link in its own header) · Re-Open
+              (right). */}
           <div className="max-w-7xl mx-auto px-3 sm:px-6 flex items-center gap-2 flex-nowrap">
-            {/* Left zone: empty spacer (equal flex-basis with the right zone) so
-                the center button stays truly centered. The status itself is
-                already shown by the badge directly below this bar, so the old
-                "Inspection Completed/Cancelled" label was redundant — and it
-                truncated on narrow screens — so it's been removed. */}
-            <span className="flex-1 min-w-0" aria-hidden="true" />
+            {/* Left zone: read-only status, left-aligned. */}
+            <div className="flex-1 min-w-0 flex items-center">
+              <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm text-gray-600 font-heading font-semibold whitespace-nowrap">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                {isCompleted ? 'Completed (read-only)' : 'Cancelled (read-only)'}
+              </span>
+            </div>
 
-            {/* Center: download options (brand-colored to match the scheme) */}
+            {/* Center: Scope has multiple reports (master/vendor/chargeback), so
+                it keeps its download menu. */}
             <div className="flex items-center justify-center gap-2 shrink-0">
               {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
                 <CompletedPdfMenu inspection={inspection} shareLinks={shareLinks} />
-              )}
-              {isCompleted && inspection.templateType === 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
-                <a href={shareLinks?.report || inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
-                   className="text-sm bg-brand hover:bg-brand-dark text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
-                  Download QC Report (PDF)
-                </a>
-              )}
-              {isCompleted && inspection.templateType !== 'pm_scope_rate_card'
-                && inspection.templateType !== 'pm_turn_reinspect_qc' && inspection.pdfUrl && (
-                <a href={shareLinks?.report || inspection.pdfUrl} target="_blank" rel="noopener noreferrer"
-                   className="text-sm bg-brand hover:bg-brand-dark text-white font-heading font-semibold px-3 py-1.5 rounded-lg">
-                  Download Report (PDF)
-                </a>
               )}
             </div>
 
@@ -519,6 +519,7 @@ export default function ExistingInspection() {
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
           inspectionStatus={inspection.status}
+          pdfUrl={isCompleted ? (shareLinks?.report || inspection.pdfUrl || undefined) : undefined}
           readOnly={readOnly}
           onSubmit={() => router.push('/')}
           onCancel={() => router.push('/')}

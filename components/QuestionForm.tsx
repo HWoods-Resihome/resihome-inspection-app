@@ -24,6 +24,7 @@ import { FinalChecklist } from '@/components/FinalChecklist';
 import { SyncingBadge } from '@/components/SyncingBadge';
 import { UnlockButton } from '@/components/UnlockButton';
 import { FitText } from '@/components/FitText';
+import { openPdf } from '@/lib/pdfViewerBus';
 import {
   finalChecklistGap, fcSectionCounts, summarizeFinalChecklist, finalChecklistPhotos,
   type FcAnswers, type FcAnswerState, type FcCompletionCtx,
@@ -1609,10 +1610,9 @@ export function QuestionForm({
             {pdfUrl && (
               <a
                 href={pdfUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline"
-                title="Open the generated inspection report (opens in a new tab)"
+                onClick={(e) => { e.preventDefault(); openPdf(pdfUrl, `${templateLabel} Report`); }}
+                className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline cursor-pointer"
+                title="View the generated inspection report"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1715,23 +1715,13 @@ export function QuestionForm({
               )}
             </div>
           </div>
-          {/* Save / read-only strip — back in the frozen header (hidden on short
-              landscape to reclaim space). */}
+          {/* Save indicator — back in the frozen header (hidden on short
+              landscape to reclaim space). The read-only/completed status now
+              lives in the top banner bar (see pages/inspection/[id].tsx), so
+              it's no longer duplicated here. */}
           {!readOnly && (
             <div className="lz-hide mt-1.5">
               <SaveIndicator saveState={autosave.saveState} />
-            </div>
-          )}
-          {readOnly && (
-            <div className="lz-hide mt-1.5">
-              <div className="inline-flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 border border-gray-200 px-2 py-1 rounded-full">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
-                <span>Read-only (Completed)</span>
-              </div>
             </div>
           )}
         </div>

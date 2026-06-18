@@ -122,6 +122,44 @@ export function primeLocationPermissionNative(): void {
   } catch { /* no geolocation — fine */ }
 }
 
+// Android hardware/gesture back-button guard for the Capacitor shell.
+//
+// By DEFAULT, Capacitor's back behavior is: go back in the WebView's page
+// history, and if there's nothing to go back to, QUIT the app. That makes the
+// back gesture feel destructive — e.g. opening a PDF and pressing back could
+// exit the whole app. This installs a `backButton` listener (Android-only) that:
+//   • navigates web history back when possible (this also closes the in-app PDF
+//     viewer overlay and any other history-backed overlay), and
+//   • MINIMIZES the app (sends it to the background, like Home) instead of
+//     exiting when there's nowhere left to go back to.
+//
+// Registering a backButton listener disables Capacitor's default handling, so we
+// drive navigation ourselves. Uses the runtime-registered global plugin
+// (window.Capacitor.Plugins.App) — same approach as the StatusBar/Keyboard
+// helpers — so @capacitor/app isn't forced into the browser bundle's critical
+// path. HARD GATE: no-op in any normal browser (isNativePlatform() === false).
+let backGuardInstalled = false;
+export function installNativeBackGuard(): void {
+  if (typeof window === 'undefined' || backGuardInstalled) return;
+  const cap = (window as any).Capacitor;
+  if (!cap?.isNativePlatform?.()) return;
+  const app = cap.Plugins?.App;
+  if (!app?.addListener) return;
+  backGuardInstalled = true;
+  try {
+    app.addListener('backButton', (e: { canGoBack?: boolean }) => {
+      // canGoBack is the WebView's own signal; history.length is a fallback.
+      if (e?.canGoBack || window.history.length > 1) {
+        window.history.back();
+      } else {
+        // Don't exitApp() — backgrounding is the expected Android behavior and
+        // keeps the session/state alive for when the user reopens the app.
+        try { app.minimizeApp?.(); } catch { /* older plugin — just ignore */ }
+      }
+    });
+  } catch { /* plugin unavailable in this build — default behavior stands */ }
+}
+
 export async function installOAuthBridge(): Promise<void> {
   // SSR / non-browser guard.
   if (typeof window === 'undefined') return;

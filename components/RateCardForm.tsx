@@ -21,6 +21,7 @@ import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { UnlockButton } from '@/components/UnlockButton';
 import { FitText } from '@/components/FitText';
+import { openPdf } from '@/lib/pdfViewerBus';
 import { isInternalResolution, VENDORS, defaultVendorForItem } from '@/lib/vendors';
 import { isAiWarm, warmAi } from '@/lib/aiWarm';
 import { ListPicker } from '@/components/ListPicker';
@@ -3359,8 +3360,9 @@ export function RateCardForm(props: RateCardFormProps) {
               </div>
             )}
             {props.pdfUrl && (
-              <a href={props.pdfUrl} target="_blank" rel="noopener noreferrer"
-                 className="inline-block mt-2 text-sm text-brand underline">View PDF</a>
+              <a href={props.pdfUrl}
+                 onClick={(e) => { e.preventDefault(); openPdf(props.pdfUrl!, `${props.templateLabel} Report`); }}
+                 className="inline-block mt-2 text-sm text-brand underline cursor-pointer">View PDF</a>
             )}
           </div>
 

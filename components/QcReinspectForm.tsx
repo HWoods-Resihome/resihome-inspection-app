@@ -30,6 +30,7 @@ import { useAppDialog } from '@/components/AppDialog';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 import { UnlockButton } from '@/components/UnlockButton';
+import { openPdf } from '@/lib/pdfViewerBus';
 
 interface QcLine {
   recordId: string;
@@ -63,6 +64,8 @@ interface Props {
   bathrooms: number;
   squareFootage: number | null;
   inspectionStatus: string;
+  /** Completed QC report — shown as an in-app "View PDF Report" link. */
+  pdfUrl?: string;
   readOnly: boolean;
   onSubmit: () => void;
   onCancel: () => void;
@@ -614,6 +617,21 @@ export function QcReinspectForm(props: Props) {
               )}
               {sourceName && <span> &middot; Validating: {sourceName}</span>}
             </div>
+            {props.pdfUrl && (
+              <a
+                href={props.pdfUrl}
+                onClick={(e) => { e.preventDefault(); openPdf(props.pdfUrl!, `${props.templateLabel} Report`); }}
+                className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline cursor-pointer"
+                title="View the generated QC report"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                View PDF Report
+              </a>
+            )}
           </div>
           {/* Unlock (Rently code) — compact circle inline to the LEFT of Back.
               Hidden once read-only (completed). */}

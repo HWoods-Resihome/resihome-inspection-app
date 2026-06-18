@@ -5,10 +5,11 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AppDialogProvider } from '@/components/AppDialog';
 import { FlashProvider } from '@/components/Flash';
 import { FieldStatusOverlays } from '@/components/FieldStatusOverlays';
+import { PdfViewerHost } from '@/components/PdfViewerHost';
 import { initErrorReporting } from '@/lib/clientErrorReporter';
 import { installSessionGuard } from '@/lib/sessionGuard';
 import { registerServiceWorker } from '@/lib/useAppUpdate';
-import { installOAuthBridge, installPushBridge, primeLocationPermissionNative } from '@/lib/nativeBridge';
+import { installOAuthBridge, installPushBridge, primeLocationPermissionNative, installNativeBackGuard } from '@/lib/nativeBridge';
 import { initPushOnLoad } from '@/lib/pushClient';
 import { Raleway } from 'next/font/google';
 import '../styles/globals.css';
@@ -53,6 +54,10 @@ export default function App({ Component, pageProps }: AppProps) {
     // stamped from the first capture. No-op on web/PWA. (Requires the native
     // build to declare the location usage string — see mobile/ runbooks.)
     primeLocationPermissionNative();
+    // Native-only: make the Android back gesture close overlays / go back
+    // instead of quitting the app (minimizes when there's nowhere to go back).
+    // No-op on web/PWA. Works with the in-app PDF viewer's history-backed close.
+    installNativeBackGuard();
   }, []);
 
   return (
@@ -73,6 +78,7 @@ export default function App({ Component, pageProps }: AppProps) {
           <FlashProvider>
             <FieldStatusOverlays />
             <Component {...pageProps} />
+            <PdfViewerHost />
           </FlashProvider>
         </AppDialogProvider>
       </div>
