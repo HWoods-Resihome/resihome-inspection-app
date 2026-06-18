@@ -105,7 +105,9 @@ function friendlyError(d: any): string {
     case 'auth_fail':         return 'The code service could not authenticate to Rently. Notify ops.';
     case 'business_rule':     return d?.error || 'Rently rejected the request.';
     case 'network_error':     return 'Network error reaching the code service. Try again in a moment.';
-    case 'server_error':      return 'Server error. Try again; if it persists, notify ops.';
+    // Surface the real server detail (endpoint exception or deployment/access
+    // diagnostic) so failures are actionable in the field, not opaque.
+    case 'server_error':      return d?.error || 'Server error. Try again; if it persists, notify ops.';
     case 'unauthorized':      return 'This app is not authorized to request codes.';
     case 'forbidden':         return 'Your account is not authorized to request codes.';
     case 'not_configured':    return 'Unlock is not configured on the server yet. Notify ops.';

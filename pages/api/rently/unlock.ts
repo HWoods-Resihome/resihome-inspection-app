@@ -63,13 +63,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }),
       signal: ctrl.signal,
     });
+    const httpStatus = upstream.status;
     const text = await upstream.text();
-    let data: unknown;
-    try { data = JSON.parse(text); }
-    catch { data = { status: 'FAILED', errorClass: 'server_error', error: 'Bad response from code service.' }; }
-    res.status(200).json(data);
+
+    // Try to parse the endpoint's JSON envelope.
+    let data: any = null;
+    try { data = JSON.parse(text); } catch { /* not JSON — handled below */ }
+
+    // A well-formed envelope (SUCCESS / STUB / or the endpoint's OWN typed
+    // FAILED) — relay it verbatim so the real errorClass + message reach the app.
+    if (data && typeof data === 'object' && typeof data.status === 'string') {
+      if (data.status === 'FAILED') {
+        console.error('[rently/unlock] endpoint FAILED', {
+          errorClass: data.errorClass, error: data.error, httpStatus,
+        });
+      }
+      res.status(200).json(data);
+      return;
+    }
+
+    // Non-JSON (or unexpected shape). This is almost always a DEPLOYMENT problem:
+    // the Apps Script Web App isn't deployed with access "Anyone", so Google
+    // served an HTML sign-in/redirect page instead of our JSON — or the env URL
+    // points at the wrong deployment. Surface a precise, actionable diagnostic.
+    const snippet = (text || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+    const looksLikeGoogleLogin = /sign in|accounts\.google\.com|<!doctype html|<html/i.test(snippet);
+    console.error('[rently/unlock] non-JSON upstream', { httpStatus, snippet });
+    res.status(200).json({
+      status: 'FAILED',
+      errorClass: 'server_error',
+      error: looksLikeGoogleLogin
+        ? `Code service returned a sign-in page (HTTP ${httpStatus}), not a code. ` +
+          `Re-deploy the VCB Web App with “Who has access: Anyone”, and confirm ` +
+          `RENTLY_UNLOCK_ENDPOINT is that deployment’s /exec URL.`
+        : `Code service returned an unexpected response (HTTP ${httpStatus}): ` +
+          `${snippet || '(empty body)'}`,
+    });
   } catch (e: any) {
     const aborted = e?.name === 'AbortError';
+    console.error('[rently/unlock] fetch error', { name: e?.name, message: e?.message });
     res.status(200).json({
       status: 'FAILED',
       errorClass: 'network_error',
