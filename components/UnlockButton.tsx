@@ -13,23 +13,17 @@ interface UnlockButtonProps {
   propertyId?: string;
   /** Address fallback (only used server-side if propertyId is absent). */
   address?: string;
-  /** Labels the code in the Rently portal. */
-  inspectionName?: string;
-  inspectionDate?: string;
+  /** Optional inspection record id (round-tripped to label the Rently code). */
   inspectionId?: string;
-  /** Extra classes (e.g. w-full) to match the BACK button it sits under. */
+  /** Extra classes if a caller needs to tweak the circle. */
   className?: string;
-  /** Small variant — sits inline to the LEFT of the Back button (no extra height). */
-  compact?: boolean;
 }
 
 type ModalState =
   | { kind: 'success' | 'warn'; title: string; code?: string; subtitle?: string }
   | { kind: 'error'; title: string; subtitle?: string };
 
-export function UnlockButton({
-  propertyId, address, inspectionName, inspectionDate, inspectionId, className, compact,
-}: UnlockButtonProps) {
+export function UnlockButton({ propertyId, address, inspectionId, className }: UnlockButtonProps) {
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<ModalState | null>(null);
 
@@ -40,7 +34,7 @@ export function UnlockButton({
       const res = await fetch('/api/rently/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ propertyId, address, inspectionName, inspectionDate, inspectionId }),
+        body: JSON.stringify({ propertyId, address, inspectionId }),
       });
       const data = await res.json(); // branch on data.status, NOT res.status
       if (data.status === 'SUCCESS' || data.status === 'STUB') {
@@ -74,29 +68,23 @@ export function UnlockButton({
         onClick={handleUnlock}
         disabled={loading}
         aria-busy={loading}
-        title="Get a Rently access code for this property"
+        aria-label="Unlock — get a Rently access code for this property"
+        title="Unlock — get a Rently access code for this property"
         className={
-          'inline-flex items-center justify-center gap-1.5 font-heading font-semibold text-black ' +
-          'rounded-lg border border-transparent transition-colors disabled:cursor-default ' +
-          (compact ? 'text-xs px-2.5 py-1.5 ' : 'text-sm px-3 py-1.5 ') +
-          (loading ? 'bg-[#A8EEEB] ' : 'bg-[#73E3DF] hover:bg-[#5fd8d3] active:scale-[0.98] ') +
+          'inline-flex items-center justify-center w-9 h-9 rounded-full text-black shrink-0 ' +
+          'transition-colors disabled:cursor-default ' +
+          (loading ? 'bg-[#A8EEEB] ' : 'bg-[#73E3DF] hover:bg-[#5fd8d3] active:scale-95 ') +
           (className || '')
         }
       >
         {loading ? (
-          <>
-            <span className="inline-block w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" aria-hidden />
-            Unlocking…
-          </>
+          <span className="inline-block w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" aria-hidden />
         ) : (
-          <>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <rect x="3" y="11" width="18" height="11" rx="2" />
-              <path d="M7 11V7a5 5 0 0 1 9.9-1" />
-            </svg>
-            Unlock
-          </>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="3" y="11" width="18" height="11" rx="2" />
+            <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+          </svg>
         )}
       </button>
       {modal && <CodeModal modal={modal} onClose={() => setModal(null)} />}

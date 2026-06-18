@@ -615,18 +615,14 @@ export function QcReinspectForm(props: Props) {
               {sourceName && <span> &middot; Validating: {sourceName}</span>}
             </div>
           </div>
-          {/* Unlock (Rently code) inline to the LEFT of Back — hidden once
-              read-only (completed). */}
+          {/* Unlock (Rently code) — compact circle inline to the LEFT of Back,
+              always available (no status gate). */}
           <div className="flex-shrink-0 self-start flex flex-row items-center gap-2">
-            {!props.readOnly && (
-              <UnlockButton
-                propertyId={props.propertyRecordId}
-                address={props.propertyName}
-                inspectionName={props.templateLabel}
-                inspectionId={props.inspectionRecordId}
-                compact
-              />
-            )}
+            <UnlockButton
+              propertyId={props.propertyRecordId}
+              address={props.propertyName}
+              inspectionId={props.inspectionRecordId}
+            />
             <button
               type="button"
               onClick={props.onCancel}

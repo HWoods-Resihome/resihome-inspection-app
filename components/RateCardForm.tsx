@@ -3423,17 +3423,13 @@ export function RateCardForm(props: RateCardFormProps) {
                 )}
               </div>
             )}
-            {/* Unlock (Rently code) sits inline to the LEFT of Back — hidden once
-                the inspection is read-only (completed / pending approval view). */}
-            {!props.readOnly && (
-              <UnlockButton
-                propertyId={props.propertyRecordId}
-                address={props.propertyName}
-                inspectionName={props.templateLabel}
-                inspectionId={props.inspectionRecordId}
-                compact
-              />
-            )}
+            {/* Unlock (Rently code) — compact circle inline to the LEFT of Back,
+                always available (no status gate). */}
+            <UnlockButton
+              propertyId={props.propertyRecordId}
+              address={props.propertyName}
+              inspectionId={props.inspectionRecordId}
+            />
             <button
               type="button"
               onClick={handleSaveAndClose}

@@ -33,7 +33,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { propertyId, address, inspectionName, inspectionDate, inspectionId } = body as Record<string, string>;
+  const { propertyId, address, inspectionId } = body as Record<string, string>;
   if (!propertyId && !address) {
     res.status(200).json({ status: 'FAILED', errorClass: 'bad_request', error: 'Missing property reference.' });
     return;
@@ -52,8 +52,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         token,
         propertyId: propertyId || '',
         address: address || '',
-        inspectionName: inspectionName || 'ResiWalk Inspection',
-        inspectionDate: inspectionDate || '',
+        // The Rently access-log label is the signed-in ResiWalk inspector's name
+        // (authoritative, from the session) — no vendor name/email is required of
+        // the inspector. The endpoint pulls the lock details from the Property.
+        inspectionName: session.name || 'ResiWalk Inspection',
+        inspectionDate: '',
         inspectionId: inspectionId || '',
         userEmail: session.email,
         userPhone: '',
