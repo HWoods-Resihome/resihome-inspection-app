@@ -166,8 +166,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Step 5: upload to HubSpot Files
     const t3 = Date.now();
     const safeName = body.inspectionName.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 60);
-    const filename = `${safeName}_${body.externalId}.pdf`;
-    const { url: pdfUrl, id: pdfFileId } = await uploadFileWithId(pdfBuffer, filename, 'application/pdf', '/inspection_pdfs', true);
+    // Versioned filename so a re-submit (reopen → resubmit) or regen lands on a
+    // NEW CDN path. HubSpot's file CDN serves overwritten files by path and
+    // ignores query strings, so overwriting the same name served stale bytes
+    // (the "old PDF" problem). The clean short link resolves pdf_attachment_url,
+    // so this is transparent to anyone using the /d/<id>/report link.
+    const version = Date.now().toString(36);
+    const filename = `${safeName}_${body.externalId}_v${version}.pdf`;
+    const { url: pdfUrl, id: pdfFileId } = await uploadFileWithId(pdfBuffer, filename, 'application/pdf', '/inspection_pdfs', false);
     const tUpload = Date.now() - t3;
     console.log(`[pdf] uploaded in ${tUpload}ms`);
 

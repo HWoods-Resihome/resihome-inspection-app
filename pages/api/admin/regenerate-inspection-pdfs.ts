@@ -196,7 +196,14 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
 
   const buf = await renderToBuffer(React.createElement(InspectionPdf, { data: pdfData }) as any);
   const safeName = (insp.inspectionName || 'Inspection').replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 60);
-  const { url } = await uploadFileWithId(buf, `${safeName}_${insp.inspectionIdExternal}.pdf`, 'application/pdf', '/inspection_pdfs', true);
+  // Mint a NEW file path on every regeneration. HubSpot's file CDN serves
+  // overwritten files by PATH and ignores query strings (a per-request ?cb=
+  // buster still returned stale bytes), so re-uploading to the same filename
+  // kept serving the OLD PDF. A versioned filename forces a brand-new CDN
+  // object. The clean /d/<id>/report link resolves to pdf_attachment_url, so it
+  // transparently points at the new file and shared links are unaffected.
+  const version = Date.now().toString(36);
+  const { url } = await uploadFileWithId(buf, `${safeName}_${insp.inspectionIdExternal}_v${version}.pdf`, 'application/pdf', '/inspection_pdfs', false);
   await attachPdfUrlToInspection(id, url);
   // Refresh the clean short link so the record's "report" link/download resolves
   // to the regenerated PDF (matches /api/pdf). Best-effort.
