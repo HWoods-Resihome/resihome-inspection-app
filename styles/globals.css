@@ -166,7 +166,7 @@ button, input, select, textarea {
    insets non-zero. The top bar drops below the notch; the footer (shutter) is
    lifted above the home indicator / toolbar grab area. */
 .lz-head-top { padding-top: calc(0.3rem + env(safe-area-inset-top)) !important; }
-.lz-foot { padding-bottom: calc(1rem + env(safe-area-inset-bottom)) !important; }
+.lz-foot { padding-bottom: calc(0.4rem + env(safe-area-inset-bottom)) !important; }
 
 /* ---- Landscape / short-viewport compaction --------------------------------
    On short viewports (landscape phones, ≲ 540px tall) reclaim vertical space:
