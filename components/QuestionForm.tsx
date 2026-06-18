@@ -1648,13 +1648,16 @@ export function QuestionForm({
             )}
           </div>
           {/* Unlock (Rently code) + Back on ONE row so they don't add height.
-              Compact circle to the LEFT of Back, always available (no gate). */}
+              Compact circle to the LEFT of Back; hidden once read-only
+              (completed / cancelled / view-only). */}
           <div className="shrink-0 self-start flex flex-row items-center gap-2">
-          <UnlockButton
-            propertyId={propertyRecordId}
-            address={propertyName}
-            inspectionId={inspectionRecordId}
-          />
+          {!readOnly && (
+            <UnlockButton
+              propertyId={propertyRecordId}
+              address={propertyName}
+              inspectionId={inspectionRecordId}
+            />
+          )}
           <button
             type="button"
             onClick={async () => {
