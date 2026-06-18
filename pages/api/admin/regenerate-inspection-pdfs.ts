@@ -24,11 +24,22 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { InspectionPdf, type PdfData, type PdfAnswer } from '@/lib/pdf';
 import {
   fetchInspections, fetchInspectionWithPropertyRef, fetchAnswersForInspection,
-  fetchQuestionsForTemplate, uploadFileWithId, attachPdfUrlToInspection,
+  fetchQuestionsForTemplate, fetchActiveListingForProperty, uploadFileWithId, attachPdfUrlToInspection,
 } from '@/lib/hubspot';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
 import { getPosterUrl } from '@/lib/media';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
+import { summarizeFinalChecklist, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
+
+// Strip a trailing "__<hash>" so an answer's question id matches the template's
+// question id even when one carries the uniqueness suffix and the other doesn't.
+const normQid = (s: string) => (s || '').replace(/__[0-9a-f]{4,}$/i, '');
+// Last-resort readable label from a question id slug (drops section prefix + hash).
+function prettifyQid(qid: string): string {
+  const parts = (qid || '').split('__');
+  const core = parts.length >= 2 ? parts[1] : (parts[0] || qid);
+  return core.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 const TEMPLATES = new Set([
   'leasing_agent_1099_property_inspection',
@@ -45,13 +56,15 @@ async function regenerateOne(id: string): Promise<{ id: string; ok: boolean; pdf
   const tmpl = insp.templateType;
   if (!TEMPLATES.has(tmpl)) return { id, ok: false, error: `Template ${tmpl} not supported here` };
 
-  // Map questionIdExternal -> clean question text (the stored answer_summary is
-  // prefixed with the section, so we read the template's questions instead).
-  let qText = new Map<string, string>();
+  // Map questionIdExternal -> clean question text. The stored answer_summary is
+  // section-prefixed, so we read the template's questions; key by both the exact
+  // id and a hash-stripped id so answers match regardless of the suffix.
+  const qText = new Map<string, string>();
   try {
     const { questions } = await fetchQuestionsForTemplate(tmpl, { includeDisabled: true });
-    qText = new Map(questions.map((q) => [q.questionIdExternal, q.questionText]));
-  } catch { /* fall back to ids below */ }
+    for (const q of questions) { qText.set(q.questionIdExternal, q.questionText); qText.set(normQid(q.questionIdExternal), q.questionText); }
+  } catch { /* prettify fallback below */ }
+  const questionText = (qid: string) => qText.get(qid) || qText.get(normQid(qid)) || prettifyQid(qid);
 
   const answers = await fetchAnswersForInspection(id);
   const effSection = (a: { section: string; location?: string }) => a.location || a.section;
@@ -61,6 +74,10 @@ async function regenerateOne(id: string): Promise<{ id: string; ok: boolean; pdf
   const sectionPhotosBy: Record<string, string[]> = {};
   const ensure = (sec: string) => { if (!answersBySection[sec]) { sectionsInOrder.push(sec); answersBySection[sec] = []; } };
 
+  // Capture the Final Checklist JSON blob (questionId "fc__all", value
+  // "final_checklist", data in `note`) — rendered as its own block, not a Q&A row.
+  let fcBlob: FcAnswers | null = null;
+
   for (const a of answers) {
     const sec = effSection(a);
     if (a.answerType === 'section_photo') {
@@ -69,9 +86,13 @@ async function regenerateOne(id: string): Promise<{ id: string; ok: boolean; pdf
       continue;
     }
     if (a.answerType !== 'qa') continue; // skip rate_card_line / signature etc.
+    if (/^fc__/.test(a.questionIdExternal) || /^final.?checklist$/i.test((a.answerValue || '').trim())) {
+      try { if (a.note) fcBlob = JSON.parse(a.note) as FcAnswers; } catch { /* malformed blob — skip */ }
+      continue;
+    }
     ensure(sec);
     answersBySection[sec].push({
-      questionText: qText.get(a.questionIdExternal) || a.questionIdExternal,
+      questionText: questionText(a.questionIdExternal),
       section: sec,
       location: a.location,
       answerValue: a.answerValue,
@@ -81,6 +102,26 @@ async function regenerateOne(id: string): Promise<{ id: string; ok: boolean; pdf
       photoUrls: a.photoUrls && a.photoUrls.length > 0 ? a.photoUrls : undefined,
     });
   }
+
+  // Final Checklist → label/value groups (same as the Master report).
+  let finalChecklist: { name: string; rows: { label: string; value: string }[] }[] | undefined;
+  if (fcBlob) {
+    const fcCtx: FcCompletionCtx = {
+      septicFee: (data as any).propertySepticFee ?? null,
+      airQtyPrefill: (data as any).propertyAirFiltersTotal ?? null,
+      filterOptionsAvailable: true,
+      filterPrefills: [
+        (data as any).propertyAirFiltersType1 ?? null,
+        (data as any).propertyAirFiltersType2 ?? null,
+        (data as any).propertyAirFiltersType3 ?? null,
+      ],
+    };
+    try { finalChecklist = summarizeFinalChecklist(fcBlob, fcCtx); } catch { /* skip */ }
+  }
+
+  // Listing highlights for the header (Active / Deposit Taken · price · date).
+  let listing: { listingStatus: string | null; listingPrice: number | null; listingDate: string | null } | null = null;
+  try { listing = await fetchActiveListingForProperty(data.propertyIdRef); } catch { /* optional */ }
 
   // Resolve + embed thumbnails (small file), keep original URLs for clickable links.
   const allUrls: string[] = [];
@@ -103,6 +144,9 @@ async function regenerateOne(id: string): Promise<{ id: string; ok: boolean; pdf
     bathrooms: insp.bathroomsAtInspection || 0,
     squareFootage: data.propertySquareFootage,
     region: insp.regionSnapshot || null,
+    listingStatus: listing?.listingStatus ?? null,
+    listingPrice: listing?.listingPrice ?? null,
+    listingDate: listing?.listingDate ?? null,
     completedAt: insp.completedAt || insp.updatedAt || new Date().toISOString(),
     totalAnswered: Object.values(answersBySection).reduce((n, arr) => n + arr.length, 0),
     totalPhotos: allUrls.length,
@@ -113,6 +157,7 @@ async function regenerateOne(id: string): Promise<{ id: string; ok: boolean; pdf
     sectionPhotosBy,
     triggeredValues: new Set<string>(),
     embeddedByUrl,
+    finalChecklist,
   };
 
   const buf = await renderToBuffer(React.createElement(InspectionPdf, { data: pdfData }) as any);

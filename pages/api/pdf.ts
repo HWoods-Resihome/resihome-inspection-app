@@ -29,9 +29,13 @@ interface GeneratePdfBody {
   bathrooms: number;
   squareFootage?: number | null;
   region?: string | null;
+  listingStatus?: string | null;
+  listingPrice?: number | null;
+  listingDate?: string | null;
   completedAt: string;
   answers: AnswerInput[];
   sectionPhotoUrls: Record<string, string[]>;
+  finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -130,6 +134,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       bathrooms: body.bathrooms,
       squareFootage: body.squareFootage ?? null,
       region: body.region ?? null,
+      listingStatus: body.listingStatus ?? null,
+      listingPrice: body.listingPrice ?? null,
+      listingDate: body.listingDate ?? null,
+      finalChecklist: body.finalChecklist,
       completedAt: body.completedAt,
       totalAnswered: body.answers.length,
       totalPhotos,

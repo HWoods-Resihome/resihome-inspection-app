@@ -368,6 +368,11 @@ export function PdfHeaderStrip(props: {
   /** Optional approver name + "M/DD/YY Approved" stamp shown on a second line. */
   approverName?: string | null;
   approvedLabel?: string | null;
+  /** Optional listing line (e.g. "Active · Listing $1,995 · Listed 5/8/2026"). */
+  listingLine?: string | null;
+  /** When true, render the property details line BEFORE the inspector line
+   *  (1099 layout). Default false (inspector first — Scope/QC layout). */
+  detailsFirst?: boolean;
   /** Right-aligned summary content — typically a Tenant Total or Vendor Total. */
   summary?: React.ReactNode;
 }) {
@@ -386,6 +391,15 @@ export function PdfHeaderStrip(props: {
   if (props.region) metaParts.push(props.region);
   metaParts.push(props.generatedAtLabel);
 
+  const inspectorEl = <Text style={pdfStyles.headerMeta}>{inspectorLine}</Text>;
+  const approverEl = props.approverName ? (
+    <Text style={pdfStyles.headerMeta}>
+      Approver: {props.approverName}{props.approvedLabel ? `  ·  ${props.approvedLabel}` : ''}
+    </Text>
+  ) : null;
+  const detailsEl = <Text style={pdfStyles.headerMeta}>{metaParts.join(' · ')}</Text>;
+  const listingEl = props.listingLine ? <Text style={pdfStyles.headerMeta}>{props.listingLine}</Text> : null;
+
   const logoSrc = brandLogoDataUri();
   return (
     <View style={pdfStyles.headerStrip}>
@@ -393,13 +407,21 @@ export function PdfHeaderStrip(props: {
       <View style={pdfStyles.headerLeft}>
         <Text style={pdfStyles.headerTitle}>{props.docTitle}</Text>
         <Text style={pdfStyles.headerProperty}>{props.propertyName}</Text>
-        <Text style={pdfStyles.headerMeta}>{inspectorLine}</Text>
-        {props.approverName ? (
-          <Text style={pdfStyles.headerMeta}>
-            Approver: {props.approverName}{props.approvedLabel ? `  ·  ${props.approvedLabel}` : ''}
-          </Text>
-        ) : null}
-        <Text style={pdfStyles.headerMeta}>{metaParts.join(' · ')}</Text>
+        {props.detailsFirst ? (
+          <>
+            {detailsEl}
+            {inspectorEl}
+            {approverEl}
+            {listingEl}
+          </>
+        ) : (
+          <>
+            {inspectorEl}
+            {approverEl}
+            {detailsEl}
+            {listingEl}
+          </>
+        )}
       </View>
       {props.summary ? <View style={pdfStyles.headerRight}>{props.summary}</View> : null}
     </View>

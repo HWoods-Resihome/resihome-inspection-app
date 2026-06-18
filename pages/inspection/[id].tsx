@@ -230,9 +230,13 @@ export default function ExistingInspection() {
           bathrooms: inspection.bathroomsAtInspection || 0,
           squareFootage: propertySquareFootage,
           region: inspection.regionSnapshot || null,
+          listingStatus,
+          listingPrice,
+          listingDate,
           completedAt: new Date().toISOString(),
           answers,
           sectionPhotoUrls,
+          finalChecklist: meta?.finalChecklist,
         };
         const pdfResp = await fetch('/api/pdf', {
           method: 'POST',

@@ -142,6 +142,10 @@ export interface PdfData {
   /** Optional header meta (mirrors Scope): sqft + region. */
   squareFootage?: number | null;
   region?: string | null;
+  /** Listing highlights for the header (mirrors the app header). */
+  listingStatus?: string | null;
+  listingPrice?: number | null;
+  listingDate?: string | null;
   completedAt: string;
   totalAnswered: number;
   totalPhotos: number;
@@ -155,6 +159,9 @@ export interface PdfData {
    *  (small file) but LINK to the original full-size URL so they're clickable in
    *  the PDF viewer, like the Scope report. */
   embeddedByUrl?: Record<string, string>;
+  /** Final Checklist (HVAC / Smart Home / Air Filters / Utilities) summarized to
+   *  label/value rows — rendered the same way as the Master report. */
+  finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
 }
 
 function formatDate(iso: string): string {
@@ -178,6 +185,11 @@ function toneOf(v: string | undefined): 'pass' | 'fail' | null {
 
 const isMaintRequestQ = (q: string) => /submit a maintenance ticket/i.test(q || '');
 const isMaintDescQ = (q: string) => /maintenance ticket description/i.test(q || '');
+// The Final Checklist data is stored as a single JSON-blob answer (questionId
+// "fc__all" / value "final_checklist"); it's rendered as its own Final Checklist
+// block, NOT as a raw Q&A row.
+const isFcBlob = (a: PdfAnswer) => /^final.?checklist$/i.test((a.answerValue || '').trim())
+  || /^fc__/.test((a.questionText || '').trim());
 // The Community/Visit inspection's overall score question ("Grade the Community",
 // 1 = Poor … 10 = Excellent). Its answer is the headline "Community Score".
 const isCommunityGradeQ = (q: string) => /grade the community/i.test(q || '');
@@ -211,7 +223,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
   for (const section of data.sectionsInOrder) {
     for (const a of (data.answersBySection[section] || [])) {
       if (isMaintRequestQ(a.questionText)) { maintTicket = a.answerValue || null; continue; }
-      if (isMaintDescQ(a.questionText)) continue; // shown in detail, not the summary grid
+      if (isMaintDescQ(a.questionText) || isFcBlob(a)) continue; // not summary-grid rows
       if (isCommunityGradeQ(a.questionText) && a.answerValue) communityGrade = a.answerValue.trim();
       const tone = toneOf(a.answerValue);
       if (tone === 'pass') passCount++;
@@ -225,6 +237,13 @@ export function InspectionPdf({ data }: { data: PdfData }) {
   const isCommunity = /community/i.test(data.templateLabel || '');
   // Community Score = the "Grade the Community" answer (1–10 scale).
   const communityScore = communityGrade ? `${communityGrade} / 10` : '—';
+
+  // Listing highlights line for the header (Active · Listing $X · Listed date).
+  const listingParts: string[] = [];
+  if (data.listingStatus) listingParts.push(data.listingStatus);
+  if (typeof data.listingPrice === 'number' && data.listingPrice > 0) listingParts.push(`Listing $${data.listingPrice.toLocaleString()}`);
+  if (data.listingDate) listingParts.push(`Listed ${data.listingDate}`);
+  const listingLine = listingParts.length ? listingParts.join(' · ') : null;
 
   const chipStyle = (tone: 'pass' | 'fail' | null) => {
     if (tone === 'pass') return { ...styles.chip, backgroundColor: COLORS.greenBg, color: COLORS.emerald };
@@ -249,6 +268,8 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           bedrooms={data.bedrooms}
           bathrooms={data.bathrooms}
           generatedAtLabel={isoToHumanDate(data.completedAt)}
+          listingLine={listingLine}
+          detailsFirst
           summary={(
             <>
               <Text style={pdfStyles.headerRightLabel}>RESULT</Text>
@@ -322,8 +343,9 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           <Text style={styles.detailHeading}>Full Detail</Text>
         </View>
         {data.sectionsInOrder.map((sectionName) => {
-          const answers = (data.answersBySection[sectionName] || []).filter((a) => !isMaintRequestQ(a.questionText));
+          const answers = (data.answersBySection[sectionName] || []).filter((a) => !isMaintRequestQ(a.questionText) && !isFcBlob(a));
           const sectionPhotos = data.sectionPhotosBy[sectionName] || [];
+          if (answers.length === 0 && sectionPhotos.length === 0) return null;
           return (
             <View key={sectionName} wrap>
               <View wrap={false}>
@@ -381,6 +403,25 @@ export function InspectionPdf({ data }: { data: PdfData }) {
             </View>
           );
         })}
+
+        {/* Final Checklist (HVAC / Smart Home / Air Filters / Utilities) — same
+            label/value layout as the Master report. */}
+        {data.finalChecklist && data.finalChecklist.length > 0 && (
+          <View style={{ marginTop: 10 }}>
+            <Text style={pdfStyles.sectionTitle}>Final Checklist</Text>
+            {data.finalChecklist.map((g) => (
+              <View key={g.name} style={{ marginBottom: 6 }} wrap={false}>
+                <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 9, marginTop: 4, marginBottom: 2, color: '#374151' }}>{g.name}</Text>
+                {g.rows.map((r, i) => (
+                  <View key={i} style={{ flexDirection: 'row', paddingVertical: 1.5, borderBottomWidth: 0.5, borderBottomColor: '#eeeeee' }}>
+                    <Text style={{ width: '42%', fontSize: 8.5, color: '#111111', paddingRight: 6 }}>{r.label}</Text>
+                    <Text style={{ width: '58%', fontSize: 8.5, color: '#333333' }}>{r.value}</Text>
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+        )}
 
         <PdfFooter docName={data.templateLabel} propertyName={data.propertyAddress} />
       </Page>
