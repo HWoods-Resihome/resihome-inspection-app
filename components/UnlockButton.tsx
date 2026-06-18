@@ -19,6 +19,8 @@ interface UnlockButtonProps {
   inspectionId?: string;
   /** Extra classes (e.g. w-full) to match the BACK button it sits under. */
   className?: string;
+  /** Small variant — sits inline to the LEFT of the Back button (no extra height). */
+  compact?: boolean;
 }
 
 type ModalState =
@@ -26,7 +28,7 @@ type ModalState =
   | { kind: 'error'; title: string; subtitle?: string };
 
 export function UnlockButton({
-  propertyId, address, inspectionName, inspectionDate, inspectionId, className,
+  propertyId, address, inspectionName, inspectionDate, inspectionId, className, compact,
 }: UnlockButtonProps) {
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<ModalState | null>(null);
@@ -74,8 +76,9 @@ export function UnlockButton({
         aria-busy={loading}
         title="Get a Rently access code for this property"
         className={
-          'inline-flex items-center justify-center gap-1.5 text-sm font-heading font-semibold text-black ' +
-          'rounded-lg px-3 py-1.5 border border-transparent transition-colors disabled:cursor-default ' +
+          'inline-flex items-center justify-center gap-1.5 font-heading font-semibold text-black ' +
+          'rounded-lg border border-transparent transition-colors disabled:cursor-default ' +
+          (compact ? 'text-xs px-2.5 py-1.5 ' : 'text-sm px-3 py-1.5 ') +
           (loading ? 'bg-[#A8EEEB] ' : 'bg-[#73E3DF] hover:bg-[#5fd8d3] active:scale-[0.98] ') +
           (className || '')
         }

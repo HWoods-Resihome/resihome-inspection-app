@@ -1648,8 +1648,19 @@ export function QuestionForm({
               </a>
             )}
           </div>
-          {/* Back — saves pending edits then exits. */}
-          <div className="shrink-0 self-start flex flex-col items-end gap-2">
+          {/* Unlock (Rently code) + Back on ONE row so they don't add height.
+              Unlock sits to the LEFT of Back and is hidden once the inspection
+              is read-only (completed / cancelled / view-only). */}
+          <div className="shrink-0 self-start flex flex-row items-center gap-2">
+          {!readOnly && (
+            <UnlockButton
+              propertyId={propertyRecordId}
+              address={propertyName}
+              inspectionName={templateLabel}
+              inspectionId={inspectionRecordId}
+              compact
+            />
+          )}
           <button
             type="button"
             onClick={async () => {
@@ -1663,14 +1674,6 @@ export function QuestionForm({
           >
             <span aria-hidden>←</span> Back
           </button>
-          {/* Rently access code for this property — sits directly below Back. */}
-          <UnlockButton
-            propertyId={propertyRecordId}
-            address={propertyName}
-            inspectionName={templateLabel}
-            inspectionId={inspectionRecordId}
-            className="w-full"
-          />
           </div>
         </div>
       </div>

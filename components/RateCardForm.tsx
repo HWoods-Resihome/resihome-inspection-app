@@ -3423,6 +3423,17 @@ export function RateCardForm(props: RateCardFormProps) {
                 )}
               </div>
             )}
+            {/* Unlock (Rently code) sits inline to the LEFT of Back — hidden once
+                the inspection is read-only (completed / pending approval view). */}
+            {!props.readOnly && (
+              <UnlockButton
+                propertyId={props.propertyRecordId}
+                address={props.propertyName}
+                inspectionName={props.templateLabel}
+                inspectionId={props.inspectionRecordId}
+                compact
+              />
+            )}
             <button
               type="button"
               onClick={handleSaveAndClose}
@@ -3432,14 +3443,6 @@ export function RateCardForm(props: RateCardFormProps) {
               <span aria-hidden>←</span> Back
             </button>
             </div>
-            {/* Rently access code for this property — sits directly below Back. */}
-            <UnlockButton
-              propertyId={props.propertyRecordId}
-              address={props.propertyName}
-              inspectionName={props.templateLabel}
-              inspectionId={props.inspectionRecordId}
-              className="w-full"
-            />
           </div>
         </div>
       </header>
