@@ -255,23 +255,35 @@ export default function Home() {
 
   // Revalidate the list+counts from the network and refresh the cache. On a
   // failure we KEEP whatever is on screen (the cached list) rather than blanking
-  // it — only surface an error when there is nothing cached to show.
+  // it — only surface an error when there is nothing cached to show. The very
+  // first load on a fresh device has no cache, so a transient HubSpot blip (cold
+  // serverless instance, rate-limit, or an open circuit breaker) would otherwise
+  // greet a brand-new user with a red error. Retry a couple times with backoff
+  // before surfacing it, so transient failures self-heal silently.
   const load = useCallback(async (opts?: { refresh?: boolean }) => {
-    try {
-      const r = await fetch(`/api/inspections?${buildListParams(opts).toString()}`, { cache: 'no-store' });
-      const data = await r.json();
-      if (data.error) {
-        if (!lsRead(RESULTS_CACHE)[listCacheKey]) setError(data.error);
-      } else {
-        applyListData(data);
-        lsWrite(RESULTS_CACHE, listCacheKey, { inspections: data.inspections || [], total: data.total, counts: data.counts });
-        setError(null);
+    const hasCache = !!lsRead(RESULTS_CACHE)[listCacheKey];
+    const maxAttempts = hasCache ? 1 : 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const r = await fetch(`/api/inspections?${buildListParams(opts).toString()}`, { cache: 'no-store' });
+        const data = await r.json();
+        if (!data.error) {
+          applyListData(data);
+          lsWrite(RESULTS_CACHE, listCacheKey, { inspections: data.inspections || [], total: data.total, counts: data.counts });
+          setError(null);
+          break;
+        }
+        // Server returned an error payload — retry while attempts remain.
+        if (attempt >= maxAttempts) { if (!hasCache) setError(data.error); break; }
+      } catch (e: any) {
+        if (attempt >= maxAttempts) {
+          if (!hasCache) setError('Couldn’t reach the server. Check your connection and try again.');
+          break;
+        }
       }
-    } catch (e: any) {
-      if (!lsRead(RESULTS_CACHE)[listCacheKey]) setError(String(e.message || e));
-    } finally {
-      setLoading(false);
+      await new Promise((res) => setTimeout(res, 700 * attempt));
     }
+    setLoading(false);
   }, [buildListParams, listCacheKey, applyListData]);
 
   // On any query change: paint cached results INSTANTLY (stale-while-revalidate),
@@ -867,7 +879,7 @@ export default function Home() {
           )}
           {error && !loading && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 mb-3">
-              Could not load inspections: {error}
+              {error}
             </div>
           )}
           {!loading && !error && total === 0 && (
