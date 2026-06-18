@@ -875,7 +875,12 @@ function inspectionFilterGroups(q: InspectionQuery): any[] {
 }
 
 const SORT_PROPERTY: Record<InspectionSortField, string> = {
-  updated: 'hs_lastmodifieddate',
+  // The card shows `last_edited_at || hs_lastmodifieddate` (the meaningful "last
+  // edited" time, NOT every backend touch like a PDF regeneration). Sort on the
+  // SAME field so the list order matches the dates shown on the cards — sorting
+  // on raw hs_lastmodifieddate made backend writes (regeneration) reorder the
+  // list while the displayed dates stayed put, which looked unsorted.
+  updated: 'last_edited_at',
   scheduled: 'scheduled_date',
   address: 'property_address_snapshot',
   inspector: 'inspector_name',
@@ -900,11 +905,18 @@ export async function searchInspectionsPage(params: InspectionQuery & {
   const pageSize = Math.min(100, Math.max(1, params.pageSize || 20));
   const page = Math.max(1, params.page || 1);
   const offset = (page - 1) * pageSize;
+  // For "updated", add hs_lastmodifieddate as a secondary key so records that
+  // predate the last_edited_at property (null value) still order sensibly and
+  // stay visible — matching the card's `last_edited_at || hs_lastmodifieddate`
+  // display fallback. Other sort fields use the single property.
+  const sorts = sortField === 'updated'
+    ? [{ propertyName: 'last_edited_at', direction }, { propertyName: 'hs_lastmodifieddate', direction }]
+    : [{ propertyName: SORT_PROPERTY[sortField], direction }];
   const body: any = {
     filterGroups: inspectionFilterGroups(params),
     properties: INSPECTION_LIST_PROPERTIES,
     limit: pageSize,
-    sorts: [{ propertyName: SORT_PROPERTY[sortField], direction }],
+    sorts,
   };
   // HubSpot caps offset paging at 10,000; clamp so a very deep page never errors.
   if (offset > 0) body.after = String(Math.min(offset, Math.max(0, 10000 - pageSize)));
