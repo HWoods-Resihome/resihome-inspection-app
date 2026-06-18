@@ -55,47 +55,71 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let objectUrl: string | null = null;
     setReady(false);
     setLoadError(false);
-    let tries = 0;
-    const MAX_TRIES = 5;
     const isLocal = /^(blob:|data:)/.test(src);
-    const attempt = () => {
+    const MAX_TRIES = 5;
+
+    // Draw the loaded <img> into the canvas (capped at MAX_EDGE).
+    const onImgLoad = (img: HTMLImageElement) => {
+      if (cancelled) return;
+      let w = img.naturalWidth || img.width;
+      let h = img.naturalHeight || img.height;
+      const longEdge = Math.max(w, h);
+      if (longEdge > MAX_EDGE) {
+        const s = MAX_EDGE / longEdge;
+        w = Math.round(w * s); h = Math.round(h * s);
+      }
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      canvas.width = w; canvas.height = h;
+      imgRef.current = img;
+      setReady(true);
+      redraw();
+    };
+
+    const loadObjectUrl = (u: string) => {
       const img = new Image();
-      img.onload = () => {
+      img.onload = () => onImgLoad(img);
+      img.onerror = () => { if (!cancelled) setLoadError(true); };
+      img.src = u;
+    };
+
+    // Remote photos: FETCH the bytes (same-origin proxy) and load via an object
+    // URL rather than pointing <img src> straight at the API route. iOS WebKit is
+    // flaky loading <img>/canvas images directly from a streaming API endpoint
+    // (the "Opening photo… / Couldn't open" hang), but a fully-fetched local blob
+    // decodes reliably AND can't taint the canvas. Retries cover the brief window
+    // right after capture where the file hasn't propagated to HubSpot's CDN yet.
+    const fetchAndLoad = async (tries: number) => {
+      try {
+        const bust = tries > 0 ? `${src.includes('?') ? '&' : '?'}r=${tries}` : '';
+        const resp = await fetch(src + bust, { cache: 'no-store' });
+        if (!resp.ok) throw new Error(`proxy ${resp.status}`);
+        const blob = await resp.blob();
         if (cancelled) return;
-        let w = img.naturalWidth || img.width;
-        let h = img.naturalHeight || img.height;
-        const longEdge = Math.max(w, h);
-        if (longEdge > MAX_EDGE) {
-          const s = MAX_EDGE / longEdge;
-          w = Math.round(w * s); h = Math.round(h * s);
-        }
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        canvas.width = w; canvas.height = h;
-        imgRef.current = img;
-        setReady(true);
-        redraw();
-      };
-      img.onerror = () => {
+        objectUrl = URL.createObjectURL(blob);
+        loadObjectUrl(objectUrl);
+      } catch (e) {
         if (cancelled) return;
-        tries += 1;
-        // A photo opened right after capture may not have propagated to HubSpot's
-        // CDN yet (the proxy 404s briefly). Retry with backoff before giving up —
-        // cache-busting each remote retry so a cached 404 isn't reused.
-        if (tries < MAX_TRIES) {
-          timer = setTimeout(attempt, 700 * tries);
+        if (tries + 1 < MAX_TRIES) {
+          timer = setTimeout(() => { void fetchAndLoad(tries + 1); }, 700 * (tries + 1));
         } else {
+          console.warn('[PhotoAnnotator] could not fetch image for markup:', e);
           setLoadError(true);
         }
-      };
-      img.src = (!isLocal && tries > 0)
-        ? `${src}${src.includes('?') ? '&' : '?'}r=${tries}`
-        : src;
+      }
     };
-    attempt();
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+
+    if (isLocal) loadObjectUrl(src);
+    else void fetchAndLoad(0);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      if (objectUrl) { try { URL.revokeObjectURL(objectUrl); } catch { /* noop */ } }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src, reloadKey]);
 

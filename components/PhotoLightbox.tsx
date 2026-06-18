@@ -178,18 +178,7 @@ export function PhotoLightbox({
                   // clip you swiped past stops instead of playing audio
                   // off-screen; neighbors show the poster image.
                   i === index ? (
-                    // Native controls only — ONE play button on every platform.
-                    // (A custom overlay button used to double up with iOS Safari's
-                    // own start-playback button, which iOS won't reliably hide.)
-                    <video
-                      src={playableVideoSrc(p)}
-                      poster={displayImageSrc(p)}
-                      controls
-                      playsInline
-                      preload="metadata"
-                      className="lightbox-video max-w-full max-h-full"
-                      // No stopPropagation: a horizontal swipe navigates like a photo.
-                    />
+                    <LightboxVideo entry={p} poster={displayImageSrc(p)} />
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={displayImageSrc(p)} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
@@ -311,5 +300,76 @@ export function PhotoLightbox({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Video slide for the lightbox. iOS Safari/WebKit is unreliable streaming a
+ * <video> straight from an API route (the proxy) or playing a non-faststart
+ * local recording blob — clips showed a black frame + slashed play button. So we
+ * FETCH the playable source fully and play it from an object URL: a complete,
+ * faststart mp4 blob decodes reliably on iOS, no Range/streaming needed. While a
+ * just-recorded clip is still uploading its only source is the local recording
+ * blob (moov atom at the end → unplayable on iOS); that errors into a "still
+ * processing" state, and the moment the upload finishes the parent swaps in the
+ * uploaded (server-faststarted) entry, which re-fetches here and plays.
+ */
+function LightboxVideo({ entry, poster }: { entry: string; poster: string }) {
+  const [src, setSrc] = useState<string>('');
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    let obj: string | null = null;
+    setStatus('loading');
+    setSrc('');
+    const raw = playableVideoSrc(entry);
+    (async () => {
+      try {
+        const resp = await fetch(raw, { cache: 'no-store' });
+        if (!resp.ok) throw new Error(`video ${resp.status}`);
+        const blob = await resp.blob();
+        if (cancelled) return;
+        obj = URL.createObjectURL(blob);
+        setSrc(obj);
+        setStatus('ready');
+      } catch {
+        if (!cancelled) setStatus('error');
+      }
+    })();
+    return () => { cancelled = true; if (obj) { try { URL.revokeObjectURL(obj); } catch { /* noop */ } } };
+  }, [entry, reloadKey]);
+
+  if (status === 'error') {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 text-white/80 text-sm text-center px-6"
+           style={{ backgroundImage: `url(${poster})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', width: '100%', height: '100%' }}>
+        <div className="bg-black/60 rounded-xl px-5 py-4 flex flex-col items-center gap-3">
+          <span>This clip is still processing.</span>
+          <button type="button" onClick={() => setReloadKey((k) => k + 1)}
+            className="bg-white/20 hover:bg-white/30 text-white font-heading font-semibold px-4 py-2 rounded-lg">
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+  if (status === 'loading' || !src) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={poster} alt="" className="max-w-full max-h-full object-contain opacity-80" draggable={false} />
+    );
+  }
+  return (
+    <video
+      src={src}
+      poster={poster}
+      controls
+      playsInline
+      preload="metadata"
+      className="lightbox-video max-w-full max-h-full"
+      onError={() => setStatus('error')}
+    />
   );
 }
