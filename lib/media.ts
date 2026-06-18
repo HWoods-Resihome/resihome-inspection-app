@@ -46,7 +46,11 @@ export function getVideoUrl(entry: string): string {
 }
 
 // HubSpot file hosts (region/CDN/TLD variants) — clips stored on HubSpot Files.
-const HUBSPOT_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com)$/i;
+// resihome.com / resiwalk.com = HubSpot's file CDN served via the connected
+// custom domain (this portal's uploads resolve there). MUST be included or
+// playableVideoSrc serves those clips DIRECT — bypassing /api/video-proxy's
+// faststart + content-type fix — and iOS won't play them.
+const HUBSPOT_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com|resihome\.com|resiwalk\.com)$/i;
 
 /**
  * The <video> src to actually render. iOS Safari only plays a source whose

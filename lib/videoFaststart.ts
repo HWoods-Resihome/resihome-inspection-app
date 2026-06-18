@@ -175,6 +175,7 @@ export async function transcodeToH264Mp4(buf: Buffer, timeoutMs = 55000): Promis
     const outPath = path.join(dir, 'out.mp4');
     await fs.writeFile(inPath, buf);
     await new Promise<void>((resolve, reject) => {
+      let err = '';
       const proc = spawn(
         exe,
         [
@@ -185,15 +186,21 @@ export async function transcodeToH264Mp4(buf: Buffer, timeoutMs = 55000): Promis
           '-movflags', '+faststart',
           outPath,
         ],
-        { stdio: 'ignore' },
+        { stdio: ['ignore', 'ignore', 'pipe'] },
       );
+      proc.stderr?.on('data', (d) => { err += d.toString(); });
       const timer = setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* noop */ } reject(new Error('ffmpeg timeout')); }, timeoutMs);
       proc.on('error', (e) => { clearTimeout(timer); reject(e); });
-      proc.on('close', (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`)); });
+      proc.on('close', (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg exit ${code}: ${err.slice(0, 500)}`));
+      });
     });
     const out = await fs.readFile(outPath);
     return out.length > 0 && isMp4(out) ? out : await ensureFaststart(buf);
-  } catch {
+  } catch (e) {
+    console.error('[transcodeToH264Mp4] failed, serving original:', String((e as any)?.message || e).slice(0, 500));
     return ensureFaststart(buf); // never corrupt/drop the clip
   } finally {
     if (dir) { try { await fs.rm(dir, { recursive: true, force: true }); } catch { /* noop */ } }
