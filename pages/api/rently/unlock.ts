@@ -88,6 +88,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // points at the wrong deployment. Surface a precise, actionable diagnostic.
     const snippet = (text || '').replace(/\s+/g, ' ').trim().slice(0, 240);
     const looksLikeGoogleLogin = /sign in|accounts\.google\.com|<!doctype html|<html/i.test(snippet);
+    // An XML / TwiML <Response/> means the /exec URL is answering with a
+    // DIFFERENT web app entry point (e.g. a Twilio-webhook doPost) — i.e. the
+    // Apps Script project has more than one doPost and ours isn't the one that
+    // ran. Only one doPost can exist per project; the Unlock handler must be
+    // dispatched from that single doPost.
+    const looksLikeXml = /^<\?xml|<Response\b|<Response\/>/i.test(snippet);
     console.error('[rently/unlock] non-JSON upstream', { httpStatus, snippet });
     res.status(200).json({
       status: 'FAILED',
@@ -96,6 +102,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ? `Code service returned a sign-in page (HTTP ${httpStatus}), not a code. ` +
           `Re-deploy the VCB Web App with “Who has access: Anyone”, and confirm ` +
           `RENTLY_UNLOCK_ENDPOINT is that deployment’s /exec URL.`
+        : looksLikeXml
+        ? `The code service URL is answering with a different web app (an XML/TwiML ` +
+          `response), not the Unlock endpoint. The VCB Apps Script project has a ` +
+          `second doPost (the Twilio webhook) that's overriding the Unlock one — ` +
+          `dispatch the Unlock handler from the single project doPost.`
         : `Code service returned an unexpected response (HTTP ${httpStatus}): ` +
           `${snippet || '(empty body)'}`,
     });
