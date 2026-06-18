@@ -60,6 +60,8 @@ type Props = {
    *  property has no qualifying listing or the listing object isn't configured. */
   listingPrice?: number | null;
   listingDate?: string | null;
+  /** Listing status (e.g. "Active" / "Deposit Taken") shown in front of the price. */
+  listingStatus?: string | null;
   /** Community/Visit only: the name of the community associated with the
    *  property, shown above the address in the header. */
   communityName?: string | null;
@@ -218,7 +220,7 @@ function slugify(s: string): string {
 
 export function QuestionForm({
   questions, templateType, templateLabel, inspectorName, propertyName, propertyRecordId,
-  bedrooms, bathrooms, squareFootage, inspectionRegion, status, submittedAt, listingPrice, listingDate, communityName, onSubmit, onCancel,
+  bedrooms, bathrooms, squareFootage, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, communityName, onSubmit, onCancel,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
   propertyAirFiltersTotal, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
@@ -1704,8 +1706,17 @@ export function QuestionForm({
                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{failCount} Fail</span>
                 </div>
               )}
-              {!isCommunity && ((typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? (
+              {!isCommunity && (listingStatus || (typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? (
                 <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
+                  {/* Listing status from the listing object (Active / Deposit
+                      Taken), shown in front of the price. */}
+                  {listingStatus && (
+                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full border mr-1.5 align-middle ${
+                      /active/i.test(listingStatus)
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                        : 'bg-amber-100 text-amber-800 border-amber-200'
+                    }`}>{listingStatus}</span>
+                  )}
                   {typeof listingPrice === 'number' && listingPrice > 0 && (
                     <span>Listing ${listingPrice.toLocaleString()}</span>
                   )}

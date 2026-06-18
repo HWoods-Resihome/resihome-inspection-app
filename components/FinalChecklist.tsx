@@ -20,7 +20,7 @@ import { ListPicker } from '@/components/ListPicker';
 import { WheelPicker } from '@/components/WheelPicker';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
-import { thumbImageSrc } from '@/lib/photoDisplay';
+import { PhotoThumb } from '@/components/PhotoThumb';
 import { SyncingBadge } from '@/components/SyncingBadge';
 
 export type { FcAnswerState, FcAnswers } from '@/lib/finalChecklist';
@@ -146,8 +146,11 @@ export function FinalChecklist(props: Props) {
       <div className={`flex flex-wrap gap-2 items-center mt-1.5 ${center ? 'justify-center' : ''}`}>
         {urls.map((u, i) => (
           <div key={`${u}-${i}`} className="relative">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={thumbImageSrc(u)} alt="" onClick={() => openLightbox(camKey, i)}
+            {/* Self-healing tile (proxy → direct → neutral box). A raw <img> on
+                the proxied thumbnail showed a broken image right after capture/
+                sync — the FC photos that "weren't previewing". PhotoThumb retries
+                and handles blob: drafts too. */}
+            <PhotoThumb url={u} alt="" onClick={() => openLightbox(camKey, i)}
               title="Tap to view, mark up, or delete"
               className="w-14 h-14 object-cover rounded border border-gray-200 cursor-pointer" />
             {u.startsWith('blob:') && <SyncingBadge />}

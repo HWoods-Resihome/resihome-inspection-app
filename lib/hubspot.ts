@@ -2053,9 +2053,23 @@ function formatListingDate(raw: any): string | null {
   return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
 }
 
+// Human-readable listing status for the inspection header (shown in front of the
+// listing price). The status property may hold a boolean-ish publish flag or a
+// status string; normalize the common cases to "Active" / "Deposit Taken" and
+// Title-case anything else. Returns null when there's nothing useful to show.
+function formatListingStatus(raw: string | null | undefined): string | null {
+  const s = (raw || '').trim();
+  if (!s) return null;
+  const low = s.toLowerCase();
+  if (/deposit/.test(low)) return 'Deposit Taken';
+  if (low === 'true' || low === 'yes' || low === '1' || low === 'active' || /publish/.test(low)) return 'Active';
+  if (low === 'false' || low === 'no' || low === '0') return null; // unpublished / none → omit
+  return s.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export async function fetchActiveListingForProperty(
   propertyRecordId: string
-): Promise<{ listingPrice: number | null; listingDate: string | null } | null> {
+): Promise<{ listingPrice: number | null; listingDate: string | null; listingStatus: string | null } | null> {
   if (!propertyRecordId) return null;
   const tids = typeIds();
   const lid = listingTypeId();
@@ -2123,7 +2137,7 @@ export async function fetchActiveListingForProperty(
     // (in practice the deposit-taken / pending listings).
     const pick = published[0] || rest[0];
     if (!pick) return null;
-    return { listingPrice: pick.price, listingDate: formatListingDate(pick.date) };
+    return { listingPrice: pick.price, listingDate: formatListingDate(pick.date), listingStatus: formatListingStatus(pick.status) };
   } catch (e) {
     console.warn('[listing] lookup failed:', e);
     return null;

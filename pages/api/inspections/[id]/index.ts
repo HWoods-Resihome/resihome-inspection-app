@@ -108,6 +108,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         propertySepticFee: data.propertySepticFee,
         listingPrice: listing?.listingPrice ?? null,
         listingDate: listing?.listingDate ?? null,
+        listingStatus: listing?.listingStatus ?? null,
         communityName: communityName ?? null,
         filterSizeOptions,
         shareLinks,
