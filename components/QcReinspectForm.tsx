@@ -29,6 +29,7 @@ import { PhotoStrip } from '@/components/PhotoStrip';
 import { useAppDialog } from '@/components/AppDialog';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
+import { UnlockButton } from '@/components/UnlockButton';
 
 interface QcLine {
   recordId: string;
@@ -614,14 +615,24 @@ export function QcReinspectForm(props: Props) {
               {sourceName && <span> &middot; Validating: {sourceName}</span>}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={props.onCancel}
-            className="flex-shrink-0 inline-flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-3 py-1.5 bg-white"
-            title="Go back"
-          >
-            <span aria-hidden>&larr;</span> Back
-          </button>
+          <div className="flex-shrink-0 self-start flex flex-col items-end gap-2">
+            <button
+              type="button"
+              onClick={props.onCancel}
+              className="inline-flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-3 py-1.5 bg-white"
+              title="Go back"
+            >
+              <span aria-hidden>&larr;</span> Back
+            </button>
+            {/* Rently access code for this property — sits directly below Back. */}
+            <UnlockButton
+              propertyId={props.propertyRecordId}
+              address={props.propertyName}
+              inspectionName={props.templateLabel}
+              inspectionId={props.inspectionRecordId}
+              className="w-full"
+            />
+          </div>
         </div>
       </header>
 

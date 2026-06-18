@@ -19,6 +19,7 @@ import {
 import { buildSectionPhotoAnswerProps, buildQaAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
+import { UnlockButton } from '@/components/UnlockButton';
 import { isInternalResolution, VENDORS, defaultVendorForItem } from '@/lib/vendors';
 import { isAiWarm, warmAi } from '@/lib/aiWarm';
 import { ListPicker } from '@/components/ListPicker';
@@ -3361,7 +3362,8 @@ export function RateCardForm(props: RateCardFormProps) {
           {/* Settings (gear) + Back, pinned upper-right. The gear houses the
               lower-frequency Manage Sections / Refresh Pricing actions to keep
               the body clean. */}
-          <div className="flex-shrink-0 self-start flex items-center gap-2">
+          <div className="flex-shrink-0 self-start flex flex-col items-end gap-2">
+            <div className="flex items-center gap-2">
             {!props.readOnly && (
               <div className="relative">
                 <button
@@ -3429,6 +3431,15 @@ export function RateCardForm(props: RateCardFormProps) {
             >
               <span aria-hidden>←</span> Back
             </button>
+            </div>
+            {/* Rently access code for this property — sits directly below Back. */}
+            <UnlockButton
+              propertyId={props.propertyRecordId}
+              address={props.propertyName}
+              inspectionName={props.templateLabel}
+              inspectionId={props.inspectionRecordId}
+              className="w-full"
+            />
           </div>
         </div>
       </header>

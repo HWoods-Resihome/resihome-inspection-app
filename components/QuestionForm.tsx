@@ -22,6 +22,7 @@ import { buildQaAnswerProps, buildSectionPhotoAnswerProps } from '@/lib/answerPr
 import { isHvacSection, isSmartHomeSection } from '@/lib/scopeWidgetSections';
 import { FinalChecklist } from '@/components/FinalChecklist';
 import { SyncingBadge } from '@/components/SyncingBadge';
+import { UnlockButton } from '@/components/UnlockButton';
 import {
   finalChecklistGap, fcSectionCounts,
   type FcAnswers, type FcAnswerState, type FcCompletionCtx,
@@ -1648,6 +1649,7 @@ export function QuestionForm({
             )}
           </div>
           {/* Back — saves pending edits then exits. */}
+          <div className="shrink-0 self-start flex flex-col items-end gap-2">
           <button
             type="button"
             onClick={async () => {
@@ -1656,11 +1658,20 @@ export function QuestionForm({
               }
               onCancel();
             }}
-            className="shrink-0 inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
+            className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
             title="Save and go back"
           >
             <span aria-hidden>←</span> Back
           </button>
+          {/* Rently access code for this property — sits directly below Back. */}
+          <UnlockButton
+            propertyId={propertyRecordId}
+            address={propertyName}
+            inspectionName={templateLabel}
+            inspectionId={inspectionRecordId}
+            className="w-full"
+          />
+          </div>
         </div>
       </div>
 
