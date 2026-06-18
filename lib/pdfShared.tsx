@@ -79,15 +79,18 @@ export const pdfStyles = StyleSheet.create({
     color: PDF_COLORS.white,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    // Vertically center the logo (left) and the RESULT block (right) against the
-    // taller property/details column so they sit mid-height in the pink band.
-    alignItems: 'center',
+    // Top-align so the right column's inspector name sits on the title row; the
+    // logo is re-centered on its own via alignSelf (see headerLogo).
+    alignItems: 'flex-start',
   },
   headerLogo: {
     width: 38,
     height: 38,
     borderRadius: 8,
     marginRight: 12,
+    // Vertically center the logo within the pink band even though the strip
+    // itself is top-aligned (so the inspector name can sit on the title row).
+    alignSelf: 'center',
   },
   headerLeft: {
     flexDirection: 'column',
@@ -375,6 +378,10 @@ export function PdfHeaderStrip(props: {
   /** When true, render the property details line BEFORE the inspector line
    *  (1099 layout). Default false (inspector first — Scope/QC layout). */
   detailsFirst?: boolean;
+  /** When true, the inspector name moves to the TOP-RIGHT (on the title row) and
+   *  is dropped from the left column — saving a line and shortening the header.
+   *  The `summary` (e.g. RESULT) then renders just below it on the right. */
+  inspectorTopRight?: boolean;
   /** Right-aligned summary content — typically a Tenant Total or Vendor Total. */
   summary?: React.ReactNode;
 }) {
@@ -403,6 +410,16 @@ export function PdfHeaderStrip(props: {
   const listingEl = props.listingLine ? <Text style={pdfStyles.headerMeta}>{props.listingLine}</Text> : null;
 
   const logoSrc = brandLogoDataUri();
+  // Inspector shown in the left column ONLY when it's not pinned to the top-right.
+  const inspectorLeftEl = props.inspectorTopRight ? null : inspectorEl;
+  const rightCol = (props.summary || props.inspectorTopRight) ? (
+    <View style={pdfStyles.headerRight}>
+      {props.inspectorTopRight ? (
+        <Text style={[pdfStyles.headerProperty, { textAlign: 'right' }]}>{inspectorLine}</Text>
+      ) : null}
+      {props.summary}
+    </View>
+  ) : null;
   return (
     <View style={pdfStyles.headerStrip}>
       {logoSrc ? <Image src={logoSrc} style={pdfStyles.headerLogo} /> : null}
@@ -413,19 +430,19 @@ export function PdfHeaderStrip(props: {
           <>
             {detailsEl}
             {listingEl}
-            {inspectorEl}
+            {inspectorLeftEl}
             {approverEl}
           </>
         ) : (
           <>
-            {inspectorEl}
+            {inspectorLeftEl}
             {approverEl}
             {detailsEl}
             {listingEl}
           </>
         )}
       </View>
-      {props.summary ? <View style={pdfStyles.headerRight}>{props.summary}</View> : null}
+      {rightCol}
     </View>
   );
 }

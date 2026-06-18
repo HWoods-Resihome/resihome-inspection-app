@@ -282,9 +282,10 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           generatedAtLabel={isoToHumanDate(data.completedAt)}
           listingLine={isCommunity ? null : listingLine}
           detailsFirst
+          inspectorTopRight
           summary={(
             <>
-              <Text style={pdfStyles.headerRightLabel}>RESULT</Text>
+              <Text style={{ ...pdfStyles.headerRightLabel, marginTop: 5 }}>RESULT</Text>
               <Text style={pdfStyles.headerRightValue}>{resultText}</Text>
             </>
           )}
