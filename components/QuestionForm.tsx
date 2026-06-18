@@ -1612,25 +1612,24 @@ export function QuestionForm({
       <div className="lz-head max-w-3xl mx-auto px-4 pt-3 pb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            {/* Title + status on ONE line — never wraps; the title font shrinks
-                to fit, the badge stays fixed beside it. */}
-            <div className="flex items-center gap-2">
-              <FitText
-                text={templateLabel}
-                className="font-heading font-bold text-gray-900 flex-1 min-w-0"
-                max={20}
-                min={13}
-              />
-              {headerBadge && (
-                <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${headerBadge.color}`}>{headerBadge.label}</span>
-              )}
-            </div>
+            {/* Template name gets the full width — the status chip moved to its
+                own line below the inspector so the name isn't cropped by the chip
+                + Unlock/Back sharing the top row. */}
+            <FitText
+              text={templateLabel}
+              className="font-heading font-bold text-gray-900"
+              max={20}
+              min={13}
+            />
             <div className="text-xs text-gray-500 mt-0.5">
               Inspector: {inspectorName}
               {isSubmittedState && fmtStamp(submittedAt) && (
                 <span className="text-gray-400">{'  ·  '}{fmtStamp(submittedAt)} Submitted</span>
               )}
             </div>
+            {headerBadge && (
+              <span className={`inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${headerBadge.color}`}>{headerBadge.label}</span>
+            )}
             {pdfUrl && (
               <a
                 href={pdfUrl}
@@ -1713,13 +1712,7 @@ export function QuestionForm({
                 )}
                 {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
               </div>
-              {/* Live Pass / Fail tally — updates as selections are made. */}
-              {scopeStyle && (
-                <div className="mt-0.5 flex items-center gap-1.5 text-[11px] font-heading font-bold">
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{passCount} Pass</span>
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{failCount} Fail</span>
-                </div>
-              )}
+              {/* Order: address → details → listing line → Pass/Fail tally. */}
               {!isCommunity && (listingStatus || (typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? (
                 <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
                   {/* Listing status from the listing object (Active / Deposit
@@ -1738,6 +1731,13 @@ export function QuestionForm({
                   )}
                 </div>
               ) : null}
+              {/* Live Pass / Fail tally — updates as selections are made. */}
+              {scopeStyle && (
+                <div className="mt-0.5 flex items-center gap-1.5 text-[11px] font-heading font-bold">
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{passCount} Pass</span>
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{failCount} Fail</span>
+                </div>
+              )}
             </div>
           </div>
           {/* Save / read-only strip — back in the frozen header (hidden on short
