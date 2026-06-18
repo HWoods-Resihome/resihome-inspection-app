@@ -178,6 +178,9 @@ function toneOf(v: string | undefined): 'pass' | 'fail' | null {
 
 const isMaintRequestQ = (q: string) => /submit a maintenance ticket/i.test(q || '');
 const isMaintDescQ = (q: string) => /maintenance ticket description/i.test(q || '');
+// The Community/Visit inspection's overall score question ("Grade the Community",
+// 1 = Poor … 10 = Excellent). Its answer is the headline "Community Score".
+const isCommunityGradeQ = (q: string) => /grade the community/i.test(q || '');
 
 // Clickable photo tiles: render the small embedded thumbnail but LINK to the
 // original full-size file (image) or playable clip (video) so tapping a photo in
@@ -204,10 +207,12 @@ export function InspectionPdf({ data }: { data: PdfData }) {
   let passCount = 0;
   let failCount = 0;
   let maintTicket: string | null = null;
+  let communityGrade: string | null = null;
   for (const section of data.sectionsInOrder) {
     for (const a of (data.answersBySection[section] || [])) {
       if (isMaintRequestQ(a.questionText)) { maintTicket = a.answerValue || null; continue; }
       if (isMaintDescQ(a.questionText)) continue; // shown in detail, not the summary grid
+      if (isCommunityGradeQ(a.questionText) && a.answerValue) communityGrade = a.answerValue.trim();
       const tone = toneOf(a.answerValue);
       if (tone === 'pass') passCount++;
       else if (tone === 'fail') failCount++;
@@ -218,8 +223,8 @@ export function InspectionPdf({ data }: { data: PdfData }) {
   const resultText = result === 'fail' ? 'FAIL' : result === 'pass' ? 'PASS' : '—';
   const ticketYes = /^y/i.test(maintTicket || '');
   const isCommunity = /community/i.test(data.templateLabel || '');
-  const scored = passCount + failCount;
-  const communityScore = scored > 0 ? `${Math.round((passCount / scored) * 100)}%` : '—';
+  // Community Score = the "Grade the Community" answer (1–10 scale).
+  const communityScore = communityGrade ? `${communityGrade} / 10` : '—';
 
   const chipStyle = (tone: 'pass' | 'fail' | null) => {
     if (tone === 'pass') return { ...styles.chip, backgroundColor: COLORS.greenBg, color: COLORS.emerald };
