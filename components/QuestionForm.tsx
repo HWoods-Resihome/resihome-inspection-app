@@ -1709,20 +1709,17 @@ export function QuestionForm({
               {!isCommunity && (listingStatus || (typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? (
                 <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
                   {/* Listing status from the listing object (Active / Deposit
-                      Taken), shown in front of the price. */}
+                      Taken), shown in front of the price as plain colored text:
+                      green for Active, amber otherwise. */}
                   {listingStatus && (
-                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full border mr-1.5 align-middle ${
-                      /active/i.test(listingStatus)
-                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                        : 'bg-amber-100 text-amber-800 border-amber-200'
-                    }`}>{listingStatus}</span>
+                    <span className={/active/i.test(listingStatus) ? '' : 'text-amber-600'}>{listingStatus}</span>
                   )}
                   {typeof listingPrice === 'number' && listingPrice > 0 && (
-                    <span>Listing ${listingPrice.toLocaleString()}</span>
+                    <span>{listingStatus ? ' · ' : ''}Listing ${listingPrice.toLocaleString()}</span>
                   )}
                   {listingDate && (
                     <span className="text-gray-500 font-normal">
-                      {typeof listingPrice === 'number' && listingPrice > 0 ? ' · ' : ''}Listed {listingDate}
+                      {(listingStatus || (typeof listingPrice === 'number' && listingPrice > 0)) ? ' · ' : ''}Listed {listingDate}
                     </span>
                   )}
                 </div>
