@@ -23,6 +23,9 @@
     },
     "pages/api/cron/auto-cancel-stale.ts": {
       "maxDuration": 60
+    },
+    "pages/api/insights/rebuild.ts": {
+      "maxDuration": 60
     }
   },
   "crons": [
@@ -37,6 +40,10 @@
     {
       "path": "/api/cron/auto-cancel-stale",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/insights/rebuild",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

@@ -45,6 +45,9 @@ const PUBLIC_PATHS = new Set<string>([
   '/api/cron/sftp-watch',
   '/api/cron/blob-cleanup',
   '/api/cron/auto-cancel-stale',
+  // Insights snapshot rebuild: reached by Vercel Cron (no session cookie) and by
+  // admins. Self-enforces CRON_SECRET bearer / app-admin session in the handler.
+  '/api/insights/rebuild',
   // Image proxy/resizer. Must be public so the PUBLIC share viewer (/d/...) can
   // render legacy HEIC photos (converted to JPEG) and request small thumbnails.
   // Safe: it is SSRF-guarded to HubSpot file hosts and only ever returns files
