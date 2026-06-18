@@ -25,6 +25,7 @@ const nextConfig = {
       '/api/upload': ['./node_modules/ffmpeg-static/ffmpeg'],
       '/api/video-proxy': ['./node_modules/ffmpeg-static/ffmpeg'],
       '/api/video-transcode': ['./node_modules/ffmpeg-static/ffmpeg'],
+      '/api/admin/ffmpeg-check': ['./node_modules/ffmpeg-static/ffmpeg'],
     },
   },
   env: {

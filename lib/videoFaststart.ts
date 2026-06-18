@@ -44,6 +44,36 @@ function ffmpegExec(): string | null {
   return _ffmpegExec;
 }
 
+/**
+ * Diagnostic: does ffmpeg actually EXECUTE in this runtime, and is H.264 (libx264)
+ * available? Surfaces the silent EACCES / missing-encoder failures that made
+ * faststart/transcode no-op on Vercel. Used by /api/admin/ffmpeg-check.
+ */
+export async function probeFfmpeg(): Promise<{ path: string | null; version: string; hasH264: boolean; raw: string }> {
+  const exe = ffmpegExec();
+  if (!exe) return { path: null, version: '', hasH264: false, raw: 'no ffmpeg binary resolved' };
+  const run = (args: string[]) => new Promise<string>((resolve) => {
+    let out = '';
+    try {
+      const p = spawn(exe, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      p.stdout?.on('data', (d) => { out += d.toString(); });
+      p.stderr?.on('data', (d) => { out += d.toString(); });
+      p.on('error', (e) => resolve(`SPAWN_ERROR: ${e.message}`));
+      p.on('close', () => resolve(out));
+      setTimeout(() => { try { p.kill('SIGKILL'); } catch { /* noop */ } resolve(out || 'timeout'); }, 8000);
+    } catch (e: any) { resolve(`THROW: ${e?.message || e}`); }
+  });
+  const versionOut = await run(['-hide_banner', '-version']);
+  const encoders = await run(['-hide_banner', '-encoders']);
+  const hasH264 = /\blibx264\b/.test(encoders) || /^\s*V.{5,}\bh264\b/m.test(encoders);
+  return {
+    path: exe,
+    version: (versionOut.split('\n')[0] || '').trim(),
+    hasH264,
+    raw: `${versionOut.slice(0, 200)}\n--- encoders(h264) ---\n${(encoders.match(/.*264.*/g) || []).join('\n').slice(0, 400)}`,
+  };
+}
+
 /** True if the buffer looks like an ISO-BMFF (mp4/mov) file — 'ftyp' at offset 4. */
 export function isMp4(buf: Buffer): boolean {
   return buf.length >= 12 && buf.toString('latin1', 4, 8) === 'ftyp';
