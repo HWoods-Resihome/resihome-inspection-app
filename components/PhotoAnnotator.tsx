@@ -48,30 +48,56 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
   const [widthScale, setWidthScale] = useState(1);
   const widthScaleRef = useRef(1); widthScaleRef.current = widthScale;
   const [showSize, setShowSize] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const toolRef = useRef(tool); toolRef.current = tool;
   const colorRef = useRef(color); colorRef.current = color;
 
   useEffect(() => {
-    const img = new Image();
-    img.onload = () => {
-      let w = img.naturalWidth || img.width;
-      let h = img.naturalHeight || img.height;
-      const longEdge = Math.max(w, h);
-      if (longEdge > MAX_EDGE) {
-        const s = MAX_EDGE / longEdge;
-        w = Math.round(w * s); h = Math.round(h * s);
-      }
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      canvas.width = w; canvas.height = h;
-      imgRef.current = img;
-      setReady(true);
-      redraw();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    setReady(false);
+    setLoadError(false);
+    let tries = 0;
+    const MAX_TRIES = 5;
+    const isLocal = /^(blob:|data:)/.test(src);
+    const attempt = () => {
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) return;
+        let w = img.naturalWidth || img.width;
+        let h = img.naturalHeight || img.height;
+        const longEdge = Math.max(w, h);
+        if (longEdge > MAX_EDGE) {
+          const s = MAX_EDGE / longEdge;
+          w = Math.round(w * s); h = Math.round(h * s);
+        }
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        canvas.width = w; canvas.height = h;
+        imgRef.current = img;
+        setReady(true);
+        redraw();
+      };
+      img.onerror = () => {
+        if (cancelled) return;
+        tries += 1;
+        // A photo opened right after capture may not have propagated to HubSpot's
+        // CDN yet (the proxy 404s briefly). Retry with backoff before giving up —
+        // cache-busting each remote retry so a cached 404 isn't reused.
+        if (tries < MAX_TRIES) {
+          timer = setTimeout(attempt, 700 * tries);
+        } else {
+          setLoadError(true);
+        }
+      };
+      img.src = (!isLocal && tries > 0)
+        ? `${src}${src.includes('?') ? '&' : '?'}r=${tries}`
+        : src;
     };
-    img.onerror = () => setLoadError(true);
-    img.src = src;
+    attempt();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src]);
+  }, [src, reloadKey]);
 
   function strokeWidthFor(t: Tool): number {
     const c = canvasRef.current;
@@ -255,21 +281,31 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
 
       {/* Canvas */}
       <div className="flex-1 min-h-0 relative flex items-center justify-center p-2 overflow-hidden">
+        {/* Canvas is ALWAYS mounted (even while loading / on error) so canvasRef
+            exists when the image's onload fires; overlays sit on top of it. */}
+        <canvas
+          ref={canvasRef}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onUp}
+          style={{ touchAction: 'none', display: ready ? 'block' : 'none' }}
+          className="max-w-full max-h-full rounded cursor-crosshair"
+        />
         {loadError ? (
-          <div className="text-white/80 text-sm text-center px-6">
-            Couldn’t open this photo for markup in your browser.
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/80 text-sm text-center px-6">
+            <span>Couldn’t open this photo for markup. It may still be uploading.</span>
+            <button
+              type="button"
+              onClick={() => setReloadKey((k) => k + 1)}
+              className="bg-white/15 hover:bg-white/25 text-white font-heading font-semibold px-4 py-2 rounded-lg"
+            >
+              Try again
+            </button>
           </div>
-        ) : (
-          <canvas
-            ref={canvasRef}
-            onPointerDown={onDown}
-            onPointerMove={onMove}
-            onPointerUp={onUp}
-            onPointerCancel={onUp}
-            style={{ touchAction: 'none' }}
-            className="max-w-full max-h-full rounded cursor-crosshair"
-          />
-        )}
+        ) : !ready ? (
+          <div className="absolute inset-0 flex items-center justify-center text-white/70 text-sm text-center px-6">Opening photo…</div>
+        ) : null}
         {/* Live brush-size indicator while pinching */}
         {showSize && (
           <div className="absolute left-1/2 top-4 -translate-x-1/2 bg-black/70 text-white px-4 py-2 rounded-full flex items-center gap-3 pointer-events-none">

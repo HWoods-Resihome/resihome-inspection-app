@@ -1589,8 +1589,9 @@ export function QuestionForm({
           <div className="min-w-0 flex-1">
             {/* Title + status on ONE line — the title font auto-shrinks so both
                 the full template name AND the status chip fit without truncating
-                (Unlock is now a small bubble, so there's room). */}
-            <div className="flex items-center gap-2">
+                (Unlock is now a small bubble, so there's room). min-h matches the
+                Unlock/Back control row so the status chip lines up with them. */}
+            <div className="flex items-center gap-2 min-h-[36px]">
               <FitText
                 text={templateLabel}
                 className="font-heading font-bold text-gray-900 flex-1 min-w-0"

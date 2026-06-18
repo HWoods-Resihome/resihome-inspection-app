@@ -3334,8 +3334,10 @@ export function RateCardForm(props: RateCardFormProps) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             {/* Title + status on ONE line — the title font auto-shrinks so both
-                the full template name AND the status chip fit without truncating. */}
-            <div className="flex items-center gap-2">
+                the full template name AND the status chip fit without truncating.
+                min-h matches the right-side control row (h-9) so the status chip
+                is vertically centered with the Unlock / Back / Settings icons. */}
+            <div className="flex items-center gap-2 min-h-[36px]">
               <FitText
                 text={props.templateLabel}
                 className="font-heading font-bold text-gray-900 flex-1 min-w-0"
