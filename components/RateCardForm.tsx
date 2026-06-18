@@ -20,6 +20,7 @@ import { buildSectionPhotoAnswerProps, buildQaAnswerProps } from '@/lib/answerPr
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { UnlockButton } from '@/components/UnlockButton';
+import { FitText } from '@/components/FitText';
 import { isInternalResolution, VENDORS, defaultVendorForItem } from '@/lib/vendors';
 import { isAiWarm, warmAi } from '@/lib/aiWarm';
 import { ListPicker } from '@/components/ListPicker';
@@ -3315,24 +3316,32 @@ export function RateCardForm(props: RateCardFormProps) {
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 pt-1 pb-2.5">
-      {/* Pinned top block — the title/status row, sync/storage banners, and the
-          property + $ totals all stay fixed while the rooms list scrolls beneath.
-          env(safe-area-inset-top) keeps it clear of the iOS notch/Dynamic Island
-          (0 in a normal browser, so web/PWA is unchanged). The -mx/px pair lets
-          the gray surface bleed full-width over the page padding. */}
+      {/* Title block — NOT sticky: scrolls away on scroll so only the totals/
+          logo bar below stays pinned (mirrors the 1099). env(safe-area-inset-top)
+          clears the iOS notch; the -mx/px pair bleeds the gray full-width. */}
       <div
-        id="inspection-top-block"
-        className="sticky top-0 z-30 -mx-5 sm:-mx-6 px-5 sm:px-6 bg-gray-50"
+        className="-mx-5 sm:-mx-6 px-5 sm:px-6 bg-gray-50"
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
       {/* Header */}
       <header className="mb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            {/* Template name gets the full width; status chip moved to its own
-                line below the inspector (left-aligned) so the name isn't cropped
-                by the chip + gear/Unlock/Back on the title row. */}
-            <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{props.templateLabel}</h1>
+            {/* Title + status on ONE line — the title font auto-shrinks so both
+                the full template name AND the status chip fit without truncating. */}
+            <div className="flex items-center gap-2">
+              <FitText
+                text={props.templateLabel}
+                className="font-heading font-bold text-gray-900 flex-1 min-w-0"
+                max={20}
+                min={11}
+              />
+              {statusLabel && (
+                <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
+                  {statusLabel.label}
+                </span>
+              )}
+            </div>
             <div className="text-xs text-gray-500 mt-0.5">
               Inspector: {props.inspectorName}
               {/* Only show "Submitted" while it's actually in a submitted state —
@@ -3341,11 +3350,6 @@ export function RateCardForm(props: RateCardFormProps) {
                 <span className="text-gray-400">{'  ·  '}{fmtStamp(props.submittedAt)} Submitted</span>
               )}
             </div>
-            {statusLabel && (
-              <span className={`inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
-                {statusLabel.label}
-              </span>
-            )}
             {props.approverName && (
               <div className="text-xs text-gray-500 mt-0.5">
                 Approver: {props.approverName}
@@ -3364,9 +3368,10 @@ export function RateCardForm(props: RateCardFormProps) {
               lower-frequency Manage Sections / Refresh Pricing actions to keep
               the body clean. */}
           <div className="flex-shrink-0 self-start flex flex-col items-end gap-2">
+            {/* Order: Unlock · Back · Settings (gear far right). */}
             <div className="flex items-center gap-2">
             {!props.readOnly && (
-              <div className="relative">
+              <div className="relative order-3">
                 <button
                   type="button"
                   onClick={() => setShowSettingsMenu((v) => !v)}
@@ -3431,20 +3436,31 @@ export function RateCardForm(props: RateCardFormProps) {
                 propertyId={props.propertyRecordId}
                 address={props.propertyName}
                 inspectionId={props.inspectionRecordId}
+                className="order-1"
               />
             )}
             <button
               type="button"
               onClick={handleSaveAndClose}
-              className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white transition-colors"
+              className="order-2 inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white transition-colors"
               title="Save and go back"
             >
-              <span aria-hidden>←</span> Back
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
+              Back
             </button>
             </div>
           </div>
         </div>
       </header>
+      </div>
+
+      {/* Pinned block — sync/storage banners + the logo/address/$-totals bar
+          stay fixed while the rooms scroll beneath. The title block above
+          scrolls away. */}
+      <div
+        id="inspection-top-block"
+        className="sticky top-0 z-30 -mx-5 sm:-mx-6 px-5 sm:px-6 bg-gray-50"
+      >
 
       {/* Sticky header bar — the single home for address + property data
           (the top header no longer repeats it). Five centered boxes:

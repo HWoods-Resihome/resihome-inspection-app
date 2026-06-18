@@ -631,7 +631,8 @@ export function QcReinspectForm(props: Props) {
               className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
               title="Go back"
             >
-              <span aria-hidden>&larr;</span> Back
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
+              Back
             </button>
           </div>
         </div>

@@ -23,6 +23,7 @@ import { isHvacSection, isSmartHomeSection } from '@/lib/scopeWidgetSections';
 import { FinalChecklist } from '@/components/FinalChecklist';
 import { SyncingBadge } from '@/components/SyncingBadge';
 import { UnlockButton } from '@/components/UnlockButton';
+import { FitText } from '@/components/FitText';
 import {
   finalChecklistGap, fcSectionCounts,
   type FcAnswers, type FcAnswerState, type FcCompletionCtx,
@@ -115,45 +116,7 @@ function fmtStamp(v?: string | null): string {
   return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
 }
 
-// Renders text on a single line, shrinking the font until it fits the
-// available width (down to a floor) so long addresses never wrap. Re-measures
-// when the text or the container width changes.
-function FitText({ text, className, max = 14, min = 11 }: {
-  text: string; className?: string; max?: number; min?: number;
-}) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [size, setSize] = useState(max);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const fit = () => {
-      let s = max;
-      el.style.fontSize = `${s}px`;
-      while (s > min && el.scrollWidth > el.clientWidth) {
-        s -= 0.5;
-        el.style.fontSize = `${s}px`;
-      }
-      setSize(s);
-    };
-    fit();
-    let ro: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(fit);
-      ro.observe(el);
-    }
-    return () => { ro?.disconnect(); };
-  }, [text, max, min]);
-  return (
-    <div
-      ref={ref}
-      className={className}
-      style={{ whiteSpace: 'nowrap', overflow: 'hidden', fontSize: `${size}px`, lineHeight: 1.2 }}
-      title={text}
-    >
-      {text}
-    </div>
-  );
-}
+// FitText is shared (components/FitText.tsx) — single-line auto-shrink text.
 
 // Sections that do NOT require a section photo.
 function sectionPhotosExempt(sectionName: string, sectionOrder: number, templateType?: string): boolean {
@@ -1612,24 +1575,26 @@ export function QuestionForm({
       <div className="lz-head max-w-3xl mx-auto px-4 pt-3 pb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            {/* Template name gets the full width — the status chip moved to its
-                own line below the inspector so the name isn't cropped by the chip
-                + Unlock/Back sharing the top row. */}
-            <FitText
-              text={templateLabel}
-              className="font-heading font-bold text-gray-900"
-              max={20}
-              min={13}
-            />
+            {/* Title + status on ONE line — the title font auto-shrinks so both
+                the full template name AND the status chip fit without truncating
+                (Unlock is now a small bubble, so there's room). */}
+            <div className="flex items-center gap-2">
+              <FitText
+                text={templateLabel}
+                className="font-heading font-bold text-gray-900 flex-1 min-w-0"
+                max={20}
+                min={11}
+              />
+              {headerBadge && (
+                <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${headerBadge.color}`}>{headerBadge.label}</span>
+              )}
+            </div>
             <div className="text-xs text-gray-500 mt-0.5">
               Inspector: {inspectorName}
               {isSubmittedState && fmtStamp(submittedAt) && (
                 <span className="text-gray-400">{'  ·  '}{fmtStamp(submittedAt)} Submitted</span>
               )}
             </div>
-            {headerBadge && (
-              <span className={`inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${headerBadge.color}`}>{headerBadge.label}</span>
-            )}
             {pdfUrl && (
               <a
                 href={pdfUrl}
@@ -1669,7 +1634,8 @@ export function QuestionForm({
             className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
             title="Save and go back"
           >
-            <span aria-hidden>←</span> Back
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
+            Back
           </button>
           </div>
         </div>
