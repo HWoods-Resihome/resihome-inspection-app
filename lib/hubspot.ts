@@ -2043,6 +2043,40 @@ async function listingStatusProp(): Promise<string | null> {
   return _listingStatusProp;
 }
 
+// Discover the listing object's HUMAN status field — the enumeration whose
+// values are Active / Deposit Taken (etc.) — distinct from the `published`
+// boolean used to rank active-vs-not above. The published boolean is true/false
+// (false on deposit-taken listings, which is why those showed no status); the
+// real status lives in its own enum field. We find it by the option set
+// (uniquely, it has a "deposit"/"active" option) and cache its value→label map
+// so the header shows the proper label. Env override: HUBSPOT_LISTING_DISPLAY_STATUS_PROP.
+let _listingDisplayStatus: { prop: string; labels: Record<string, string> } | null | undefined;
+async function listingDisplayStatusInfo(): Promise<{ prop: string; labels: Record<string, string> } | null> {
+  if (_listingDisplayStatus !== undefined) return _listingDisplayStatus;
+  const override = (process.env.HUBSPOT_LISTING_DISPLAY_STATUS_PROP || '').trim();
+  const buildLabels = (p: any): Record<string, string> => {
+    const m: Record<string, string> = {};
+    for (const o of (p?.options || [])) if (o && o.value != null) m[String(o.value).toLowerCase()] = String(o.label ?? o.value);
+    return m;
+  };
+  try {
+    const schema = await hubspotFetch(`/crm/v3/schemas/${listingTypeId()}`);
+    const props: any[] = schema?.properties || [];
+    const byName = new Map<string, any>(props.map((p) => [p.name, p]));
+    let chosen: any = null;
+    if (override && byName.has(override)) chosen = byName.get(override);
+    // The status field is the enumeration whose options include a
+    // "deposit"/"active" option (NOT the published boolean).
+    if (!chosen) chosen = props.find((p) => Array.isArray(p.options) && p.options.some((o: any) => /deposit|active/i.test(`${o.label || ''} ${o.value || ''}`)));
+    // Fallback to common status names (not the published boolean).
+    if (!chosen) chosen = ['listing_status', 'status'].map((n) => byName.get(n)).find(Boolean);
+    _listingDisplayStatus = chosen ? { prop: chosen.name, labels: buildLabels(chosen) } : null;
+  } catch {
+    _listingDisplayStatus = override ? { prop: override, labels: {} } : null;
+  }
+  return _listingDisplayStatus;
+}
+
 // Format a HubSpot date value (epoch-ms string or ISO) to a short M/D/YYYY string.
 function formatListingDate(raw: any): string | null {
   if (raw == null || raw === '') return null;
@@ -2091,9 +2125,11 @@ export async function fetchActiveListingForProperty(
 
     // 2) Batch-read price/date/status for each listing.
     const statusProp = await listingStatusProp();
+    const displayInfo = await listingDisplayStatusInfo();
     const wantProps = ['listing_price', 'listing_date', 'hs_createdate'];
     if (statusProp) wantProps.push(statusProp);
-    type Row = { price: number | null; date: any; created: number; status: string };
+    if (displayInfo?.prop && !wantProps.includes(displayInfo.prop)) wantProps.push(displayInfo.prop);
+    type Row = { price: number | null; date: any; created: number; status: string; displayRaw: string };
     const rows: Row[] = [];
     for (let i = 0; i < ids.length; i += 100) {
       const chunk = ids.slice(i, i + 100);
@@ -2111,6 +2147,7 @@ export async function fetchActiveListingForProperty(
           date: p.listing_date ?? null,
           created: isNaN(createdMs) ? 0 : createdMs,
           status: statusProp ? String(p[statusProp] ?? '') : '',
+          displayRaw: displayInfo?.prop ? String(p[displayInfo.prop] ?? '') : '',
         });
       }
     }
@@ -2137,7 +2174,15 @@ export async function fetchActiveListingForProperty(
     // (in practice the deposit-taken / pending listings).
     const pick = published[0] || rest[0];
     if (!pick) return null;
-    return { listingPrice: pick.price, listingDate: formatListingDate(pick.date), listingStatus: formatListingStatus(pick.status) };
+    // Display status: prefer the HUMAN status field (Active / Deposit Taken),
+    // mapping the stored enum value to its label; fall back to the published
+    // boolean (true → Active). This is why deposit-taken listings now show a
+    // status instead of nothing.
+    const displayLabel = displayInfo && pick.displayRaw
+      ? (displayInfo.labels[pick.displayRaw.toLowerCase()] || pick.displayRaw)
+      : '';
+    const listingStatus = formatListingStatus(displayLabel) || formatListingStatus(pick.status);
+    return { listingPrice: pick.price, listingDate: formatListingDate(pick.date), listingStatus };
   } catch (e) {
     console.warn('[listing] lookup failed:', e);
     return null;
