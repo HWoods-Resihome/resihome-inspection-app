@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/router';
@@ -436,6 +436,20 @@ export default function ExistingInspection() {
   const readOnly = statusReadOnly || externalViewOnly;
   const templateLabel = templateLabelFor(inspection.templateType) || inspection.templateType;
 
+  // Scope reports for the in-app "View PDFs" dropdown in RateCardForm. Prefer the
+  // clean short links; PDFs open in the in-app viewer, the xlsx import downloads.
+  const scopeReportLinks: { label: string; url: string; isPdf: boolean; primary?: boolean }[] = [];
+  if (isCompleted && inspection.templateType === 'pm_scope_rate_card') {
+    if (inspection.pdfMasterUrl) scopeReportLinks.push({ label: 'Master Report', url: shareLinks?.master || inspection.pdfMasterUrl, isPdf: true, primary: true });
+    if (inspection.pdfChargebackUrl) scopeReportLinks.push({ label: 'Tenant Chargeback (PDF)', url: shareLinks?.chargeback || inspection.pdfChargebackUrl, isPdf: true });
+    let vendorUrls: Record<string, string> = {};
+    try { const p = inspection.pdfVendorUrlsJson ? JSON.parse(inspection.pdfVendorUrlsJson) : {}; if (p && typeof p === 'object') vendorUrls = p; } catch { /* ignore */ }
+    for (const [vendor, url] of Object.entries(vendorUrls)) {
+      if (url) scopeReportLinks.push({ label: `Vendor — ${vendor}`, url: shareLinks?.vendors?.[vendor] || url, isPdf: true });
+    }
+    if (inspection.pdfChargebackXlsxUrl) scopeReportLinks.push({ label: 'Tenant Chargeback Import (xlsx)', url: shareLinks?.xlsx || inspection.pdfChargebackXlsxUrl, isPdf: false });
+  }
+
   // Compose the display address: append the property's zip code if we have
   // one and the address doesn't already include it. This handles both cases
   // where the snapshot was built with or without the zip.
@@ -485,13 +499,10 @@ export default function ExistingInspection() {
               </span>
             </div>
 
-            {/* Center: Scope has multiple reports (master/vendor/chargeback), so
-                it keeps its download menu. */}
-            <div className="flex items-center justify-center gap-2 shrink-0">
-              {isCompleted && inspection.templateType === 'pm_scope_rate_card' && (
-                <CompletedPdfMenu inspection={inspection} shareLinks={shareLinks} />
-              )}
-            </div>
+            {/* Every template (Scope included) now views its report(s) from an
+                in-app link in the form header — Scope via a "View PDFs" dropdown
+                (master / vendor / chargeback). So the banner no longer carries a
+                center button, which also removes the button-over-text overlap. */}
 
             {/* Right: Re-Open for Edits (secondary, plain text link — underlines
                 on hover and while pressed, no box). Hidden for external (1099)
@@ -558,6 +569,7 @@ export default function ExistingInspection() {
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}
           pdfUrl={shareLinks?.report || inspection.pdfUrl || undefined}
+          reportLinks={scopeReportLinks.length > 0 ? scopeReportLinks : undefined}
           readOnly={readOnly}
           onCancelInspection={readOnly ? undefined : handleCancelInspection}
         />
@@ -608,125 +620,6 @@ function Layout({ children }: { children: React.ReactNode }) {
         {children}
       </div>
     </main>
-  );
-}
-
-/**
- * Drop-down menu listing all PDFs generated for a completed Rate Card
- * inspection. Renders nothing if no PDFs are stored on the inspection record
- * (e.g., inspection was completed before Phase 4 shipped or finalize failed
- * to write the URLs back). Vendor PDFs come out of pdf_vendor_urls_json
- * which is `{ vendorName: url, ... }`.
- */
-function CompletedPdfMenu({ inspection, shareLinks }: { inspection: InspectionSummary; shareLinks: ShareLinks | null }) {
-  const [open, setOpen] = useState(false);
-  // Parse vendor URLs JSON (forgiving — if it's blank or malformed, treat as none)
-  const vendorUrls = useMemo<Record<string, string>>(() => {
-    if (!inspection.pdfVendorUrlsJson) return {};
-    try {
-      const parsed = JSON.parse(inspection.pdfVendorUrlsJson);
-      return parsed && typeof parsed === 'object' ? parsed as Record<string, string> : {};
-    } catch {
-      return {};
-    }
-  }, [inspection.pdfVendorUrlsJson]);
-
-  // Prefer the clean short links (resolve to the real file); fall back to the
-  // raw stored URL if a short link isn't available for some reason.
-  const links: Array<{ label: string; url: string; primary?: boolean }> = [];
-  if (inspection.pdfMasterUrl) {
-    links.push({ label: 'Master Report', url: shareLinks?.master || inspection.pdfMasterUrl, primary: true });
-  }
-  if (inspection.pdfChargebackUrl) {
-    links.push({ label: 'Tenant Chargeback (PDF)', url: shareLinks?.chargeback || inspection.pdfChargebackUrl });
-  }
-  if (inspection.pdfChargebackXlsxUrl) {
-    links.push({ label: 'Tenant Chargeback Import (xlsx)', url: shareLinks?.xlsx || inspection.pdfChargebackXlsxUrl });
-  }
-  for (const [vendor, url] of Object.entries(vendorUrls)) {
-    if (url) links.push({ label: `Vendor — ${vendor}`, url: shareLinks?.vendors?.[vendor] || url });
-  }
-
-  // No PDFs at all? Don't render the menu (avoids confusion). The Reopen
-  // button still shows so the user can regenerate by re-running finalize.
-  if (links.length === 0) return null;
-
-  return (
-    <div className="relative inline-block">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="text-sm bg-brand hover:bg-brand-dark text-white px-3 py-1.5 rounded-lg font-heading font-semibold"
-      >
-        Download PDFs ▾
-      </button>
-      {open && (
-        <>
-          {/* Click-away mask — closing the menu when the user clicks anywhere else */}
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-1 z-40 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[260px] py-1">
-            <button
-              type="button"
-              onClick={async () => {
-                setOpen(false);
-                // Sequential blob-fetch downloads. Cross-origin URLs (HubSpot
-                // Files) ignore <a download> when used directly, so we fetch
-                // each PDF as a blob first then save the blob. This forces a
-                // download rather than a navigation regardless of the
-                // server's Content-Disposition headers.
-                for (const l of links) {
-                  try {
-                    const res = await fetch(l.url);
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const blob = await res.blob();
-                    const objectUrl = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = objectUrl;
-                    // Best-effort filename: last URL path segment (HubSpot
-                    // Files URLs include the original filename here).
-                    try {
-                      const u = new URL(l.url);
-                      a.download = decodeURIComponent(u.pathname.split('/').pop() || `${l.label}.pdf`);
-                    } catch {
-                      a.download = `${l.label}.pdf`;
-                    }
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-                  } catch (e) {
-                    console.error('[CompletedPdfMenu] download failed, opening in tab:', e);
-                    window.open(l.url, '_blank', 'noopener,noreferrer');
-                  }
-                  // small gap between downloads so the browser registers each
-                  // as a separate event (helps Chrome's UI counter)
-                  await new Promise((r) => setTimeout(r, 250));
-                }
-              }}
-              className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 border-b border-gray-200"
-            >
-              <span>↓ Download All ({links.length})</span>
-            </button>
-            {links.map((l) => (
-              <a
-                key={l.url}
-                href={l.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => setOpen(false)}
-                className={
-                  'flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50 ' +
-                  (l.primary ? 'text-brand font-semibold' : 'text-gray-700')
-                }
-              >
-                <span className="truncate pr-2">{l.label}</span>
-                <span className="text-xs opacity-70 whitespace-nowrap">↓</span>
-              </a>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
   );
 }
 
