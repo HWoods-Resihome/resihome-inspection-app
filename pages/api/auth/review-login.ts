@@ -19,7 +19,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import crypto from 'crypto';
-import { createSessionCookie, type SessionUser } from '@/lib/auth';
+import { createSessionCookie, readReturnTo, clearReturnToCookie, type SessionUser } from '@/lib/auth';
 import { fetchActiveUsers } from '@/lib/hubspot';
 
 const REVIEW_EMAIL = (process.env.APP_REVIEW_EMAIL || 'apptest@resihome.com').trim().toLowerCase();
@@ -65,8 +65,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (match) user = { userId: match.id, email: match.email, name: match.fullName || match.email };
   } catch { /* HubSpot unavailable — keep synthetic identity */ }
 
-  const cookie = await createSessionCookie(user);
-  res.setHeader('Set-Cookie', cookie);
+  const redirect = readReturnTo(req); // capture before clearing
+  res.setHeader('Set-Cookie', [await createSessionCookie(user), clearReturnToCookie()]);
   console.log(`[review-login] App Review account signed in (${user.userId === 'app-review' ? 'synthetic identity' : 'HubSpot user ' + user.userId})`);
-  return res.status(200).json({ ok: true });
+  return res.status(200).json({ ok: true, redirect });
 }

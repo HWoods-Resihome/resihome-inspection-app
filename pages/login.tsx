@@ -70,7 +70,7 @@ export default function LoginPage() {
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok || !data.ok) { setError(data.error || 'Sign-in failed'); setOtpBusy(false); return; }
-      window.location.href = '/';
+      window.location.href = data.redirect || '/';
     } catch (err: any) {
       setError(String(err.message || err));
       setOtpBusy(false);
@@ -101,7 +101,7 @@ export default function LoginPage() {
         setSubmitting(false);
         return;
       }
-      window.location.href = '/';
+      window.location.href = data.redirect || '/';
     } catch (err: any) {
       setError(String(err.message || err));
       setSubmitting(false);

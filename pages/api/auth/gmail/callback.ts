@@ -10,7 +10,7 @@
 //      is connecting/repairing Gmail send. Requires a session. (Legacy behavior.)
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { getSessionFromRequest, createSessionCookie, createOAuthExchangeToken } from '@/lib/auth';
+import { getSessionFromRequest, createSessionCookie, createOAuthExchangeToken, readReturnTo, clearReturnToCookie } from '@/lib/auth';
 import {
   getGmailOAuthConfig,
   getLoginOAuthConfig,
@@ -121,7 +121,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Store the Gmail refresh token if Google granted one (internal users who
     // approved the send scope). External users may not grant it — that's fine,
     // they're authenticated either way and don't send email.
-    const setCookies: string[] = [sessionCookie, clearCookie(LOGIN_STATE_COOKIE)];
+    const setCookies: string[] = [sessionCookie, clearCookie(LOGIN_STATE_COOKIE), clearReturnToCookie()];
     if (refreshToken) setCookies.push(gmailTokenCookie(refreshToken));
     res.setHeader('Set-Cookie', setCookies);
 
@@ -146,7 +146,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return;
     }
 
-    res.redirect(302, '/');
+    // Deep-link preservation: return to the originally-requested page if any.
+    res.redirect(302, readReturnTo(req));
     return;
   }
 

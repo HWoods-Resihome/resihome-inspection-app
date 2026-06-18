@@ -4,7 +4,7 @@
 // session the Google path mints. No mail scopes are involved.
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createSessionCookie, createOAuthExchangeToken } from '@/lib/auth';
+import { createSessionCookie, createOAuthExchangeToken, readReturnTo, clearReturnToCookie } from '@/lib/auth';
 import { getMicrosoftOAuthConfig, exchangeMicrosoftCode, emailFromMicrosoftIdToken } from '@/lib/microsoftAuth';
 import { fetchActiveUsers } from '@/lib/hubspot';
 import { parse, serialize } from 'cookie';
@@ -69,7 +69,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!match) return fail('not_recognized');
 
   const sessionUser = { userId: match.id, email: match.email, name: match.fullName };
-  res.setHeader('Set-Cookie', [await createSessionCookie(sessionUser), clearCookie(STATE_COOKIE)]);
+  res.setHeader('Set-Cookie', [await createSessionCookie(sessionUser), clearCookie(STATE_COOKIE), clearReturnToCookie()]);
 
   // Native (Capacitor) return: hand the app a short-TTL token via the deep link
   // so it can set the session cookie in its OWN webview jar (same as Google).
@@ -78,5 +78,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.redirect(302, `resiwalk://auth-callback?t=${encodeURIComponent(exchangeToken)}`);
     return;
   }
-  res.redirect(302, '/');
+  // Deep-link preservation: return to the originally-requested page if any.
+  res.redirect(302, readReturnTo(req));
 }

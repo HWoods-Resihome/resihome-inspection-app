@@ -7,7 +7,7 @@
  * real HubSpot identity for that email. Public route — see middleware.ts.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { verifyOtp, readOtpToken, clearOtpCookie, createSessionCookie, type SessionUser } from '@/lib/auth';
+import { verifyOtp, readOtpToken, clearOtpCookie, createSessionCookie, readReturnTo, clearReturnToCookie, type SessionUser } from '@/lib/auth';
 import { fetchActiveUsers } from '@/lib/hubspot';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -54,6 +54,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ error: 'Account not found. Contact your administrator.' });
   }
 
-  res.setHeader('Set-Cookie', [await createSessionCookie(user), clearOtpCookie()]);
-  return res.status(200).json({ ok: true });
+  const redirect = readReturnTo(req); // capture before clearing
+  res.setHeader('Set-Cookie', [await createSessionCookie(user), clearOtpCookie(), clearReturnToCookie()]);
+  return res.status(200).json({ ok: true, redirect });
 }

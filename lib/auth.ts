@@ -62,6 +62,53 @@ export function clearSessionCookie(): string {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Return-to after login (deep-link preservation)
+// ---------------------------------------------------------------------------
+// When middleware redirects an unauthenticated browser navigation to /login, it
+// stashes the originally-requested path in this short-lived cookie (set on the
+// edge — see middleware). The auth callbacks read it here to send the user back
+// where they were headed instead of always the home screen. A cookie (not a
+// query param) is used so it survives the OAuth/OTP round-trip — the provider
+// would drop a query param, but a first-party cookie persists across the
+// redirect chain on our own domain.
+export const RETURN_TO_COOKIE = 'resihome_return_to';
+
+/** Open-redirect guard: only same-origin RELATIVE paths to a real page.
+ *  Rejects //host, /\host, protocol-relative/absolute URLs, /api/* and /login,
+ *  and anything with control chars. Must match the inline check in middleware. */
+export function isSafeReturnPath(p: string | undefined | null): p is string {
+  if (typeof p !== 'string' || p.length === 0 || p.length > 512) return false;
+  if (!p.startsWith('/')) return false;          // must be relative to our origin
+  if (p.startsWith('//') || p.startsWith('/\\')) return false; // protocol-relative / backslash trick
+  if (p.startsWith('/login') || p.startsWith('/api/')) return false; // don't loop / land on an API
+  if (/[\u0000-\u001f]/.test(p)) return false;   // control chars
+  return true;
+}
+
+/** Read the validated return-to path from the request cookie, or '/' as a safe default. */
+export function readReturnTo(req: NextApiRequest): string {
+  try {
+    const raw = parse(req.headers.cookie || '')[RETURN_TO_COOKIE];
+    const decoded = raw ? decodeURIComponent(raw) : '';
+    return isSafeReturnPath(decoded) ? decoded : '/';
+  } catch {
+    return '/';
+  }
+}
+
+/** Clear the return-to cookie (add to the Set-Cookie array when finalizing login). */
+export function clearReturnToCookie(): string {
+  return serialize(RETURN_TO_COOKIE, '', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 0,
+  });
+}
+
+
 export async function verifySessionToken(token: string): Promise<SessionUser | null> {
   try {
     const { payload } = await jwtVerify(token, sessionSecret());

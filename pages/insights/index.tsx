@@ -61,10 +61,13 @@ export default function InsightsPortal() {
                 )}
               </div>
             </div>
-            <Link href="/" className="text-xs font-heading font-semibold text-white/90 hover:text-white shrink-0 inline-flex items-center gap-1">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M11 18l-6-6 6-6" /></svg>
-              Inspections
-            </Link>
+            <div className="flex items-center gap-4 shrink-0">
+              <Link href="/" className="text-xs font-heading font-semibold text-white/90 hover:text-white inline-flex items-center gap-1">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M11 18l-6-6 6-6" /></svg>
+                Inspections
+              </Link>
+              {access?.user && <AccountMenu name={access.user.name} email={access.user.email} />}
+            </div>
           </div>
         </header>
 
@@ -100,6 +103,54 @@ export default function InsightsPortal() {
         </main>
       </div>
     </>
+  );
+}
+
+/** Account menu on the user's name — sign out clears the session and returns to /login. */
+function AccountMenu({ name, email }: { name: string; email: string }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function signOut() {
+    setBusy(true);
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* clear anyway */ }
+    window.location.href = '/login';
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="inline-flex items-center gap-1.5 text-xs font-heading font-semibold text-white/90 hover:text-white"
+      >
+        <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-white/20 text-white text-[11px] font-bold uppercase">
+          {(name || email || '?').trim().charAt(0)}
+        </span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${open ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+      </button>
+      {open && (
+        <>
+          {/* click-away */}
+          <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setOpen(false)} />
+          <div role="menu" className="absolute right-0 top-full mt-2 z-50 w-56 bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden text-left">
+            <div className="px-4 py-3 border-b border-gray-100">
+              <div className="text-sm font-heading font-semibold text-ink truncate">{name}</div>
+              <div className="text-[11px] text-gray-500 truncate">{email}</div>
+            </div>
+            <button
+              type="button" role="menuitem" onClick={signOut} disabled={busy}
+              className="w-full text-left px-4 py-2.5 text-sm font-heading font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60 flex items-center gap-2"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
+              {busy ? 'Signing out…' : 'Sign out'}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

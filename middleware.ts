@@ -138,10 +138,37 @@ function redirectToLogin(req: NextRequest): NextResponse {
       });
     }
   }
+  const intended = req.nextUrl.pathname + req.nextUrl.search;
   const url = req.nextUrl.clone();
   url.pathname = '/login';
   url.search = '';
-  return NextResponse.redirect(url);
+  const res = NextResponse.redirect(url);
+  // Stash the originally-requested path so the auth callback can return the user
+  // there after login (deep-link preservation). Validated here (mirrors
+  // lib/auth.isSafeReturnPath) to prevent open-redirect; cookie survives the
+  // OAuth/OTP round-trip where a query param would be dropped.
+  if (isSafeReturnPath(intended)) {
+    res.cookies.set('resihome_return_to', intended, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 600, // 10 minutes — just long enough to complete a sign-in
+    });
+  }
+  return res;
+}
+
+// Open-redirect guard — keep in sync with lib/auth.isSafeReturnPath. Only
+// same-origin RELATIVE page paths; rejects //host, backslash tricks, /api/* and
+// /login, and control chars.
+function isSafeReturnPath(p: string): boolean {
+  if (!p || p.length > 512) return false;
+  if (!p.startsWith('/')) return false;
+  if (p.startsWith('//') || p.startsWith('/\\')) return false;
+  if (p.startsWith('/login') || p.startsWith('/api/')) return false;
+  if (/[\u0000-\u001f]/.test(p)) return false;
+  return true;
 }
 
 export const config = {
