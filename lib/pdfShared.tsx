@@ -410,9 +410,9 @@ export function PdfHeaderStrip(props: {
         {props.detailsFirst ? (
           <>
             {detailsEl}
+            {listingEl}
             {inspectorEl}
             {approverEl}
-            {listingEl}
           </>
         ) : (
           <>
@@ -724,6 +724,8 @@ export interface PdfBuildContext {
   /** Final Checklist Q&A — rendered on the MASTER pdf only. Each section is a
    *  group of label/value rows. Absent/empty on non-scope templates. */
   finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
+  /** Final Checklist photos (label stickers etc.) — rendered under the block. */
+  finalChecklistPhotos?: string[];
   /** Signed base URL for the in-app photo gallery (e.g.
    *  https://resiwalk.com/d/{id}/photos/{sig}). When set, PDF photos link here
    *  (browsable left/right) instead of the raw file. */

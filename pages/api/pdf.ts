@@ -36,6 +36,7 @@ interface GeneratePdfBody {
   answers: AnswerInput[];
   sectionPhotoUrls: Record<string, string[]>;
   finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
+  finalChecklistPhotos?: string[];
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -62,6 +63,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     for (const urls of Object.values(body.sectionPhotoUrls || {})) {
       if (urls && urls.length) for (const u of urls) allUrls.push(getPosterUrl(u));
+    }
+    if (body.finalChecklistPhotos?.length) {
+      for (const u of body.finalChecklistPhotos) allUrls.push(getPosterUrl(u));
     }
 
     // Step 2: pre-fetch + resize all in parallel (the big perf win).
@@ -138,6 +142,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       listingPrice: body.listingPrice ?? null,
       listingDate: body.listingDate ?? null,
       finalChecklist: body.finalChecklist,
+      finalChecklistPhotos: body.finalChecklistPhotos,
       completedAt: body.completedAt,
       totalAnswered: body.answers.length,
       totalPhotos,

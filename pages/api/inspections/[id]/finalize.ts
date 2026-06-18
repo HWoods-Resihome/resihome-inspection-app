@@ -51,7 +51,7 @@ import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, type C
 import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
 import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
-import { summarizeFinalChecklist, finalChecklistAnswerRecords, fcMissingLineCodes, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
+import { summarizeFinalChecklist, finalChecklistPhotos, finalChecklistAnswerRecords, fcMissingLineCodes, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
 
 export const config = {
   api: {
@@ -438,6 +438,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // as its own structured HubSpot answer record (the fc__all blob stays the
     // form's working store; these are an idempotent reporting projection).
     let finalChecklistGroups: { name: string; rows: { label: string; value: string }[] }[] | undefined;
+    let finalChecklistPhotoUrls: string[] | undefined;
     let fcAnswers: FcAnswers | null = null;
     let fcCtx: FcCompletionCtx | null = null;
     // Only render the block when this inspection actually has checklist data.
@@ -459,6 +460,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ],
       };
       finalChecklistGroups = summarizeFinalChecklist(parsed, fcCtx);
+      const fcPhotos = finalChecklistPhotos(parsed);
+      if (fcPhotos.length > 0) finalChecklistPhotoUrls = fcPhotos;
     }
 
     // Signed gallery base so every PDF's photos link to a browsable in-app
@@ -488,6 +491,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       sections: sectionInstances.map((s) => sectionGroups.get(s.id)!).filter(Boolean),
       grandTotals: { vendor: grandVendor, client: grandClient, tenant: grandTenant, lineCount: grandLineCount },
       finalChecklist: finalChecklistGroups,
+      finalChecklistPhotos: finalChecklistPhotoUrls,
       photoGalleryBase,
     };
 
@@ -512,6 +516,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         photoEntries.push(...(g.photoUrls || []));
         for (const l of g.lines) if (l.afterPhotoUrls?.length) photoEntries.push(...l.afterPhotoUrls);
       }
+      if (finalChecklistPhotoUrls?.length) photoEntries.push(...finalChecklistPhotoUrls);
       if (photoEntries.length > 0) {
         ctx.embeddedPhotoByUrl = await buildEmbeddedPhotoMap(photoEntries);
       }

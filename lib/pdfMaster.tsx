@@ -9,6 +9,7 @@ import {
   PdfHeaderStrip,
   PdfFooter,
   PdfSectionHeader,
+  PdfSectionPhotos,
   PdfSummaryTable,
   PdfGalleryBaseProvider,
   formatMoneyPdf,
@@ -230,7 +231,8 @@ function MasterSection(props: { section: PdfSectionGroup }) {
 // grouped by section. Renders nothing when there's no checklist data.
 function FinalChecklistBlock(props: { ctx: PdfBuildContext }) {
   const groups = props.ctx.finalChecklist || [];
-  if (!groups.length) return null;
+  const photos = props.ctx.finalChecklistPhotos || [];
+  if (!groups.length && !photos.length) return null;
   return (
     <View style={{ marginTop: 10 }}>
       <PdfSectionHeader title="Final Checklist" photoUrls={[]} />
@@ -245,6 +247,7 @@ function FinalChecklistBlock(props: { ctx: PdfBuildContext }) {
           ))}
         </View>
       ))}
+      {photos.length > 0 && <PdfSectionPhotos photoUrls={photos} />}
     </View>
   );
 }

@@ -284,6 +284,22 @@ export function summarizeFinalChecklist(
   return out;
 }
 
+/** Collect every photo URL captured in the Final Checklist — per-question photos
+ *  plus all label-sticker photos — so the PDFs can render them (same as the
+ *  Master report). Order: by checklist section/question, stickers after photos. */
+export function finalChecklistPhotos(a: FcAnswers): string[] {
+  const out: string[] = [];
+  for (const section of FINAL_CHECKLIST) {
+    for (const q of section.questions) {
+      const ans = a[q.id];
+      if (!ans) continue;
+      for (const u of (ans.photoUrls || [])) if (u) out.push(u);
+      for (const p of (q.photos || [])) for (const u of (ans.stickerPhotos?.[p.id] || [])) if (u) out.push(u);
+    }
+  }
+  return out;
+}
+
 /** The first unmet (visible, required) checklist item, described for the user
  *  (e.g. "HVAC & Air Filters · Label Sticker Photos: add the Air Handler photo").
  *  Returns null when the checklist is complete. Single source of truth for both

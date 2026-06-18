@@ -25,7 +25,7 @@ import { SyncingBadge } from '@/components/SyncingBadge';
 import { UnlockButton } from '@/components/UnlockButton';
 import { FitText } from '@/components/FitText';
 import {
-  finalChecklistGap, fcSectionCounts, summarizeFinalChecklist,
+  finalChecklistGap, fcSectionCounts, summarizeFinalChecklist, finalChecklistPhotos,
   type FcAnswers, type FcAnswerState, type FcCompletionCtx,
 } from '@/lib/finalChecklist';
 
@@ -37,6 +37,8 @@ export interface QuestionFormSubmitMeta {
   maintenanceTicket: { wanted: boolean; description: string };
   /** Final Checklist (HVAC/Smart Home/Air Filters) summarized for the PDF. */
   finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
+  /** Final Checklist sticker/label photo URLs for the PDF. */
+  finalChecklistPhotos?: string[];
 }
 
 type Props = {
@@ -1417,6 +1419,7 @@ export function QuestionForm({
       inspectionResult: overallResult,
       maintenanceTicket: { wanted: wantsTicket, description: wantsTicket ? maintTicketDescription.trim() : '' },
       finalChecklist: fcEnabled ? summarizeFinalChecklist(fcAnswers, fcCtx) : undefined,
+      finalChecklistPhotos: fcEnabled ? finalChecklistPhotos(fcAnswers) : undefined,
     };
 
     onSubmit(finalAnswers, sectionPhotoUrlsForApi, meta);

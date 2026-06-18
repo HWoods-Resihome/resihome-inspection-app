@@ -162,6 +162,8 @@ export interface PdfData {
   /** Final Checklist (HVAC / Smart Home / Air Filters / Utilities) summarized to
    *  label/value rows — rendered the same way as the Master report. */
   finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
+  /** Final Checklist photos (label stickers etc.), rendered under the block. */
+  finalChecklistPhotos?: string[];
 }
 
 function formatDate(iso: string): string {
@@ -268,7 +270,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           bedrooms={data.bedrooms}
           bathrooms={data.bathrooms}
           generatedAtLabel={isoToHumanDate(data.completedAt)}
-          listingLine={listingLine}
+          listingLine={isCommunity ? null : listingLine}
           detailsFirst
           summary={(
             <>
@@ -420,6 +422,11 @@ export function InspectionPdf({ data }: { data: PdfData }) {
                 ))}
               </View>
             ))}
+            {data.finalChecklistPhotos && data.finalChecklistPhotos.length > 0 && (
+              <View style={styles.photoGrid}>
+                {renderPhotos(data.finalChecklistPhotos, data.embeddedByUrl)}
+              </View>
+            )}
           </View>
         )}
 

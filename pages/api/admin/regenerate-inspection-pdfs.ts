@@ -25,11 +25,13 @@ import { InspectionPdf, type PdfData, type PdfAnswer } from '@/lib/pdf';
 import {
   fetchInspections, fetchInspectionWithPropertyRef, fetchAnswersForInspection,
   fetchQuestionsForTemplate, fetchActiveListingForProperty, uploadFileWithId, attachPdfUrlToInspection,
+  updateInspection,
 } from '@/lib/hubspot';
+import { buildShortLink } from '@/lib/shortLinks';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
 import { getPosterUrl } from '@/lib/media';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
-import { summarizeFinalChecklist, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
+import { summarizeFinalChecklist, finalChecklistPhotos, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
 
 // Strip a trailing "__<hash>" so an answer's question id matches the template's
 // question id even when one carries the uniqueness suffix and the other doesn't.
@@ -49,39 +51,45 @@ const TEMPLATES = new Set([
 
 export const config = { maxDuration: 300 };
 
-async function regenerateOne(id: string): Promise<{ id: string; ok: boolean; pdfUrl?: string; error?: string }> {
+async function regenerateOne(id: string, origin?: string): Promise<{ id: string; ok: boolean; pdfUrl?: string; error?: string }> {
   const data = await fetchInspectionWithPropertyRef(id);
   if (!data) return { id, ok: false, error: 'Inspection not found' };
   const insp = data.inspection;
   const tmpl = insp.templateType;
   if (!TEMPLATES.has(tmpl)) return { id, ok: false, error: `Template ${tmpl} not supported here` };
 
-  // Map questionIdExternal -> clean question text. The stored answer_summary is
-  // section-prefixed, so we read the template's questions; key by both the exact
-  // id and a hash-stripped id so answers match regardless of the suffix.
+  // Map questionIdExternal -> clean question text AND template order. The stored
+  // answer_summary is section-prefixed, so we read the template's questions; key
+  // by both the exact id and a hash-stripped id so answers match regardless of
+  // the suffix. The order map restores the form's section/question order (so the
+  // Review / Sign-Off section lands last, after Whole House).
   const qText = new Map<string, string>();
+  const qOrder = new Map<string, { s: number; d: number }>();
   try {
     const { questions } = await fetchQuestionsForTemplate(tmpl, { includeDisabled: true });
-    for (const q of questions) { qText.set(q.questionIdExternal, q.questionText); qText.set(normQid(q.questionIdExternal), q.questionText); }
+    for (const q of questions) {
+      const ord = { s: q.sectionOrder ?? 9999, d: q.displayOrder ?? 9999 };
+      qText.set(q.questionIdExternal, q.questionText); qText.set(normQid(q.questionIdExternal), q.questionText);
+      qOrder.set(q.questionIdExternal, ord); qOrder.set(normQid(q.questionIdExternal), ord);
+    }
   } catch { /* prettify fallback below */ }
   const questionText = (qid: string) => qText.get(qid) || qText.get(normQid(qid)) || prettifyQid(qid);
+  const orderOf = (qid: string) => qOrder.get(qid) || qOrder.get(normQid(qid)) || { s: 9999, d: 9999 };
 
   const answers = await fetchAnswersForInspection(id);
   const effSection = (a: { section: string; location?: string }) => a.location || a.section;
 
-  const sectionsInOrder: string[] = [];
-  const answersBySection: Record<string, PdfAnswer[]> = {};
   const sectionPhotosBy: Record<string, string[]> = {};
-  const ensure = (sec: string) => { if (!answersBySection[sec]) { sectionsInOrder.push(sec); answersBySection[sec] = []; } };
-
   // Capture the Final Checklist JSON blob (questionId "fc__all", value
   // "final_checklist", data in `note`) — rendered as its own block, not a Q&A row.
   let fcBlob: FcAnswers | null = null;
 
+  // Collect Q&A with their template order so we can sort sections + questions
+  // back into the form's order (Review / Sign-Off last, after Whole House).
+  const qaItems: { sec: string; s: number; d: number; ans: PdfAnswer }[] = [];
   for (const a of answers) {
     const sec = effSection(a);
     if (a.answerType === 'section_photo') {
-      ensure(sec);
       sectionPhotosBy[sec] = (sectionPhotosBy[sec] || []).concat(a.photoUrls || []);
       continue;
     }
@@ -90,17 +98,31 @@ async function regenerateOne(id: string): Promise<{ id: string; ok: boolean; pdf
       try { if (a.note) fcBlob = JSON.parse(a.note) as FcAnswers; } catch { /* malformed blob — skip */ }
       continue;
     }
-    ensure(sec);
-    answersBySection[sec].push({
-      questionText: questionText(a.questionIdExternal),
-      section: sec,
-      location: a.location,
-      answerValue: a.answerValue,
-      note: a.note || undefined,
-      quantity: a.quantity,
-      assignedTo: a.assignedTo || undefined,
-      photoUrls: a.photoUrls && a.photoUrls.length > 0 ? a.photoUrls : undefined,
+    const ord = orderOf(a.questionIdExternal);
+    qaItems.push({
+      sec, s: ord.s, d: ord.d,
+      ans: {
+        questionText: questionText(a.questionIdExternal),
+        section: sec,
+        location: a.location,
+        answerValue: a.answerValue,
+        note: a.note || undefined,
+        quantity: a.quantity,
+        assignedTo: a.assignedTo || undefined,
+        photoUrls: a.photoUrls && a.photoUrls.length > 0 ? a.photoUrls : undefined,
+      },
     });
+  }
+
+  // Group + order: each section's order is the min sectionOrder among its
+  // questions; questions within a section sort by displayOrder.
+  const secMinOrder = new Map<string, number>();
+  for (const it of qaItems) secMinOrder.set(it.sec, Math.min(secMinOrder.get(it.sec) ?? Infinity, it.s));
+  for (const sec of Object.keys(sectionPhotosBy)) if (!secMinOrder.has(sec)) secMinOrder.set(sec, 9998);
+  const sectionsInOrder = Array.from(secMinOrder.keys()).sort((x, y) => (secMinOrder.get(x)! - secMinOrder.get(y)!));
+  const answersBySection: Record<string, PdfAnswer[]> = {};
+  for (const sec of sectionsInOrder) {
+    answersBySection[sec] = qaItems.filter((it) => it.sec === sec).sort((x, y) => x.d - y.d).map((it) => it.ans);
   }
 
   // Final Checklist → label/value groups (same as the Master report).
@@ -118,6 +140,7 @@ async function regenerateOne(id: string): Promise<{ id: string; ok: boolean; pdf
     };
     try { finalChecklist = summarizeFinalChecklist(fcBlob, fcCtx); } catch { /* skip */ }
   }
+  const fcPhotos = fcBlob ? finalChecklistPhotos(fcBlob) : [];
 
   // Listing highlights for the header (Active / Deposit Taken · price · date).
   let listing: { listingStatus: string | null; listingPrice: number | null; listingDate: string | null } | null = null;
@@ -127,6 +150,7 @@ async function regenerateOne(id: string): Promise<{ id: string; ok: boolean; pdf
   const allUrls: string[] = [];
   for (const arr of Object.values(answersBySection)) for (const a of arr) for (const u of (a.photoUrls || [])) allUrls.push(getPosterUrl(u));
   for (const arr of Object.values(sectionPhotosBy)) for (const u of arr) allUrls.push(getPosterUrl(u));
+  for (const u of fcPhotos) allUrls.push(getPosterUrl(u));
   const resolved = await resolveImagesInParallel(allUrls);
   const embeddedByUrl: Record<string, string> = {};
   for (const [u, d] of resolved) embeddedByUrl[u] = d;
@@ -158,12 +182,19 @@ async function regenerateOne(id: string): Promise<{ id: string; ok: boolean; pdf
     triggeredValues: new Set<string>(),
     embeddedByUrl,
     finalChecklist,
+    finalChecklistPhotos: fcPhotos,
   };
 
   const buf = await renderToBuffer(React.createElement(InspectionPdf, { data: pdfData }) as any);
   const safeName = (insp.inspectionName || 'Inspection').replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 60);
   const { url } = await uploadFileWithId(buf, `${safeName}_${insp.inspectionIdExternal}.pdf`, 'application/pdf', '/inspection_pdfs', true);
   await attachPdfUrlToInspection(id, url);
+  // Refresh the clean short link so the record's "report" link/download resolves
+  // to the regenerated PDF (matches /api/pdf). Best-effort.
+  if (origin) {
+    try { await updateInspection(id, { link_report: buildShortLink(origin, id, 'report') }); }
+    catch { /* property may not exist — non-fatal */ }
+  }
   return { id, ok: true, pdfUrl: url };
 }
 
@@ -172,10 +203,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
   if (!/@resihome\.com$/i.test(session.email)) return res.status(403).json({ error: 'Admin only.' });
 
+  const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+  const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
+  const origin = host ? `${proto}://${host}` : undefined;
+
   try {
     const id = typeof req.query.id === 'string' ? req.query.id : '';
     if (id) {
-      const result = await regenerateOne(id);
+      const result = await regenerateOne(id, origin);
       return res.status(result.ok ? 200 : 502).json({ ok: result.ok, results: [result] });
     }
 
@@ -196,7 +231,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const results: Array<{ id: string; ok: boolean; pdfUrl?: string; error?: string }> = [];
     for (const t of targets) {
-      try { results.push(await regenerateOne(t.recordId)); }
+      try { results.push(await regenerateOne(t.recordId, origin)); }
       catch (e: any) { results.push({ id: t.recordId, ok: false, error: String(e?.message || e).slice(0, 200) }); }
     }
     const okCount = results.filter((r) => r.ok).length;

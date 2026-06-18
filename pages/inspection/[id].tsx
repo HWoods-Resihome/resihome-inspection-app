@@ -237,6 +237,7 @@ export default function ExistingInspection() {
           answers,
           sectionPhotoUrls,
           finalChecklist: meta?.finalChecklist,
+          finalChecklistPhotos: meta?.finalChecklistPhotos,
         };
         const pdfResp = await fetch('/api/pdf', {
           method: 'POST',
