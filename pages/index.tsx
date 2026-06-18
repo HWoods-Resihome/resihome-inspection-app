@@ -89,11 +89,13 @@ export default function Home() {
   const [facets, setFacets] = useState<{ inspectors: string[]; templates: string[]; regions: string[] }>({ inspectors: [], templates: [], regions: [] });
 
   // Restore the list view (filters/sort/search/paging) from the last time the
-  // user was on this page, so backing out of an inspection lands them exactly
-  // where they left off. Persisted to sessionStorage (per browsing session).
+  // user was on this page, so backing out of an inspection — OR leaving the app
+  // entirely and coming back — lands them exactly where they left off, with all
+  // filters and searches intact. Persisted to localStorage (survives the PWA
+  // being backgrounded/killed and reopened; also covers plain-browser use).
   const savedView = useMemo<Record<string, any>>(() => {
     if (typeof window === 'undefined') return {};
-    try { return JSON.parse(window.sessionStorage.getItem('resiwalk_home_view_v1') || '{}') || {}; }
+    try { return JSON.parse(window.localStorage.getItem('resiwalk_home_view_v1') || '{}') || {}; }
     catch { return {}; }
   }, []);
 
@@ -135,7 +137,7 @@ export default function Home() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      window.sessionStorage.setItem('resiwalk_home_view_v1', JSON.stringify({
+      window.localStorage.setItem('resiwalk_home_view_v1', JSON.stringify({
         search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, regionFilter, pageSize, page,
       }));
     } catch { /* storage disabled — view just won't persist */ }

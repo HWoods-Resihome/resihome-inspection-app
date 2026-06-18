@@ -119,7 +119,13 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     if (!destination) return notFound;
 
     // Proxy the file so the clean URL stays in the address bar.
-    const fileResp = await fetch(destination);
+    // Cache-bust the upstream fetch: regenerated PDFs are OVERWRITTEN in place
+    // (uploadFileWithId keeps the same HubSpot URL), so HubSpot's file CDN can
+    // keep serving the previous bytes long after a regen. A unique query param +
+    // no-store forces the freshest file on every view so completed-inspection
+    // links never resolve to a stale PDF.
+    const bust = `${destination.includes('?') ? '&' : '?'}cb=${Date.now()}`;
+    const fileResp = await fetch(destination + bust, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
     if (!fileResp.ok || !fileResp.body) {
       // Couldn't fetch — fall back to a redirect so the file is still reachable.
       return { redirect: { destination, permanent: false } };
@@ -135,7 +141,9 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     ctx.res.setHeader('Content-Type', contentType);
     // inline → view in the browser tab at the clean URL; clients can still save.
     ctx.res.setHeader('Content-Disposition', `inline; filename="${filename.replace(/["\\]/g, '')}"`);
-    ctx.res.setHeader('Cache-Control', 'private, max-age=300');
+    // Don't let the browser cache the streamed bytes — otherwise a regenerated
+    // PDF would keep showing the previously-viewed version from cache.
+    ctx.res.setHeader('Cache-Control', 'no-store, must-revalidate');
     const len = fileResp.headers.get('content-length');
     if (len) ctx.res.setHeader('Content-Length', len);
 
