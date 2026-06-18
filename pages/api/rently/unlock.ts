@@ -59,7 +59,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         inspectionDate: '',
         inspectionId: inspectionId || '',
         userEmail: session.email,
-        userPhone: '',
+        // Rently's unlock API requires a phone on every code; the inspector
+        // isn't asked for one, so send a placeholder. The code is still labeled
+        // (and auditable) by the inspector's name + email above.
+        userPhone: '5555555555',
       }),
       signal: ctrl.signal,
     });
