@@ -155,6 +155,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       sectionPhotosBy,
       triggeredValues,
       embeddedByUrl,
+      photoGalleryBase: (() => {
+        const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+        const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
+        return host ? buildShortLink(`${proto}://${host}`, body.inspectionRecordId, 'photos') : undefined;
+      })(),
     };
 
     // Step 4: render the PDF

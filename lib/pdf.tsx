@@ -161,6 +161,10 @@ export interface PdfData {
    *  (small file) but LINK to the original full-size URL so they're clickable in
    *  the PDF viewer, like the Scope report. */
   embeddedByUrl?: Record<string, string>;
+  /** Signed base for the swipeable photo gallery (`/d/<id>/photos/<sig>`). When
+   *  set, each photo links into the gallery (fit-to-screen + left/right) instead
+   *  of opening the raw full-size image. Built per request from the origin. */
+  photoGalleryBase?: string;
   /** Final Checklist (HVAC / Smart Home / Air Filters / Utilities) summarized to
    *  label/value rows — rendered the same way as the Master report. */
   finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
@@ -201,15 +205,19 @@ const isFcBlob = (a: PdfAnswer) => /^final.?checklist$/i.test((a.answerValue || 
 // 1 = Poor … 10 = Excellent). Its answer is the headline "Community Score".
 const isCommunityGradeQ = (q: string) => /grade the community/i.test(q || '');
 
-// Clickable photo tiles: render the small embedded thumbnail but LINK to the
-// original full-size file (image) or playable clip (video) so tapping a photo in
-// the PDF opens it — same behavior as the Scope report.
-function renderPhotos(entries: string[], embedded?: Record<string, string>) {
+// Clickable photo tiles: render the small embedded thumbnail but LINK each photo
+// to the swipeable photo GALLERY (fit-to-screen, left/right across all the
+// inspection's photos) — same behavior as the Scope report. Videos link to the
+// playable file. Falls back to the raw file URL only when no gallery base is set.
+function renderPhotos(entries: string[], embedded?: Record<string, string>, galleryBase?: string) {
+  const sep = galleryBase && galleryBase.includes('?') ? '&' : '?';
   return entries.map((entry, i) => {
     const poster = getPosterUrl(entry);
     const imgSrc = (embedded && embedded[poster]) || poster;
     const video = isVideoEntry(entry) ? getVideoUrl(entry) : '';
-    const href = video || poster;
+    const fileHref = video || poster;
+    // Photos → gallery (starts at this photo); videos → the playable file.
+    const href = (galleryBase && !video) ? `${galleryBase}${sep}u=${encodeURIComponent(entry)}` : fileHref;
     return (
       <Link key={`${entry}-${i}`} src={href} style={styles.photo}>
         {/* eslint-disable-next-line jsx-a11y/alt-text */}
@@ -369,7 +377,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
                   <View style={styles.sectionPhotosBlock}>
                     <Text style={styles.sectionPhotosLabel}>Section Photos</Text>
                     <View style={styles.photoGrid}>
-                      {renderPhotos(sectionPhotos, data.embeddedByUrl)}
+                      {renderPhotos(sectionPhotos, data.embeddedByUrl, data.photoGalleryBase)}
                     </View>
                   </View>
                 )}
@@ -406,7 +414,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
                       )}
                       {a.photoUrls && a.photoUrls.length > 0 && (
                         <View style={styles.photoGrid}>
-                          {renderPhotos(a.photoUrls, data.embeddedByUrl)}
+                          {renderPhotos(a.photoUrls, data.embeddedByUrl, data.photoGalleryBase)}
                         </View>
                       )}
                     </View>
@@ -435,7 +443,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
             ))}
             {data.finalChecklistPhotos && data.finalChecklistPhotos.length > 0 && (
               <View style={styles.photoGrid}>
-                {renderPhotos(data.finalChecklistPhotos, data.embeddedByUrl)}
+                {renderPhotos(data.finalChecklistPhotos, data.embeddedByUrl, data.photoGalleryBase)}
               </View>
             )}
           </View>

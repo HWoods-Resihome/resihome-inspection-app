@@ -189,6 +189,7 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
     sectionPhotosBy,
     triggeredValues: new Set<string>(),
     embeddedByUrl,
+    photoGalleryBase: origin ? buildShortLink(origin, id, 'photos') : undefined,
     finalChecklist,
     finalChecklistPhotos: fcPhotos,
     communityName,

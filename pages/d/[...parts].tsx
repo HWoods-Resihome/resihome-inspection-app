@@ -81,6 +81,13 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
           const arr = bySection.get(s.id) || [];
           for (const u of [...(a.photoUrls || []), ...(a.afterPhotoUrls || [])]) if (ok(u)) arr.push(u);
           bySection.set(s.id, arr);
+        } else if (a.answerType === 'qa') {
+          // Q&A answers carry their own photos on 1099 / vacancy / community
+          // reports (e.g. the per-question PHOTO REQUIRED tiles). Include them so
+          // the gallery covers every photo the PDF links to.
+          const arr = bySection.get(s.id) || [];
+          for (const u of (a.photoUrls || [])) if (ok(u)) arr.push(u);
+          bySection.set(s.id, arr);
         } else if (a.answerType === 'rate_card_line' && kind === 'vendor' && vSlug) {
           if (slugifyVendor(a.assignedTo || '') !== vSlug) continue;
           const arr = afterBySection.get(s.id) || [];
