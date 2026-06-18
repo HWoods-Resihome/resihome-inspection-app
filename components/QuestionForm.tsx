@@ -1997,9 +1997,12 @@ export function QuestionForm({
           visual reassurance that it's saving work. Matches the same layout
           used in RateCardForm so behavior is consistent across templates. */}
       <div className="lz-foot fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand px-3 sm:p-4 py-2.5 shadow-lg">
-        <div className="max-w-3xl mx-auto flex items-center justify-between gap-2">
+        <div className={`max-w-3xl mx-auto flex items-center gap-2 ${readOnly ? 'justify-center' : 'justify-between'}`}>
           {/* scopeStyle templates drop the destructive Cancel button and move
-              Save & Close to the LEFT (Submit stays on the right). */}
+              Save & Close to the LEFT (Submit stays on the right). Completed /
+              read-only inspections have no left actions, so the whole bar
+              (Close + status) is centered instead. */}
+          {!readOnly && (
           <div className="shrink-0">
             {!readOnly && onCancelInspection && !scopeStyle && (
               <button
@@ -2029,6 +2032,7 @@ export function QuestionForm({
               </button>
             )}
           </div>
+          )}
           <div className="flex items-center gap-2 justify-end shrink-0">
             {!readOnly && !scopeStyle && (
               <button
