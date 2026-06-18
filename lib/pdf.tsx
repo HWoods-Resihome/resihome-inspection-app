@@ -164,6 +164,9 @@ export interface PdfData {
   finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
   /** Final Checklist photos (label stickers etc.), rendered under the block. */
   finalChecklistPhotos?: string[];
+  /** Community/Visit inspection: name of the property's associated Community
+   *  object (e.g. "Southport"). Appended to the doc title on community PDFs. */
+  communityName?: string | null;
 }
 
 function formatDate(iso: string): string {
@@ -239,6 +242,11 @@ export function InspectionPdf({ data }: { data: PdfData }) {
   const isCommunity = /community/i.test(data.templateLabel || '');
   // Community Score = the "Grade the Community" answer (1–10 scale).
   const communityScore = communityGrade ? `${communityGrade} / 10` : '—';
+  // Community PDF title row = "[Template] - [Community name]" (e.g.
+  // "Community Visit Inspection - Southport") when the community is known.
+  const docTitle = isCommunity && data.communityName
+    ? `${data.templateLabel} - ${data.communityName}`
+    : data.templateLabel;
 
   // Listing highlights line for the header (Active · Listing $X · Listed date).
   const listingParts: string[] = [];
@@ -262,7 +270,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
       <Page size="LETTER" style={pdfStyles.page} wrap>
         {/* Brand header strip — mirrors the Scope report. RESULT (PASS/FAIL) on the right. */}
         <PdfHeaderStrip
-          docTitle={data.templateLabel}
+          docTitle={docTitle}
           propertyName={data.propertyAddress}
           inspectorName={data.inspectorName}
           region={data.region ?? null}

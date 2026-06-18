@@ -24,7 +24,8 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { InspectionPdf, type PdfData, type PdfAnswer } from '@/lib/pdf';
 import {
   fetchInspections, fetchInspectionWithPropertyRef, fetchAnswersForInspection,
-  fetchQuestionsForTemplate, fetchActiveListingForProperty, uploadFileWithId, attachPdfUrlToInspection,
+  fetchQuestionsForTemplate, fetchActiveListingForProperty, fetchPropertyCommunityName,
+  uploadFileWithId, attachPdfUrlToInspection,
   updateInspection,
 } from '@/lib/hubspot';
 import { buildShortLink } from '@/lib/shortLinks';
@@ -146,6 +147,13 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
   let listing: { listingStatus: string | null; listingPrice: number | null; listingDate: string | null } | null = null;
   try { listing = await fetchActiveListingForProperty(data.propertyIdRef); } catch { /* optional */ }
 
+  // Community/Visit only: the property's associated Community object name, used
+  // in the PDF title row ("Community Visit Inspection - Southport"). Fail-open.
+  let communityName: string | null = null;
+  if (tmpl === 'pm_community_inspection') {
+    try { communityName = await fetchPropertyCommunityName(data.propertyIdRef); } catch { /* optional */ }
+  }
+
   // Resolve + embed thumbnails (small file), keep original URLs for clickable links.
   const allUrls: string[] = [];
   for (const arr of Object.values(answersBySection)) for (const a of arr) for (const u of (a.photoUrls || [])) allUrls.push(getPosterUrl(u));
@@ -183,6 +191,7 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
     embeddedByUrl,
     finalChecklist,
     finalChecklistPhotos: fcPhotos,
+    communityName,
   };
 
   const buf = await renderToBuffer(React.createElement(InspectionPdf, { data: pdfData }) as any);
