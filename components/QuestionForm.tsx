@@ -1137,6 +1137,11 @@ export function QuestionForm({
         // Hidden conditional widget fields / occupied-hidden questions aren't required.
         if (!isWidgetVisible(q.questionIdExternal, inst.instanceKey)) continue;
         if (isHiddenWhenOccupied(q)) continue;
+        // When a maintenance ticket is being raised (Yes + the required ticket
+        // description captures the detail), the free-text "Additional Comments"
+        // question becomes optional — its content is redundant with the ticket.
+        if (maintTicketEligible && maintTicketWanted === 'Yes'
+            && /additional\s*comment/i.test(q.questionText || '')) continue;
         const key = answerKey(q.questionIdExternal, inst.instanceKey);
         const a = answers[key];
         const locTag = inst.location ? `${inst.location} -> ` : `${inst.displayName} -> `;
@@ -1936,7 +1941,7 @@ export function QuestionForm({
                       </div>
                       {showTicketWidget && (
                         <div id="maint-ticket-widget" className="scroll-mt-24 mt-3 rounded-lg border border-brand/30 bg-brand/5 p-4">
-                          <div className="font-heading font-semibold text-ink mb-2">Do you want to submit a maintenance ticket?</div>
+                          <div className="font-heading font-semibold text-ink text-sm mb-2">Do you want to submit a maintenance ticket?</div>
                           <div className="flex gap-2">
                             {(['Yes', 'No'] as const).map((opt) => (
                               <button

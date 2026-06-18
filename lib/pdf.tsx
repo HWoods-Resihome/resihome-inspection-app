@@ -1,288 +1,122 @@
-// Server-side PDF generator using @react-pdf/renderer.
-// IMPORTANT: This file only runs server-side -- never imported into browser code.
+// Server-side PDF generator (1099 / Q&A inspection templates) using
+// @react-pdf/renderer. IMPORTANT: server-side only — never imported into browser.
+//
+// Layout (reworked to mirror the Scope Rate Card report):
+//   Page 1  — pink header strip (logo + template + property + inspector/date),
+//             a stats strip (Passed / Failed / Maintenance Ticket), and a
+//             color-coded summary table of every question + its response.
+//   Page 2+ — full detail: each section with its photos, notes, and per-question
+//             responses.
 
 import React from 'react';
 import {
   Document, Page, Text, View, StyleSheet, Image, Link,
 } from '@react-pdf/renderer';
 import { isVideoEntry, getPosterUrl, getVideoUrl } from '@/lib/media';
-import { brandLogoDataUri } from '@/lib/pdfShared';
+import {
+  PDF_COLORS, pdfStyles, PdfHeaderStrip, PdfFooter, isoToHumanDate,
+} from '@/lib/pdfShared';
 
-// Brand colors from ResiHome brand guidelines
 const COLORS = {
-  brand: '#ff0060',
-  brandDark: '#cc004d',
-  accent: '#73e3df',
-  black: '#000000',
-  ink: '#1a1a1a',
-  gray: '#6b7280',
-  grayLight: '#e5e7eb',
-  grayBg: '#f9fafb',
+  ...PDF_COLORS,
   amber: '#fef3c7',
   amberBorder: '#fcd34d',
-  white: '#ffffff',
+  red: '#dc2626',
+  redBg: '#fee2e2',
+  greenBg: '#dcfce7',
 };
 
-// We previously tried to register Raleway from Google Fonts here, but the
-// runtime fetch failed in Vercel's serverless lambda with "Unknown font
-// format". Using bundled Helvetica/Helvetica-Bold avoids any network call.
-// (No-op kept as documentation of the prior attempt.)
-
 const styles = StyleSheet.create({
-  page: {
-    fontFamily: 'Helvetica',
-    fontSize: 9,
-    paddingTop: 40,
-    paddingBottom: 50,
-    paddingLeft: 40,
-    paddingRight: 40,
-    color: COLORS.ink,
-  },
-  // Header
-  header: {
-    backgroundColor: COLORS.brand,
-    color: COLORS.white,
-    padding: 16,
-    marginBottom: 18,
-    marginTop: -40,
-    marginLeft: -40,
-    marginRight: -40,
+  // ---- Stats strip (Passed / Failed / Maintenance Ticket) ----
+  statsStrip: {
     flexDirection: 'row',
-    alignItems: 'center',
-  },
-  headerLogo: {
-    width: 44,
-    height: 44,
-    borderRadius: 9,
-    marginRight: 14,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: 700,
-    fontFamily: 'Helvetica-Bold',
-    color: COLORS.white,
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 11,
-    color: COLORS.white,
-    opacity: 0.9,
-  },
-  // Metadata block (the opening summary).
-  // Designed to read as professional, not flashy: white card with a hot-pink
-  // accent bar on the left, generous whitespace, small uppercase labels above
-  // each value, two-column grid for compactness.
-  metaCard: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.white,
-    border: `1px solid ${COLORS.grayLight}`,
-    borderRadius: 4,
-    marginBottom: 22,
-    overflow: 'hidden',
-  },
-  metaAccent: {
-    width: 4,
-    backgroundColor: COLORS.brand,
-  },
-  metaBody: {
-    flex: 1,
-    padding: 16,
-  },
-  metaRowDouble: {
-    flexDirection: 'row',
-    marginBottom: 12,
-  },
-  metaCol: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  metaLabel: {
-    fontSize: 7,
-    color: COLORS.gray,
-    fontFamily: 'Helvetica-Bold',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: 3,
-  },
-  metaValue: {
-    fontSize: 11,
-    color: COLORS.ink,
-    fontFamily: 'Helvetica-Bold',
-  },
-  metaValueSmall: {
-    fontSize: 9,
-    color: COLORS.ink,
-  },
-  metaValueLink: {
-    fontSize: 9,
-    color: COLORS.brand,
-    textDecoration: 'underline',
-  },
-  // (Legacy summary styles kept for backwards-compat in case anything still references them)
-  summaryBox: {
+    justifyContent: 'space-between',
     backgroundColor: COLORS.grayBg,
-    border: `1px solid ${COLORS.grayLight}`,
-    padding: 12,
-    marginBottom: 18,
-    borderRadius: 4,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    marginBottom: 4,
-    fontSize: 9,
-  },
-  summaryLabel: {
-    width: 130,
-    color: COLORS.gray,
-    fontFamily: 'Helvetica-Bold',
-  },
-  summaryValue: {
-    flex: 1,
-    color: COLORS.ink,
-  },
-  // Section
-  sectionHeader: {
-    backgroundColor: COLORS.black,
-    color: COLORS.white,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: COLORS.grayLight,
     padding: 8,
-    marginBottom: 0,
-    marginTop: 10,
-    fontSize: 11,
-    fontFamily: 'Helvetica-Bold',
+    marginBottom: 10,
+  },
+  statItem: { flexDirection: 'column', alignItems: 'flex-start', flex: 1 },
+  statLabel: {
+    fontFamily: 'Helvetica', fontSize: 7, color: COLORS.gray,
+    textTransform: 'uppercase', letterSpacing: 0.5,
+  },
+  statValue: { fontFamily: 'Helvetica-Bold', fontSize: 13, color: COLORS.ink, marginTop: 2 },
+
+  // ---- Meta line (ID + HubSpot link) under the header ----
+  metaLine: {
+    flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8, gap: 3,
+  },
+  metaLineText: { fontSize: 7.5, color: COLORS.gray },
+  metaLineLink: { fontSize: 7.5, color: COLORS.brand, textDecoration: 'underline' },
+
+  // ---- Summary table ----
+  sumHeaderRow: {
+    flexDirection: 'row', backgroundColor: COLORS.grayBg,
+    borderTopWidth: 0.5, borderBottomWidth: 0.5, borderColor: COLORS.grayLight,
+    paddingVertical: 3,
+  },
+  sumHeaderCell: {
+    fontFamily: 'Helvetica-Bold', fontSize: 6.5, color: COLORS.gray,
+    paddingHorizontal: 4, textTransform: 'uppercase', letterSpacing: 0.3,
+  },
+  sumRow: {
+    flexDirection: 'row', alignItems: 'center',
+    borderBottomWidth: 0.5, borderBottomColor: COLORS.grayLight, paddingVertical: 3,
+  },
+  sumCellRoom: { fontFamily: 'Helvetica', fontSize: 7.5, color: COLORS.gray, paddingHorizontal: 4 },
+  sumCellQ: { fontFamily: 'Helvetica', fontSize: 7.5, color: COLORS.ink, paddingHorizontal: 4 },
+  // Color-coded response chip
+  chip: {
+    fontFamily: 'Helvetica-Bold', fontSize: 7, paddingVertical: 2, paddingHorizontal: 5,
+    borderRadius: 3, textAlign: 'center',
+  },
+
+  // ---- Detail: section ----
+  sectionHeader: {
+    backgroundColor: COLORS.black, color: COLORS.white, padding: 8,
+    marginTop: 10, fontSize: 11, fontFamily: 'Helvetica-Bold',
   },
   sectionContent: {
-    border: `1px solid ${COLORS.grayLight}`,
-    borderTop: 'none',
-    padding: 8,
-    marginBottom: 8,
+    border: `1px solid ${COLORS.grayLight}`, borderTop: 'none', padding: 8, marginBottom: 8,
   },
-  // Question/Answer row
   qa: {
-    paddingTop: 3,
-    paddingBottom: 3,
-    borderBottom: `0.5px solid ${COLORS.grayLight}`,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    paddingTop: 3, paddingBottom: 3, borderBottom: `0.5px solid ${COLORS.grayLight}`,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
   },
   qaLast: {
-    paddingTop: 3,
-    paddingBottom: 3,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    paddingTop: 3, paddingBottom: 3,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
   },
-  qaQuestion: {
-    fontSize: 9,
-    fontFamily: 'Helvetica-Bold',
-    flex: 1,
-    paddingRight: 8,
+  qaQuestion: { fontSize: 9, fontFamily: 'Helvetica-Bold', flex: 1, paddingRight: 8 },
+  qaAnswer: { fontSize: 9, fontFamily: 'Helvetica-Bold', textAlign: 'right', maxWidth: '45%' },
+  qaWithExtras: { paddingTop: 3, paddingBottom: 3, borderBottom: `0.5px solid ${COLORS.grayLight}` },
+  qaWithExtrasLast: { paddingTop: 3, paddingBottom: 3 },
+  qaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  // Note box: WHITE background with an amber border (no more yellow fill).
+  noteBox: {
+    backgroundColor: COLORS.white, border: `1px solid ${COLORS.amberBorder}`,
+    padding: 6, marginTop: 4, borderRadius: 2,
   },
-  qaAnswer: {
-    fontSize: 9,
-    color: COLORS.brand,
-    fontFamily: 'Helvetica-Bold',
-    textAlign: 'right',
-    maxWidth: '45%',
-  },
-  qaAnswerPlain: {
-    fontSize: 9,
-    color: COLORS.gray,
-    textAlign: 'right',
-    maxWidth: '45%',
-  },
-  // Container for a question+answer that has follow-on content (action box, photos).
-  // The action box and photos appear below the row, full width.
-  qaWithExtras: {
-    paddingTop: 3,
-    paddingBottom: 3,
-    borderBottom: `0.5px solid ${COLORS.grayLight}`,
-  },
-  qaWithExtrasLast: {
-    paddingTop: 3,
-    paddingBottom: 3,
-  },
-  qaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  // Triggered (action) box
-  triggeredBox: {
-    backgroundColor: COLORS.amber,
-    border: `1px solid ${COLORS.amberBorder}`,
-    padding: 6,
-    marginTop: 4,
-    borderRadius: 2,
-  },
-  noteText: {
-    fontSize: 8.5,
-    color: COLORS.ink,
-    marginBottom: 3,
-  },
-  scoreText: {
-    fontSize: 8,
-    color: COLORS.gray,
-    fontFamily: 'Helvetica-Bold',
-  },
+  noteText: { fontSize: 8.5, color: COLORS.ink, marginBottom: 3 },
+  scoreText: { fontSize: 8, color: COLORS.gray, fontFamily: 'Helvetica-Bold' },
   // Photos
-  photoGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 6,
-  },
-  photo: {
-    width: 100,
-    height: 75,
-    margin: 2,
-    objectFit: 'cover',
-  },
-  photoFill: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-  },
+  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
+  photo: { width: 100, height: 75, margin: 2, objectFit: 'cover' },
+  photoFill: { width: '100%', height: '100%', objectFit: 'cover' },
   videoBadge: {
-    position: 'absolute',
-    bottom: 2,
-    left: 2,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    color: '#ffffff',
-    fontSize: 6,
-    paddingHorizontal: 3,
-    paddingVertical: 1,
-    borderRadius: 2,
+    position: 'absolute', bottom: 2, left: 2, backgroundColor: 'rgba(0,0,0,0.65)',
+    color: '#ffffff', fontSize: 6, paddingHorizontal: 3, paddingVertical: 1, borderRadius: 2,
   },
-  sectionPhotosLabel: {
-    fontSize: 9,
-    color: COLORS.gray,
-    fontFamily: 'Helvetica-Bold',
-    marginBottom: 4,
-  },
+  sectionPhotosLabel: { fontSize: 9, color: COLORS.gray, fontFamily: 'Helvetica-Bold', marginBottom: 4 },
   sectionPhotosBlock: {
-    backgroundColor: COLORS.grayBg,
-    padding: 6,
-    marginBottom: 6,
+    backgroundColor: COLORS.grayBg, padding: 6, marginBottom: 6,
     borderBottom: `0.5px solid ${COLORS.grayLight}`,
   },
-  // Footer
-  footer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 40,
-    right: 40,
-    fontSize: 7,
-    color: COLORS.gray,
-    textAlign: 'center',
-    borderTop: `0.5px solid ${COLORS.grayLight}`,
-    paddingTop: 6,
-  },
-  pageNumber: {
-    position: 'absolute',
-    bottom: 20,
-    right: 40,
-    fontSize: 7,
-    color: COLORS.gray,
+  detailHeading: {
+    fontFamily: 'Helvetica-Bold', fontSize: 13, color: COLORS.ink, marginBottom: 2,
   },
 });
 
@@ -305,193 +139,234 @@ export interface PdfData {
   inspectorName: string;
   bedrooms: number;
   bathrooms: number;
+  /** Optional header meta (mirrors Scope): sqft + region. */
+  squareFootage?: number | null;
+  region?: string | null;
   completedAt: string;
   totalAnswered: number;
   totalPhotos: number;
   triggeredCount: number;
-  // The HubSpot record ID (used to build the clickable record URL in the metadata block)
   hubspotRecordId?: string;
-  // Grouped by section, preserving order
   sectionsInOrder: string[];
   answersBySection: Record<string, PdfAnswer[]>;
   sectionPhotosBy: Record<string, string[]>;
-  // Triggered-only filter values
   triggeredValues: Set<string>;
+  /** poster URL → small embedded JPEG data URI. Photos render the embedded thumb
+   *  (small file) but LINK to the original full-size URL so they're clickable in
+   *  the PDF viewer, like the Scope report. */
+  embeddedByUrl?: Record<string, string>;
 }
 
 function formatDate(iso: string): string {
   try {
-    // HubSpot Date fields are epoch-ms strings; coerce to Number first.
     const d = /^\d+$/.test(iso) ? new Date(Number(iso)) : new Date(iso);
     return d.toLocaleDateString('en-US', {
-      year: 'numeric', month: 'short', day: 'numeric',
-      hour: 'numeric', minute: '2-digit',
+      year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
     });
   } catch {
     return iso;
   }
 }
 
+// Pass/fail tone of an answer value (mirrors components/QuestionItem.answerTone).
+function toneOf(v: string | undefined): 'pass' | 'fail' | null {
+  const n = (v || '').trim().toLowerCase();
+  if (/\b(fail|failed|poor|deficient)\b/.test(n)) return 'fail';
+  if (/\b(good|pass|passed|satisfactory)\b/.test(n)) return 'pass';
+  return null;
+}
+
+const isMaintRequestQ = (q: string) => /submit a maintenance ticket/i.test(q || '');
+const isMaintDescQ = (q: string) => /maintenance ticket description/i.test(q || '');
+
+// Clickable photo tiles: render the small embedded thumbnail but LINK to the
+// original full-size file (image) or playable clip (video) so tapping a photo in
+// the PDF opens it — same behavior as the Scope report.
+function renderPhotos(entries: string[], embedded?: Record<string, string>) {
+  return entries.map((entry, i) => {
+    const poster = getPosterUrl(entry);
+    const imgSrc = (embedded && embedded[poster]) || poster;
+    const video = isVideoEntry(entry) ? getVideoUrl(entry) : '';
+    const href = video || poster;
+    return (
+      <Link key={`${entry}-${i}`} src={href} style={styles.photo}>
+        {/* eslint-disable-next-line jsx-a11y/alt-text */}
+        <Image src={imgSrc} style={styles.photoFill} />
+        {video ? <Text style={styles.videoBadge}>VIDEO</Text> : null}
+      </Link>
+    );
+  });
+}
+
 export function InspectionPdf({ data }: { data: PdfData }) {
+  // Flatten all answers in section order for the summary table + counts.
+  const flat: { room: string; q: string; value: string; tone: 'pass' | 'fail' | null }[] = [];
+  let passCount = 0;
+  let failCount = 0;
+  let maintTicket: string | null = null;
+  for (const section of data.sectionsInOrder) {
+    for (const a of (data.answersBySection[section] || [])) {
+      if (isMaintRequestQ(a.questionText)) { maintTicket = a.answerValue || null; continue; }
+      if (isMaintDescQ(a.questionText)) continue; // shown in detail, not the summary grid
+      const tone = toneOf(a.answerValue);
+      if (tone === 'pass') passCount++;
+      else if (tone === 'fail') failCount++;
+      if (a.answerValue && a.answerValue.trim()) flat.push({ room: section, q: a.questionText, value: a.answerValue, tone });
+    }
+  }
+  const result: 'pass' | 'fail' | null = failCount > 0 ? 'fail' : passCount > 0 ? 'pass' : null;
+  const resultText = result === 'fail' ? 'FAIL' : result === 'pass' ? 'PASS' : '—';
+  const ticketYes = /^y/i.test(maintTicket || '');
+  const isCommunity = /community/i.test(data.templateLabel || '');
+  const scored = passCount + failCount;
+  const communityScore = scored > 0 ? `${Math.round((passCount / scored) * 100)}%` : '—';
+
+  const chipStyle = (tone: 'pass' | 'fail' | null) => {
+    if (tone === 'pass') return { ...styles.chip, backgroundColor: COLORS.greenBg, color: COLORS.emerald };
+    if (tone === 'fail') return { ...styles.chip, backgroundColor: COLORS.redBg, color: COLORS.red };
+    return { ...styles.chip, backgroundColor: COLORS.grayBg, color: COLORS.gray };
+  };
+
   return (
     <Document
       title={data.inspectionName}
       author={data.inspectorName}
       subject={`Inspection: ${data.propertyAddress}`}
     >
-      <Page size="LETTER" style={styles.page} wrap>
-        {/* Brand header (hot pink) with the ResiWalk house+footprint logo */}
-        <View style={styles.header} fixed={false}>
-          {brandLogoDataUri() ? <Image src={brandLogoDataUri()} style={styles.headerLogo} /> : null}
-          <View>
-            <Text style={styles.headerTitle}>RESIHOME</Text>
-            <Text style={styles.headerSubtitle}>{data.templateLabel}</Text>
-          </View>
+      <Page size="LETTER" style={pdfStyles.page} wrap>
+        {/* Brand header strip — mirrors the Scope report. RESULT (PASS/FAIL) on the right. */}
+        <PdfHeaderStrip
+          docTitle={data.templateLabel}
+          propertyName={data.propertyAddress}
+          inspectorName={data.inspectorName}
+          region={data.region ?? null}
+          squareFootage={data.squareFootage ?? null}
+          bedrooms={data.bedrooms}
+          bathrooms={data.bathrooms}
+          generatedAtLabel={isoToHumanDate(data.completedAt)}
+          summary={(
+            <>
+              <Text style={pdfStyles.headerRightLabel}>RESULT</Text>
+              <Text style={pdfStyles.headerRightValue}>{resultText}</Text>
+            </>
+          )}
+        />
+
+        {/* ID + HubSpot link */}
+        <View style={styles.metaLine}>
+          <Text style={styles.metaLineText}>Inspection ID: {data.externalId}</Text>
+          {data.hubspotRecordId && (
+            <>
+              <Text style={styles.metaLineText}>   ·   </Text>
+              <Link
+                src={`https://app.hubspot.com/contacts/${process.env.HUBSPOT_PORTAL_ID || '51415639'}/record/${process.env.HUBSPOT_INSPECTION_TYPE_ID || '2-63142762'}/${data.hubspotRecordId}`}
+                style={styles.metaLineLink}
+              >
+                Open in HubSpot
+              </Link>
+            </>
+          )}
         </View>
 
-        {/* Metadata card */}
-        <View style={styles.metaCard}>
-          <View style={styles.metaAccent} />
-          <View style={styles.metaBody}>
-            {/* Row 1: Property (full width) */}
-            <View style={{ marginBottom: 12 }}>
-              <Text style={styles.metaLabel}>Property</Text>
-              <Text style={styles.metaValue}>{data.propertyAddress}</Text>
+        {/* Stats strip. Community shows the score; 1099/vacancy show the
+            maintenance-ticket status. Passed/Failed always shown. */}
+        <View style={styles.statsStrip}>
+          {isCommunity && (
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Community Score</Text>
+              <Text style={{ ...styles.statValue, color: COLORS.emerald }}>{communityScore}</Text>
             </View>
-
-            {/* Row 2: Inspector + Date */}
-            <View style={styles.metaRowDouble}>
-              <View style={styles.metaCol}>
-                <Text style={styles.metaLabel}>Inspector</Text>
-                <Text style={styles.metaValueSmall}>{data.inspectorName}</Text>
-              </View>
-              <View style={styles.metaCol}>
-                <Text style={styles.metaLabel}>Date</Text>
-                <Text style={styles.metaValueSmall}>{formatDate(data.completedAt)}</Text>
-              </View>
-            </View>
-
-            {/* Row 3: ID + HubSpot URL */}
-            <View style={{ ...styles.metaRowDouble, marginBottom: 0 }}>
-              <View style={styles.metaCol}>
-                <Text style={styles.metaLabel}>Inspection ID</Text>
-                <Text style={styles.metaValueSmall}>{data.externalId}</Text>
-              </View>
-              {data.hubspotRecordId && (
-                <View style={styles.metaCol}>
-                  <Text style={styles.metaLabel}>HubSpot Record</Text>
-                  <Link
-                    src={`https://app.hubspot.com/contacts/${process.env.HUBSPOT_PORTAL_ID || '51415639'}/record/${process.env.HUBSPOT_INSPECTION_TYPE_ID || '2-63142762'}/${data.hubspotRecordId}`}
-                    style={styles.metaValueLink}
-                  >
-                    Open in HubSpot
-                  </Link>
-                </View>
-              )}
-            </View>
+          )}
+          <View style={styles.statItem}>
+            <Text style={styles.statLabel}>Passed</Text>
+            <Text style={{ ...styles.statValue, color: COLORS.emerald }}>{passCount}</Text>
           </View>
+          <View style={styles.statItem}>
+            <Text style={styles.statLabel}>Failed</Text>
+            <Text style={{ ...styles.statValue, color: failCount > 0 ? COLORS.brand : COLORS.ink }}>{failCount}</Text>
+          </View>
+          {!isCommunity && (
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Maintenance Ticket</Text>
+              <Text style={{ ...styles.statValue, color: ticketYes ? COLORS.brand : COLORS.gray, fontSize: 11 }}>
+                {maintTicket == null ? 'No' : ticketYes ? 'Yes — Created' : 'No'}
+              </Text>
+            </View>
+          )}
         </View>
 
-        {/* Sections */}
+        {/* Summary table — every question + its response, color-coded */}
+        <Text style={pdfStyles.sectionTitle}>Inspection Summary</Text>
+        <View style={styles.sumHeaderRow}>
+          <Text style={[styles.sumHeaderCell, { width: '28%' }]}>Section</Text>
+          <Text style={[styles.sumHeaderCell, { width: '52%' }]}>Question</Text>
+          <Text style={[styles.sumHeaderCell, { width: '20%', textAlign: 'center' }]}>Response</Text>
+        </View>
+        {flat.map((r, i) => (
+          <View key={i} style={styles.sumRow} wrap={false}>
+            <Text style={[styles.sumCellRoom, { width: '28%' }]}>{r.room}</Text>
+            <Text style={[styles.sumCellQ, { width: '52%' }]}>{r.q}</Text>
+            <View style={{ width: '20%', flexDirection: 'row', justifyContent: 'center', paddingHorizontal: 3 }}>
+              <Text style={chipStyle(r.tone)}>{r.value}</Text>
+            </View>
+          </View>
+        ))}
+
+        {/* ---- DETAIL (page 2+) ---- */}
+        <View break>
+          <Text style={styles.detailHeading}>Full Detail</Text>
+        </View>
         {data.sectionsInOrder.map((sectionName) => {
-          const answers = data.answersBySection[sectionName] || [];
+          const answers = (data.answersBySection[sectionName] || []).filter((a) => !isMaintRequestQ(a.questionText));
           const sectionPhotos = data.sectionPhotosBy[sectionName] || [];
           return (
             <View key={sectionName} wrap>
-              {/*
-                Section title + section photos render as ONE non-splittable
-                block (wrap={false}). Without this, react-pdf can place the
-                title near the bottom of a page and let the photo grid spill
-                past the page boundary into the fixed footer (the overhang bug).
-                Keeping them together forces the whole block to the next page
-                when it doesn't fit. The Q&A rows below still wrap normally.
-                Mirrors PdfSectionHeader in lib/pdfShared.tsx.
-              */}
               <View wrap={false}>
                 <View style={styles.sectionHeader}>
                   <Text>{sectionName}</Text>
                 </View>
-                {/* Section photos FIRST (matches form order) */}
                 {sectionPhotos.length > 0 && (
                   <View style={styles.sectionPhotosBlock}>
                     <Text style={styles.sectionPhotosLabel}>Section Photos</Text>
                     <View style={styles.photoGrid}>
-                      {sectionPhotos.map((entry, i) => {
-                        const poster = getPosterUrl(entry);
-                        if (!isVideoEntry(entry)) {
-                          // eslint-disable-next-line jsx-a11y/alt-text
-                          return <Image key={i} src={poster} style={styles.photo} />;
-                        }
-                        return (
-                          <Link key={i} src={getVideoUrl(entry)} style={styles.photo}>
-                            {/* eslint-disable-next-line jsx-a11y/alt-text */}
-                            <Image src={poster} style={styles.photoFill} />
-                            <Text style={styles.videoBadge}>VIDEO</Text>
-                          </Link>
-                        );
-                      })}
+                      {renderPhotos(sectionPhotos, data.embeddedByUrl)}
                     </View>
                   </View>
                 )}
               </View>
               <View style={styles.sectionContent}>
                 {answers.map((a, idx) => {
-                  const isTriggered = data.triggeredValues.has(a.answerValue);
+                  const tone = toneOf(a.answerValue);
                   const isLast = idx === answers.length - 1;
                   const hasExtras = !!(a.note || a.quantity != null || a.assignedTo
                     || (a.photoUrls && a.photoUrls.length > 0));
                   const displayAnswer = a.answerValue && a.answerValue.trim() ? a.answerValue : '—';
+                  const answerColor = tone === 'fail' ? COLORS.brand : tone === 'pass' ? COLORS.emerald : COLORS.gray;
 
-                  // Simple two-column row (no action box, no photos): question
-                  // on the left, answer on the right.
                   if (!hasExtras) {
                     return (
                       <View key={idx} style={isLast ? styles.qaLast : styles.qa} wrap={false}>
                         <Text style={styles.qaQuestion}>{a.questionText}</Text>
-                        <Text style={isTriggered ? styles.qaAnswer : styles.qaAnswerPlain}>
-                          {displayAnswer}
-                        </Text>
+                        <Text style={{ ...styles.qaAnswer, color: answerColor }}>{displayAnswer}</Text>
                       </View>
                     );
                   }
-
-                  // Row with extras: question/answer in top row, action box and
-                  // photos below at full width.
                   return (
                     <View key={idx} style={isLast ? styles.qaWithExtrasLast : styles.qaWithExtras} wrap={false}>
                       <View style={styles.qaRow}>
                         <Text style={styles.qaQuestion}>{a.questionText}</Text>
-                        <Text style={isTriggered ? styles.qaAnswer : styles.qaAnswerPlain}>
-                          {displayAnswer}
-                        </Text>
+                        <Text style={{ ...styles.qaAnswer, color: answerColor }}>{displayAnswer}</Text>
                       </View>
                       {(a.note || (a.quantity != null) || a.assignedTo) && (
-                        <View style={styles.triggeredBox}>
+                        <View style={styles.noteBox}>
                           {a.note && <Text style={styles.noteText}>Note: {a.note}</Text>}
-                          {a.assignedTo && (
-                            <Text style={styles.scoreText}>Assigned to: {a.assignedTo}</Text>
-                          )}
-                          {a.quantity != null && (
-                            <Text style={styles.scoreText}>Quantity: {a.quantity}</Text>
-                          )}
+                          {a.assignedTo && <Text style={styles.scoreText}>Assigned to: {a.assignedTo}</Text>}
+                          {a.quantity != null && <Text style={styles.scoreText}>Quantity: {a.quantity}</Text>}
                         </View>
                       )}
                       {a.photoUrls && a.photoUrls.length > 0 && (
                         <View style={styles.photoGrid}>
-                          {a.photoUrls.map((entry, i) => {
-                            const poster = getPosterUrl(entry);
-                            if (!isVideoEntry(entry)) {
-                              // eslint-disable-next-line jsx-a11y/alt-text
-                              return <Image key={i} src={poster} style={styles.photo} />;
-                            }
-                            return (
-                              <Link key={i} src={getVideoUrl(entry)} style={styles.photo}>
-                                {/* eslint-disable-next-line jsx-a11y/alt-text */}
-                                <Image src={poster} style={styles.photoFill} />
-                                <Text style={styles.videoBadge}>VIDEO</Text>
-                              </Link>
-                            );
-                          })}
+                          {renderPhotos(a.photoUrls, data.embeddedByUrl)}
                         </View>
                       )}
                     </View>
@@ -502,13 +377,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           );
         })}
 
-        <Text
-          style={styles.footer}
-          fixed
-          render={({ pageNumber, totalPages }) => (
-            `ResiHome Inspection - ${data.inspectionName} - Page ${pageNumber} of ${totalPages}`
-          )}
-        />
+        <PdfFooter docName={data.templateLabel} propertyName={data.propertyAddress} />
       </Page>
     </Document>
   );

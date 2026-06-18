@@ -28,6 +28,7 @@ import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
 import { buildShortLink } from '@/lib/shortLinks';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
+import { getPosterUrl } from '@/lib/media';
 
 export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };
 
@@ -167,11 +168,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       allPhotoUrls.push(...s.beforePhotos, ...s.afterPhotos);
     }
     const resolved = await resolveImagesInParallel(allPhotoUrls);
-    const swap = (urls: string[]) => urls.map((u) => resolved.get(u) || u);
-    for (const s of sections) {
-      s.beforePhotos = swap(s.beforePhotos);
-      s.afterPhotos = swap(s.afterPhotos);
-    }
+    // Keep the ORIGINAL urls on the sections (so the PDF can LINK each photo to
+    // its full-size file / gallery — clickable) and pass the poster→thumbnail
+    // map separately for the embedded (small) image.
+    const embeddedByUrl: Record<string, string> = {};
+    for (const [url, dataUri] of resolved) embeddedByUrl[getPosterUrl(url)] = dataUri;
 
     const ctx: QcPdfContext = {
       templateLabel: templateLabelFor(inspection.templateType) || 'Turn Re-Inspect QC',
@@ -188,6 +189,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       passCount,
       failCount,
       sections,
+      embeddedByUrl,
     };
 
     // Photos in the QC PDF link to the browsable in-app gallery too.

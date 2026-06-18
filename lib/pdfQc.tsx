@@ -18,7 +18,7 @@ import {
   PdfFooter,
   PdfSectionPhotos,
   PdfSummaryTable,
-  setPdfPhotoGalleryBase,
+  PdfGalleryBaseProvider,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
@@ -63,6 +63,9 @@ export interface QcPdfContext {
   passCount: number;
   failCount: number;
   sections: QcPdfSection[];
+  /** poster URL → embedded JPEG data URI (so photos stay clickable to the
+   *  full-size file / gallery while embedding small thumbnails). */
+  embeddedByUrl?: Record<string, string>;
 }
 
 // QC column layout mirrors Scope (no client/tenant) + Result:
@@ -154,7 +157,7 @@ function QcDoc({ ctx }: { ctx: QcPdfContext }) {
         {/* Overall failure reason (when the re-inspect failed). */}
         {ctx.verdict === 'fail' && !!ctx.overallNote && (
           <View style={{ marginTop: 6, marginBottom: 8, padding: 8, borderWidth: 1, borderColor: PDF_COLORS.brand, borderRadius: 4 }}>
-            <Text style={{ fontSize: 8, fontWeight: 700, color: PDF_COLORS.brand, marginBottom: 2, textTransform: 'uppercase' }}>Reason for Fail</Text>
+            <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 9, color: PDF_COLORS.brand, marginBottom: 2, textTransform: 'uppercase' }}>Reason for Fail</Text>
             <Text style={{ fontSize: 9, color: PDF_COLORS.brand }}>{ctx.overallNote}</Text>
           </View>
         )}
@@ -258,6 +261,11 @@ function QcSection({ section: s }: { section: QcPdfSection }) {
 }
 
 export async function renderQcPdf(ctx: QcPdfContext): Promise<Buffer> {
-  setPdfPhotoGalleryBase((ctx as any).photoGalleryBase);
-  return renderToBuffer(<QcDoc ctx={ctx} />);
+  // Wrap in the gallery provider so photos embed small thumbnails but LINK to the
+  // full-size file / browsable gallery (clickable in the PDF viewer).
+  return renderToBuffer(
+    <PdfGalleryBaseProvider base={(ctx as any).photoGalleryBase} embedded={ctx.embeddedByUrl}>
+      <QcDoc ctx={ctx} />
+    </PdfGalleryBaseProvider>,
+  );
 }

@@ -228,6 +228,8 @@ export default function ExistingInspection() {
           inspectorName: inspection.inspectorName,
           bedrooms: inspection.bedroomsAtInspection || 0,
           bathrooms: inspection.bathroomsAtInspection || 0,
+          squareFootage: propertySquareFootage,
+          region: inspection.regionSnapshot || null,
           completedAt: new Date().toISOString(),
           answers,
           sectionPhotoUrls,

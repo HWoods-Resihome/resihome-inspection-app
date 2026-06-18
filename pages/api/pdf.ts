@@ -6,7 +6,7 @@ import { InspectionPdf, PdfData, PdfAnswer } from '@/lib/pdf';
 import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord, updateInspection } from '@/lib/hubspot';
 import { buildShortLink } from '@/lib/shortLinks';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
-import { isVideoEntry, getPosterUrl, getVideoUrl, makeVideoEntry } from '@/lib/media';
+import { getPosterUrl } from '@/lib/media';
 import type { AnswerInput } from '@/lib/types';
 
 export const config = {
@@ -27,6 +27,8 @@ interface GeneratePdfBody {
   inspectorName: string;
   bedrooms: number;
   bathrooms: number;
+  squareFootage?: number | null;
+  region?: string | null;
   completedAt: string;
   answers: AnswerInput[];
   sectionPhotoUrls: Record<string, string[]>;
@@ -64,14 +66,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const tImg = Date.now() - t1;
     console.log(`[pdf] resolved ${urlToDataUri.size} images in ${tImg}ms`);
 
-    // Step 3: build PDF data, swapping each URL for its resolved data URI. For a
-    // video entry, we embed the poster data URI but preserve the video URL in the
-    // same `poster#v=video` encoding so the PDF can link to the playable file.
-    const swap = (urls?: string[]) =>
-      urls?.map((u) => {
-        const posterData = urlToDataUri.get(getPosterUrl(u)) || getPosterUrl(u);
-        return isVideoEntry(u) ? makeVideoEntry(posterData, getVideoUrl(u)) : posterData;
-      });
+    // Step 3: build PDF data. We KEEP the original photo URLs (so the PDF can
+    // LINK each photo to its full-size file — clickable like the Scope report)
+    // and pass a poster→thumbnail map separately for the embedded (small) image.
+    const embeddedByUrl: Record<string, string> = {};
+    for (const [url, dataUri] of urlToDataUri) embeddedByUrl[url] = dataUri;
 
     // Group answers by an effective "section display name":
     //   - non-repeating: just the section ("Yard / Exterior")
@@ -97,7 +96,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         note: a.note || undefined,
         quantity: a.quantity,
         assignedTo: a.assignedTo || undefined,
-        photoUrls: a.photoUrls && a.photoUrls.length > 0 ? swap(a.photoUrls) : undefined,
+        photoUrls: a.photoUrls && a.photoUrls.length > 0 ? a.photoUrls : undefined,
       });
       if (a.note || a.quantity != null || a.assignedTo) triggeredCount++;
     }
@@ -112,7 +111,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const sectionPhotosBy: Record<string, string[]> = {};
     for (const [sec, urls] of Object.entries(body.sectionPhotoUrls || {})) {
-      sectionPhotosBy[sec] = swap(urls) || [];
+      sectionPhotosBy[sec] = urls || [];
     }
 
     const totalPhotos = allUrls.length;
@@ -129,6 +128,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       inspectorName: body.inspectorName,
       bedrooms: body.bedrooms,
       bathrooms: body.bathrooms,
+      squareFootage: body.squareFootage ?? null,
+      region: body.region ?? null,
       completedAt: body.completedAt,
       totalAnswered: body.answers.length,
       totalPhotos,
@@ -138,6 +139,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       answersBySection,
       sectionPhotosBy,
       triggeredValues,
+      embeddedByUrl,
     };
 
     // Step 4: render the PDF

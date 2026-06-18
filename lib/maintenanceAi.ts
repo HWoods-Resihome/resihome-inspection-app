@@ -107,13 +107,14 @@ export function buildInspectionTicketDescription(args: {
   date?: Date;
 }): string {
   const who = (args.inspectorName || 'an inspector').trim();
-  const form = (args.templateLabel || 'an').trim();
+  const form = (args.templateLabel || 'Inspection').trim();
   const when = formatDateMMDDYYYY(args.date || new Date());
-  const provenance =
-    `Submitted by ${who} on ${when} via the ${form} inspection. ` +
-    `Please validate scope and confirm work is necessary before dispatching this work order.`;
-  const body = (args.inspectorDescription || '').trim();
-  const out = body ? `${body}\n\n${provenance}` : provenance;
+  // Format: "[Template] - [Inspector] Submitted on [Date]. [Description]. Please
+  // validate scope and confirm work is necessary before dispatching this work order."
+  let body = (args.inspectorDescription || '').trim();
+  if (body && !/[.!?]$/.test(body)) body += '.';
+  const out = `${form} - ${who} Submitted on ${when}. ${body ? `${body} ` : ''}`
+    + 'Please validate scope and confirm work is necessary before dispatching this work order.';
   return out.length > DESCRIPTION_MAX ? out.slice(0, DESCRIPTION_MAX) : out;
 }
 
