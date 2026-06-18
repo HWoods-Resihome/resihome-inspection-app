@@ -2951,6 +2951,81 @@ export async function writeAppAdmins(admins: AppAdminRecord[]): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Insights-Only users — a SEPARATE allowlist (not admins) for the ResiWalk
+// Insights analytics portal (/insights). Stored as JSON on the SAME admin Agent
+// record as app_admins_json. The gate is canViewInsights = isAppAdmin OR
+// isInsightsUser (see lib/insightsAccess), so admins NEVER need to be in this
+// list. These users can view dashboards only — no admin capabilities.
+// ---------------------------------------------------------------------------
+const APP_INSIGHTS_USERS_PROP = 'app_insights_users_json';
+
+export interface InsightsUserRecord {
+  email: string;
+  addedByEmail?: string;
+  addedAt: number;       // epoch ms
+}
+
+/** Read the Insights-Only user list. Best-effort: [] on any error. */
+export async function readInsightsUsers(): Promise<InsightsUserRecord[]> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) return [];
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}?properties=${APP_INSIGHTS_USERS_PROP}`);
+    const raw = resp?.properties?.[APP_INSIGHTS_USERS_PROP];
+    if (!raw) return [];
+    const parsed = JSON.parse(String(raw));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((a) => a && typeof a.email === 'string')
+      .map((a) => ({ email: String(a.email).trim().toLowerCase(), addedByEmail: a.addedByEmail, addedAt: Number(a.addedAt) || Date.now() }));
+  } catch (e) {
+    console.warn('[insights-users] read failed:', e);
+    return [];
+  }
+}
+
+/** Best-effort: create app_insights_users_json if missing (mirrors ensureAppAdminsProperty). */
+async function ensureInsightsUsersProperty(): Promise<void> {
+  try {
+    await hubspotFetch(`/crm/v3/properties/${agentTypeId()}/${APP_INSIGHTS_USERS_PROP}`);
+    return; // exists
+  } catch { /* fall through to create */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${agentTypeId()}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: APP_INSIGHTS_USERS_PROP, label: 'Insights-Only Users (JSON)', type: 'string', fieldType: 'textarea',
+        groupName: 'ai_knowledge',
+        description: 'ResiWalk Insights view-only user allowlist (managed by the app).',
+      }),
+    });
+  } catch (e) {
+    console.warn('[insights-users] could not auto-create property:', String((e as any)?.message || e).slice(0, 160));
+  }
+}
+
+export async function writeInsightsUsers(users: InsightsUserRecord[]): Promise<void> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) throw new Error('Admin Agent record not found — set AI_KNOWLEDGE_AGENT_RECORD_ID, or ensure the admin (AI_KNOWLEDGE_ADMIN_EMAIL) is a HubSpot owner with an Agent record.');
+  const doWrite = () => hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ properties: { [APP_INSIGHTS_USERS_PROP]: JSON.stringify(users) } }),
+  });
+  try {
+    await doWrite();
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    if (msg.includes('PROPERTY_DOESNT_EXIST') || (msg.includes('Property') && msg.includes('does not exist'))) {
+      await ensureInsightsUsersProperty();
+      await doWrite(); // retry once after creating the property
+    } else {
+      throw e;
+    }
+  }
+}
+
+
 /**
  * One-click provisioning of the HubSpot properties the new admin features need
  * (so an admin can run it from /admin/setup instead of the Python scripts).

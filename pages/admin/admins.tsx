@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { InsightsUsersManager } from '@/pages/insights';
 
 interface AdminEntry {
   email: string;
@@ -156,6 +157,17 @@ export default function AdminsPage() {
             ))}
           </ul>
         )}
+
+        {/* ResiWalk Insights — view-only analytics access. Separate from admin:
+            admins already have insights access (canViewInsights = admin OR
+            insights-user), so this list is only for non-admin viewers. */}
+        <div className="mt-8 pt-6 border-t border-gray-200">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h2 className="font-heading font-bold text-base text-ink">ResiWalk Insights access</h2>
+            <Link href="/insights" className="text-xs font-heading font-semibold text-brand underline shrink-0">Open Insights →</Link>
+          </div>
+          <InsightsUsersManager />
+        </div>
       </main>
     </div>
   );
