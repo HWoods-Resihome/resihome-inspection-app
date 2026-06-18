@@ -30,7 +30,9 @@ const styles = StyleSheet.create({
   // ---- Stats strip (Passed / Failed / Maintenance Ticket) ----
   statsStrip: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    // Center the callout cluster (Passed · Failed · Maintenance Ticket /
+    // Community Score) across the full width of the sheet.
+    justifyContent: 'center',
     backgroundColor: COLORS.grayBg,
     borderTopWidth: 1,
     borderBottomWidth: 1,
@@ -38,7 +40,7 @@ const styles = StyleSheet.create({
     padding: 8,
     marginBottom: 10,
   },
-  statItem: { flexDirection: 'column', alignItems: 'flex-start', flex: 1 },
+  statItem: { flexDirection: 'column', alignItems: 'center', marginHorizontal: 22 },
   statLabel: {
     fontFamily: 'Helvetica', fontSize: 7, color: COLORS.gray,
     textTransform: 'uppercase', letterSpacing: 0.5,

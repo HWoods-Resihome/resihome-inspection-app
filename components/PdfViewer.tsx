@@ -133,7 +133,14 @@ export default function PdfViewer({ url, title, onClose }: Props) {
         <button onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))} aria-label="Zoom out" style={iconBtn}>−</button>
         <button onClick={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))} aria-label="Zoom in" style={iconBtn}>+</button>
         <a href={url} target="_blank" rel="noreferrer" aria-label="Open or download" title="Open / download"
-           style={{ ...iconBtn, textDecoration: 'none', fontSize: 18 }}>⤓</a>
+           style={{ ...iconBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 3v12" />
+            <path d="M7 11l5 5 5-5" />
+            <path d="M5 21h14" />
+          </svg>
+        </a>
       </div>
 
       {/* Body */}

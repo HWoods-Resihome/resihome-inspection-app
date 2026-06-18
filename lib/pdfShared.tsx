@@ -79,7 +79,9 @@ export const pdfStyles = StyleSheet.create({
     color: PDF_COLORS.white,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    // Vertically center the logo (left) and the RESULT block (right) against the
+    // taller property/details column so they sit mid-height in the pink band.
+    alignItems: 'center',
   },
   headerLogo: {
     width: 38,
