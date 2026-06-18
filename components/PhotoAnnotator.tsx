@@ -43,6 +43,7 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
   const [color, setColor] = useState<string>('#ef4444');
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [errReason, setErrReason] = useState('');
   const [count, setCount] = useState(0); // strokes count → re-render for undo state
   // Brush thickness multiplier, adjusted by two-finger pinch.
   const [widthScale, setWidthScale] = useState(1);
@@ -58,6 +59,7 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
     let objectUrl: string | null = null;
     setReady(false);
     setLoadError(false);
+    setErrReason('');
     const isLocal = /^(blob:|data:)/.test(src);
     const MAX_TRIES = 5;
 
@@ -82,7 +84,7 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
     const loadObjectUrl = (u: string) => {
       const img = new Image();
       img.onload = () => onImgLoad(img);
-      img.onerror = () => { if (!cancelled) setLoadError(true); };
+      img.onerror = () => { if (!cancelled) { setErrReason('decode failed'); setLoadError(true); } };
       img.src = u;
     };
 
@@ -93,22 +95,29 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
     // decodes reliably AND can't taint the canvas. Retries cover the brief window
     // right after capture where the file hasn't propagated to HubSpot's CDN yet.
     const fetchAndLoad = async (tries: number) => {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 15000);
       try {
         const bust = tries > 0 ? `${src.includes('?') ? '&' : '?'}r=${tries}` : '';
-        const resp = await fetch(src + bust, { cache: 'no-store' });
-        if (!resp.ok) throw new Error(`proxy ${resp.status}`);
+        const resp = await fetch(src + bust, { cache: 'no-store', signal: ctrl.signal });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const blob = await resp.blob();
         if (cancelled) return;
+        if (blob.size === 0) throw new Error('empty response');
         objectUrl = URL.createObjectURL(blob);
         loadObjectUrl(objectUrl);
-      } catch (e) {
+      } catch (e: any) {
         if (cancelled) return;
+        const reason = e?.name === 'AbortError' ? 'timed out' : String(e?.message || e);
         if (tries + 1 < MAX_TRIES) {
           timer = setTimeout(() => { void fetchAndLoad(tries + 1); }, 700 * (tries + 1));
         } else {
-          console.warn('[PhotoAnnotator] could not fetch image for markup:', e);
+          console.warn('[PhotoAnnotator] could not fetch image for markup:', reason, 'src=', src);
+          setErrReason(reason);
           setLoadError(true);
         }
+      } finally {
+        clearTimeout(to);
       }
     };
 
@@ -319,6 +328,7 @@ export function PhotoAnnotator({ src, onCancel, onSave }: Props) {
         {loadError ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/80 text-sm text-center px-6">
             <span>Couldn’t open this photo for markup. It may still be uploading.</span>
+            {errReason && <span className="text-white/40 text-[11px]">({errReason})</span>}
             <button
               type="button"
               onClick={() => setReloadKey((k) => k + 1)}

@@ -317,6 +317,7 @@ export function PhotoLightbox({
 function LightboxVideo({ entry, poster }: { entry: string; poster: string }) {
   const [src, setSrc] = useState<string>('');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [reason, setReason] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -324,18 +325,31 @@ function LightboxVideo({ entry, poster }: { entry: string; poster: string }) {
     let obj: string | null = null;
     setStatus('loading');
     setSrc('');
+    setReason('');
     const raw = playableVideoSrc(entry);
     (async () => {
       try {
-        const resp = await fetch(raw, { cache: 'no-store' });
-        if (!resp.ok) throw new Error(`video ${resp.status}`);
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 20000);
+        let resp: Response;
+        try { resp = await fetch(raw, { cache: 'no-store', signal: ctrl.signal }); }
+        finally { clearTimeout(to); }
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const blob = await resp.blob();
         if (cancelled) return;
+        if (blob.size === 0) throw new Error('empty response');
+        // Surface the served container so an unplayable format (e.g. webm on iOS)
+        // is diagnosable rather than a silent black frame.
+        const ct = (blob.type || resp.headers.get('content-type') || '').toLowerCase();
+        if (ct.includes('webm')) setReason('format: webm (not playable on iOS)');
         obj = URL.createObjectURL(blob);
         setSrc(obj);
         setStatus('ready');
-      } catch {
-        if (!cancelled) setStatus('error');
+      } catch (e: any) {
+        if (!cancelled) {
+          setReason(e?.name === 'AbortError' ? 'timed out' : String(e?.message || e));
+          setStatus('error');
+        }
       }
     })();
     return () => { cancelled = true; if (obj) { try { URL.revokeObjectURL(obj); } catch { /* noop */ } } };
@@ -347,6 +361,7 @@ function LightboxVideo({ entry, poster }: { entry: string; poster: string }) {
            style={{ backgroundImage: `url(${poster})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', width: '100%', height: '100%' }}>
         <div className="bg-black/60 rounded-xl px-5 py-4 flex flex-col items-center gap-3">
           <span>This clip is still processing.</span>
+          {reason && <span className="text-white/40 text-[11px]">({reason})</span>}
           <button type="button" onClick={() => setReloadKey((k) => k + 1)}
             className="bg-white/20 hover:bg-white/30 text-white font-heading font-semibold px-4 py-2 rounded-lg">
             Try again
@@ -369,7 +384,7 @@ function LightboxVideo({ entry, poster }: { entry: string; poster: string }) {
       playsInline
       preload="metadata"
       className="lightbox-video max-w-full max-h-full"
-      onError={() => setStatus('error')}
+      onError={() => { setReason((r) => r || 'decode failed (format not supported?)'); setStatus('error'); }}
     />
   );
 }
