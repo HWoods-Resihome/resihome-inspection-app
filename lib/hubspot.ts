@@ -830,6 +830,39 @@ async function enrichPropertyStatuses(items: InspectionSummary[], rawResults: an
   }
 }
 
+/**
+ * Batch-read the CURRENT live status of Property records by id. Returns
+ * id -> status (current value of PROPERTY_STATUS_PROPERTY). Best-effort: ids
+ * that fail/miss are simply absent. Chunked to HubSpot's 100/batch limit.
+ *
+ * Used by the Insights snapshot, which wants every inspection tagged with its
+ * property's status AS IT IS NOW (so "filter by Vacant - On Market" includes
+ * completed inspections too) — distinct from the per-inspection FROZEN
+ * property_status_at_completion that the home card shows.
+ */
+export async function batchReadPropertyStatuses(ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const unique = Array.from(new Set(ids.filter(Boolean).map(String)));
+  if (unique.length === 0) return out;
+  const { property: propertyTypeId } = typeIds();
+  for (let i = 0; i < unique.length; i += 100) {
+    const chunk = unique.slice(i, i + 100);
+    try {
+      const resp = await hubspotFetch(`/crm/v3/objects/${propertyTypeId}/batch/read`, {
+        method: 'POST',
+        body: JSON.stringify({ properties: [PROPERTY_STATUS_PROPERTY], inputs: chunk.map((id) => ({ id })) }),
+      });
+      for (const rec of resp.results || []) {
+        const st = (rec.properties?.[PROPERTY_STATUS_PROPERTY] || '').toString().trim();
+        if (st) out.set(String(rec.id), st);
+      }
+    } catch (e) {
+      console.warn('[insights] property status batch read failed:', String((e as any)?.message || e).slice(0, 160));
+    }
+  }
+  return out;
+}
+
 export async function fetchInspections(opts: { search?: string } = {}): Promise<InspectionSummary[]> {
   const { inspection: typeId } = typeIds();
   // A search term lets the user reach inspections beyond the recent-500 window

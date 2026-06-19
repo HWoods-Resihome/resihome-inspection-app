@@ -22,7 +22,7 @@ export function PropertyStatusPivot({ rows }: { rows: InsightsRow[] }) {
     <CardFrame
       title="Inspections by property status" icon={ICON}
       subtitle="current status of the linked property"
-      bodyClassName="max-h-[340px] overflow-auto"
+      bodyClassName="p-4 max-h-[340px] overflow-auto"
     >
       {groups.length === 0 ? (
         <CardNote>No inspections in the current filter.</CardNote>

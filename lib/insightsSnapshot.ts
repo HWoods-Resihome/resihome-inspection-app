@@ -18,7 +18,7 @@
  * searchInspectionsPage so rows match the rest of the app exactly.
  */
 import { put, list } from '@vercel/blob';
-import { searchInspectionsPage, countInspectionsCancelled, fetchQuestionsForTemplate, fetchAnswersForInspection } from '@/lib/hubspot';
+import { searchInspectionsPage, countInspectionsCancelled, fetchQuestionsForTemplate, fetchAnswersForInspection, batchReadPropertyStatuses } from '@/lib/hubspot';
 import type { InspectionSummary } from '@/lib/types';
 
 export const SNAPSHOT_BLOB_PATH = 'insights/snapshot.json';
@@ -86,7 +86,7 @@ export interface InsightsRow {
   totalClientCost: number | null;            // Scope Rate Card $ (excluded from pass/fail)
   reportUrl: string | null;     // best available report PDF (master → attachment)
   propertyId: string | null;                 // HubSpot Property record id (property_id_ref)
-  propertyStatus: string | null;             // the property's CURRENT status (e.g. 'Vacant - On Market')
+  propertyStatus: string | null;             // the property's CURRENT live status (e.g. 'Vacant - On Market') — for analytics filtering across ALL rows
   // 1099 Grass Condition capture (only set on 1099 rows that have been worked;
   // absent otherwise). grassTone uses the app's answerTone rule; grassPhotos are
   // the photo URLs attached to the Grass Condition answer.
@@ -150,9 +150,10 @@ function toRow(s: InspectionSummary): InsightsRow {
     totalClientCost: s.totalClientCost,
     reportUrl: s.pdfMasterUrl || s.pdfUrl || null,
     propertyId: s.propertyRecordId ?? null,
-    // propertyStatus comes from the list mapper: frozen-at-completion for
-    // completed rows, live-enriched for active rows (see hubspot mapInspectionRow
-    // + enrichPropertyStatuses). No separate read here.
+    // Seed with the list-mapper value (frozen for completed, live for active);
+    // enrichCurrentPropertyStatus() then overrides ALL rows with the property's
+    // CURRENT live status so analytics filtering by status is consistent across
+    // completed + active inspections.
     propertyStatus: s.propertyStatus ?? null,
   };
 }
@@ -181,8 +182,7 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
 
   const rows = Array.from(byId.values());
   const truncated = hitCeiling || rows.length < total;
-  // propertyStatus is already on each row (from the list mapper: frozen for
-  // completed, live-enriched for active) — no extra read needed here.
+  await enrichCurrentPropertyStatus(rows);
   await enrichGrassConditions(rows);
   const cancelledCount = await countInspectionsCancelled().catch(() => 0);
   return {
@@ -195,6 +195,30 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
     buildMs: Date.now() - t0,
     rows,
   };
+}
+
+/**
+ * Override every row's propertyStatus with the property's CURRENT live status
+ * (one batched read across the distinct property ids), so the dashboard's
+ * status pivot/filter is consistent for completed AND active inspections —
+ * otherwise completed rows (which carry a mostly-empty frozen status) all land
+ * in "(unknown)" and filtering by a real status drops them, blanking the
+ * completed-based KPIs. Best-effort: rows keep their seed value on miss/failure.
+ */
+async function enrichCurrentPropertyStatus(rows: InsightsRow[]): Promise<void> {
+  const ids = rows.map((r) => r.propertyId).filter((id): id is string => !!id);
+  if (ids.length === 0) return;
+  try {
+    const statusById = await batchReadPropertyStatuses(ids);
+    for (const r of rows) {
+      if (r.propertyId) {
+        const live = statusById.get(r.propertyId);
+        if (live) r.propertyStatus = live;
+      }
+    }
+  } catch (e) {
+    console.warn('[insights] current property-status enrichment failed:', e);
+  }
 }
 
 /**

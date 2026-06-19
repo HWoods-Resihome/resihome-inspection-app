@@ -22,6 +22,7 @@ import { PropertyStatusPivot } from './cards/PropertyStatusPivot';
 import { GrassFails } from './cards/GrassFails';
 import { KbChanges } from './cards/KbChanges';
 import { KbVelocity } from './cards/KbVelocity';
+import { PreferenceMismatches } from './cards/PreferenceMismatches';
 import { CardFrame } from './cardChrome';
 import {
   EMPTY_FILTERS, applyFilters, computeKpis,
@@ -168,13 +169,16 @@ export function InsightsDashboard() {
               <PassRateGauge kpis={kpis} />
             </TwoCol>
 
-            {/* (5) AI learning velocity + Knowledge Base changes feed */}
+            {/* (5) AI learning velocity + preference overrides (training signals) */}
             <TwoCol>
               <KbVelocity />
-              <KbChanges />
+              <PreferenceMismatches />
             </TwoCol>
 
-            {/* (6) Property / inspection map — deferred */}
+            {/* (6) AI Knowledge Base changes feed (full width) */}
+            <KbChanges />
+
+            {/* (7) Property / inspection map — deferred */}
             <CardFrame title="Property / inspection map" icon={MAP_ICON} subtitle="Phase 4 · deferred">
               <div className="flex items-center justify-center text-center text-sm text-[#71717a] py-10 opacity-70">
                 A geographic view of inspections lands in a later phase.
