@@ -3218,8 +3218,7 @@ export async function writeAppAdmins(admins: AppAdminRecord[]): Promise<void> {
   try {
     await doWrite();
   } catch (e: any) {
-    const msg = String(e?.message || e);
-    if (msg.includes('PROPERTY_DOESNT_EXIST') || (msg.includes('Property') && msg.includes('does not exist'))) {
+    if (isMissingPropertyError(e, APP_ADMINS_PROP)) {
       await ensureAppAdminsProperty();
       await doWrite(); // retry once after creating the property
     } else {
@@ -3262,7 +3261,21 @@ export async function readInsightsUsers(): Promise<InsightsUserRecord[]> {
   }
 }
 
-/** Best-effort: create app_insights_users_json if missing (mirrors ensureAppAdminsProperty). */
+/** Does this hubspotFetch error indicate the property simply doesn't exist yet?
+ *  hubspotFetch sanitizes e.message to "Upstream request failed (400)" and keeps
+ *  the real HubSpot body on e.detail — so we MUST inspect e.detail (the old code
+ *  only checked e.message, so the auto-create retry never fired and the generic
+ *  400 leaked to the UI). */
+function isMissingPropertyError(e: any, propName: string): boolean {
+  const blob = `${String(e?.message || e)} ${String(e?.detail || '')}`;
+  return blob.includes('PROPERTY_DOESNT_EXIST')
+    || /property .*does(?:n.t| not) exist/i.test(blob)
+    || (e?.status === 400 && blob.includes(propName)); // a 400 naming the property → not provisioned
+}
+
+/** Best-effort: create app_insights_users_json if missing (mirrors ensureAppAdminsProperty).
+ *  Throws a CLEAR, actionable error if provisioning fails (e.g. the token lacks
+ *  CRM schema-write scope) so the admin sees the real blocker, not a generic 400. */
 async function ensureInsightsUsersProperty(): Promise<void> {
   try {
     await hubspotFetch(`/crm/v3/properties/${agentTypeId()}/${APP_INSIGHTS_USERS_PROP}`);
@@ -3277,8 +3290,16 @@ async function ensureInsightsUsersProperty(): Promise<void> {
         description: 'ResiWalk Insights view-only user allowlist (managed by the app).',
       }),
     });
-  } catch (e) {
-    console.warn('[insights-users] could not auto-create property:', String((e as any)?.message || e).slice(0, 160));
+  } catch (e: any) {
+    // 409 = the property already exists (race / created between the GET and POST) → fine.
+    const blob = `${String(e?.message || e)} ${String(e?.detail || '')}`;
+    if (e?.status === 409 || /already exists|PROPERTY_ALREADY_EXISTS/i.test(blob)) return;
+    throw new Error(
+      'Insights-Only storage is not provisioned: the property “app_insights_users_json” is missing on the '
+      + 'Agent object and auto-create failed. The HubSpot token likely lacks CRM schema-write scope '
+      + '(crm.schemas.custom.write). Grant that scope, or create the textarea property manually. '
+      + 'Detail: ' + blob.slice(0, 200),
+    );
   }
 }
 
@@ -3292,12 +3313,13 @@ export async function writeInsightsUsers(users: InsightsUserRecord[]): Promise<v
   try {
     await doWrite();
   } catch (e: any) {
-    const msg = String(e?.message || e);
-    if (msg.includes('PROPERTY_DOESNT_EXIST') || (msg.includes('Property') && msg.includes('does not exist'))) {
-      await ensureInsightsUsersProperty();
-      await doWrite(); // retry once after creating the property
+    if (isMissingPropertyError(e, APP_INSIGHTS_USERS_PROP)) {
+      await ensureInsightsUsersProperty(); // throws a clear error if it can't provision
+      await doWrite();                      // retry once after creating the property
     } else {
-      throw e;
+      // Admin-only route — surface the real HubSpot detail so the blocker is diagnosable.
+      const detail = String(e?.detail || '').slice(0, 200);
+      throw new Error(`Could not save Insights-Only users (HubSpot ${e?.status || ''}).${detail ? ' ' + detail : ''}`.trim());
     }
   }
 }
