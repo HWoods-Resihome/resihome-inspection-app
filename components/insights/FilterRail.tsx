@@ -121,6 +121,18 @@ export function FilterRail({
         </div>
       </Section>
 
+      <div className="border-b border-white/10 pb-3 mb-3">
+        <label className="flex items-center gap-2 py-1 cursor-pointer text-[13px]">
+          <input
+            type="checkbox" checked={filters.onlyAiOverrides}
+            onChange={() => set({ onlyAiOverrides: !filters.onlyAiOverrides })}
+            className="accent-[#ff0060] h-3.5 w-3.5 shrink-0"
+          />
+          <span className="text-[#f4f4f5] flex-1 min-w-0">AI overrides only</span>
+        </label>
+        <p className="text-[10px] text-[#71717a] mt-0.5">Limit every card to inspections where the AI was overridden.</p>
+      </div>
+
       <Section title="Region" count={filters.regions.length}>
         <div className="max-h-40 overflow-auto pr-1">
           {regions.length === 0 ? <div className="text-xs text-[#71717a]">None</div> :

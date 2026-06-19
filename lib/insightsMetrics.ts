@@ -23,7 +23,7 @@
  * Every helper drops rows that lack the dates/verdict a definition requires
  * (never substitutes 0), so averages and rates are honest.
  */
-import type { InsightsRow, InsightsDailyRollup, StatusBucket } from '@/lib/insightsSnapshot';
+import type { InsightsRow, InsightsDailyRollup, StatusBucket, AiOverrideRow } from '@/lib/insightsSnapshot';
 
 // ---- Template-type sets the pass/fail rules key off --------------------------
 export const TEMPLATE_1099 = 'leasing_agent_1099_property_inspection';
@@ -62,11 +62,14 @@ export interface InsightsFilters {
   templateTypes: string[];
   /** Current Property status values to include (empty = all). null → "(none)". */
   propertyStatuses: string[];
+  /** When true, restrict to inspections that have ≥1 AI override event. */
+  onlyAiOverrides: boolean;
 }
 
 export const EMPTY_FILTERS: InsightsFilters = {
   dateFrom: null, dateTo: null,
   inspectorEmails: [], properties: [], regions: [], templateTypes: [], propertyStatuses: [],
+  onlyAiOverrides: false,
 };
 
 /** Sentinel used in the region multi-select for rows with a null region. */
@@ -79,7 +82,8 @@ export const STATUS_NONE = '(unknown)';
 export function countActiveFilters(f: InsightsFilters): number {
   return (f.dateFrom || f.dateTo ? 1 : 0)
     + f.inspectorEmails.length + f.properties.length
-    + f.regions.length + f.templateTypes.length + (f.propertyStatuses?.length || 0);
+    + f.regions.length + f.templateTypes.length + (f.propertyStatuses?.length || 0)
+    + (f.onlyAiOverrides ? 1 : 0);
 }
 
 function inDateWindow(scheduledDate: string | null, from: string | null, to: string | null): boolean {
@@ -111,8 +115,73 @@ export function applyFilters(rows: InsightsRow[], f: InsightsFilters): InsightsR
       const key = r.propertyStatus == null || r.propertyStatus === '' ? STATUS_NONE : r.propertyStatus;
       if (!statuses.has(key)) return false;
     }
+    if (f.onlyAiOverrides && !r.hasAiOverride) return false;
     return true;
   });
+}
+
+// ---- AI overrides (who overrides the AI, and where) --------------------------
+
+/** Apply the global rail filters to AI override rows (same dimensions as rows:
+ *  date window on scheduledDate, inspector, region, template, property status). */
+export function filterOverrides(overrides: AiOverrideRow[], f: InsightsFilters): AiOverrideRow[] {
+  const emails = new Set(f.inspectorEmails.map((e) => e.toLowerCase()));
+  const regions = new Set(f.regions);
+  const types = new Set(f.templateTypes);
+  const statuses = new Set(f.propertyStatuses || []);
+  const props = new Set(f.properties);
+  return overrides.filter((o) => {
+    if (!inDateWindow(o.scheduledDate, f.dateFrom, f.dateTo)) return false;
+    if (emails.size && !emails.has((o.inspectorEmail || '').toLowerCase())) return false;
+    if (props.size && !props.has(o.propertyAddress || '')) return false;
+    if (regions.size) {
+      const key = o.region == null || o.region === '' ? REGION_NONE : o.region;
+      if (!regions.has(key)) return false;
+    }
+    if (types.size && !types.has(o.templateType)) return false;
+    if (statuses.size) {
+      const key = o.propertyStatus == null || o.propertyStatus === '' ? STATUS_NONE : o.propertyStatus;
+      if (!statuses.has(key)) return false;
+    }
+    return true;
+  });
+}
+
+export interface OverrideGroup {
+  key: string;            // inspector email (or '(unknown)') / category (or '(uncoded)')
+  label: string;          // display name
+  count: number;          // total override events in the group
+  rows: AiOverrideRow[];  // the events (for drill-down)
+}
+
+/** Group override events by inspector (most overrides first) — "who overrides most". */
+export function overridesByInspector(overrides: AiOverrideRow[]): OverrideGroup[] {
+  const map = new Map<string, OverrideGroup>();
+  for (const o of overrides) {
+    const key = (o.inspectorEmail || '').toLowerCase() || '(unknown)';
+    let g = map.get(key);
+    if (!g) { g = { key, label: o.inspectorName || o.inspectorEmail || '(unknown)', count: 0, rows: [] }; map.set(key, g); }
+    g.count++; g.rows.push(o);
+    if (!g.label || g.label === '(unknown)') g.label = o.inspectorName || o.inspectorEmail || '(unknown)';
+  }
+  return Array.from(map.values()).sort((a, b) => b.count - a.count);
+}
+
+/** Group override events by catalog category — "biggest training opportunity". */
+export function overridesByCategory(overrides: AiOverrideRow[]): OverrideGroup[] {
+  const map = new Map<string, OverrideGroup>();
+  for (const o of overrides) {
+    const key = o.category || '(uncoded)';
+    let g = map.get(key);
+    if (!g) { g = { key, label: key, count: 0, rows: [] }; map.set(key, g); }
+    g.count++; g.rows.push(o);
+  }
+  return Array.from(map.values()).sort((a, b) => b.count - a.count);
+}
+
+/** Override events for a specific catalog code (preference-overrides drill-down). */
+export function overridesForCode(overrides: AiOverrideRow[], code: string): AiOverrideRow[] {
+  return overrides.filter((o) => o.code === code);
 }
 
 /** Distinct current property-status values present in the rows (for the rail). */

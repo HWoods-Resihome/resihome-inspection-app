@@ -19,6 +19,8 @@
  */
 import { put, list } from '@vercel/blob';
 import { searchInspectionsPage, countInspectionsCancelled, fetchQuestionsForTemplate, fetchAnswersForInspection, batchReadPropertyStatuses } from '@/lib/hubspot';
+import { readAiFeedback } from '@/lib/aiFeedback';
+import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import type { InspectionSummary } from '@/lib/types';
 
 export const SNAPSHOT_BLOB_PATH = 'insights/snapshot.json';
@@ -93,7 +95,37 @@ export interface InsightsRow {
   grassCondition?: string | null;
   grassTone?: 'good' | 'fail' | null;
   grassPhotos?: string[];
+  // True when this inspection has ≥1 AI override event (drives the 'AI Overrides'
+  // global filter). Set by enrichAiOverrides at build time.
+  hasAiOverride?: boolean;
 }
+
+/** One human-overrode-the-AI event, joined to its inspection for attribution +
+ *  drill-down. 'decision' is the override kind; code/category identify what was
+ *  overridden. Powers the AI-overrides cards + the preference-overrides drill-down. */
+export interface AiOverrideRow {
+  inspectionId: string;
+  inspectorName: string;
+  inspectorEmail: string;
+  region: string | null;
+  templateType: string;
+  propertyAddress: string;
+  scheduledDate: string | null;
+  propertyStatus: string | null;
+  code: string | null;            // catalog line-item code the AI suggested
+  category: string | null;        // resolved from the catalog (code → category)
+  decision: string;               // decline | edit | move | remove | ignore
+  query: string | null;           // the utterance/search that produced the suggestion
+  ts: string;                     // event timestamp (ISO)
+}
+
+// Decisions where the human did something OTHER than accept the AI as-is.
+const OVERRIDE_DECISIONS = new Set(['decline', 'edit', 'move', 'remove', 'ignore']);
+// Cap the override rows shipped in the snapshot (newest first) — plenty for the
+// cards + drill-down without bloating the client payload.
+const MAX_OVERRIDE_ROWS = 2000;
+// How far back to pull AI feedback for the overrides analytics.
+const OVERRIDE_DAYS = 120;
 
 export interface InsightsSnapshot {
   asOf: string;                 // ISO build time
@@ -104,6 +136,9 @@ export interface InsightsSnapshot {
   cancelledCount: number;       // cancelled inspections (excluded from rows; for cancellation-rate later)
   buildMs: number;
   rows: InsightsRow[];
+  // AI override events (human ≠ AI), joined to inspector/inspection. Newest first,
+  // capped at MAX_OVERRIDE_ROWS. Empty if feedback storage isn't configured.
+  aiOverrides?: AiOverrideRow[];
 }
 
 /** Compact daily rollup banked each build so trend/sparkline/delta cards have a
@@ -184,6 +219,7 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
   const truncated = hitCeiling || rows.length < total;
   await enrichCurrentPropertyStatus(rows);
   await enrichGrassConditions(rows);
+  const aiOverrides = await buildAiOverrides(rows);
   const cancelledCount = await countInspectionsCancelled().catch(() => 0);
   return {
     asOf: new Date().toISOString(),
@@ -194,7 +230,63 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
     cancelledCount,
     buildMs: Date.now() - t0,
     rows,
+    aiOverrides,
   };
+}
+
+/**
+ * Build the AI-override rows: read recent AI feedback, keep the events where the
+ * human did NOT accept the AI as-is (decline/edit/move/remove/ignore), and JOIN
+ * each to its inspection (via inspectionId) for inspector attribution + a
+ * drill-down link. The event has no inspector field, so the join is how we learn
+ * "who overrides most"; events with no resolvable inspection are dropped. Also
+ * stamps row.hasAiOverride for the 'AI Overrides' global filter. Best-effort.
+ */
+async function buildAiOverrides(rows: InsightsRow[]): Promise<AiOverrideRow[]> {
+  let events;
+  try {
+    events = await readAiFeedback(OVERRIDE_DAYS);
+  } catch (e) {
+    console.warn('[insights] ai-feedback read failed:', e);
+    return [];
+  }
+  if (!events.length) return [];
+
+  // code → category (best-effort; bare code if the catalog is unavailable).
+  const catByCode = new Map<string, string>();
+  try {
+    for (const c of await getCachedCatalog()) {
+      if (c.lineItemCode && c.category) catByCode.set(c.lineItemCode, c.category);
+    }
+  } catch { /* no catalog → category stays null */ }
+
+  const rowById = new Map(rows.map((r) => [r.recordId, r]));
+  const out: AiOverrideRow[] = [];
+  for (const e of events) {
+    if (!OVERRIDE_DECISIONS.has(e.decision)) continue;
+    const row = e.inspectionId ? rowById.get(e.inspectionId) : undefined;
+    if (!row) continue; // can't attribute without the inspection → drop (never fake)
+    row.hasAiOverride = true;
+    const code = e.suggestion?.catalogCode || null;
+    out.push({
+      inspectionId: row.recordId,
+      inspectorName: row.inspectorName,
+      inspectorEmail: row.inspectorEmail,
+      region: row.region,
+      templateType: row.templateType,
+      propertyAddress: row.propertyAddress,
+      scheduledDate: row.scheduledDate,
+      propertyStatus: row.propertyStatus,
+      code,
+      category: code ? (catByCode.get(code) || null) : null,
+      decision: e.decision,
+      query: e.suggestion?.query || null,
+      ts: e.ts || new Date().toISOString(),
+    });
+  }
+  // Newest first, capped.
+  out.sort((a, b) => b.ts.localeCompare(a.ts));
+  return out.slice(0, MAX_OVERRIDE_ROWS);
 }
 
 /**

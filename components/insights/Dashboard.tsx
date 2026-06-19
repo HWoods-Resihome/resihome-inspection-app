@@ -23,13 +23,15 @@ import { GrassFails } from './cards/GrassFails';
 import { KbChanges } from './cards/KbChanges';
 import { KbVelocity } from './cards/KbVelocity';
 import { PreferenceMismatches } from './cards/PreferenceMismatches';
+import { AiOverridesByInspector } from './cards/AiOverridesByInspector';
+import { AiOverridesByCategory } from './cards/AiOverridesByCategory';
 import { CardFrame } from './cardChrome';
 import { CardHost, CardSlot, CARD_CATALOG } from './cardHost';
 import {
-  EMPTY_FILTERS, applyFilters, computeKpis, countActiveFilters,
+  EMPTY_FILTERS, applyFilters, computeKpis, countActiveFilters, filterOverrides,
   type InsightsFilters,
 } from '@/lib/insightsMetrics';
-import type { InsightsRow, InsightsDailyRollup } from '@/lib/insightsSnapshot';
+import type { InsightsRow, InsightsDailyRollup, AiOverrideRow } from '@/lib/insightsSnapshot';
 
 const STORE_KEY = 'resiwalk_insights_v1';
 
@@ -61,6 +63,7 @@ export function InsightsDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<InsightsRow[]>([]);
+  const [aiOverrides, setAiOverrides] = useState<AiOverrideRow[]>([]);
   const [asOf, setAsOf] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [history, setHistory] = useState<InsightsDailyRollup[]>([]);
@@ -95,6 +98,7 @@ export function InsightsDashboard() {
     const sJson = await sRes.json();
     const snap = sJson.snapshot;
     setRows(snap?.rows || []);
+    setAiOverrides(snap?.aiOverrides || []);
     setAsOf(snap?.asOf || null);
     setTruncated(!!snap?.truncated);
     if (hRes.ok) { const h = await hRes.json(); setHistory(h.history || []); }
@@ -115,6 +119,7 @@ export function InsightsDashboard() {
   }, [filters, hiddenCards, railOpen]);
 
   const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters]);
+  const filteredOverrides = useMemo(() => filterOverrides(aiOverrides, filters), [aiOverrides, filters]);
   const kpis = useMemo(() => computeKpis(filtered), [filtered]);
 
   async function refresh() {
@@ -230,16 +235,22 @@ export function InsightsDashboard() {
               <CardSlot id="gauges"><PassRateGauge kpis={kpis} /></CardSlot>
             </TwoCol>
 
-            {/* (5) AI learning velocity + preference overrides (training signals) */}
+            {/* (5) AI overrides — who overrides most + biggest training opportunities */}
             <TwoCol>
-              <CardSlot id="velocity"><KbVelocity /></CardSlot>
-              <CardSlot id="overrides"><PreferenceMismatches /></CardSlot>
+              <CardSlot id="overrides-inspector"><AiOverridesByInspector overrides={filteredOverrides} /></CardSlot>
+              <CardSlot id="overrides-category"><AiOverridesByCategory overrides={filteredOverrides} /></CardSlot>
             </TwoCol>
 
-            {/* (6) AI Knowledge Base changes feed (full width) */}
+            {/* (6) AI learning velocity + preference overrides (training signals) */}
+            <TwoCol>
+              <CardSlot id="velocity"><KbVelocity /></CardSlot>
+              <CardSlot id="overrides"><PreferenceMismatches events={filteredOverrides} /></CardSlot>
+            </TwoCol>
+
+            {/* (7) AI Knowledge Base changes feed (full width) */}
             <CardSlot id="kb"><KbChanges /></CardSlot>
 
-            {/* (7) Property / inspection map — deferred */}
+            {/* (8) Property / inspection map — deferred */}
             <CardSlot id="map">
               <CardFrame title="Property / inspection map" icon={MAP_ICON} subtitle="Phase 4 · deferred">
                 <div className="flex items-center justify-center text-center text-sm text-[#71717a] py-10 opacity-70">

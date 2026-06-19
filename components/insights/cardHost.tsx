@@ -49,6 +49,8 @@ export const CARD_CATALOG: { id: string; title: string }[] = [
   { id: 'gauges', title: 'Quality gauges' },
   { id: 'velocity', title: 'AI learning velocity' },
   { id: 'overrides', title: 'Inspector preference overrides' },
+  { id: 'overrides-inspector', title: 'AI overrides by inspector' },
+  { id: 'overrides-category', title: 'AI overrides by category' },
   { id: 'kb', title: 'AI Knowledge Base changes' },
   { id: 'map', title: 'Property / inspection map' },
 ];
