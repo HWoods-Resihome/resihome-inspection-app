@@ -8,6 +8,7 @@ import {
   fetchPropertyFieldOptions,
   fetchActiveListingForProperty,
   fetchPropertyCommunityName,
+  syncInspectorFromOwner,
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { buildShortLink } from '@/lib/shortLinks';
@@ -38,6 +39,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (denial) { answersPromise.catch(() => {}); return res.status(403).json({ error: denial }); }
       // Answers + the property's active listing + (Community/Visit only) the
       // associated community's name — all best-effort, in parallel.
+      // Keep the inspector in sync with the HubSpot record Owner: if the owner
+      // was reassigned in HubSpot, re-stamp inspector_name/email (the app's
+      // source of truth) and reflect it in this response so the change shows
+      // immediately on open. Best-effort; no-op when already in sync.
+      try {
+        const synced = await syncInspectorFromOwner(id);
+        if (synced) {
+          data.inspection.inspectorName = synced.name;
+          data.inspection.inspectorEmail = synced.email;
+        }
+      } catch { /* best-effort — never blocks the detail load */ }
+
       const isCommunityTpl = data.inspection.templateType === 'pm_community_inspection';
       const [answers, listing, communityName] = await Promise.all([
         answersPromise,

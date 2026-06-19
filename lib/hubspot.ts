@@ -718,6 +718,8 @@ const INSPECTION_LIST_PROPERTIES = [
   // (kept fresh by enrichPropertyStatuses), and the property ref so active rows
   // can be enriched with the live status (see enrichPropertyStatuses).
   'property_status_at_completion', 'property_status_snapshot', 'property_id_ref',
+  // Record Owner — kept in sync TO inspector_name/email by enrichInspectorFromOwner.
+  'hubspot_owner_id',
 ];
 
 /** Map a HubSpot inspection search result into a lightweight InspectionSummary. */
@@ -828,6 +830,40 @@ async function enrichPropertyStatuses(items: InspectionSummary[], rawResults: an
   } catch {
     /* best-effort — leave the live status unresolved on failure */
   }
+}
+
+/**
+ * Keep each row's inspector_name/email in sync with its HubSpot record Owner:
+ * when the owner resolves to an email/name different from the stored inspector,
+ * update the row in memory AND persist it (so the change "sticks" for the next
+ * load and the detail/PDF). Uses only the owners-by-id map (no per-row user
+ * fetch); rows whose owner has no usable name are left untouched. Runs only on a
+ * cache miss; writes only the rows that drifted. updateInspection doesn't touch
+ * last_edited_at, so this never reorders the default sort.
+ */
+async function enrichInspectorFromOwner(items: InspectionSummary[], rawResults: any[]): Promise<void> {
+  const ownerByRow = new Map<string, string>();
+  for (const r of rawResults) {
+    const oid = (r.properties?.hubspot_owner_id || '').toString().trim();
+    if (oid) ownerByRow.set(String(r.id), oid);
+  }
+  if (ownerByRow.size === 0) return;
+  const byId = await fetchOwnersById();
+  if (!byId) return;
+  const writes: Promise<unknown>[] = [];
+  for (const it of items) {
+    const oid = ownerByRow.get(it.recordId);
+    const owner = oid ? byId.get(oid) : undefined;
+    if (!owner || !owner.email) continue;
+    const name = `${owner.firstName} ${owner.lastName}`.trim();
+    if (!name) continue; // no usable owner name → leave the stored inspector as-is
+    const curEmail = (it.inspectorEmail || '').trim().toLowerCase();
+    if (owner.email === curEmail && name === (it.inspectorName || '').trim()) continue;
+    it.inspectorEmail = owner.email;
+    it.inspectorName = name;
+    writes.push(updateInspection(it.recordId, { inspector_email: owner.email, inspector_name: name }).catch(() => {}));
+  }
+  if (writes.length) await Promise.allSettled(writes);
 }
 
 /**
@@ -1046,6 +1082,7 @@ export async function searchInspectionsPage(params: InspectionQuery & {
   await Promise.all([
     enrichReinspectClientTotals(items, typeId),
     enrichPropertyStatuses(items, rawResults),
+    enrichInspectorFromOwner(items, rawResults),
   ]);
   return { items, total };
 }
@@ -1397,6 +1434,91 @@ async function fetchActiveOwners(): Promise<Map<string, OwnerNameInfo> | null> {
     return byEmail;
   } catch (e) {
     console.warn('[auth] could not load active owners; falling back to all users:', e);
+    return null;
+  }
+}
+
+// ownerId -> {email, firstName, lastName}, so an inspection's hubspot_owner_id
+// can be resolved to a display name + email (for the owner→inspector sync).
+// Cached briefly like fetchActiveOwners. Returns null on error (callers no-op).
+let _ownersByIdCache: { byId: Map<string, OwnerNameInfo>; at: number } | null = null;
+async function fetchOwnersById(): Promise<Map<string, OwnerNameInfo> | null> {
+  if (_ownersByIdCache && Date.now() - _ownersByIdCache.at < ACTIVE_OWNERS_TTL_MS) {
+    return _ownersByIdCache.byId;
+  }
+  try {
+    const byId = new Map<string, OwnerNameInfo>();
+    let after: string | undefined;
+    do {
+      const qs = new URLSearchParams({ limit: '100', archived: 'false' });
+      if (after) qs.set('after', after);
+      const resp = await hubspotFetch(`/crm/v3/owners/?${qs.toString()}`);
+      for (const o of resp.results || []) {
+        const email = String(o.email || '').trim().toLowerCase();
+        byId.set(String(o.id), { email, firstName: o.firstName || '', lastName: o.lastName || '' });
+      }
+      after = resp.paging?.next?.after;
+    } while (after);
+    _ownersByIdCache = { byId, at: Date.now() };
+    return byId;
+  } catch (e) {
+    console.warn('[owner-sync] could not load owners by id:', e);
+    return null;
+  }
+}
+
+/**
+ * Resolve a HubSpot owner id to the inspector display name + email. The name is
+ * repaired from the user record when the owner record's name is blank (same
+ * logic as create/login), so we never fall back to an email username when a real
+ * name exists. Returns null when the id is unknown or has no email.
+ */
+async function resolveOwnerInspector(ownerId: string): Promise<{ name: string; email: string } | null> {
+  const id = (ownerId || '').trim();
+  if (!id) return null;
+  const byId = await fetchOwnersById();
+  const owner = byId?.get(id);
+  if (!owner || !owner.email) return null;
+  let name = `${owner.firstName} ${owner.lastName}`.trim();
+  if (!name) {
+    try {
+      const u = (await fetchActiveUsers()).find((x) => x.email.trim().toLowerCase() === owner.email);
+      name = (u?.fullName && !u.fullName.includes('@')) ? u.fullName : owner.email.split('@')[0];
+    } catch { name = owner.email.split('@')[0]; }
+  }
+  return { name, email: owner.email };
+}
+
+/**
+ * Keep the app's inspector fields in sync with the inspection's HubSpot record
+ * Owner: when `hubspot_owner_id` resolves to an owner whose email/name differs
+ * from the stored `inspector_email`/`inspector_name`, re-stamp those two fields
+ * (the app's source of truth) from the owner. Best-effort, idempotent (no-op
+ * once in sync); returns the resolved inspector when it changed, else null.
+ *
+ * `props` may be passed to avoid a re-read when the caller already has them.
+ */
+export async function syncInspectorFromOwner(
+  recordId: string,
+  props?: { hubspot_owner_id?: string; inspector_email?: string; inspector_name?: string },
+): Promise<{ name: string; email: string } | null> {
+  try {
+    let p = props;
+    if (!p) {
+      const read = await readInspectionProps(recordId, ['hubspot_owner_id', 'inspector_email', 'inspector_name']);
+      p = read || {};
+    }
+    const ownerId = (p.hubspot_owner_id || '').toString().trim();
+    if (!ownerId) return null;
+    const resolved = await resolveOwnerInspector(ownerId);
+    if (!resolved) return null;
+    const curEmail = (p.inspector_email || '').toString().trim().toLowerCase();
+    const curName = (p.inspector_name || '').toString().trim();
+    if (resolved.email === curEmail && resolved.name === curName) return null; // already in sync
+    await updateInspection(recordId, { inspector_email: resolved.email, inspector_name: resolved.name });
+    return resolved;
+  } catch (e) {
+    console.warn(`[syncInspectorFromOwner] ${recordId} skipped:`, e);
     return null;
   }
 }
@@ -3743,6 +3865,48 @@ export async function backfillInspectionTotals(
  *
  * `email→name` is built once from fetchUsers() and reused across the whole run.
  */
+/**
+ * Backfill: sync every inspection's inspector_name/email FROM its HubSpot record
+ * Owner (hubspot_owner_id). Paginated + resumable; idempotent (rows already in
+ * sync, or with no owner, are skipped). Use after reassigning owners in bulk.
+ */
+export async function backfillInspectorFromOwner(
+  opts: { after?: string; max?: number } = {},
+): Promise<{ processed: number; updated: number; skipped: number; errors: number; nextAfter: string | null }> {
+  const { inspection: typeId } = typeIds();
+  const max = opts.max ?? 200;
+  let after = opts.after;
+  let processed = 0, updated = 0, skipped = 0, errors = 0;
+
+  while (processed < max) {
+    const body: any = {
+      filterGroups: [],
+      properties: ['hubspot_owner_id', 'inspector_email', 'inspector_name'],
+      limit: 100,
+    };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    const results = resp.results || [];
+    for (const r of results) {
+      processed++;
+      try {
+        const changed = await syncInspectorFromOwner(r.id, r.properties || {});
+        if (changed) updated++; else skipped++;
+      } catch (e) {
+        errors++;
+        console.warn(`[inspector-from-owner-backfill] record ${r.id} failed:`, e);
+      }
+    }
+    after = resp.paging?.next?.after;
+    if (!after) return { processed, updated, skipped, errors, nextAfter: null };
+    if (processed >= max) return { processed, updated, skipped, errors, nextAfter: after };
+  }
+  return { processed, updated, skipped, errors, nextAfter: after || null };
+}
+
 /**
  * Backfill `property_status_at_completion` (and the sortable snapshot) for
  * COMPLETED inspections that are missing it — e.g. ones completed before the
