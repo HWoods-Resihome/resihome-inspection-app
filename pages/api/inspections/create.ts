@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals, fetchActiveUsers } from '@/lib/hubspot';
+import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals, fetchActiveUsers, fetchPropertyStatus } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
@@ -133,6 +133,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.warn('[create] inspector name resolve failed; using client value:', e);
     }
 
+    // Seed the sortable property-status snapshot from the property's current
+    // status so a brand-new inspection is sortable by status immediately (the
+    // home list's enrichment keeps it fresh thereafter). Best-effort — null if
+    // the property has no status or the read fails.
+    const propertyStatusSnapshot = await fetchPropertyStatus(body.propertyRecordId);
+
     const inspectionProps: Record<string, any> = {
       inspection_id_external: externalId,
       inspection_name: inspectionName,
@@ -145,6 +151,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       inspector_email: inspectorEmail,
       property_id_ref: body.propertyRecordId,
       scheduled_date: scheduledDateValue,
+      ...(propertyStatusSnapshot ? { property_status_snapshot: propertyStatusSnapshot } : {}),
     };
 
     // For Rate Card inspections, snapshot the property's `region` field onto the

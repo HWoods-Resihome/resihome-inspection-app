@@ -21,13 +21,14 @@ type StatusCounts = { all: number; scheduled: number; in_progress: number; pendi
 
 // The five sortable fields, in dropdown order. Value is what the server's
 // ?sort= accepts; label is what the Sort menu shows.
-type SortField = 'updated' | 'scheduled' | 'address' | 'inspector' | 'price';
+type SortField = 'updated' | 'scheduled' | 'address' | 'inspector' | 'price' | 'property_status';
 const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: 'updated', label: 'Updated' },
   { value: 'scheduled', label: 'Scheduled' },
   { value: 'address', label: 'Address' },
   { value: 'inspector', label: 'Inspector' },
   { value: 'price', label: 'Client $' },
+  { value: 'property_status', label: 'Property Status' },
 ];
 
 function isCancelledStatus(s?: string): boolean {

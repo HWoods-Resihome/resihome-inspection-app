@@ -713,9 +713,10 @@ const INSPECTION_LIST_PROPERTIES = [
   // pass/fail, photo counts). Harmless extra fields for the home list.
   'region_snapshot', 'submitted_at', 'approved_at',
   'inspection_result', 'total_photos_attached',
-  // Property status: the frozen value (set at completion) + the property ref so
-  // active rows can be enriched with the live status (see enrichPropertyStatuses).
-  'property_status_at_completion', 'property_id_ref',
+  // Property status: the frozen value (set at completion), the sortable snapshot
+  // (kept fresh by enrichPropertyStatuses), and the property ref so active rows
+  // can be enriched with the live status (see enrichPropertyStatuses).
+  'property_status_at_completion', 'property_status_snapshot', 'property_id_ref',
 ];
 
 /** Map a HubSpot inspection search result into a lightweight InspectionSummary. */
@@ -784,11 +785,13 @@ const COMPLETED_STATUS_RE = /^(completed|complete|submitted)$/i;
  */
 async function enrichPropertyStatuses(items: InspectionSummary[], rawResults: any[]): Promise<void> {
   const { property: propertyTypeId } = typeIds();
-  // Map each active row → its property_id_ref (read off the raw search result).
+  // Map each active row → its property_id_ref + stored snapshot (off the raw search result).
   const refByRow = new Map<string, string>();
+  const storedSnapById = new Map<string, string>();
   for (const r of rawResults) {
     const ref = (r.properties?.property_id_ref || '').toString().trim();
     if (ref) refByRow.set(String(r.id), ref);
+    storedSnapById.set(String(r.id), (r.properties?.property_status_snapshot || '').toString().trim());
   }
   const active = items.filter((i) => !COMPLETED_STATUS_RE.test((i.status || '').trim()) && refByRow.get(i.recordId));
   const needIds = Array.from(new Set(active.map((i) => refByRow.get(i.recordId)!)));
@@ -805,10 +808,21 @@ async function enrichPropertyStatuses(items: InspectionSummary[], rawResults: an
         statusById.set(String(rec.id), (rec.properties?.[PROPERTY_STATUS_PROPERTY] || '').toString().trim() || null);
       }
     }
+    // Fill the in-memory display value, and keep the SORTABLE snapshot in sync.
+    // This runs only on a cache miss (the list is cached + single-flighted), and
+    // only writes the rows whose snapshot actually drifted (or was never set —
+    // backfills legacy records as they're viewed). updateInspection doesn't touch
+    // last_edited_at, so refreshing the snapshot never reorders the default sort.
+    const writes: Promise<unknown>[] = [];
     for (const it of active) {
       const live = statusById.get(refByRow.get(it.recordId)!);
       if (live) it.propertyStatus = live;
+      const liveVal = (live || '').trim();
+      if (liveVal && liveVal !== storedSnapById.get(it.recordId)) {
+        writes.push(updateInspection(it.recordId, { property_status_snapshot: liveVal }).catch(() => {}));
+      }
     }
+    if (writes.length) await Promise.allSettled(writes);
   } catch {
     /* best-effort — leave the live status unresolved on failure */
   }
@@ -880,7 +894,7 @@ const STATUS_VARIANTS: Record<string, string[]> = {
 const CANCELLED_VARIANTS = ['cancelled', 'canceled', 'Cancelled', 'Canceled'];
 
 export type InspectionStatusKey = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
-export type InspectionSortField = 'updated' | 'scheduled' | 'address' | 'inspector' | 'price';
+export type InspectionSortField = 'updated' | 'scheduled' | 'address' | 'inspector' | 'price' | 'property_status';
 
 export interface InspectionQuery {
   search?: string;
@@ -943,6 +957,10 @@ const SORT_PROPERTY: Record<InspectionSortField, string> = {
   address: 'property_address_snapshot',
   inspector: 'inspector_name',
   price: 'total_client_cost',
+  // Property lifecycle status. Sorts on the stored snapshot (kept in sync with
+  // the live status by enrichPropertyStatuses + stamped at create/completion),
+  // since the live property status isn't a queryable field on the inspection.
+  property_status: 'property_status_snapshot',
 };
 
 /**
@@ -3178,6 +3196,11 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   await ensureProp(inspection, 'property_status_at_completion', {
     name: 'property_status_at_completion', label: 'Property Status at Completion', type: 'string', fieldType: 'text', groupName: 'inspection_results',
   });
+  // Sortable property-status snapshot (seeded at create, kept fresh by the home
+  // list enrichment, frozen at completion). Powers the "Property Status" sort.
+  await ensureProp(inspection, 'property_status_snapshot', {
+    name: 'property_status_snapshot', label: 'Property Status (Snapshot)', type: 'string', fieldType: 'text', groupName: 'inspection_results',
+  });
 
   // Drop the "does this property exist?" caches so the just-provisioned fields
   // are picked up by this warm instance without waiting for a cold start.
@@ -3373,6 +3396,25 @@ export async function stampFirstCompleted(inspectionRecordId: string, when: stri
  * Best-effort: never throws. A missing property, an empty status, or a
  * not-yet-created field must not block the completion write that called us.
  */
+/**
+ * Lean read of a Property's current lifecycle status (the `status` field used by
+ * the picker / inspection header). Returns null when unset or on any error
+ * (best-effort). Used to stamp the sortable snapshot at inspection create.
+ */
+export async function fetchPropertyStatus(propertyRecordId: string): Promise<string | null> {
+  const id = (propertyRecordId || '').toString().trim();
+  if (!id) return null;
+  try {
+    const { property: propertyTypeId } = typeIds();
+    const resp = await hubspotFetch(
+      `/crm/v3/objects/${propertyTypeId}/${id}?properties=${encodeURIComponent(PROPERTY_STATUS_PROPERTY)}`,
+    );
+    return (resp.properties?.[PROPERTY_STATUS_PROPERTY] || '').toString().trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function stampPropertyStatusAtCompletion(inspectionRecordId: string): Promise<void> {
   try {
     const { inspection: typeId, property: propertyTypeId } = typeIds();
@@ -3386,7 +3428,13 @@ export async function stampPropertyStatusAtCompletion(inspectionRecordId: string
     );
     const status = (propResp.properties?.[PROPERTY_STATUS_PROPERTY] || '').toString().trim();
     if (!status) return;
-    await updateInspection(inspectionRecordId, { property_status_at_completion: status });
+    // Freeze the historical value AND set the sortable snapshot to match, so a
+    // completed inspection sorts by the status it had at completion (and the
+    // live-refresh in enrichPropertyStatuses skips completed rows).
+    await updateInspection(inspectionRecordId, {
+      property_status_at_completion: status,
+      property_status_snapshot: status,
+    });
   } catch (e) {
     console.warn('[stampPropertyStatusAtCompletion] skipped (create the property to enable):', String(e).slice(0, 200));
   }

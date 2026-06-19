@@ -111,7 +111,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const inspectors = arr(req.query.inspector);
   const templatesRaw = arr(req.query.template);
   const regions = arr(req.query.region);
-  const SORT_FIELDS: InspectionSortField[] = ['updated', 'scheduled', 'address', 'inspector', 'price'];
+  const SORT_FIELDS: InspectionSortField[] = ['updated', 'scheduled', 'address', 'inspector', 'price', 'property_status'];
   const sortRaw = str(req.query.sort);
   const sortField: InspectionSortField = (SORT_FIELDS as string[]).includes(sortRaw)
     ? (sortRaw as InspectionSortField) : 'updated';
