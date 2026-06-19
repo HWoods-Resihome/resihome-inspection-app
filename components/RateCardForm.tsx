@@ -3469,7 +3469,11 @@ export function RateCardForm(props: RateCardFormProps) {
                         onClick={() => { setShowSettingsMenu(false); setShowSectionsManager(true); }}
                         className="w-full text-left px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors"
                       >
-                        <span aria-hidden className="text-gray-400">⚙</span> Manage Sections
+                        <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0">
+                          <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" />
+                          <line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />
+                        </svg>
+                        Manage Sections
                       </button>
                       <button
                         type="button"
@@ -3488,7 +3492,11 @@ export function RateCardForm(props: RateCardFormProps) {
                         className="w-full text-left px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors disabled:opacity-50 border-t border-gray-100"
                         title="Force-refresh line item catalog and regional rates from HubSpot."
                       >
-                        <span aria-hidden className="text-gray-400">⟳</span> {dataLoading ? 'Refreshing…' : 'Refresh Pricing'}
+                        <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-gray-400 shrink-0 ${dataLoading ? 'animate-spin' : ''}`}>
+                          <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
+                          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                        </svg>
+                        {dataLoading ? 'Refreshing…' : 'Refresh Pricing'}
                       </button>
                       <button
                         type="button"
@@ -3496,7 +3504,10 @@ export function RateCardForm(props: RateCardFormProps) {
                         className="w-full text-left px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors border-t border-gray-100"
                         title="Who submitted, approved, reopened or cancelled this inspection, and when."
                       >
-                        <span aria-hidden className="text-gray-400">🕑</span> Audit Trail
+                        <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0">
+                          <circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" />
+                        </svg>
+                        Audit Trail
                       </button>
                     </div>
                   </>
