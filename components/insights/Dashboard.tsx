@@ -21,6 +21,7 @@ import { PassRateGauge } from './cards/PassRateGauge';
 import { PropertyStatusPivot } from './cards/PropertyStatusPivot';
 import { GrassFails } from './cards/GrassFails';
 import { KbChanges } from './cards/KbChanges';
+import { KbVelocity } from './cards/KbVelocity';
 import { CardFrame } from './cardChrome';
 import {
   EMPTY_FILTERS, applyFilters, computeKpis,
@@ -167,8 +168,11 @@ export function InsightsDashboard() {
               <PassRateGauge kpis={kpis} />
             </TwoCol>
 
-            {/* (5) AI Knowledge Base changes (full width) */}
-            <KbChanges />
+            {/* (5) AI learning velocity + Knowledge Base changes feed */}
+            <TwoCol>
+              <KbVelocity />
+              <KbChanges />
+            </TwoCol>
 
             {/* (6) Property / inspection map — deferred */}
             <CardFrame title="Property / inspection map" icon={MAP_ICON} subtitle="Phase 4 · deferred">

@@ -4,28 +4,12 @@
  * /api/insights/kb-changes. Mirrors the /ai-knowledge list, but NO edit/delete
  * here. Scrollable inside the card.
  */
-import { useEffect, useState } from 'react';
 import { CardFrame, CardNote } from '../cardChrome';
+import { useKbChanges, type KbEntry } from '../useKbChanges';
 
 const ICON = (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
 );
-
-interface KbEntry {
-  id: string;
-  text: string;
-  kind: 'rule' | 'example';
-  source: 'inspector' | 'admin' | 'auto';
-  expected: string | null;
-  addedByName: string | null;
-  createdAt: number;
-  updatedAt: number | null;
-  samples: number | null;
-  accepts: number | null;
-  rejects: number | null;
-  code: string | null;
-}
-interface KbCounts { total: number; auto: number; examples: number; }
 
 function fmtDate(ms: number): string {
   try { return new Date(ms).toLocaleDateString(); } catch { return ''; }
@@ -46,23 +30,9 @@ function Badge({ entry }: { entry: KbEntry }) {
 }
 
 export function KbChanges() {
-  const [entries, setEntries] = useState<KbEntry[] | null>(null);
-  const [counts, setCounts] = useState<KbCounts | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/insights/kb-changes', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((d) => {
-        if (cancelled) return;
-        if (d.error) { setError(d.error); return; }
-        setEntries(d.entries || []);
-        setCounts(d.counts || null);
-      })
-      .catch((e) => { if (!cancelled) setError(String(e?.message || e)); });
-    return () => { cancelled = true; };
-  }, []);
+  const { data, error } = useKbChanges();
+  const entries = data?.entries ?? null;
+  const counts = data?.counts ?? null;
 
   const subtitle = counts
     ? `${counts.auto} AI-learned · ${counts.examples} examples · ${counts.total} total`
