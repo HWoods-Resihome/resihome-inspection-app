@@ -5,6 +5,7 @@ import React from 'react';
 import { InspectionPdf, PdfData, PdfAnswer } from '@/lib/pdf';
 import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord, updateInspection } from '@/lib/hubspot';
 import { buildShortLink } from '@/lib/shortLinks';
+import { externalViewDenial } from '@/lib/inspectionGuard';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
 import { getPosterUrl } from '@/lib/media';
 import type { AnswerInput } from '@/lib/types';
@@ -54,6 +55,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const t0 = Date.now();
   try {
     const body = req.body as GeneratePdfBody;
+
+    // External (1099) users may only generate/view PDFs for inspections they're
+    // allowed to see (any 1099, plus COMPLETED Scope/Re-Inspect). No-op + no
+    // extra read for internal users.
+    if (body.inspectionRecordId) {
+      const denial = await externalViewDenial(session.email, body.inspectionRecordId);
+      if (denial) return res.status(403).json({ error: denial });
+    }
 
     // Step 1: collect every image URL referenced anywhere in the inspection.
     // For video clips the entry is `poster#v=video`; we only fetch/embed the

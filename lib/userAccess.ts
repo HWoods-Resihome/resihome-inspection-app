@@ -2,10 +2,13 @@
  * Access control: internal staff vs. external (1099 leasing-agent) users.
  *
  * Internal users (the company's own domains) keep full access. External users —
- * any other email that's a valid HubSpot CONTACT — are limited to the 1099
- * Leasing Agent Property Inspection: they may start one, view 1099-type
- * inspections, but cannot touch any other template and cannot edit a completed
- * inspection.
+ * any other email that's a valid HubSpot CONTACT — get:
+ *   - FULL access to the 1099 Leasing Agent Property Inspection: create one,
+ *     view any 1099, edit/cancel the ones they OWN (never once completed).
+ *   - VIEW-ONLY access to COMPLETED Scope Rate Card and Re-Inspect inspections:
+ *     they can open them and view the completed PDFs, but cannot create, edit,
+ *     re-open, or cancel them, and never see non-completed ones.
+ *   - No access to any other template.
  *
  * Role is derived from the email domain on every request (no session migration
  * needed). Enforced SERVER-SIDE in the API routes; the UI mirrors it for clarity.
@@ -16,8 +19,14 @@ import type { TemplateType } from './types';
 // domain is added.
 export const INTERNAL_DOMAINS = ['resihome.com', 'resicap.com', 'resipro.com'];
 
-// The only template an external user can create or open.
-export const EXTERNAL_TEMPLATE: TemplateType = 'leasing_agent_1099_property_inspection';
+// Templates an external user can CREATE and EDIT (own, until completed).
+export const EXTERNAL_EDIT_TEMPLATES: TemplateType[] = ['leasing_agent_1099_property_inspection'];
+// Templates an external user can VIEW (read + completed PDF) but never edit —
+// and only when COMPLETED. They never see non-completed records of these types.
+export const EXTERNAL_VIEW_TEMPLATES: TemplateType[] = ['pm_scope_rate_card', 'pm_turn_reinspect_qc'];
+// The single template an external user may create/open for editing. Kept for
+// back-compat (login hint, the new-inspection picker, /api/auth/me).
+export const EXTERNAL_TEMPLATE: TemplateType = EXTERNAL_EDIT_TEMPLATES[0];
 
 function domainOf(email: string | null | undefined): string {
   const e = (email || '').trim().toLowerCase();
@@ -35,9 +44,29 @@ export function isExternalEmail(email: string | null | undefined): boolean {
   return !!e && e.includes('@') && !isInternalEmail(e);
 }
 
-/** Can an external user create/open this template? (Only the 1099 one.) */
+/** Can an external user create/edit this template? (Only the 1099 one.) */
+export function externalCanEditTemplate(templateType: string | null | undefined): boolean {
+  return EXTERNAL_EDIT_TEMPLATES.includes(String(templateType || '') as TemplateType);
+}
+
+/** Back-compat alias — "use" historically meant create/edit (the 1099 template). */
 export function externalCanUseTemplate(templateType: string | null | undefined): boolean {
-  return String(templateType || '') === EXTERNAL_TEMPLATE;
+  return externalCanEditTemplate(templateType);
+}
+
+/**
+ * Can an external user VIEW this inspection? The 1099 template at any status,
+ * plus Scope Rate Card / Re-Inspect when (and only when) COMPLETED.
+ */
+export function externalCanViewTemplate(
+  templateType: string | null | undefined,
+  status: string | null | undefined,
+): boolean {
+  if (externalCanEditTemplate(templateType)) return true;
+  if (EXTERNAL_VIEW_TEMPLATES.includes(String(templateType || '') as TemplateType)) {
+    return isCompletedStatus(status);
+  }
+  return false;
 }
 
 /** Normalize a HubSpot status string to lowercase for completed checks. */
@@ -62,9 +91,13 @@ export function ownsInspection(email: string | null | undefined, ownerEmail: str
 /**
  * The single rule for external-user access to an inspection. Returns a denial
  * REASON string (safe to surface) or null when allowed. Internal users are never
- * restricted. External users: only the 1099 template, no edits once completed,
- * and they may only modify (edit/cancel) inspections they own — every other 1099
- * they can see is view-only.
+ * restricted.
+ *
+ * External users:
+ *   - WRITE (create/edit/re-open/cancel/submit): only the 1099 template, only
+ *     ones they OWN, and never once completed. Scope/Re-Inspect are view-only.
+ *   - READ: any 1099, plus COMPLETED Scope Rate Card / Re-Inspect (view + PDF).
+ *
  * Call from every inspection read/write API route (server-side enforcement).
  */
 export function externalAccessDenial(
@@ -73,10 +106,12 @@ export function externalAccessDenial(
   opts: { write?: boolean; status?: string | null; ownerEmail?: string | null } = {},
 ): string | null {
   if (!isExternalEmail(email)) return null; // internal = full access
-  if (!externalCanUseTemplate(templateType)) {
-    return 'Your account can only access 1099 Leasing Agent Property Inspections.';
-  }
+
   if (opts.write) {
+    // Writes are confined to the 1099 template; Scope/Re-Inspect are view-only.
+    if (!externalCanEditTemplate(templateType)) {
+      return 'Your account has view-only access to this inspection type.';
+    }
     if (isCompletedStatus(opts.status)) {
       return 'Completed inspections are read-only for your account.';
     }
@@ -84,6 +119,16 @@ export function externalAccessDenial(
     if (!ownsInspection(email, opts.ownerEmail)) {
       return 'You can only edit or cancel your own inspections.';
     }
+    return null;
+  }
+
+  // Read access.
+  if (!externalCanViewTemplate(templateType, opts.status)) {
+    if (EXTERNAL_VIEW_TEMPLATES.includes(String(templateType || '') as TemplateType)) {
+      // A Scope/Re-Inspect that isn't completed yet.
+      return 'You can only view completed Scope Rate Card or Re-Inspect inspections.';
+    }
+    return 'Your account can only access 1099 Leasing Agent Property Inspections.';
   }
   return null;
 }

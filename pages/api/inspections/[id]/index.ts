@@ -34,8 +34,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const answersPromise = fetchAnswersForInspection(id);
       const data = await fetchInspectionWithPropertyRef(id);
       if (!data) { answersPromise.catch(() => {}); return res.status(404).json({ error: 'Inspection not found' }); }
-      // External (1099) users can only open 1099-type inspections.
-      const denial = externalAccessDenial(session.email, data.inspection.templateType);
+      // External (1099) users can open any 1099, plus COMPLETED Scope Rate Card
+      // / Re-Inspect inspections (view-only). Pass the status so the read rule
+      // can allow completed view-only types and reject non-completed ones.
+      const denial = externalAccessDenial(session.email, data.inspection.templateType, {
+        status: data.inspection.status,
+      });
       if (denial) { answersPromise.catch(() => {}); return res.status(403).json({ error: denial }); }
       // Answers + the property's active listing + (Community/Visit only) the
       // associated community's name — all best-effort, in parallel.

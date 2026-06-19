@@ -5,6 +5,7 @@ import { isInternalResolution } from './vendors';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from './answerProps';
 import { extractLeasingAgent1099Fields } from './leasingAgent1099';
 import { calculateLine } from './rateCardMath';
+import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES } from './userAccess';
 
 const API_BASE = 'https://api.hubapi.com';
 
@@ -973,7 +974,7 @@ export interface InspectionQuery {
   inspectors?: string[];         // exact inspector_name values; empty = no filter
   templates?: string[];          // exact template_type values; empty = no filter
   regions?: string[];            // exact region_snapshot values; empty = no filter
-  forceTemplate?: string | null; // external (1099) users are locked to one template
+  external?: boolean;            // external (1099) user — apply the restricted visibility rule
 }
 
 export interface InspectionCounts {
@@ -992,9 +993,7 @@ function inspectionAndFilters(q: InspectionQuery): any[] {
     // "All" still hides cancelled inspections from the field team.
     filters.push({ propertyName: 'status', operator: 'NOT_IN', values: CANCELLED_VARIANTS });
   }
-  const templates = q.forceTemplate
-    ? [q.forceTemplate]
-    : (q.templates || []).map((t) => t.trim()).filter((t) => t && t !== 'all');
+  const templates = (q.templates || []).map((t) => t.trim()).filter((t) => t && t !== 'all');
   if (templates.length) filters.push({ propertyName: 'template_type', operator: 'IN', values: templates });
   const inspectors = (q.inspectors || []).map((n) => n.trim()).filter((n) => n && n !== 'all');
   if (inspectors.length) filters.push({ propertyName: 'inspector_name', operator: 'IN', values: inspectors });
@@ -1003,10 +1002,82 @@ function inspectionAndFilters(q: InspectionQuery): any[] {
   return filters;
 }
 
+// Inspector + region AND-filters shared by the external allow-groups (template
+// and status are set PER allow-group, so they're not included here).
+function externalCommonFilters(q: InspectionQuery): any[] {
+  const filters: any[] = [];
+  const inspectors = (q.inspectors || []).map((n) => n.trim()).filter((n) => n && n !== 'all');
+  if (inspectors.length) filters.push({ propertyName: 'inspector_name', operator: 'IN', values: inspectors });
+  const regions = (q.regions || []).map((r) => r.trim()).filter((r) => r && r !== 'all');
+  if (regions.length) filters.push({ propertyName: 'region_snapshot', operator: 'IN', values: regions });
+  return filters;
+}
+
+// External (1099) users see a DISJUNCTION: ALL their 1099 inspections (any
+// status) PLUS COMPLETED Scope Rate Card / Re-Inspect inspections (view-only).
+// HubSpot ORs across filterGroups, so that's up to two "allow-groups". Template
+// narrowing from the facet intersects with the allowed set; an all-disallowed
+// selection is ignored (falls back to the full allowed set) so the list can
+// never widen beyond policy.
+function externalAllowGroups(q: InspectionQuery): { filters: any[] }[] {
+  const common = externalCommonFilters(q);
+  const selected = (q.templates || []).map((t) => t.trim()).filter((t) => t && t !== 'all');
+  let editTpls: string[] = [...EXTERNAL_EDIT_TEMPLATES];
+  let viewTpls: string[] = [...EXTERNAL_VIEW_TEMPLATES];
+  if (selected.length) {
+    const e = EXTERNAL_EDIT_TEMPLATES.filter((t) => selected.includes(t));
+    const v = EXTERNAL_VIEW_TEMPLATES.filter((t) => selected.includes(t));
+    if (e.length || v.length) { editTpls = e; viewTpls = v; } // valid narrowing; else ignore
+  }
+
+  const status = q.status && q.status !== 'all' ? q.status : '';
+  const groups: { filters: any[] }[] = [];
+  // 1099 group: full visibility — the selected status, or all non-cancelled.
+  if (editTpls.length) {
+    const statusFilter = status && STATUS_VARIANTS[status]
+      ? { propertyName: 'status', operator: 'IN', values: STATUS_VARIANTS[status] }
+      : { propertyName: 'status', operator: 'NOT_IN', values: CANCELLED_VARIANTS };
+    groups.push({ filters: [{ propertyName: 'template_type', operator: 'IN', values: editTpls }, statusFilter, ...common] });
+  }
+  // Scope / Re-Inspect group: COMPLETED only. Contributes only when the selected
+  // status includes completed (the "all" tab or the "completed" chip).
+  if (viewTpls.length && (status === '' || status === 'completed')) {
+    groups.push({ filters: [
+      { propertyName: 'template_type', operator: 'IN', values: viewTpls },
+      { propertyName: 'status', operator: 'IN', values: STATUS_VARIANTS.completed },
+      ...common,
+    ] });
+  }
+  // Safety net: never emit an unfiltered query for an external user.
+  if (groups.length === 0) {
+    groups.push({ filters: [{ propertyName: 'template_type', operator: 'EQ', value: '__none__' }] });
+  }
+  return groups;
+}
+
 // Compose filterGroups. When searching, replicate the AND-filters into each of
 // the three search dimensions (address / name / inspector) so search ANDs with
 // the active filters (HubSpot ORs across groups, ANDs within a group).
 function inspectionFilterGroups(q: InspectionQuery): any[] {
+  if (q.external) {
+    const allow = externalAllowGroups(q);
+    const search = (q.search || '').trim();
+    if (!search) return allow;
+    const token = `*${search}*`;
+    // AND the search token into each allow-group. HubSpot caps filterGroups at
+    // 5, so with two allow-groups search fewer fields (address + inspector → 4
+    // groups); with one, search all three (address / name / inspector → 3).
+    const fields = allow.length > 1
+      ? ['property_address_snapshot', 'inspector_name']
+      : ['property_address_snapshot', 'inspection_name', 'inspector_name'];
+    const out: any[] = [];
+    for (const g of allow) {
+      for (const propertyName of fields) {
+        out.push({ filters: [{ propertyName, operator: 'CONTAINS_TOKEN', value: token }, ...g.filters] });
+      }
+    }
+    return out;
+  }
   const and = inspectionAndFilters(q);
   const search = (q.search || '').trim();
   if (!search) return [{ filters: and }];
@@ -1213,35 +1284,37 @@ const distinct = (vals: any[]): string[] =>
  * template.
  */
 export async function inspectionFacets(query: InspectionQuery): Promise<{ inspectors: string[]; templates: string[]; regions: string[] }> {
-  const ext = query.forceTemplate || null;
+  const ext = !!query.external;
   // Each dimension's options IGNORE that dimension's own selection (so you can
-  // change it) but respect the OTHER active filters.
-  const inspectorQ: InspectionQuery = { search: query.search, status: query.status, templates: query.templates, regions: query.regions, forceTemplate: ext };
-  const templateQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, regions: query.regions, forceTemplate: ext };
-  const regionQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, templates: query.templates, forceTemplate: ext };
+  // change it) but respect the OTHER active filters. The external visibility
+  // rule (1099 + completed Scope/Re-Inspect) is carried through `external`, so
+  // every scan is already bounded to what the user may see.
+  const inspectorQ: InspectionQuery = { search: query.search, status: query.status, templates: query.templates, regions: query.regions, external: ext };
+  const templateQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, regions: query.regions, external: ext };
+  const regionQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, templates: query.templates, external: ext };
   const noneSelected = (query.inspectors?.length || 0) === 0
     && (query.templates?.length || 0) === 0
     && (query.regions?.length || 0) === 0;
 
   let inspectors: string[] = [];
-  let templates: string[] = ext ? [ext] : [];
+  let templates: string[] = [];
   let regions: string[] = [];
   try {
     if (noneSelected) {
       // No dimension selected → all share one constraint; single combined scan.
       const rows = await scanInspectionProps(inspectorQ, ['inspector_name', 'template_type', 'region_snapshot']);
       inspectors = distinct(rows.map((p) => p.inspector_name));
-      if (!ext) templates = distinct(rows.map((p) => p.template_type));
+      templates = distinct(rows.map((p) => p.template_type));
       regions = distinct(rows.map((p) => p.region_snapshot));
     } else {
       // A dimension is selected → scan each list under the OTHER filters (parallel).
       const [iRows, tRows, rRows] = await Promise.all([
         scanInspectionProps(inspectorQ, ['inspector_name']),
-        ext ? Promise.resolve([] as any[]) : scanInspectionProps(templateQ, ['template_type']),
+        scanInspectionProps(templateQ, ['template_type']),
         scanInspectionProps(regionQ, ['region_snapshot']),
       ]);
       inspectors = distinct(iRows.map((p) => p.inspector_name));
-      if (!ext) templates = distinct(tRows.map((p) => p.template_type));
+      templates = distinct(tRows.map((p) => p.template_type));
       regions = distinct(rRows.map((p) => p.region_snapshot));
     }
   } catch (e) {

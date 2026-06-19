@@ -18,3 +18,20 @@ export async function externalWriteDenial(
   if (!insp) return null; // not found → let the endpoint return its own 404
   return externalAccessDenial(email, insp.templateType, { write: true, status: insp.status, ownerEmail: insp.inspectorEmail });
 }
+
+/**
+ * READ guard for external users — use on routes that surface an inspection's
+ * content (e.g. PDF generation). No-op (no HubSpot read) for internal users; for
+ * external users it loads the template + status and applies the read rule: any
+ * 1099, plus COMPLETED Scope Rate Card / Re-Inspect (view-only). Returns a 403
+ * message, or null when allowed.
+ */
+export async function externalViewDenial(
+  email: string | null | undefined,
+  inspectionId: string,
+): Promise<string | null> {
+  if (!isExternalEmail(email)) return null; // internal users: unrestricted, no fetch
+  const insp = await fetchInspectionById(inspectionId);
+  if (!insp) return null; // not found → let the endpoint return its own 404
+  return externalAccessDenial(email, insp.templateType, { status: insp.status });
+}
