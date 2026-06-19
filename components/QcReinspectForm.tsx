@@ -785,6 +785,11 @@ export function QcReinspectForm(props: Props) {
         const secFail = s.lines.filter((l) => l.passFail === 'fail').length;
         const after = afterPhotos[s.key] || [];
         const isCollapsed = collapsed.has(s.key);
+        // Standalone-QC room verdict drives the "required" highlighting: a Fail
+        // needs an After photo + a note.
+        const rv = !hasLines ? (roomVerdict[s.key] || '') : '';
+        const failNeedsPhoto = rv === 'fail' && after.length === 0;
+        const failNeedsNote = rv === 'fail' && !(roomNote[s.key] || '').trim();
         return (
           <section key={s.key} className="mb-4 border border-gray-200 rounded-xl overflow-hidden shadow-md">
             <button
@@ -822,9 +827,9 @@ export function QcReinspectForm(props: Props) {
                     />
                   </div>
 
-                  <div className="rounded-lg border-2 border-teal-300 bg-teal-50/60 p-2.5 min-w-0">
+                  <div className={'rounded-lg border-2 p-2.5 min-w-0 ' + (failNeedsPhoto ? 'border-brand bg-brand/5' : 'border-teal-300 bg-teal-50/60')}>
                     <PhotoStrip
-                      label={after.length === 0 && hasLines ? 'After • required' : 'After'}
+                      label={(after.length === 0 && hasLines) || failNeedsPhoto ? 'After • required' : 'After'}
                       photoUrls={cameraOpenAnywhere ? [] : after}
                       size={64}
                       accent="teal"
@@ -841,16 +846,19 @@ export function QcReinspectForm(props: Props) {
                         >Take Photo</button>
                       )}
                     </PhotoStrip>
+                    {failNeedsPhoto && (
+                      <p className="text-xs text-brand font-heading font-semibold mt-1.5">
+                        Add at least one After photo — required for a failed room.
+                      </p>
+                    )}
                   </div>
                 </div>
 
                 {/* Standalone QC: optional per-room Pass/Fail + notes. A Fail
                     requires at least one After photo AND a note (enforced on
-                    submit). Pass/blank leaves notes optional. */}
-                {!hasLines && (() => {
-                  const rv = roomVerdict[s.key] || '';
-                  const failNeedsMore = rv === 'fail' && (after.length === 0 || !(roomNote[s.key] || '').trim());
-                  return (
+                    submit). Pass/blank leaves notes optional. The After-photo
+                    requirement is highlighted up in the After block above. */}
+                {!hasLines && (
                     <div className="px-4 py-3 border-b border-gray-100">
                       <div className="flex items-center gap-2 mb-2">
                         <span className="text-xs font-heading font-semibold text-gray-500 uppercase tracking-wider">Room Result</span>
@@ -870,6 +878,10 @@ export function QcReinspectForm(props: Props) {
                           >Fail</button>
                         </div>
                       </div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-heading font-semibold text-gray-500 uppercase tracking-wider">Notes</span>
+                        {failNeedsNote && <span className="text-[11px] text-brand font-heading font-bold">• required</span>}
+                      </div>
                       <textarea
                         value={roomNote[s.key] || ''}
                         disabled={props.readOnly}
@@ -877,16 +889,10 @@ export function QcReinspectForm(props: Props) {
                         onBlur={() => saveRoomNote(s.key, s.section, s.location)}
                         rows={2}
                         placeholder={rv === 'fail' ? 'Required: describe what failed in this room…' : 'Notes for this room (optional)…'}
-                        className={'w-full text-sm rounded-lg border px-3 py-2 focus-brand ' + (rv === 'fail' && !(roomNote[s.key] || '').trim() ? 'border-brand' : 'border-gray-300')}
+                        className={'w-full text-sm rounded-lg border-2 px-3 py-2 focus-brand ' + (failNeedsNote ? 'border-brand bg-brand/5' : 'border-gray-300')}
                       />
-                      {failNeedsMore && (
-                        <p className="text-xs text-brand font-heading font-semibold mt-1">
-                          A failed room needs {after.length === 0 ? 'at least one After photo' : ''}{after.length === 0 && !(roomNote[s.key] || '').trim() ? ' and ' : ''}{!(roomNote[s.key] || '').trim() ? 'a note' : ''}.
-                        </p>
-                      )}
                     </div>
-                  );
-                })()}
+                )}
 
                 {/* Line items render ONLY when validating a source scope. A
                     standalone QC (no source) has no lines — it's just rooms +
