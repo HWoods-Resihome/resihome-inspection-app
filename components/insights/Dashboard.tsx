@@ -27,7 +27,6 @@ import { AiOverridesByInspector } from './cards/AiOverridesByInspector';
 import { AiOverridesByCategory } from './cards/AiOverridesByCategory';
 import { ScopeCost } from './cards/ScopeCost';
 import { ScopeApprovals } from './cards/ScopeApprovals';
-import { PropertyMap } from './cards/PropertyMap';
 import { CardHost, CardSlot, CARD_CATALOG } from './cardHost';
 import {
   EMPTY_FILTERS, applyFilters, computeKpis, countActiveFilters, filterOverrides,
@@ -253,9 +252,6 @@ export function InsightsDashboard() {
 
             {/* (7) AI Knowledge Base changes feed (full width) */}
             <CardSlot id="kb"><KbChanges /></CardSlot>
-
-            {/* (8) Property / inspection map (full width) */}
-            <CardSlot id="map"><PropertyMap rows={filtered} /></CardSlot>
           </div>
           </CardHost>
         )}

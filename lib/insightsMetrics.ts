@@ -261,24 +261,43 @@ export function scopeApprovalsByApprover(rows: InsightsRow[], nte: Record<string
   return out.sort((a, b) => (b.overCount - a.overCount) || (b.total - a.total));
 }
 
-export interface ScopeCategoryInspectorRow { email: string; label: string; count: number; total: number; avg: number; }
+// Mode B is a 3-level drill-down: Category → Inspector → Inspection. Each level
+// carries an average so you can see WHERE a category's average comes from.
+export interface ScopeCatScope { recordId: string; propertyAddress: string; cost: number; approverName: string | null; scheduledDate: string | null; }
+export interface ScopeCatInspector { email: string; label: string; count: number; total: number; avg: number; scopes: ScopeCatScope[]; }
+export interface ScopeCatNode { category: string; count: number; total: number; avg: number; inspectors: ScopeCatInspector[]; }
 
-/** Avg cost of ONE category per inspector (mode B) — does someone scope e.g.
- *  cleaning higher than others? Averages over that inspector's scopes that
- *  include the category; highest average first. */
-export function scopeCategoryCostByInspector(rows: InsightsRow[], category: string): ScopeCategoryInspectorRow[] {
-  const map = new Map<string, ScopeCategoryInspectorRow>();
+/**
+ * Per-category scope cost as a drill-down tree: every category with its average
+ * (across the scopes that include it), then the inspectors driving that average,
+ * then the individual inspections. `cost` at every level is the CATEGORY's share
+ * of that scope (scopeCategoryCosts[category]), so the averages reconcile.
+ * Categories by total spend; inspectors + scopes by highest cost first.
+ */
+export function scopeCategoryTree(rows: InsightsRow[]): ScopeCatNode[] {
+  const cats = new Map<string, { total: number; count: number; byInspector: Map<string, ScopeCatInspector> }>();
   for (const r of scopeRows(rows)) {
-    const amt = (r.scopeCategoryCosts || {})[category];
-    if (typeof amt !== 'number') continue;
     const email = (r.inspectorEmail || '').toLowerCase() || '(unknown)';
-    let g = map.get(email);
-    if (!g) { g = { email, label: r.inspectorName || r.inspectorEmail || '(unknown)', count: 0, total: 0, avg: 0 }; map.set(email, g); }
-    g.count++; g.total += amt;
+    const label = r.inspectorName || r.inspectorEmail || '(unknown)';
+    for (const [category, amt] of Object.entries(r.scopeCategoryCosts || {})) {
+      if (typeof amt !== 'number') continue;
+      let c = cats.get(category);
+      if (!c) { c = { total: 0, count: 0, byInspector: new Map() }; cats.set(category, c); }
+      c.total += amt; c.count++;
+      let ins = c.byInspector.get(email);
+      if (!ins) { ins = { email, label, count: 0, total: 0, avg: 0, scopes: [] }; c.byInspector.set(email, ins); }
+      ins.count++; ins.total += amt;
+      ins.scopes.push({ recordId: r.recordId, propertyAddress: r.propertyAddress, cost: amt, approverName: r.approverName, scheduledDate: r.scheduledDate });
+    }
   }
-  const out = Array.from(map.values());
-  for (const g of out) g.avg = g.count ? g.total / g.count : 0;
-  return out.sort((a, b) => b.avg - a.avg);
+  const out: ScopeCatNode[] = [];
+  for (const [category, c] of cats) {
+    const inspectors = Array.from(c.byInspector.values());
+    for (const ins of inspectors) { ins.avg = ins.count ? ins.total / ins.count : 0; ins.scopes.sort((a, b) => b.cost - a.cost); }
+    inspectors.sort((a, b) => b.avg - a.avg);
+    out.push({ category, count: c.count, total: c.total, avg: c.count ? c.total / c.count : 0, inspectors });
+  }
+  return out.sort((a, b) => b.total - a.total);
 }
 
 /** Distinct current property-status values present in the rows (for the rail). */

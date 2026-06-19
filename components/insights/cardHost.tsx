@@ -54,5 +54,4 @@ export const CARD_CATALOG: { id: string; title: string }[] = [
   { id: 'overrides-inspector', title: 'AI overrides by inspector' },
   { id: 'overrides-category', title: 'AI overrides by category' },
   { id: 'kb', title: 'AI Knowledge Base changes' },
-  { id: 'map', title: 'Property / inspection map' },
 ];

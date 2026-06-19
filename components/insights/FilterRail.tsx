@@ -93,8 +93,9 @@ export function FilterRail({
         </button>
         {onCollapse && (
           <button type="button" onClick={onCollapse} title="Collapse filters" aria-label="Collapse filters"
-            className="text-[#71717a] hover:text-[#ff0060]">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+            className="inline-flex items-center gap-1.5 text-[12px] font-heading font-semibold text-[#a1a1aa] hover:text-[#f4f4f5] bg-[#232329] hover:bg-[#2c2c33] border border-white/10 rounded-lg px-3 py-1.5">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+            Collapse
           </button>
         )}
         </div>
