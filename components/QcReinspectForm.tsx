@@ -98,6 +98,13 @@ export function QcReinspectForm(props: Props) {
   const [beforeMap, setBeforeMap] = useState<Record<string, string[]>>({});
   const [afterPhotos, setAfterPhotos] = useState<Record<string, string[]>>({});
   const [afterPhotoRecordIds, setAfterPhotoRecordIds] = useState<Record<string, string>>({});
+  // Standalone-QC per-room verdict + note (optional pass/fail; a Fail requires a
+  // photo + note). Keyed by section key. Refs mirror them so the save path reads
+  // the latest without stale closures.
+  const [roomVerdict, setRoomVerdict] = useState<Record<string, 'pass' | 'fail' | ''>>({});
+  const [roomNote, setRoomNote] = useState<Record<string, string>>({});
+  const roomVerdictRef = useRef(roomVerdict); roomVerdictRef.current = roomVerdict;
+  const roomNoteRef = useRef(roomNote); roomNoteRef.current = roomNote;
   const [sourceName, setSourceName] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<'pass' | 'fail' | ''>('');
   // Overall failure comment — REQUIRED when the verdict is Fail; carried onto the
@@ -170,13 +177,19 @@ export function QcReinspectForm(props: Props) {
         setBeforeMap(d.beforePhotos || {});
         const after: Record<string, string[]> = {};
         const afterIds: Record<string, string> = {};
+        const roomV: Record<string, 'pass' | 'fail' | ''> = {};
+        const roomN: Record<string, string> = {};
         for (const [key, v] of Object.entries(d.afterPhotos || {})) {
-          const val = v as { recordId: string; urls: string[] };
+          const val = v as { recordId: string; urls: string[]; passFail?: string; note?: string };
           after[key] = val.urls || [];
           afterIds[key] = val.recordId;
+          if (val.passFail === 'pass' || val.passFail === 'fail') roomV[key] = val.passFail;
+          if (val.note) roomN[key] = val.note;
         }
         setAfterPhotos(after);
         setAfterPhotoRecordIds(afterIds);
+        setRoomVerdict(roomV);
+        setRoomNote(roomN);
         setSourceName(d.sourceRateCardName || null);
         if (d.qcVerdict === 'pass' || d.qcVerdict === 'fail') setVerdict(d.qcVerdict);
 
@@ -267,6 +280,12 @@ export function QcReinspectForm(props: Props) {
   const hasLines = lines.length > 0;
   const allMarked = !hasLines || lines.every((l) => l.passFail === 'pass' || l.passFail === 'fail');
   const allSectionsHaveAfter = !hasLines || sections.every((s) => (afterPhotos[s.key] || []).length > 0);
+  // Standalone QC: per-room Pass/Fail is optional, but a room marked FAIL needs
+  // at least one After photo AND a note before submitting.
+  const standaloneFailRoomsOk = hasLines || sections.every((s) => {
+    if ((roomVerdict[s.key] || '') !== 'fail') return true;
+    return (afterPhotos[s.key] || []).length > 0 && (roomNote[s.key] || '').trim().length > 0;
+  });
 
   // Offline-aware uploader for the in-app camera — caches to IndexedDB on a weak
   // signal and returns a draft URL, tagged to the camera's active section so it
@@ -310,6 +329,9 @@ export function QcReinspectForm(props: Props) {
             location,
             photoUrls: urls,
             photoPhase: 'after',
+            // Standalone-QC room verdict + note ride on this same record.
+            passFail: roomVerdictRef.current[key] || '',
+            note: roomNoteRef.current[key] || '',
           }),
           questionHubspotRecordId: null,
         }],
@@ -345,6 +367,29 @@ export function QcReinspectForm(props: Props) {
         await saveLinePhotos(line.recordId, (line.photoUrls || []).filter((u) => u !== url));
       }
     }
+  }
+
+  // Standalone-QC room verdict (optional). Toggling off a set verdict clears it.
+  // The verdict rides on the room's after-photo record (persistAfterPhotos).
+  function setRoomPassFail(key: string, section: string, location: string, pf: 'pass' | 'fail') {
+    if (props.readOnly) return;
+    const next = (roomVerdictRef.current[key] === pf ? '' : pf) as 'pass' | 'fail' | '';
+    const updated = { ...roomVerdictRef.current, [key]: next };
+    roomVerdictRef.current = updated;
+    setRoomVerdict(updated);
+    void persistAfterPhotos(key, section, location, afterPhotos[key] || [])
+      .catch((e) => console.warn('[QC] room verdict save failed:', e));
+  }
+  function setRoomNoteText(key: string, text: string) {
+    const updated = { ...roomNoteRef.current, [key]: text };
+    roomNoteRef.current = updated;
+    setRoomNote(updated);
+  }
+  // Persist the room note (called on blur) onto the room's after-photo record.
+  function saveRoomNote(key: string, section: string, location: string) {
+    if (props.readOnly) return;
+    void persistAfterPhotos(key, section, location, afterPhotos[key] || [])
+      .catch((e) => console.warn('[QC] room note save failed:', e));
   }
 
   // Persist a QC line's photo_urls to its answer record (shared by tag/untag).
@@ -594,6 +639,11 @@ export function QcReinspectForm(props: Props) {
       return;
     }
     if (!allSectionsHaveAfter) { void dialog.alert('Every section needs at least one After Photo before submitting.'); return; }
+    if (!standaloneFailRoomsOk) {
+      const bad = sections.find((s) => (roomVerdict[s.key] || '') === 'fail' && ((afterPhotos[s.key] || []).length === 0 || !(roomNote[s.key] || '').trim()));
+      void dialog.alert(`A room marked FAIL needs at least one After photo and a note.\n\nMissing: ${bad?.displayName || 'a failed room'}`);
+      return;
+    }
     if (verdict !== 'pass' && verdict !== 'fail') { void dialog.alert('Select an overall Pass or Fail verdict.'); return; }
     // A failing overall verdict REQUIRES a comment — it prints on the QC PDF.
     if (verdict === 'fail' && !overallNote.trim()) {
@@ -793,6 +843,50 @@ export function QcReinspectForm(props: Props) {
                     </PhotoStrip>
                   </div>
                 </div>
+
+                {/* Standalone QC: optional per-room Pass/Fail + notes. A Fail
+                    requires at least one After photo AND a note (enforced on
+                    submit). Pass/blank leaves notes optional. */}
+                {!hasLines && (() => {
+                  const rv = roomVerdict[s.key] || '';
+                  const failNeedsMore = rv === 'fail' && (after.length === 0 || !(roomNote[s.key] || '').trim());
+                  return (
+                    <div className="px-4 py-3 border-b border-gray-100">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs font-heading font-semibold text-gray-500 uppercase tracking-wider">Room Result</span>
+                        <span className="text-[11px] text-gray-400">(optional)</span>
+                        <div className="ml-auto flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={props.readOnly}
+                            onClick={() => setRoomPassFail(s.key, s.section, s.location, 'pass')}
+                            className={'px-3 py-1.5 rounded-lg text-xs font-heading font-bold border ' + (rv === 'pass' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-emerald-700 border-emerald-300 hover:bg-emerald-50')}
+                          >Pass</button>
+                          <button
+                            type="button"
+                            disabled={props.readOnly}
+                            onClick={() => setRoomPassFail(s.key, s.section, s.location, 'fail')}
+                            className={'px-3 py-1.5 rounded-lg text-xs font-heading font-bold border ' + (rv === 'fail' ? 'bg-brand text-white border-brand' : 'bg-white text-brand border-brand/40 hover:bg-brand/5')}
+                          >Fail</button>
+                        </div>
+                      </div>
+                      <textarea
+                        value={roomNote[s.key] || ''}
+                        disabled={props.readOnly}
+                        onChange={(e) => setRoomNoteText(s.key, e.target.value)}
+                        onBlur={() => saveRoomNote(s.key, s.section, s.location)}
+                        rows={2}
+                        placeholder={rv === 'fail' ? 'Required: describe what failed in this room…' : 'Notes for this room (optional)…'}
+                        className={'w-full text-sm rounded-lg border px-3 py-2 focus-brand ' + (rv === 'fail' && !(roomNote[s.key] || '').trim() ? 'border-brand' : 'border-gray-300')}
+                      />
+                      {failNeedsMore && (
+                        <p className="text-xs text-brand font-heading font-semibold mt-1">
+                          A failed room needs {after.length === 0 ? 'at least one After photo' : ''}{after.length === 0 && !(roomNote[s.key] || '').trim() ? ' and ' : ''}{!(roomNote[s.key] || '').trim() ? 'a note' : ''}.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Line items render ONLY when validating a source scope. A
                     standalone QC (no source) has no lines — it's just rooms +
@@ -1021,10 +1115,11 @@ export function QcReinspectForm(props: Props) {
             </div>
           )}
 
-          {(!allMarked || !allSectionsHaveAfter || !verdict || (verdict === 'fail' && !overallNote.trim())) && (
+          {(!allMarked || !allSectionsHaveAfter || !standaloneFailRoomsOk || !verdict || (verdict === 'fail' && !overallNote.trim())) && (
             <ul className="text-xs text-amber-700 list-disc pl-5 space-y-0.5">
               {!allMarked && <li>Mark every line item Pass or Fail.</li>}
               {!allSectionsHaveAfter && <li>Add at least one After Photo to every section.</li>}
+              {!standaloneFailRoomsOk && <li>Each room marked Fail needs an After photo and a note.</li>}
               {!verdict && <li>Choose an overall Pass/Fail verdict.</li>}
               {verdict === 'fail' && !overallNote.trim() && <li>Add an overall failure comment.</li>}
             </ul>
@@ -1064,7 +1159,7 @@ export function QcReinspectForm(props: Props) {
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || !allMarked || !allSectionsHaveAfter || !verdict}
+                disabled={submitting || !allMarked || !allSectionsHaveAfter || !standaloneFailRoomsOk || !verdict}
                 className="px-3 sm:px-5 py-2 text-xs sm:text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed whitespace-nowrap"
               >
                 {submitting ? 'Submitting...' : 'Submit'}

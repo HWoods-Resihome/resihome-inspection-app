@@ -151,11 +151,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // QC's own "after" section photos, keyed by composite + location.
-    const afterPhotos: Record<string, { recordId: string; urls: string[] }> = {};
+    const afterPhotos: Record<string, { recordId: string; urls: string[]; passFail?: string; note?: string }> = {};
     for (const a of answers) {
       if (a.answerType === 'section_photo') {
         const key = `${a.section || ''}||${a.location || ''}`;
-        afterPhotos[key] = { recordId: a.recordId, urls: a.photoUrls || [] };
+        // pass_fail / note are the standalone-QC room verdict + room note carried
+        // on the after-photo record (see buildSectionPhotoAnswerProps).
+        afterPhotos[key] = { recordId: a.recordId, urls: a.photoUrls || [], passFail: a.passFail || '', note: a.note || '' };
       }
     }
 

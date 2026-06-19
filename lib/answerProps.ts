@@ -103,6 +103,11 @@ export interface SectionPhotoAnswerFields {
   location?: string | null;
   /** QC before/after re-inspect flow only. */
   photoPhase?: 'before' | 'after' | null;
+  /** Standalone-QC room verdict ('pass' | 'fail' | '') stored on the room's
+   *  after-photo record so a room can be passed/failed without line items. */
+  passFail?: 'pass' | 'fail' | '' | null;
+  /** Standalone-QC room note (general notes; required when the room is failed). */
+  note?: string | null;
 }
 
 /**
@@ -130,5 +135,9 @@ export function buildSectionPhotoAnswerProps(
   if (f.inspectionIdExternal) props.inspection_id_external = f.inspectionIdExternal;
   if (f.location) props.location = f.location;
   if (f.photoPhase) props.photo_phase = f.photoPhase;
+  // Standalone-QC room verdict + note (carried on the room's after-photo record).
+  // Always written (even empty) so clearing a verdict/note persists.
+  if (f.passFail !== undefined) props.pass_fail = f.passFail || '';
+  if (f.note !== undefined) props.note = f.note || '';
   return props;
 }

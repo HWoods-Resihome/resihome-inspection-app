@@ -45,6 +45,9 @@ export interface QcPdfSection {
   afterPhotos: string[];
   passCount: number;
   failCount: number;
+  /** Standalone-QC (no line items): optional per-room verdict + note. */
+  roomVerdict?: 'pass' | 'fail' | '';
+  roomNote?: string;
 }
 
 export interface QcPdfContext {
@@ -222,6 +225,18 @@ function QcSection({ section: s }: { section: QcPdfSection }) {
             <PdfSectionPhotos photoUrls={s.afterPhotos} />
           </View>
         )}
+
+        {/* Standalone-QC room verdict + note (no line items). */}
+        {s.lines.length === 0 && s.roomVerdict ? (
+          <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 9, marginTop: 2, color: s.roomVerdict === 'fail' ? PDF_COLORS.brand : PDF_COLORS.emerald }}>
+            Room result: {s.roomVerdict === 'fail' ? 'FAIL' : 'PASS'}
+          </Text>
+        ) : null}
+        {s.lines.length === 0 && s.roomNote ? (
+          <Text style={{ fontSize: 8, color: PDF_COLORS.ink, marginTop: 1 }}>
+            <Text style={{ fontFamily: 'Helvetica-Bold' }}>Notes: </Text>{s.roomNote}
+          </Text>
+        ) : null}
       </View>
 
       {s.lines.length > 0 && (

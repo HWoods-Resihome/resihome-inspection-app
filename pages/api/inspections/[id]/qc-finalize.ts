@@ -157,6 +157,42 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       sec.lines.push(line);
     }
 
+    // Standalone-QC rooms: the section_photo records carry the room's after
+    // photos + optional verdict + note (no line items). Build/augment sections
+    // from them so the report shows every inspected room, and count room
+    // verdicts (only for rooms WITHOUT lines, so line verdicts aren't
+    // double-counted).
+    for (const a of answers) {
+      if (a.answerType !== 'section_photo') continue;
+      const loc = a.location || '';
+      const sectionLabel = a.section || '';
+      const key = `${sectionLabel}||${loc}`;
+      const pf = (a.passFail === 'pass' || a.passFail === 'fail') ? a.passFail : '';
+      const note = (a as any).note || '';
+      if (!sectionMap.has(key)) {
+        sectionOrder.push(key);
+        sectionMap.set(key, {
+          displayName: loc || sectionLabel || 'Section',
+          lines: [],
+          beforePhotos: beforeByLoc[key] || beforeByLoc[loc] || beforeByLoc[sectionLabel] || [],
+          afterPhotos: a.photoUrls || [],
+          passCount: 0,
+          failCount: 0,
+          roomVerdict: pf,
+          roomNote: note,
+        });
+      } else {
+        const sec = sectionMap.get(key)!;
+        if ((sec.afterPhotos || []).length === 0 && (a.photoUrls || []).length) sec.afterPhotos = a.photoUrls!;
+        if (sec.lines.length === 0) { sec.roomVerdict = pf; sec.roomNote = note; }
+      }
+      const sec = sectionMap.get(key)!;
+      if (pf && sec.lines.length === 0) {
+        if (pf === 'pass') { sec.passCount++; passCount++; }
+        else { sec.failCount++; failCount++; }
+      }
+    }
+
     const sections: QcPdfSection[] = sectionOrder.map((k) => sectionMap.get(k)!);
 
     // Pre-resolve every before/after photo URL to a JPEG data URI in parallel,
