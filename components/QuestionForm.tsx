@@ -1959,6 +1959,7 @@ export function QuestionForm({
                           plainStyle={scopeStyle}
                           photoFirst={isCommunity}
                           compactOptions={isCommunity}
+                          listingPrice={listingPrice}
                         />
                       </div>
                       {showTicketWidget && (

@@ -32,9 +32,12 @@ type Props = {
   /** Shrink answer pills so long sets (e.g. Good - No Issues / Fail - Needs
    *  Attention / N/A) fit on one line on mobile. */
   compactOptions?: boolean;
+  /** Property's current listing price — shown as the greyed-out placeholder in
+   *  the 1099 recommended-rent input so the inspector adjusts from it. */
+  listingPrice?: number | null;
 };
 
-export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName, propertyRecordId, plainStyle, photoFirst, compactOptions }: Props) {
+export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName, propertyRecordId, plainStyle, photoFirst, compactOptions, listingPrice }: Props) {
   const dialog = useAppDialog();
   // A note is required when the selected value is explicitly configured
   // (noteRequiredOnValues) OR — robust to the Good/Fail relabel — when a
@@ -285,7 +288,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
         </p>
       )}
 
-      {renderInput(question, answer, onUpdate, compactOptions)}
+      {renderInput(question, answer, onUpdate, compactOptions, listingPrice)}
 
       {/* Combined notes/photos panel */}
       {panelOpen && (
@@ -549,6 +552,7 @@ function renderInput(
   a: AnswerInput,
   onUpdate: (patch: Partial<AnswerInput>) => void,
   compactOptions?: boolean,
+  listingPrice?: number | null,
 ) {
   // Picklists: short choice sets (Yes/No, Good/Fail, Pass/Fail/NA, etc.) stay as
   // quick tap-buttons; only LONGER lists use the branded ListPicker pop-up (a
@@ -628,7 +632,7 @@ function renderInput(
         {showRecommended && (
           <div className="mt-3">
             <label className="block text-xs font-heading font-semibold text-amber-900 mb-1">
-              Recommended new monthly rent <span className="text-brand">(Required)</span>
+              Recommended New Monthly Rent <span className="text-brand">(Required)</span>
             </label>
             <div className="relative w-40">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
@@ -640,7 +644,9 @@ function renderInput(
                   const digits = e.target.value.replace(/[^0-9]/g, '');
                   onUpdate({ recommendedAmount: digits ? Number(digits) : null });
                 }}
-                placeholder="2,350"
+                // Greyed-out placeholder = the property's current listing price so
+                // the inspector adjusts from it (falls back to an example).
+                placeholder={listingPrice != null && listingPrice > 0 ? listingPrice.toLocaleString('en-US') : '2,350'}
                 aria-label="Recommended new monthly rent"
                 className={`focus-brand w-full text-sm rounded-md pl-6 pr-2 py-1.5 bg-white border ${
                   a.recommendedAmount == null ? 'border-amber-300' : 'border-gray-300'
