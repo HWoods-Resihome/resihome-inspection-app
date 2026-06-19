@@ -13,6 +13,7 @@ import { installOAuthBridge, installPushBridge, primeLocationPermissionNative, i
 import { initPushOnLoad } from '@/lib/pushClient';
 import { Raleway } from 'next/font/google';
 import '../styles/globals.css';
+import 'leaflet/dist/leaflet.css'; // Insights property map (Leaflet); negligible + harmless elsewhere
 
 // Self-hosted Raleway (was a render-blocking Google Fonts @import in globals.css).
 // next/font downloads + inlines the font at build time and exposes it as the

@@ -18,7 +18,7 @@
  * searchInspectionsPage so rows match the rest of the app exactly.
  */
 import { put, list } from '@vercel/blob';
-import { searchInspectionsPage, countInspectionsCancelled, fetchQuestionsForTemplate, fetchAnswersForInspection, batchReadPropertyStatuses } from '@/lib/hubspot';
+import { searchInspectionsPage, countInspectionsCancelled, fetchQuestionsForTemplate, fetchAnswersForInspection, batchReadPropertyStatuses, fetchPropertyCoords } from '@/lib/hubspot';
 import { readAiFeedback } from '@/lib/aiFeedback';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import type { InspectionSummary } from '@/lib/types';
@@ -94,6 +94,8 @@ export interface InsightsRow {
   scopeCategoryCosts?: Record<string, number>;
   reportUrl: string | null;     // best available report PDF (master → attachment)
   propertyId: string | null;                 // HubSpot Property record id (property_id_ref)
+  lat?: number | null;                        // resolved coordinates for the map (backfilled + cached)
+  lng?: number | null;
   propertyStatus: string | null;             // the property's CURRENT live status (e.g. 'Vacant - On Market') — for analytics filtering across ALL rows
   // 1099 Grass Condition capture (only set on 1099 rows that have been worked;
   // absent otherwise). grassTone uses the app's answerTone rule; grassPhotos are
@@ -133,6 +135,15 @@ const OVERRIDE_DECISIONS = new Set(['decline', 'edit', 'move', 'remove', 'ignore
 const MAX_OVERRIDE_ROWS = 2000;
 // How far back to pull AI feedback for the overrides analytics.
 const OVERRIDE_DAYS = 120;
+
+// Persistent geocode cache so we don't re-resolve 255 addresses every build
+// (Nominatim is ~1 req/sec). Stable blob path; only successful coords are
+// cached, so transient failures self-heal on a later build.
+const GEOCODE_CACHE_PATH = 'insights/geocode-cache.json';
+// Max NEW coordinate resolutions per build — fills the cache over a few builds
+// without blowing the 60s budget or hammering the geocoders.
+const GEOCODE_BUDGET = 80;
+const GEOCODE_CONCURRENCY = 5;
 
 export interface InsightsSnapshot {
   asOf: string;                 // ISO build time
@@ -228,6 +239,7 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
   await enrichCurrentPropertyStatus(rows);
   await enrichGrassConditions(rows);
   await enrichScopeCategoryCosts(rows);
+  await enrichCoords(rows);
   const aiOverrides = await buildAiOverrides(rows);
   const cancelledCount = await countInspectionsCancelled().catch(() => 0);
   return {
@@ -419,6 +431,89 @@ async function enrichScopeCategoryCosts(rows: InsightsRow[]): Promise<void> {
     }
   };
   await Promise.all(Array.from({ length: Math.min(GRASS_CONCURRENCY, targets.length) }, worker));
+}
+
+/** Stable cache key for a row's coordinates: prefer the Property record id
+ *  (stable across address edits), else the normalized address. */
+function coordKey(row: InsightsRow): string | null {
+  if (row.propertyId) return `pid:${row.propertyId}`;
+  const addr = (row.propertyAddress || '').trim().toLowerCase();
+  return addr.length >= 5 ? `addr:${addr}` : null;
+}
+
+/** US Census one-line geocoder (keyless, government, tolerates concurrency).
+ *  Returns null on any miss/error — the address is retried on a later build. */
+async function geocodeCensus(address: string): Promise<{ lat: number; lng: number } | null> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const url = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress'
+      + `?address=${encodeURIComponent(address)}&benchmark=Public_AR_Current&format=json`;
+    const r = await fetch(url, { signal: ctrl.signal });
+    if (!r.ok) return null;
+    const d = await r.json();
+    const m = d?.result?.addressMatches?.[0];
+    const lng = Number(m?.coordinates?.x);
+    const lat = Number(m?.coordinates?.y);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) return { lat, lng };
+    return null;
+  } catch { return null; }
+  finally { clearTimeout(t); }
+}
+
+/**
+ * Backfill map coordinates onto rows, cached persistently in a blob. Each build
+ * resolves at most GEOCODE_BUDGET *new* rows (prefer the Property's stored
+ * lat/long, else geocode the address), so the cache fills over a few builds
+ * instead of geocoding everything every 30 minutes. Best-effort throughout.
+ */
+async function enrichCoords(rows: InsightsRow[]): Promise<void> {
+  // Load the cache (best-effort).
+  let cache: Record<string, { lat: number; lng: number }> = {};
+  try {
+    const { blobs } = await list({ prefix: GEOCODE_CACHE_PATH, limit: 1 });
+    if (blobs[0]) {
+      const r = await fetch(blobs[0].url + `?t=${Date.now()}`, { cache: 'no-store' });
+      if (r.ok) cache = (await r.json()) || {};
+    }
+  } catch { /* start cold */ }
+
+  // Attach whatever the cache already has, and collect the misses.
+  const misses: InsightsRow[] = [];
+  for (const row of rows) {
+    const key = coordKey(row);
+    const hit = key ? cache[key] : null;
+    if (hit) { row.lat = hit.lat; row.lng = hit.lng; }
+    else if (key) misses.push(row);
+  }
+  if (misses.length === 0) return;
+
+  // Resolve up to the budget this build (newest rows first — they're most useful).
+  const todo = misses.slice(0, GEOCODE_BUDGET);
+  let i = 0, resolved = 0;
+  const worker = async (): Promise<void> => {
+    while (i < todo.length) {
+      const row = todo[i++];
+      const key = coordKey(row)!;
+      let coords: { lat: number; lng: number } | null = null;
+      if (row.propertyId) {
+        try { coords = await fetchPropertyCoords(row.propertyId); } catch { /* fall through */ }
+      }
+      if (!coords && (row.propertyAddress || '').trim().length >= 5) {
+        coords = await geocodeCensus(row.propertyAddress.trim());
+      }
+      if (coords) { cache[key] = coords; row.lat = coords.lat; row.lng = coords.lng; resolved++; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(GEOCODE_CONCURRENCY, todo.length) }, worker));
+
+  if (resolved > 0) {
+    try {
+      await put(GEOCODE_CACHE_PATH, JSON.stringify(cache), {
+        access: 'public', contentType: 'application/json', allowOverwrite: true, addRandomSuffix: false,
+      });
+    } catch (e) { console.warn('[insights-geocode] cache write failed:', e); }
+  }
 }
 
 // --- Daily history (banked each build for trend/delta cards) -----------------

@@ -27,7 +27,7 @@ import { AiOverridesByInspector } from './cards/AiOverridesByInspector';
 import { AiOverridesByCategory } from './cards/AiOverridesByCategory';
 import { ScopeCost } from './cards/ScopeCost';
 import { ScopeApprovals } from './cards/ScopeApprovals';
-import { CardFrame } from './cardChrome';
+import { PropertyMap } from './cards/PropertyMap';
 import { CardHost, CardSlot, CARD_CATALOG } from './cardHost';
 import {
   EMPTY_FILTERS, applyFilters, computeKpis, countActiveFilters, filterOverrides,
@@ -55,10 +55,6 @@ function TwoCol({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
-const MAP_ICON = (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" /><line x1="8" y1="2" x2="8" y2="18" /><line x1="16" y1="6" x2="16" y2="22" /></svg>
-);
 
 export function InsightsDashboard() {
   const [mounted, setMounted] = useState(false);
@@ -258,14 +254,8 @@ export function InsightsDashboard() {
             {/* (7) AI Knowledge Base changes feed (full width) */}
             <CardSlot id="kb"><KbChanges /></CardSlot>
 
-            {/* (8) Property / inspection map — deferred */}
-            <CardSlot id="map">
-              <CardFrame title="Property / inspection map" icon={MAP_ICON} subtitle="Phase 4 · deferred">
-                <div className="flex items-center justify-center text-center text-sm text-[#71717a] py-10 opacity-70">
-                  A geographic view of inspections lands in a later phase.
-                </div>
-              </CardFrame>
-            </CardSlot>
+            {/* (8) Property / inspection map (full width) */}
+            <CardSlot id="map"><PropertyMap rows={filtered} /></CardSlot>
           </div>
           </CardHost>
         )}
