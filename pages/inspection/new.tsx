@@ -531,7 +531,11 @@ export default function NewInspection() {
                 </div>
               )}
 
-              {/* Dependent bed/bath */}
+              {/* Dependent bed/bath — populated from the property record and
+                  read-only (greyed) for everyone; bed/bath is no longer an
+                  inspector-entered field. Stays editable only as a fallback when
+                  the property record has no count, so a missing value can't block
+                  starting the inspection. */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-heading font-semibold text-ink mb-1.5">Bedrooms</label>
@@ -540,7 +544,7 @@ export default function NewInspection() {
                     value={bedrooms != null ? String(bedrooms) : ''}
                     onChange={(v) => setBedrooms(v === '' ? null : Number(v))}
                     placeholder={selectedPropertyId ? '0' : 'Select property first'}
-                    disabled={!selectedPropertyId}
+                    disabled={!selectedPropertyId || bedrooms != null}
                     ariaLabel="Bedrooms"
                     className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base disabled:bg-gray-100 disabled:text-gray-400"
                   />
@@ -551,7 +555,7 @@ export default function NewInspection() {
                     value={bathrooms != null ? String(bathrooms) : ''}
                     onChange={(v) => setBathrooms(v === '' ? null : Number(v))}
                     placeholder={selectedPropertyId ? '0' : 'Select property first'}
-                    disabled={!selectedPropertyId}
+                    disabled={!selectedPropertyId || bathrooms != null}
                     ariaLabel="Bathrooms"
                     className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base disabled:bg-gray-100 disabled:text-gray-400"
                   />
