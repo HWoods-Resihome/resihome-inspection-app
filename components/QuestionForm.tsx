@@ -1656,7 +1656,7 @@ export function QuestionForm({
       {/* Frozen header — logo + address + status + meta. The ONLY thing pinned
           on scroll (mirrors the Scope rate-card sticky header). */}
       <header className="sticky top-0 z-10 bg-white border-b-2 border-brand shadow-sm">
-        <div className="max-w-3xl mx-auto px-4 py-2">
+        <div className="max-w-3xl mx-auto px-4 py-1.5">
           <div className="flex items-center gap-2.5">
             <button
               type="button"
@@ -1715,16 +1715,16 @@ export function QuestionForm({
                 </div>
               )}
             </div>
+            {/* Save indicator — right-aligned on the bottom line (level with the
+                Pass/Fail chips) instead of its own row below, to reclaim header
+                height. Hidden on short landscape to save space; the
+                read-only/completed status lives in the top banner bar. */}
+            {!readOnly && (
+              <div className="lz-hide shrink-0 self-end text-right">
+                <SaveIndicator saveState={autosave.saveState} />
+              </div>
+            )}
           </div>
-          {/* Save indicator — back in the frozen header (hidden on short
-              landscape to reclaim space). The read-only/completed status now
-              lives in the top banner bar (see pages/inspection/[id].tsx), so
-              it's no longer duplicated here. */}
-          {!readOnly && (
-            <div className="lz-hide mt-1.5">
-              <SaveIndicator saveState={autosave.saveState} />
-            </div>
-          )}
         </div>
       </header>
 
