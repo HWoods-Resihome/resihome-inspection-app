@@ -23,6 +23,7 @@ import {
   updateInspection,
   answerHasAfterPhotoProperty,
   stampFirstCompleted,
+  stampPropertyStatusAtCompletion,
   upsertAnswers,
 } from '@/lib/hubspot';
 import { buildQaAnswerProps } from '@/lib/answerProps';
@@ -731,9 +732,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         throw e;
       }
     }
-    // Stamp the FIRST completion timestamp (kept even if re-finalized later).
-    // Skipped for regenerateOnly — it isn't a completion.
-    if (!regenerateOnly) await stampFirstCompleted(id, nowIso);
+    // Stamp the FIRST completion timestamp (kept even if re-finalized later)
+    // AND freeze the property status for the historical record. Skipped for
+    // regenerateOnly — it isn't a completion.
+    if (!regenerateOnly) {
+      await stampFirstCompleted(id, nowIso);
+      await stampPropertyStatusAtCompletion(id);
+    }
     finalizePhase = 'side-effects'; // status is now persisted; remaining steps are best-effort
 
     // Audit trail: the finalize IS the approval. Distinguish first approval from

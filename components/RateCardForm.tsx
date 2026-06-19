@@ -3626,12 +3626,9 @@ export function RateCardForm(props: RateCardFormProps) {
               {props.squareFootage != null && props.squareFootage > 0 && (
                 <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
               )}
-              {/* Property status carried over from the property card. */}
-              {props.propertyStatus && (
-                <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 text-[10px] font-heading font-semibold uppercase tracking-wide align-middle">
-                  {props.propertyStatus}
-                </span>
-              )}
+              {/* Property status carried over from the property card — same
+                  style as the sqft, bullet-separated. Frozen at completion. */}
+              {props.propertyStatus && <span> &middot; {props.propertyStatus}</span>}
               {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
               {!inspectionRegion && <span className="text-yellow-700"> &middot; fallback (GA: Atlanta)</span>}
               {saveStatus.kind === 'saving' && <span className="text-brand font-semibold"> &middot; Saving...</span>}

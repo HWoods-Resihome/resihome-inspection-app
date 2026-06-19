@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { updateInspection, fetchInspectionById, stampFirstCompleted } from '@/lib/hubspot';
+import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { recordAuditEvent } from '@/lib/auditLog';
@@ -64,8 +64,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     await updateInspection(id, props);
-    // Non-rate-card templates complete here → stamp first completion timestamp.
-    if (!isRateCard) await stampFirstCompleted(id, nowIso);
+    // Non-rate-card templates complete here → stamp first completion timestamp
+    // AND freeze the property status for the historical record. Rate Card goes
+    // to Pending Approval (still dynamic), so its status freezes at finalize.
+    if (!isRateCard) {
+      await stampFirstCompleted(id, nowIso);
+      await stampPropertyStatusAtCompletion(id);
+    }
     // Persist the overall verdict to the standardized `inspection_result` field
     // (same property QC writes). Separate, best-effort write so a missing
     // property never blocks the status flip above.

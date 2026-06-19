@@ -762,12 +762,9 @@ export function QcReinspectForm(props: Props) {
               {props.squareFootage != null && props.squareFootage > 0 && (
                 <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
               )}
-              {/* Property status carried over from the property card. */}
-              {props.propertyStatus && (
-                <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 text-[10px] font-heading font-semibold uppercase tracking-wide align-middle">
-                  {props.propertyStatus}
-                </span>
-              )}
+              {/* Property status carried over from the property card — same
+                  style as the sqft, bullet-separated. Frozen at completion. */}
+              {props.propertyStatus && <span> &middot; {props.propertyStatus}</span>}
             </div>
           </div>
           <div className="shrink-0 flex items-center gap-1.5 text-[11px] font-heading font-bold">

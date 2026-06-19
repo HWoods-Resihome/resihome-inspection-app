@@ -1690,12 +1690,9 @@ export function QuestionForm({
                   <span> &middot; {squareFootage.toLocaleString()} sqft</span>
                 )}
                 {/* Property status (Turnkey / Vacant / Unmarketed / …) carried
-                    over from the property card, shown right of the square feet. */}
-                {propertyStatus && (
-                  <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 text-[10px] font-heading font-semibold uppercase tracking-wide align-middle">
-                    {propertyStatus}
-                  </span>
-                )}
+                    over from the property card, shown right of the square feet
+                    in the same style, bullet-separated. Frozen at completion. */}
+                {propertyStatus && <span> &middot; {propertyStatus}</span>}
                 {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
               </div>
               {/* Order: address → details → listing line → Pass/Fail tally. */}

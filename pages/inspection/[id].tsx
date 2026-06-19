@@ -531,7 +531,7 @@ export default function ExistingInspection() {
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
-          propertyStatus={propertyStatus}
+          propertyStatus={inspection.propertyStatusAtCompletion || propertyStatus}
           inspectionStatus={inspection.status}
           pdfUrl={isCompleted ? (shareLinks?.report || inspection.pdfUrl || undefined) : undefined}
           readOnly={readOnly}
@@ -555,7 +555,7 @@ export default function ExistingInspection() {
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
-          propertyStatus={propertyStatus}
+          propertyStatus={inspection.propertyStatusAtCompletion || propertyStatus}
           listingPrice={listingPrice}
           listingDate={listingDate}
           lastTenantMonths={propertyLastTenantMonths}
@@ -589,7 +589,7 @@ export default function ExistingInspection() {
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
-          propertyStatus={propertyStatus}
+          propertyStatus={inspection.propertyStatusAtCompletion || propertyStatus}
           inspectionRegion={inspection.regionSnapshot || ''}
           status={inspection.status}
           submittedAt={inspection.submittedAt}

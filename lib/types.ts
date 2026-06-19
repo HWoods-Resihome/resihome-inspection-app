@@ -128,6 +128,15 @@ export interface InspectionSummary {
   // used by searchInspectionsPage) populates these; other constructors omit them.
   inspectionResult?: 'pass' | 'fail' | null;
   totalPhotosAttached?: number | null;
+  // Property lifecycle status FROZEN at completion (`property_status_at_completion`),
+  // stamped when the inspection finalizes/submits-to-completed. Null while the
+  // inspection is still scheduled / in progress / pending approval (status stays
+  // dynamic then). Drives the historical status shown on completed inspections.
+  propertyStatusAtCompletion?: string | null;
+  // Status to DISPLAY on the home card: the frozen value for completed
+  // inspections, otherwise the property's live status (enriched server-side for
+  // active rows). Null when unknown. List mapper only.
+  propertyStatus?: string | null;
 }
 
 export interface HubSpotUser {

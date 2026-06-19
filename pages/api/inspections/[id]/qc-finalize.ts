@@ -21,6 +21,7 @@ import {
   attachFilesToInspectionRecord,
   updateInspection,
   stampFirstCompleted,
+  stampPropertyStatusAtCompletion,
 } from '@/lib/hubspot';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { bustInspectionsCache } from '@/pages/api/inspections';
@@ -320,6 +321,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     await stampFirstCompleted(id, nowIso); // first completion timestamp (kept on re-runs)
+    await stampPropertyStatusAtCompletion(id); // freeze property status for the record
     bustInspectionsCache(); // status → completed; reflect in the list at once
     res.status(200).json({
       success: true,

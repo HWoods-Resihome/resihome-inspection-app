@@ -96,9 +96,12 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
           <h3 className="font-bold text-[15px] text-ink break-words leading-snug">
             {street}
           </h3>
-          {locality && (
+          {(locality || i.propertyStatus) && (
             <p className="text-[13px] text-gray-500 break-words leading-snug mt-0.5">
               {locality}
+              {/* Property status — frozen at completion, live while active.
+                  Bullet-separated after the City, State, Zip line. */}
+              {i.propertyStatus && <span>{locality ? ' · ' : ''}{i.propertyStatus}</span>}
             </p>
           )}
         </div>

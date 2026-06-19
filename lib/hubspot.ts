@@ -713,6 +713,9 @@ const INSPECTION_LIST_PROPERTIES = [
   // pass/fail, photo counts). Harmless extra fields for the home list.
   'region_snapshot', 'submitted_at', 'approved_at',
   'inspection_result', 'total_photos_attached',
+  // Property status: the frozen value (set at completion) + the property ref so
+  // active rows can be enriched with the live status (see enrichPropertyStatuses).
+  'property_status_at_completion', 'property_id_ref',
 ];
 
 /** Map a HubSpot inspection search result into a lightweight InspectionSummary. */
@@ -761,7 +764,54 @@ function mapInspectionRow(r: any): InspectionSummary {
     inspectionResult: (p.inspection_result === 'pass' || p.inspection_result === 'fail') ? p.inspection_result : null,
     totalPhotosAttached: p.total_photos_attached != null && p.total_photos_attached !== ''
       ? Number(p.total_photos_attached) : null,
+    propertyStatusAtCompletion: (p.property_status_at_completion || '').toString().trim() || null,
+    // Display value: start from the frozen value (completed rows are done here);
+    // active rows get the live status filled in by enrichPropertyStatuses.
+    propertyStatus: (p.property_status_at_completion || '').toString().trim() || null,
   };
+}
+
+// Status strings that mean the inspection is finished — its property status is
+// frozen and should NOT be refreshed from the live property record.
+const COMPLETED_STATUS_RE = /^(completed|complete|submitted)$/i;
+
+/**
+ * Enrich ACTIVE (non-completed) rows with the property's LIVE lifecycle status,
+ * so the home card shows the current status while the inspection is scheduled /
+ * in progress / pending approval. Completed rows already carry the frozen
+ * `property_status_at_completion` and are left untouched. One batched property
+ * read across the page's distinct property ids; best-effort (never throws).
+ */
+async function enrichPropertyStatuses(items: InspectionSummary[], rawResults: any[]): Promise<void> {
+  const { property: propertyTypeId } = typeIds();
+  // Map each active row → its property_id_ref (read off the raw search result).
+  const refByRow = new Map<string, string>();
+  for (const r of rawResults) {
+    const ref = (r.properties?.property_id_ref || '').toString().trim();
+    if (ref) refByRow.set(String(r.id), ref);
+  }
+  const active = items.filter((i) => !COMPLETED_STATUS_RE.test((i.status || '').trim()) && refByRow.get(i.recordId));
+  const needIds = Array.from(new Set(active.map((i) => refByRow.get(i.recordId)!)));
+  if (needIds.length === 0) return;
+  try {
+    const statusById = new Map<string, string | null>();
+    for (let i = 0; i < needIds.length; i += 100) {
+      const chunk = needIds.slice(i, i + 100);
+      const resp = await hubspotFetch(`/crm/v3/objects/${propertyTypeId}/batch/read`, {
+        method: 'POST',
+        body: JSON.stringify({ properties: [PROPERTY_STATUS_PROPERTY], inputs: chunk.map((id) => ({ id })) }),
+      });
+      for (const rec of resp.results || []) {
+        statusById.set(String(rec.id), (rec.properties?.[PROPERTY_STATUS_PROPERTY] || '').toString().trim() || null);
+      }
+    }
+    for (const it of active) {
+      const live = statusById.get(refByRow.get(it.recordId)!);
+      if (live) it.propertyStatus = live;
+    }
+  } catch {
+    /* best-effort — leave the live status unresolved on failure */
+  }
 }
 
 export async function fetchInspections(opts: { search?: string } = {}): Promise<InspectionSummary[]> {
@@ -931,13 +981,19 @@ export async function searchInspectionsPage(params: InspectionQuery & {
     method: 'POST',
     body: JSON.stringify(body),
   });
-  const items = (resp.results || []).map(mapInspectionRow);
+  const rawResults = resp.results || [];
+  const items = rawResults.map(mapInspectionRow);
   const total = typeof resp.total === 'number' ? resp.total : items.length;
   // Enrich Turn Re-Inspect QC rows with the client total of the SCOPE they
   // re-inspect (the re-inspect itself carries no rate-card lines, so its own
   // total_client_cost is empty). One batched read across the distinct source
   // scope ids on this page; best-effort (a failed read just leaves it null).
-  await enrichReinspectClientTotals(items, typeId);
+  // Then fill the LIVE property status on active rows (completed rows keep the
+  // frozen value). Both are batched + best-effort; run in parallel.
+  await Promise.all([
+    enrichReinspectClientTotals(items, typeId),
+    enrichPropertyStatuses(items, rawResults),
+  ]);
   return { items, total };
 }
 
@@ -1903,7 +1959,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     'source_rate_card_id', 'source_rate_card_name', 'qc_verdict', 'qc_pass_count', 'qc_fail_count',
     // Submit/approve stamps + Internal Resolution timing map
     'submitted_at', 'submitted_by_email', 'approved_by_name', 'approved_at', 'resolution_timing_json',
-    'total_client_cost',
+    'total_client_cost', 'property_status_at_completion',
   ];
   try {
     const qs = properties.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
@@ -2048,6 +2104,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         resolutionTimingJson: p.resolution_timing_json || null,
         totalClientCost: p.total_client_cost != null && p.total_client_cost !== ''
           ? Number(p.total_client_cost) : null,
+        propertyStatusAtCompletion: (p.property_status_at_completion || '').toString().trim() || null,
       },
       propertyIdRef,
       propertySquareFootage,
@@ -3293,6 +3350,38 @@ export async function stampFirstCompleted(inspectionRecordId: string, when: stri
     await updateInspection(inspectionRecordId, { first_completed_date: ms });
   } catch (e) {
     console.warn('[billing] stampFirstCompleted skipped (create the property to enable):', e);
+  }
+}
+
+/**
+ * Freeze the property's CURRENT lifecycle status onto the inspection as
+ * `property_status_at_completion`. Called when an inspection reaches a terminal
+ * completed state (question-form submit, scope finalize, QC finalize). After
+ * this, the header and home card show this frozen value instead of the live
+ * property status — so a completed report reflects the status as it was at
+ * completion, even if the property's status changes later. While the inspection
+ * is still scheduled / in progress / pending approval this is never set, so the
+ * UI keeps showing the live property status.
+ *
+ * Best-effort: never throws. A missing property, an empty status, or a
+ * not-yet-created field must not block the completion write that called us.
+ */
+export async function stampPropertyStatusAtCompletion(inspectionRecordId: string): Promise<void> {
+  try {
+    const { inspection: typeId, property: propertyTypeId } = typeIds();
+    const insResp = await hubspotFetch(
+      `/crm/v3/objects/${typeId}/${inspectionRecordId}?properties=${encodeURIComponent('property_id_ref')}`,
+    );
+    const propertyIdRef = (insResp.properties?.property_id_ref || '').toString().trim();
+    if (!propertyIdRef) return;
+    const propResp = await hubspotFetch(
+      `/crm/v3/objects/${propertyTypeId}/${propertyIdRef}?properties=${encodeURIComponent(PROPERTY_STATUS_PROPERTY)}`,
+    );
+    const status = (propResp.properties?.[PROPERTY_STATUS_PROPERTY] || '').toString().trim();
+    if (!status) return;
+    await updateInspection(inspectionRecordId, { property_status_at_completion: status });
+  } catch (e) {
+    console.warn('[stampPropertyStatusAtCompletion] skipped (create the property to enable):', String(e).slice(0, 200));
   }
 }
 
