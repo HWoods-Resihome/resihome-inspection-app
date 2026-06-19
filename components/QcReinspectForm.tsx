@@ -273,8 +273,13 @@ export function QcReinspectForm(props: Props) {
       .filter((s) => s.lines.length > 0);
   }, [sections, activeVendorFilter]);
 
-  const totalPass = lines.filter((l) => l.passFail === 'pass').length;
-  const totalFail = lines.filter((l) => l.passFail === 'fail').length;
+  // Counts include BOTH scope line verdicts AND standalone per-room verdicts
+  // (they're mutually exclusive: a scope QC has lines, a standalone QC has room
+  // verdicts), so the header/section chips update as rooms are marked.
+  const totalPass = lines.filter((l) => l.passFail === 'pass').length
+    + sections.filter((s) => (roomVerdict[s.key] || '') === 'pass').length;
+  const totalFail = lines.filter((l) => l.passFail === 'fail').length
+    + sections.filter((s) => (roomVerdict[s.key] || '') === 'fail').length;
   // STANDALONE QC (no copied lines): nothing to mark and after-photos are
   // OPTIONAL, so only the final Pass/Fail verdict gates submit. With a source
   // scope, every line must be marked and every room needs an after-photo.
@@ -813,8 +818,9 @@ export function QcReinspectForm(props: Props) {
       )}
 
       {visibleSections.map((s) => {
-        const secPass = s.lines.filter((l) => l.passFail === 'pass').length;
-        const secFail = s.lines.filter((l) => l.passFail === 'fail').length;
+        const rvSec = roomVerdict[s.key] || '';
+        const secPass = s.lines.filter((l) => l.passFail === 'pass').length + (rvSec === 'pass' ? 1 : 0);
+        const secFail = s.lines.filter((l) => l.passFail === 'fail').length + (rvSec === 'fail' ? 1 : 0);
         const after = afterPhotos[s.key] || [];
         const isCollapsed = collapsed.has(s.key);
         // Standalone-QC room verdict drives the "required" highlighting: a Fail

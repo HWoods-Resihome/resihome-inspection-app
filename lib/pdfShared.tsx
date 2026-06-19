@@ -146,7 +146,8 @@ export const pdfStyles = StyleSheet.create({
   },
   grandTotalsItem: {
     flexDirection: 'column',
-    alignItems: 'flex-start',
+    // Center each callout's value under its header text (was left-aligned).
+    alignItems: 'center',
   },
   grandTotalsLabel: {
     fontFamily: 'Helvetica',
