@@ -211,10 +211,18 @@ export interface Kpis {
   avgPhotos: number | null;
   totalPhotos: number;
   scopeTotalClientCost: number; // sum of totalClientCost for Scope Rate Card rows
+  // On-time = share of COMPLETED inspections whose total turnaround
+  // ((approvedAt||completedAt) − scheduledDate) is ≤ 24h. Denominator is
+  // completed rows that have a measurable turnaround (both dates); null if none.
+  onTimeRate: number | null;
 }
+
+/** Turnaround SLA threshold for the on-time gauge: 24 hours in ms. */
+export const ON_TIME_MS = 24 * 60 * 60 * 1000;
 
 export function computeKpis(rows: InsightsRow[]): Kpis {
   let completed = 0, incomplete = 0, totalPhotos = 0, photoRows = 0, scopeCost = 0;
+  let onTimeDenom = 0, onTimeNum = 0;
   for (const r of rows) {
     if (r.status === 'completed') completed++;
     if (r.status === 'scheduled' || r.status === 'in_progress') incomplete++;
@@ -222,6 +230,8 @@ export function computeKpis(rows: InsightsRow[]): Kpis {
     if (r.templateType === TEMPLATE_SCOPE && typeof r.totalClientCost === 'number') {
       scopeCost += r.totalClientCost;
     }
+    const turn = completionTimeMs(r); // null unless completed with both dates
+    if (turn != null) { onTimeDenom++; if (turn <= ON_TIME_MS) onTimeNum++; }
   }
   const pf = passFail(rows);
   return {
@@ -235,6 +245,7 @@ export function computeKpis(rows: InsightsRow[]): Kpis {
     avgPhotos: photoRows ? totalPhotos / photoRows : null,
     totalPhotos,
     scopeTotalClientCost: scopeCost,
+    onTimeRate: onTimeDenom ? onTimeNum / onTimeDenom : null,
   };
 }
 

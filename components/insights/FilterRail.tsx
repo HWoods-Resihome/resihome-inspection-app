@@ -1,12 +1,13 @@
 /**
- * Left rail of global filters for the Insights dashboard. CLIENT-SIDE ONLY —
- * filters apply to every card (the Dashboard runs applyFilters() on the rows).
- * State lives in the Dashboard and is persisted to localStorage there.
+ * Left rail of global filters for the Insights dashboard (dark). CLIENT-SIDE
+ * ONLY — filters apply to every card (the Dashboard runs applyFilters() on the
+ * rows). State lives in the Dashboard and is persisted to localStorage there.
  *
+ * Order (Region near the top, per the dashboard brief):
  *   Date range  (on scheduledDate; default = all)
+ *   Region      (multi-select)
  *   Inspector   (multi-select by email, name labels)
  *   Property    (search + multi-select on propertyAddress)
- *   Region      (multi-select)
  *   Inspection type (multi-select templateType)
  */
 import { useMemo, useState } from 'react';
@@ -24,16 +25,16 @@ function toggle(list: string[], value: string): string[] {
 function Section({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="border-b border-gray-100 pb-3 mb-3">
+    <div className="border-b border-white/10 pb-3 mb-3">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center justify-between text-left mb-2"
       >
-        <span className="font-heading font-bold text-xs uppercase tracking-wide text-gray-500">
-          {title}{count ? <span className="text-brand ml-1">· {count}</span> : null}
+        <span className="font-heading font-bold text-[11px] uppercase tracking-wide text-[#a1a1aa]">
+          {title}{count ? <span className="text-[#ff0060] ml-1">· {count}</span> : null}
         </span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`text-[#71717a] transition-transform ${open ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
       </button>
       {open && children}
     </div>
@@ -42,13 +43,16 @@ function Section({ title, count, children }: { title: string; count?: number; ch
 
 function CheckRow({ checked, label, hint, onChange }: { checked: boolean; label: string; hint?: string; onChange: () => void }) {
   return (
-    <label className="flex items-center gap-2 py-1 cursor-pointer text-sm">
-      <input type="checkbox" checked={checked} onChange={onChange} className="accent-brand h-3.5 w-3.5 shrink-0" />
-      <span className="truncate text-gray-700 flex-1 min-w-0" title={label}>{label}</span>
-      {hint != null && <span className="text-[11px] text-gray-400 shrink-0">{hint}</span>}
+    <label className="flex items-center gap-2 py-1 cursor-pointer text-[13px]">
+      <input type="checkbox" checked={checked} onChange={onChange} className="accent-[#ff0060] h-3.5 w-3.5 shrink-0" />
+      <span className="truncate text-[#f4f4f5] flex-1 min-w-0" title={label}>{label}</span>
+      {hint != null && <span className="text-[11px] text-[#71717a] shrink-0">{hint}</span>}
     </label>
   );
 }
+
+const dateInputCls =
+  'w-full border border-white/10 bg-[#232329] text-[#f4f4f5] rounded-lg px-2 py-1.5 text-sm mt-0.5 focus:outline-none focus:border-[#ff0060] [color-scheme:dark]';
 
 export function FilterRail({
   rows, filters, onChange, onReset,
@@ -77,38 +81,51 @@ export function FilterRail({
     filters.regions.length + filters.templateTypes.length;
 
   return (
-    <aside className="w-full lg:w-64 shrink-0 bg-white rounded-2xl border border-gray-200 shadow-sm p-4 self-start lg:sticky lg:top-4">
+    <aside className="bg-[#18181c] rounded-xl border border-white/10 p-3.5 self-start lg:sticky lg:top-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-heading font-bold text-sm text-ink">Filters{activeCount ? <span className="text-brand"> · {activeCount}</span> : null}</h2>
-        <button type="button" onClick={onReset} className="text-xs font-heading font-semibold text-gray-500 hover:text-brand">
+        <h2 className="font-heading font-bold text-[13px] text-[#f4f4f5]">Filters{activeCount ? <span className="text-[#ff0060]"> · {activeCount}</span> : null}</h2>
+        <button type="button" onClick={onReset} className="text-[11px] font-heading font-semibold text-[#a1a1aa] hover:text-[#ff0060]">
           Reset
         </button>
       </div>
 
       <Section title="Date range (scheduled)">
         <div className="flex flex-col gap-2">
-          <label className="text-[11px] text-gray-500">
+          <label className="text-[11px] text-[#a1a1aa]">
             From
             <input
               type="date" value={filters.dateFrom || ''}
               onChange={(e) => set({ dateFrom: e.target.value || null })}
-              className="focus-brand w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm mt-0.5"
+              className={dateInputCls}
             />
           </label>
-          <label className="text-[11px] text-gray-500">
+          <label className="text-[11px] text-[#a1a1aa]">
             To
             <input
               type="date" value={filters.dateTo || ''}
               onChange={(e) => set({ dateTo: e.target.value || null })}
-              className="focus-brand w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm mt-0.5"
+              className={dateInputCls}
             />
           </label>
         </div>
       </Section>
 
+      <Section title="Region" count={filters.regions.length}>
+        <div className="max-h-40 overflow-auto pr-1">
+          {regions.length === 0 ? <div className="text-xs text-[#71717a]">None</div> :
+            regions.map((r) => (
+              <CheckRow
+                key={r} checked={filters.regions.includes(r)}
+                label={r === REGION_NONE ? '(no region)' : r}
+                onChange={() => set({ regions: toggle(filters.regions, r) })}
+              />
+            ))}
+        </div>
+      </Section>
+
       <Section title="Inspector" count={filters.inspectorEmails.length}>
         <div className="max-h-48 overflow-auto pr-1">
-          {inspectors.length === 0 ? <div className="text-xs text-gray-400">None</div> :
+          {inspectors.length === 0 ? <div className="text-xs text-[#71717a]">None</div> :
             inspectors.map((o) => (
               <CheckRow
                 key={o.email}
@@ -124,10 +141,10 @@ export function FilterRail({
         <input
           type="text" value={propSearch} onChange={(e) => setPropSearch(e.target.value)}
           placeholder="Search address…"
-          className="focus-brand w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm mb-2"
+          className="w-full border border-white/10 bg-[#232329] text-[#f4f4f5] placeholder-[#71717a] rounded-lg px-2 py-1.5 text-sm mb-2 focus:outline-none focus:border-[#ff0060]"
         />
         <div className="max-h-48 overflow-auto pr-1">
-          {filteredProps.length === 0 ? <div className="text-xs text-gray-400">No matches</div> :
+          {filteredProps.length === 0 ? <div className="text-xs text-[#71717a]">No matches</div> :
             filteredProps.map((p) => (
               <CheckRow
                 key={p} checked={filters.properties.includes(p)} label={p}
@@ -137,22 +154,9 @@ export function FilterRail({
         </div>
       </Section>
 
-      <Section title="Region" count={filters.regions.length}>
-        <div className="max-h-40 overflow-auto pr-1">
-          {regions.length === 0 ? <div className="text-xs text-gray-400">None</div> :
-            regions.map((r) => (
-              <CheckRow
-                key={r} checked={filters.regions.includes(r)}
-                label={r === REGION_NONE ? '(no region)' : r}
-                onChange={() => set({ regions: toggle(filters.regions, r) })}
-              />
-            ))}
-        </div>
-      </Section>
-
       <Section title="Inspection type" count={filters.templateTypes.length}>
         <div className="max-h-48 overflow-auto pr-1">
-          {types.length === 0 ? <div className="text-xs text-gray-400">None</div> :
+          {types.length === 0 ? <div className="text-xs text-[#71717a]">None</div> :
             types.map((t) => (
               <CheckRow
                 key={t} checked={filters.templateTypes.includes(t)} label={templateLabel(t)}

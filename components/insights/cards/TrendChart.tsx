@@ -1,15 +1,9 @@
 /**
- * Trend card (recharts): completion VOLUME (bars/line, left axis) + AVG
- * TURNAROUND (line, right axis) over time, from /api/insights/history. Until
+ * Completion-time trend — average turnaround (hours) over time, from
+ * /api/insights/history. Drawn as a lightweight inline SVG line (aqua). Until
  * >=2 history days exist there's nothing honest to plot, so it shows a
- * "Collecting history — check back tomorrow" placeholder, NOT a faked line.
- *
- * Series colors follow the brand order: pink #ff0060 (volume) then aqua
- * #73E3DF (turnaround).
+ * "Collecting history" placeholder, NEVER a faked line.
  */
-import {
-  ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-} from 'recharts';
 import { CardFrame, CardNote } from '../cardChrome';
 import { trendSeries, fmtDuration } from '@/lib/insightsMetrics';
 import type { InsightsDailyRollup } from '@/lib/insightsSnapshot';
@@ -18,39 +12,47 @@ const ICON = (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></svg>
 );
 
-export function TrendChart({ history, onRemove }: { history: InsightsDailyRollup[]; onRemove?: () => void }) {
-  const series = trendSeries(history).map((p) => ({
-    date: p.date.slice(5), // MM-DD for the axis
-    completed: p.completed,
-    turnaroundHours: p.avgTurnaroundMs == null ? null : +(p.avgTurnaroundMs / 3_600_000).toFixed(1),
-    _turnMs: p.avgTurnaroundMs,
-  }));
+const LINE = '#73E3DF';
+const W = 480, H = 180, PADX = 8, PADY = 16;
+
+export function TrendChart({ history }: { history: InsightsDailyRollup[] }) {
+  // Only days with a measurable average turnaround can be plotted honestly.
+  const pts = trendSeries(history)
+    .filter((p) => p.avgTurnaroundMs != null)
+    .map((p) => ({ date: p.date, hours: (p.avgTurnaroundMs as number) / 3_600_000 }));
+
+  let path = '', area = '';
+  if (pts.length >= 2) {
+    const max = Math.max(...pts.map((p) => p.hours), 1);
+    const min = Math.min(...pts.map((p) => p.hours), 0);
+    const span = max - min || 1;
+    const x = (i: number) => PADX + (i / (pts.length - 1)) * (W - PADX * 2);
+    const y = (h: number) => PADY + (1 - (h - min) / span) * (H - PADY * 2);
+    const coords = pts.map((p, i) => [x(i), y(p.hours)] as const);
+    path = coords.map(([cx, cy], i) => `${i === 0 ? 'M' : 'L'}${cx.toFixed(1)},${cy.toFixed(1)}`).join(' ');
+    area = `${path} L${coords[coords.length - 1][0].toFixed(1)},${H - PADY} L${coords[0][0].toFixed(1)},${H - PADY} Z`;
+  }
+
+  const last = pts[pts.length - 1];
 
   return (
-    <CardFrame title="Completion trend" icon={ICON} onRemove={onRemove}>
-      {series.length < 2 ? (
-        <CardNote>Collecting history — check back tomorrow. Trend appears once at least two daily snapshots exist.</CardNote>
+    <CardFrame
+      title="Completion-time trend" icon={ICON}
+      subtitle={pts.length >= 2 ? `latest avg ${fmtDuration((last.hours) * 3_600_000)}` : undefined}
+    >
+      {pts.length < 2 ? (
+        <CardNote>Collecting history — the trend appears once at least two daily snapshots exist.</CardNote>
       ) : (
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={series} margin={{ top: 8, right: 8, bottom: 4, left: -10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
-            <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#888' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
-            <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#888' }} tickLine={false} axisLine={false} allowDecimals={false} />
-            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: '#888' }} tickLine={false} axisLine={false} />
-            <Tooltip
-              formatter={(value: any, name: any, item: any) => {
-                if (name === 'Avg turnaround') {
-                  return [fmtDuration(item?.payload?._turnMs ?? null), name];
-                }
-                return [value, name];
-              }}
-              contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #eee' }}
-            />
-            <Legend wrapperStyle={{ fontSize: 11 }} />
-            <Bar yAxisId="left" dataKey="completed" name="Completed" fill="#ff0060" radius={[3, 3, 0, 0]} barSize={14} />
-            <Line yAxisId="right" type="monotone" dataKey="turnaroundHours" name="Avg turnaround" stroke="#73E3DF" strokeWidth={2.5} dot={false} connectNulls />
-          </ComposedChart>
-        </ResponsiveContainer>
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 180 }} preserveAspectRatio="none" role="img" aria-label="Average completion time trend">
+          <defs>
+            <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={LINE} stopOpacity="0.22" />
+              <stop offset="100%" stopColor={LINE} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={area} fill="url(#trendFill)" />
+          <path d={path} fill="none" stroke={LINE} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
       )}
     </CardFrame>
   );
