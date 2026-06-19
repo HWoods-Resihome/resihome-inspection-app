@@ -7,6 +7,7 @@
  * primary-text colored here.
  */
 import { type ReactNode } from 'react';
+import { useCardSlotMinimize } from './cardHost';
 
 export function CardFrame({
   title, subtitle, icon, children, headerRight, bodyClassName,
@@ -19,6 +20,8 @@ export function CardFrame({
   /** Override the body wrapper (e.g. scroll height, padding) when needed. */
   bodyClassName?: string;
 }) {
+  // When rendered inside a <CardSlot>, expose a minimize button (top-right).
+  const slot = useCardSlotMinimize();
   return (
     <div className="bg-[#18181c] rounded-xl border border-white/10 flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
@@ -28,6 +31,14 @@ export function CardFrame({
           {subtitle != null && <div className="text-[11px] text-[#71717a] truncate mt-0.5">{subtitle}</div>}
         </div>
         {headerRight && <div className="shrink-0">{headerRight}</div>}
+        {slot && (
+          <button
+            type="button" onClick={slot.minimize} title="Minimize card" aria-label="Minimize card"
+            className="shrink-0 text-[#71717a] hover:text-[#ff0060] transition-colors -mr-1 p-1"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+          </button>
+        )}
       </div>
       <div className={bodyClassName ?? 'p-4'}>{children}</div>
     </div>

@@ -74,6 +74,14 @@ export const REGION_NONE = '(none)';
 /** Sentinel used in the property-status multi-select for rows with no status. */
 export const STATUS_NONE = '(unknown)';
 
+/** Count of active rail filters (a date window counts as one). Shared by the
+ *  rail header and the collapsed-rail button badge so they never drift. */
+export function countActiveFilters(f: InsightsFilters): number {
+  return (f.dateFrom || f.dateTo ? 1 : 0)
+    + f.inspectorEmails.length + f.properties.length
+    + f.regions.length + f.templateTypes.length + (f.propertyStatuses?.length || 0);
+}
+
 function inDateWindow(scheduledDate: string | null, from: string | null, to: string | null): boolean {
   if (!from && !to) return true;
   if (!scheduledDate) return false; // a date filter excludes rows with no scheduledDate

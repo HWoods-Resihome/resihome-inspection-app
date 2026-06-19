@@ -24,15 +24,16 @@ import { KbChanges } from './cards/KbChanges';
 import { KbVelocity } from './cards/KbVelocity';
 import { PreferenceMismatches } from './cards/PreferenceMismatches';
 import { CardFrame } from './cardChrome';
+import { CardHost, CardSlot, CARD_CATALOG } from './cardHost';
 import {
-  EMPTY_FILTERS, applyFilters, computeKpis,
+  EMPTY_FILTERS, applyFilters, computeKpis, countActiveFilters,
   type InsightsFilters,
 } from '@/lib/insightsMetrics';
 import type { InsightsRow, InsightsDailyRollup } from '@/lib/insightsSnapshot';
 
 const STORE_KEY = 'resiwalk_insights_v1';
 
-interface Persisted { filters?: InsightsFilters; }
+interface Persisted { filters?: InsightsFilters; hiddenCards?: string[]; railOpen?: boolean; }
 
 function loadPersisted(): Persisted {
   if (typeof window === 'undefined') return {};
@@ -67,6 +68,21 @@ export function InsightsDashboard() {
 
   const persisted = useMemo(loadPersisted, []);
   const [filters, setFilters] = useState<InsightsFilters>(persisted.filters || EMPTY_FILTERS);
+  // Filter rail starts COLLAPSED (the user expands it to filter).
+  const [railOpen, setRailOpen] = useState<boolean>(persisted.railOpen ?? false);
+  // Minimized cards (hidden from the canvas; restored from the dropdown below filters).
+  const [hiddenCards, setHiddenCards] = useState<Set<string>>(() => new Set(persisted.hiddenCards || []));
+  const [restoreOpen, setRestoreOpen] = useState(false);
+
+  const minimizeCard = useCallback((id: string) => {
+    setHiddenCards((prev) => { const n = new Set(prev); n.add(id); return n; });
+  }, []);
+  const restoreCard = useCallback((id: string) => {
+    setHiddenCards((prev) => { const n = new Set(prev); n.delete(id); return n; });
+  }, []);
+  const cardHostValue = useMemo(() => ({ hidden: hiddenCards, minimize: minimizeCard }), [hiddenCards, minimizeCard]);
+  const hiddenList = useMemo(() => CARD_CATALOG.filter((c) => hiddenCards.has(c.id)), [hiddenCards]);
+  const activeFilters = countActiveFilters(filters);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -93,8 +109,10 @@ export function InsightsDashboard() {
     return () => { cancelled = true; };
   }, [fetchData]);
 
-  // Persist filters whenever they change.
-  useEffect(() => { savePersisted({ filters }); }, [filters]);
+  // Persist filters + view prefs (hidden cards, rail open) whenever they change.
+  useEffect(() => {
+    savePersisted({ filters, hiddenCards: Array.from(hiddenCards), railOpen });
+  }, [filters, hiddenCards, railOpen]);
 
   const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters]);
   const kpis = useMemo(() => computeKpis(filtered), [filtered]);
@@ -111,14 +129,56 @@ export function InsightsDashboard() {
 
   return (
     <div className="flex flex-col lg:flex-row gap-4 items-start">
-      {/* Left filter rail */}
-      <div className="w-full lg:w-[200px] shrink-0">
-        <FilterRail
-          rows={rows}
-          filters={filters}
-          onChange={setFilters}
-          onReset={() => setFilters(EMPTY_FILTERS)}
-        />
+      {/* Left column: collapsible filter rail + minimized-cards restore dropdown */}
+      <div className="w-full lg:w-[200px] shrink-0 flex flex-col gap-3">
+        {railOpen ? (
+          <FilterRail
+            rows={rows}
+            filters={filters}
+            onChange={setFilters}
+            onReset={() => setFilters(EMPTY_FILTERS)}
+            onCollapse={() => setRailOpen(false)}
+          />
+        ) : (
+          <button
+            type="button" onClick={() => setRailOpen(true)}
+            className="w-full flex items-center justify-between gap-2 bg-[#18181c] rounded-xl border border-white/10 px-3.5 py-2.5 text-left hover:border-white/20"
+          >
+            <span className="flex items-center gap-2 font-heading font-bold text-[13px] text-[#f4f4f5]">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+              Filters{activeFilters ? <span className="text-[#ff0060]"> · {activeFilters}</span> : null}
+            </span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#71717a]"><polyline points="9 18 15 12 9 6" /></svg>
+          </button>
+        )}
+
+        {hiddenList.length > 0 && (
+          <div className="bg-[#18181c] rounded-xl border border-white/10 overflow-hidden">
+            <button
+              type="button" onClick={() => setRestoreOpen((o) => !o)}
+              className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-left hover:bg-white/[0.03]"
+            >
+              <span className="font-heading font-bold text-[11px] uppercase tracking-wide text-[#a1a1aa]">
+                Minimized<span className="text-[#ff0060] ml-1">· {hiddenList.length}</span>
+              </span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`text-[#71717a] transition-transform ${restoreOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+            </button>
+            {restoreOpen && (
+              <div className="px-2 pb-2 flex flex-col gap-1">
+                {hiddenList.map((c) => (
+                  <button
+                    key={c.id} type="button" onClick={() => restoreCard(c.id)}
+                    className="w-full flex items-center gap-2 text-left text-[13px] text-[#f4f4f5] rounded-lg px-2 py-1.5 hover:bg-white/[0.06]"
+                    title={`Restore “${c.title}”`}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#ff0060] shrink-0"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                    <span className="truncate">{c.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Main column */}
@@ -146,45 +206,49 @@ export function InsightsDashboard() {
         ) : error ? (
           <div className="px-3 py-2 rounded-lg bg-[#ff0060]/10 border border-[#ff0060]/40 text-sm text-[#ff0060]">Could not load Insights data: {error}</div>
         ) : (
+          <CardHost value={cardHostValue}>
           <div className="flex flex-col gap-4">
-            {/* (1) Compact KPI tiles */}
+            {/* (1) Compact KPI tiles (always shown — the at-a-glance headline) */}
             <KpiTiles kpis={kpis} />
 
             {/* (2) Pass/fail bars + property-status pivot */}
             <TwoCol>
-              <PassFailBars rows={filtered} />
-              <PropertyStatusPivot rows={filtered} />
+              <CardSlot id="passfail"><PassFailBars rows={filtered} /></CardSlot>
+              <CardSlot id="propstatus"><PropertyStatusPivot rows={filtered} /></CardSlot>
             </TwoCol>
 
             {/* (3) Inspector performance + 1099 grass-condition fails */}
             <TwoCol>
-              <InspectorRoster rows={filtered} />
-              <GrassFails rows={filtered} />
+              <CardSlot id="roster"><InspectorRoster rows={filtered} /></CardSlot>
+              <CardSlot id="grass"><GrassFails rows={filtered} /></CardSlot>
             </TwoCol>
-            <CompletedTable rows={filtered} />
+            <CardSlot id="completed"><CompletedTable rows={filtered} /></CardSlot>
 
             {/* (4) Completion-time trend + quality gauges */}
             <TwoCol>
-              <TrendChart history={history} />
-              <PassRateGauge kpis={kpis} />
+              <CardSlot id="trend"><TrendChart history={history} /></CardSlot>
+              <CardSlot id="gauges"><PassRateGauge kpis={kpis} /></CardSlot>
             </TwoCol>
 
             {/* (5) AI learning velocity + preference overrides (training signals) */}
             <TwoCol>
-              <KbVelocity />
-              <PreferenceMismatches />
+              <CardSlot id="velocity"><KbVelocity /></CardSlot>
+              <CardSlot id="overrides"><PreferenceMismatches /></CardSlot>
             </TwoCol>
 
             {/* (6) AI Knowledge Base changes feed (full width) */}
-            <KbChanges />
+            <CardSlot id="kb"><KbChanges /></CardSlot>
 
             {/* (7) Property / inspection map — deferred */}
-            <CardFrame title="Property / inspection map" icon={MAP_ICON} subtitle="Phase 4 · deferred">
-              <div className="flex items-center justify-center text-center text-sm text-[#71717a] py-10 opacity-70">
-                A geographic view of inspections lands in a later phase.
-              </div>
-            </CardFrame>
+            <CardSlot id="map">
+              <CardFrame title="Property / inspection map" icon={MAP_ICON} subtitle="Phase 4 · deferred">
+                <div className="flex items-center justify-center text-center text-sm text-[#71717a] py-10 opacity-70">
+                  A geographic view of inspections lands in a later phase.
+                </div>
+              </CardFrame>
+            </CardSlot>
           </div>
+          </CardHost>
         )}
       </div>
     </div>

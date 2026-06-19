@@ -56,12 +56,13 @@ const dateInputCls =
   'w-full border border-white/10 bg-[#232329] text-[#f4f4f5] rounded-lg px-2 py-1.5 text-sm mt-0.5 focus:outline-none focus:border-[#ff0060] [color-scheme:dark]';
 
 export function FilterRail({
-  rows, filters, onChange, onReset,
+  rows, filters, onChange, onReset, onCollapse,
 }: {
   rows: InsightsRow[];
   filters: InsightsFilters;
   onChange: (next: InsightsFilters) => void;
   onReset: () => void;
+  onCollapse?: () => void;
 }) {
   const inspectors: InspectorOption[] = useMemo(() => inspectorOptions(rows), [rows]);
   const properties = useMemo(() => propertyOptions(rows), [rows]);
@@ -84,11 +85,19 @@ export function FilterRail({
 
   return (
     <aside className="bg-[#18181c] rounded-xl border border-white/10 p-3.5 self-start lg:sticky lg:top-4">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-2">
         <h2 className="font-heading font-bold text-[13px] text-[#f4f4f5]">Filters{activeCount ? <span className="text-[#ff0060]"> · {activeCount}</span> : null}</h2>
+        <div className="flex items-center gap-2 shrink-0">
         <button type="button" onClick={onReset} className="text-[11px] font-heading font-semibold text-[#a1a1aa] hover:text-[#ff0060]">
           Reset
         </button>
+        {onCollapse && (
+          <button type="button" onClick={onCollapse} title="Collapse filters" aria-label="Collapse filters"
+            className="text-[#71717a] hover:text-[#ff0060]">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+          </button>
+        )}
+        </div>
       </div>
 
       <Section title="Date range (scheduled)">
