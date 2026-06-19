@@ -3130,7 +3130,7 @@ export async function writeInsightsUsers(users: InsightsUserRecord[]): Promise<v
 export async function provisionAppProperties(): Promise<Record<string, string>> {
   const results: Record<string, string> = {};
   const agent = agentTypeId();
-  const { question, answer } = typeIds();
+  const { question, answer, inspection } = typeIds();
 
   const ensureGroup = async (objType: string, name: string, label: string) => {
     try { await hubspotFetch(`/crm/v3/properties/${objType}/groups`, { method: 'POST', body: JSON.stringify({ name, label }) }); }
@@ -3170,6 +3170,13 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   await ensureGroup(answer, 'inspection_answer_info', 'Answer Info');
   await ensureProp(answer, 'qc_failure_note', {
     name: 'qc_failure_note', label: 'QC Failure Note', type: 'string', fieldType: 'textarea', groupName: 'inspection_answer_info',
+  });
+
+  // Property status frozen at completion (Inspection object). Stamped at
+  // finalize/submit so completed reports keep the historical property status.
+  await ensureGroup(inspection, 'inspection_results', 'Inspection Results');
+  await ensureProp(inspection, 'property_status_at_completion', {
+    name: 'property_status_at_completion', label: 'Property Status at Completion', type: 'string', fieldType: 'text', groupName: 'inspection_results',
   });
 
   // Drop the "does this property exist?" caches so the just-provisioned fields
