@@ -64,9 +64,12 @@ interface Props {
   bedrooms: number;
   bathrooms: number;
   squareFootage: number | null;
-  /** Property lifecycle status (Turnkey / Vacant / Unmarketed / …) — shown in
-   *  the header next to the square footage. */
+  /** Property lifecycle status (Turnkey / Vacant / Unmarketed / …) — shown on
+   *  its own line in the header. */
   propertyStatus?: string | null;
+  /** Move-in Ready date from the listing (M/D/YY) — shown as "MIR: …" to the
+   *  right of the property status. */
+  moveInReadyDate?: string | null;
   inspectionStatus: string;
   /** Completed QC report — shown as an in-app "View PDF Report" link. */
   pdfUrl?: string;
@@ -762,10 +765,16 @@ export function QcReinspectForm(props: Props) {
               {props.squareFootage != null && props.squareFootage > 0 && (
                 <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
               )}
-              {/* Property status carried over from the property card — same
-                  style as the sqft, bullet-separated. Frozen at completion. */}
-              {props.propertyStatus && <span> &middot; {props.propertyStatus}</span>}
             </div>
+            {/* Property status (Turnkey / Vacant / …) on its OWN line, with the
+                listing's Move-in Ready date to its right (MIR: M/D/YY). */}
+            {(props.propertyStatus || props.moveInReadyDate) && (
+              <div className="text-xs text-gray-500 truncate">
+                {props.propertyStatus}
+                {props.propertyStatus && props.moveInReadyDate && <span> &middot; </span>}
+                {props.moveInReadyDate && <span>MIR: {props.moveInReadyDate}</span>}
+              </div>
+            )}
           </div>
           <div className="shrink-0 flex items-center gap-1.5 text-[11px] font-heading font-bold">
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{totalPass} Pass</span>

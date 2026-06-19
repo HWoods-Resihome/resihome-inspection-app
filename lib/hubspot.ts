@@ -2467,6 +2467,38 @@ async function listingDisplayStatusInfo(): Promise<{ prop: string; labels: Recor
   return _listingDisplayStatus;
 }
 
+// Discover the listing object's "Move-in Ready Date" property once (cached).
+// Like listingStatusProp, we can't request an unknown property (HubSpot 400s),
+// so read the schema and pick the env override, a common name, or any date-ish
+// property whose name/label looks like "move-in ready". Env override:
+// HUBSPOT_LISTING_MIR_PROP.
+let _listingMirProp: string | null | undefined;
+async function listingMoveInReadyProp(): Promise<string | null> {
+  if (_listingMirProp !== undefined) return _listingMirProp;
+  const override = (process.env.HUBSPOT_LISTING_MIR_PROP || '').trim();
+  try {
+    const schema = await hubspotFetch(`/crm/v3/schemas/${listingTypeId()}`);
+    const props: any[] = schema?.properties || [];
+    const names = new Set(props.map((p) => p.name));
+    if (override && names.has(override)) { _listingMirProp = override; return override; }
+    const prefer = ['move_in_ready_date', 'move_in_ready', 'mir_date', 'movein_ready_date'];
+    let pick = prefer.find((n) => names.has(n));
+    // Otherwise the date/datetime property whose name or label mentions "move"
+    // and "ready" (e.g. "Move-in Ready Date").
+    if (!pick) {
+      pick = props.find((p) => {
+        const hay = `${p.name} ${p.label || ''}`.toLowerCase();
+        const isDate = p.type === 'date' || p.type === 'datetime';
+        return isDate && /move/.test(hay) && /ready/.test(hay);
+      })?.name;
+    }
+    _listingMirProp = pick || null;
+  } catch {
+    _listingMirProp = override || null;
+  }
+  return _listingMirProp;
+}
+
 // Format a HubSpot date value (epoch-ms string or ISO) to a short M/D/YYYY string.
 function formatListingDate(raw: any): string | null {
   if (raw == null || raw === '') return null;
@@ -2475,6 +2507,16 @@ function formatListingDate(raw: any): string | null {
   if (!isFinite(t) || isNaN(t)) return null;
   const d = new Date(t);
   return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+}
+
+// Short M/D/YY (2-digit year) — used for the header "MIR:" date.
+function formatShortDateYY(raw: any): string | null {
+  if (raw == null || raw === '') return null;
+  const s = String(raw);
+  const t = /^\d+$/.test(s) ? Number(s) : Date.parse(s);
+  if (!isFinite(t) || isNaN(t)) return null;
+  const d = new Date(t);
+  return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(-2)}`;
 }
 
 // Human-readable listing status for the inspection header (shown in front of the
@@ -2493,7 +2535,7 @@ function formatListingStatus(raw: string | null | undefined): string | null {
 
 export async function fetchActiveListingForProperty(
   propertyRecordId: string
-): Promise<{ listingPrice: number | null; listingDate: string | null; listingStatus: string | null } | null> {
+): Promise<{ listingPrice: number | null; listingDate: string | null; listingStatus: string | null; moveInReadyDate: string | null } | null> {
   if (!propertyRecordId) return null;
   const tids = typeIds();
   const lid = listingTypeId();
@@ -2516,10 +2558,12 @@ export async function fetchActiveListingForProperty(
     // 2) Batch-read price/date/status for each listing.
     const statusProp = await listingStatusProp();
     const displayInfo = await listingDisplayStatusInfo();
+    const mirProp = await listingMoveInReadyProp();
     const wantProps = ['listing_price', 'listing_date', 'hs_createdate'];
     if (statusProp) wantProps.push(statusProp);
     if (displayInfo?.prop && !wantProps.includes(displayInfo.prop)) wantProps.push(displayInfo.prop);
-    type Row = { price: number | null; date: any; created: number; status: string; displayRaw: string };
+    if (mirProp && !wantProps.includes(mirProp)) wantProps.push(mirProp);
+    type Row = { price: number | null; date: any; created: number; status: string; displayRaw: string; mir: any };
     const rows: Row[] = [];
     for (let i = 0; i < ids.length; i += 100) {
       const chunk = ids.slice(i, i + 100);
@@ -2538,6 +2582,7 @@ export async function fetchActiveListingForProperty(
           created: isNaN(createdMs) ? 0 : createdMs,
           status: statusProp ? String(p[statusProp] ?? '') : '',
           displayRaw: displayInfo?.prop ? String(p[displayInfo.prop] ?? '') : '',
+          mir: mirProp ? (p[mirProp] ?? null) : null,
         });
       }
     }
@@ -2572,7 +2617,12 @@ export async function fetchActiveListingForProperty(
       ? (displayInfo.labels[pick.displayRaw.toLowerCase()] || pick.displayRaw)
       : '';
     const listingStatus = formatListingStatus(displayLabel) || formatListingStatus(pick.status);
-    return { listingPrice: pick.price, listingDate: formatListingDate(pick.date), listingStatus };
+    return {
+      listingPrice: pick.price,
+      listingDate: formatListingDate(pick.date),
+      listingStatus,
+      moveInReadyDate: formatShortDateYY(pick.mir),
+    };
   } catch (e) {
     console.warn('[listing] lookup failed:', e);
     return null;

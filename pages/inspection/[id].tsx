@@ -94,6 +94,7 @@ export default function ExistingInspection() {
   const [listingPrice, setListingPrice] = useState<number | null>(null);
   const [listingDate, setListingDate] = useState<string | null>(null);
   const [listingStatus, setListingStatus] = useState<string | null>(null);
+  const [moveInReadyDate, setMoveInReadyDate] = useState<string | null>(null);
   const [communityName, setCommunityName] = useState<string | null>(null);
   const [filterSizeOptions, setFilterSizeOptions] = useState<string[]>([]);
   const [existingAnswers, setExistingAnswers] = useState<SavedAnswer[]>([]);
@@ -138,6 +139,7 @@ export default function ExistingInspection() {
         setListingPrice(typeof data.listingPrice === 'number' ? data.listingPrice : null);
         setListingDate(typeof data.listingDate === 'string' ? data.listingDate : null);
         setListingStatus(typeof data.listingStatus === 'string' ? data.listingStatus : null);
+        setMoveInReadyDate(typeof data.moveInReadyDate === 'string' ? data.moveInReadyDate : null);
         setCommunityName(typeof data.communityName === 'string' ? data.communityName : null);
         setFilterSizeOptions(Array.isArray(data.filterSizeOptions) ? data.filterSizeOptions : []);
         setExistingAnswers(data.answers || []);
@@ -532,6 +534,7 @@ export default function ExistingInspection() {
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
           propertyStatus={inspection.propertyStatusAtCompletion || propertyStatus}
+          moveInReadyDate={moveInReadyDate}
           inspectionStatus={inspection.status}
           pdfUrl={isCompleted ? (shareLinks?.report || inspection.pdfUrl || undefined) : undefined}
           readOnly={readOnly}
@@ -590,6 +593,7 @@ export default function ExistingInspection() {
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
           propertyStatus={inspection.propertyStatusAtCompletion || propertyStatus}
+          moveInReadyDate={moveInReadyDate}
           inspectionRegion={inspection.regionSnapshot || ''}
           status={inspection.status}
           submittedAt={inspection.submittedAt}

@@ -55,9 +55,12 @@ type Props = {
   /** Property's square footage (from `square_footage` on the property object).
    *  Optional — shown in the header next to bed/bath if present. */
   squareFootage?: number | null;
-  /** Property lifecycle status (Turnkey / Vacant / Unmarketed / …) — shown in
-   *  the header next to the square footage. */
+  /** Property lifecycle status (Turnkey / Vacant / Unmarketed / …) — shown on
+   *  its own line in the header. */
   propertyStatus?: string | null;
+  /** Move-in Ready date from the listing (M/D/YY) — shown as "MIR: …" to the
+   *  right of the property status. */
+  moveInReadyDate?: string | null;
   /** Inspection's region snapshot (used in the header subtitle). */
   inspectionRegion?: string;
   /** Inspection status + submitted timestamp — drive the header status badge and
@@ -192,7 +195,7 @@ function slugify(s: string): string {
 
 export function QuestionForm({
   questions, templateType, templateLabel, inspectorName, propertyName, propertyRecordId,
-  bedrooms, bathrooms, squareFootage, propertyStatus, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, communityName, onSubmit, onCancel,
+  bedrooms, bathrooms, squareFootage, propertyStatus, moveInReadyDate, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, communityName, onSubmit, onCancel,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
   propertyAirFiltersTotal, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
@@ -1701,12 +1704,18 @@ export function QuestionForm({
                 {squareFootage != null && squareFootage > 0 && (
                   <span> &middot; {squareFootage.toLocaleString()} sqft</span>
                 )}
-                {/* Property status (Turnkey / Vacant / Unmarketed / …) carried
-                    over from the property card, shown right of the square feet
-                    in the same style, bullet-separated. Frozen at completion. */}
-                {propertyStatus && <span> &middot; {propertyStatus}</span>}
                 {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
               </div>
+              {/* Property status (Turnkey / Vacant / Unmarketed / …) on its OWN
+                  line, with the listing's Move-in Ready date to its right
+                  (MIR: M/D/YY). Frozen at completion. */}
+              {(propertyStatus || moveInReadyDate) && (
+                <div className="text-xs text-gray-500 truncate">
+                  {propertyStatus}
+                  {propertyStatus && moveInReadyDate && <span> &middot; </span>}
+                  {moveInReadyDate && <span>MIR: {moveInReadyDate}</span>}
+                </div>
+              )}
               {/* Order: address → details → listing line → Pass/Fail tally. */}
               {!isCommunity && (listingStatus || (typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? (
                 <div className="text-xs text-emerald-700 font-heading font-semibold truncate">

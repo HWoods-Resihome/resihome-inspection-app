@@ -127,6 +127,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         listingPrice: listing?.listingPrice ?? null,
         listingDate: listing?.listingDate ?? null,
         listingStatus: listing?.listingStatus ?? null,
+        moveInReadyDate: listing?.moveInReadyDate ?? null,
         communityName: communityName ?? null,
         filterSizeOptions,
         shareLinks,
