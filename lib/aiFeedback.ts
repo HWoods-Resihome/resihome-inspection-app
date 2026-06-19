@@ -29,6 +29,12 @@ export interface AiFeedbackEvent {
   source: AiFeedbackSource;
   decision: AiFeedbackDecision;
   inspectionId?: string;
+  /** WHO made this decision — the signed-in user at the moment "Apply" was hit.
+   *  Stamped server-side from the session (never trusted from the client), so an
+   *  edit an APPROVER makes during review is attributed to the approver, not the
+   *  inspection's original inspector. Absent on pre-attribution (legacy) events. */
+  actorEmail?: string;
+  actorName?: string;
   sectionId?: string;
   region?: string;
   /** The AI's original suggestion — the "input" half of the training pair. */
@@ -73,6 +79,8 @@ function sanitize(e: AiFeedbackEvent): AiFeedbackEvent {
     source: e.source,
     decision: e.decision,
     inspectionId: clip(e.inspectionId, 64),
+    actorEmail: clip(e.actorEmail, 200),
+    actorName: clip(e.actorName, 200),
     sectionId: clip(e.sectionId, 64),
     region: clip(e.region, 64),
     suggestion: {

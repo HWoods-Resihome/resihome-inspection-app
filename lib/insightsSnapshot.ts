@@ -111,6 +111,9 @@ export interface InsightsRow {
  *  overridden. Powers the AI-overrides cards + the preference-overrides drill-down. */
 export interface AiOverrideRow {
   inspectionId: string;
+  // WHO made the override (the event actor — inspector OR approver), falling
+  // back to the inspection's inspector for legacy events. Named "inspector*"
+  // for back-compat with the grouping/filter helpers.
   inspectorName: string;
   inspectorEmail: string;
   region: string | null;
@@ -256,10 +259,14 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
 /**
  * Build the AI-override rows: read recent AI feedback, keep the events where the
  * human did NOT accept the AI as-is (decline/edit/move/remove/ignore), and JOIN
- * each to its inspection (via inspectionId) for inspector attribution + a
- * drill-down link. The event has no inspector field, so the join is how we learn
- * "who overrides most"; events with no resolvable inspection are dropped. Also
- * stamps row.hasAiOverride for the 'AI Overrides' global filter. Best-effort.
+ * each to its inspection (via inspectionId) for context (region / property /
+ * template) + a drill-down link. Events with no resolvable inspection are
+ * dropped. Also stamps row.hasAiOverride for the 'AI Overrides' global filter.
+ *
+ * Attribution: the override is credited to the ACTOR stamped on the event (the
+ * signed-in user who made the decision — inspector OR approver), so an
+ * approver's edits no longer inflate the inspection's original inspector. Legacy
+ * events with no actor fall back to the inspection's inspector. Best-effort.
  */
 async function buildAiOverrides(rows: InsightsRow[]): Promise<AiOverrideRow[]> {
   let events;
@@ -290,10 +297,15 @@ async function buildAiOverrides(rows: InsightsRow[]): Promise<AiOverrideRow[]> {
     if (!row) continue; // can't attribute without the inspection → drop (never fake)
     row.hasAiOverride = true;
     const code = e.suggestion?.catalogCode || null;
+    // Credit the actual editor (event actor) — falling back to the inspection's
+    // inspector for legacy events that predate actor stamping.
+    const actorEmail = (e.actorEmail || '').trim();
+    const editorEmail = actorEmail || row.inspectorEmail;
+    const editorName = actorEmail ? (e.actorName || e.actorEmail || actorEmail) : row.inspectorName;
     out.push({
       inspectionId: row.recordId,
-      inspectorName: row.inspectorName,
-      inspectorEmail: row.inspectorEmail,
+      inspectorName: editorName,
+      inspectorEmail: editorEmail,
       region: row.region,
       templateType: row.templateType,
       propertyAddress: row.propertyAddress,

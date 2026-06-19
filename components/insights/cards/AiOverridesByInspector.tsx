@@ -1,8 +1,9 @@
 /**
- * AI overrides by inspector — who overrides the AI's suggestions most. Each bar
- * is one inspector; click to drill down to the individual override events
- * (decision + the AI's suggestion + a link to the inspection). Respects the
- * global rail filters. Data: snapshot.aiOverrides joined to the inspection.
+ * AI overrides by account — who overrides the AI's suggestions most, credited to
+ * the user who actually made each edit (inspector OR approver). Each bar is one
+ * account; click to drill down to the individual override events (decision + the
+ * AI's suggestion + a link to the inspection). Respects the global rail filters.
+ * Data: snapshot.aiOverrides (each event stamped with its acting user).
  */
 import { CardFrame, CardNote } from '../cardChrome';
 import { overridesByInspector, fmtNumber } from '@/lib/insightsMetrics';
@@ -17,8 +18,8 @@ export function AiOverridesByInspector({ overrides }: { overrides: AiOverrideRow
   const groups = overridesByInspector(overrides);
   return (
     <CardFrame
-      title="AI overrides by inspector" icon={ICON}
-      subtitle="who overrides the AI most — click to drill down"
+      title="AI overrides by account" icon={ICON}
+      subtitle="who overrides the AI most (inspector or approver) — click to drill down"
       headerRight={overrides.length ? <span className="text-[11px] text-[#71717a]">{fmtNumber(overrides.length)} overrides</span> : null}
       bodyClassName="p-0 max-h-[420px] overflow-auto"
     >

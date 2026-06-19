@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { recordAiFeedback, type AiFeedbackEvent } from '@/lib/aiFeedback';
 import { maybeRefreshLearnedKnowledge } from '@/lib/aiKnowledgeLearning';
+import { getSessionFromRequest } from '@/lib/auth';
 
 /**
  * Sink for AI feedback events (see lib/aiFeedbackClient.ts) — how a human
@@ -19,9 +20,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       : Array.isArray(body) ? body
       : body ? [body] : [];
 
+    // Stamp WHO made the decision from the session (server-authoritative — the
+    // client never supplies identity). The beacon sends the auth cookie, so
+    // whoever is signed in when they hit "Apply" is recorded: the inspector
+    // during the inspection, or the APPROVER during review. This is what lets
+    // Insights attribute an approver's AI edits to the approver instead of the
+    // inspection's original inspector.
+    const session = await getSessionFromRequest(req);
+    const actorEmail = session?.email || undefined;
+    const actorName = session?.name || undefined;
+
     // Cap the batch so a misbehaving client can't storm the blob store.
     const events = raw.filter((e) => e && typeof e === 'object' && e.source && e.decision).slice(0, 100);
-    await Promise.all(events.map((e) => recordAiFeedback(e as AiFeedbackEvent)));
+    await Promise.all(events.map((e) =>
+      recordAiFeedback({ ...(e as AiFeedbackEvent), actorEmail, actorName })));
     // Near-real-time learning: fold new feedback into the AI Knowledge base
     // (throttled to ~once / 3 min across the fleet, only when there's activity).
     if (events.length) await maybeRefreshLearnedKnowledge();
