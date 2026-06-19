@@ -169,7 +169,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const key = `${sectionLabel}||${loc}`;
       const pf = (a.passFail === 'pass' || a.passFail === 'fail') ? a.passFail : '';
       const note = (a as any).note || '';
+      const hasPhotos = (a.photoUrls || []).length > 0;
       if (!sectionMap.has(key)) {
+        // Skip a completely-ignored room (no verdict AND no photos) from the
+        // report — both the summary page and the detail pages. A note alone
+        // isn't enough to include it.
+        if (!pf && !hasPhotos) continue;
         sectionOrder.push(key);
         sectionMap.set(key, {
           displayName: loc || sectionLabel || 'Section',
