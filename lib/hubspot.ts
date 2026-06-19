@@ -974,7 +974,11 @@ export interface InspectionQuery {
   inspectors?: string[];         // exact inspector_name values; empty = no filter
   templates?: string[];          // exact template_type values; empty = no filter
   regions?: string[];            // exact region_snapshot values; empty = no filter
-  external?: boolean;            // external (1099) user — apply the restricted visibility rule
+  // External (1099) user's email. When set, applies the restricted visibility
+  // rule: only the 1099 inspections assigned to THIS email, plus COMPLETED
+  // Scope/Re-Inspect from anyone (view-only). Lists become per-user — callers
+  // MUST include this email in any cache key.
+  externalEmail?: string | null;
 }
 
 export interface InspectionCounts {
@@ -1013,14 +1017,22 @@ function externalCommonFilters(q: InspectionQuery): any[] {
   return filters;
 }
 
-// External (1099) users see a DISJUNCTION: ALL their 1099 inspections (any
-// status) PLUS COMPLETED Scope Rate Card / Re-Inspect inspections (view-only).
-// HubSpot ORs across filterGroups, so that's up to two "allow-groups". Template
-// narrowing from the facet intersects with the allowed set; an all-disallowed
-// selection is ignored (falls back to the full allowed set) so the list can
-// never widen beyond policy.
+// External (1099) users see a DISJUNCTION: their OWN 1099 inspections (the ones
+// whose inspector_email is theirs, any status) PLUS COMPLETED Scope Rate Card /
+// Re-Inspect inspections from anyone (view-only). HubSpot ORs across
+// filterGroups, so that's up to two "allow-groups". Template narrowing from the
+// facet intersects with the allowed set; an all-disallowed selection is ignored
+// (falls back to the full allowed set) so the list can never widen beyond policy.
 function externalAllowGroups(q: InspectionQuery): { filters: any[] }[] {
   const common = externalCommonFilters(q);
+  // The 1099 group is scoped to the inspections assigned to THIS user. Match on
+  // inspector_email, accepting both the original and lowercased form so a
+  // case-difference (e.g. owner-sync lowercases) can't hide their own work.
+  const email = (q.externalEmail || '').trim();
+  const ownerValues = Array.from(new Set([email, email.toLowerCase()].filter(Boolean)));
+  const ownerFilter = ownerValues.length
+    ? [{ propertyName: 'inspector_email', operator: 'IN', values: ownerValues }]
+    : [];
   const selected = (q.templates || []).map((t) => t.trim()).filter((t) => t && t !== 'all');
   let editTpls: string[] = [...EXTERNAL_EDIT_TEMPLATES];
   let viewTpls: string[] = [...EXTERNAL_VIEW_TEMPLATES];
@@ -1032,12 +1044,12 @@ function externalAllowGroups(q: InspectionQuery): { filters: any[] }[] {
 
   const status = q.status && q.status !== 'all' ? q.status : '';
   const groups: { filters: any[] }[] = [];
-  // 1099 group: full visibility — the selected status, or all non-cancelled.
+  // 1099 group: the user's OWN 1099s — the selected status, or all non-cancelled.
   if (editTpls.length) {
     const statusFilter = status && STATUS_VARIANTS[status]
       ? { propertyName: 'status', operator: 'IN', values: STATUS_VARIANTS[status] }
       : { propertyName: 'status', operator: 'NOT_IN', values: CANCELLED_VARIANTS };
-    groups.push({ filters: [{ propertyName: 'template_type', operator: 'IN', values: editTpls }, statusFilter, ...common] });
+    groups.push({ filters: [{ propertyName: 'template_type', operator: 'IN', values: editTpls }, statusFilter, ...ownerFilter, ...common] });
   }
   // Scope / Re-Inspect group: COMPLETED only. Contributes only when the selected
   // status includes completed (the "all" tab or the "completed" chip).
@@ -1059,7 +1071,7 @@ function externalAllowGroups(q: InspectionQuery): { filters: any[] }[] {
 // the three search dimensions (address / name / inspector) so search ANDs with
 // the active filters (HubSpot ORs across groups, ANDs within a group).
 function inspectionFilterGroups(q: InspectionQuery): any[] {
-  if (q.external) {
+  if (q.externalEmail) {
     const allow = externalAllowGroups(q);
     const search = (q.search || '').trim();
     if (!search) return allow;
@@ -1284,14 +1296,14 @@ const distinct = (vals: any[]): string[] =>
  * template.
  */
 export async function inspectionFacets(query: InspectionQuery): Promise<{ inspectors: string[]; templates: string[]; regions: string[] }> {
-  const ext = !!query.external;
+  const extEmail = query.externalEmail || null;
   // Each dimension's options IGNORE that dimension's own selection (so you can
   // change it) but respect the OTHER active filters. The external visibility
-  // rule (1099 + completed Scope/Re-Inspect) is carried through `external`, so
-  // every scan is already bounded to what the user may see.
-  const inspectorQ: InspectionQuery = { search: query.search, status: query.status, templates: query.templates, regions: query.regions, external: ext };
-  const templateQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, regions: query.regions, external: ext };
-  const regionQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, templates: query.templates, external: ext };
+  // rule (own 1099 + completed Scope/Re-Inspect) is carried through
+  // `externalEmail`, so every scan is already bounded to what the user may see.
+  const inspectorQ: InspectionQuery = { search: query.search, status: query.status, templates: query.templates, regions: query.regions, externalEmail: extEmail };
+  const templateQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, regions: query.regions, externalEmail: extEmail };
+  const regionQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, templates: query.templates, externalEmail: extEmail };
   const noneSelected = (query.inspectors?.length || 0) === 0
     && (query.templates?.length || 0) === 0
     && (query.regions?.length || 0) === 0;

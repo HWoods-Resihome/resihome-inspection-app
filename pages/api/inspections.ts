@@ -120,15 +120,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const page = Math.max(1, parseInt(str(req.query.page), 10) || 1);
   const refresh = str(req.query.refresh) === '1';
 
-  // External (1099) users get a restricted visibility rule applied SERVER-SIDE
-  // (all their 1099s + COMPLETED Scope/Re-Inspect, view-only) so their
-  // list/counts/facets can't be widened by crafting a query param. They may
-  // still narrow within that allowed set via the template facet (intersected
-  // server-side); a disallowed template selection is ignored.
-  const external = isExternalEmail(session.email);
+  // External (1099) users get a restricted visibility rule applied SERVER-SIDE:
+  // only the 1099 inspections assigned to THEM, plus COMPLETED Scope/Re-Inspect
+  // from anyone (view-only). Passing their email scopes the 1099 set per-user
+  // (so it MUST be part of the cache key — external lists are no longer global).
+  // It can't be widened by crafting a query param; they may still narrow within
+  // the allowed set via the template facet (a disallowed selection is ignored).
+  const externalEmail = isExternalEmail(session.email) ? session.email : null;
   const templates = templatesRaw;
 
-  const baseQuery: InspectionQuery = { search, status, inspectors, templates, regions, external };
+  const baseQuery: InspectionQuery = { search, status, inspectors, templates, regions, externalEmail };
   // Stable key parts: sort the multi-value arrays so equivalent selections share
   // a cache entry regardless of click order.
   const insKey = [...inspectors].sort();
@@ -136,12 +137,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const regKey = [...regions].sort();
   // Counts ignore the selected status (each chip shows its own total) and the
   // page/sort, so cache them on just the constraining filters.
-  const countKey = JSON.stringify({ search, inspectors: insKey, templates: tmpKey, regions: regKey, external });
-  const listKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, external, sortField, sortDir, page, pageSize });
+  const countKey = JSON.stringify({ search, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail });
+  const listKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail, sortField, sortDir, page, pageSize });
   // Facets are DEPENDENT: each dropdown is constrained by the other active
   // filters (status, search, and the other dimensions' selections), so the cache
   // key includes them all.
-  const facetKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, external });
+  const facetKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail });
 
   // The filter dropdown options (facets) require a multi-page scan and are NOT
   // needed to render the inspection cards. On a slow connection that scan would
