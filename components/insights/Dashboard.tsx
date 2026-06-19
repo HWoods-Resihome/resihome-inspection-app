@@ -25,6 +25,8 @@ import { KbVelocity } from './cards/KbVelocity';
 import { PreferenceMismatches } from './cards/PreferenceMismatches';
 import { AiOverridesByInspector } from './cards/AiOverridesByInspector';
 import { AiOverridesByCategory } from './cards/AiOverridesByCategory';
+import { ScopeCost } from './cards/ScopeCost';
+import { ScopeApprovals } from './cards/ScopeApprovals';
 import { CardFrame } from './cardChrome';
 import { CardHost, CardSlot, CARD_CATALOG } from './cardHost';
 import {
@@ -228,6 +230,12 @@ export function InsightsDashboard() {
               <CardSlot id="grass"><GrassFails rows={filtered} /></CardSlot>
             </TwoCol>
             <CardSlot id="completed"><CompletedTable rows={filtered} /></CardSlot>
+
+            {/* (3b) Scope Rate Card cost + approvals */}
+            <TwoCol>
+              <CardSlot id="scope-cost"><ScopeCost rows={filtered} /></CardSlot>
+              <CardSlot id="scope-approvals"><ScopeApprovals rows={filtered} /></CardSlot>
+            </TwoCol>
 
             {/* (4) Completion-time trend + quality gauges */}
             <TwoCol>

@@ -184,6 +184,103 @@ export function overridesForCode(overrides: AiOverrideRow[], code: string): AiOv
   return overrides.filter((o) => o.code === code);
 }
 
+// ---- Scope Rate Card cost ----------------------------------------------------
+
+/** Scope rows that carry a client cost (the population for the scope-cost card). */
+export function scopeRows(rows: InsightsRow[]): InsightsRow[] {
+  return rows.filter((r) => r.templateType === TEMPLATE_SCOPE && typeof r.totalClientCost === 'number' && (r.totalClientCost as number) > 0);
+}
+
+export interface ScopeTotals { total: number; count: number; avg: number | null; }
+export function scopeTotals(rows: InsightsRow[]): ScopeTotals {
+  const scopes = scopeRows(rows);
+  const total = scopes.reduce((s, r) => s + (r.totalClientCost || 0), 0);
+  return { total, count: scopes.length, avg: scopes.length ? total / scopes.length : null };
+}
+
+export interface ScopeInspectorRow {
+  email: string; label: string;
+  count: number; total: number; avg: number;
+  scopes: { recordId: string; propertyAddress: string; cost: number; approverName: string | null; scheduledDate: string | null }[];
+}
+
+/** Avg total scope $ per inspector (mode A), highest average first. */
+export function scopeCostByInspector(rows: InsightsRow[]): ScopeInspectorRow[] {
+  const map = new Map<string, ScopeInspectorRow>();
+  for (const r of scopeRows(rows)) {
+    const email = (r.inspectorEmail || '').toLowerCase() || '(unknown)';
+    let g = map.get(email);
+    if (!g) { g = { email, label: r.inspectorName || r.inspectorEmail || '(unknown)', count: 0, total: 0, avg: 0, scopes: [] }; map.set(email, g); }
+    g.count++; g.total += r.totalClientCost || 0;
+    g.scopes.push({ recordId: r.recordId, propertyAddress: r.propertyAddress, cost: r.totalClientCost || 0, approverName: r.approverName, scheduledDate: r.scheduledDate });
+  }
+  const out = Array.from(map.values());
+  for (const g of out) { g.avg = g.count ? g.total / g.count : 0; g.scopes.sort((a, b) => b.cost - a.cost); }
+  return out.sort((a, b) => b.avg - a.avg);
+}
+
+/** Distinct scope categories present (for the mode-B category picker), by spend. */
+export function scopeCategories(rows: InsightsRow[]): string[] {
+  const totals = new Map<string, number>();
+  for (const r of scopeRows(rows)) {
+    for (const [cat, amt] of Object.entries(r.scopeCategoryCosts || {})) {
+      totals.set(cat, (totals.get(cat) || 0) + (amt || 0));
+    }
+  }
+  return Array.from(totals.entries()).sort((a, b) => b[1] - a[1]).map(([c]) => c);
+}
+
+export interface ScopeApprovalRow {
+  approver: string;
+  count: number;          // scopes approved
+  total: number;          // $ approved
+  nte: number | null;     // this approver's not-to-exceed ceiling (if configured)
+  overCount: number;      // # approvals over the NTE
+  scopes: { recordId: string; propertyAddress: string; cost: number; over: boolean; scheduledDate: string | null }[];
+}
+
+/** Scopes approved per reviewer (count + $), flagging approvals over that
+ *  approver's NTE ceiling. nte/overCount are null/0 until thresholds are set. */
+export function scopeApprovalsByApprover(rows: InsightsRow[], nte: Record<string, number>): ScopeApprovalRow[] {
+  const map = new Map<string, ScopeApprovalRow>();
+  for (const r of scopeRows(rows)) {
+    const approver = (r.approverName || '').trim();
+    if (!approver) continue; // not yet approved → not an approval
+    const limit = typeof nte[approver] === 'number' ? nte[approver] : null;
+    const cost = r.totalClientCost || 0;
+    const over = limit != null && cost > limit;
+    let g = map.get(approver);
+    if (!g) { g = { approver, count: 0, total: 0, nte: limit, overCount: 0, scopes: [] }; map.set(approver, g); }
+    g.count++; g.total += cost; g.nte = limit;
+    if (over) g.overCount++;
+    g.scopes.push({ recordId: r.recordId, propertyAddress: r.propertyAddress, cost, over, scheduledDate: r.scheduledDate });
+  }
+  const out = Array.from(map.values());
+  for (const g of out) g.scopes.sort((a, b) => b.cost - a.cost);
+  // Over-NTE approvers first (most flags), then by $ approved.
+  return out.sort((a, b) => (b.overCount - a.overCount) || (b.total - a.total));
+}
+
+export interface ScopeCategoryInspectorRow { email: string; label: string; count: number; total: number; avg: number; }
+
+/** Avg cost of ONE category per inspector (mode B) — does someone scope e.g.
+ *  cleaning higher than others? Averages over that inspector's scopes that
+ *  include the category; highest average first. */
+export function scopeCategoryCostByInspector(rows: InsightsRow[], category: string): ScopeCategoryInspectorRow[] {
+  const map = new Map<string, ScopeCategoryInspectorRow>();
+  for (const r of scopeRows(rows)) {
+    const amt = (r.scopeCategoryCosts || {})[category];
+    if (typeof amt !== 'number') continue;
+    const email = (r.inspectorEmail || '').toLowerCase() || '(unknown)';
+    let g = map.get(email);
+    if (!g) { g = { email, label: r.inspectorName || r.inspectorEmail || '(unknown)', count: 0, total: 0, avg: 0 }; map.set(email, g); }
+    g.count++; g.total += amt;
+  }
+  const out = Array.from(map.values());
+  for (const g of out) g.avg = g.count ? g.total / g.count : 0;
+  return out.sort((a, b) => b.avg - a.avg);
+}
+
 /** Distinct current property-status values present in the rows (for the rail). */
 export function propertyStatusOptions(rows: InsightsRow[]): string[] {
   const set = new Set<string>();

@@ -3324,6 +3324,86 @@ export async function writeInsightsUsers(users: InsightsUserRecord[]): Promise<v
   }
 }
 
+// ---------------------------------------------------------------------------
+// Approver NTE (not-to-exceed) thresholds — per-approver $ ceilings used by the
+// Insights scope-approvals card to flag approvals above an approver's limit.
+// Stored as JSON { approverName: dollars } on the same admin Agent record.
+// ---------------------------------------------------------------------------
+const APP_APPROVER_NTE_PROP = 'app_approver_nte_json';
+export type ApproverNteMap = Record<string, number>;
+
+/** Read the approver NTE thresholds. Best-effort: {} on any error. */
+export async function readApproverNte(): Promise<ApproverNteMap> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) return {};
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}?properties=${APP_APPROVER_NTE_PROP}`);
+    const raw = resp?.properties?.[APP_APPROVER_NTE_PROP];
+    if (!raw) return {};
+    const parsed = JSON.parse(String(raw));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: ApproverNteMap = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      const n = Number(v);
+      if (k && Number.isFinite(n) && n > 0) out[k] = n;
+    }
+    return out;
+  } catch (e) {
+    console.warn('[approver-nte] read failed:', e);
+    return {};
+  }
+}
+
+async function ensureApproverNteProperty(): Promise<void> {
+  try {
+    await hubspotFetch(`/crm/v3/properties/${agentTypeId()}/${APP_APPROVER_NTE_PROP}`);
+    return; // exists
+  } catch { /* fall through to create */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${agentTypeId()}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: APP_APPROVER_NTE_PROP, label: 'Approver NTE thresholds (JSON)', type: 'string', fieldType: 'textarea',
+        groupName: 'ai_knowledge',
+        description: 'ResiWalk Insights per-approver not-to-exceed $ thresholds (managed by the app).',
+      }),
+    });
+  } catch (e: any) {
+    const blob = `${String(e?.message || e)} ${String(e?.detail || '')}`;
+    if (e?.status === 409 || /already exists|PROPERTY_ALREADY_EXISTS/i.test(blob)) return;
+    throw new Error(
+      'Approver-NTE storage is not provisioned: the property “app_approver_nte_json” is missing on the Agent '
+      + 'object and auto-create failed — the HubSpot token likely lacks CRM schema-write scope. Detail: ' + blob.slice(0, 200),
+    );
+  }
+}
+
+/** Persist the approver NTE thresholds (sanitized to positive numbers). */
+export async function writeApproverNte(map: ApproverNteMap): Promise<void> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) throw new Error('Admin Agent record not found — set AI_KNOWLEDGE_AGENT_RECORD_ID, or ensure the admin is a HubSpot owner with an Agent record.');
+  const clean: ApproverNteMap = {};
+  for (const [k, v] of Object.entries(map || {})) {
+    const n = Number(v);
+    if (k && Number.isFinite(n) && n > 0) clean[k] = n;
+  }
+  const doWrite = () => hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ properties: { [APP_APPROVER_NTE_PROP]: JSON.stringify(clean) } }),
+  });
+  try {
+    await doWrite();
+  } catch (e: any) {
+    if (isMissingPropertyError(e, APP_APPROVER_NTE_PROP)) {
+      await ensureApproverNteProperty();
+      await doWrite();
+    } else {
+      const detail = String(e?.detail || '').slice(0, 200);
+      throw new Error(`Could not save approver NTE thresholds (HubSpot ${e?.status || ''}).${detail ? ' ' + detail : ''}`.trim());
+    }
+  }
+}
+
 
 /**
  * One-click provisioning of the HubSpot properties the new admin features need

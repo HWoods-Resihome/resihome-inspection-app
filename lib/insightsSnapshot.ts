@@ -26,9 +26,10 @@ import type { InspectionSummary } from '@/lib/types';
 export const SNAPSHOT_BLOB_PATH = 'insights/snapshot.json';
 export const HISTORY_BLOB_PREFIX = 'insights/history/';
 const PAGE_SIZE = 100;
-// 1099 Leasing-Agent template (literal here to avoid an import cycle with
-// insightsMetrics, which imports the InsightsRow type from this file).
+// Template literals here to avoid an import cycle with insightsMetrics, which
+// imports the InsightsRow type from this file.
 const TEMPLATE_1099 = 'leasing_agent_1099_property_inspection';
+const TEMPLATE_SCOPE = 'pm_scope_rate_card';
 // Concurrency + ceiling for the per-1099 answer reads (Grass Condition capture).
 // Bounded so the 60s rebuild window is never at risk.
 const GRASS_CONCURRENCY = 8;
@@ -86,6 +87,11 @@ export interface InsightsRow {
   inspectionResult: 'pass' | 'fail' | null;  // 1099/Vacancy overall pass/fail
   totalPhotos: number | null;                // total_photos_attached (stamped at submit)
   totalClientCost: number | null;            // Scope Rate Card $ (excluded from pass/fail)
+  approverName: string | null;               // who approved (approved_by) — for the scope cost/approvals cards
+  // Scope Rate Card per-category client cost { category: $ } (set on scope rows
+  // that have rate-card lines; absent otherwise). Sums clientCost by the line's
+  // catalog category. Powers the per-category scope-cost breakdown.
+  scopeCategoryCosts?: Record<string, number>;
   reportUrl: string | null;     // best available report PDF (master → attachment)
   propertyId: string | null;                 // HubSpot Property record id (property_id_ref)
   propertyStatus: string | null;             // the property's CURRENT live status (e.g. 'Vacant - On Market') — for analytics filtering across ALL rows
@@ -183,6 +189,7 @@ function toRow(s: InspectionSummary): InsightsRow {
     inspectionResult: s.inspectionResult ?? null,
     totalPhotos: s.totalPhotosAttached ?? null,
     totalClientCost: s.totalClientCost,
+    approverName: s.approvedByName ?? null,
     reportUrl: s.pdfMasterUrl || s.pdfUrl || null,
     propertyId: s.propertyRecordId ?? null,
     // Seed with the list-mapper value (frozen for completed, live for active);
@@ -219,6 +226,7 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
   const truncated = hitCeiling || rows.length < total;
   await enrichCurrentPropertyStatus(rows);
   await enrichGrassConditions(rows);
+  await enrichScopeCategoryCosts(rows);
   const aiOverrides = await buildAiOverrides(rows);
   const cancelledCount = await countInspectionsCancelled().catch(() => 0);
   return {
@@ -358,6 +366,50 @@ async function enrichGrassConditions(rows: InsightsRow[]): Promise<void> {
         row.grassPhotos = Array.isArray(a.photoUrls) ? a.photoUrls.filter(Boolean) : [];
       } catch {
         /* best-effort: leave this row's grass fields unset */
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(GRASS_CONCURRENCY, targets.length) }, worker));
+}
+
+/**
+ * Sum each Scope Rate Card inspection's client cost by catalog CATEGORY (from
+ * its rate-card line answers), powering the per-category scope-cost breakdown.
+ * Reads answers per scope inspection that has a cost — bounded by concurrency +
+ * ceiling, best-effort. category resolved via the cached catalog (code→category).
+ */
+async function enrichScopeCategoryCosts(rows: InsightsRow[]): Promise<void> {
+  const targets = rows
+    .filter((r) => r.templateType === TEMPLATE_SCOPE && (r.totalClientCost ?? 0) > 0)
+    .slice(0, GRASS_MAX_INSPECTIONS);
+  if (targets.length === 0) return;
+
+  const catByCode = new Map<string, string>();
+  try {
+    for (const c of await getCachedCatalog()) {
+      if (c.lineItemCode && c.category) catByCode.set(c.lineItemCode, c.category);
+    }
+  } catch (e) {
+    console.warn('[insights-scope] catalog load failed:', e);
+    return; // without categories there is nothing to break down
+  }
+
+  let i = 0;
+  const worker = async (): Promise<void> => {
+    while (i < targets.length) {
+      const row = targets[i++];
+      try {
+        const answers = await fetchAnswersForInspection(row.recordId);
+        const byCat: Record<string, number> = {};
+        for (const a of answers) {
+          const line = a.rateCardLine;
+          if (!line || typeof line.clientCost !== 'number') continue;
+          const cat = catByCode.get(line.lineItemCode) || '(uncategorized)';
+          byCat[cat] = (byCat[cat] || 0) + line.clientCost;
+        }
+        if (Object.keys(byCat).length) row.scopeCategoryCosts = byCat;
+      } catch {
+        /* best-effort: leave this scope's category breakdown unset */
       }
     }
   };
