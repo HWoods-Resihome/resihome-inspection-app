@@ -139,6 +139,14 @@ export default function Home() {
   // Defaults to expanded; the choice persists with the rest of the view.
   const [filtersOpen, setFiltersOpen] = useState<boolean>(savedView.filtersOpen ?? true);
 
+  // Scroll-position restore: on large screens the list scrolls inside the
+  // `.frozen-scroll` element; on short/landscape it's the window. We save BOTH
+  // and restore BOTH (the inactive one is a harmless no-op) so backing out of an
+  // inspection lands the user exactly where they were, not at the top.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollRestoredRef = useRef(false);
+  const SCROLL_KEY = 'resiwalk_home_scroll_v1';
+
   // Persist the view state on every change so it's restored on return.
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -148,6 +156,49 @@ export default function Home() {
       }));
     } catch { /* storage disabled — view just won't persist */ }
   }, [search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, regionFilter, pageSize, page, filtersOpen]);
+
+  // Save the current scroll offset (throttled via rAF) on scroll, and right
+  // before navigating away (routeChangeStart) so opening an inspection captures
+  // the exact spot. Stored per-tab in sessionStorage.
+  useEffect(() => {
+    const save = () => {
+      try {
+        const el = scrollRef.current;
+        window.sessionStorage.setItem(SCROLL_KEY, JSON.stringify({
+          el: el ? el.scrollTop : 0,
+          win: window.scrollY || 0,
+        }));
+      } catch { /* storage disabled — scroll just won't persist */ }
+    };
+    let raf = 0;
+    const onScroll = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; save(); }); };
+    const el = scrollRef.current;
+    el?.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true });
+    router.events.on('routeChangeStart', save);
+    return () => {
+      el?.removeEventListener('scroll', onScroll);
+      window.removeEventListener('scroll', onScroll);
+      router.events.off('routeChangeStart', save);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [router.events]);
+
+  // Restore the saved scroll offset ONCE, after the cards have painted (the
+  // cached list paints instantly, and InspectionCard has no images so card
+  // height is stable — the offset lands accurately).
+  useEffect(() => {
+    if (scrollRestoredRef.current) return;
+    if (loading || inspections.length === 0) return;
+    scrollRestoredRef.current = true;
+    let saved: { el?: number; win?: number } | null = null;
+    try { saved = JSON.parse(window.sessionStorage.getItem(SCROLL_KEY) || 'null'); } catch { /* ignore */ }
+    if (!saved) return;
+    requestAnimationFrame(() => {
+      if (scrollRef.current && saved!.el) scrollRef.current.scrollTop = saved!.el;
+      if (saved!.win) window.scrollTo(0, saved!.win);
+    });
+  }, [loading, inspections.length]);
 
   useEffect(() => {
     // Hydrate from the last known signed-in user immediately so a dead-zone
@@ -917,7 +968,7 @@ export default function Home() {
         </div>{/* end frozen top region */}
 
         {/* Inspection list — the only scrolling region on large screens */}
-        <div className="frozen-scroll">
+        <div className="frozen-scroll" ref={scrollRef}>
         <div className="max-w-3xl mx-auto px-4 pb-12">
           {loading && (
             <div className="text-sm text-gray-500 text-center py-8">Loading inspections...</div>
