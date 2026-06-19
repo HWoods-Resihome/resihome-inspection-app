@@ -5,7 +5,7 @@ import { SyncingBadge } from '@/components/SyncingBadge';
 
 interface PhotoStripProps {
   /** Section/group title shown on the collapsible header (e.g. "Before"). */
-  label: string;
+  label: React.ReactNode;
   photoUrls: string[];
   /** Thumbnail size in px. QC (side-by-side, narrow) uses a smaller size. */
   size?: number;
@@ -77,7 +77,7 @@ export function PhotoStrip({
                   <>
                     <PhotoThumb
                       url={u}
-                      alt={label}
+                      alt=""
                       style={{ width: size, height: size }}
                       className={`object-cover rounded border ${a.thumb}`}
                     />

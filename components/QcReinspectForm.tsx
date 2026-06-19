@@ -829,7 +829,9 @@ export function QcReinspectForm(props: Props) {
 
                   <div className={'rounded-lg border-2 p-2.5 min-w-0 ' + (failNeedsPhoto ? 'border-brand bg-brand/5' : 'border-teal-300 bg-teal-50/60')}>
                     <PhotoStrip
-                      label={(after.length === 0 && hasLines) || failNeedsPhoto ? 'After • required' : 'After'}
+                      label={failNeedsPhoto
+                        ? (<>After <span className="text-brand normal-case font-bold">• Required</span></>)
+                        : (after.length === 0 && hasLines) ? 'After • Required' : 'After'}
                       photoUrls={cameraOpenAnywhere ? [] : after}
                       size={64}
                       accent="teal"
@@ -848,7 +850,7 @@ export function QcReinspectForm(props: Props) {
                     </PhotoStrip>
                     {failNeedsPhoto && (
                       <p className="text-xs text-brand font-heading font-semibold mt-1.5">
-                        Add at least one After photo — required for a failed room.
+                        At least one photo required.
                       </p>
                     )}
                   </div>
@@ -880,7 +882,7 @@ export function QcReinspectForm(props: Props) {
                       </div>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-xs font-heading font-semibold text-gray-500 uppercase tracking-wider">Notes</span>
-                        {failNeedsNote && <span className="text-[11px] text-brand font-heading font-bold">• required</span>}
+                        {failNeedsNote && <span className="text-[11px] text-brand font-heading font-bold normal-case">• Required</span>}
                       </div>
                       <textarea
                         value={roomNote[s.key] || ''}

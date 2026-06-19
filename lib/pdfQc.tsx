@@ -172,14 +172,37 @@ function QcDoc({ ctx }: { ctx: QcPdfContext }) {
           </Text>
         )}
 
-        {/* Page 1: condensed summary of every re-inspected line, grouped by room. */}
-        <PdfSummaryTable
-          title="Re-Inspect Summary — All Line Items"
-          groups={ctx.sections}
-          columns={summaryColumns}
-          roomWidth="12%"
-          grandTotalLabel="Grand Total"
-        />
+        {/* Page 1: condensed summary. Scope-backed QC lists every re-inspected
+            LINE grouped by room; a standalone QC (no line items) lists each ROOM
+            with its optional Pass/Fail + note. */}
+        {ctx.sections.some((s) => s.lines.length > 0) ? (
+          <PdfSummaryTable
+            title="Re-Inspect Summary — All Line Items"
+            groups={ctx.sections}
+            columns={summaryColumns}
+            roomWidth="12%"
+            grandTotalLabel="Grand Total"
+          />
+        ) : (
+          <PdfSummaryTable<{ note: string; passFail: 'pass' | 'fail' | '' }>
+            title="Re-Inspect Summary — Rooms"
+            groups={ctx.sections.map((s) => ({
+              displayName: s.displayName,
+              lines: [{ note: s.roomNote || '', passFail: s.roomVerdict || '' }],
+            }))}
+            roomWidth="24%"
+            roomHeader="Room"
+            columns={[
+              { key: 'note', header: 'Notes', width: '56%', cell: (l) => l.note },
+              {
+                key: 'result', header: 'Result', width: '20%', align: 'center', hasTotal: true,
+                cell: (l) => <ResultChip pf={l.passFail} />,
+                grandTotal: `${ctx.passCount}P / ${ctx.failCount}F`,
+              },
+            ]}
+            grandTotalLabel="Grand Total"
+          />
+        )}
 
         {/* Detail pages: each room with before/after photos + full line table. */}
         <View break>
