@@ -277,9 +277,9 @@ export default function NewInspection() {
     && !!selectedPropertyId
     && !!sessionUser
     && bedrooms != null
-    && bathrooms != null
-    // QC requires a source Scope Rate Card inspection to validate.
-    && (!isQcTemplate || !!selectedSourceId);
+    && bathrooms != null;
+    // QC's source Scope is OPTIONAL — when none is selected the QC starts
+    // standalone (empty rooms for after-photos + a final pass/fail verdict).
 
   // A future scheduled date (vs. today, in local time) means we save a
   // Scheduled inspection and assign it, rather than starting it now.
@@ -496,28 +496,35 @@ export default function NewInspection() {
                       Loading inspections…
                     </div>
                   ) : sourceOptions.length === 0 ? (
-                    <div className="text-sm text-amber-700 border border-amber-200 bg-amber-50 rounded-lg px-3 py-2.5">
-                      {sourceError || 'No submitted Scope Rate Card inspections for this property.'}
+                    <div className="text-sm text-gray-600 border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5">
+                      No recent Scope Rate Card for this property — you can still
+                      <span className="font-semibold"> begin a standalone QC</span>:
+                      it opens with empty rooms so you can add after-photos and set a
+                      final Pass/Fail.
                     </div>
                   ) : (
                     <>
                       <Combobox
                         id="source-rc-cb"
-                        options={sourceOptions.map((o) => ({
-                          value: o.recordId,
-                          label: o.inspectionName,
-                          sublabel: [
-                            o.status,
-                            o.submittedAt ? new Date(/^\d+$/.test(o.submittedAt) ? Number(o.submittedAt) : o.submittedAt).toLocaleDateString() : null,
-                          ].filter(Boolean).join(' · ') || undefined,
-                        }))}
+                        options={[
+                          { value: '', label: 'None — start a standalone QC', sublabel: 'No source scope; empty rooms + after-photos' },
+                          ...sourceOptions.map((o) => ({
+                            value: o.recordId,
+                            label: o.inspectionName,
+                            sublabel: [
+                              o.status,
+                              o.submittedAt ? new Date(/^\d+$/.test(o.submittedAt) ? Number(o.submittedAt) : o.submittedAt).toLocaleDateString() : null,
+                            ].filter(Boolean).join(' · ') || undefined,
+                          })),
+                        ]}
                         value={selectedSourceId}
                         onChange={setSelectedSourceId}
-                        placeholder="Select the inspection to validate"
+                        placeholder="Select the inspection to validate (optional)"
                       />
                       <p className="text-xs text-gray-500 mt-1">
-                        Defaults to the most recently submitted. The QC will copy this
-                        inspection's line items for pass/fail validation.
+                        Optional. Pick a Scope to validate against (copies its line items
+                        for pass/fail), or choose <span className="font-semibold">None</span> to
+                        run a standalone QC.
                       </p>
                     </>
                   )}

@@ -91,6 +91,10 @@ export function QcReinspectForm(props: Props) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [lines, setLines] = useState<QcLine[]>([]);
+  // Property room list (from qc-data). Used to render rooms for a STANDALONE QC
+  // (no source scope → no copied lines), so after-photos can still be captured
+  // per room and a final Pass/Fail set.
+  const [roomList, setRoomList] = useState<{ key: string; displayName: string; section: string; location: string }[]>([]);
   const [beforeMap, setBeforeMap] = useState<Record<string, string[]>>({});
   const [afterPhotos, setAfterPhotos] = useState<Record<string, string[]>>({});
   const [afterPhotoRecordIds, setAfterPhotoRecordIds] = useState<Record<string, string>>({});
@@ -162,6 +166,7 @@ export function QcReinspectForm(props: Props) {
       const apply = (d: any) => {
         const loadedLines: QcLine[] = d.lines || [];
         setLines(loadedLines);
+        setRoomList(Array.isArray(d.sections) ? d.sections : []);
         setBeforeMap(d.beforePhotos || {});
         const after: Record<string, string[]> = {};
         const afterIds: Record<string, string> = {};
@@ -200,6 +205,18 @@ export function QcReinspectForm(props: Props) {
   }, [props.inspectionRecordId]);
 
   const sections: SectionGroup[] = useMemo(() => {
+    // STANDALONE QC (no source scope → no copied lines): render the property's
+    // rooms with empty lines/before-photos so after-photos can still be captured.
+    if (lines.length === 0) {
+      return roomList.map((r) => ({
+        key: r.key,
+        displayName: r.displayName || r.section || 'Room',
+        location: r.location,
+        section: r.section,
+        lines: [],
+        beforePhotos: beforeMap[r.key] || beforeMap[r.location] || beforeMap[r.section] || [],
+      }));
+    }
     const order: string[] = [];
     const map = new Map<string, SectionGroup>();
     for (const ln of lines) {
@@ -219,7 +236,7 @@ export function QcReinspectForm(props: Props) {
       map.get(key)!.lines.push(ln);
     }
     return order.map((k) => map.get(k)!);
-  }, [lines, beforeMap]);
+  }, [lines, beforeMap, roomList]);
 
   // Distinct vendors actually assigned on this reinspect, ordered by the
   // canonical VENDORS list (then any extras). Drives the header filter dropdown.
@@ -244,8 +261,12 @@ export function QcReinspectForm(props: Props) {
 
   const totalPass = lines.filter((l) => l.passFail === 'pass').length;
   const totalFail = lines.filter((l) => l.passFail === 'fail').length;
-  const allMarked = lines.length > 0 && lines.every((l) => l.passFail === 'pass' || l.passFail === 'fail');
-  const allSectionsHaveAfter = sections.every((s) => (afterPhotos[s.key] || []).length > 0);
+  // STANDALONE QC (no copied lines): nothing to mark and after-photos are
+  // OPTIONAL, so only the final Pass/Fail verdict gates submit. With a source
+  // scope, every line must be marked and every room needs an after-photo.
+  const hasLines = lines.length > 0;
+  const allMarked = !hasLines || lines.every((l) => l.passFail === 'pass' || l.passFail === 'fail');
+  const allSectionsHaveAfter = !hasLines || sections.every((s) => (afterPhotos[s.key] || []).length > 0);
 
   // Offline-aware uploader for the in-app camera — caches to IndexedDB on a weak
   // signal and returns a draft URL, tagged to the camera's active section so it
@@ -724,7 +745,9 @@ export function QcReinspectForm(props: Props) {
               <div className="flex items-center gap-2 min-w-0">
                 <span className={'text-gray-400 transition-transform ' + (isCollapsed ? '' : 'rotate-90')}>&#9654;</span>
                 <h2 className="font-bold text-sm text-gray-900 truncate">{s.displayName}</h2>
-                <span className="text-xs text-gray-400">&middot; {s.lines.length} {s.lines.length === 1 ? 'line' : 'lines'}</span>
+                {hasLines && (
+                  <span className="text-xs text-gray-400">&middot; {s.lines.length} {s.lines.length === 1 ? 'line' : 'lines'}</span>
+                )}
               </div>
               <div className="text-xs font-bold shrink-0">
                 <span className="text-emerald-600">{secPass} pass</span>
@@ -751,7 +774,7 @@ export function QcReinspectForm(props: Props) {
 
                   <div className="rounded-lg border-2 border-teal-300 bg-teal-50/60 p-2.5 min-w-0">
                     <PhotoStrip
-                      label={after.length === 0 ? 'After • required' : 'After'}
+                      label={after.length === 0 && hasLines ? 'After • required' : 'After'}
                       photoUrls={cameraOpenAnywhere ? [] : after}
                       size={64}
                       accent="teal"
@@ -771,6 +794,10 @@ export function QcReinspectForm(props: Props) {
                   </div>
                 </div>
 
+                {/* Line items render ONLY when validating a source scope. A
+                    standalone QC (no source) has no lines — it's just rooms +
+                    after-photos + a final verdict, so the line tables are hidden. */}
+                {s.lines.length > 0 && (<>
                 {/* Desktop: full table (horizontal scroll if needed) */}
                 <div className="overflow-x-auto hidden sm:block">
                   <table className="w-full text-sm">
@@ -945,6 +972,7 @@ export function QcReinspectForm(props: Props) {
                     );
                   })}
                 </div>
+                </>)}
               </>
             )}
           </section>

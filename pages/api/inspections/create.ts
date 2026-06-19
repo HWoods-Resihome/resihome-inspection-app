@@ -143,11 +143,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // QC Turn Re-Inspect: stamp the source inspection ref + carry its region
-    // snapshot so the copied lines price/display consistently.
-    if (isQc) {
-      if (!body.sourceRateCardId) {
-        return res.status(400).json({ error: 'QC inspection requires a source Rate Card inspection.' });
-      }
+    // snapshot so the copied lines price/display consistently. The source is now
+    // OPTIONAL — a QC can be started standalone (no recent Scope) and the form
+    // renders empty rooms for after-photos + a final pass/fail.
+    if (isQc && body.sourceRateCardId) {
       inspectionProps.source_rate_card_id = body.sourceRateCardId;
       try {
         const src = await fetchInspectionById(body.sourceRateCardId);

@@ -115,12 +115,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // reads as a confusing jumble). Build the canonical section order from the
     // inspection's own section layout (copied from the source scope) and sort by
     // it; unmatched sections fall to the end in their original order.
+    // Canonical room list (used for ordering AND, when there's no source scope,
+    // as the room set the standalone QC renders so after-photos can be captured
+    // per room even with zero line items).
+    const ordered = resolveSections(
+      inspection.sectionListJson,
+      inspection.bedroomsAtInspection || 0,
+      inspection.bathroomsAtInspection || 0,
+    );
+    const roomSections = ordered.map((s) => ({
+      key: `${s.label}||${s.location || ''}`,
+      displayName: s.displayName || s.label,
+      section: s.label,
+      location: s.location || '',
+    }));
     try {
-      const ordered = resolveSections(
-        inspection.sectionListJson,
-        inspection.bedroomsAtInspection || 0,
-        inspection.bathroomsAtInspection || 0,
-      );
       const orderIndex = new Map<string, number>();
       ordered.forEach((s, i) => {
         for (const k of [`${s.label}||${s.location}`, `${s.displayName}||${s.location}`, `${s.displayName}||`, `${s.label}||`, s.displayName, s.label, s.location]) {
@@ -162,6 +171,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       qcPassCount: inspection.qcPassCount,
       qcFailCount: inspection.qcFailCount,
       lines,
+      sections: roomSections,
       afterPhotos,
       beforePhotos,
     });
