@@ -38,31 +38,39 @@ export function PhotoThumb({
   url, width = 400, alt = '', className, style, title, loading, decoding, onClick,
 }: PhotoThumbProps) {
   const [stage, setStage] = useState(0);
+  const [loaded, setLoaded] = useState(false);
   // Reset the fallback chain if this slot is reused for a different photo (e.g.
   // the offline draft url swapped for the real HubSpot url after it syncs).
   const [seenUrl, setSeenUrl] = useState(url);
-  if (url !== seenUrl) { setSeenUrl(url); setStage(0); }
+  if (url !== seenUrl) { setSeenUrl(url); setStage(0); setLoaded(false); }
 
-  if (stage >= 2) {
-    // Exhausted both sources — keep the tile's box (no layout shift) but show a
-    // neutral placeholder rather than the broken-image glyph.
-    return <span aria-hidden className={className} style={{ ...style, backgroundColor: '#f3f4f6', display: 'inline-block' }} onClick={onClick} />;
-  }
-
-  const src = stage === 0 ? thumbImageSrc(url, width) : displayImageSrc(url);
+  const src = stage >= 2 ? '' : (stage === 0 ? thumbImageSrc(url, width) : displayImageSrc(url));
+  // The wrapper IS the tile (carries the caller's size/border/rounded classes)
+  // and shows a neutral fill. The <img> sits on top but stays INVISIBLE until it
+  // actually loads — so a still-loading OR failed source never paints the
+  // browser's broken-image "?" glyph; you just see the blank box until a real
+  // pixel arrives. On error we advance to the next source (and reset visibility).
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt={alt}
-      title={title}
-      loading={loading}
-      decoding={decoding}
-      onClick={onClick}
-      onError={() => setStage((s) => s + 1)}
+    <span
+      aria-hidden
       className={className}
-      style={style}
-    />
+      onClick={onClick}
+      style={{ ...style, backgroundColor: '#f3f4f6', display: 'inline-block', overflow: 'hidden', position: 'relative' }}
+    >
+      {src && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt={alt}
+          title={title}
+          loading={loading}
+          decoding={decoding}
+          onLoad={() => setLoaded(true)}
+          onError={() => { setLoaded(false); setStage((s) => s + 1); }}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: loaded ? 1 : 0, transition: 'opacity 120ms' }}
+        />
+      )}
+    </span>
   );
 }
 

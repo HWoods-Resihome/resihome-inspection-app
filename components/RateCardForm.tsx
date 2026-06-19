@@ -2087,9 +2087,16 @@ export function RateCardForm(props: RateCardFormProps) {
 
   function removePhoto(sectionId: string, idx: number) {
     if (props.readOnly) return;
-    const current = photosBySection[sectionId] || [];
+    // DATA-LOSS GUARD: read the LIVE list from the ref (a stale render/closure
+    // could otherwise hold an old, short array and wipe the whole room), resolve
+    // the target photo by index, then remove it by URL IDENTITY — not by index.
+    // An out-of-range index or a URL that's no longer present is a no-op, so a
+    // single delete can never clear more than the one photo it points at.
+    const current = photosBySectionRef.current[sectionId] || [];
     const url = current[idx];
-    const next = current.filter((_, i) => i !== idx);
+    if (!url) return;
+    const next = current.filter((u) => u !== url);
+    if (next.length === current.length) return; // nothing matched → never wipe
     setPhotosBySection((m) => ({ ...m, [sectionId]: next }));
     savePhotosForSection(sectionId, next);
     // Keep line tags in sync: a deleted photo can't stay attached to a line.

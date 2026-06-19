@@ -74,6 +74,37 @@ export async function probeFfmpeg(): Promise<{ path: string | null; version: str
   };
 }
 
+/**
+ * Diagnostic: report a clip's actual container/codec via `ffmpeg -i` (reads the
+ * stream lines from stderr). Tells us whether a STORED clip is really H.264 mp4
+ * (transcode worked) or still an undecodable original.
+ */
+export async function probeMediaCodec(buf: Buffer): Promise<string> {
+  const exe = ffmpegExec();
+  if (!exe) return 'no ffmpeg';
+  let dir: string | null = null;
+  try {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'probe-'));
+    const inPath = path.join(dir, 'probe');
+    await fs.writeFile(inPath, buf);
+    const info = await new Promise<string>((resolve) => {
+      let err = '';
+      const p = spawn(exe, ['-hide_banner', '-i', inPath], { stdio: ['ignore', 'ignore', 'pipe'] });
+      p.stderr?.on('data', (d) => { err += d.toString(); });
+      p.on('error', (e) => resolve(`ERR ${e.message}`));
+      p.on('close', () => resolve(err));
+      setTimeout(() => { try { p.kill('SIGKILL'); } catch { /* noop */ } resolve(err || 'timeout'); }, 10000);
+    });
+    const streams = info.match(/Stream #[^\n]*/g);
+    const inputLine = (info.match(/Input #[^\n]*/g) || [])[0] || '';
+    return [inputLine, ...(streams || [])].join(' | ').slice(0, 600) || info.slice(0, 300);
+  } catch (e: any) {
+    return `probe error ${String(e?.message || e).slice(0, 120)}`;
+  } finally {
+    if (dir) { try { await fs.rm(dir, { recursive: true, force: true }); } catch { /* noop */ } }
+  }
+}
+
 /** True if the buffer looks like an ISO-BMFF (mp4/mov) file — 'ftyp' at offset 4. */
 export function isMp4(buf: Buffer): boolean {
   return buf.length >= 12 && buf.toString('latin1', 4, 8) === 'ftyp';
