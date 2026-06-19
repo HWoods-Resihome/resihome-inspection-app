@@ -7,6 +7,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalAccessDenial } from '@/lib/userAccess';
+import { isAppAdmin } from '@/lib/adminAccess';
 import { fetchInspectionById, updateInspection } from '@/lib/hubspot';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 
@@ -36,6 +37,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const cancelled: string[] = [];
   const skipped: Array<{ id: string; reason: string }> = [];
 
+  // Admins may cancel COMPLETED inspections too; everyone else is blocked from
+  // cancelling a completed one (the historical record is preserved).
+  const admin = await isAppAdmin(session.email);
+
   // Process with a small concurrency cap so a large multi-select doesn't take
   // N sequential round-trips, while staying polite with HubSpot's rate limit.
   const CONCURRENCY = 5;
@@ -44,10 +49,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     while (idx < ids.length) {
       const id = ids[idx++];
       try {
-        // Guard: never cancel a completed inspection.
+        // Guard: never cancel a completed inspection — UNLESS an admin.
         const insp = await fetchInspectionById(id);
         const status = (insp?.status || '').trim().toLowerCase();
-        if (status === 'completed' || status === 'complete' || status === 'submitted') {
+        if ((status === 'completed' || status === 'complete' || status === 'submitted') && !admin) {
           skipped.push({ id, reason: 'completed' });
           continue;
         }

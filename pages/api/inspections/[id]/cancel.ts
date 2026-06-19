@@ -3,6 +3,7 @@ import { fetchInspectionById, updateInspection } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { recordAuditEvent } from '@/lib/auditLog';
 import { externalAccessDenial, isCompletedStatus } from '@/lib/userAccess';
+import { isAppAdmin } from '@/lib/adminAccess';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -20,8 +21,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const insp = await fetchInspectionById(id);
     if (!insp) return res.status(404).json({ error: 'Inspection not found' });
 
-    // A completed inspection can NEVER be cancelled — for anyone, internal or external.
-    if (isCompletedStatus(insp.status)) {
+    // A completed inspection can be cancelled ONLY by an app admin; everyone else
+    // is blocked so the historical record is preserved.
+    if (isCompletedStatus(insp.status) && !(await isAppAdmin(session.email))) {
       return res.status(409).json({ error: "Completed inspections can't be cancelled." });
     }
 

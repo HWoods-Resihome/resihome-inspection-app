@@ -399,8 +399,10 @@ export default function Home() {
     || statusFilter !== 'all' || inspectorFilter.length > 0 || templateFilter.length > 0 || regionFilter.length > 0;
 
   // ---- Bulk-select helpers ----
-  // A card is selectable for cancellation unless it's completed.
+  // A card is selectable for cancellation unless it's completed — but admins
+  // may cancel completed inspections too (server-enforced in bulk-cancel).
   function isSelectable(i: InspectionSummary): boolean {
+    if (isAdmin) return true;
     const s = (i.status || '').trim().toLowerCase();
     return !(s === 'completed' || s === 'complete' || s === 'submitted');
   }
