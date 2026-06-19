@@ -136,8 +136,8 @@ export default function Home() {
 
   // Collapse the whole filter/sort block (status chips + inspector/template/
   // region/sort row) behind one chevron so the card list shows more at once.
-  // Defaults to expanded; the choice persists with the rest of the view.
-  const [filtersOpen, setFiltersOpen] = useState<boolean>(savedView.filtersOpen ?? true);
+  // Defaults to COLLAPSED; the choice persists with the rest of the view.
+  const [filtersOpen, setFiltersOpen] = useState<boolean>(savedView.filtersOpen ?? false);
 
   // Scroll-position restore: on large screens the list scrolls inside the
   // `.frozen-scroll` element; on short/landscape it's the window. We save BOTH
