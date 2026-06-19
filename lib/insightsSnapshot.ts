@@ -120,6 +120,7 @@ export interface AiOverrideRow {
   propertyStatus: string | null;
   code: string | null;            // catalog line-item code the AI suggested
   category: string | null;        // resolved from the catalog (code → category)
+  codeLabel: string | null;       // line-item description (catalog laborShortDescription)
   decision: string;               // decline | edit | move | remove | ignore
   query: string | null;           // the utterance/search that produced the suggestion
   ts: string;                     // event timestamp (ISO)
@@ -260,13 +261,16 @@ async function buildAiOverrides(rows: InsightsRow[]): Promise<AiOverrideRow[]> {
   }
   if (!events.length) return [];
 
-  // code → category (best-effort; bare code if the catalog is unavailable).
+  // code → category + human description (best-effort; bare code if unavailable).
   const catByCode = new Map<string, string>();
+  const labelByCode = new Map<string, string>();
   try {
     for (const c of await getCachedCatalog()) {
-      if (c.lineItemCode && c.category) catByCode.set(c.lineItemCode, c.category);
+      if (!c.lineItemCode) continue;
+      if (c.category) catByCode.set(c.lineItemCode, c.category);
+      if (c.laborShortDescription) labelByCode.set(c.lineItemCode, c.laborShortDescription);
     }
-  } catch { /* no catalog → category stays null */ }
+  } catch { /* no catalog → category/label stay null */ }
 
   const rowById = new Map(rows.map((r) => [r.recordId, r]));
   const out: AiOverrideRow[] = [];
@@ -287,6 +291,7 @@ async function buildAiOverrides(rows: InsightsRow[]): Promise<AiOverrideRow[]> {
       propertyStatus: row.propertyStatus,
       code,
       category: code ? (catByCode.get(code) || null) : null,
+      codeLabel: code ? (labelByCode.get(code) || null) : null,
       decision: e.decision,
       query: e.suggestion?.query || null,
       ts: e.ts || new Date().toISOString(),

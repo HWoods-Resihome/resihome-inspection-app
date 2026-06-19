@@ -13,16 +13,22 @@ import type { OverrideGroup } from '@/lib/insightsMetrics';
 export function OverrideEvents({ rows, showInspector = true }: { rows: AiOverrideRow[]; showInspector?: boolean }) {
   return (
     <ul className="flex flex-col gap-1 pl-3 ml-2 my-2 border-l border-white/10">
-      {rows.slice(0, 60).map((o, i) => (
-        <li key={o.inspectionId + o.ts + i} className="text-[11px] text-[#a1a1aa] flex items-center gap-2">
-          <span className="text-[#ff0060] font-heading font-semibold uppercase text-[10px] w-[52px] shrink-0">{o.decision}</span>
-          <span className="truncate flex-1" title={[o.inspectorName, o.code, o.query].filter(Boolean).join(' · ')}>
-            {showInspector ? `${o.inspectorName || o.inspectorEmail || '—'} · ` : ''}{o.code || '—'}{o.query ? ` · “${o.query}”` : ''}
-          </span>
-          <a href={`/inspection/${o.inspectionId}`} target="_blank" rel="noopener noreferrer"
-            className="text-[#ff0060] hover:underline shrink-0 font-heading font-semibold">open ↗</a>
-        </li>
-      ))}
+      {rows.slice(0, 60).map((o, i) => {
+        // code · category · line-item description — the code alone doesn't say what it was.
+        const parts = [o.code || '—', o.category, o.codeLabel].filter(Boolean) as string[];
+        const detail = parts.join(' · ');
+        return (
+          <li key={o.inspectionId + o.ts + i} className="text-[11px] text-[#a1a1aa] flex items-center gap-2">
+            <span className="text-[#ff0060] font-heading font-semibold uppercase text-[10px] w-[52px] shrink-0">{o.decision}</span>
+            <span className="truncate flex-1" title={[showInspector ? o.inspectorName : '', detail, o.query].filter(Boolean).join(' · ')}>
+              {showInspector ? <span className="text-[#f4f4f5]">{o.inspectorName || o.inspectorEmail || '—'} · </span> : ''}
+              {detail}{o.query ? ` · “${o.query}”` : ''}
+            </span>
+            <a href={`/inspection/${o.inspectionId}`} target="_blank" rel="noopener noreferrer"
+              className="text-[#ff0060] hover:underline shrink-0 font-heading font-semibold">open ↗</a>
+          </li>
+        );
+      })}
       {rows.length > 60 && <li className="text-[10px] text-[#71717a]">…and {rows.length - 60} more</li>}
     </ul>
   );

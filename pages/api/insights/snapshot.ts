@@ -11,7 +11,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { canViewInsights } from '@/lib/insightsAccess';
-import { readInsightsSnapshot, buildInsightsSnapshot, writeInsightsSnapshot } from '@/lib/insightsSnapshot';
+import { readInsightsSnapshot, buildInsightsSnapshot, writeInsightsSnapshot, buildDailyRollup, writeDailyRollup } from '@/lib/insightsSnapshot';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
@@ -28,6 +28,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // First load before any cron run — build once so the portal isn't empty.
       snapshot = await buildInsightsSnapshot();
       try { await writeInsightsSnapshot(snapshot); } catch { /* serve it even if the write fails */ }
+      // Bank today's rollup here too — otherwise an on-demand build (e.g. when the
+      // cron times out) contributes no point and the trend never advances.
+      try { await writeDailyRollup(buildDailyRollup(snapshot)); }
+      catch (e) { console.warn('[insights/snapshot] history write failed:', e); }
     }
     return res.status(200).json({ snapshot });
   } catch (e: any) {

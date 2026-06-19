@@ -713,7 +713,7 @@ const INSPECTION_LIST_PROPERTIES = [
   'source_rate_card_id', 'source_rate_card_name', 'qc_verdict',
   // Added for ResiWalk Insights analytics (region filter, turnaround timestamps,
   // pass/fail, photo counts). Harmless extra fields for the home list.
-  'region_snapshot', 'submitted_at', 'approved_at',
+  'region_snapshot', 'submitted_at', 'approved_at', 'approved_by_name',
   'inspection_result', 'total_photos_attached',
   // Property status: the frozen value (set at completion), the sortable snapshot
   // (kept fresh by enrichPropertyStatuses), and the property ref so active rows
@@ -761,7 +761,7 @@ function mapInspectionRow(r: any): InspectionSummary {
     qcFailCount: null,
     submittedAt: p.submitted_at || null,
     submittedByEmail: null,
-    approvedByName: null,
+    approvedByName: p.approved_by_name || null,
     approvedAt: p.approved_at || null,
     resolutionTimingJson: null,
     totalClientCost: p.total_client_cost != null && p.total_client_cost !== ''

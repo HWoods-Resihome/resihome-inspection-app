@@ -63,7 +63,7 @@ export function ScopeCost({ rows }: { rows: InsightsRow[] }) {
       {totals.count === 0 ? (
         <CardNote>No scopes with cost in the current filter.</CardNote>
       ) : mode === 'inspector' ? (
-        <ul className="flex flex-col">
+        <ul className="flex flex-col max-h-[360px] overflow-auto">
           {byInspector.map((g) => {
             const isOpen = openEmail === g.email;
             return (
@@ -103,7 +103,7 @@ export function ScopeCost({ rows }: { rows: InsightsRow[] }) {
           {byCategory.length === 0 ? (
             <CardNote>No “{activeCategory}” lines in the current filter.</CardNote>
           ) : (
-            <ul className="flex flex-col">
+            <ul className="flex flex-col max-h-[300px] overflow-auto">
               {byCategory.map((g) => (
                 <li key={g.email} className="flex items-center gap-2.5 py-2 px-4 border-b border-white/5 last:border-0">
                   <span className="text-[12px] text-[#f4f4f5] w-[140px] shrink-0 truncate" title={g.label}>{g.label}</span>
