@@ -18,7 +18,7 @@
  * searchInspectionsPage so rows match the rest of the app exactly.
  */
 import { put, list } from '@vercel/blob';
-import { searchInspectionsPage, countInspectionsCancelled, fetchQuestionsForTemplate, fetchAnswersForInspection, batchReadPropertyStatuses } from '@/lib/hubspot';
+import { searchInspectionsPage, countInspectionsCancelled, fetchQuestionsForTemplate, fetchAnswersForInspection, batchReadPropertyStatuses, fetchActiveUsers } from '@/lib/hubspot';
 import { readAiFeedback } from '@/lib/aiFeedback';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import type { InspectionSummary } from '@/lib/types';
@@ -265,8 +265,13 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
  *
  * Attribution: the override is credited to the ACTOR stamped on the event (the
  * signed-in user who made the decision — inspector OR approver), so an
- * approver's edits no longer inflate the inspection's original inspector. Legacy
- * events with no actor fall back to the inspection's inspector. Best-effort.
+ * approver's edits no longer inflate the inspection's original inspector.
+ *
+ * Backfill for legacy events (logged before actor stamping, so no actor): an
+ * override timestamped AFTER the inspection entered pending-approval is credited
+ * to the APPROVER (approved_by_name, resolved to an email when possible so it
+ * merges with the approver's actor-stamped events); earlier edits stay with the
+ * inspector. Best-effort.
  */
 async function buildAiOverrides(rows: InsightsRow[]): Promise<AiOverrideRow[]> {
   let events;
@@ -289,6 +294,20 @@ async function buildAiOverrides(rows: InsightsRow[]): Promise<AiOverrideRow[]> {
     }
   } catch { /* no catalog → category/label stay null */ }
 
+  // Resolve an approver's display name → email so the legacy backfill credits the
+  // SAME identity that the approver's actor-stamped events use. Best-effort: only
+  // map names that resolve to exactly one active user (skip ambiguous duplicates).
+  const emailByName = new Map<string, string>();
+  try {
+    const seen = new Map<string, string | null>();
+    for (const u of await fetchActiveUsers()) {
+      const key = (u.fullName || '').trim().toLowerCase();
+      if (!key || !u.email) continue;
+      seen.set(key, seen.has(key) ? null : u.email.toLowerCase()); // 2nd hit → ambiguous (null)
+    }
+    for (const [k, v] of seen) if (v) emailByName.set(k, v);
+  } catch { /* no users → approver stays name-only */ }
+
   const rowById = new Map(rows.map((r) => [r.recordId, r]));
   const out: AiOverrideRow[] = [];
   for (const e of events) {
@@ -297,15 +316,27 @@ async function buildAiOverrides(rows: InsightsRow[]): Promise<AiOverrideRow[]> {
     if (!row) continue; // can't attribute without the inspection → drop (never fake)
     row.hasAiOverride = true;
     const code = e.suggestion?.catalogCode || null;
-    // Credit the actual editor (event actor) — falling back to the inspection's
-    // inspector for legacy events that predate actor stamping.
+    // Credit the actual editor. New events carry the acting user (actorEmail);
+    // legacy events are backfilled by timing: edits after the inspection entered
+    // pending-approval go to the approver, earlier ones to the inspector.
     const actorEmail = (e.actorEmail || '').trim();
-    const editorEmail = actorEmail || row.inspectorEmail;
-    const editorName = actorEmail ? (e.actorName || e.actorEmail || actorEmail) : row.inspectorName;
+    let editorEmail = row.inspectorEmail;
+    let editorName = row.inspectorName;
+    if (actorEmail) {
+      editorEmail = actorEmail;
+      editorName = e.actorName || e.actorEmail || actorEmail;
+    } else if (row.approverName) {
+      const submittedMs = row.submittedAt ? Date.parse(row.submittedAt) : NaN;
+      const eventMs = e.ts ? Date.parse(e.ts) : NaN;
+      if (isFinite(submittedMs) && isFinite(eventMs) && eventMs >= submittedMs) {
+        editorName = row.approverName;
+        editorEmail = emailByName.get(row.approverName.trim().toLowerCase()) || '';
+      }
+    }
     out.push({
       inspectionId: row.recordId,
       inspectorName: editorName,
-      inspectorEmail: editorEmail,
+      inspectorEmail: editorEmail || '',
       region: row.region,
       templateType: row.templateType,
       propertyAddress: row.propertyAddress,

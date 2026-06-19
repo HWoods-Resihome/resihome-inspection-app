@@ -154,11 +154,16 @@ export interface OverrideGroup {
   rows: AiOverrideRow[];  // the events (for drill-down)
 }
 
-/** Group override events by inspector (most overrides first) — "who overrides most". */
+/** Group override events by the account that made them (most overrides first) —
+ *  "who overrides most". Keys on email when known, else the name (so an approver
+ *  with no resolved email still groups distinctly instead of collapsing into
+ *  "(unknown)"). */
 export function overridesByInspector(overrides: AiOverrideRow[]): OverrideGroup[] {
   const map = new Map<string, OverrideGroup>();
   for (const o of overrides) {
-    const key = (o.inspectorEmail || '').toLowerCase() || '(unknown)';
+    const key = (o.inspectorEmail || '').toLowerCase()
+      || (o.inspectorName || '').trim().toLowerCase()
+      || '(unknown)';
     let g = map.get(key);
     if (!g) { g = { key, label: o.inspectorName || o.inspectorEmail || '(unknown)', count: 0, rows: [] }; map.set(key, g); }
     g.count++; g.rows.push(o);

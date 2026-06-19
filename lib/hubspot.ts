@@ -2468,36 +2468,9 @@ async function listingDisplayStatusInfo(): Promise<{ prop: string; labels: Recor
 }
 
 // Discover the listing object's "Move-in Ready Date" property once (cached).
-// Like listingStatusProp, we can't request an unknown property (HubSpot 400s),
-// so read the schema and pick the env override, a common name, or any date-ish
-// property whose name/label looks like "move-in ready". Env override:
-// HUBSPOT_LISTING_MIR_PROP.
-let _listingMirProp: string | null | undefined;
-async function listingMoveInReadyProp(): Promise<string | null> {
-  if (_listingMirProp !== undefined) return _listingMirProp;
-  const override = (process.env.HUBSPOT_LISTING_MIR_PROP || '').trim();
-  try {
-    const schema = await hubspotFetch(`/crm/v3/schemas/${listingTypeId()}`);
-    const props: any[] = schema?.properties || [];
-    const names = new Set(props.map((p) => p.name));
-    if (override && names.has(override)) { _listingMirProp = override; return override; }
-    const prefer = ['move_in_ready_date', 'move_in_ready', 'mir_date', 'movein_ready_date'];
-    let pick = prefer.find((n) => names.has(n));
-    // Otherwise the date/datetime property whose name or label mentions "move"
-    // and "ready" (e.g. "Move-in Ready Date").
-    if (!pick) {
-      pick = props.find((p) => {
-        const hay = `${p.name} ${p.label || ''}`.toLowerCase();
-        const isDate = p.type === 'date' || p.type === 'datetime';
-        return isDate && /move/.test(hay) && /ready/.test(hay);
-      })?.name;
-    }
-    _listingMirProp = pick || null;
-  } catch {
-    _listingMirProp = override || null;
-  }
-  return _listingMirProp;
-}
+// The listing's Move-in Ready date property. Confirmed field name; env override
+// is supported only in case it differs in another portal.
+const LISTING_MIR_PROP = (process.env.HUBSPOT_LISTING_MIR_PROP || '').trim() || 'move_in_ready_date';
 
 // Format a HubSpot date value (epoch-ms string or ISO) to a short M/D/YYYY string.
 function formatListingDate(raw: any): string | null {
@@ -2558,7 +2531,7 @@ export async function fetchActiveListingForProperty(
     // 2) Batch-read price/date/status for each listing.
     const statusProp = await listingStatusProp();
     const displayInfo = await listingDisplayStatusInfo();
-    const mirProp = await listingMoveInReadyProp();
+    const mirProp = LISTING_MIR_PROP;
     const wantProps = ['listing_price', 'listing_date', 'hs_createdate'];
     if (statusProp) wantProps.push(statusProp);
     if (displayInfo?.prop && !wantProps.includes(displayInfo.prop)) wantProps.push(displayInfo.prop);
