@@ -1130,25 +1130,13 @@ export function QcReinspectForm(props: Props) {
       {/* Spacer so the fixed footer doesn't cover the last content */}
       {!props.readOnly && <div className="h-20" />}
 
-      {/* Floating footer — same pattern as the Scope Rate Card. Cancel
-          Inspection / Save & Close / Submit Inspection, with a live save
-          status chip. Shown for editable inspections. */}
+      {/* Floating footer — mirrors the Scope Rate Card: Save & Close on the LEFT
+          (with the live save-status chip), Submit on the right. No Cancel button.
+          Shown for editable inspections. */}
       {!props.readOnly && (
         <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
           <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
-              {props.onCancelInspection && (
-                <button
-                  type="button"
-                  onClick={props.onCancelInspection}
-                  className="px-2.5 sm:px-4 py-2 text-xs sm:text-sm border border-red-300 text-red-700 rounded hover:bg-red-50 whitespace-nowrap"
-                >
-                  Cancel
-                </button>
-              )}
-              <span className="hidden sm:inline-flex"><SaveStatusChip status={saveStatus} /></span>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={props.onCancel}
@@ -1156,6 +1144,9 @@ export function QcReinspectForm(props: Props) {
               >
                 Save &amp; Close
               </button>
+              <span className="hidden sm:inline-flex"><SaveStatusChip status={saveStatus} /></span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={handleSubmit}
