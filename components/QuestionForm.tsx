@@ -55,6 +55,9 @@ type Props = {
   /** Property's square footage (from `square_footage` on the property object).
    *  Optional — shown in the header next to bed/bath if present. */
   squareFootage?: number | null;
+  /** Property lifecycle status (Turnkey / Vacant / Unmarketed / …) — shown in
+   *  the header next to the square footage. */
+  propertyStatus?: string | null;
   /** Inspection's region snapshot (used in the header subtitle). */
   inspectionRegion?: string;
   /** Inspection status + submitted timestamp — drive the header status badge and
@@ -189,7 +192,7 @@ function slugify(s: string): string {
 
 export function QuestionForm({
   questions, templateType, templateLabel, inspectorName, propertyName, propertyRecordId,
-  bedrooms, bathrooms, squareFootage, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, communityName, onSubmit, onCancel,
+  bedrooms, bathrooms, squareFootage, propertyStatus, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, communityName, onSubmit, onCancel,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
   propertyAirFiltersTotal, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
@@ -1685,6 +1688,13 @@ export function QuestionForm({
                 {bedrooms} bed / {bathrooms} bath
                 {squareFootage != null && squareFootage > 0 && (
                   <span> &middot; {squareFootage.toLocaleString()} sqft</span>
+                )}
+                {/* Property status (Turnkey / Vacant / Unmarketed / …) carried
+                    over from the property card, shown right of the square feet. */}
+                {propertyStatus && (
+                  <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 text-[10px] font-heading font-semibold uppercase tracking-wide align-middle">
+                    {propertyStatus}
+                  </span>
                 )}
                 {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
               </div>

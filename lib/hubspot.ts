@@ -1856,6 +1856,10 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   propertyIdRef: string;
   propertySquareFootage: number | null;
   propertyZip: string | null;
+  /** Property's lifecycle status (e.g. "Turnkey", "Vacant", "Unmarketed") —
+   *  the same `status` field shown on the property card at create time. Shown
+   *  in the inspection header next to the square footage. */
+  propertyStatus: string | null;
   /** Property's street-only address (e.g. "5503 Thomas Dr"). Used in
    *  chargeback xlsx Property Address column. */
   propertyAddressStreet: string | null;
@@ -1920,6 +1924,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     // the corresponding column blank.
     let propertySquareFootage: number | null = null;
     let propertyZip: string | null = null;
+    let propertyStatus: string | null = null;
     let propertyAddressStreet: string | null = null;
     let propertyCity: string | null = null;
     let propertyStateCode: string | null = null;
@@ -1963,6 +1968,9 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
           'septic_fee',
           // Preferred email CC for finalize (falls back to team{STATE}@resihome.com).
           'team_group_email',
+          // Property lifecycle status (Turnkey / Vacant / Unmarketed / …) — shown
+          // in the inspection header next to square footage.
+          PROPERTY_STATUS_PROPERTY,
         ];
         const propQs = propProps.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
         const propResp = await hubspotFetch(
@@ -1993,6 +2001,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
           if (Number.isFinite(n)) propertySepticFee = n;
         }
         propertyTeamGroupEmail = (pp.team_group_email || '').toString().trim() || null;
+        propertyStatus = (pp[PROPERTY_STATUS_PROPERTY] || '').toString().trim() || null;
       } catch (e: any) {
         console.warn(`[fetchInspectionWithPropertyRef] could not fetch property ${propertyIdRef} extras:`, String(e).slice(0, 200));
       }
@@ -2043,6 +2052,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       propertyIdRef,
       propertySquareFootage,
       propertyZip,
+      propertyStatus,
       propertyAddressStreet,
       propertyCity,
       propertyStateCode,

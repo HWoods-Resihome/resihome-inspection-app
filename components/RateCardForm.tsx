@@ -92,6 +92,9 @@ interface RateCardFormProps {
   /** Property's square footage (from `square_footage` on the property object).
    *  Optional — shown in the header next to bed/bath if present. */
   squareFootage?: number | null;
+  /** Property lifecycle status (Turnkey / Vacant / Unmarketed / …) — shown in
+   *  the header next to the square footage. */
+  propertyStatus?: string | null;
   /** Months the last tenant occupied the home (from
    *  `last_tenant_time_in_home_months` on the property). Drives AI-review
    *  depreciation. null/absent → AI review defaults to 12. */
@@ -3622,6 +3625,12 @@ export function RateCardForm(props: RateCardFormProps) {
               {props.bedrooms} bed / {props.bathrooms} bath
               {props.squareFootage != null && props.squareFootage > 0 && (
                 <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
+              )}
+              {/* Property status carried over from the property card. */}
+              {props.propertyStatus && (
+                <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 text-[10px] font-heading font-semibold uppercase tracking-wide align-middle">
+                  {props.propertyStatus}
+                </span>
               )}
               {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
               {!inspectionRegion && <span className="text-yellow-700"> &middot; fallback (GA: Atlanta)</span>}

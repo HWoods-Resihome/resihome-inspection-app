@@ -64,6 +64,9 @@ interface Props {
   bedrooms: number;
   bathrooms: number;
   squareFootage: number | null;
+  /** Property lifecycle status (Turnkey / Vacant / Unmarketed / …) — shown in
+   *  the header next to the square footage. */
+  propertyStatus?: string | null;
   inspectionStatus: string;
   /** Completed QC report — shown as an in-app "View PDF Report" link. */
   pdfUrl?: string;
@@ -758,6 +761,12 @@ export function QcReinspectForm(props: Props) {
               {props.bedrooms} bed / {props.bathrooms} bath
               {props.squareFootage != null && props.squareFootage > 0 && (
                 <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
+              )}
+              {/* Property status carried over from the property card. */}
+              {props.propertyStatus && (
+                <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 text-[10px] font-heading font-semibold uppercase tracking-wide align-middle">
+                  {props.propertyStatus}
+                </span>
               )}
             </div>
           </div>

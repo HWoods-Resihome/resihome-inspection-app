@@ -100,6 +100,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         propertyRecordId: data.propertyIdRef,
         propertySquareFootage: data.propertySquareFootage,
         propertyZip: data.propertyZip,
+        propertyStatus: data.propertyStatus,
         propertyLastTenantMonths: data.propertyLastTenantMonths,
         propertyAirFiltersTotal: data.propertyAirFiltersTotal,
         propertyAirFiltersType1: data.propertyAirFiltersType1,

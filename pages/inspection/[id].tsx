@@ -84,6 +84,7 @@ export default function ExistingInspection() {
   const [propertyRecordId, setPropertyRecordId] = useState<string>('');
   const [propertySquareFootage, setPropertySquareFootage] = useState<number | null>(null);
   const [propertyZip, setPropertyZip] = useState<string | null>(null);
+  const [propertyStatus, setPropertyStatus] = useState<string | null>(null);
   const [propertyLastTenantMonths, setPropertyLastTenantMonths] = useState<number | null>(null);
   const [propertyAirFiltersTotal, setPropertyAirFiltersTotal] = useState<number | null>(null);
   const [propertyAirFiltersType1, setPropertyAirFiltersType1] = useState<string | null>(null);
@@ -121,6 +122,7 @@ export default function ExistingInspection() {
           typeof data.propertySquareFootage === 'number' ? data.propertySquareFootage : null
         );
         setPropertyZip(typeof data.propertyZip === 'string' ? data.propertyZip : null);
+        setPropertyStatus(typeof data.propertyStatus === 'string' ? data.propertyStatus : null);
         setPropertyLastTenantMonths(
           typeof data.propertyLastTenantMonths === 'number' ? data.propertyLastTenantMonths : null
         );
@@ -529,6 +531,7 @@ export default function ExistingInspection() {
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
+          propertyStatus={propertyStatus}
           inspectionStatus={inspection.status}
           pdfUrl={isCompleted ? (shareLinks?.report || inspection.pdfUrl || undefined) : undefined}
           readOnly={readOnly}
@@ -552,6 +555,7 @@ export default function ExistingInspection() {
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
+          propertyStatus={propertyStatus}
           listingPrice={listingPrice}
           listingDate={listingDate}
           lastTenantMonths={propertyLastTenantMonths}
@@ -585,6 +589,7 @@ export default function ExistingInspection() {
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
+          propertyStatus={propertyStatus}
           inspectionRegion={inspection.regionSnapshot || ''}
           status={inspection.status}
           submittedAt={inspection.submittedAt}
