@@ -96,12 +96,9 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
           <h3 className="font-bold text-[15px] text-ink break-words leading-snug">
             {street}
           </h3>
-          {(locality || i.propertyStatus) && (
+          {locality && (
             <p className="text-[13px] text-gray-500 break-words leading-snug mt-0.5">
               {locality}
-              {/* Property status — frozen at completion, live while active.
-                  Bullet-separated after the City, State, Zip line. */}
-              {i.propertyStatus && <span>{locality ? ' · ' : ''}{i.propertyStatus}</span>}
             </p>
           )}
         </div>
@@ -119,12 +116,19 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
           )}
         </div>
       </div>
-      {/* Meta row: one date on the left, inspector right-aligned. */}
-      <div className="flex items-center justify-between gap-3 text-xs text-gray-500">
+      {/* Meta row: date (left) · property status (center, muted, truncates) ·
+          inspector (right). Keeping the status here — not on the address line —
+          stops it muddying the address and never adds a second line. */}
+      <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
         {dateValue
           ? <span className="shrink-0 whitespace-nowrap">{dateLabel} {dateValue}</span>
           : <span />}
-        {i.inspectorName && <span className="truncate text-right">{i.inspectorName}</span>}
+        {i.propertyStatus && (
+          <span className="min-w-0 flex-1 truncate text-center text-gray-400" title={i.propertyStatus}>
+            {i.propertyStatus}
+          </span>
+        )}
+        {i.inspectorName && <span className="shrink-0 truncate text-right max-w-[42%]">{i.inspectorName}</span>}
       </div>
     </>
   );
