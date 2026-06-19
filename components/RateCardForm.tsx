@@ -3629,8 +3629,6 @@ export function RateCardForm(props: RateCardFormProps) {
               {/* Property status carried over from the property card — same
                   style as the sqft, bullet-separated. Frozen at completion. */}
               {props.propertyStatus && <span> &middot; {props.propertyStatus}</span>}
-              {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
-              {!inspectionRegion && <span className="text-yellow-700"> &middot; fallback (GA: Atlanta)</span>}
               {saveStatus.kind === 'saving' && <span className="text-brand font-semibold"> &middot; Saving...</span>}
               {saveStatus.kind === 'saved' && <span className="text-emerald-700 font-semibold"> &middot; &#10003; Saved</span>}
               {saveStatus.kind === 'error' && (
