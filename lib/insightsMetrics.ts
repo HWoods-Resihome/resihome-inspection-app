@@ -34,6 +34,18 @@ export const TEMPLATE_SCOPE = 'pm_scope_rate_card';
 /** Templates whose pass/fail verdict comes from inspectionResult. */
 const RESULT_VERDICT_TEMPLATES = new Set([TEMPLATE_1099, TEMPLATE_VACANCY]);
 
+/** 1099 inspections whose Grass Condition answer failed (app answerTone rule),
+ *  newest first. Photos live on row.grassPhotos. Powers the Grass fails card. */
+export function grassConditionFails(rows: InsightsRow[]): InsightsRow[] {
+  return rows
+    .filter((r) => r.templateType === TEMPLATE_1099 && r.grassTone === 'fail')
+    .sort((a, b) => {
+      const da = a.completedAt || a.scheduledDate || a.createdAt || '';
+      const db = b.completedAt || b.scheduledDate || b.createdAt || '';
+      return db.localeCompare(da);
+    });
+}
+
 // ---- Filters -----------------------------------------------------------------
 
 export interface InsightsFilters {

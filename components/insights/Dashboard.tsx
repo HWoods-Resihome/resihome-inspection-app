@@ -19,6 +19,7 @@ import { CompletedTable } from './cards/CompletedTable';
 import { TrendChart } from './cards/TrendChart';
 import { PassRateGauge } from './cards/PassRateGauge';
 import { PropertyStatusPivot } from './cards/PropertyStatusPivot';
+import { GrassFails } from './cards/GrassFails';
 import { KbChanges } from './cards/KbChanges';
 import { CardFrame } from './cardChrome';
 import {
@@ -153,8 +154,11 @@ export function InsightsDashboard() {
               <PropertyStatusPivot rows={filtered} />
             </TwoCol>
 
-            {/* (3) Inspector performance + completed inspections */}
-            <InspectorRoster rows={filtered} />
+            {/* (3) Inspector performance + 1099 grass-condition fails */}
+            <TwoCol>
+              <InspectorRoster rows={filtered} />
+              <GrassFails rows={filtered} />
+            </TwoCol>
             <CompletedTable rows={filtered} />
 
             {/* (4) Completion-time trend + quality gauges */}

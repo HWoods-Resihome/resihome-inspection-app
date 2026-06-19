@@ -18,12 +18,30 @@
  * searchInspectionsPage so rows match the rest of the app exactly.
  */
 import { put, list } from '@vercel/blob';
-import { searchInspectionsPage, countInspectionsCancelled } from '@/lib/hubspot';
+import { searchInspectionsPage, countInspectionsCancelled, fetchQuestionsForTemplate, fetchAnswersForInspection } from '@/lib/hubspot';
 import type { InspectionSummary } from '@/lib/types';
 
 export const SNAPSHOT_BLOB_PATH = 'insights/snapshot.json';
 export const HISTORY_BLOB_PREFIX = 'insights/history/';
 const PAGE_SIZE = 100;
+// 1099 Leasing-Agent template (literal here to avoid an import cycle with
+// insightsMetrics, which imports the InsightsRow type from this file).
+const TEMPLATE_1099 = 'leasing_agent_1099_property_inspection';
+// Concurrency + ceiling for the per-1099 answer reads (Grass Condition capture).
+// Bounded so the 60s rebuild window is never at risk.
+const GRASS_CONCURRENCY = 8;
+const GRASS_MAX_INSPECTIONS = 600;
+
+// Pass/fail tone of an answer label — MIRRORS components/QuestionItem.tsx
+// answerTone() (the canonical app rule) so a "Grass Condition" fail here matches
+// what the inspector saw. Kept inline (not imported) to avoid pulling a client
+// component into the server snapshot build.
+function answerTone(v: string): 'good' | 'fail' | null {
+  const n = (v || '').trim().toLowerCase();
+  if (/\b(fail|failed|poor|deficient)\b/.test(n)) return 'fail';
+  if (/\b(good|pass|passed|satisfactory)\b/.test(n)) return 'good';
+  return null;
+}
 // Safety ceiling: ~120 pages = 12,000 rows. Far past current volume; if we ever
 // hit it the snapshot is flagged `truncated` rather than silently short.
 const MAX_PAGES = 120;
@@ -69,6 +87,12 @@ export interface InsightsRow {
   reportUrl: string | null;     // best available report PDF (master → attachment)
   propertyId: string | null;                 // HubSpot Property record id (property_id_ref)
   propertyStatus: string | null;             // the property's CURRENT status (e.g. 'Vacant - On Market')
+  // 1099 Grass Condition capture (only set on 1099 rows that have been worked;
+  // absent otherwise). grassTone uses the app's answerTone rule; grassPhotos are
+  // the photo URLs attached to the Grass Condition answer.
+  grassCondition?: string | null;
+  grassTone?: 'good' | 'fail' | null;
+  grassPhotos?: string[];
 }
 
 export interface InsightsSnapshot {
@@ -159,6 +183,7 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
   const truncated = hitCeiling || rows.length < total;
   // propertyStatus is already on each row (from the list mapper: frozen for
   // completed, live-enriched for active) — no extra read needed here.
+  await enrichGrassConditions(rows);
   const cancelledCount = await countInspectionsCancelled().catch(() => 0);
   return {
     asOf: new Date().toISOString(),
@@ -170,6 +195,57 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
     buildMs: Date.now() - t0,
     rows,
   };
+}
+
+/**
+ * Capture each 1099 inspection's "Grass Condition" answer (value + tone +
+ * photos) onto its row, powering the Grass Condition fails card. Reads the
+ * answers per 1099 inspection — bounded by concurrency + a hard ceiling so the
+ * 60s rebuild window is safe. Best-effort: any failure leaves the row's grass
+ * fields unset (the card simply shows fewer rows), never failing the build.
+ *
+ * The Grass Condition question is found by matching question text /grass/i in
+ * the 1099 template; rows still 'scheduled' (no answers yet) are skipped.
+ */
+async function enrichGrassConditions(rows: InsightsRow[]): Promise<void> {
+  const targets = rows
+    .filter((r) => r.templateType === TEMPLATE_1099 && r.status !== 'scheduled')
+    .slice(0, GRASS_MAX_INSPECTIONS);
+  if (targets.length === 0) return;
+
+  // Find the Grass Condition question's external id (once).
+  let grassQid: string | null = null;
+  try {
+    const { questions } = await fetchQuestionsForTemplate(TEMPLATE_1099, { includeDisabled: true });
+    const grass = questions.find((q) => /grass/i.test(q.questionText || ''));
+    grassQid = grass?.questionIdExternal || null;
+  } catch (e) {
+    console.warn('[insights-grass] could not load 1099 questions:', e);
+    return;
+  }
+  if (!grassQid) {
+    console.warn('[insights-grass] no Grass Condition question found in 1099 template');
+    return;
+  }
+
+  let i = 0;
+  const worker = async (): Promise<void> => {
+    while (i < targets.length) {
+      const row = targets[i++];
+      try {
+        const answers = await fetchAnswersForInspection(row.recordId);
+        const a = answers.find((x) => x.questionIdExternal === grassQid);
+        if (!a) continue;
+        const value = (a.answerValue || '').trim();
+        row.grassCondition = value || null;
+        row.grassTone = answerTone(value);
+        row.grassPhotos = Array.isArray(a.photoUrls) ? a.photoUrls.filter(Boolean) : [];
+      } catch {
+        /* best-effort: leave this row's grass fields unset */
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(GRASS_CONCURRENCY, targets.length) }, worker));
 }
 
 // --- Daily history (banked each build for trend/delta cards) -----------------
