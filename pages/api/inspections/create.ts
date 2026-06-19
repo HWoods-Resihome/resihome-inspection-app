@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals } from '@/lib/hubspot';
+import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals, fetchActiveUsers } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
@@ -108,6 +108,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       scheduledDateValue = nowIso().slice(0, 10);
     }
 
+    // Stamp external (1099) creators as the owner so the ownership guard can
+    // reliably restrict edit/cancel to their own inspections. Internal users
+    // keep the client-provided value (they may create on behalf of others).
+    const inspectorEmail = isExternalEmail(session.email) ? session.email : (body.inspectorEmail || '');
+
+    // Resolve the inspector's DISPLAY NAME server-side from the latest user data
+    // (matched by email) so we never persist the email-username fallback
+    // ("asanders") the client may hold if its /me name wasn't repaired yet. Only
+    // staff users are in this list; for a 1099 (external) inspector with no match
+    // we keep the client-provided value. Best-effort — never blocks creation.
+    let inspectorName = body.inspectorName;
+    try {
+      const want = inspectorEmail.trim().toLowerCase();
+      if (want) {
+        const match = (await fetchActiveUsers()).find((u) => (u.email || '').trim().toLowerCase() === want);
+        // fullName falls back to the email username when the owner record has no
+        // name; only override when we got a real (non-email) name.
+        if (match?.fullName && !match.fullName.includes('@') && match.fullName !== want.split('@')[0]) {
+          inspectorName = match.fullName;
+        }
+      }
+    } catch (e) {
+      console.warn('[create] inspector name resolve failed; using client value:', e);
+    }
+
     const inspectionProps: Record<string, any> = {
       inspection_id_external: externalId,
       inspection_name: inspectionName,
@@ -116,11 +141,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       property_address_snapshot: body.propertyAddressSnapshot,
       bedrooms_at_inspection: body.bedrooms,
       bathrooms_at_inspection: body.bathrooms,
-      inspector_name: body.inspectorName,
-      // Stamp external (1099) creators as the owner so the ownership guard can
-      // reliably restrict edit/cancel to their own inspections. Internal users
-      // keep the client-provided value (they may create on behalf of others).
-      inspector_email: isExternalEmail(session.email) ? session.email : (body.inspectorEmail || ''),
+      inspector_name: inspectorName,
+      inspector_email: inspectorEmail,
       property_id_ref: body.propertyRecordId,
       scheduled_date: scheduledDateValue,
     };

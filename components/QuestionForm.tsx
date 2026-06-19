@@ -1707,23 +1707,29 @@ export function QuestionForm({
                   )}
                 </div>
               ) : null}
-              {/* Live Pass / Fail tally — updates as selections are made. */}
-              {scopeStyle && (
-                <div className="mt-0.5 flex items-center gap-1.5 text-[11px] font-heading font-bold">
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{passCount} Pass</span>
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{failCount} Fail</span>
+              {/* Bottom line: live Pass/Fail tally (left, updates as selections
+                  are made) + the save indicator (right). Both share THIS row only
+                  — keeping the save indicator here, rather than as a sibling of
+                  the whole info column, means the address/listing lines above
+                  keep their full width and don't truncate. The save indicator is
+                  hidden on short landscape to reclaim space; the
+                  read-only/completed status lives in the top banner bar. */}
+              {(scopeStyle || !readOnly) && (
+                <div className="mt-0.5 flex items-end justify-between gap-2">
+                  {scopeStyle ? (
+                    <div className="flex items-center gap-1.5 text-[11px] font-heading font-bold">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{passCount} Pass</span>
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{failCount} Fail</span>
+                    </div>
+                  ) : <span aria-hidden />}
+                  {!readOnly && (
+                    <div className="lz-hide shrink-0 text-right">
+                      <SaveIndicator saveState={autosave.saveState} />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-            {/* Save indicator — right-aligned on the bottom line (level with the
-                Pass/Fail chips) instead of its own row below, to reclaim header
-                height. Hidden on short landscape to save space; the
-                read-only/completed status lives in the top banner bar. */}
-            {!readOnly && (
-              <div className="lz-hide shrink-0 self-end text-right">
-                <SaveIndicator saveState={autosave.saveState} />
-              </div>
-            )}
           </div>
         </div>
       </header>
