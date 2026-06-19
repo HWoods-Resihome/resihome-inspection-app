@@ -13,6 +13,11 @@ import { installOAuthBridge, installPushBridge, primeLocationPermissionNative, i
 import { initPushOnLoad } from '@/lib/pushClient';
 import { Raleway } from 'next/font/google';
 import '../styles/globals.css';
+// react-grid-layout / react-resizable global CSS (drag/resize handles for the
+// Insights dashboard canvas). Next forbids global CSS imports outside _app, so
+// they live here even though only /insights uses them.
+import 'react-grid-layout/css/styles.css';
+import 'react-resizable/css/styles.css';
 
 // Self-hosted Raleway (was a render-blocking Google Fonts @import in globals.css).
 // next/font downloads + inlines the font at build time and exposes it as the

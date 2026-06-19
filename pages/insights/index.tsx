@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
+import { InsightsDashboard } from '@/components/insights/Dashboard';
 
 interface Access {
   authenticated: boolean;
@@ -87,17 +88,7 @@ export default function InsightsPortal() {
           ) : (
             <>
               {access.isAdmin && <AdminMenu />}
-
-              {/* Phase 1 placeholder — the dashboard framework + analytical views
-                  land in Phases 2–3. Kept honest: no mocked metrics. */}
-              <section className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
-                <h2 className="font-heading font-bold text-lg text-ink mb-1">Dashboards are on the way</h2>
-                <p className="text-sm text-gray-600">
-                  Phase 1 (portal, sign-in, and roles) is live. The KPI &amp; chart grid, global filters,
-                  and analytical views (completion time, pass/fail, inspector performance, completed-inspections
-                  export) arrive in the next phases. No metrics are shown until they read from real data.
-                </p>
-              </section>
+              <InsightsDashboard />
             </>
           )}
         </main>
