@@ -3744,6 +3744,54 @@ export async function backfillInspectionTotals(
  * `email→name` is built once from fetchUsers() and reused across the whole run.
  */
 /**
+ * Backfill `property_status_at_completion` (and the sortable snapshot) for
+ * COMPLETED inspections that are missing it — e.g. ones completed before the
+ * freeze logic existed. Uses each property's CURRENT status as the value (the
+ * best available proxy for "status at completion"). Paginated + resumable; the
+ * status filter is stable across the run (we only write the status fields, not
+ * `status`), so the `after` cursor stays valid. Idempotent: already-set rows
+ * are skipped.
+ */
+export async function backfillPropertyStatusAtCompletion(
+  opts: { after?: string; max?: number } = {},
+): Promise<{ processed: number; updated: number; skipped: number; errors: number; nextAfter: string | null }> {
+  const { inspection: typeId } = typeIds();
+  const max = opts.max ?? 200;
+  let after = opts.after;
+  let processed = 0, updated = 0, skipped = 0, errors = 0;
+
+  while (processed < max) {
+    const body: any = {
+      filterGroups: [{ filters: [{ propertyName: 'status', operator: 'IN', values: ['completed', 'complete', 'submitted'] }] }],
+      properties: ['property_status_at_completion'],
+      limit: 100,
+    };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    const results = resp.results || [];
+    for (const r of results) {
+      processed++;
+      const cur = (r.properties?.property_status_at_completion || '').toString().trim();
+      if (cur) { skipped++; continue; } // already has a frozen value
+      try {
+        await stampPropertyStatusAtCompletion(r.id); // reads the property's CURRENT status, writes both fields
+        updated++;
+      } catch (e) {
+        errors++;
+        console.warn(`[property-status-backfill] record ${r.id} failed:`, e);
+      }
+    }
+    after = resp.paging?.next?.after;
+    if (!after) return { processed, updated, skipped, errors, nextAfter: null };
+    if (processed >= max) return { processed, updated, skipped, errors, nextAfter: after };
+  }
+  return { processed, updated, skipped, errors, nextAfter: after || null };
+}
+
+/**
  * Backfill the standardized 1099 Leasing Agent report fields from existing
  * answers. Paginated + resumable (processes up to `max` 1099 inspections from
  * `after`, returns `nextAfter`). For each it reads the answers, maps them with
