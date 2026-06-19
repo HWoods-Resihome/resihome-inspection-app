@@ -17,14 +17,18 @@ html {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   /* iOS: kill the document rubber-band so pages can't be "pulled" past their
-     edges, and paint the area BEHIND the webview white so any residual bounce
-     never flashes the black native background (the "black bar" at the top). */
-  background-color: #ffffff;
+     edges. Paint the area BEHIND the webview the app's gray-50 (NOT white or
+     black): on iPad Safari the fixed "frozen" shell is sized to the layout
+     viewport, so when the toolbar collapses on scroll the visual viewport grows
+     and the body shows through BELOW the pinned footer — white flashed as a big
+     gap there; gray-50 blends with the list background instead. (Still light,
+     so it never flashes the black native background at the top either.) */
+  background-color: #f9fafb;
   overscroll-behavior: none;
 }
 
 body {
-  background-color: #ffffff;
+  background-color: #f9fafb;
   color: #1a1a1a;
   overscroll-behavior: none;
   font-family: Arial, system-ui, sans-serif;
