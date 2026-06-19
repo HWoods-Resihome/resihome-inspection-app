@@ -17,7 +17,8 @@ import { useAppDialog } from '@/components/AppDialog';
 // Whether this browser supports the camera API. SSR-safe.
 const hasMediaDevices = typeof navigator !== 'undefined'
   && !!navigator.mediaDevices?.getUserMedia;
-import { useAutosave, type SaveState } from '@/lib/useAutosave';
+import { useAutosave } from '@/lib/useAutosave';
+import { SaveIndicator } from '@/components/inspection/SaveIndicator';
 import { buildQaAnswerProps, buildSectionPhotoAnswerProps } from '@/lib/answerProps';
 import { isHvacSection, isSmartHomeSection } from '@/lib/scopeWidgetSections';
 import { FinalChecklist } from '@/components/FinalChecklist';
@@ -1752,7 +1753,7 @@ export function QuestionForm({
                   ) : <span aria-hidden />}
                   {!readOnly && (
                     <div className="lz-hide shrink-0 text-right">
-                      <SaveIndicator saveState={autosave.saveState} />
+                      <SaveIndicator phase={autosave.saveState.kind} />
                     </div>
                   )}
                 </div>
@@ -2190,87 +2191,4 @@ export function QuestionForm({
       )}
     </main>
   );
-}
-
-// Save indicator: small badge showing autosave status at the top of the form.
-function SaveIndicator({ saveState }: { saveState: SaveState }) {
-  if (saveState.kind === 'idle') {
-    return (
-      <div className="inline-flex items-center gap-1.5 text-xs text-gray-500 font-heading">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-600">
-          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-          <polyline points="22 4 12 14.01 9 11.01" />
-        </svg>
-        <span>All changes saved</span>
-      </div>
-    );
-  }
-  if (saveState.kind === 'dirty') {
-    return (
-      <div className="inline-flex items-center gap-1.5 text-xs text-amber-700 font-heading font-semibold">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
-        <span>Saving in a moment&hellip;</span>
-      </div>
-    );
-  }
-  if (saveState.kind === 'saving') {
-    return (
-      <div className="inline-flex items-center gap-1.5 text-xs text-brand font-heading font-semibold">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-             className="animate-spin">
-          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-        </svg>
-        <span>Saving&hellip;</span>
-      </div>
-    );
-  }
-  if (saveState.kind === 'saved') {
-    return (
-      <div className="inline-flex items-center gap-1.5 text-xs text-green-700 font-heading font-semibold">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-          <polyline points="22 4 12 14.01 9 11.01" />
-        </svg>
-        <span>Saved</span>
-      </div>
-    );
-  }
-  if (saveState.kind === 'offline') {
-    return (
-      <div className="inline-flex items-center gap-1.5 text-xs text-gray-500 font-heading font-semibold">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <line x1="1" y1="1" x2="23" y2="23" />
-          <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
-          <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
-          <path d="M10.71 5.05A16 16 0 0 1 22.58 9" />
-          <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
-          <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
-          <line x1="12" y1="20" x2="12.01" y2="20" />
-        </svg>
-        <span>Offline &mdash; changes will save when reconnected</span>
-      </div>
-    );
-  }
-  if (saveState.kind === 'error') {
-    return (
-      <div className="inline-flex items-center gap-1.5 text-xs text-red-700 font-heading font-semibold">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="8" x2="12" y2="12" />
-          <line x1="12" y1="16" x2="12.01" y2="16" />
-        </svg>
-        <span>Save failed &mdash; will retry shortly</span>
-      </div>
-    );
-  }
-  return null;
 }

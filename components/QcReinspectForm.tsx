@@ -31,6 +31,7 @@ import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 import { UnlockButton } from '@/components/UnlockButton';
 import { FitText } from '@/components/FitText';
+import { SaveIndicator } from '@/components/inspection/SaveIndicator';
 import { openPdf } from '@/lib/pdfViewerBus';
 
 interface QcLine {
@@ -753,7 +754,7 @@ export function QcReinspectForm(props: Props) {
       {/* Frozen header — logo + address + bed/bath/sqft + the Pass/Fail tally
           (the subheading). The ONLY thing pinned on scroll (mirrors Scope/1099). */}
       <header className="sticky top-0 z-10 -mx-5 sm:-mx-6 px-5 sm:px-6 bg-white border-b-2 border-brand shadow-sm">
-        <div className="max-w-7xl mx-auto py-2 flex items-center gap-2.5">
+        <div className="max-w-7xl mx-auto py-1.5 flex items-center gap-2.5">
           <button type="button" onClick={props.onCancel} aria-label="Back to inspections" title="Back to inspections" className="shrink-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
@@ -775,10 +776,17 @@ export function QcReinspectForm(props: Props) {
                 {props.moveInReadyDate && <span>MIR: {props.moveInReadyDate}</span>}
               </div>
             )}
-          </div>
-          <div className="shrink-0 flex items-center gap-1.5 text-[11px] font-heading font-bold">
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{totalPass} Pass</span>
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{totalFail} Fail</span>
+            {/* Bottom row: live Pass/Fail tally (left) + the standardized save
+                indicator (right) — same layout/format as every other template. */}
+            <div className="mt-0.5 flex items-end justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-heading font-bold">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{totalPass} Pass</span>
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{totalFail} Fail</span>
+              </div>
+              {!props.readOnly && (
+                <div className="shrink-0 text-right"><SaveIndicator phase={saveStatus} /></div>
+              )}
+            </div>
           </div>
         </div>
       </header>

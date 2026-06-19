@@ -21,6 +21,7 @@ import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { UnlockButton } from '@/components/UnlockButton';
 import { FitText } from '@/components/FitText';
+import { SaveIndicator } from '@/components/inspection/SaveIndicator';
 import { openPdf } from '@/lib/pdfViewerBus';
 import { isInternalResolution, VENDORS, defaultVendorForItem } from '@/lib/vendors';
 import { isAiWarm, warmAi } from '@/lib/aiWarm';
@@ -92,9 +93,12 @@ interface RateCardFormProps {
   /** Property's square footage (from `square_footage` on the property object).
    *  Optional — shown in the header next to bed/bath if present. */
   squareFootage?: number | null;
-  /** Property lifecycle status (Turnkey / Vacant / Unmarketed / …) — shown in
-   *  the header next to the square footage. */
+  /** Property lifecycle status (Turnkey / Vacant / Unmarketed / …) — shown on
+   *  its own line in the header. */
   propertyStatus?: string | null;
+  /** Move-in Ready date from the listing (M/D/YY) — shown as "MIR: …" to the
+   *  right of the property status, matching the other templates' headers. */
+  moveInReadyDate?: string | null;
   /** Months the last tenant occupied the home (from
    *  `last_tenant_time_in_home_months` on the property). Drives AI-review
    *  depreciation. null/absent → AI review defaults to 12. */
@@ -3608,44 +3612,46 @@ export function RateCardForm(props: RateCardFormProps) {
 
       <div id="sticky-totals-header" className="-mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
         <div className="sm:flex sm:items-center sm:justify-between sm:gap-4">
-          <div className="flex items-center justify-center sm:justify-start gap-2 mb-2 sm:mb-0 min-w-0">
-            {/* ResiWalk app icon — pink house + footprint on a white tile so the
-                square blends into the light header (vs the white-on-pink tile
-                used on the pink inspections-list header). Edge-to-edge. */}
+          <div className="flex items-center justify-start gap-2.5 mb-2 sm:mb-0 min-w-0">
             {/* Logo → save & return to the inspections list (flushes first).
                 Transparent pink mark (no white tile) so it blends on the
                 off-white header. */}
             <button type="button" onClick={handleSaveAndClose} aria-label="Back to inspections" title="Back to inspections" className="shrink-0">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/favicon.svg" alt="ResiWalk" className="h-8 w-8 object-contain" />
+              <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
             </button>
-            <div className="text-center sm:text-left min-w-0">
-            <div className="text-sm font-semibold text-gray-800 truncate">{props.propertyName}</div>
-            <div className="text-[11px] text-gray-500 truncate">
-              {props.bedrooms} bed / {props.bathrooms} bath
-              {props.squareFootage != null && props.squareFootage > 0 && (
-                <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
+            {/* Address + meta — same typography / alignment / line order as every
+                other template's header (see QuestionForm / QcReinspectForm). */}
+            <div className="text-left min-w-0 flex-1">
+              <FitText text={props.propertyName} className="font-heading font-semibold text-ink" />
+              <div className="text-xs text-gray-500 truncate">
+                {props.bedrooms} bed / {props.bathrooms} bath
+                {props.squareFootage != null && props.squareFootage > 0 && (
+                  <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
+                )}
+              </div>
+              {/* Property status on its OWN line, with the listing's Move-in Ready
+                  date to its right (MIR: M/D/YY). */}
+              {(props.propertyStatus || props.moveInReadyDate) && (
+                <div className="text-xs text-gray-500 truncate">
+                  {props.propertyStatus}
+                  {props.propertyStatus && props.moveInReadyDate && <span> &middot; </span>}
+                  {props.moveInReadyDate && <span>MIR: {props.moveInReadyDate}</span>}
+                </div>
               )}
-              {/* Property status carried over from the property card — same
-                  style as the sqft, bullet-separated. Frozen at completion. */}
-              {props.propertyStatus && <span> &middot; {props.propertyStatus}</span>}
-              {saveStatus.kind === 'saving' && <span className="text-brand font-semibold"> &middot; Saving...</span>}
-              {saveStatus.kind === 'saved' && <span className="text-emerald-700 font-semibold"> &middot; &#10003; Saved</span>}
-              {saveStatus.kind === 'error' && (
-                <button
-                  type="button"
-                  onClick={() => setShowSaveErrorDetail(true)}
-                  className="text-red-700 font-semibold underline hover:text-red-900 ml-1"
-                  title="Click for details"
-                >
-                  &middot; Save failed
-                </button>
-              )}
-            </div>
-            {/* Total client $ across lines assigned to Internal Resolution. */}
-            <div className="text-[11px] text-gray-500 truncate">
-              Internal Resolution: ${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
+              {/* Internal Resolution client total (Scope-specific) + the
+                  standardized save indicator, sharing the bottom row. */}
+              <div className="mt-0.5 flex items-end justify-between gap-2">
+                <span className="text-xs text-gray-500 truncate">
+                  Internal Resolution: ${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="shrink-0">
+                  <SaveIndicator
+                    phase={saveStatus.kind}
+                    onErrorClick={saveStatus.kind === 'error' ? () => setShowSaveErrorDetail(true) : undefined}
+                  />
+                </span>
+              </div>
             </div>
           </div>
           <div className="flex justify-center sm:justify-end shrink-0">
