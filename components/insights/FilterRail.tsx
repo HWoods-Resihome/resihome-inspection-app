@@ -14,7 +14,8 @@ import { useMemo, useState } from 'react';
 import { templateLabel } from '@/lib/templateLabels';
 import {
   type InsightsFilters, type InspectorOption,
-  inspectorOptions, propertyOptions, regionOptions, templateTypeOptions, REGION_NONE,
+  inspectorOptions, propertyOptions, regionOptions, templateTypeOptions, propertyStatusOptions,
+  REGION_NONE, STATUS_NONE,
 } from '@/lib/insightsMetrics';
 import type { InsightsRow } from '@/lib/insightsSnapshot';
 
@@ -65,6 +66,7 @@ export function FilterRail({
   const inspectors: InspectorOption[] = useMemo(() => inspectorOptions(rows), [rows]);
   const properties = useMemo(() => propertyOptions(rows), [rows]);
   const regions = useMemo(() => regionOptions(rows), [rows]);
+  const statuses = useMemo(() => propertyStatusOptions(rows), [rows]);
   const types = useMemo(() => templateTypeOptions(rows), [rows]);
 
   const [propSearch, setPropSearch] = useState('');
@@ -78,7 +80,7 @@ export function FilterRail({
   const activeCount =
     (filters.dateFrom || filters.dateTo ? 1 : 0) +
     filters.inspectorEmails.length + filters.properties.length +
-    filters.regions.length + filters.templateTypes.length;
+    filters.regions.length + filters.templateTypes.length + (filters.propertyStatuses?.length || 0);
 
   return (
     <aside className="bg-[#18181c] rounded-xl border border-white/10 p-3.5 self-start lg:sticky lg:top-4">
@@ -118,6 +120,19 @@ export function FilterRail({
                 key={r} checked={filters.regions.includes(r)}
                 label={r === REGION_NONE ? '(no region)' : r}
                 onChange={() => set({ regions: toggle(filters.regions, r) })}
+              />
+            ))}
+        </div>
+      </Section>
+
+      <Section title="Property status" count={filters.propertyStatuses?.length || 0}>
+        <div className="max-h-40 overflow-auto pr-1">
+          {statuses.length === 0 ? <div className="text-xs text-[#71717a]">None</div> :
+            statuses.map((s) => (
+              <CheckRow
+                key={s} checked={(filters.propertyStatuses || []).includes(s)}
+                label={s === STATUS_NONE ? '(unknown)' : s}
+                onChange={() => set({ propertyStatuses: toggle(filters.propertyStatuses || [], s) })}
               />
             ))}
         </div>

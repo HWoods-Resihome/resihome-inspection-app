@@ -67,6 +67,8 @@ export interface InsightsRow {
   totalPhotos: number | null;                // total_photos_attached (stamped at submit)
   totalClientCost: number | null;            // Scope Rate Card $ (excluded from pass/fail)
   reportUrl: string | null;     // best available report PDF (master → attachment)
+  propertyId: string | null;                 // HubSpot Property record id (property_id_ref)
+  propertyStatus: string | null;             // the property's CURRENT status (e.g. 'Vacant - On Market')
 }
 
 export interface InsightsSnapshot {
@@ -123,6 +125,11 @@ function toRow(s: InspectionSummary): InsightsRow {
     totalPhotos: s.totalPhotosAttached ?? null,
     totalClientCost: s.totalClientCost,
     reportUrl: s.pdfMasterUrl || s.pdfUrl || null,
+    propertyId: s.propertyRecordId ?? null,
+    // propertyStatus comes from the list mapper: frozen-at-completion for
+    // completed rows, live-enriched for active rows (see hubspot mapInspectionRow
+    // + enrichPropertyStatuses). No separate read here.
+    propertyStatus: s.propertyStatus ?? null,
   };
 }
 
@@ -150,6 +157,8 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
 
   const rows = Array.from(byId.values());
   const truncated = hitCeiling || rows.length < total;
+  // propertyStatus is already on each row (from the list mapper: frozen for
+  // completed, live-enriched for active) — no extra read needed here.
   const cancelledCount = await countInspectionsCancelled().catch(() => 0);
   return {
     asOf: new Date().toISOString(),

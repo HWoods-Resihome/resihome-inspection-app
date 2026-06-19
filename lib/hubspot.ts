@@ -769,6 +769,7 @@ function mapInspectionRow(r: any): InspectionSummary {
     // Display value: start from the frozen value (completed rows are done here);
     // active rows get the live status filled in by enrichPropertyStatuses.
     propertyStatus: (p.property_status_at_completion || '').toString().trim() || null,
+    propertyRecordId: p.property_id_ref || null,
   };
 }
 

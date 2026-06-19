@@ -137,6 +137,9 @@ export interface InspectionSummary {
   // inspections, otherwise the property's live status (enriched server-side for
   // active rows). Null when unknown. List mapper only.
   propertyStatus?: string | null;
+  // HubSpot Property record id (property_id_ref) — lets Insights join rows to the
+  // property (e.g. future map). Optional; list mapper only.
+  propertyRecordId?: string | null;
 }
 
 export interface HubSpotUser {

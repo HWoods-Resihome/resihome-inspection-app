@@ -48,15 +48,19 @@ export interface InsightsFilters {
   regions: string[];
   /** templateType values to include (empty = all). */
   templateTypes: string[];
+  /** Current Property status values to include (empty = all). null → "(none)". */
+  propertyStatuses: string[];
 }
 
 export const EMPTY_FILTERS: InsightsFilters = {
   dateFrom: null, dateTo: null,
-  inspectorEmails: [], properties: [], regions: [], templateTypes: [],
+  inspectorEmails: [], properties: [], regions: [], templateTypes: [], propertyStatuses: [],
 };
 
 /** Sentinel used in the region multi-select for rows with a null region. */
 export const REGION_NONE = '(none)';
+/** Sentinel used in the property-status multi-select for rows with no status. */
+export const STATUS_NONE = '(unknown)';
 
 function inDateWindow(scheduledDate: string | null, from: string | null, to: string | null): boolean {
   if (!from && !to) return true;
@@ -73,6 +77,7 @@ export function applyFilters(rows: InsightsRow[], f: InsightsFilters): InsightsR
   const props = new Set(f.properties);
   const regions = new Set(f.regions);
   const types = new Set(f.templateTypes);
+  const statuses = new Set(f.propertyStatuses || []);
   return rows.filter((r) => {
     if (!inDateWindow(r.scheduledDate, f.dateFrom, f.dateTo)) return false;
     if (emails.size && !emails.has((r.inspectorEmail || '').toLowerCase())) return false;
@@ -82,8 +87,34 @@ export function applyFilters(rows: InsightsRow[], f: InsightsFilters): InsightsR
       if (!regions.has(key)) return false;
     }
     if (types.size && !types.has(r.templateType)) return false;
+    if (statuses.size) {
+      const key = r.propertyStatus == null || r.propertyStatus === '' ? STATUS_NONE : r.propertyStatus;
+      if (!statuses.has(key)) return false;
+    }
     return true;
   });
+}
+
+/** Distinct current property-status values present in the rows (for the rail). */
+export function propertyStatusOptions(rows: InsightsRow[]): string[] {
+  const set = new Set<string>();
+  for (const r of rows) set.add(r.propertyStatus == null || r.propertyStatus === '' ? STATUS_NONE : r.propertyStatus);
+  return Array.from(set).sort((a, b) => (a === STATUS_NONE ? 1 : b === STATUS_NONE ? -1 : a.localeCompare(b)));
+}
+
+/** Inspections grouped by current property status (count + completed), for the pivot card. */
+export interface PropertyStatusGroup { status: string; total: number; completed: number; incomplete: number; }
+export function inspectionsByPropertyStatus(rows: InsightsRow[]): PropertyStatusGroup[] {
+  const map = new Map<string, PropertyStatusGroup>();
+  for (const r of rows) {
+    const status = r.propertyStatus == null || r.propertyStatus === '' ? STATUS_NONE : r.propertyStatus;
+    let g = map.get(status);
+    if (!g) { g = { status, total: 0, completed: 0, incomplete: 0 }; map.set(status, g); }
+    g.total++;
+    if (r.status === 'completed') g.completed++;
+    else if (r.status === 'scheduled' || r.status === 'in_progress') g.incomplete++;
+  }
+  return Array.from(map.values()).sort((a, b) => b.total - a.total);
 }
 
 // ---- Filter-option discovery (for the rail) ----------------------------------
@@ -289,8 +320,8 @@ export interface InspectorRow {
   label: string;
   count: number;            // # inspections (all statuses, after filters)
   incomplete: number;       // scheduled + in_progress
-  avgTimeToStartMs: number | null;
-  avgTimeToFinishMs: number | null;
+  avgTurnaroundMs: number | null;  // (approved||completed) − scheduledDate, completed rows
+  avgWorkMs: number | null;        // (approved||completed) − startedAt, active work
   avgPhotos: number | null;
   totalPhotos: number;
 }
@@ -320,8 +351,8 @@ export function inspectorRoster(rows: InsightsRow[]): InspectorRow[] {
       label: labels.get(email) || email,
       count: rs.length,
       incomplete,
-      avgTimeToStartMs: avgDuration(rs, timeToStartMs),
-      avgTimeToFinishMs: avgDuration(rs, timeToFinishMs),
+      avgTurnaroundMs: avgDuration(rs, completionTimeMs),
+      avgWorkMs: avgDuration(rs, timeToFinishMs),
       avgPhotos: photoRows ? totalPhotos / photoRows : null,
       totalPhotos,
     });

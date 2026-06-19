@@ -18,6 +18,7 @@ import { InspectorRoster } from './cards/InspectorRoster';
 import { CompletedTable } from './cards/CompletedTable';
 import { TrendChart } from './cards/TrendChart';
 import { PassRateGauge } from './cards/PassRateGauge';
+import { PropertyStatusPivot } from './cards/PropertyStatusPivot';
 import { KbChanges } from './cards/KbChanges';
 import { CardFrame } from './cardChrome';
 import {
@@ -146,13 +147,14 @@ export function InsightsDashboard() {
             {/* (1) Compact KPI tiles */}
             <KpiTiles kpis={kpis} />
 
-            {/* (2) Pass/fail bars + inspector performance */}
+            {/* (2) Pass/fail bars + property-status pivot */}
             <TwoCol>
               <PassFailBars rows={filtered} />
-              <InspectorRoster rows={filtered} />
+              <PropertyStatusPivot rows={filtered} />
             </TwoCol>
 
-            {/* (3) Completed inspections (full width) */}
+            {/* (3) Inspector performance + completed inspections */}
+            <InspectorRoster rows={filtered} />
             <CompletedTable rows={filtered} />
 
             {/* (4) Completion-time trend + quality gauges */}
