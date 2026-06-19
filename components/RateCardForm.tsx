@@ -903,7 +903,16 @@ export function RateCardForm(props: RateCardFormProps) {
   const savePhotosRef = useRef<(sectionId: string, urls: string[]) => Promise<void>>(async () => {});
   savePhotosRef.current = savePhotosForSection;
 
+  const flushingRef = useRef(false);
   const runFlush = useCallback(async () => {
+    // CONCURRENCY GUARD: runFlush fires from many triggers (online, SW message,
+    // poll interval, mount, photo-resume, tab-visible, manual Retry). Without
+    // this, two loops overlap — flickering the "Syncing…/Retrying…" banner over
+    // itself AND racing to upload the SAME queued photos (duplicate uploads).
+    // A single in-flight flush already drains the whole queue, so extra calls
+    // are safe no-ops.
+    if (flushingRef.current) return;
+    flushingRef.current = true;
     setFlushing(true);
     try {
     // Photos and the answer/line OUTBOX sync INDEPENDENTLY and CONCURRENTLY. A
@@ -1029,6 +1038,7 @@ export function RateCardForm(props: RateCardFormProps) {
       lastError: err,
     });
     } finally {
+      flushingRef.current = false;
       setFlushing(false);
     }
   }, [refreshPending, props.inspectionRecordId]);
