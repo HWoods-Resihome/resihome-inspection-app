@@ -709,6 +709,10 @@ const INSPECTION_LIST_PROPERTIES = [
   'last_edited_at', 'hs_lastmodifieddate',
   'total_client_cost',
   'source_rate_card_id', 'source_rate_card_name', 'qc_verdict',
+  // Added for ResiWalk Insights analytics (region filter, turnaround timestamps,
+  // pass/fail, photo counts). Harmless extra fields for the home list.
+  'region_snapshot', 'submitted_at', 'approved_at',
+  'inspection_result', 'total_photos_attached',
 ];
 
 /** Map a HubSpot inspection search result into a lightweight InspectionSummary. */
@@ -747,13 +751,16 @@ function mapInspectionRow(r: any): InspectionSummary {
     qcVerdict: (p.qc_verdict === 'pass' || p.qc_verdict === 'fail') ? p.qc_verdict : null,
     qcPassCount: null,
     qcFailCount: null,
-    submittedAt: null,
+    submittedAt: p.submitted_at || null,
     submittedByEmail: null,
     approvedByName: null,
-    approvedAt: null,
+    approvedAt: p.approved_at || null,
     resolutionTimingJson: null,
     totalClientCost: p.total_client_cost != null && p.total_client_cost !== ''
       ? Number(p.total_client_cost) : null,
+    inspectionResult: (p.inspection_result === 'pass' || p.inspection_result === 'fail') ? p.inspection_result : null,
+    totalPhotosAttached: p.total_photos_attached != null && p.total_photos_attached !== ''
+      ? Number(p.total_photos_attached) : null,
   };
 }
 
@@ -996,6 +1003,26 @@ export async function countInspectionsByStatus(q: InspectionQuery): Promise<Insp
   };
   const [all, scheduled, in_progress, pending_approval, completed] = await Promise.all(keys.map(countOne));
   return { all, scheduled, in_progress, pending_approval, completed };
+}
+
+/** Count of CANCELLED inspections (excluded from the analytics snapshot, but
+ *  retained as a number for a future cancellation-rate view). Best-effort. */
+export async function countInspectionsCancelled(): Promise<number> {
+  const { inspection: typeId } = typeIds();
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filterGroups: [{ filters: [{ propertyName: 'status', operator: 'IN', values: ['cancelled', 'canceled', 'Cancelled', 'Canceled'] }] }],
+        properties: ['hs_object_id'],
+        limit: 1,
+      }),
+    });
+    return typeof resp.total === 'number' ? resp.total : (resp.results || []).length;
+  } catch (e) {
+    console.warn('[insights] cancelled count failed:', e);
+    return 0;
+  }
 }
 
 // Bounded scan that collects the requested properties from inspections matching

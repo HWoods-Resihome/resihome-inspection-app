@@ -12,7 +12,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { buildInsightsSnapshot, writeInsightsSnapshot } from '@/lib/insightsSnapshot';
+import { buildInsightsSnapshot, writeInsightsSnapshot, buildDailyRollup, writeDailyRollup } from '@/lib/insightsSnapshot';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -38,6 +38,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const snap = await buildInsightsSnapshot();
     await writeInsightsSnapshot(snap);
+    // Bank today's rollup so trend/delta cards have a time series (best-effort —
+    // a failed history write must not fail the snapshot).
+    try { await writeDailyRollup(buildDailyRollup(snap)); }
+    catch (e) { console.warn('[insights/rebuild] history write failed:', e); }
     const summary = {
       ok: true, asOf: snap.asOf, total: snap.total, scanned: snap.scanned,
       truncated: snap.truncated, buildMs: snap.buildMs,

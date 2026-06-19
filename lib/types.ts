@@ -123,6 +123,11 @@ export interface InspectionSummary {
   // is enriched server-side with the SOURCE scope's client total (the scope it
   // re-inspects), since the re-inspect itself carries no rate-card lines.
   totalClientCost: number | null;
+  // ResiWalk Insights analytics: overall pass/fail (1099/Vacancy) and the photo
+  // count stamped at submit. Optional — only the list mapper (mapInspectionRow,
+  // used by searchInspectionsPage) populates these; other constructors omit them.
+  inspectionResult?: 'pass' | 'fail' | null;
+  totalPhotosAttached?: number | null;
 }
 
 export interface HubSpotUser {

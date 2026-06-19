@@ -18,10 +18,11 @@
  * searchInspectionsPage so rows match the rest of the app exactly.
  */
 import { put, list } from '@vercel/blob';
-import { searchInspectionsPage } from '@/lib/hubspot';
+import { searchInspectionsPage, countInspectionsCancelled } from '@/lib/hubspot';
 import type { InspectionSummary } from '@/lib/types';
 
 export const SNAPSHOT_BLOB_PATH = 'insights/snapshot.json';
+export const HISTORY_BLOB_PREFIX = 'insights/history/';
 const PAGE_SIZE = 100;
 // Safety ceiling: ~120 pages = 12,000 rows. Far past current volume; if we ever
 // hit it the snapshot is flagged `truncated` rather than silently short.
@@ -62,6 +63,9 @@ export interface InsightsRow {
   qcVerdict: 'pass' | 'fail' | null;
   qcPassCount: number | null;
   qcFailCount: number | null;
+  inspectionResult: 'pass' | 'fail' | null;  // 1099/Vacancy overall pass/fail
+  totalPhotos: number | null;                // total_photos_attached (stamped at submit)
+  totalClientCost: number | null;            // Scope Rate Card $ (excluded from pass/fail)
   reportUrl: string | null;     // best available report PDF (master → attachment)
 }
 
@@ -71,8 +75,26 @@ export interface InsightsSnapshot {
   total: number;                // HubSpot's reported match count (non-cancelled)
   scanned: number;              // rows actually fetched
   truncated: boolean;           // scanned < total OR hit the offset ceiling — DO NOT trust if true
+  cancelledCount: number;       // cancelled inspections (excluded from rows; for cancellation-rate later)
   buildMs: number;
   rows: InsightsRow[];
+}
+
+/** Compact daily rollup banked each build so trend/sparkline/delta cards have a
+ *  time series to draw (the live snapshot is overwritten, so it carries no
+ *  history). One file per UTC day, overwritten by later builds the same day. */
+export interface InsightsDailyRollup {
+  date: string;                 // YYYY-MM-DD (UTC)
+  asOf: string;                 // last build that updated this day
+  total: number;                // non-cancelled
+  cancelledCount: number;
+  byStatus: Record<StatusBucket, number>;
+  completed: number;
+  // Pass/fail tallies (1099/Vacancy via inspection_result, QC via qcVerdict).
+  passCount: number;
+  failCount: number;
+  // Avg total turnaround (completed/approved − scheduled) over completed rows, ms.
+  avgTurnaroundMs: number | null;
 }
 
 function toRow(s: InspectionSummary): InsightsRow {
@@ -97,6 +119,9 @@ function toRow(s: InspectionSummary): InsightsRow {
     qcVerdict: s.qcVerdict,
     qcPassCount: s.qcPassCount,
     qcFailCount: s.qcFailCount,
+    inspectionResult: s.inspectionResult ?? null,
+    totalPhotos: s.totalPhotosAttached ?? null,
+    totalClientCost: s.totalClientCost,
     reportUrl: s.pdfMasterUrl || s.pdfUrl || null,
   };
 }
@@ -125,15 +150,82 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
 
   const rows = Array.from(byId.values());
   const truncated = hitCeiling || rows.length < total;
+  const cancelledCount = await countInspectionsCancelled().catch(() => 0);
   return {
     asOf: new Date().toISOString(),
     strategy: 'paged',
     total,
     scanned: rows.length,
     truncated,
+    cancelledCount,
     buildMs: Date.now() - t0,
     rows,
   };
+}
+
+// --- Daily history (banked each build for trend/delta cards) -----------------
+
+/** Build today's rollup from the snapshot. Date is UTC (matches the cron clock). */
+export function buildDailyRollup(snap: InsightsSnapshot): InsightsDailyRollup {
+  const byStatus: Record<StatusBucket, number> = {
+    scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0, other: 0,
+  };
+  let passCount = 0, failCount = 0, completed = 0, turnSum = 0, turnN = 0;
+  for (const r of snap.rows) {
+    byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+    if (r.status === 'completed') {
+      completed++;
+      const end = r.approvedAt || r.completedAt;
+      if (end && r.scheduledDate) {
+        const ms = Date.parse(end) - Date.parse(r.scheduledDate);
+        if (Number.isFinite(ms) && ms >= 0) { turnSum += ms; turnN++; }
+      }
+    }
+    // Pass/fail: 1099/Vacancy via inspection_result, QC via qcVerdict (Scope excluded).
+    const verdict = r.inspectionResult || r.qcVerdict;
+    if (verdict === 'pass') passCount++;
+    else if (verdict === 'fail') failCount++;
+  }
+  return {
+    date: snap.asOf.slice(0, 10),
+    asOf: snap.asOf,
+    total: snap.total,
+    cancelledCount: snap.cancelledCount,
+    byStatus,
+    completed,
+    passCount,
+    failCount,
+    avgTurnaroundMs: turnN ? Math.round(turnSum / turnN) : null,
+  };
+}
+
+/** Persist today's rollup (one file per UTC day; later builds overwrite it). */
+export async function writeDailyRollup(rollup: InsightsDailyRollup): Promise<void> {
+  await put(`${HISTORY_BLOB_PREFIX}${rollup.date}.json`, JSON.stringify(rollup), {
+    access: 'public',
+    contentType: 'application/json',
+    allowOverwrite: true,
+    addRandomSuffix: false,
+  });
+}
+
+/** Read the banked daily rollups (ascending by date) for trend/delta cards. */
+export async function readInsightsHistory(maxDays = 180): Promise<InsightsDailyRollup[]> {
+  try {
+    const { blobs } = await list({ prefix: HISTORY_BLOB_PREFIX, limit: 1000 });
+    const recent = blobs
+      .filter((b) => b.pathname.endsWith('.json'))
+      .sort((a, b) => a.pathname.localeCompare(b.pathname))
+      .slice(-maxDays);
+    const rollups = await Promise.all(recent.map((b) =>
+      fetch(b.url + `?t=${b.uploadedAt ? new Date(b.uploadedAt).getTime() : ''}`, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null)).catch(() => null)));
+    return rollups.filter((r): r is InsightsDailyRollup => !!r && typeof r.date === 'string')
+      .sort((a, b) => a.date.localeCompare(b.date));
+  } catch (e) {
+    console.warn('[insights-history] read failed:', e);
+    return [];
+  }
 }
 
 /** Persist the snapshot to Vercel Blob (stable path, overwritten each build). */
