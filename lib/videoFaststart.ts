@@ -211,8 +211,17 @@ export async function transcodeToH264Mp4(buf: Buffer, timeoutMs = 55000): Promis
         exe,
         [
           '-y', '-loglevel', 'error', '-i', inPath,
+          // Downscale to an iOS-DECODABLE size. The in-app canvas recorder emits
+          // the full sensor resolution (e.g. 3840x2880 ≈ 11MP ≈ 43k macroblocks),
+          // which EXCEEDS iOS's H.264 hardware-decode limit (~36k MB / Level 5.1)
+          // — the real "decode failed" cause, even though the codec was valid
+          // H.264. Cap the long edge to 1280 (keep aspect, even dimensions) and
+          // pin Level 4.0 so every iPhone/iPad decodes it. Normalize to CFR 30
+          // (the recorder is variable-frame-rate).
+          '-vf', 'scale=w=1280:h=1280:force_original_aspect_ratio=decrease:force_divisible_by=2',
+          '-r', '30',
           '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24',
-          '-profile:v', 'high', '-pix_fmt', 'yuv420p',
+          '-profile:v', 'high', '-level', '4.0', '-pix_fmt', 'yuv420p',
           '-c:a', 'aac', '-b:a', '128k',
           '-movflags', '+faststart',
           outPath,
