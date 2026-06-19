@@ -133,15 +133,20 @@ export default function Home() {
   const [pageSize, setPageSize] = useState<number>(savedView.pageSize ?? 20);
   const [page, setPage] = useState<number>(savedView.page ?? 1);
 
+  // Collapse the whole filter/sort block (status chips + inspector/template/
+  // region/sort row) behind one chevron so the card list shows more at once.
+  // Defaults to expanded; the choice persists with the rest of the view.
+  const [filtersOpen, setFiltersOpen] = useState<boolean>(savedView.filtersOpen ?? true);
+
   // Persist the view state on every change so it's restored on return.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       window.localStorage.setItem('resiwalk_home_view_v1', JSON.stringify({
-        search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, regionFilter, pageSize, page,
+        search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, regionFilter, pageSize, page, filtersOpen,
       }));
     } catch { /* storage disabled — view just won't persist */ }
-  }, [search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, regionFilter, pageSize, page]);
+  }, [search, statusFilter, sortField, sortDir, inspectorFilter, templateFilter, regionFilter, pageSize, page, filtersOpen]);
 
   useEffect(() => {
     // Hydrate from the last known signed-in user immediately so a dead-zone
@@ -660,39 +665,62 @@ export default function Home() {
         <div className="frozen-top">
         {/* Search + Filters */}
         <div className="lz-head max-w-3xl mx-auto px-4 pt-4 pb-2">
-          <div className="relative mb-3">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                 className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Search address, name, or inspector…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="focus-brand w-full pl-9 pr-9 py-2.5 text-sm border border-gray-300 rounded-lg bg-white"
-            />
-            {/* Clear search — right-aligned; wipes the term and returns the full
-                unfiltered list. Only shown when there's something to clear. */}
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                aria-label="Clear search"
-                title="Clear search"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-brand p-0.5"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            )}
+          {/* Search bar + a chevron toggle that collapses/expands the entire
+              filter block below it (status chips + inspector/template/region/
+              sort row) in unison, so the list can show more cards at once. */}
+          <div className="flex items-center gap-2 mb-3">
+            <div className="relative flex-1 min-w-0">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                   className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search address, name, or inspector…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="focus-brand w-full pl-9 pr-9 py-2.5 text-sm border border-gray-300 rounded-lg bg-white"
+              />
+              {/* Clear search — right-aligned; wipes the term and returns the full
+                  unfiltered list. Only shown when there's something to clear. */}
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search"
+                  title="Clear search"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-brand p-0.5"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            {/* Collapse/expand the filter block. A pink dot flags active filters
+                while the block is hidden so the user knows the list is filtered. */}
+            <button
+              type="button"
+              onClick={() => setFiltersOpen((o) => !o)}
+              aria-expanded={filtersOpen}
+              aria-label={filtersOpen ? 'Hide filters' : 'Show filters'}
+              title={filtersOpen ? 'Hide filters' : 'Show filters'}
+              className="relative shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50 transition-colors"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+              {!filtersOpen && anyFilterActive && (
+                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-brand ring-2 ring-white" />
+              )}
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`ml-0.5 transition-transform ${filtersOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+            </button>
           </div>
 
+          {filtersOpen && (
+          <>
           {/* Status filter chips — two full-width rows; each chip stretches to
               fill its row so the section reads as a structured block (no
               horizontal scroll on mobile). */}
@@ -823,6 +851,8 @@ export default function Home() {
               </button>
             )}
           </div>
+          </>
+          )}
 
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="text-xs text-gray-500 font-heading">
