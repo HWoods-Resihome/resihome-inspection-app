@@ -77,21 +77,36 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       const ok = (u: any) => typeof u === 'string' && u && !u.startsWith('blob:');
       const bySection = new Map<string, string[]>();
       const afterBySection = new Map<string, string[]>();
-      for (const a of (answers as any[]) || []) {
+      // Answers whose section isn't in the resolved room list — e.g. "Review /
+      // Sign-Off" or "Final Checklist" section photos — must STILL be in the
+      // gallery (the PDF links them). Group them under a raw-name key and append
+      // after the resolved sections, in first-seen order, so EVERY photo the PDF
+      // shows is clickable and reachable by swiping.
+      const extraOrder: string[] = [];
+      const keyFor = (a: any): string => {
         const s = resolve(a.section, a.location);
-        if (!s) continue;
+        if (s) return s.id;
+        const k = `__extra__${a.section || ''}||${a.location || ''}`;
+        if (!extraOrder.includes(k)) extraOrder.push(k);
+        return k;
+      };
+      for (const a of (answers as any[]) || []) {
         if (a.answerType === 'section_photo') {
-          const arr = bySection.get(s.id) || [];
+          const key = keyFor(a);
+          const arr = bySection.get(key) || [];
           for (const u of [...(a.photoUrls || []), ...(a.afterPhotoUrls || [])]) if (ok(u)) arr.push(u);
-          bySection.set(s.id, arr);
+          bySection.set(key, arr);
         } else if (a.answerType === 'qa') {
           // Q&A answers carry their own photos on 1099 / vacancy / community
           // reports (e.g. the per-question PHOTO REQUIRED tiles). Include them so
           // the gallery covers every photo the PDF links to.
-          const arr = bySection.get(s.id) || [];
+          const key = keyFor(a);
+          const arr = bySection.get(key) || [];
           for (const u of (a.photoUrls || [])) if (ok(u)) arr.push(u);
-          bySection.set(s.id, arr);
+          bySection.set(key, arr);
         } else if (a.answerType === 'rate_card_line' && kind === 'vendor' && vSlug) {
+          const s = resolve(a.section, a.location);
+          if (!s) continue;
           if (slugifyVendor(a.assignedTo || '') !== vSlug) continue;
           const arr = afterBySection.get(s.id) || [];
           for (const u of (a.afterPhotoUrls || [])) if (ok(u)) arr.push(u);
@@ -100,10 +115,12 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       }
       const seen = new Set<string>();
       const photos: string[] = [];
-      for (const s of sections) {
-        for (const u of (bySection.get(s.id) || [])) if (!seen.has(u)) { seen.add(u); photos.push(u); }
-        for (const u of (afterBySection.get(s.id) || [])) if (!seen.has(u)) { seen.add(u); photos.push(u); }
-      }
+      const pushKey = (key: string) => {
+        for (const u of (bySection.get(key) || [])) if (!seen.has(u)) { seen.add(u); photos.push(u); }
+        for (const u of (afterBySection.get(key) || [])) if (!seen.has(u)) { seen.add(u); photos.push(u); }
+      };
+      for (const s of sections) pushKey(s.id);     // resolved rooms, in section order
+      for (const k of extraOrder) pushKey(k);       // Review/Sign-Off, Final Checklist, etc.
       galleryCache.set(cacheKey, { photos, at: Date.now() });
       return { props: { photos, start, embed } };
     }
