@@ -44,6 +44,9 @@ export interface QaAnswerFields {
   quantity?: number | null;
   assignedTo?: string | null;
   photoUrls?: string[] | null;
+  /** Dependent numeric input (1099 recommended rent). undefined = not managed;
+   *  null clears it; a number writes it. */
+  recommendedAmount?: number | null;
 }
 
 /**
@@ -82,6 +85,12 @@ export function buildQaAnswerProps(
   if (f.photoUrls != null) {
     props.photo_urls = joinPhotoUrls(f.photoUrls); // '' clears all photos
     props.photo_count = f.photoUrls.length;
+  }
+  // Dependent numeric input (1099 recommended rent). Written when managed
+  // (!== undefined); '' clears the number. The answers API strips this when the
+  // `recommended_amount` property doesn't exist yet, so it can't 400 a save.
+  if (f.recommendedAmount !== undefined) {
+    props.recommended_amount = f.recommendedAmount == null ? '' : f.recommendedAmount;
   }
   return props;
 }

@@ -5,6 +5,7 @@ import {
   updateInspection,
   touchInspection,
   fetchInspectionById,
+  answerHasProperty,
   type AnswerUpsert,
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -40,6 +41,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const body = req.body as BodyShape;
     const upserts = body?.upserts || [];
     const archives = body?.archives || [];
+
+    // The 1099 recommended-rent input writes `recommended_amount` on the answer.
+    // Until that property is provisioned (/admin/setup), strip it so an unknown
+    // property can't 400 the save. Only checks when an upsert actually carries it.
+    if (upserts.some((u) => u?.answerProps && 'recommended_amount' in u.answerProps)) {
+      if (!(await answerHasProperty('recommended_amount'))) {
+        for (const u of upserts) {
+          if (u?.answerProps) delete (u.answerProps as Record<string, any>).recommended_amount;
+        }
+      }
+    }
 
     const t0 = Date.now();
 

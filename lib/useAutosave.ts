@@ -155,6 +155,7 @@ export function useAutosave(opts: Options) {
       quantity: a.quantity,
       assignedTo: a.assignedTo,
       photoUrls: a.photoUrls,
+      recommendedAmount: a.recommendedAmount,
     }, { isScope: !!isScope });
     return {
       recordId: state.recordId || undefined,

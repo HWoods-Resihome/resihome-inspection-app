@@ -166,6 +166,10 @@ export interface AnswerInput {
   // Stored on the Inspection Answer record as the assigned_to field.
   assignedTo?: string;
   photoUrls: string[];
+  // Optional dependent numeric input (e.g. the 1099 "Evaluate Listing Price"
+  // recommended new rent, shown when Increase/Reduce is chosen). Stored on the
+  // Answer record's `recommended_amount` number property. null = not set.
+  recommendedAmount?: number | null;
   // True when the inspector manually opened the optional note/photo panel.
   // The same note field is used whether or not the question is triggered;
   // this flag just tracks whether to keep the panel expanded after they collapse the answer.

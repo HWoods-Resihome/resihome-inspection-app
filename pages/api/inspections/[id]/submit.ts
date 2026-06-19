@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion } from '@/lib/hubspot';
+import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, fetchAnswersForInspection } from '@/lib/hubspot';
+import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { recordAuditEvent } from '@/lib/auditLog';
@@ -70,6 +71,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!isRateCard) {
       await stampFirstCompleted(id, nowIso);
       await stampPropertyStatusAtCompletion(id);
+    }
+
+    // 1099 Leasing Agent: freeze the standardized report fields (listing-price
+    // response/recommendation/feedback + landscaping response/feedback) from the
+    // inspector's answers onto the inspection for downstream reporting.
+    // Best-effort — never blocks the completion above; no-op until the fields are
+    // provisioned (/admin/setup).
+    if ((existing?.templateType || '') === 'leasing_agent_1099_property_inspection') {
+      try {
+        const answers = await fetchAnswersForInspection(id);
+        const fields = extractLeasingAgent1099Fields(answers);
+        if (Object.keys(fields).length > 0) await updateInspection(id, fields as Record<string, any>);
+      } catch (e) {
+        console.warn('[submit] 1099 field stamp skipped (provision via /admin/setup):', e);
+      }
     }
     // Persist the overall verdict to the standardized `inspection_result` field
     // (same property QC writes). Separate, best-effort write so a missing

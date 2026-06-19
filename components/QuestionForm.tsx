@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import type { Question, AnswerInput, TemplateType } from '@/lib/types';
 import type { SavedAnswer } from '@/lib/hubspot';
-import { QuestionItem, answerTone, isNA } from './QuestionItem';
+import { QuestionItem, answerTone, isNA, isListingPriceQuestion, wantsRecommendedPrice } from './QuestionItem';
 import { CameraCapture } from './CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadFilesBatch } from '@/lib/photoUpload';
@@ -471,6 +471,8 @@ export function QuestionForm({
           answerValue: scopeStyle ? '' : (q.defaultValue || ''),
           note: '',
           quantity: null,
+          // recommendedAmount left undefined (untouched) so it's only written for
+          // answers that actually use the dependent input (the 1099 listing price).
           photoUrls: [],
           // Notes/photos panel starts CLOSED. It opens automatically once an
           // answer is selected when that answer requires a note/photo (handled by
@@ -525,6 +527,7 @@ export function QuestionForm({
           answerValue: sa.answerValue || existing.answerValue,
           note: sa.note || '',
           quantity: sa.quantity,
+          recommendedAmount: sa.recommendedAmount != null ? sa.recommendedAmount : undefined,
           assignedTo: sa.assignedTo || undefined,
           photoUrls: sa.photoUrls || [],
           optionalPanelOpen: !!(sa.note || sa.quantity != null || (sa.photoUrls && sa.photoUrls.length > 0)),
@@ -1164,6 +1167,15 @@ export function QuestionForm({
         } else if (q.isRequired && (!a || !a.answerValue)) {
           return {
             message: `Required: ${locTag}${q.questionText}`,
+            scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
+            instanceKey: inst.instanceKey,
+          };
+        }
+        // Listing-price: an Increase/Reduce answer requires the recommended new
+        // monthly rent (the dependent currency input).
+        if (isListingPriceQuestion(q) && wantsRecommendedPrice(a?.answerValue || '') && (a?.recommendedAmount == null)) {
+          return {
+            message: `Recommended new rent required: ${locTag}${q.questionText}`,
             scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
             instanceKey: inst.instanceKey,
           };

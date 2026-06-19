@@ -3,6 +3,7 @@
 import type { Question, Property, HubSpotUser, InspectionSummary } from './types';
 import { isInternalResolution } from './vendors';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from './answerProps';
+import { extractLeasingAgent1099Fields } from './leasingAgent1099';
 import { calculateLine } from './rateCardMath';
 
 const API_BASE = 'https://api.hubapi.com';
@@ -2351,9 +2352,14 @@ export interface SavedAnswer {
   answerType: string;
   section: string;
   location: string;
+  /** Human-readable summary "{section} {label} / {questionText}" — used to match
+   *  a question by text without a separate question fetch (e.g. 1099 stamping). */
+  answerSummary: string;
   answerValue: string;
   note: string;
   quantity: number | null;
+  /** Dependent numeric input (1099 recommended rent), from `recommended_amount`. */
+  recommendedAmount: number | null;
   assignedTo: string;
   photoUrls: string[];
   // AFTER photos for Internal Resolution rate-card lines (proof the in-house
@@ -2480,6 +2486,7 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
   // 400s on an unknown property, which would break this (widely-used) fetch.
   if (await answerHasAfterPhotoProperty()) properties.push('after_photo_urls');
   if (await answerHasProperty('qc_failure_note')) properties.push('qc_failure_note');
+  if (await answerHasProperty('recommended_amount')) properties.push('recommended_amount');
   const out: SavedAnswer[] = [];
   for (let i = 0; i < answerIds.length; i += 100) {
     const chunk = answerIds.slice(i, i + 100);
@@ -2500,9 +2507,11 @@ export async function fetchAnswersForInspection(inspectionRecordId: string): Pro
         answerType: p.answer_type || 'qa',
         section: p.section || '',
         location: p.location || '',
+        answerSummary: p.answer_summary || '',
         answerValue: p.answer_value || '',
         note: p.note || '',
         quantity: p.quantity != null && p.quantity !== '' ? Number(p.quantity) : null,
+        recommendedAmount: p.recommended_amount != null && p.recommended_amount !== '' ? Number(p.recommended_amount) : null,
         assignedTo: p.assigned_to || '',
         // photo_urls is stored comma-separated by rate-card-lines.ts and
         // semicolon-separated by some Scope code paths. Handle both.
@@ -3190,6 +3199,10 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   await ensureProp(answer, 'qc_failure_note', {
     name: 'qc_failure_note', label: 'QC Failure Note', type: 'string', fieldType: 'textarea', groupName: 'inspection_answer_info',
   });
+  // Dependent numeric input (1099 "Evaluate Listing Price" recommended new rent).
+  await ensureProp(answer, 'recommended_amount', {
+    name: 'recommended_amount', label: 'Recommended Amount', type: 'number', fieldType: 'number', groupName: 'inspection_answer_info',
+  });
 
   // Property status frozen at completion (Inspection object). Stamped at
   // finalize/submit so completed reports keep the historical property status.
@@ -3201,6 +3214,25 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   // list enrichment, frozen at completion). Powers the "Property Status" sort.
   await ensureProp(inspection, 'property_status_snapshot', {
     name: 'property_status_snapshot', label: 'Property Status (Snapshot)', type: 'string', fieldType: 'text', groupName: 'inspection_results',
+  });
+
+  // 1099 Leasing Agent report fields — stamped onto the inspection at completion
+  // from the inspector's answers, for downstream reporting.
+  await ensureGroup(inspection, 'inspection_1099', '1099 Leasing Agent');
+  await ensureProp(inspection, 'listing_price_response_1099', {
+    name: 'listing_price_response_1099', label: '1099 Listing Price Response', type: 'string', fieldType: 'text', groupName: 'inspection_1099',
+  });
+  await ensureProp(inspection, 'listing_price_recommendation_1099', {
+    name: 'listing_price_recommendation_1099', label: '1099 Listing Price Recommendation', type: 'number', fieldType: 'number', groupName: 'inspection_1099',
+  });
+  await ensureProp(inspection, 'listing_price_feedback_1099', {
+    name: 'listing_price_feedback_1099', label: '1099 Listing Price Feedback', type: 'string', fieldType: 'textarea', groupName: 'inspection_1099',
+  });
+  await ensureProp(inspection, 'landscaping_response_1099', {
+    name: 'landscaping_response_1099', label: '1099 Landscaping Response', type: 'string', fieldType: 'text', groupName: 'inspection_1099',
+  });
+  await ensureProp(inspection, 'landscaping_feedback_1099', {
+    name: 'landscaping_feedback_1099', label: '1099 Landscaping Feedback', type: 'string', fieldType: 'textarea', groupName: 'inspection_1099',
   });
 
   // Drop the "does this property exist?" caches so the just-provisioned fields
@@ -3678,6 +3710,56 @@ export async function backfillInspectionTotals(
  *
  * `email→name` is built once from fetchUsers() and reused across the whole run.
  */
+/**
+ * Backfill the standardized 1099 Leasing Agent report fields from existing
+ * answers. Paginated + resumable (processes up to `max` 1099 inspections from
+ * `after`, returns `nextAfter`). For each it reads the answers, maps them with
+ * extractLeasingAgent1099Fields, and writes the inspection fields when present.
+ * Idempotent. Skips records whose two source questions aren't found/answered.
+ */
+export async function backfillLeasingAgent1099Fields(
+  opts: { after?: string; max?: number } = {},
+): Promise<{ processed: number; updated: number; skipped: number; errors: number; nextAfter: string | null }> {
+  const { inspection: typeId } = typeIds();
+  const max = opts.max ?? 150;
+  let after = opts.after;
+  let processed = 0, updated = 0, skipped = 0, errors = 0;
+
+  while (processed < max) {
+    const body: any = {
+      filterGroups: [{ filters: [{ propertyName: 'template_type', operator: 'EQ', value: 'leasing_agent_1099_property_inspection' }] }],
+      properties: ['template_type'],
+      limit: 100,
+    };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    const results = resp.results || [];
+    for (const r of results) {
+      processed++;
+      try {
+        const answers = await fetchAnswersForInspection(r.id);
+        const fields = extractLeasingAgent1099Fields(answers);
+        if (Object.keys(fields).length > 0) {
+          await updateInspection(r.id, fields as Record<string, any>);
+          updated++;
+        } else {
+          skipped++;
+        }
+      } catch (e) {
+        errors++;
+        console.warn(`[1099-field-backfill] record ${r.id} failed:`, e);
+      }
+    }
+    after = resp.paging?.next?.after;
+    if (!after) return { processed, updated, skipped, errors, nextAfter: null };
+    if (processed >= max) return { processed, updated, skipped, errors, nextAfter: after };
+  }
+  return { processed, updated, skipped, errors, nextAfter: after || null };
+}
+
 export async function backfillInspectorNames(
   opts: { after?: string; max?: number; nameByEmail?: Map<string, string> } = {},
 ): Promise<{ processed: number; updated: number; skipped: number; errors: number; nextAfter: string | null }> {

@@ -532,6 +532,18 @@ export function isNA(opt: string): boolean {
   return /^(n\/?a|n\.a\.?|not applicable)\b/.test((opt || '').trim().toLowerCase());
 }
 
+// The 1099 "Evaluate Listing Price" question — drives the dependent recommended-
+// rent input that appears when the inspector chooses Increase or Reduce.
+export function isListingPriceQuestion(q: { questionText: string }): boolean {
+  return /\b(evaluate\s+)?listing price\b/i.test(q.questionText || '');
+}
+
+// True for the Increase/Reduce listing-price answers (which require a recommended
+// new rent). "Keep" needs no recommendation.
+export function wantsRecommendedPrice(answerValue: string): boolean {
+  return /\b(increase|reduce|decrease)\b/i.test((answerValue || '').trim());
+}
+
 function renderInput(
   q: Question,
   a: AnswerInput,
@@ -575,33 +587,69 @@ function renderInput(
       if (/squatter|occupied/.test(n)) return { tone: 'fail', icon: 'person' };  // pink person
       return { tone: null, icon: null };
     };
+    // Listing-price: an Increase/Reduce answer reveals a REQUIRED recommended
+    // new-rent input (whole-dollar, comma-formatted). "Keep" clears it.
+    const showRecommended = isListingPriceQuestion(q) && wantsRecommendedPrice(a.answerValue);
     return (
-      <div className={compactOptions ? 'flex gap-1' : 'flex flex-wrap gap-1.5'}>
-        {opts.map((opt) => {
-          const selected = a.answerValue === opt;
-          const { tone, icon } = meta(opt);
-          const selectedCls =
-            tone === 'good' ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm'
-            : tone === 'neutral' ? 'bg-gray-600 text-white border-gray-600 shadow-sm'
-            : 'bg-brand text-white border-brand shadow-sm';
-          const hover =
-            tone === 'good' ? 'hover:border-emerald-400'
-            : tone === 'neutral' ? 'hover:border-gray-400'
-            : 'hover:border-brand/50';
-          const cls = selected ? selectedCls : `bg-white text-ink border-gray-300 ${hover}`;
-          return (
-            <button
-              type="button"
-              key={opt}
-              onClick={() => onUpdate({ answerValue: selected ? '' : opt })}
-              className={`inline-flex items-center rounded-full border-2 transition whitespace-nowrap font-heading font-semibold ${compactOptions ? 'gap-1 text-[10px] px-2 py-1' : 'gap-1.5 text-xs px-3 py-1.5'} ${cls}`}
-            >
-              <PillIcon icon={icon} tone={tone} selected={selected} />
-              {opt}
-            </button>
-          );
-        })}
-      </div>
+      <>
+        <div className={compactOptions ? 'flex gap-1' : 'flex flex-wrap gap-1.5'}>
+          {opts.map((opt) => {
+            const selected = a.answerValue === opt;
+            const { tone, icon } = meta(opt);
+            const selectedCls =
+              tone === 'good' ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm'
+              : tone === 'neutral' ? 'bg-gray-600 text-white border-gray-600 shadow-sm'
+              : 'bg-brand text-white border-brand shadow-sm';
+            const hover =
+              tone === 'good' ? 'hover:border-emerald-400'
+              : tone === 'neutral' ? 'hover:border-gray-400'
+              : 'hover:border-brand/50';
+            const cls = selected ? selectedCls : `bg-white text-ink border-gray-300 ${hover}`;
+            return (
+              <button
+                type="button"
+                key={opt}
+                onClick={() => {
+                  const next = selected ? '' : opt;
+                  // Switching away from Increase/Reduce (or deselecting) clears the
+                  // now-hidden recommended price so a stale value can't persist.
+                  const patch: Partial<AnswerInput> = { answerValue: next };
+                  if (!wantsRecommendedPrice(next)) patch.recommendedAmount = null;
+                  onUpdate(patch);
+                }}
+                className={`inline-flex items-center rounded-full border-2 transition whitespace-nowrap font-heading font-semibold ${compactOptions ? 'gap-1 text-[10px] px-2 py-1' : 'gap-1.5 text-xs px-3 py-1.5'} ${cls}`}
+              >
+                <PillIcon icon={icon} tone={tone} selected={selected} />
+                {opt}
+              </button>
+            );
+          })}
+        </div>
+        {showRecommended && (
+          <div className="mt-3">
+            <label className="block text-xs font-heading font-semibold text-amber-900 mb-1">
+              Recommended new monthly rent <span className="text-brand">(Required)</span>
+            </label>
+            <div className="relative w-40">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={a.recommendedAmount != null ? a.recommendedAmount.toLocaleString('en-US') : ''}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/[^0-9]/g, '');
+                  onUpdate({ recommendedAmount: digits ? Number(digits) : null });
+                }}
+                placeholder="2,350"
+                aria-label="Recommended new monthly rent"
+                className={`focus-brand w-full text-sm rounded-md pl-6 pr-2 py-1.5 bg-white border ${
+                  a.recommendedAmount == null ? 'border-amber-300' : 'border-gray-300'
+                }`}
+              />
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 
