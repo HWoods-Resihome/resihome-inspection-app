@@ -137,6 +137,10 @@ export function QcReinspectForm(props: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Real-time save status indicator (mirrors the Scope Rate Card).
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // In-flight QC writes (line pass/fail, room verdict/note, photo tags). The
+  // submit gate waits for this to reach 0 so a verdict/note save can't be lost
+  // to an in-flight write at finalize. Bumped via markSaving/markSaved/markSaveError.
+  const qcInFlightRef = useRef(0);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Audit: log ONE "Edited" event per editing session (first successful save),
@@ -152,14 +156,15 @@ export function QcReinspectForm(props: Props) {
     } catch { /* ignore */ }
   }
 
-  function markSaving() { setSaveStatus('saving'); }
+  function markSaving() { qcInFlightRef.current++; setSaveStatus('saving'); }
   function markSaved() {
+    qcInFlightRef.current = Math.max(0, qcInFlightRef.current - 1);
     logEditOnce(); // first save of the session → record an "Edited" audit event
     setSaveStatus('saved');
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     savedTimerRef.current = setTimeout(() => setSaveStatus('idle'), 2000);
   }
-  function markSaveError() { setSaveStatus('error'); }
+  function markSaveError() { qcInFlightRef.current = Math.max(0, qcInFlightRef.current - 1); setSaveStatus('error'); }
   useEffect(() => () => { if (savedTimerRef.current) clearTimeout(savedTimerRef.current); }, []);
   // Re-arm the once-per-session edit log when the app is re-entered after >60s away.
   useEffect(() => {
@@ -704,6 +709,25 @@ export function QcReinspectForm(props: Props) {
         const proceed = await dialog.confirm(`${pendingPhotos} After photo${pendingPhotos === 1 ? '' : 's'} keep${pendingPhotos === 1 ? 's' : ''} failing to upload (check your signal). If you submit now ${pendingPhotos === 1 ? 'it' : 'they'} will NOT be on the report. Submit without ${pendingPhotos === 1 ? 'it' : 'them'}?`, { confirmLabel: 'Submit without photos', cancelLabel: 'Keep trying' });
         if (!proceed) return;
       }
+    }
+    // Authoritatively re-save every room's verdict / note / after-photos — per-tap
+    // room saves are best-effort (errors were only logged) and qc-finalize re-reads
+    // from HubSpot, so this guarantees the latest results are persisted, and BLOCKS
+    // submit if they can't be — never finalizing on stale/lost room data.
+    try {
+      for (const s of sections) {
+        const hasData = !!(roomVerdictRef.current[s.key] || (roomNoteRef.current[s.key] || '').trim() || (afterPhotosRef.current[s.key] || []).length);
+        if (hasData) await persistAfterPhotos(s.key, s.section, s.location, afterPhotosRef.current[s.key] || []);
+      }
+    } catch (e: any) {
+      void dialog.alert(`Could not save the latest room results before submitting (${e?.message || e}). Your inspection was NOT submitted — check your connection and try Submit again.`);
+      return;
+    }
+    // Wait for any in-flight line pass/fail + note saves to confirm before finalize.
+    for (let i = 0; i < 24 && qcInFlightRef.current > 0; i++) { await new Promise((r) => setTimeout(r, 250)); }
+    if (qcInFlightRef.current > 0) {
+      void dialog.alert('Your latest results are still saving. Keep this screen open a few more seconds, then submit again.');
+      return;
     }
     submittingRef.current = true;
     setSubmitting(true);
