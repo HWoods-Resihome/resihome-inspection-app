@@ -76,6 +76,10 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
     {
       key: 'tenantPct', header: 'Ten %', width: '5%', align: 'right',
       cell: (l) => `${Math.round(l.tenantBillBackPercent)}%`,
+      // Total line: overall tenant share = total tenant $ / total client $ (whole %).
+      grandTotal: ctx.grandTotals.client > 0
+        ? `${Math.round((ctx.grandTotals.tenant / ctx.grandTotals.client) * 100)}%`
+        : '0%',
     },
     {
       key: 'tenantCost', header: 'Tenant $', width: '10%', align: 'right', brand: true,

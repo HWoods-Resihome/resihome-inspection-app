@@ -146,7 +146,9 @@ export const pdfStyles = StyleSheet.create({
   },
   grandTotalsItem: {
     flexDirection: 'column',
-    // Center each callout's value under its header text (was left-aligned).
+    // Equal-width columns, each value centered under its header — so the summary
+    // values read as a centered, evenly-spaced row.
+    flex: 1,
     alignItems: 'center',
   },
   grandTotalsLabel: {
@@ -393,12 +395,11 @@ export function PdfHeaderStrip(props: {
 
   const metaParts: string[] = [];
   if (props.bedrooms > 0 || props.bathrooms > 0) {
-    metaParts.push(`${props.bedrooms} bed / ${props.bathrooms} bath`);
+    metaParts.push(`${props.bedrooms} Bed / ${props.bathrooms} Bath`);
   }
   if (props.squareFootage && props.squareFootage > 0) {
     metaParts.push(`${props.squareFootage.toLocaleString()} sqft`);
   }
-  if (props.region) metaParts.push(props.region);
   metaParts.push(props.generatedAtLabel);
 
   const inspectorEl = <Text style={pdfStyles.headerMeta}>{inspectorLine}</Text>;
