@@ -1614,14 +1614,14 @@ export function QuestionForm({
               <FitText
                 text={templateLabel}
                 className="font-heading font-bold text-gray-900 flex-1 min-w-0"
-                max={20}
+                max={22}
                 min={11}
               />
               {headerBadge && (
                 <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${headerBadge.color}`}>{headerBadge.label}</span>
               )}
             </div>
-            <div className="text-xs text-gray-500 mt-0.5">
+            <div className="text-xs text-gray-500 mt-0.5 truncate">
               Inspector: {inspectorName}
               {isSubmittedState && fmtStamp(submittedAt) && (
                 <span className="text-gray-400">{'  ·  '}{fmtStamp(submittedAt)} Submitted</span>
@@ -1662,11 +1662,11 @@ export function QuestionForm({
               }
               onCancel();
             }}
-            className="inline-flex items-center gap-1 h-8 px-2.5 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white"
+            aria-label="Save and go back"
+            className="inline-flex items-center justify-center w-8 h-8 text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white"
             title="Save and go back"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
-            Back
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
           </button>
           </div>
         </div>
