@@ -237,7 +237,10 @@ export function InspectionPdf({ data }: { data: PdfData }) {
   let communityGrade: string | null = null;
   for (const section of data.sectionsInOrder) {
     for (const a of (data.answersBySection[section] || [])) {
-      if (isMaintRequestQ(a.questionText)) { maintTicket = a.answerValue || null; continue; }
+      // Capture the maintenance-ticket Yes/No for the stat strip, but DON'T drop
+      // it — the question still belongs as a normal row in the summary table AND
+      // in the Review / Sign-Off detail below (it was previously invisible there).
+      if (isMaintRequestQ(a.questionText)) maintTicket = a.answerValue || null;
       if (isMaintDescQ(a.questionText) || isFcBlob(a)) continue; // not summary-grid rows
       if (isCommunityGradeQ(a.questionText) && a.answerValue) communityGrade = a.answerValue.trim();
       const tone = toneOf(a.answerValue);
@@ -364,7 +367,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           <Text style={styles.detailHeading}>Full Detail</Text>
         </View>
         {data.sectionsInOrder.map((sectionName) => {
-          const answers = (data.answersBySection[sectionName] || []).filter((a) => !isMaintRequestQ(a.questionText) && !isFcBlob(a));
+          const answers = (data.answersBySection[sectionName] || []).filter((a) => !isFcBlob(a));
           const sectionPhotos = data.sectionPhotosBy[sectionName] || [];
           if (answers.length === 0 && sectionPhotos.length === 0) return null;
           return (
