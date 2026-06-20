@@ -1621,27 +1621,6 @@ export function QuestionForm({
                 <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${headerBadge.color}`}>{headerBadge.label}</span>
               )}
             </div>
-            <div className="text-xs text-gray-500 mt-0.5 truncate">
-              Inspector: {inspectorName}
-              {isSubmittedState && fmtStamp(submittedAt) && (
-                <span className="text-gray-400">{'  ·  '}{fmtStamp(submittedAt)} Submitted</span>
-              )}
-            </div>
-            {pdfUrl && (
-              <a
-                href={pdfUrl}
-                onClick={(e) => { e.preventDefault(); openPdf(pdfUrl, `${templateLabel} Report`); }}
-                className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline cursor-pointer"
-                title="View the generated inspection report"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
-                View PDF Report
-              </a>
-            )}
           </div>
           {/* Unlock (Rently code) + Back on ONE row so they don't add height.
               Compact circle to the LEFT of Back; hidden once read-only
@@ -1670,6 +1649,29 @@ export function QuestionForm({
           </button>
           </div>
         </div>
+        {/* Inspector / report link — full width below the title + controls row
+            so the "· date Submitted" stamp never truncates under the buttons. */}
+        <div className="text-xs text-gray-500 mt-0.5 truncate">
+          Inspector: {inspectorName}
+          {isSubmittedState && fmtStamp(submittedAt) && (
+            <span className="text-gray-400">{'  ·  '}{fmtStamp(submittedAt)} Submitted</span>
+          )}
+        </div>
+        {pdfUrl && (
+          <a
+            href={pdfUrl}
+            onClick={(e) => { e.preventDefault(); openPdf(pdfUrl, `${templateLabel} Report`); }}
+            className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline cursor-pointer"
+            title="View the generated inspection report"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+            </svg>
+            View PDF Report
+          </a>
+        )}
       </div>
 
       {/* Frozen header — logo + address + status + meta. The ONLY thing pinned

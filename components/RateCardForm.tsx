@@ -3375,75 +3375,6 @@ export function RateCardForm(props: RateCardFormProps) {
                 </span>
               )}
             </div>
-            <div className="text-xs text-gray-500 mt-0.5 truncate">
-              Inspector: {props.inspectorName}
-              {/* Only show "Submitted" while it's actually in a submitted state —
-                  if it was reopened back to In Progress, drop the stamp. */}
-              {(liveStatus === 'pending_approval' || liveStatus === 'completed') && fmtStamp(props.submittedAt) && (
-                <span className="text-gray-400">{'  ·  '}{fmtStamp(props.submittedAt)} Submitted</span>
-              )}
-            </div>
-            {props.approverName && (
-              <div className="text-xs text-gray-500 mt-0.5">
-                Approver: {props.approverName}
-                {fmtStamp(props.approvedAt) && (
-                  <span className="text-gray-400">{'  ·  '}{fmtStamp(props.approvedAt)} Approved</span>
-                )}
-              </div>
-            )}
-            {props.reportLinks && props.reportLinks.length > 0 ? (
-              <div className="relative inline-block mt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowPdfMenu((v) => !v)}
-                  aria-expanded={showPdfMenu}
-                  className="inline-flex items-center gap-1 text-sm text-brand font-heading font-semibold hover:underline cursor-pointer"
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                  </svg>
-                  View PDFs ▾
-                </button>
-                {showPdfMenu && (
-                  <>
-                    <div className="fixed inset-0 z-30" onClick={() => setShowPdfMenu(false)} />
-                    <div className="absolute left-0 mt-1 z-40 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[260px] py-1">
-                      {props.reportLinks.map((l) => (
-                        l.isPdf ? (
-                          <button
-                            key={l.url}
-                            type="button"
-                            onClick={() => { setShowPdfMenu(false); openPdf(l.url, l.label); }}
-                            className={'w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50 text-left ' + (l.primary ? 'text-brand font-semibold' : 'text-gray-700')}
-                          >
-                            <span className="truncate pr-2">{l.label}</span>
-                            <span className="text-xs opacity-70 whitespace-nowrap">View</span>
-                          </button>
-                        ) : (
-                          <a
-                            key={l.url}
-                            href={l.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={() => setShowPdfMenu(false)}
-                            className="flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50 text-gray-700"
-                          >
-                            <span className="truncate pr-2">{l.label}</span>
-                            <span className="text-xs opacity-70 whitespace-nowrap">↓</span>
-                          </a>
-                        )
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : props.pdfUrl ? (
-              <a href={props.pdfUrl}
-                 onClick={(e) => { e.preventDefault(); openPdf(props.pdfUrl!, `${props.templateLabel} Report`); }}
-                 className="inline-block mt-2 text-sm text-brand underline cursor-pointer">View PDF</a>
-            ) : null}
           </div>
 
           {/* Settings (gear) + Back, pinned upper-right. The gear houses the
@@ -3544,6 +3475,78 @@ export function RateCardForm(props: RateCardFormProps) {
             </div>
           </div>
         </div>
+        {/* Inspector / approver / report links — full width BELOW the title +
+            controls row, so the line uses the entire header width and the
+            "· date Submitted" stamp never truncates under the buttons. */}
+        <div className="text-xs text-gray-500 mt-0.5 truncate">
+          Inspector: {props.inspectorName}
+          {/* Only show "Submitted" while it's actually in a submitted state —
+              if it was reopened back to In Progress, drop the stamp. */}
+          {(liveStatus === 'pending_approval' || liveStatus === 'completed') && fmtStamp(props.submittedAt) && (
+            <span className="text-gray-400">{'  ·  '}{fmtStamp(props.submittedAt)} Submitted</span>
+          )}
+        </div>
+        {props.approverName && (
+          <div className="text-xs text-gray-500 mt-0.5 truncate">
+            Approver: {props.approverName}
+            {fmtStamp(props.approvedAt) && (
+              <span className="text-gray-400">{'  ·  '}{fmtStamp(props.approvedAt)} Approved</span>
+            )}
+          </div>
+        )}
+        {props.reportLinks && props.reportLinks.length > 0 ? (
+          <div className="relative inline-block mt-2">
+            <button
+              type="button"
+              onClick={() => setShowPdfMenu((v) => !v)}
+              aria-expanded={showPdfMenu}
+              className="inline-flex items-center gap-1 text-sm text-brand font-heading font-semibold hover:underline cursor-pointer"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+              View PDFs ▾
+            </button>
+            {showPdfMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowPdfMenu(false)} />
+                <div className="absolute left-0 mt-1 z-40 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[260px] py-1">
+                  {props.reportLinks.map((l) => (
+                    l.isPdf ? (
+                      <button
+                        key={l.url}
+                        type="button"
+                        onClick={() => { setShowPdfMenu(false); openPdf(l.url, l.label); }}
+                        className={'w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50 text-left ' + (l.primary ? 'text-brand font-semibold' : 'text-gray-700')}
+                      >
+                        <span className="truncate pr-2">{l.label}</span>
+                        <span className="text-xs opacity-70 whitespace-nowrap">View</span>
+                      </button>
+                    ) : (
+                      <a
+                        key={l.url}
+                        href={l.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setShowPdfMenu(false)}
+                        className="flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50 text-gray-700"
+                      >
+                        <span className="truncate pr-2">{l.label}</span>
+                        <span className="text-xs opacity-70 whitespace-nowrap">↓</span>
+                      </a>
+                    )
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        ) : props.pdfUrl ? (
+          <a href={props.pdfUrl}
+             onClick={(e) => { e.preventDefault(); openPdf(props.pdfUrl!, `${props.templateLabel} Report`); }}
+             className="inline-block mt-2 text-sm text-brand underline cursor-pointer">View PDF</a>
+        ) : null}
       </header>
       </div>
 
