@@ -15,6 +15,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { isAppAdmin } from '@/lib/adminAccess';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { fcReferencedLineCodes, fcMissingLineCodes } from '@/lib/finalChecklist';
 import { validateEnv, validateSchema, type CheckItem } from '@/lib/configValidation';
@@ -22,7 +23,7 @@ import { validateEnv, validateSchema, type CheckItem } from '@/lib/configValidat
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
-  if (!/@resihome\.com$/i.test(session.email)) return res.status(403).json({ error: 'Admin only.' });
+  if (!(await isAppAdmin(session.email))) return res.status(403).json({ error: 'Admin only.' });
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return res.status(405).json({ error: 'Method not allowed' });

@@ -13,6 +13,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { isAppAdmin } from '@/lib/adminAccess';
 import { backfillLastEditedDate } from '@/lib/hubspot';
 
 export const config = { maxDuration: 300 };
@@ -20,7 +21,7 @@ export const config = { maxDuration: 300 };
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
-  if (!/@resihome\.com$/i.test(session.email)) {
+  if (!(await isAppAdmin(session.email))) {
     return res.status(403).json({ error: 'Admin only.' });
   }
 

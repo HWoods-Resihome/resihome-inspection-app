@@ -18,6 +18,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { isAppAdmin } from '@/lib/adminAccess';
 import { readSftpWatchQueue } from '@/lib/hubspot';
 import { withSftpClient, listSftpDir, type SftpEntry } from '@/lib/sftp';
 import { normalizeForMatch, errorFileMatchesAddress, WATCH_WINDOW_MS, type SftpWatch } from '@/lib/sftpWatch';
@@ -33,7 +34,7 @@ const ms = (n: number) => {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
-  if (!/@resihome\.com$/i.test(session.email)) return res.status(403).json({ error: 'Admin only.' });
+  if (!(await isAppAdmin(session.email))) return res.status(403).json({ error: 'Admin only.' });
 
   const now = Date.now();
   const address = typeof req.query.address === 'string' ? req.query.address : '';

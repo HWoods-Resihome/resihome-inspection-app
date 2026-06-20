@@ -25,7 +25,28 @@ const ALLOWED_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites
 
 export const config = { api: { responseLimit: false } };
 
+// Soft per-IP rate limit. This endpoint is public (drawn onto a canvas, no
+// session), so cap how fast a single client can drive HubSpot fetches through
+// us — without it the proxy is a bandwidth/DoS amplifier. Per-instance (not
+// global), which is enough to blunt abuse from any one source; legitimate
+// galleries load a handful of images and never approach the cap.
+const RL_WINDOW_MS = 60_000;
+const RL_MAX = 240; // requests per IP per minute
+const rlHits = new Map<string, { count: number; windowStart: number }>();
+function rateLimited(ip: string): boolean {
+  const now = Date.now();
+  const cur = rlHits.get(ip);
+  if (!cur || now - cur.windowStart >= RL_WINDOW_MS) { rlHits.set(ip, { count: 1, windowStart: now }); }
+  else if (cur.count >= RL_MAX) { return true; }
+  else { cur.count++; }
+  // Bound the map so it can't grow unboundedly across many IPs.
+  if (rlHits.size > 5000) for (const [k, v] of rlHits) { if (now - v.windowStart >= RL_WINDOW_MS) rlHits.delete(k); }
+  return false;
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const ip = (String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket?.remoteAddress || 'unknown';
+  if (rateLimited(ip)) { res.setHeader('Retry-After', '30'); return res.status(429).json({ error: 'Too many requests' }); }
   const raw = String(req.query.url || '');
   let u: URL;
   try { u = new URL(raw); } catch { return res.status(400).json({ error: 'Invalid url' }); }

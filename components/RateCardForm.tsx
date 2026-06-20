@@ -283,6 +283,10 @@ export function RateCardForm(props: RateCardFormProps) {
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const [dataLoaded, setDataLoaded] = useState(false);
+  // The catalog/regions endpoints serve a last-known-good copy when a HubSpot
+  // refresh blips (they return `stale: true`). Surface that so the inspector
+  // knows prices may be slightly behind and can hit "Refresh Pricing".
+  const [pricesStale, setPricesStale] = useState(false);
 
   // ----- Lines + photos in state ---------------------------------------
   // Internal Resolution after-photo requirement is active only once the
@@ -617,7 +621,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // Fetch catalog + regions with a hard timeout so a stalled request on weak
   // service fails fast (and the cache-first path below can take over) instead of
   // spinning forever. `refresh` bypasses the server-side 60-min cache.
-  async function fetchRateCardData(refresh: boolean, timeoutMs: number): Promise<{ catalog: RateCardLineItem[]; regions: RegionRate[] }> {
+  async function fetchRateCardData(refresh: boolean, timeoutMs: number): Promise<{ catalog: RateCardLineItem[]; regions: RegionRate[]; stale: boolean }> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
@@ -630,7 +634,9 @@ export function RateCardForm(props: RateCardFormProps) {
       const regData = await regRes.json();
       if (!catRes.ok) throw new Error(catData.error || `Catalog HTTP ${catRes.status}`);
       if (!regRes.ok) throw new Error(regData.error || `Regions HTTP ${regRes.status}`);
-      return { catalog: catData.items || [], regions: regData.regions || [] };
+      // The server falls back to its last-known-good cache (and flags `stale`)
+      // when a live HubSpot refresh fails — prices may be slightly behind.
+      return { catalog: catData.items || [], regions: regData.regions || [], stale: !!(catData.stale || regData.stale) };
     } finally {
       clearTimeout(timer);
     }
@@ -641,10 +647,11 @@ export function RateCardForm(props: RateCardFormProps) {
   // inspector is already using stays valid if it fails.
   async function revalidateRateCardInBackground(): Promise<void> {
     try {
-      const { catalog, regions } = await fetchRateCardData(false, 20000);
+      const { catalog, regions, stale } = await fetchRateCardData(false, 20000);
       if (catalog.length === 0) return;
       setCatalog(catalog);
       setRegions(regions);
+      setPricesStale(stale);
       saveCachedRateCard(catalog, regions);
     } catch {
       /* offline / weak signal — keep the cached catalog */
@@ -671,9 +678,10 @@ export function RateCardForm(props: RateCardFormProps) {
 
     // No cache (first ever load): fetch with a timeout and cache for next time.
     try {
-      const { catalog, regions } = await fetchRateCardData(false, 25000);
+      const { catalog, regions, stale } = await fetchRateCardData(false, 25000);
       setCatalog(catalog);
       setRegions(regions);
+      setPricesStale(stale);
       setDataLoaded(true);
       saveCachedRateCard(catalog, regions);
       return true;
@@ -704,12 +712,15 @@ export function RateCardForm(props: RateCardFormProps) {
     setDataLoading(true);
     setDataError(null);
     try {
-      const { catalog, regions } = await fetchRateCardData(true, 30000);
+      const { catalog, regions, stale } = await fetchRateCardData(true, 30000);
       setCatalog(catalog);
       setRegions(regions);
+      setPricesStale(stale);
       setDataLoaded(true);
       saveCachedRateCard(catalog, regions);
-      void dialog.alert(`Rate card refreshed: ${catalog.length} line items, ${regions.length} regions loaded from HubSpot.`);
+      void dialog.alert(stale
+        ? `Rate card loaded from cache (${catalog.length} line items, ${regions.length} regions) — HubSpot was unreachable, so prices may be slightly behind.`
+        : `Rate card refreshed: ${catalog.length} line items, ${regions.length} regions loaded from HubSpot.`);
     } catch (e: any) {
       setDataError(String(e?.message || e));
       void dialog.alert(`Refresh failed: ${e?.message || e}`);
@@ -3795,6 +3806,13 @@ export function RateCardForm(props: RateCardFormProps) {
       {dataError && (
         <div className="mb-3 p-3 bg-red-50 border border-red-300 rounded text-sm text-red-800">
           Error loading rate card data: {dataError}
+        </div>
+      )}
+
+      {!dataError && pricesStale && !props.readOnly && (
+        <div className="mb-3 p-3 bg-amber-50 border border-amber-300 rounded text-sm text-amber-800">
+          Pricing loaded from cache — HubSpot was unreachable, so line-item and
+          regional rates may be slightly behind. Tap “Refresh Pricing” to retry.
         </div>
       )}
 

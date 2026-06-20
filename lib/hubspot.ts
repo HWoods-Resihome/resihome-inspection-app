@@ -1,5 +1,6 @@
 // HubSpot API client. SERVER-SIDE ONLY -- never import in client code.
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Question, Property, HubSpotUser, InspectionSummary } from './types';
 import { isInternalResolution } from './vendors';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from './answerProps';
@@ -132,20 +133,44 @@ async function hubspotFetch(path: string, init: RequestInit = {}): Promise<any> 
 }
 
 // ---- HubSpot request governor (per-instance) ------------------------------
-// Concurrency cap: hand a fixed number of slots out, queue the rest. Env-tunable.
+// Two-tier concurrency cap. Foreground (user-facing) requests may use ALL slots;
+// BACKGROUND work (insights rebuild, bulk backfills/regenerates, cron) is capped
+// below the total so it can never consume every slot and starve live inspectors.
+// Foreground waiters are always served before background ones.
 const HS_MAX_CONCURRENT = Math.max(1, Number(process.env.HUBSPOT_MAX_CONCURRENT) || 8);
+// Slots reserved for foreground: background may use at most (MAX - RESERVE).
+const HS_FG_RESERVE = Math.max(1, Math.min(HS_MAX_CONCURRENT - 1, Number(process.env.HUBSPOT_FG_RESERVE) || 3));
+const HS_BG_LIMIT = Math.max(1, HS_MAX_CONCURRENT - HS_FG_RESERVE);
+
+// Marks a unit of work as "background" for the governor. Any hubspotFetch made
+// (directly or transitively) inside the callback is throttled to the background
+// lane — no need to thread a flag through every call site.
+const hsPriority = new AsyncLocalStorage<'background'>();
+export function runAsBackground<T>(fn: () => Promise<T>): Promise<T> {
+  return hsPriority.run('background', fn);
+}
+
 let hsActive = 0;
-const hsWaiters: Array<() => void> = [];
+const hsFgWaiters: Array<() => void> = [];
+const hsBgWaiters: Array<() => void> = [];
 async function hsAcquire(): Promise<void> {
-  if (hsActive < HS_MAX_CONCURRENT) { hsActive++; return; }
-  // No free slot — wait. The releaser hands its slot directly to us (it does NOT
-  // decrement), so hsActive stays accurate without a race.
-  await new Promise<void>((resolve) => hsWaiters.push(resolve));
+  const bg = hsPriority.getStore() === 'background';
+  const limit = bg ? HS_BG_LIMIT : HS_MAX_CONCURRENT;
+  if (hsActive < limit) { hsActive++; return; }
+  // No free slot in our lane — wait in the matching queue.
+  await new Promise<void>((resolve) => (bg ? hsBgWaiters : hsFgWaiters).push(resolve));
 }
 function hsRelease(): void {
-  const next = hsWaiters.shift();
-  if (next) next();        // transfer the slot to the next waiter
-  else hsActive--;         // nobody waiting — free the slot
+  // Foreground waiters first — transfer the freed slot directly (active unchanged).
+  const fg = hsFgWaiters.shift();
+  if (fg) { fg(); return; }
+  // No foreground waiter: free the slot, then wake background waiters only while
+  // there's headroom under the background cap (so background can't refill past it).
+  hsActive--;
+  while (hsBgWaiters.length > 0 && hsActive < HS_BG_LIMIT) {
+    hsActive++;
+    (hsBgWaiters.shift())!();
+  }
 }
 // Circuit breaker: after N consecutive HARD failures (retries already exhausted),
 // open for a short cooldown so we stop hammering a down API and fail fast instead.
@@ -1890,6 +1915,23 @@ export async function backfillInspectionPropertyAssociations(): Promise<{
  * Defaults to `false` (matches HubSpot's API default) because inspection
  * photos use random UUID filenames where overwrite isn't needed.
  */
+// HubSpot Files uploads can hang on a slow S3 write; time-box them so a stalled
+// upload fails fast (the caller retries / the offline queue keeps the bytes)
+// instead of pinning a serverless function until the platform kills it.
+const FILE_UPLOAD_TIMEOUT_MS = 30000;
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw new Error(`HubSpot file upload timed out after ${timeoutMs}ms`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function uploadFile(
   buffer: Buffer,
   filename: string,
@@ -1915,11 +1957,11 @@ export async function uploadFile(
   }));
   form.append('folderPath', folderPath);
 
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token()}` },
     body: form,
-  });
+  }, FILE_UPLOAD_TIMEOUT_MS);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`HubSpot file upload failed ${res.status}: ${text.slice(0, 500)}`);
@@ -1948,11 +1990,11 @@ export async function uploadFileWithId(
   form.append('options', JSON.stringify({ access: 'PUBLIC_INDEXABLE', overwrite }));
   form.append('folderPath', folderPath);
 
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token()}` },
     body: form,
-  });
+  }, FILE_UPLOAD_TIMEOUT_MS);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`HubSpot file upload failed ${res.status}: ${text.slice(0, 500)}`);
@@ -4515,6 +4557,29 @@ export interface AnswerUpsert {
   questionHubspotRecordId?: string | null;
 }
 
+/** Map answer_id_external → existing Answer recordId (for the create-dedup guard
+ *  in upsertAnswers). Batched IN-search; best-effort. */
+async function findAnswerRecordIdsByExternalId(answerTypeId: string, externalIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const uniq = Array.from(new Set(externalIds.filter(Boolean)));
+  for (let i = 0; i < uniq.length; i += 100) {
+    const chunk = uniq.slice(i, i + 100);
+    const resp = await hubspotFetch(`/crm/v3/objects/${answerTypeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filterGroups: [{ filters: [{ propertyName: 'answer_id_external', operator: 'IN', values: chunk }] }],
+        properties: ['answer_id_external'],
+        limit: 100,
+      }),
+    });
+    for (const r of resp.results || []) {
+      const ext = String(r.properties?.answer_id_external || '');
+      if (ext && !out.has(ext)) out.set(ext, String(r.id));
+    }
+  }
+  return out;
+}
+
 export async function upsertAnswers(
   inspectionRecordId: string,
   upserts: AnswerUpsert[]
@@ -4525,6 +4590,32 @@ export async function upsertAnswers(
   // Split into creates vs updates
   const toCreate = upserts.filter((u) => !u.recordId);
   const toUpdate = upserts.filter((u) => u.recordId);
+
+  // Idempotency guard: a "create" (no client recordId) whose answer_id_external
+  // ALREADY exists in HubSpot would make a DUPLICATE record. This happens if the
+  // client lost the recordId (e.g. autosave abandoned tracking after unconfirmed
+  // flushes, or an offline replay). Look the externals up and reclassify any that
+  // already exist as UPDATES, so a re-save updates in place instead of duplicating.
+  if (toCreate.length > 0) {
+    try {
+      const exts = toCreate.map((u) => String(u.answerProps?.answer_id_external || '')).filter(Boolean);
+      const existing = await findAnswerRecordIdsByExternalId(tids.answer, exts);
+      if (existing.size > 0) {
+        for (const u of toCreate) {
+          const rid = existing.get(String(u.answerProps?.answer_id_external || ''));
+          if (rid) u.recordId = rid; // mutate → now treated as an update below
+        }
+        const promoted = toCreate.filter((u) => u.recordId);
+        if (promoted.length > 0) {
+          toUpdate.push(...promoted);
+          const stillCreate = toCreate.filter((u) => !u.recordId);
+          toCreate.length = 0; toCreate.push(...stillCreate);
+        }
+      }
+    } catch (e) {
+      console.warn('[upsertAnswers] external-id dedup lookup failed (continuing as creates):', String((e as any)?.message || e).slice(0, 160));
+    }
+  }
 
   // Failed items are RETURNED (not silently dropped): the client must know which
   // answers HubSpot rejected and WHY, otherwise the autosave never sees them come

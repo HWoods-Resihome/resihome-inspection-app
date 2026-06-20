@@ -45,9 +45,6 @@ function answerTone(v: string): 'good' | 'fail' | null {
   if (/\b(good|pass|passed|satisfactory)\b/.test(n)) return 'good';
   return null;
 }
-// Safety ceiling: ~120 pages = 12,000 rows. Far past current volume; if we ever
-// hit it the snapshot is flagged `truncated` rather than silently short.
-const MAX_PAGES = 120;
 
 /** Canonical status bucket (cancelled is excluded upstream by the search). */
 export type StatusBucket = 'scheduled' | 'in_progress' | 'pending_approval' | 'completed' | 'other';
@@ -214,8 +211,11 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
 
   // No status filter → the search excludes cancelled by default (NOT_IN cancelled).
   // Sort by createdate so the page order is stable across the scan (less racy than
-  // 'updated', which changes as the app is used mid-build).
-  for (; page <= MAX_PAGES; page++) {
+  // 'updated', which changes as the app is used mid-build). No artificial page cap:
+  // page to natural completion. The ONLY hard stop is HubSpot's 10,000-result
+  // offset ceiling (a platform limit — paging past it errors); if that ever trips,
+  // `truncated` flags it and we move to date-windowed partitioning.
+  for (;; page++) {
     const { items, total: t } = await searchInspectionsPage({
       sortField: 'scheduled', sortDir: 'asc', page, pageSize: PAGE_SIZE,
     });
@@ -223,7 +223,7 @@ export async function buildInsightsSnapshot(): Promise<InsightsSnapshot> {
     for (const it of items) byId.set(it.recordId, toRow(it));
     if (items.length < PAGE_SIZE) break;        // last page
     if (byId.size >= total) break;              // got everything HubSpot reports
-    if (page * PAGE_SIZE >= 10000) { hitCeiling = true; break; } // offset cap
+    if (page * PAGE_SIZE >= 10000) { hitCeiling = true; break; } // HubSpot offset hard cap
   }
 
   const rows = Array.from(byId.values());

@@ -16,6 +16,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { isAppAdmin } from '@/lib/adminAccess';
 import { fetchRateCardCatalog, archiveRateCardLineItem } from '@/lib/hubspot';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 
@@ -24,7 +25,7 @@ export const config = { maxDuration: 60 };
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
-  if (!/@resihome\.com$/i.test(session.email)) return res.status(403).json({ error: 'Admin only.' });
+  if (!(await isAppAdmin(session.email))) return res.status(403).json({ error: 'Admin only.' });
 
   const apply = req.query.apply === '1';
   // Accept a single ?code= or a comma-separated ?codes= list (multi-delete).

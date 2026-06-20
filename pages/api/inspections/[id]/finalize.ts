@@ -775,6 +775,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // value (identical to the PDF) plus the raw per-question state in `note`.
     // Idempotent via a stable external id (FC-<inspId>-<questionId>), so a
     // re-finalize updates them in place. Best-effort: it NEVER blocks finalize.
+    let fcMaterializeWarning: string | null = null;
     if (fcAnswers && fcCtx) {
       try {
         const existingByExt = new Map(answers.map((x) => [x.answerIdExternal, x.recordId]));
@@ -795,8 +796,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             questionHubspotRecordId: null,
           };
         });
-        if (fcUpserts.length > 0) await upsertAnswers(id, fcUpserts);
+        if (fcUpserts.length > 0) {
+          const fcResults = await upsertAnswers(id, fcUpserts);
+          const failed = fcResults.filter((r) => r.failed).length;
+          if (failed > 0) fcMaterializeWarning = `${failed} of ${fcUpserts.length} Final Checklist items did not save to HubSpot reporting.`;
+        }
       } catch (e) {
+        fcMaterializeWarning = `Final Checklist reporting records did not save (${String((e as any)?.message || e).slice(0, 120)}).`;
         console.warn('[finalize] Final Checklist structured-answer materialization failed (non-fatal):', e);
       }
     }
@@ -1021,6 +1027,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })),
       },
       email: emailResult,
+      ...(fcMaterializeWarning ? { fcMaterializeWarning } : {}),
       maintenanceTicket: ticketResult ? { ...ticketResult, url: ticketUrl } : null,
       totals: {
         vendor: ctx.grandTotals.vendor,

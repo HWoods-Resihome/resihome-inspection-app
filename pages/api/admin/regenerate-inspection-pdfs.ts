@@ -21,6 +21,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
 import { getSessionFromRequest } from '@/lib/auth';
+import { isAppAdmin } from '@/lib/adminAccess';
 import { InspectionPdf, type PdfData, type PdfAnswer } from '@/lib/pdf';
 import {
   fetchInspections, fetchInspectionWithPropertyRef, fetchAnswersForInspection,
@@ -218,7 +219,7 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
-  if (!/@resihome\.com$/i.test(session.email)) return res.status(403).json({ error: 'Admin only.' });
+  if (!(await isAppAdmin(session.email))) return res.status(403).json({ error: 'Admin only.' });
 
   const host = req.headers['x-forwarded-host'] || req.headers.host || '';
   const proto = (req.headers['x-forwarded-proto'] as string) || 'https';

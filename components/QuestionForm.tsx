@@ -1393,9 +1393,21 @@ export function QuestionForm({
           );
           return; // Block submit — do not finalize an empty record.
         }
+        const data = await resp.json().catch(() => ({} as any));
+        // Per-item failures (HubSpot rejected some answers even though the request
+        // returned 200) must BLOCK finalize — otherwise those answers are silently
+        // missing from the completed record.
+        const failedItems = ((data.results || []) as Array<{ failed?: boolean; reason?: string }>).filter((r) => r.failed);
+        if (failedItems.length > 0) {
+          await dialog.alert(
+            `${failedItems.length} answer${failedItems.length === 1 ? '' : 's'} could not be saved to HubSpot. ` +
+            `Your inspection was NOT submitted so nothing is lost — try Submit again.` +
+            `${failedItems[0].reason ? `\n\n${failedItems[0].reason.slice(0, 160)}` : ''}`,
+          );
+          return;
+        }
         // Update recordId map from the response so a later re-submit PATCHes.
         try {
-          const data = await resp.json();
           for (const r of (data.results || []) as Array<{ recordId: string; answerIdExternal: string }>) {
             // Find the form key whose external id matches and store its recordId.
             for (const inst of sectionInstances) {

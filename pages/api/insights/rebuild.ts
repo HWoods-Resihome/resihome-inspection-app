@@ -12,7 +12,13 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { buildInsightsSnapshot, writeInsightsSnapshot, buildDailyRollup, writeDailyRollup } from '@/lib/insightsSnapshot';
+import { runAsBackground } from '@/lib/hubspot';
+import { buildInsightsSnapshot, writeInsightsSnapshot, buildDailyRollup, writeDailyRollup, type InsightsSnapshot } from '@/lib/insightsSnapshot';
+
+// Single-flight per instance: concurrent triggers (a cron + an admin click, or a
+// double-click) ride ONE build instead of racing two that clobber the blob with
+// last-write-wins. Only the request that STARTED the build writes the snapshot.
+let rebuildInFlight: Promise<InsightsSnapshot> | null = null;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -36,12 +42,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!authorized) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const snap = await buildInsightsSnapshot();
-    await writeInsightsSnapshot(snap);
-    // Bank today's rollup so trend/delta cards have a time series (best-effort —
-    // a failed history write must not fail the snapshot).
-    try { await writeDailyRollup(buildDailyRollup(snap)); }
-    catch (e) { console.warn('[insights/rebuild] history write failed:', e); }
+    // Single-flight: if a build is already running, ride it instead of kicking off
+    // a second scan that would race to clobber the same blob. Only the request that
+    // STARTED the build writes the snapshot/rollup. The scan is HubSpot-heavy, so
+    // run it in the background governor lane (runAsBackground) — a manual admin
+    // rebuild or cron must not starve live inspector traffic of HubSpot capacity.
+    let iStarted = false;
+    let snap: InsightsSnapshot;
+    if (rebuildInFlight) {
+      snap = await rebuildInFlight;
+    } else {
+      iStarted = true;
+      rebuildInFlight = runAsBackground(() => buildInsightsSnapshot());
+      try { snap = await rebuildInFlight; }
+      finally { rebuildInFlight = null; }
+    }
+    if (iStarted) {
+      await writeInsightsSnapshot(snap);
+      // Bank today's rollup so trend/delta cards have a time series (best-effort —
+      // a failed history write must not fail the snapshot).
+      try { await writeDailyRollup(buildDailyRollup(snap)); }
+      catch (e) { console.warn('[insights/rebuild] history write failed:', e); }
+    }
     const summary = {
       ok: true, asOf: snap.asOf, total: snap.total, scanned: snap.scanned,
       truncated: snap.truncated, buildMs: snap.buildMs,

@@ -14,6 +14,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { isAppAdmin } from '@/lib/adminAccess';
 import { fetchInspectionWithPropertyRef } from '@/lib/hubspot';
 import { uploadTicketDocuments, type TicketUploadFile } from '@/lib/ticketUpload';
 import { vendorGetsOwnPdf } from '@/lib/vendors';
@@ -69,7 +70,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // GET = admin browser test: run the same upload for ?ticketId= and render the
   // step log + screenshot as a page (so selectors can be diagnosed/tuned).
   if (req.method === 'GET') {
-    if (!/@resihome\.com$/i.test(session.email)) return res.status(403).send('Admin only.');
+    if (!(await isAppAdmin(session.email))) return res.status(403).send('Admin only.');
     const ticketId = Number(req.query.ticketId || 0);
     if (!ticketId || !Number.isFinite(ticketId)) {
       return res.status(400).send('Add ?ticketId=<HoneyBadger ticket id> (the number in the ticket URL …/EditTicket/<id>).');

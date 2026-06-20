@@ -12,6 +12,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runAutoCancelStaleScheduled } from '@/lib/autoCancelStale';
+import { runAsBackground } from '@/lib/hubspot';
 
 export const config = { maxDuration: 60 };
 
@@ -25,7 +26,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (provided !== secret) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const summary = await runAutoCancelStaleScheduled();
+    // Background lane: this daily sweep is HubSpot-heavy and must never starve
+    // live inspector traffic of governor capacity.
+    const summary = await runAsBackground(() => runAutoCancelStaleScheduled());
     console.log('[cron/auto-cancel-stale]', JSON.stringify(summary));
     return res.status(200).json({ ok: true, ...summary });
   } catch (e: any) {

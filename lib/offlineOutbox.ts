@@ -22,13 +22,14 @@ export type OutboxEntry = {
   // that happened before the entry synced.
   meta?: { sectionId?: string; line?: any; externalId?: string };
   createdAt: number;
-  // Failed replay attempts; a wedged entry is dropped after MAX_ATTEMPTS so it
-  // can't block the queue (and the "Syncing…" banner) forever.
+  // Failed replay attempts (telemetry only). Transient/network/5xx failures are
+  // NEVER dropped — they replay until they land (the submit gate blocks finalize
+  // while the queue is non-empty). Only a genuine 4xx (permanently-bad request)
+  // is dropped, since it can never succeed.
   attempts?: number;
 };
 
 const KEY = 'resiwalk_outbox_v1';
-const MAX_ATTEMPTS = 6;
 
 /** Increment an entry's attempt counter in storage; returns the new count. */
 function bumpAttempts(id: string): number {
@@ -129,14 +130,14 @@ export async function flushOutbox(
     } catch (e: any) {
       // If the device is genuinely offline, keep everything and stop.
       if (typeof navigator !== 'undefined' && navigator.onLine === false) { lastError = 'Device is offline — will retry when back online.'; break; }
-      // Online but the request failed (DNS/CORS/transient). Count the attempt;
-      // drop+skip a wedged entry after too many so it can't block the queue
-      // forever, otherwise stop and retry in order next time.
+      // Online but the request failed (DNS/CORS/transient). NEVER drop a
+      // queued change — it carries the inspector's entered data (a rate-card
+      // line, a layout change). Count the attempt (for telemetry/diagnostics)
+      // and stop, replaying in order on the next tick/reconnect. The submit gate
+      // refuses to finalize while the queue is non-empty, so a transient failure
+      // can no longer silently lose a line and leave the report short.
       lastError = `Network error reaching the server (${String(e?.message || e).slice(0, 80)}).`;
-      if (bumpAttempts(entry.id) >= MAX_ATTEMPTS) {
-        console.error(`[outbox] dropping entry ${entry.id} after ${MAX_ATTEMPTS} failed attempts (network)`);
-        remove(entry.id); failedPermanently++; continue;
-      }
+      bumpAttempts(entry.id);
       break;
     }
     if (res.ok) {
@@ -160,15 +161,14 @@ export async function flushOutbox(
       remove(entry.id);
       failedPermanently++;
     } else {
-      // 429 / 5xx — transient server error. Surface the server's message so a
-      // recurring failure can be diagnosed. Count the attempt; after too many,
-      // drop+skip so one bad entry can't wedge the queue indefinitely.
+      // 429 / 5xx — transient server error. NEVER drop the change (it's the
+      // inspector's entered data); surface the server's message, count the
+      // attempt for diagnostics, and stop — it replays in order next tick /
+      // reconnect. The submit gate blocks finalize while the queue is non-empty,
+      // so a flaky link can't silently drop a line from the report + totals.
       const body = await res.text().catch(() => '');
       lastError = `Server error (HTTP ${res.status})${body ? `: ${body.slice(0, 200)}` : ''} — retrying.`;
-      if (bumpAttempts(entry.id) >= MAX_ATTEMPTS) {
-        console.error(`[outbox] dropping entry ${entry.id} after ${MAX_ATTEMPTS} failed attempts (HTTP ${res.status})`);
-        remove(entry.id); failedPermanently++; continue;
-      }
+      bumpAttempts(entry.id);
       break;
     }
   }
