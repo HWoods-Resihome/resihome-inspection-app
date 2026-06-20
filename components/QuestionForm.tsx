@@ -920,9 +920,9 @@ export function QuestionForm({
   const answersRef = useRef(answers); answersRef.current = answers;
   const autosaveRef = useRef(autosave); autosaveRef.current = autosave;
   const runPhotoFlush = useCallback(async () => {
-    if (readOnly || !photoRehydratedRef.current) return;
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-    await flushQueuedPhotos(inspectionRecordId, ({ sectionId, oldUrl, newUrl, replacesUrl, lineExternalId }) => {
+    if (readOnly || !photoRehydratedRef.current) return undefined;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return undefined;
+    return await flushQueuedPhotos(inspectionRecordId, ({ sectionId, oldUrl, newUrl, replacesUrl, lineExternalId }) => {
       // Final Checklist photo (HVAC label stickers, etc.): swap the draft/original
       // URL for the real one inside fcAnswers (photoUrls + per-slot stickerPhotos),
       // then persist. MUST run before the lineExternalId guard — FC photos carry
@@ -966,7 +966,7 @@ export function QuestionForm({
         sectionPhotoDirtyRef.current.add(sectionId);
         return { ...cur, [sectionId]: arr.map((u) => (matches(u) ? newUrl : u)) };
       });
-    }).catch(() => {});
+    }).catch(() => undefined);
   }, [readOnly, inspectionRecordId, saveFc]);
   const runPhotoFlushRef = useRef(runPhotoFlush);
   runPhotoFlushRef.current = runPhotoFlush;
@@ -1266,27 +1266,43 @@ export function QuestionForm({
     }
     // Don't finalize while photos are still queued — the persist below strips
     // unsynced blob: urls, so submitting now would LOSE them from the record (the
-    // field failure where photos went missing). Try one more flush, then if any
-    // remain, tell the inspector exactly what's pending and let them wait (the
-    // safe default) rather than silently dropping evidence.
+    // field failure where photos went missing on a completed inspection). Retry
+    // the upload a few times so a transient/slow upload finishes, and HARD-BLOCK
+    // while anything is still pending — never silently drop evidence. The lossy
+    // "submit without them" override is offered ONLY when a photo is genuinely
+    // stuck (failed repeatedly) so the inspector isn't permanently stranded.
     if (!readOnly) {
-      try { await runPhotoFlushRef.current(); } catch { /* surfaced below */ }
       let pendingPhotos = 0;
-      try { pendingPhotos = await countQueuedPhotos(inspectionRecordId); } catch { /* treat as 0 */ }
+      let lastErr: string | undefined;
+      for (let i = 0; i < 5; i++) {
+        try { const r = await runPhotoFlushRef.current(); lastErr = r?.lastError; } catch { /* checked below */ }
+        try { pendingPhotos = await countQueuedPhotos(inspectionRecordId); } catch { pendingPhotos = 0; }
+        if (pendingPhotos === 0) break;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
       if (pendingPhotos > 0) {
         const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
         if (offline) {
           await dialog.alert(
             `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} still need${pendingPhotos === 1 ? 's' : ''} to upload, but you're offline. ` +
-            `Move to an area with signal and stay on this screen until they finish, then submit — they aren't saved yet.`,
+            `Move to an area with signal and stay on this screen until they finish — they aren't saved yet.`,
+          );
+          return;
+        }
+        // Genuinely stuck (a photo has failed repeatedly) → let them submit without
+        // it rather than be stranded, but make the loss explicit.
+        const stuck = /failed to upload\s*\d+/i.test(lastErr || '');
+        if (!stuck) {
+          await dialog.alert(
+            `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} ${pendingPhotos === 1 ? 'is' : 'are'} still uploading. ` +
+            `Keep this screen open a few more seconds and submit again — ${pendingPhotos === 1 ? "it isn't" : "they aren't"} saved yet.`,
           );
           return;
         }
         const proceed = await dialog.confirm(
-          `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} ${pendingPhotos === 1 ? 'is' : 'are'} still uploading. ` +
-          `If you submit now ${pendingPhotos === 1 ? 'it' : 'they'} may not be attached to the report. ` +
-          `Keep this screen open a few more seconds and they'll finish.`,
-          { confirmLabel: 'Submit anyway', cancelLabel: 'Keep waiting' },
+          `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} keep${pendingPhotos === 1 ? 's' : ''} failing to upload (check your signal). ` +
+          `If you submit now ${pendingPhotos === 1 ? 'it' : 'they'} will NOT be attached to the report. Submit without ${pendingPhotos === 1 ? 'it' : 'them'}?`,
+          { confirmLabel: 'Submit without photos', cancelLabel: 'Keep trying' },
         );
         if (!proceed) return;
       }
