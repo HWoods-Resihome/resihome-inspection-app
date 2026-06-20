@@ -1,26 +1,11 @@
 /**
- * /admin/regenerate-qc-pdfs  (admin only)
- *
- * Live-progress runner for the Turn Re-Inspect QC PDFs. Same UX as the Scope and
- * Q&A regenerate pages: single-inspection preview, bounded-concurrency run with
- * auto-retry, progress bar + live log, and CSV export.
+ * /admin/regenerate-qc-pdfs → folded into the combined /admin/regenerate-pdfs
+ * tool (pick which types to regenerate). Kept as a redirect so old links work.
  */
-import { RegenPdfRunner } from '@/components/admin/RegenPdfRunner';
+import type { GetServerSideProps } from 'next';
 
-export default function RegenerateQcPdfsPage() {
-  return (
-    <RegenPdfRunner
-      title="Regenerate QC PDFs"
-      apiBase="/api/admin/regenerate-qc-pdfs"
-      noun="Turn Re-Inspect QC inspections"
-      description={
-        <>
-          Re-renders the Turn Re-Inspect QC report <b>in place</b> from saved answers
-          (before/after photos, line pass/fail, header verdict) — to retrofit PDF format
-          changes (e.g. capitalized Bed/Bath, region removed). It never changes status or
-          sends any email/ticket.
-        </>
-      }
-    />
-  );
-}
+export const getServerSideProps: GetServerSideProps = async () => ({
+  redirect: { destination: '/admin/regenerate-pdfs', permanent: false },
+});
+
+export default function RedirectToCombined() { return null; }
