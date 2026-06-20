@@ -175,7 +175,7 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
     sourceRateCardName: inspection.sourceRateCardName || null,
     generatedAtIso: new Date().toISOString(),
     verdict,
-    overallNote: '', // not reconstructable on regenerate
+    overallNote: verdict === 'fail' ? (inspection.qcOverallNote || '') : '',
     passCount,
     failCount,
     sections,

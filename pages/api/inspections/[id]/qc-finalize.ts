@@ -303,6 +303,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // Overall failure comment — written separately (best-effort) so a not-yet-
+    // provisioned qc_overall_note can never disturb the verdict/counts update
+    // above. Stored only on a Fail; cleared on Pass. Run /admin/setup to create it.
+    try {
+      await updateInspection(id, { qc_overall_note: verdict === 'fail' ? overallNote : '' });
+    } catch (e) {
+      console.warn('[qc-finalize] qc_overall_note write skipped (property may not exist yet — run /admin/setup):', e);
+    }
+
     // Clean short links (resolve to this PDF) for the record + UI. Separate
     // best-effort write so a missing link_* property never disturbs the QC
     // update/fallback above. Run scripts/short_links to create the properties.

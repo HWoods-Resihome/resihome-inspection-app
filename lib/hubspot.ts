@@ -710,7 +710,7 @@ const INSPECTION_LIST_PROPERTIES = [
   'hs_createdate',
   'last_edited_at', 'hs_lastmodifieddate',
   'total_client_cost',
-  'source_rate_card_id', 'source_rate_card_name', 'qc_verdict',
+  'source_rate_card_id', 'source_rate_card_name', 'qc_verdict', 'qc_overall_note',
   // Added for ResiWalk Insights analytics (region filter, turnaround timestamps,
   // pass/fail, photo counts). Harmless extra fields for the home list.
   'region_snapshot', 'submitted_at', 'approved_at', 'approved_by_name',
@@ -757,6 +757,7 @@ function mapInspectionRow(r: any): InspectionSummary {
     sourceRateCardId: p.source_rate_card_id || null,
     sourceRateCardName: p.source_rate_card_name || null,
     qcVerdict: (p.qc_verdict === 'pass' || p.qc_verdict === 'fail') ? p.qc_verdict : null,
+    qcOverallNote: p.qc_overall_note || null,
     qcPassCount: null,
     qcFailCount: null,
     submittedAt: p.submitted_at || null,
@@ -2151,6 +2152,7 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
       sourceRateCardId: null,
       sourceRateCardName: null,
       qcVerdict: null,
+      qcOverallNote: null,
       qcPassCount: null,
       qcFailCount: null,
       submittedAt: null,
@@ -2218,7 +2220,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     'region_snapshot', 'section_list_json',
     // Phase 4 PDF outputs (Rate Card finalize)
     'pdf_master_url', 'pdf_chargeback_url', 'pdf_chargeback_xlsx_url', 'pdf_vendor_urls_json', 'pdf_generated_at',
-    'source_rate_card_id', 'source_rate_card_name', 'qc_verdict', 'qc_pass_count', 'qc_fail_count',
+    'source_rate_card_id', 'source_rate_card_name', 'qc_verdict', 'qc_overall_note', 'qc_pass_count', 'qc_fail_count',
     // Submit/approve stamps + Internal Resolution timing map
     'submitted_at', 'submitted_by_email', 'approved_by_name', 'approved_at', 'resolution_timing_json',
     'total_client_cost', 'property_status_at_completion',
@@ -2357,6 +2359,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         sourceRateCardId: p.source_rate_card_id || null,
         sourceRateCardName: p.source_rate_card_name || null,
         qcVerdict: (p.qc_verdict === 'pass' || p.qc_verdict === 'fail') ? p.qc_verdict : null,
+        qcOverallNote: p.qc_overall_note || null,
         qcPassCount: p.qc_pass_count != null && p.qc_pass_count !== '' ? Number(p.qc_pass_count) : null,
         qcFailCount: p.qc_fail_count != null && p.qc_fail_count !== '' ? Number(p.qc_fail_count) : null,
         submittedAt: p.submitted_at || null,
@@ -3571,6 +3574,12 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   // list enrichment, frozen at completion). Powers the "Property Status" sort.
   await ensureProp(inspection, 'property_status_snapshot', {
     name: 'property_status_snapshot', label: 'Property Status (Snapshot)', type: 'string', fieldType: 'text', groupName: 'inspection_results',
+  });
+  // QC Turn Re-Inspect: the overall failure comment (why the re-inspect failed),
+  // stamped at qc-finalize so completed QCs can show it in-app (and the PDF
+  // regenerator can reproduce it).
+  await ensureProp(inspection, 'qc_overall_note', {
+    name: 'qc_overall_note', label: 'QC Overall Failure Comment', type: 'string', fieldType: 'textarea', groupName: 'inspection_results',
   });
 
   // 1099 Leasing Agent report fields — stamped onto the inspection at completion

@@ -200,6 +200,7 @@ export function QcReinspectForm(props: Props) {
         setRoomNote(roomN);
         setSourceName(d.sourceRateCardName || null);
         if (d.qcVerdict === 'pass' || d.qcVerdict === 'fail') setVerdict(d.qcVerdict);
+        if (typeof d.qcOverallNote === 'string') setOverallNote(d.qcOverallNote);
 
         // Default: all sections expanded so the reviewer can see every line
         // item at a glance. (They can still collapse individually.)
@@ -1211,6 +1212,13 @@ export function QcReinspectForm(props: Props) {
           }>
             {verdict === 'pass' ? '✓ Pass' : '✗ Fail'}
           </span>
+          {/* Overall failure comment (Fail only) — why the re-inspect failed. */}
+          {verdict === 'fail' && overallNote.trim() && (
+            <div className="mt-3">
+              <div className="text-[11px] font-heading font-semibold text-brand mb-1">Overall failure comment</div>
+              <div className="text-sm text-gray-800 whitespace-pre-wrap border border-brand/30 bg-brand/5 rounded-lg p-2.5">{overallNote}</div>
+            </div>
+          )}
         </div>
       )}
 

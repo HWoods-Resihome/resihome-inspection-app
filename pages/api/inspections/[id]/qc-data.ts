@@ -170,6 +170,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       sourceRateCardId: inspection.sourceRateCardId,
       sourceRateCardName: inspection.sourceRateCardName,
       qcVerdict: inspection.qcVerdict,
+      qcOverallNote: inspection.qcOverallNote,
       qcPassCount: inspection.qcPassCount,
       qcFailCount: inspection.qcFailCount,
       lines,

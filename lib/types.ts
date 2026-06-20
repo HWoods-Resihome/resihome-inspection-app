@@ -105,6 +105,9 @@ export interface InspectionSummary {
   qcVerdict: 'pass' | 'fail' | null;
   qcPassCount: number | null;
   qcFailCount: number | null;
+  /** QC overall failure comment (why the re-inspect failed). Empty unless a
+   *  completed QC was failed. */
+  qcOverallNote: string | null;
   // Rate Card submit/approve stamps. submittedAt is set when the inspector
   // submits for approval; approvedByName/approvedAt when an approver finalizes.
   submittedAt: string | null;
