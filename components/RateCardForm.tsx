@@ -3359,9 +3359,10 @@ export function RateCardForm(props: RateCardFormProps) {
           <div className="min-w-0 flex-1">
             {/* Title + status on ONE line — the title font auto-shrinks so both
                 the full template name AND the status chip fit without truncating.
-                Natural height (no forced min-h) so the inspector line sits snug
-                beneath it. */}
-            <div className="flex items-center gap-2">
+                min-h matches the 36px control row (Unlock / Back / Settings) and
+                items-center vertically centers the status chip with those
+                buttons. */}
+            <div className="flex items-center gap-2 min-h-[36px]">
               <FitText
                 text={props.templateLabel}
                 className="font-heading font-bold text-gray-900 flex-1 min-w-0"
@@ -3621,7 +3622,8 @@ export function RateCardForm(props: RateCardFormProps) {
               <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
             </button>
             {/* Address + meta — same typography / alignment / line order as every
-                other template's header (see QuestionForm / QcReinspectForm). */}
+                other template's header (see QuestionForm / QcReinspectForm). Each
+                fact is a tight consecutive line, including Internal Resolution. */}
             <div className="text-left min-w-0 flex-1">
               <FitText text={props.propertyName} className="font-heading font-semibold text-ink" />
               <div className="text-xs text-gray-500 truncate">
@@ -3639,21 +3641,19 @@ export function RateCardForm(props: RateCardFormProps) {
                   {props.moveInReadyDate && <span>MIR: {props.moveInReadyDate}</span>}
                 </div>
               )}
-              {/* Internal Resolution client total (Scope-specific) — called out in
-                  its own color — + the standardized save indicator, on one row
-                  directly under the status (no extra gap above). */}
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-heading font-semibold text-violet-700 truncate">
-                  Internal Resolution: ${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-                <span className="shrink-0">
-                  <SaveIndicator
-                    phase={saveStatus.kind}
-                    onErrorClick={saveStatus.kind === 'error' ? () => setShowSaveErrorDetail(true) : undefined}
-                  />
-                </span>
+              {/* Internal Resolution client total (Scope-specific) — just the next
+                  line down, called out in its own color. */}
+              <div className="text-xs font-heading font-semibold text-violet-700 truncate">
+                Internal Resolution: ${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
+            {/* Save indicator — right of the address block, vertically centered. */}
+            <span className="shrink-0 self-center pl-2">
+              <SaveIndicator
+                phase={saveStatus.kind}
+                onErrorClick={saveStatus.kind === 'error' ? () => setShowSaveErrorDetail(true) : undefined}
+              />
+            </span>
           </div>
           <div className="flex justify-center sm:justify-end shrink-0">
             <button
