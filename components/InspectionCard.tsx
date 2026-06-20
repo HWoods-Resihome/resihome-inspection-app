@@ -26,9 +26,9 @@ function fmtShort(raw: string | null): string {
   const d = /^\d+$/.test(raw) ? new Date(Number(raw)) : new Date(raw);
   if (isNaN(d.getTime())) return '';
   const m = d.getUTCMonth() + 1;
-  const day = String(d.getUTCDate()).padStart(2, '0');
+  const day = d.getUTCDate();
   const yy = String(d.getUTCFullYear()).slice(-2);
-  return `${m}-${day}-${yy}`;
+  return `${m}/${day}/${yy}`;
 }
 
 // Whole-dollar currency for the card's "Client: $x" figure.
@@ -76,7 +76,8 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
   // Scheduled (the planned visit is the meaningful date then); once work starts
   // it switches to the last-updated date.
   const isScheduled = (i.status || '').trim().toLowerCase() === 'scheduled';
-  const dateLabel = isScheduled ? 'Scheduled' : 'Updated';
+  // Date shown bottom-left (no prefix): the scheduled date while still Scheduled,
+  // otherwise the last-updated date.
   const dateValue = fmtShort(isScheduled ? (i.scheduledDate || i.updatedAt) : i.updatedAt);
 
   const inner = (
@@ -121,7 +122,7 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
           stops it muddying the address and never adds a second line. */}
       <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
         {dateValue
-          ? <span className="shrink-0 whitespace-nowrap">{dateLabel} {dateValue}</span>
+          ? <span className="shrink-0 whitespace-nowrap">{dateValue}</span>
           : <span />}
         {i.propertyStatus && (
           <span className="min-w-0 flex-1 truncate text-center text-gray-400" title={i.propertyStatus}>
