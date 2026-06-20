@@ -8,6 +8,10 @@
  *   - "Evaluate Listing Price"  → response (answer), recommendation (the
  *      dependent recommended-rent number), feedback (the required note)
  *   - "Grass Condition"         → response (answer), feedback (the required note)
+ *
+ * The Utilities answers (Electric / Water / Gas / Trash Bins) live in the Final
+ * Checklist blob (one `qa` record whose `note` is a JSON map of FcAnswers), so
+ * they're read from there and stamped as their own inspection fields.
  */
 import type { SavedAnswer } from '@/lib/hubspot';
 
@@ -20,6 +24,12 @@ export interface LeasingAgent1099Fields {
   listing_price_feedback_1099?: string;
   landscaping_response_1099?: string;
   landscaping_feedback_1099?: string;
+  // Utilities (from the Final Checklist) — the selected value as shown on the
+  // form (On / Off / N/A, or Present / Missing / N/A).
+  electric?: string;
+  water?: string;
+  gas?: string;
+  trash_bins?: string;
 }
 
 /** Build the inspection-property set from the answers. Only includes a field
@@ -39,6 +49,23 @@ export function extractLeasingAgent1099Fields(answers: SavedAnswer[]): LeasingAg
   if (grass) {
     out.landscaping_response_1099 = grass.answerValue || '';
     out.landscaping_feedback_1099 = grass.note || '';
+  }
+
+  // Utilities live in the Final Checklist blob: one `qa` record (questionIdExternal
+  // 'fc__all' / answerIdExternal 'FINALCHECKLIST-*') whose `note` is JSON-encoded
+  // FcAnswers keyed by question id (fc_electric, fc_water, fc_gas, fc_trash_bins).
+  const fcBlob = answers.find(
+    (a) => a.questionIdExternal === 'fc__all' || String(a.answerIdExternal || '').startsWith('FINALCHECKLIST-'),
+  );
+  if (fcBlob) {
+    try {
+      const fc = JSON.parse(fcBlob.note || '{}') as Record<string, { value?: string }>;
+      const val = (k: string) => String(fc[k]?.value ?? '').trim();
+      if (fc.fc_electric) out.electric = val('fc_electric');
+      if (fc.fc_water) out.water = val('fc_water');
+      if (fc.fc_gas) out.gas = val('fc_gas');
+      if (fc.fc_trash_bins) out.trash_bins = val('fc_trash_bins');
+    } catch { /* malformed blob → skip utilities */ }
   }
   return out;
 }

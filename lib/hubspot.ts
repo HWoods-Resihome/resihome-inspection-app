@@ -3592,6 +3592,23 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
     name: 'landscaping_feedback_1099', label: '1099 Landscaping Feedback', type: 'string', fieldType: 'textarea', groupName: 'inspection_1099',
   });
 
+  // Utilities (from the Final Checklist) — the selected answer is stamped onto
+  // the inspection at completion for reporting. Values: On / Off / N/A (or
+  // Present / Missing / N/A for Trash Bins).
+  await ensureGroup(inspection, 'inspection_utilities', 'Utilities');
+  await ensureProp(inspection, 'electric', {
+    name: 'electric', label: 'Electric', type: 'string', fieldType: 'text', groupName: 'inspection_utilities',
+  });
+  await ensureProp(inspection, 'water', {
+    name: 'water', label: 'Water', type: 'string', fieldType: 'text', groupName: 'inspection_utilities',
+  });
+  await ensureProp(inspection, 'gas', {
+    name: 'gas', label: 'Gas', type: 'string', fieldType: 'text', groupName: 'inspection_utilities',
+  });
+  await ensureProp(inspection, 'trash_bins', {
+    name: 'trash_bins', label: 'Trash Bins', type: 'string', fieldType: 'text', groupName: 'inspection_utilities',
+  });
+
   // Drop the "does this property exist?" caches so the just-provisioned fields
   // are picked up by this warm instance without waiting for a cold start.
   _afterPhotoPropCache = null;
