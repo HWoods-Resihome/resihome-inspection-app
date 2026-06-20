@@ -1610,7 +1610,7 @@ export function QuestionForm({
                 the full template name AND the status chip fit without truncating
                 (Unlock is now a small bubble, so there's room). min-h matches the
                 Unlock/Back control row so the status chip lines up with them. */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-h-[32px]">
               <FitText
                 text={templateLabel}
                 className="font-heading font-bold text-gray-900 flex-1 min-w-0"
@@ -1662,7 +1662,7 @@ export function QuestionForm({
               }
               onCancel();
             }}
-            className="inline-flex items-center gap-1 h-9 px-2.5 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white"
+            className="inline-flex items-center gap-1 h-8 px-2.5 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white"
             title="Save and go back"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>

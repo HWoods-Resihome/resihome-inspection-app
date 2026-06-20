@@ -704,7 +704,7 @@ export function QcReinspectForm(props: Props) {
       <div className="pt-3 pb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-h-[32px]">
               <FitText text={props.templateLabel} className="font-heading font-bold text-gray-900 flex-1 min-w-0" max={20} min={11} />
               {statusLabel && (
                 <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>{statusLabel.label}</span>
@@ -741,7 +741,7 @@ export function QcReinspectForm(props: Props) {
             <button
               type="button"
               onClick={props.onCancel}
-              className="inline-flex items-center gap-1 h-9 px-2.5 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white"
+              className="inline-flex items-center gap-1 h-8 px-2.5 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white"
               title="Go back"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>

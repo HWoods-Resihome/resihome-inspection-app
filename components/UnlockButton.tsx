@@ -71,7 +71,7 @@ export function UnlockButton({ propertyId, address, inspectionId, className }: U
         aria-label="Unlock — get a Rently access code for this property"
         title="Unlock — get a Rently access code for this property"
         className={
-          'inline-flex items-center justify-center w-9 h-9 rounded-full text-black shrink-0 ' +
+          'inline-flex items-center justify-center w-8 h-8 rounded-full text-black shrink-0 ' +
           'transition-colors disabled:cursor-default ' +
           (loading ? 'bg-[#A8EEEB] ' : 'bg-[#73E3DF] hover:bg-[#5fd8d3] active:scale-95 ') +
           (className || '')
