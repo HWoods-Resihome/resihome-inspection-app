@@ -3616,7 +3616,7 @@ export function RateCardForm(props: RateCardFormProps) {
 
       <div id="sticky-totals-header" className="-mx-4 px-4 py-2 mb-3 bg-gray-50 border-b border-gray-200 shadow-sm">
         <div className="sm:flex sm:items-center sm:justify-between sm:gap-4">
-          <div className="flex items-center justify-start gap-2.5 mb-2 sm:mb-0 min-w-0">
+          <div className="flex items-center justify-start gap-2.5 mb-2 sm:mb-0 min-w-0 sm:flex-1">
             {/* Logo → save & return to the inspections list (flushes first).
                 Transparent pink mark (no white tile) so it blends on the
                 off-white header. */}
