@@ -58,6 +58,15 @@ const MAX_ATTEMPTS = 6;
 // entry, and revokables holds both underlying object URLs.
 const urlByLocalId = new Map<string, { displayUrl: string; revokables: string[] }>();
 
+// In-memory fallback queue: photos whose DURABLE IndexedDB write failed or
+// stalled (private mode, quota, or an iOS/Android IDB chain stall). Volatile —
+// lost if the tab is killed before they upload — but it keeps capture + "Done"
+// instant and the photo uploading in the background, instead of blocking the
+// camera on (or failing it from) a wedged IndexedDB write. getAllRecords() merges
+// it in, so the flush + the queued-count submit gate treat these like any other
+// queued photo. Keyed by localId.
+const memQueue = new Map<string, QueuedPhoto>();
+
 // ---- Foreground flush coordination ------------------------------------------
 // The background flush runs CONTINUOUSLY — including while the camera is open —
 // so photos upload as they're taken ("Saved Offline" -> synced) and the
@@ -256,9 +265,18 @@ async function txInner<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) 
 }
 
 async function getAllRecords(): Promise<QueuedPhoto[]> {
-  if (!idbAvailable()) return [];
-  try { return (await tx<QueuedPhoto[]>('readonly', (s) => s.getAll())) || []; }
-  catch { return []; }
+  let idb: QueuedPhoto[] = [];
+  if (idbAvailable()) {
+    try { idb = (await tx<QueuedPhoto[]>('readonly', (s) => s.getAll())) || []; }
+    catch { idb = []; }
+  }
+  // Merge the in-memory fallback queue (photos whose durable IndexedDB write
+  // failed/stalled). Dedupe by localId — a durable copy in IDB wins — so the
+  // flush, the queued-count submit gate, and rehydrate all see these photos and
+  // never lose them, even though they never reached IndexedDB.
+  if (memQueue.size === 0) return idb;
+  const seen = new Set(idb.map((r) => r.localId));
+  return [...idb, ...Array.from(memQueue.values()).filter((r) => !seen.has(r.localId))];
 }
 
 async function putRecord(rec: QueuedPhoto): Promise<void> {
@@ -296,9 +314,20 @@ export async function uploadPhotoOrQueue(
   // draft URL for immediate display. The photo is NEVER lost to a stuck spinner.
   const queueDraft = async (): Promise<string> => {
     const localId = `idbph_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    await putRecord({
+    const rec: QueuedPhoto = {
       localId, inspectionRecordId, sectionId, kind: 'photo', blob, filename,
       replacesUrl: opts?.replacesUrl, lineExternalId: opts?.lineExternalId, createdAt: Date.now(),
+    };
+    // Persist durably in the BACKGROUND. The capture (and the camera's "Done")
+    // must NEVER wait on — or fail from — a stalled IndexedDB write: the IDB ops
+    // are serialized + 8s-timeout-guarded, so one wedged write used to stall every
+    // subsequent capture past the camera's flush window and report good photos as
+    // "did not upload" (and lose the in-flight ones). If the durable write
+    // fails/stalls, hold the record in memory so the flush still uploads it.
+    void putRecord(rec).catch((e) => {
+      console.warn('[offlinePhotoStore] durable queue write failed; holding photo in memory', e);
+      memQueue.set(localId, rec);
+      kickFlush();
     });
     // Build the display URL for this draft. While a camera is open on iOS, do
     // NOT decode the full-res blob to make a thumbnail: the section grid is HIDDEN
@@ -343,23 +372,13 @@ export async function uploadPhotoOrQueue(
   // the background flush (read-all-blobs + concurrent upload) is SUSPENDED until
   // the camera closes (flushQueuedPhotos) — so capture only does one lightweight
   // IndexedDB write per shot.
-  if (idbAvailable()) {
-    try {
-      return await queueDraft();
-    } catch (e) {
-      // Genuine out-of-storage → surface it so the inspector frees space; the
-      // photo can't be queued and we shouldn't pretend otherwise.
-      if (e instanceof StorageFullError || isQuotaError(e)) throw e;
-      // The IndexedDB write failed for another reason. iOS Safari in particular
-      // rejects IDB writes intermittently (and in private / locked-down modes),
-      // which used to dead-end a captured photo on "couldn't be saved / Retry"
-      // with NOTHING queued to sync — so it never uploaded even after reconnect.
-      // Don't lose the shot: fall through to a direct inline upload instead.
-      console.warn('[offlinePhotoStore] queue write failed; uploading inline instead', e);
-    }
-  }
-  // No IndexedDB (private mode) OR the queue write failed → upload inline.
-  return uploadJpegBlob(blob, filename, { attempts: 3, timeoutMs: 20000 });
+  // Queue-first on every platform: queueDraft returns a draft URL immediately
+  // (durable write happens in the background; an in-memory fallback covers a
+  // failed/stalled IndexedDB write or private mode), so a capture can never be
+  // blocked by — or falsely reported as failing from — IndexedDB. The flush
+  // uploads it (from IDB or memory) right after, and the submit gate refuses to
+  // finalize while anything is still queued, so the photo is never lost.
+  return queueDraft();
 }
 
 /**
@@ -369,12 +388,14 @@ export async function uploadPhotoOrQueue(
  * revokes the object URLs. Best-effort; unknown URLs are ignored.
  */
 export async function discardQueuedByUrls(urls: string[]): Promise<number> {
-  if (!idbAvailable() || urls.length === 0) return 0;
+  if (urls.length === 0) return 0;
   const wanted = new Set(urls);
   let n = 0;
   for (const [localId, entry] of Array.from(urlByLocalId.entries())) {
     if (!wanted.has(entry.displayUrl)) continue;
-    try { await deleteRecord(localId); n++; } catch { /* noop */ }
+    memQueue.delete(localId);
+    try { await deleteRecord(localId); } catch { /* memory-only or IDB gone */ }
+    n++;
     for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } }
     urlByLocalId.delete(localId);
   }
@@ -507,7 +528,9 @@ export async function flushQueuedPhotos(
   inspectionRecordId: string,
   onSynced: FlushOnSynced,
 ): Promise<FlushResult> {
-  if (!idbAvailable()) return { synced: 0, remaining: 0 };
+  // Still run when IndexedDB is unavailable IF the in-memory fallback holds
+  // photos to upload (private mode / a failed durable write).
+  if (!idbAvailable() && memQueue.size === 0) return { synced: 0, remaining: 0 };
   const existing = flushInFlight.get(inspectionRecordId);
   if (existing) return existing;
   // iOS uploads DURING the camera session too — photos save as they're taken, not
@@ -542,7 +565,8 @@ async function doFlushQueuedPhotos(
   const finishSynced = async (rec: QueuedPhoto, newUrl: string) => {
     const entry = urlByLocalId.get(rec.localId);
     const oldUrl = entry?.displayUrl || '';
-    await deleteRecord(rec.localId);
+    memQueue.delete(rec.localId);     // clear the in-memory fallback copy (if any)
+    try { await deleteRecord(rec.localId); } catch { /* memory-only record, or IDB gone — fine */ }
     onSynced({ localId: rec.localId, sectionId: rec.sectionId, oldUrl, newUrl, replacesUrl: rec.replacesUrl, lineExternalId: rec.lineExternalId });
     // Also tell any open camera so it can swap its draft URL for the real one
     // (clears "Saved Offline" live; Done then returns real URLs, not stale drafts).
@@ -599,7 +623,12 @@ async function doFlushQueuedPhotos(
       // 4xx (incl. 429 rate-limit) or after N attempts, which is what made photos
       // vanish in the field.
       const attempts = (rec.attempts || 0) + 1;
-      try { await putRecord({ ...rec, attempts }); } catch { /* keep the in-memory record; next flush retries */ }
+      const updated = { ...rec, attempts };
+      // Persist the bumped attempt count durably; if the durable write isn't
+      // possible (the very reason it may be memory-only), keep it in the
+      // in-memory queue so the next flush still retries it — never dropped.
+      try { await putRecord(updated); memQueue.delete(rec.localId); }
+      catch { memQueue.set(rec.localId, updated); }
       if (attempts >= MAX_ATTEMPTS) {
         lastError = `A photo has failed to upload ${attempts}×. It's kept safe and will keep retrying — check your signal before submitting.`;
         console.warn(`[offlinePhotoStore] ${rec.localId} still failing after ${attempts} attempts — kept (never dropped)`);
