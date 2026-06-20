@@ -13,6 +13,7 @@ import { Readable } from 'stream';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { readInspectionProps, fetchAnswersForInspection, fetchInspectionById } from '@/lib/hubspot';
 import { resolveSections } from '@/lib/sections';
+import { finalChecklistPhotos } from '@/lib/finalChecklist';
 import { verifyShareSig, slugifyVendor, SHARE_TYPE_TO_PROP, type ShareDocType } from '@/lib/shortLinks';
 import { displayImageSrc } from '@/lib/photoDisplay';
 
@@ -90,7 +91,21 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         if (!extraOrder.includes(k)) extraOrder.push(k);
         return k;
       };
+      // Final Checklist (HVAC & Air Filters, Smart Home Tech, …) persists as ONE
+      // 'qa' record whose `note` is a JSON blob of the FcAnswers — its photos
+      // (per-question + label-sticker slots) live there, NOT in photo_urls. The
+      // PDF links every one of them into this gallery, so parse the blob and add
+      // them (in the same order finalChecklistPhotos produces for the PDF).
+      const fcPhotos: string[] = [];
+      const isFcBlob = (a: any) =>
+        a.questionIdExternal === 'fc__all' || String(a.answerIdExternal || '').startsWith('FINALCHECKLIST-');
       for (const a of (answers as any[]) || []) {
+        if (isFcBlob(a)) {
+          try {
+            for (const u of finalChecklistPhotos(JSON.parse(a.note || '{}'))) if (ok(u)) fcPhotos.push(u);
+          } catch { /* malformed FC blob → skip */ }
+          continue;
+        }
         if (a.answerType === 'section_photo') {
           const key = keyFor(a);
           const arr = bySection.get(key) || [];
@@ -120,7 +135,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         for (const u of (afterBySection.get(key) || [])) if (!seen.has(u)) { seen.add(u); photos.push(u); }
       };
       for (const s of sections) pushKey(s.id);     // resolved rooms, in section order
-      for (const k of extraOrder) pushKey(k);       // Review/Sign-Off, Final Checklist, etc.
+      for (const k of extraOrder) pushKey(k);       // Review/Sign-Off, etc.
+      for (const u of fcPhotos) if (!seen.has(u)) { seen.add(u); photos.push(u); } // Final Checklist photos last (matches the PDF)
       galleryCache.set(cacheKey, { photos, at: Date.now() });
       return { props: { photos, start, embed } };
     }
