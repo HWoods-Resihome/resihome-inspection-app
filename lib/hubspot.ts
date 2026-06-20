@@ -2472,17 +2472,7 @@ async function listingDisplayStatusInfo(): Promise<{ prop: string; labels: Recor
 // is supported only in case it differs in another portal.
 const LISTING_MIR_PROP = (process.env.HUBSPOT_LISTING_MIR_PROP || '').trim() || 'move_in_ready_date';
 
-// Format a HubSpot date value (epoch-ms string or ISO) to a short M/D/YYYY string.
-function formatListingDate(raw: any): string | null {
-  if (raw == null || raw === '') return null;
-  const s = String(raw);
-  const t = /^\d+$/.test(s) ? Number(s) : Date.parse(s);
-  if (!isFinite(t) || isNaN(t)) return null;
-  const d = new Date(t);
-  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
-}
-
-// Short M/D/YY (2-digit year) — used for the header "MIR:" date.
+// Short M/D/YY (2-digit year) — used for header dates (listing date + MIR).
 function formatShortDateYY(raw: any): string | null {
   if (raw == null || raw === '') return null;
   const s = String(raw);
@@ -2592,7 +2582,7 @@ export async function fetchActiveListingForProperty(
     const listingStatus = formatListingStatus(displayLabel) || formatListingStatus(pick.status);
     return {
       listingPrice: pick.price,
-      listingDate: formatListingDate(pick.date),
+      listingDate: formatShortDateYY(pick.date),
       listingStatus,
       moveInReadyDate: formatShortDateYY(pick.mir),
     };

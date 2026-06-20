@@ -3359,9 +3359,9 @@ export function RateCardForm(props: RateCardFormProps) {
           <div className="min-w-0 flex-1">
             {/* Title + status on ONE line — the title font auto-shrinks so both
                 the full template name AND the status chip fit without truncating.
-                min-h matches the right-side control row (h-9) so the status chip
-                is vertically centered with the Unlock / Back / Settings icons. */}
-            <div className="flex items-center gap-2 min-h-[36px]">
+                Natural height (no forced min-h) so the inspector line sits snug
+                beneath it. */}
+            <div className="flex items-center gap-2">
               <FitText
                 text={props.templateLabel}
                 className="font-heading font-bold text-gray-900 flex-1 min-w-0"
@@ -3534,7 +3534,7 @@ export function RateCardForm(props: RateCardFormProps) {
             <button
               type="button"
               onClick={handleSaveAndClose}
-              className="order-2 inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white transition-colors"
+              className="order-2 inline-flex items-center gap-1 h-9 px-2.5 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white transition-colors"
               title="Save and go back"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
@@ -3625,7 +3625,7 @@ export function RateCardForm(props: RateCardFormProps) {
             <div className="text-left min-w-0 flex-1">
               <FitText text={props.propertyName} className="font-heading font-semibold text-ink" />
               <div className="text-xs text-gray-500 truncate">
-                {props.bedrooms} bed / {props.bathrooms} bath
+                {props.bedrooms} Bed / {props.bathrooms} Bath
                 {props.squareFootage != null && props.squareFootage > 0 && (
                   <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
                 )}
@@ -3639,10 +3639,11 @@ export function RateCardForm(props: RateCardFormProps) {
                   {props.moveInReadyDate && <span>MIR: {props.moveInReadyDate}</span>}
                 </div>
               )}
-              {/* Internal Resolution client total (Scope-specific) + the
-                  standardized save indicator, sharing the bottom row. */}
-              <div className="mt-0.5 flex items-end justify-between gap-2">
-                <span className="text-xs text-gray-500 truncate">
+              {/* Internal Resolution client total (Scope-specific) — called out in
+                  its own color — + the standardized save indicator, on one row
+                  directly under the status (no extra gap above). */}
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-heading font-semibold text-violet-700 truncate">
                   Internal Resolution: ${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <span className="shrink-0">

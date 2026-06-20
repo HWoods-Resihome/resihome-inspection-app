@@ -1610,7 +1610,7 @@ export function QuestionForm({
                 the full template name AND the status chip fit without truncating
                 (Unlock is now a small bubble, so there's room). min-h matches the
                 Unlock/Back control row so the status chip lines up with them. */}
-            <div className="flex items-center gap-2 min-h-[36px]">
+            <div className="flex items-center gap-2">
               <FitText
                 text={templateLabel}
                 className="font-heading font-bold text-gray-900 flex-1 min-w-0"
@@ -1662,7 +1662,7 @@ export function QuestionForm({
               }
               onCancel();
             }}
-            className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
+            className="inline-flex items-center gap-1 h-9 px-2.5 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white"
             title="Save and go back"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
@@ -1701,7 +1701,7 @@ export function QuestionForm({
                 className="font-heading font-semibold text-ink"
               />
               <div className="text-xs text-gray-500 truncate">
-                {bedrooms} bed / {bathrooms} bath
+                {bedrooms} Bed / {bathrooms} Bath
                 {squareFootage != null && squareFootage > 0 && (
                   <span> &middot; {squareFootage.toLocaleString()} sqft</span>
                 )}
@@ -1717,48 +1717,38 @@ export function QuestionForm({
                   {moveInReadyDate && <span>MIR: {moveInReadyDate}</span>}
                 </div>
               )}
-              {/* Order: address → details → listing line → Pass/Fail tally. */}
+              {/* Listing line (status · price · listed date) — SAME font/size/
+                  weight/color as the meta lines above so it reads as one block. */}
               {!isCommunity && (listingStatus || (typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? (
-                <div className="text-xs text-emerald-700 font-heading font-semibold truncate">
-                  {/* Listing status from the listing object (Active / Deposit
-                      Taken), shown in front of the price as plain colored text:
-                      green for Active, amber otherwise. */}
-                  {listingStatus && (
-                    <span className={/active/i.test(listingStatus) ? '' : 'text-amber-600'}>{listingStatus}</span>
-                  )}
+                <div className="text-xs text-gray-500 truncate">
+                  {listingStatus && <span>{listingStatus}</span>}
                   {typeof listingPrice === 'number' && listingPrice > 0 && (
                     <span>{listingStatus ? ' · ' : ''}Listing ${listingPrice.toLocaleString()}</span>
                   )}
                   {listingDate && (
-                    <span className="text-gray-500 font-normal">
-                      {(listingStatus || (typeof listingPrice === 'number' && listingPrice > 0)) ? ' · ' : ''}Listed {listingDate}
-                    </span>
+                    <span>{(listingStatus || (typeof listingPrice === 'number' && listingPrice > 0)) ? ' · ' : ''}Listed {listingDate}</span>
                   )}
                 </div>
               ) : null}
-              {/* Bottom line: live Pass/Fail tally (left, updates as selections
-                  are made) + the save indicator (right). Both share THIS row only
-                  — keeping the save indicator here, rather than as a sibling of
-                  the whole info column, means the address/listing lines above
-                  keep their full width and don't truncate. The save indicator is
-                  hidden on short landscape to reclaim space; the
-                  read-only/completed status lives in the top banner bar. */}
-              {(scopeStyle || !readOnly) && (
-                <div className="mt-0.5 flex items-end justify-between gap-2">
-                  {scopeStyle ? (
-                    <div className="flex items-center gap-1.5 text-[11px] font-heading font-bold">
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{passCount} Pass</span>
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{failCount} Fail</span>
-                    </div>
-                  ) : <span aria-hidden />}
-                  {!readOnly && (
-                    <div className="lz-hide shrink-0 text-right">
-                      <SaveIndicator phase={autosave.saveState.kind} />
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
+            {/* Right column: live Pass/Fail tally stacked ABOVE the standardized
+                save indicator, right-aligned and vertically centered. Keeping them
+                here (instead of a full-width row below) removes a line and trims
+                the header's height. The save indicator is hidden on short
+                landscape to reclaim space. */}
+            {(scopeStyle || !readOnly) && (
+              <div className="shrink-0 flex flex-col items-end justify-center gap-1">
+                {scopeStyle && (
+                  <div className="flex items-center gap-1.5 text-[11px] font-heading font-bold">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{passCount} Pass</span>
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{failCount} Fail</span>
+                  </div>
+                )}
+                {!readOnly && (
+                  <div className="lz-hide text-right"><SaveIndicator phase={autosave.saveState.kind} /></div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </header>

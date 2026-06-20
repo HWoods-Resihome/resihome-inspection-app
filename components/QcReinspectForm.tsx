@@ -704,7 +704,7 @@ export function QcReinspectForm(props: Props) {
       <div className="pt-3 pb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 min-h-[36px]">
+            <div className="flex items-center gap-2">
               <FitText text={props.templateLabel} className="font-heading font-bold text-gray-900 flex-1 min-w-0" max={20} min={11} />
               {statusLabel && (
                 <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>{statusLabel.label}</span>
@@ -741,7 +741,7 @@ export function QcReinspectForm(props: Props) {
             <button
               type="button"
               onClick={props.onCancel}
-              className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg px-2.5 py-1.5 bg-white"
+              className="inline-flex items-center gap-1 h-9 px-2.5 text-xs font-heading font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white"
               title="Go back"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
@@ -762,7 +762,7 @@ export function QcReinspectForm(props: Props) {
           <div className="min-w-0 flex-1">
             <FitText text={props.propertyName} className="font-heading font-semibold text-ink" />
             <div className="text-xs text-gray-500 truncate">
-              {props.bedrooms} bed / {props.bathrooms} bath
+              {props.bedrooms} Bed / {props.bathrooms} Bath
               {props.squareFootage != null && props.squareFootage > 0 && (
                 <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
               )}
@@ -776,17 +776,18 @@ export function QcReinspectForm(props: Props) {
                 {props.moveInReadyDate && <span>MIR: {props.moveInReadyDate}</span>}
               </div>
             )}
-            {/* Bottom row: live Pass/Fail tally (left) + the standardized save
-                indicator (right) — same layout/format as every other template. */}
-            <div className="mt-0.5 flex items-end justify-between gap-2">
-              <div className="flex items-center gap-1.5 text-[11px] font-heading font-bold">
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{totalPass} Pass</span>
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{totalFail} Fail</span>
-              </div>
-              {!props.readOnly && (
-                <div className="shrink-0 text-right"><SaveIndicator phase={saveStatus} /></div>
-              )}
+          </div>
+          {/* Right column: Pass/Fail tally stacked ABOVE the standardized save
+              indicator, right-aligned and vertically centered — same layout as
+              every other template. */}
+          <div className="shrink-0 flex flex-col items-end justify-center gap-1">
+            <div className="flex items-center gap-1.5 text-[11px] font-heading font-bold">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{totalPass} Pass</span>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{totalFail} Fail</span>
             </div>
+            {!props.readOnly && (
+              <div className="text-right"><SaveIndicator phase={saveStatus} /></div>
+            )}
           </div>
         </div>
       </header>
