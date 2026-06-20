@@ -1717,10 +1717,16 @@ export function QuestionForm({
                   {moveInReadyDate && <span>MIR: {moveInReadyDate}</span>}
                 </div>
               )}
-              {/* Listing line (status · price · listed date) — SAME font/size/
-                  weight/color as the meta lines above so it reads as one block. */}
+              {/* Listing line (status · price · listed date). SAME font/size/
+                  weight as the meta lines above (text-xs, normal weight) — only
+                  the COLOR differs: green when Active, amber otherwise, so listing
+                  state still reads at a glance. */}
               {!isCommunity && (listingStatus || (typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? (
-                <div className="text-xs text-gray-500 truncate">
+                <div className={`text-xs truncate ${
+                  listingStatus
+                    ? (/active/i.test(listingStatus) ? 'text-emerald-700' : 'text-amber-600')
+                    : 'text-gray-500'
+                }`}>
                   {listingStatus && <span>{listingStatus}</span>}
                   {typeof listingPrice === 'number' && listingPrice > 0 && (
                     <span>{listingStatus ? ' · ' : ''}Listing ${listingPrice.toLocaleString()}</span>
