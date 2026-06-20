@@ -34,6 +34,9 @@ interface Props {
   propertyName?: string;
   propertyRecordId?: string;
   propertyValues?: Record<string, string | number | null | undefined>;
+  /** True when the property is associated to a Community object in HubSpot.
+   *  Gates community-only questions (e.g. mailbox keys). */
+  hasCommunity?: boolean;
   filterSizeOptions?: string[];
   lineExists?: (lineItemCode: string) => boolean;
   onAddLine?: (rule: FcAddLineRule, questionId: string) => Promise<{ externalId: string; costLabel: string } | null>;
@@ -137,6 +140,7 @@ export function FinalChecklist(props: Props) {
       (props.propertyValues?.air_filters___type__2 as string) || null,
       (props.propertyValues?.air_filters___type__3 as string) || null,
     ],
+    hasCommunity: !!props.hasCommunity,
   };
   const skipLineRules = !props.onAddLine;
 
@@ -574,6 +578,7 @@ export function FinalChecklist(props: Props) {
   }
 
   function visible(q: FcQuestion): boolean {
+    if (q.requiresCommunity && !props.hasCommunity) return false;
     if (!q.showWhenProperty) return true;
     const v = num(props.propertyValues?.[q.showWhenProperty.field]);
     if (q.showWhenProperty.gt != null) return (v ?? 0) > q.showWhenProperty.gt;

@@ -560,6 +560,7 @@ export default function ExistingInspection() {
           squareFootage={propertySquareFootage}
           propertyStatus={inspection.propertyStatusAtCompletion || propertyStatus}
           moveInReadyDate={moveInReadyDate}
+          communityName={communityName}
           listingPrice={listingPrice}
           listingDate={listingDate}
           lastTenantMonths={propertyLastTenantMonths}

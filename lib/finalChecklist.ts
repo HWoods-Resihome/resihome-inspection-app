@@ -99,6 +99,9 @@ export interface FcQuestion {
 
   // --- conditional visibility on a property field ---
   showWhenProperty?: { field: string; gt?: number };
+  // Only show when the property is associated to a Community object in HubSpot
+  // (e.g. mailbox keys — non-community homes have none, so the question is hidden).
+  requiresCommunity?: boolean;
 
   // --- photo_set ---
   photos?: { id: string; label: string; required: boolean }[];
@@ -145,6 +148,9 @@ export interface FcCompletionCtx {
   /** True if a line with this catalog code already exists anywhere in the scope.
    *  When it does, the add-line prompt is auto-satisfied (no approve/decline). */
   lineExists?: (lineItemCode: string) => boolean;
+  /** True when the inspection's property is associated to a Community object in
+   *  HubSpot — gates community-only questions (e.g. mailbox keys). */
+  hasCommunity?: boolean;
 }
 
 /** How many filter-size pickers are in play given the answered/prefilled qty. */
@@ -178,6 +184,8 @@ export function fcMissingLineCodes(catalogCodes: Set<string> | string[]): string
 
 /** Whether a question is currently shown (respects conditional visibility). */
 export function fcQuestionVisible(q: FcQuestion, ctx: FcCompletionCtx): boolean {
+  // Community-only questions (mailbox keys) hide on non-community properties.
+  if (q.requiresCommunity && !ctx.hasCommunity) return false;
   if (q.showWhenProperty) {
     const v = ctx.septicFee ?? 0;
     return v > (q.showWhenProperty.gt ?? 0);
@@ -444,6 +452,8 @@ export const FINAL_CHECKLIST: FcSection[] = [
         type: 'single_select',
         options: ['Yes', 'No', 'N/A'],
         required: true,
+        // Only community-associated properties have mailboxes/keys; hide otherwise.
+        requiresCommunity: true,
         photoRequiredOnValues: ['Yes'],
         noteRequiredOnValues: ['Yes'],
         notePrompt: 'Where Are They Left?',

@@ -316,6 +316,7 @@ export function QuestionForm({
     airQtyPrefill: propertyAirFiltersTotal ?? null,
     filterOptionsAvailable: (filterSizeOptions?.length || 0) > 0,
     filterPrefills: [propertyAirFiltersType1 || null, propertyAirFiltersType2 || null, propertyAirFiltersType3 || null],
+    hasCommunity: !!communityName,  // gates the community-only mailbox-keys question
   };
 
   // Transform the raw questions:
@@ -1556,6 +1557,7 @@ export function QuestionForm({
       propertyName={propertyName}
       propertyRecordId={propertyRecordId}
       propertyValues={propertyValues}
+      hasCommunity={!!communityName}
       filterSizeOptions={filterSizeOptions}
       readOnly={readOnly}
     />

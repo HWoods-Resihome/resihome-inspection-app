@@ -56,12 +56,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       } catch { /* best-effort — never blocks the detail load */ }
 
       const isCommunityTpl = data.inspection.templateType === 'pm_community_inspection';
+      // The Final Checklist (mailbox-keys question) renders on scope / 1099 /
+      // vacancy and is gated on the property's Community association, so fetch the
+      // community name for those too — not only the Community template's header.
+      const FC_OR_COMMUNITY = new Set([
+        'pm_community_inspection', 'pm_scope_rate_card',
+        'leasing_agent_1099_property_inspection', 'pm_vacancy_occupancy_check',
+      ]);
+      const wantCommunity = FC_OR_COMMUNITY.has(data.inspection.templateType);
       const [answers, listing, communityName] = await Promise.all([
         answersPromise,
         data.propertyIdRef
           ? fetchActiveListingForProperty(data.propertyIdRef).catch(() => null)
           : Promise.resolve(null),
-        (isCommunityTpl && data.propertyIdRef)
+        (wantCommunity && data.propertyIdRef)
           ? fetchPropertyCommunityName(data.propertyIdRef).catch(() => null)
           : Promise.resolve(null),
       ]);

@@ -99,6 +99,9 @@ interface RateCardFormProps {
   /** Move-in Ready date from the listing (M/D/YY) — shown as "MIR: …" to the
    *  right of the property status, matching the other templates' headers. */
   moveInReadyDate?: string | null;
+  /** Community object name the property is associated to in HubSpot (if any).
+   *  Gates the community-only mailbox-keys question in the Final Checklist. */
+  communityName?: string | null;
   /** Months the last tenant occupied the home (from
    *  `last_tenant_time_in_home_months` on the property). Drives AI-review
    *  depreciation. null/absent → AI review defaults to 12. */
@@ -2426,6 +2429,7 @@ export function RateCardForm(props: RateCardFormProps) {
       airQtyPrefill: props.propertyAirFiltersTotal ?? null,
       filterOptionsAvailable: (props.filterSizeOptions?.length ?? 0) > 0,
       filterPrefills: [props.propertyAirFiltersType1 ?? null, props.propertyAirFiltersType2 ?? null, props.propertyAirFiltersType3 ?? null],
+      hasCommunity: !!props.communityName,
       lineExists: fcLineExists,
     }),
     [fcAnswers, props.propertySepticFee, props.propertyAirFiltersTotal, props.filterSizeOptions,
@@ -4124,6 +4128,7 @@ export function RateCardForm(props: RateCardFormProps) {
             propertyName={props.propertyName}
             propertyRecordId={props.propertyRecordId}
             propertyValues={fcPropertyValues}
+            hasCommunity={!!props.communityName}
             filterSizeOptions={props.filterSizeOptions}
             lineExists={fcLineExists}
             onAddLine={handleFcAddLine}
