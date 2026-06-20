@@ -966,7 +966,7 @@ const STATUS_VARIANTS: Record<string, string[]> = {
 const CANCELLED_VARIANTS = ['cancelled', 'canceled', 'Cancelled', 'Canceled'];
 
 export type InspectionStatusKey = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
-export type InspectionSortField = 'updated' | 'scheduled' | 'address' | 'inspector' | 'price' | 'property_status';
+export type InspectionSortField = 'date' | 'updated' | 'scheduled' | 'address' | 'inspector' | 'price' | 'property_status';
 
 export interface InspectionQuery {
   search?: string;
@@ -1100,12 +1100,14 @@ function inspectionFilterGroups(q: InspectionQuery): any[] {
 }
 
 const SORT_PROPERTY: Record<InspectionSortField, string> = {
-  // 'updated' sorts on last_edited_at so the list order matches the date shown on
-  // the cards (`last_edited_at || hs_lastmodifieddate`) and backend-only writes
-  // (e.g. PDF regeneration) don't reorder the list. This MUST stay a single sort:
-  // HubSpot's CRM Search API rejects more than one sort property with a 400
-  // ("too many sorts; max allowed: 1"). Records with no last_edited_at sort last
-  // in DESC and still render via the card's display fallback.
+  // 'date' is the single combined date sort: it orders on last_edited_at, which
+  // we initialize at create to the scheduled date and bump on every edit — so it
+  // reads as "updated date, falling back to scheduled date when nothing's been
+  // edited yet". This MUST stay a single sort: HubSpot's CRM Search API rejects
+  // more than one sort property with a 400 ("too many sorts; max allowed: 1").
+  date: 'last_edited_at',
+  // 'updated' / 'scheduled' kept as back-compat aliases for any saved view; the
+  // UI now offers only the combined 'date'.
   updated: 'last_edited_at',
   scheduled: 'scheduled_date',
   address: 'property_address_snapshot',
@@ -4065,6 +4067,53 @@ export async function backfillInspectionTotals(
  *
  * `email→name` is built once from fetchUsers() and reused across the whole run.
  */
+/**
+ * Backfill the combined-date sort key: for inspections with no `last_edited_at`
+ * (e.g. scheduled-but-never-edited, or records created before create-time
+ * seeding), set it from the scheduled date (falling back to created date) so the
+ * single "Date" sort orders them sensibly. Paginated + resumable; only fills
+ * empty values (never overwrites a real edit timestamp). Best-effort.
+ */
+export async function backfillLastEditedDate(
+  opts: { after?: string; max?: number } = {},
+): Promise<{ processed: number; updated: number; skipped: number; errors: number; nextAfter: string | null }> {
+  const { inspection: typeId } = typeIds();
+  const max = opts.max ?? 200;
+  let after = opts.after;
+  let processed = 0, updated = 0, skipped = 0, errors = 0;
+  const toIso = (raw: any): string => {
+    if (raw == null || raw === '') return '';
+    const s = String(raw).trim();
+    const t = /^\d+$/.test(s) ? Number(s) : Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s}T12:00:00Z` : s);
+    return isFinite(t) && !isNaN(t) ? new Date(t).toISOString() : '';
+  };
+
+  while (processed < max) {
+    const body: any = {
+      filterGroups: [],
+      properties: ['last_edited_at', 'scheduled_date', 'hs_createdate'],
+      limit: 100,
+    };
+    if (after) body.after = after;
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST', body: JSON.stringify(body),
+    });
+    for (const r of resp.results || []) {
+      processed++;
+      const p = r.properties || {};
+      if (String(p.last_edited_at || '').trim()) { skipped++; continue; } // already has it
+      const iso = toIso(p.scheduled_date) || toIso(p.hs_createdate);
+      if (!iso) { skipped++; continue; }
+      try { await updateInspection(r.id, { last_edited_at: iso }); updated++; }
+      catch (e) { errors++; console.warn(`[last-edited-backfill] ${r.id} failed:`, e); }
+    }
+    after = resp.paging?.next?.after;
+    if (!after) return { processed, updated, skipped, errors, nextAfter: null };
+    if (processed >= max) return { processed, updated, skipped, errors, nextAfter: after };
+  }
+  return { processed, updated, skipped, errors, nextAfter: after || null };
+}
+
 /**
  * Backfill: sync every inspection's inspector_name/email FROM its HubSpot record
  * Owner (hubspot_owner_id). Paginated + resumable; idempotent (rows already in

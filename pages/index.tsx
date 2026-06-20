@@ -21,10 +21,10 @@ type StatusCounts = { all: number; scheduled: number; in_progress: number; pendi
 
 // The five sortable fields, in dropdown order. Value is what the server's
 // ?sort= accepts; label is what the Sort menu shows.
-type SortField = 'updated' | 'scheduled' | 'address' | 'inspector' | 'price' | 'property_status';
+type SortField = 'date' | 'address' | 'inspector' | 'price' | 'property_status';
 const SORT_OPTIONS: { value: SortField; label: string }[] = [
-  { value: 'updated', label: 'Updated' },
-  { value: 'scheduled', label: 'Scheduled' },
+  // One combined date sort (last-updated, falling back to scheduled date).
+  { value: 'date', label: 'Date' },
   { value: 'address', label: 'Address' },
   { value: 'inspector', label: 'Inspector' },
   { value: 'price', label: 'Client $' },
@@ -102,10 +102,11 @@ export default function Home() {
 
   const [search, setSearch] = useState<string>(savedView.search ?? '');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(savedView.statusFilter ?? 'all');
-  // Sort field + direction. Default: most-recently-updated first. The server
-  // accepts updated | scheduled | address | inspector | price.
+  // Sort field + direction. Default: the combined Date sort, newest first. The
+  // server accepts date | address | inspector | price | property_status (older
+  // saved views of 'updated'/'scheduled' fall through to 'date').
   const [sortField, setSortField] = useState<SortField>(
-    SORT_OPTIONS.some((o) => o.value === savedView.sortField) ? savedView.sortField : 'updated');
+    SORT_OPTIONS.some((o) => o.value === savedView.sortField) ? savedView.sortField : 'date');
   // "Sort" dropdown open state (single control replacing the old field + arrow).
   const [sortOpen, setSortOpen] = useState(false);
   const sortMenuRef = useRef<HTMLDivElement | null>(null);

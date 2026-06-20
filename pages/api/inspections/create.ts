@@ -193,6 +193,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       propertyRecordId: body.propertyRecordId,
     });
 
+    // Seed the combined-date sort key: initialize last_edited_at to the scheduled
+    // date so a brand-new (unedited) scheduled inspection sorts by its scheduled
+    // date. The first real edit bumps it to the edit time (touchInspection), so
+    // the single "Date" sort reads as "updated date, falling back to scheduled".
+    // Best-effort — swallow if the property isn't created in this portal yet.
+    try {
+      await updateInspection(inspectionId, {
+        last_edited_at: new Date(`${scheduledDateValue}T12:00:00.000Z`).toISOString(),
+      });
+    } catch { /* last_edited_at absent → hs_lastmodifieddate fallback + backfill cover it */ }
+
     // QC: copy the source Rate Card's line items onto the new QC inspection so
     // it's a self-contained snapshot. Done after creation so we have the new id.
     let copiedLines = 0;
