@@ -1199,6 +1199,21 @@ export function QcReinspectForm(props: Props) {
         </div>
       )}
 
+      {/* Completed / read-only: show the recorded overall verdict (the editable
+          selector above is hidden once submitted, so without this the inspector
+          couldn't see whether the re-inspect passed or failed). */}
+      {props.readOnly && verdict && (
+        <div className="border-2 border-gray-200 rounded-xl p-4 mb-4 mt-4">
+          <div className="text-sm font-bold text-gray-900 mb-2">Overall Inspection Result</div>
+          <span className={
+            'inline-flex items-center gap-1.5 px-4 py-2 rounded-lg font-bold border-2 ' +
+            (verdict === 'pass' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-brand text-white border-brand')
+          }>
+            {verdict === 'pass' ? '✓ Pass' : '✗ Fail'}
+          </span>
+        </div>
+      )}
+
       {/* Spacer so the fixed footer doesn't cover the last content */}
       {!props.readOnly && <div className="h-20" />}
 
