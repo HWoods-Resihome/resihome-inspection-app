@@ -18,7 +18,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatMoney, formatQty } from '@/lib/photoUpload';
-import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, countQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { loadCachedQcData, saveCachedQcData } from '@/lib/offlineCache';
 import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { CameraCapture } from '@/components/CameraCapture';
@@ -500,14 +500,14 @@ export function QcReinspectForm(props: Props) {
   const rehydratedRef = useRef(false);
 
   const runQcFlush = async () => {
-    if (!rehydratedRef.current) return; // wait until drafts are in state to swap
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (!rehydratedRef.current) return undefined; // wait until drafts are in state to swap
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return undefined;
     const sectionSwaps = new Map<string, string>();
     const lineSwaps = new Map<string, string>();
-    await flushQueuedPhotos(props.inspectionRecordId, ({ sectionId, oldUrl, newUrl, replacesUrl, lineExternalId }) => {
+    const flushResult = await flushQueuedPhotos(props.inspectionRecordId, ({ sectionId, oldUrl, newUrl, replacesUrl, lineExternalId }) => {
       if (lineExternalId) { if (oldUrl) lineSwaps.set(oldUrl, newUrl); if (replacesUrl) lineSwaps.set(replacesUrl, newUrl); }
       else { if (oldUrl) sectionSwaps.set(oldUrl, newUrl); if (replacesUrl) sectionSwaps.set(replacesUrl, newUrl); }
-    }).catch(() => ({ synced: 0 } as any));
+    }).catch(() => ({ synced: 0, remaining: 0 } as any));
     if (sectionSwaps.size) {
       const cur = afterPhotosRef.current;
       const next: Record<string, string[]> = { ...cur };
@@ -535,6 +535,7 @@ export function QcReinspectForm(props: Props) {
       });
       if (toSave.length) { setLines(next); for (const t of toSave) void saveLineRef.current(t.id, t.urls); }
     }
+    return flushResult;
   };
   const runQcFlushRef = useRef(runQcFlush); runQcFlushRef.current = runQcFlush;
 
@@ -675,6 +676,34 @@ export function QcReinspectForm(props: Props) {
     if (verdict === 'fail' && !overallNote.trim()) {
       void dialog.alert('Add an overall failure comment explaining why the re-inspect failed — it’s included on the report.');
       return;
+    }
+    // Don't finalize while After photos are still uploading — qc-finalize re-reads
+    // the answers from HubSpot to build the report, so a queued (unsynced) photo
+    // would be missing from the record. Retry, then HARD-BLOCK while pending;
+    // only allow finalizing without them when a photo is genuinely stuck.
+    {
+      let pendingPhotos = 0;
+      let lastErr: string | undefined;
+      for (let i = 0; i < 5; i++) {
+        try { const fr = await runQcFlushRef.current(); lastErr = (fr as any)?.lastError; } catch { /* checked below */ }
+        try { pendingPhotos = await countQueuedPhotos(props.inspectionRecordId); } catch { pendingPhotos = 0; }
+        if (pendingPhotos === 0) break;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      if (pendingPhotos > 0) {
+        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+        if (offline) {
+          void dialog.alert(`${pendingPhotos} After photo${pendingPhotos === 1 ? '' : 's'} still need${pendingPhotos === 1 ? 's' : ''} to upload, but you're offline. Move to signal and stay on this screen until they finish — they aren't saved yet.`);
+          return;
+        }
+        const stuck = /failed to upload\s*\d+/i.test(lastErr || '');
+        if (!stuck) {
+          void dialog.alert(`${pendingPhotos} After photo${pendingPhotos === 1 ? '' : 's'} ${pendingPhotos === 1 ? 'is' : 'are'} still uploading. Keep this screen open a few more seconds, then submit again — ${pendingPhotos === 1 ? "it isn't" : "they aren't"} saved yet.`);
+          return;
+        }
+        const proceed = await dialog.confirm(`${pendingPhotos} After photo${pendingPhotos === 1 ? '' : 's'} keep${pendingPhotos === 1 ? 's' : ''} failing to upload (check your signal). If you submit now ${pendingPhotos === 1 ? 'it' : 'they'} will NOT be on the report. Submit without ${pendingPhotos === 1 ? 'it' : 'them'}?`, { confirmLabel: 'Submit without photos', cancelLabel: 'Keep trying' });
+        if (!proceed) return;
+      }
     }
     submittingRef.current = true;
     setSubmitting(true);

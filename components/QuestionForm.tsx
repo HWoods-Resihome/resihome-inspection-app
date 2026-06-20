@@ -271,8 +271,10 @@ export function QuestionForm({
   }, []);
 
   // Persist the checklist as a single JSON-blob answer (mirrors the rate card).
-  const saveFc = useCallback(async (toSave: FcAnswers): Promise<void> => {
-    if (readOnly) return;
+  // Returns true on a confirmed save, false on a failed/offline write — so the
+  // submit gate can BLOCK finalize and never lose the checklist's selections/notes.
+  const saveFc = useCallback(async (toSave: FcAnswers): Promise<boolean> => {
+    if (readOnly) return true;
     const body = {
       upserts: [{
         recordId: fcRecordIdRef.current || undefined,
@@ -295,8 +297,9 @@ export function QuestionForm({
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...body, bumpStatusToInProgress: true }),
       });
-      if (r.ok) { const d = await r.json(); const rid = d.results?.[0]?.recordId; if (rid) fcRecordIdRef.current = rid; }
-    } catch { /* offline — the next save / submit retries */ }
+      if (r.ok) { const d = await r.json(); const rid = d.results?.[0]?.recordId; if (rid) fcRecordIdRef.current = rid; return true; }
+      return false;
+    } catch { return false; /* offline — the next save / submit retries */ }
   }, [readOnly, inspectionRecordId, inspectionExternalId, fcStripBlobs]);
 
   const onFcPatch = useCallback((questionId: string, patch: Partial<FcAnswerState>) => {
@@ -1431,7 +1434,18 @@ export function QuestionForm({
     }
 
     // Make sure the HVAC/Smart Home checklist blob is persisted before finalize.
-    if (fcEnabled) { try { await saveFc(fcAnswers); } catch { /* surfaced via answers save */ } }
+    // Its selections + notes ride in this one record, so a failed save would lose
+    // them — BLOCK submit (don't finalize) rather than complete without them.
+    if (fcEnabled) {
+      const fcOk = await saveFc(fcAnswers);
+      if (!fcOk) {
+        await dialog.alert(
+          'Could not save the HVAC / Smart Home checklist before submitting. ' +
+          'Your inspection was NOT submitted so nothing is lost — check your connection and try Submit again.',
+        );
+        return;
+      }
+    }
 
     // Maintenance-ticket outcome (1099 / vacancy fails). Append the inspector's
     // answers so they print on the PDF, and pass the structured outcome up so the
