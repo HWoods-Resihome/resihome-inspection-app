@@ -118,18 +118,14 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
         </div>
       </div>
       {/* Meta row: date (left) · property status (center, muted, truncates) ·
-          inspector (right). Keeping the status here — not on the address line —
-          stops it muddying the address and never adds a second line. */}
-      <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
-        {dateValue
-          ? <span className="shrink-0 whitespace-nowrap">{dateValue}</span>
-          : <span />}
-        {i.propertyStatus && (
-          <span className="min-w-0 flex-1 truncate text-center text-gray-400" title={i.propertyStatus}>
-            {i.propertyStatus}
-          </span>
-        )}
-        {i.inspectorName && <span className="shrink-0 truncate text-right max-w-[42%]">{i.inspectorName}</span>}
+          inspector (right). Three EQUAL-width cells so the status sits at the
+          card's true center regardless of the date/inspector lengths. */}
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        <span className="flex-1 min-w-0 truncate whitespace-nowrap">{dateValue || ''}</span>
+        <span className="flex-1 min-w-0 truncate text-center text-gray-400" title={i.propertyStatus || undefined}>
+          {i.propertyStatus || ''}
+        </span>
+        <span className="flex-1 min-w-0 truncate text-right">{i.inspectorName || ''}</span>
       </div>
     </>
   );
