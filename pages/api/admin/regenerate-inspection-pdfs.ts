@@ -75,7 +75,18 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
       qOrder.set(q.questionIdExternal, ord); qOrder.set(normQid(q.questionIdExternal), ord);
     }
   } catch { /* prettify fallback below */ }
-  const questionText = (qid: string) => qText.get(qid) || qText.get(normQid(qid)) || prettifyQid(qid);
+  // The maintenance-ticket answers are SYNTHETIC (questionIdExternal
+  // 'maint_ticket_request' / 'maint_ticket_description') — they have no template
+  // question, so the lookup below would prettify them to "Maint Ticket Request".
+  // That breaks the PDF's isMaintRequestQ/isMaintDescQ matching (which keys off
+  // the exact "Submit a maintenance ticket?" text), so a regenerated report would
+  // miss the maintenance-ticket stat + summary/Review rows. Map them to the same
+  // text the live finalize path saves (see QuestionForm handleSubmit).
+  const SYNTHETIC_Q_TEXT: Record<string, string> = {
+    maint_ticket_request: 'Submit a maintenance ticket?',
+    maint_ticket_description: 'Maintenance ticket description',
+  };
+  const questionText = (qid: string) => SYNTHETIC_Q_TEXT[qid] || qText.get(qid) || qText.get(normQid(qid)) || prettifyQid(qid);
   const orderOf = (qid: string) => qOrder.get(qid) || qOrder.get(normQid(qid)) || { s: 9999, d: 9999 };
 
   const answers = await fetchAnswersForInspection(id);
