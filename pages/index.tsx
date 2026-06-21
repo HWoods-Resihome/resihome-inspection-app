@@ -5,6 +5,7 @@ import { useAppDialog } from '@/components/AppDialog';
 import { useRouter } from 'next/router';
 import type { InspectionSummary } from '@/lib/types';
 import { InspectionCard } from '@/components/InspectionCard';
+import { INSPECTION_NAV_KEY } from '@/components/InspectionPager';
 import { ListPicker } from '@/components/ListPicker';
 import {
   loadCachedRateCard, saveCachedRateCard,
@@ -296,6 +297,9 @@ export default function Home() {
     // "Cancelled" — that's the stale-index window) — drop it so it falls off now.
     const filtered = raw.filter((i) => !isCancelledStatus(i.status) && !cancelledSet.has(i.recordId));
     setInspections(filtered);
+    // Stash the CURRENT visible order so the inspection page's prev/next pager can
+    // step through exactly this filtered/sorted list.
+    try { sessionStorage.setItem(INSPECTION_NAV_KEY, JSON.stringify(filtered.map((i) => i.recordId))); } catch { /* non-fatal */ }
     // While a cancel is still working through the index (the server keeps
     // returning a just-cancelled id), keep the optimistic counts/total we set at
     // cancel time. Once the server stops returning them, it has reindexed — adopt

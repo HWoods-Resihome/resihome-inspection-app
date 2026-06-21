@@ -24,6 +24,7 @@ import { isHvacSection, isSmartHomeSection } from '@/lib/scopeWidgetSections';
 import { FinalChecklist } from '@/components/FinalChecklist';
 import { SyncingBadge } from '@/components/SyncingBadge';
 import { UnlockButton } from '@/components/UnlockButton';
+import InspectionPager from '@/components/InspectionPager';
 import { FitText } from '@/components/FitText';
 import { openPdf } from '@/lib/pdfViewerBus';
 import {
@@ -92,6 +93,8 @@ type Props = {
   filterSizeOptions?: string[];
   onSubmit: (answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>, meta?: QuestionFormSubmitMeta) => void;
   onCancel: () => void;
+  /** Prev/next pager: save-then-navigate to another inspection id. */
+  onNavigateTo?: (id: string) => void;
 
   // Round B additions:
   // -- The HubSpot Inspection record ID (used for autosave POSTs)
@@ -199,7 +202,7 @@ function slugify(s: string): string {
 
 export function QuestionForm({
   questions, templateType, templateLabel, inspectorName, propertyName, propertyRecordId,
-  bedrooms, bathrooms, squareFootage, propertyStatus, moveInReadyDate, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, moveInDate, communityName, onSubmit, onCancel,
+  bedrooms, bathrooms, squareFootage, propertyStatus, moveInReadyDate, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, moveInDate, communityName, onSubmit, onCancel, onNavigateTo,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
   propertyAirFiltersTotal, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
@@ -1739,6 +1742,14 @@ export function QuestionForm({
               Compact circle to the LEFT of Back; hidden once read-only
               (completed / cancelled / view-only). */}
           <div className="shrink-0 self-start flex flex-row items-center gap-2">
+          <InspectionPager
+            currentId={inspectionRecordId}
+            onNavigate={async (id) => {
+              // Force-save (like Back) before leaving an editable inspection.
+              if (!readOnly) { try { await autosave.flush(true); } catch (e) { console.error('Pager: flush failed', e); } }
+              onNavigateTo?.(id);
+            }}
+          />
           {!readOnly && (
             <UnlockButton
               propertyId={propertyRecordId}

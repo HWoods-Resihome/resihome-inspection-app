@@ -30,6 +30,7 @@ import { useAppDialog } from '@/components/AppDialog';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 import { UnlockButton } from '@/components/UnlockButton';
+import InspectionPager from '@/components/InspectionPager';
 import { FitText } from '@/components/FitText';
 import { SaveIndicator } from '@/components/inspection/SaveIndicator';
 import { openPdf } from '@/lib/pdfViewerBus';
@@ -83,6 +84,8 @@ interface Props {
   readOnly: boolean;
   onSubmit: () => void;
   onCancel: () => void;
+  /** Prev/next pager: navigate to another inspection id (QC persists per-change). */
+  onNavigateTo?: (id: string) => void;
   // Cancel the whole inspection (sets status to cancelled). Absent when readOnly.
   onCancelInspection?: () => void;
 }
@@ -772,6 +775,7 @@ export function QcReinspectForm(props: Props) {
             </div>
           </div>
           <div className="shrink-0 self-start flex flex-row items-center gap-2">
+            <InspectionPager currentId={props.inspectionRecordId} onNavigate={(id) => props.onNavigateTo?.(id)} />
             {!props.readOnly && (
               <UnlockButton
                 propertyId={props.propertyRecordId}

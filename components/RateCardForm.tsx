@@ -20,6 +20,7 @@ import { buildSectionPhotoAnswerProps, buildQaAnswerProps } from '@/lib/answerPr
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
 import { UnlockButton } from '@/components/UnlockButton';
+import InspectionPager from '@/components/InspectionPager';
 import { FitText } from '@/components/FitText';
 import { SaveIndicator } from '@/components/inspection/SaveIndicator';
 import { openPdf } from '@/lib/pdfViewerBus';
@@ -148,6 +149,8 @@ interface RateCardFormProps {
   readOnly?: boolean;
   onSubmit: () => void;
   onCancel: () => void;
+  /** Prev/next pager: save-then-navigate to another inspection id. */
+  onNavigateTo?: (id: string) => void;
   onCancelInspection?: () => void;
 }
 
@@ -3040,6 +3043,22 @@ export function RateCardForm(props: RateCardFormProps) {
     props.onCancel();
   }
 
+  // Prev/next pager: same save-before-leave behavior as handleSaveAndClose, but
+  // navigate to the chosen inspection instead of closing.
+  async function handleNavigateTo(id: string) {
+    try {
+      await commitAndWait();
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      const proceed = await dialog.confirm(
+        `Save failed: ${msg}\n\nLeave anyway? Your unsaved changes will be lost.`,
+        { confirmLabel: 'Leave anyway', cancelLabel: 'Stay' }
+      );
+      if (!proceed) return;
+    }
+    props.onNavigateTo?.(id);
+  }
+
   // At finalize, permanently burn each tagged photo's line label onto the image
   // (bottom-right). Tagging is non-destructive while editing; this is the one
   // place the label is baked in, so the vendor PDF's section-photo grid shows
@@ -3473,6 +3492,9 @@ export function RateCardForm(props: RateCardFormProps) {
                 )}
               </div>
             )}
+            <span className="order-0 flex items-center gap-2">
+              <InspectionPager currentId={props.inspectionRecordId} onNavigate={handleNavigateTo} />
+            </span>
             {/* Unlock (Rently code) — compact circle inline to the LEFT of Back.
                 Hidden once read-only (completed / pending-approval view). */}
             {!props.readOnly && (

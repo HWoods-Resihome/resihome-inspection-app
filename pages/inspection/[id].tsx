@@ -547,6 +547,7 @@ export default function ExistingInspection() {
           readOnly={readOnly}
           onSubmit={() => router.push('/')}
           onCancel={() => router.push('/')}
+          onNavigateTo={(navId) => router.push(`/inspection/${navId}`)}
           onCancelInspection={readOnly ? undefined : handleCancelInspection}
         />
       ) : inspection.templateType === 'pm_scope_rate_card' ? (
@@ -584,6 +585,7 @@ export default function ExistingInspection() {
           sectionListJson={inspection.sectionListJson}
           onSubmit={() => router.push('/')}
           onCancel={() => router.push('/')}
+          onNavigateTo={(navId) => router.push(`/inspection/${navId}`)}
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}
           pdfUrl={shareLinks?.report || inspection.pdfUrl || undefined}
@@ -620,6 +622,7 @@ export default function ExistingInspection() {
           filterSizeOptions={filterSizeOptions}
           onSubmit={handleSubmit}
           onCancel={() => router.push('/')}
+          onNavigateTo={(navId) => router.push(`/inspection/${navId}`)}
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}
           pdfUrl={shareLinks?.report || inspection.pdfUrl || undefined}
