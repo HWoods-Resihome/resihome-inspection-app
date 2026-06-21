@@ -583,6 +583,10 @@ export function QuestionForm({
   // Shown in the Review & Sign-Off section only when its verdict is Fail.
   const [maintTicketWanted, setMaintTicketWanted] = useState<'' | 'Yes' | 'No'>('');
   const [maintTicketDescription, setMaintTicketDescription] = useState('');
+  // Existing record ids of the synthetic maint answers (from a prior submit or
+  // the backfill), so a re-finalize PATCHes them in place instead of creating a
+  // duplicate maint_ticket_request/description record.
+  const maintAnswerRecordIdsRef = useRef<Record<string, string>>({});
 
   // Hydrate the maintenance-ticket widget from the saved synthetic answers
   // ('maint_ticket_request' / 'maint_ticket_description'). They aren't tied to a
@@ -593,10 +597,12 @@ export function QuestionForm({
     if (!existingAnswers || existingAnswers.length === 0) return;
     for (const sa of existingAnswers) {
       if (sa.questionIdExternal === 'maint_ticket_request') {
+        if (sa.recordId) maintAnswerRecordIdsRef.current.maint_ticket_request = sa.recordId;
         const v = (sa.answerValue || '').trim();
         if (/^y/i.test(v)) setMaintTicketWanted('Yes');
         else if (/^n/i.test(v)) setMaintTicketWanted('No');
       } else if (sa.questionIdExternal === 'maint_ticket_description') {
+        if (sa.recordId) maintAnswerRecordIdsRef.current.maint_ticket_description = sa.recordId;
         if (sa.answerValue) setMaintTicketDescription(sa.answerValue);
       }
     }
@@ -1419,7 +1425,8 @@ export function QuestionForm({
         const summarySectionName = summaryInstance?.baseSectionName || 'Review & Sign-Off';
         const summaryKey = firstSummaryKey || 'summary';
         const mkMaintUpsert = (qid: string, qText: string, value: string) => ({
-          recordId: answerRecordIdsRef.current.get(answerKey(qid, summaryKey)) || undefined,
+          recordId: maintAnswerRecordIdsRef.current[qid]
+            || answerRecordIdsRef.current.get(answerKey(qid, summaryKey)) || undefined,
           answerProps: buildQaAnswerProps({
             answerIdExternal: buildAnswerExternalId(inspectionExternalId, qid, summaryKey),
             inspectionIdExternal: inspectionExternalId,
