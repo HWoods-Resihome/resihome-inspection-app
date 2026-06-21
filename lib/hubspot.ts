@@ -2627,14 +2627,86 @@ export function parseListingSnapshot(json: string | null | undefined): ListingIn
   if (!json) return null;
   try {
     const o = JSON.parse(json) || {};
+    const listingStatus = o.listingStatus ?? null;
+    // Mirror the live path: deposit-taken / leased always show a move-in, falling
+    // back to "TBD" when the frozen value is empty (e.g. captured before a lease
+    // start existed) — so completed inspections never hide the field.
+    let moveInDate: string | null = o.moveInDate ?? null;
+    if (!moveInDate && /deposit|leas/i.test(listingStatus || '')) moveInDate = 'TBD';
     return {
       listingPrice: typeof o.listingPrice === 'number' ? o.listingPrice : null,
       listingDate: o.listingDate ?? null,
-      listingStatus: o.listingStatus ?? null,
+      listingStatus,
       moveInReadyDate: o.moveInReadyDate ?? null,
-      moveInDate: o.moveInDate ?? null,
+      moveInDate,
     };
   } catch { return null; }
+}
+
+/** Diagnostic: dump every deal associated to a listing with the exact fields the
+ *  move-in lookup filters on, and whether each one qualifies. Used by
+ *  /api/admin/debug-listing-deals to root-cause a missing Move-In date. */
+export async function debugListingDeals(listingRecordId: string): Promise<any> {
+  const lid = listingTypeId();
+  const did = dealsTypeId();
+  const ids: string[] = [];
+  let after: string | undefined;
+  let pages = 0;
+  do {
+    const qs = new URLSearchParams({ limit: '100' });
+    if (after) qs.set('after', after);
+    const resp = await hubspotFetch(`/crm/v4/objects/${lid}/${listingRecordId}/associations/${did}?${qs.toString()}`);
+    for (const r of resp.results || []) { const id = r.toObjectId ?? r.id; if (id != null) ids.push(String(id)); }
+    after = resp.paging?.next?.after;
+  } while (after && ++pages < 20);
+  const wantProps = ['pipeline', 'dealstage', 'hf_transaction_id', 'lease_start_date', 'createdate', 'hs_createdate'];
+  const deals: any[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const resp = await hubspotFetch(`/crm/v3/objects/${did}/batch/read`, {
+      method: 'POST', body: JSON.stringify({ properties: wantProps, inputs: chunk.map((id) => ({ id })) }),
+    });
+    for (const rec of resp.results || []) {
+      const p = rec.properties || {};
+      const pipelineOk = String(p.pipeline ?? '') === LEASING_PIPELINE_ID;
+      const stageOk = LEASING_MOVEIN_DEALSTAGES.has(String(p.dealstage ?? ''));
+      const hfOk = !!String(p.hf_transaction_id ?? '').trim();
+      deals.push({
+        id: rec.id, pipeline: p.pipeline ?? null, dealstage: p.dealstage ?? null,
+        hf_transaction_id: p.hf_transaction_id ?? null, lease_start_date: p.lease_start_date ?? null,
+        createdate: p.createdate || p.hs_createdate || null,
+        qualifies: pipelineOk && stageOk && hfOk, checks: { pipelineOk, stageOk, hfOk },
+      });
+    }
+  }
+  return {
+    listingTypeId: lid, dealsTypeId: did, leasingPipeline: LEASING_PIPELINE_ID,
+    allowedDealstages: Array.from(LEASING_MOVEIN_DEALSTAGES),
+    associatedDealCount: ids.length, computedMoveInDate: await fetchListingMoveInDate(listingRecordId), deals,
+  };
+}
+
+/** Diagnostic: resolve an inspection → its property → associated listings, and
+ *  run debugListingDeals on each. */
+export async function debugInspectionListings(inspectionRecordId: string): Promise<any> {
+  const tids = typeIds();
+  const lid = listingTypeId();
+  const insp = await hubspotFetch(`/crm/v3/objects/${tids.inspection}/${inspectionRecordId}?properties=${encodeURIComponent('property_id_ref')}`);
+  const propertyIdRef = (insp.properties?.property_id_ref || '').toString().trim();
+  if (!propertyIdRef) return { error: 'inspection has no property_id_ref' };
+  const ids: string[] = [];
+  let after: string | undefined;
+  let pages = 0;
+  do {
+    const qs = new URLSearchParams({ limit: '100' });
+    if (after) qs.set('after', after);
+    const resp = await hubspotFetch(`/crm/v4/objects/${tids.property}/${propertyIdRef}/associations/${lid}?${qs.toString()}`);
+    for (const r of resp.results || []) { const id = r.toObjectId ?? r.id; if (id != null) ids.push(String(id)); }
+    after = resp.paging?.next?.after;
+  } while (after && ++pages < 20);
+  const listings: any[] = [];
+  for (const id of ids) listings.push({ listingId: id, ...(await debugListingDeals(id)) });
+  return { propertyIdRef, listingIds: ids, listings };
 }
 
 export async function fetchActiveListingForProperty(
