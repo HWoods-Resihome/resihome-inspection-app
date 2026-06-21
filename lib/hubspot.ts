@@ -2722,11 +2722,12 @@ export async function fetchActiveListingForProperty(
       ? (displayInfo.labels[pick.displayRaw.toLowerCase()] || pick.displayRaw)
       : '';
     const listingStatus = formatListingStatus(displayLabel) || formatListingStatus(pick.status);
-    // Deposit-taken AND leased listings carry a meaningful move-in (the lease
-    // start on the associated leasing deal). It's an extra HubSpot round-trip, so
-    // skip it for other statuses (Active, etc.).
+    // Deposit-taken AND leased listings always show a move-in (the lease start on
+    // the associated leasing deal). When the deal has no lease_start_date yet (or
+    // no qualifying deal exists), still surface the field as "TBD" rather than
+    // hiding it. Other statuses (Active, etc.) omit it entirely (null).
     const moveInDate = /deposit|leas/i.test(listingStatus || '')
-      ? await fetchListingMoveInDate(pick.id)
+      ? ((await fetchListingMoveInDate(pick.id)) || 'TBD')
       : null;
     return {
       listingPrice: pick.price,
