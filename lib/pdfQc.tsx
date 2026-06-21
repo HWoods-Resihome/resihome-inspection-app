@@ -129,6 +129,7 @@ function QcDoc({ ctx }: { ctx: QcPdfContext }) {
           bedrooms={ctx.bedrooms}
           bathrooms={ctx.bathrooms}
           generatedAtLabel={generatedAtLabel}
+          inspectorTopRight
           summary={
             <>
               <Text style={pdfStyles.headerRightLabel}>Verdict</Text>

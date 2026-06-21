@@ -392,6 +392,10 @@ export function PdfHeaderStrip(props: {
   const inspectorLine = props.submittedLabel
     ? `${props.inspectorName}  ·  ${props.submittedLabel}`
     : props.inspectorName;
+  // In the Scope submitter/approver layout (submittedLabel present) the
+  // left-column line is labeled "Inspector: …" so it mirrors the "Approver: …"
+  // line right below it. The top-right placement (Community/QC) stays unlabeled.
+  const inspectorLeftLine = props.submittedLabel ? `Inspector: ${inspectorLine}` : inspectorLine;
 
   const metaParts: string[] = [];
   if (props.bedrooms > 0 || props.bathrooms > 0) {
@@ -402,7 +406,7 @@ export function PdfHeaderStrip(props: {
   }
   metaParts.push(props.generatedAtLabel);
 
-  const inspectorEl = <Text style={pdfStyles.headerMeta}>{inspectorLine}</Text>;
+  const inspectorEl = <Text style={pdfStyles.headerMeta}>{inspectorLeftLine}</Text>;
   const approverEl = props.approverName ? (
     <Text style={pdfStyles.headerMeta}>
       Approver: {props.approverName}{props.approvedLabel ? `  ·  ${props.approvedLabel}` : ''}
