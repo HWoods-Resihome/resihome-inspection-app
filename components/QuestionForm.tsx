@@ -1853,13 +1853,13 @@ export function QuestionForm({
                 }`}>
                   {listingStatus && <span>{listingStatus}</span>}
                   {typeof listingPrice === 'number' && listingPrice > 0 && (
-                    <span>{listingStatus ? ' · ' : ''}Listing ${listingPrice.toLocaleString()}</span>
+                    <span>{listingStatus ? ' · ' : ''}${listingPrice.toLocaleString()}</span>
                   )}
-                  {listingDate && (
+                  {!/deposit/i.test(listingStatus || '') && listingDate && (
                     <span>{(listingStatus || (typeof listingPrice === 'number' && listingPrice > 0)) ? ' · ' : ''}Listed {listingDate}</span>
                   )}
-                  {moveInDate && (
-                    <span>{(listingStatus || (typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? ' · ' : ''}Move-In: {moveInDate}</span>
+                  {/deposit/i.test(listingStatus || '') && moveInDate && (
+                    <span>{(listingStatus || (typeof listingPrice === 'number' && listingPrice > 0)) ? ' · ' : ''}Move-In: {moveInDate}</span>
                   )}
                 </div>
               ) : null}

@@ -847,13 +847,13 @@ export function QcReinspectForm(props: Props) {
               }`}>
                 {props.listingStatus && <span>{props.listingStatus}</span>}
                 {typeof props.listingPrice === 'number' && props.listingPrice > 0 && (
-                  <span>{props.listingStatus ? ' · ' : ''}Listing ${props.listingPrice.toLocaleString()}</span>
+                  <span>{props.listingStatus ? ' · ' : ''}${props.listingPrice.toLocaleString()}</span>
                 )}
-                {props.listingDate && (
+                {!/deposit/i.test(props.listingStatus || '') && props.listingDate && (
                   <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0)) ? ' · ' : ''}Listed {props.listingDate}</span>
                 )}
-                {props.moveInDate && (
-                  <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0) || props.listingDate) ? ' · ' : ''}Move-In: {props.moveInDate}</span>
+                {/deposit/i.test(props.listingStatus || '') && props.moveInDate && (
+                  <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0)) ? ' · ' : ''}Move-In: {props.moveInDate}</span>
                 )}
               </div>
             ) : null}

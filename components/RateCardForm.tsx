@@ -3394,34 +3394,27 @@ export function RateCardForm(props: RateCardFormProps) {
       >
       {/* Header */}
       <header className="mb-2">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-2">
+          {/* Title gets the whole left side so it renders large; the status chip
+              moves into the control row (below) so it sits right next to the
+              buttons and shares their height. */}
           <div className="min-w-0 flex-1">
-            {/* Title + status on ONE line — the title font auto-shrinks so both
-                the full template name AND the status chip fit without truncating.
-                min-h matches the 32px control row (Unlock / Back / Settings) and
-                items-center vertically centers the status chip with those
-                buttons. */}
-            <div className="flex items-center gap-2">
-              <FitText
-                text={props.templateLabel}
-                className="font-heading font-bold text-gray-900 flex-1 min-w-0"
-                max={22}
-                min={11}
-              />
-              {statusLabel && (
-                <span className={`inline-flex items-center shrink-0 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold border whitespace-nowrap ${statusLabel.color}`}>
-                  {statusLabel.label}
-                </span>
-              )}
-            </div>
+            <FitText
+              text={props.templateLabel}
+              className="font-heading font-bold text-gray-900"
+              max={26}
+              min={11}
+            />
           </div>
 
-          {/* Settings (gear) + Back, pinned upper-right. The gear houses the
-              lower-frequency Manage Sections / Refresh Pricing actions to keep
-              the body clean. */}
+          {/* Status chip + Pager · Back · Unlock · Settings, pinned upper-right. */}
           <div className="flex-shrink-0 flex flex-col items-end gap-2">
-            {/* Order: Pager · Back · Unlock · Settings (gear far right). */}
             <div className="flex items-center gap-1.5">
+            {statusLabel && (
+              <span className={`order-first inline-flex items-center shrink-0 h-8 px-3 rounded-full text-[10px] sm:text-xs font-semibold border whitespace-nowrap ${statusLabel.color}`}>
+                {statusLabel.label}
+              </span>
+            )}
             {!props.readOnly && (
               <div className="relative order-3">
                 <button
@@ -3695,19 +3688,19 @@ export function RateCardForm(props: RateCardFormProps) {
                 }`}>
                   {props.listingStatus && <span>{props.listingStatus}</span>}
                   {typeof props.listingPrice === 'number' && props.listingPrice > 0 && (
-                    <span>{props.listingStatus ? ' · ' : ''}Listing ${props.listingPrice.toLocaleString()}</span>
+                    <span>{props.listingStatus ? ' · ' : ''}${props.listingPrice.toLocaleString()}</span>
                   )}
-                  {props.listingDate && (
+                  {!/deposit/i.test(props.listingStatus || '') && props.listingDate && (
                     <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0)) ? ' · ' : ''}Listed {props.listingDate}</span>
                   )}
-                  {props.moveInDate && (
-                    <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0) || props.listingDate) ? ' · ' : ''}Move-In: {props.moveInDate}</span>
+                  {/deposit/i.test(props.listingStatus || '') && props.moveInDate && (
+                    <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0)) ? ' · ' : ''}Move-In: {props.moveInDate}</span>
                   )}
                 </div>
               ) : null}
               {/* Internal Resolution client total (Scope-specific) — just the next
                   line down, called out in its own color. */}
-              <div className="text-xs font-heading font-semibold text-violet-700 truncate">
+              <div className="text-xs font-semibold text-violet-700 truncate">
                 Internal Resolution: ${internalResolutionClient.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>

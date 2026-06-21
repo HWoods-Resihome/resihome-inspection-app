@@ -375,11 +375,14 @@ export function buildListingLine(opts: {
   // Only show the listing line when the most-recent listing is Active or Deposit
   // Taken. Leased (and any other status) is skipped entirely.
   if (!/active|deposit/i.test(opts.listingStatus || '')) return null;
+  const isDeposit = /deposit/i.test(opts.listingStatus || '');
   const parts: string[] = [];
   if (opts.listingStatus) parts.push(opts.listingStatus);
-  if (typeof opts.listingPrice === 'number' && opts.listingPrice > 0) parts.push(`Listing $${opts.listingPrice.toLocaleString()}`);
-  if (opts.listingDate) parts.push(`Listed ${opts.listingDate}`);
-  if (opts.moveInDate) parts.push(`Move-In: ${opts.moveInDate}`);
+  if (typeof opts.listingPrice === 'number' && opts.listingPrice > 0) parts.push(`$${opts.listingPrice.toLocaleString()}`);
+  // Deposit-taken: drop the listed date and show the move-in instead. Active:
+  // show the listed date (no move-in).
+  if (!isDeposit && opts.listingDate) parts.push(`Listed ${opts.listingDate}`);
+  if (isDeposit && opts.moveInDate) parts.push(`Move-In: ${opts.moveInDate}`);
   return parts.length ? parts.join(' · ') : null;
 }
 
