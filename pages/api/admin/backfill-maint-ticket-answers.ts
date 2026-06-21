@@ -98,8 +98,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       TEMPLATES.has(i.templateType) && (i.status || '').toLowerCase() === 'completed');
 
     let processed = 0, wrote = 0, skippedExisting = 0, skippedNotFail = 0,
-      skippedNoPdf = 0, errors = 0;
+      skippedNoPdf = 0, parseErrors = 0, errors = 0;
     const changes: Array<{ id: string; address: string; wanted: string; hasDescription: boolean }> = [];
+    const errorSamples: string[] = [];
     let i = startIdx;
     for (; i < targets.length && i < startIdx + limit; i++) {
       const insp = targets[i];
@@ -118,11 +119,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           || 'Review & Sign-Off';
 
         if (!insp.pdfUrl) { skippedNoPdf++; continue; }
-        const resp = await fetch(insp.pdfUrl);
-        if (!resp.ok) { skippedNoPdf++; continue; }
-        const buf = Buffer.from(await resp.arrayBuffer());
-        const text = await extractPdfText(buf);
-        const { wanted, description } = parseMaintTicket(text);
+
+        // Read the PDF to recover the Yes/No + description. On a fetch/parse
+        // failure we SKIP (count as parseError) rather than writing a wrong
+        // value — a transient failure must be retryable on a re-run, not
+        // permanently mismark a real ticket as "No". A SUCCESSFUL parse with no
+        // "Yes — Created" legitimately means no ticket → 'No' (per "if no value,
+        // assume create-ticket = No").
+        let wanted: 'Yes' | 'No';
+        let description: string;
+        try {
+          const resp = await fetch(insp.pdfUrl);
+          if (!resp.ok) throw new Error(`pdf fetch HTTP ${resp.status}`);
+          const buf = Buffer.from(await resp.arrayBuffer());
+          const text = await extractPdfText(buf);
+          ({ wanted, description } = parseMaintTicket(text));
+        } catch (pdfErr: any) {
+          parseErrors++;
+          if (errorSamples.length < 8) errorSamples.push(`${insp.recordId}: ${String(pdfErr?.message || pdfErr).slice(0, 160)}`);
+          continue;
+        }
 
         changes.push({ id: insp.recordId, address: insp.propertyAddressSnapshot, wanted, hasDescription: !!description });
 
@@ -161,6 +177,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       } catch (e: any) {
         errors++;
+        if (errorSamples.length < 8) errorSamples.push(`${insp.recordId}: ${String(e?.message || e).slice(0, 160)}`);
         console.error(`[backfill-maint-ticket] ${insp.recordId} failed:`, String(e?.message || e).slice(0, 200));
       }
       if (Date.now() > deadline) { i++; break; }
@@ -174,13 +191,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       totalTargets: targets.length,
       processed,
       [apply ? 'wrote' : 'wouldWrite']: wrote,
-      skippedExisting, skippedNotFail, skippedNoPdf, errors,
+      skippedExisting, skippedNotFail, skippedNoPdf, parseErrors, errors,
       done,
       nextAfter,
       resume: nextAfter != null
         ? `/api/admin/backfill-maint-ticket-answers?after=${nextAfter}&limit=${limit}${apply ? '&apply=1' : ''}`
         : null,
       sample: changes.slice(0, 25),
+      errorSamples,
     });
   } catch (e: any) {
     console.error('[backfill-maint-ticket] failed:', e);
