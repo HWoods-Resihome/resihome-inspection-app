@@ -1726,22 +1726,22 @@ export function QuestionForm({
                 the full template name AND the status chip fit without truncating
                 (Unlock is now a small bubble, so there's room). min-h matches the
                 Unlock/Back control row so the status chip lines up with them. */}
-            <div className="flex items-center gap-2 min-h-[32px]">
+            <div className="flex items-center gap-2">
               <FitText
                 text={templateLabel}
                 className="font-heading font-bold text-gray-900 flex-1 min-w-0"
                 max={22}
-                min={11}
+                min={13}
               />
               {headerBadge && (
-                <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${headerBadge.color}`}>{headerBadge.label}</span>
+                <span className={`inline-flex items-center shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap ${headerBadge.color}`}>{headerBadge.label}</span>
               )}
             </div>
           </div>
           {/* Unlock (Rently code) + Back on ONE row so they don't add height.
               Compact circle to the LEFT of Back; hidden once read-only
               (completed / cancelled / view-only). */}
-          <div className="shrink-0 self-start flex flex-row items-center gap-2">
+          <div className="shrink-0 self-start flex flex-row items-center gap-1.5">
           <InspectionPager
             currentId={inspectionRecordId}
             onNavigate={async (id) => {
@@ -1750,13 +1750,6 @@ export function QuestionForm({
               onNavigateTo?.(id);
             }}
           />
-          {!readOnly && (
-            <UnlockButton
-              propertyId={propertyRecordId}
-              address={propertyName}
-              inspectionId={inspectionRecordId}
-            />
-          )}
           <button
             type="button"
             onClick={async () => {
@@ -1771,6 +1764,13 @@ export function QuestionForm({
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
           </button>
+          {!readOnly && (
+            <UnlockButton
+              propertyId={propertyRecordId}
+              address={propertyName}
+              inspectionId={inspectionRecordId}
+            />
+          )}
           </div>
         </div>
         {/* Inspector / report link — full width below the title + controls row
@@ -1847,11 +1847,9 @@ export function QuestionForm({
                   weight as the meta lines above (text-xs, normal weight) — only
                   the COLOR differs: green when Active, amber otherwise, so listing
                   state still reads at a glance. */}
-              {!isCommunity && (listingStatus || (typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? (
+              {!isCommunity && /active|deposit/i.test(listingStatus || '') ? (
                 <div className={`text-xs truncate ${
-                  listingStatus
-                    ? (/active/i.test(listingStatus) ? 'text-emerald-700' : 'text-amber-600')
-                    : 'text-gray-500'
+                  /active/i.test(listingStatus || '') ? 'text-emerald-700' : 'text-amber-600'
                 }`}>
                   {listingStatus && <span>{listingStatus}</span>}
                   {typeof listingPrice === 'number' && listingPrice > 0 && (

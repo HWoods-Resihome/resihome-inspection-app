@@ -372,6 +372,9 @@ export function buildListingLine(opts: {
   listingDate?: string | null;
   moveInDate?: string | null;
 }): string | null {
+  // Only show the listing line when the most-recent listing is Active or Deposit
+  // Taken. Leased (and any other status) is skipped entirely.
+  if (!/active|deposit/i.test(opts.listingStatus || '')) return null;
   const parts: string[] = [];
   if (opts.listingStatus) parts.push(opts.listingStatus);
   if (typeof opts.listingPrice === 'number' && opts.listingPrice > 0) parts.push(`Listing $${opts.listingPrice.toLocaleString()}`);

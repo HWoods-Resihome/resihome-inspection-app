@@ -3401,15 +3401,15 @@ export function RateCardForm(props: RateCardFormProps) {
                 min-h matches the 32px control row (Unlock / Back / Settings) and
                 items-center vertically centers the status chip with those
                 buttons. */}
-            <div className="flex items-center gap-2 min-h-[32px]">
+            <div className="flex items-center gap-2">
               <FitText
                 text={props.templateLabel}
                 className="font-heading font-bold text-gray-900 flex-1 min-w-0"
                 max={22}
-                min={11}
+                min={13}
               />
               {statusLabel && (
-                <span className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusLabel.color}`}>
+                <span className={`inline-flex items-center shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap ${statusLabel.color}`}>
                   {statusLabel.label}
                 </span>
               )}
@@ -3420,8 +3420,8 @@ export function RateCardForm(props: RateCardFormProps) {
               lower-frequency Manage Sections / Refresh Pricing actions to keep
               the body clean. */}
           <div className="flex-shrink-0 self-start flex flex-col items-end gap-2">
-            {/* Order: Unlock · Back · Settings (gear far right). */}
-            <div className="flex items-center gap-2">
+            {/* Order: Pager · Back · Unlock · Settings (gear far right). */}
+            <div className="flex items-center gap-1.5">
             {!props.readOnly && (
               <div className="relative order-3">
                 <button
@@ -3502,14 +3502,14 @@ export function RateCardForm(props: RateCardFormProps) {
                 propertyId={props.propertyRecordId}
                 address={props.propertyName}
                 inspectionId={props.inspectionRecordId}
-                className="order-1"
+                className="order-2"
               />
             )}
             <button
               type="button"
               onClick={handleSaveAndClose}
               aria-label="Save and go back"
-              className="order-2 inline-flex items-center justify-center w-8 h-8 text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white transition-colors"
+              className="order-1 inline-flex items-center justify-center w-8 h-8 text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white transition-colors"
               title="Save and go back"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
@@ -3689,11 +3689,9 @@ export function RateCardForm(props: RateCardFormProps) {
               {/* Listing line (status · price · listed · Move-In far-right) —
                   matches the other templates' headers; Move-In shows on
                   deposit-taken listings only. */}
-              {(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0) || props.listingDate) ? (
+              {/active|deposit/i.test(props.listingStatus || '') ? (
                 <div className={`text-xs truncate ${
-                  props.listingStatus
-                    ? (/active/i.test(props.listingStatus) ? 'text-emerald-700' : 'text-amber-600')
-                    : 'text-gray-500'
+                  /active/i.test(props.listingStatus || '') ? 'text-emerald-700' : 'text-amber-600'
                 }`}>
                   {props.listingStatus && <span>{props.listingStatus}</span>}
                   {typeof props.listingPrice === 'number' && props.listingPrice > 0 && (
