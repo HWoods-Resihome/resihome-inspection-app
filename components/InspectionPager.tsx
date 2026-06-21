@@ -39,33 +39,36 @@ export default function InspectionPager({
   // Hide entirely when this inspection isn't in a known list, or it's the only one.
   if (idx === -1 || (!prevId && !nextId)) return null;
 
-  const btn =
-    'inline-flex items-center justify-center w-8 h-8 text-gray-700 hover:text-gray-900 ' +
-    'border border-gray-300 hover:border-gray-400 rounded-lg bg-white ' +
-    'disabled:opacity-30 disabled:cursor-default disabled:hover:border-gray-300';
+  // Single compact segmented pill (‹ | ›) — one bordered control holding both
+  // chevrons, so it takes ~half the width of two separate buttons and leaves the
+  // cramped mobile header room for the title.
+  const seg =
+    'inline-flex items-center justify-center w-7 h-8 text-gray-700 hover:text-gray-900 ' +
+    'hover:bg-gray-50 disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent';
 
   return (
-    <>
+    <div className="inline-flex items-center rounded-lg border border-gray-300 overflow-hidden bg-white">
       <button
         type="button"
         disabled={!prevId}
         onClick={() => prevId && onNavigate(prevId)}
         aria-label="Previous inspection"
         title="Previous inspection"
-        className={btn}
+        className={seg}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M15 18l-6-6 6-6" /></svg>
       </button>
+      <span className="w-px h-5 bg-gray-300" aria-hidden />
       <button
         type="button"
         disabled={!nextId}
         onClick={() => nextId && onNavigate(nextId)}
         aria-label="Next inspection"
         title="Next inspection"
-        className={btn}
+        className={seg}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9 18l6-6-6-6" /></svg>
       </button>
-    </>
+    </div>
   );
 }

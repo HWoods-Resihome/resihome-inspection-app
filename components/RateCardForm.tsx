@@ -3394,7 +3394,7 @@ export function RateCardForm(props: RateCardFormProps) {
       >
       {/* Header */}
       <header className="mb-2">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             {/* Title + status on ONE line — the title font auto-shrinks so both
                 the full template name AND the status chip fit without truncating.
@@ -3406,7 +3406,7 @@ export function RateCardForm(props: RateCardFormProps) {
                 text={props.templateLabel}
                 className="font-heading font-bold text-gray-900 flex-1 min-w-0"
                 max={22}
-                min={13}
+                min={11}
               />
               {statusLabel && (
                 <span className={`inline-flex items-center shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap ${statusLabel.color}`}>
@@ -3419,7 +3419,7 @@ export function RateCardForm(props: RateCardFormProps) {
           {/* Settings (gear) + Back, pinned upper-right. The gear houses the
               lower-frequency Manage Sections / Refresh Pricing actions to keep
               the body clean. */}
-          <div className="flex-shrink-0 self-start flex flex-col items-end gap-2">
+          <div className="flex-shrink-0 flex flex-col items-end gap-2">
             {/* Order: Pager · Back · Unlock · Settings (gear far right). */}
             <div className="flex items-center gap-1.5">
             {!props.readOnly && (

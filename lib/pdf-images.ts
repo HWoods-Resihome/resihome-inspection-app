@@ -19,35 +19,49 @@ const IMAGE_FETCH_TIMEOUT_MS = 12000;
 /**
  * Fetch a single image URL and resize it to a JPEG data URI.
  * Returns null on failure so missing images don't break the whole PDF.
+ *
+ * Retries a transient fetch failure (network blip, or a just-uploaded file that
+ * HubSpot's CDN briefly 404/403/5xx's before it propagates) a couple of times —
+ * otherwise that photo renders as a "View photo" link in the PDF instead of the
+ * image. A sharp DECODE failure isn't retried (it won't change on a re-fetch).
  */
 async function fetchAndResize(url: string): Promise<string | null> {
-  // Time-box the fetch: on timeout return null so the image is skipped and the
-  // report still renders (rather than the whole PDF hanging on one bad URL).
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), IMAGE_FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: ctrl.signal });
-    if (!res.ok) {
-      console.warn(`[pdf-images] Failed to fetch ${url}: ${res.status}`);
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    // Time-box each fetch: on timeout we retry (or skip), so the report still
+    // renders rather than hanging the whole PDF on one bad URL.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), IMAGE_FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      if (!res.ok) {
+        // Retry the propagation-lag statuses; give up on a genuine client error.
+        const retryable = res.status === 404 || res.status === 403 || res.status >= 500;
+        if (retryable && attempt < MAX_ATTEMPTS) { clearTimeout(timer); await new Promise((r) => setTimeout(r, 600)); continue; }
+        console.warn(`[pdf-images] Failed to fetch ${url}: ${res.status}`);
+        return null;
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      // auto-orient (rotate) so EXIF-rotated phone photos embed upright.
+      const resized = await sharp(buf)
+        .rotate()
+        .resize(MAX_WIDTH, MAX_HEIGHT, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
+        .toBuffer();
+      return `data:image/jpeg;base64,${resized.toString('base64')}`;
+    } catch (e: any) {
+      const isAbort = e?.name === 'AbortError';
+      // A network/timeout error is worth one more try; a decode error isn't.
+      const looksTransient = isAbort || /fetch failed|network|ECONN|ETIMEDOUT|socket/i.test(String(e?.message || e));
+      if (looksTransient && attempt < MAX_ATTEMPTS) { clearTimeout(timer); await new Promise((r) => setTimeout(r, 600)); continue; }
+      const why = isAbort ? `timed out after ${IMAGE_FETCH_TIMEOUT_MS}ms` : (e?.message || e);
+      console.warn(`[pdf-images] Error processing ${url}: ${why}`);
       return null;
+    } finally {
+      clearTimeout(timer);
     }
-    const arrayBuf = await res.arrayBuffer();
-    const buf = Buffer.from(arrayBuf);
-
-    const resized = await sharp(buf)
-      .resize(MAX_WIDTH, MAX_HEIGHT, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
-      .toBuffer();
-
-    const base64 = resized.toString('base64');
-    return `data:image/jpeg;base64,${base64}`;
-  } catch (e: any) {
-    const why = e?.name === 'AbortError' ? `timed out after ${IMAGE_FETCH_TIMEOUT_MS}ms` : (e?.message || e);
-    console.warn(`[pdf-images] Error processing ${url}: ${why}`);
-    return null;
-  } finally {
-    clearTimeout(timer);
   }
+  return null;
 }
 
 /**

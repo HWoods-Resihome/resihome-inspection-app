@@ -1720,7 +1720,7 @@ export function QuestionForm({
 
       {/* Top block — title + inspector + Back. NOT sticky: scrolls away (Scope style). */}
       <div className="lz-head max-w-3xl mx-auto px-4 pt-3 pb-2">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             {/* Title + status on ONE line — the title font auto-shrinks so both
                 the full template name AND the status chip fit without truncating
@@ -1731,7 +1731,7 @@ export function QuestionForm({
                 text={templateLabel}
                 className="font-heading font-bold text-gray-900 flex-1 min-w-0"
                 max={22}
-                min={13}
+                min={11}
               />
               {headerBadge && (
                 <span className={`inline-flex items-center shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap ${headerBadge.color}`}>{headerBadge.label}</span>
@@ -1741,7 +1741,7 @@ export function QuestionForm({
           {/* Unlock (Rently code) + Back on ONE row so they don't add height.
               Compact circle to the LEFT of Back; hidden once read-only
               (completed / cancelled / view-only). */}
-          <div className="shrink-0 self-start flex flex-row items-center gap-1.5">
+          <div className="shrink-0 flex flex-row items-center gap-1.5">
           <InspectionPager
             currentId={inspectionRecordId}
             onNavigate={async (id) => {

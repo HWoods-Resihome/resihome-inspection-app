@@ -765,16 +765,16 @@ export function QcReinspectForm(props: Props) {
       {/* Title block — template name + status + inspector + Back/Unlock. Scrolls
           away on scroll (mirrors Scope / 1099); only the logo bar below pins. */}
       <div className="pt-3 pb-2">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <FitText text={props.templateLabel} className="font-heading font-bold text-gray-900 flex-1 min-w-0" max={22} min={13} />
+              <FitText text={props.templateLabel} className="font-heading font-bold text-gray-900 flex-1 min-w-0" max={22} min={11} />
               {statusLabel && (
                 <span className={`inline-flex items-center shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap ${statusLabel.color}`}>{statusLabel.label}</span>
               )}
             </div>
           </div>
-          <div className="shrink-0 self-start flex flex-row items-center gap-1.5">
+          <div className="shrink-0 flex flex-row items-center gap-1.5">
             <InspectionPager currentId={props.inspectionRecordId} onNavigate={(id) => props.onNavigateTo?.(id)} />
             <button
               type="button"
