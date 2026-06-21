@@ -1406,6 +1406,37 @@ export function QuestionForm({
         }
       }
 
+      // Persist the maintenance-ticket outcome as Q&A answers too. Previously
+      // these synthetic answers were ONLY appended to the finalize PDF payload
+      // (finalAnswers below) and never written to HubSpot — so reopening a
+      // completed inspection couldn't restore the Yes/No selection + description
+      // (the widget rendered blank), and REGENERATING the PDF (which rebuilds
+      // from saved answers) dropped the maintenance-ticket entirely. Writing them
+      // here makes both round-trip. Synthetic ids have no template question, so
+      // upsertAnswers simply skips the Question→Answer association (non-fatal);
+      // the Inspection→Answer association still makes them visible on reopen.
+      if (maintTicketEligible && maintTicketWanted) {
+        const summarySectionName = summaryInstance?.baseSectionName || 'Review & Sign-Off';
+        const summaryKey = firstSummaryKey || 'summary';
+        const mkMaintUpsert = (qid: string, qText: string, value: string) => ({
+          recordId: answerRecordIdsRef.current.get(answerKey(qid, summaryKey)) || undefined,
+          answerProps: buildQaAnswerProps({
+            answerIdExternal: buildAnswerExternalId(inspectionExternalId, qid, summaryKey),
+            inspectionIdExternal: inspectionExternalId,
+            questionIdExternal: qid,
+            questionText: qText,
+            section: summarySectionName,
+            summaryInstanceLabel: summaryKey,
+            answerValue: value,
+            location: null,
+          }, { isScope: false }),
+        });
+        upserts.push(mkMaintUpsert('maint_ticket_request', 'Submit a maintenance ticket?', maintTicketWanted));
+        if (maintTicketWanted === 'Yes' && maintTicketDescription.trim()) {
+          upserts.push(mkMaintUpsert('maint_ticket_description', 'Maintenance ticket description', maintTicketDescription.trim()));
+        }
+      }
+
       if (upserts.length > 0) {
         const resp = await fetch(`/api/inspections/${inspectionRecordId}/answers`, {
           method: 'POST',
