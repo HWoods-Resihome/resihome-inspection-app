@@ -132,7 +132,7 @@ function QcDoc({ ctx }: { ctx: QcPdfContext }) {
           inspectorTopRight
           summary={
             <>
-              <Text style={pdfStyles.headerRightLabel}>Verdict</Text>
+              <Text style={[pdfStyles.headerRightLabel, { marginTop: 5 }]}>Verdict</Text>
               <Text style={[pdfStyles.headerRightValue, { color: PDF_COLORS.white }]}>{verdictText}</Text>
             </>
           }
