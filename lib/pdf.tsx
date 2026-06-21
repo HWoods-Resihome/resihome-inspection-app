@@ -108,6 +108,12 @@ const styles = StyleSheet.create({
   photoGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
   photo: { width: 100, height: 75, margin: 2, objectFit: 'cover' },
   photoFill: { width: '100%', height: '100%', objectFit: 'cover' },
+  // Compact link shown when an image couldn't be embedded (so we don't reserve a
+  // blank fixed-size tile). Sized to the text, not a 100×75 box.
+  photoLinkFallback: {
+    fontSize: 8, color: COLORS.brand, marginTop: 4, marginRight: 10,
+    textDecoration: 'underline',
+  },
   videoBadge: {
     position: 'absolute', bottom: 2, left: 2, backgroundColor: 'rgba(0,0,0,0.65)',
     color: '#ffffff', fontSize: 6, paddingHorizontal: 3, paddingVertical: 1, borderRadius: 2,
@@ -213,15 +219,29 @@ function renderPhotos(entries: string[], embedded?: Record<string, string>, gall
   const sep = galleryBase && galleryBase.includes('?') ? '&' : '?';
   return entries.map((entry, i) => {
     const poster = getPosterUrl(entry);
-    const imgSrc = (embedded && embedded[poster]) || poster;
+    const data = embedded && embedded[poster];
+    // resolveImagesInParallel returns a base64 data URI on success and falls back
+    // to the ORIGINAL url on failure. A raw url here means the embed failed —
+    // react-pdf can't reliably fetch it at render time either, so drawing an
+    // <Image> would leave a blank, fixed-size 100×75 tile (the "large empty
+    // space without photos"). When the embed failed, render a compact text link
+    // to the photo instead of reserving that blank box.
+    const embeddedOk = !!data && data.startsWith('data:');
     const video = isVideoEntry(entry) ? getVideoUrl(entry) : '';
     const fileHref = video || poster;
     // Photos → gallery (starts at this photo); videos → the playable file.
     const href = (galleryBase && !video) ? `${galleryBase}${sep}u=${encodeURIComponent(entry)}` : fileHref;
+    if (!embeddedOk) {
+      return (
+        <Link key={`${entry}-${i}`} src={href} style={styles.photoLinkFallback}>
+          <Text>{video ? 'View video ↗' : 'View photo ↗'}</Text>
+        </Link>
+      );
+    }
     return (
       <Link key={`${entry}-${i}`} src={href} style={styles.photo}>
         {/* eslint-disable-next-line jsx-a11y/alt-text */}
-        <Image src={imgSrc} style={styles.photoFill} />
+        <Image src={data} style={styles.photoFill} />
         {video ? <Text style={styles.videoBadge}>VIDEO</Text> : null}
       </Link>
     );

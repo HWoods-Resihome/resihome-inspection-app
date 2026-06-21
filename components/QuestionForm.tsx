@@ -584,6 +584,25 @@ export function QuestionForm({
   const [maintTicketWanted, setMaintTicketWanted] = useState<'' | 'Yes' | 'No'>('');
   const [maintTicketDescription, setMaintTicketDescription] = useState('');
 
+  // Hydrate the maintenance-ticket widget from the saved synthetic answers
+  // ('maint_ticket_request' / 'maint_ticket_description'). They aren't tied to a
+  // template question, so the normal answer hydration above can't restore them —
+  // without this, a completed (read-only) inspection shows neither the Yes/No
+  // selection nor the ticket description the inspector recorded.
+  useEffect(() => {
+    if (!existingAnswers || existingAnswers.length === 0) return;
+    for (const sa of existingAnswers) {
+      if (sa.questionIdExternal === 'maint_ticket_request') {
+        const v = (sa.answerValue || '').trim();
+        if (/^y/i.test(v)) setMaintTicketWanted('Yes');
+        else if (/^n/i.test(v)) setMaintTicketWanted('No');
+      } else if (sa.questionIdExternal === 'maint_ticket_description') {
+        if (sa.answerValue) setMaintTicketDescription(sa.answerValue);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Map of instanceKey -> HubSpot Answer recordId for section_photo records
   const sectionPhotoRecordIdsRef = useRef<Map<string, string>>(new Map());
   // Populate from existing answers
@@ -1237,7 +1256,16 @@ export function QuestionForm({
         }
       }
     }
-    // Maintenance-ticket widget: a description is required once "Yes" is chosen.
+    // Maintenance-ticket widget: a Yes/No selection is required on a failed
+    // report (the widget only renders when the verdict is Fail), and a
+    // description is required once "Yes" is chosen.
+    if (maintTicketEligible && !maintTicketWanted) {
+      return {
+        message: 'Choose whether to submit a maintenance ticket.',
+        scrollToDomId: 'maint-ticket-widget',
+        instanceKey: firstSummaryKey || '',
+      };
+    }
     if (maintTicketEligible && maintTicketWanted === 'Yes' && !maintTicketDescription.trim()) {
       return {
         message: 'Enter the maintenance ticket description, or choose “No”.',
@@ -2016,7 +2044,7 @@ export function QuestionForm({
                       </div>
                       {showTicketWidget && (
                         <div id="maint-ticket-widget" className="scroll-mt-24 mt-3 rounded-lg border border-brand/30 bg-brand/5 p-4">
-                          <div className="font-heading font-semibold text-ink text-sm mb-2">Do you want to submit a maintenance ticket?</div>
+                          <div className="font-heading font-semibold text-ink text-sm mb-2">Do you want to submit a maintenance ticket? <span className="text-brand">*</span></div>
                           <div className="flex gap-2">
                             {(['Yes', 'No'] as const).map((opt) => (
                               <button
