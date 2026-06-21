@@ -26,7 +26,7 @@ import { InspectionPdf, type PdfData, type PdfAnswer } from '@/lib/pdf';
 import {
   fetchInspections, fetchInspectionWithPropertyRef, fetchAnswersForInspection,
   fetchQuestionsForTemplate, fetchActiveListingForProperty, fetchPropertyCommunityName,
-  uploadFileWithId, attachPdfUrlToInspection,
+  uploadFileWithId, attachPdfUrlToInspection, parseListingSnapshot,
   updateInspection,
 } from '@/lib/hubspot';
 import { buildShortLink } from '@/lib/shortLinks';
@@ -156,8 +156,11 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
   const fcPhotos = fcBlob ? finalChecklistPhotos(fcBlob) : [];
 
   // Listing highlights for the header (Active / Deposit Taken · price · date).
-  let listing: { listingStatus: string | null; listingPrice: number | null; listingDate: string | null; moveInDate: string | null } | null = null;
-  try { listing = await fetchActiveListingForProperty(data.propertyIdRef); } catch { /* optional */ }
+  // Prefer the frozen snapshot so regenerated reports keep the listing as it was
+  // at completion; fall back to a live lookup for older inspections without one.
+  let listing: { listingStatus: string | null; listingPrice: number | null; listingDate: string | null; moveInDate: string | null } | null =
+    parseListingSnapshot(data.listingSnapshotJson);
+  if (!listing) { try { listing = await fetchActiveListingForProperty(data.propertyIdRef); } catch { /* optional */ } }
 
   // Community/Visit only: the property's associated Community object name, used
   // in the PDF title row ("Community Visit Inspection - Southport"). Fail-open.

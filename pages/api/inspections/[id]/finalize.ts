@@ -18,6 +18,8 @@ import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
   fetchActiveListingForProperty,
+  parseListingSnapshot,
+  stampListingSnapshotAtCompletion,
   readInspectionProps,
   uploadFileWithId,
   attachFilesToInspectionRecord,
@@ -474,9 +476,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const galleryOrigin = galleryHost ? `${galleryProto}://${galleryHost}` : '';
     const photoGalleryBase = galleryOrigin ? buildShortLink(galleryOrigin, id, 'photos') : undefined;
 
-    // Listing snapshot for the header listing line (status · price · listed ·
-    // Move-In). Best-effort — never block finalize on a listing lookup.
-    const listing = await fetchActiveListingForProperty(inspectionData.propertyIdRef).catch(() => null);
+    // Listing line for the header (status · price · listed · Move-In). Prefer the
+    // FROZEN snapshot (set at first finalize / re-finalize) so regenerated PDFs
+    // keep the listing as it was at completion; fall back to a live lookup on the
+    // first finalize before the snapshot exists. Best-effort.
+    const listing = parseListingSnapshot(inspectionData.listingSnapshotJson)
+      || await fetchActiveListingForProperty(inspectionData.propertyIdRef).catch(() => null);
 
     const ctx: PdfBuildContext = {
       inspectionRecordId: id,
@@ -747,6 +752,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!regenerateOnly) {
       await stampFirstCompleted(id, nowIso);
       await stampPropertyStatusAtCompletion(id);
+      await stampListingSnapshotAtCompletion(id);
     }
     finalizePhase = 'side-effects'; // status is now persisted; remaining steps are best-effort
 

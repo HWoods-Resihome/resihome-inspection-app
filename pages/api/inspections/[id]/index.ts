@@ -7,6 +7,7 @@ import {
   answerHasAfterPhotoProperty,
   fetchPropertyFieldOptions,
   fetchActiveListingForProperty,
+  parseListingSnapshot,
   fetchPropertyCommunityName,
   syncInspectorFromOwner,
 } from '@/lib/hubspot';
@@ -64,11 +65,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         'leasing_agent_1099_property_inspection', 'pm_vacancy_occupancy_check',
       ]);
       const wantCommunity = FC_OR_COMMUNITY.has(data.inspection.templateType);
+      // Prefer the FROZEN listing snapshot (set at completion) so a completed
+      // inspection shows the listing as it was at the time of inspection; fall
+      // back to a live lookup while it's still in progress (no snapshot yet).
+      const listingSnapshot = parseListingSnapshot(data.listingSnapshotJson);
       const [answers, listing, communityName] = await Promise.all([
         answersPromise,
-        data.propertyIdRef
-          ? fetchActiveListingForProperty(data.propertyIdRef).catch(() => null)
-          : Promise.resolve(null),
+        listingSnapshot
+          ? Promise.resolve(listingSnapshot)
+          : (data.propertyIdRef
+            ? fetchActiveListingForProperty(data.propertyIdRef).catch(() => null)
+            : Promise.resolve(null)),
         (wantCommunity && data.propertyIdRef)
           ? fetchPropertyCommunityName(data.propertyIdRef).catch(() => null)
           : Promise.resolve(null),

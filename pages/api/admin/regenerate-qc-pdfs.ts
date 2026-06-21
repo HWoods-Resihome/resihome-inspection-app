@@ -26,6 +26,7 @@ import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
   fetchActiveListingForProperty,
+  parseListingSnapshot,
   fetchSourceSectionPhotos,
   uploadFileWithId,
   attachPdfUrlToInspection,
@@ -166,7 +167,8 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
     ? inspection.qcVerdict
     : (failCount > 0 ? 'fail' : 'pass');
 
-  const listing = await fetchActiveListingForProperty(data.propertyIdRef).catch(() => null);
+  const listing = parseListingSnapshot(data.listingSnapshotJson)
+    || await fetchActiveListingForProperty(data.propertyIdRef).catch(() => null);
 
   const ctx: QcPdfContext = {
     templateLabel: templateLabelFor(inspection.templateType) || 'Turn Re-Inspect QC',

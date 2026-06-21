@@ -2250,6 +2250,9 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   propertySepticFee: number | null;
   /** Property's team_group_email — preferred finalize CC. */
   propertyTeamGroupEmail: string | null;
+  /** Frozen listing snapshot JSON (status/price/listed/MIR/move-in) captured at
+   *  completion. Empty until the inspection is completed. */
+  listingSnapshotJson: string | null;
 } | null> {
   const { inspection: typeId, property: propertyTypeId } = typeIds();
   const properties = [
@@ -2265,7 +2268,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     'source_rate_card_id', 'source_rate_card_name', 'qc_verdict', 'qc_overall_note', 'qc_pass_count', 'qc_fail_count',
     // Submit/approve stamps + Internal Resolution timing map
     'submitted_at', 'submitted_by_email', 'approved_by_name', 'approved_at', 'resolution_timing_json',
-    'total_client_cost', 'property_status_at_completion',
+    'total_client_cost', 'property_status_at_completion', 'listing_snapshot_json',
   ];
   try {
     const qs = properties.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
@@ -2430,6 +2433,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       propertyAirFiltersType3,
       propertySepticFee,
       propertyTeamGroupEmail,
+      listingSnapshotJson: (p.listing_snapshot_json || '').toString() || null,
     };
   } catch (e: any) {
     if (String(e).includes('404')) return null;
@@ -2608,9 +2612,34 @@ async function fetchListingMoveInDate(listingRecordId: string): Promise<string |
   }
 }
 
+export interface ListingInfo {
+  listingPrice: number | null;
+  listingDate: string | null;
+  listingStatus: string | null;
+  moveInReadyDate: string | null;
+  moveInDate: string | null;
+}
+
+/** Parse the frozen `listing_snapshot_json` (written at completion) back into a
+ *  ListingInfo. Returns null when absent/malformed so callers fall back to the
+ *  live lookup (e.g. inspections completed before the snapshot existed). */
+export function parseListingSnapshot(json: string | null | undefined): ListingInfo | null {
+  if (!json) return null;
+  try {
+    const o = JSON.parse(json) || {};
+    return {
+      listingPrice: typeof o.listingPrice === 'number' ? o.listingPrice : null,
+      listingDate: o.listingDate ?? null,
+      listingStatus: o.listingStatus ?? null,
+      moveInReadyDate: o.moveInReadyDate ?? null,
+      moveInDate: o.moveInDate ?? null,
+    };
+  } catch { return null; }
+}
+
 export async function fetchActiveListingForProperty(
   propertyRecordId: string
-): Promise<{ listingPrice: number | null; listingDate: string | null; listingStatus: string | null; moveInReadyDate: string | null; moveInDate: string | null } | null> {
+): Promise<ListingInfo | null> {
   if (!propertyRecordId) return null;
   const tids = typeIds();
   const lid = listingTypeId();
@@ -2693,9 +2722,10 @@ export async function fetchActiveListingForProperty(
       ? (displayInfo.labels[pick.displayRaw.toLowerCase()] || pick.displayRaw)
       : '';
     const listingStatus = formatListingStatus(displayLabel) || formatListingStatus(pick.status);
-    // Only deposit-taken listings carry a meaningful move-in (lease start) — and
-    // it's an extra HubSpot round-trip, so skip it otherwise.
-    const moveInDate = /deposit/i.test(listingStatus || '')
+    // Deposit-taken AND leased listings carry a meaningful move-in (the lease
+    // start on the associated leasing deal). It's an extra HubSpot round-trip, so
+    // skip it for other statuses (Active, etc.).
+    const moveInDate = /deposit|leas/i.test(listingStatus || '')
       ? await fetchListingMoveInDate(pick.id)
       : null;
     return {
@@ -3689,6 +3719,13 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   await ensureProp(inspection, 'property_status_snapshot', {
     name: 'property_status_snapshot', label: 'Property Status (Snapshot)', type: 'string', fieldType: 'text', groupName: 'inspection_results',
   });
+  // Listing snapshot frozen at completion — the listing status/price/listed date,
+  // Move-in Ready date, and lease-start (move-in) as they were at the time of
+  // inspection. Stored as JSON so completed reports/headers don't drift when the
+  // live listing changes later. Long text (a small JSON object).
+  await ensureProp(inspection, 'listing_snapshot_json', {
+    name: 'listing_snapshot_json', label: 'Listing Snapshot (JSON)', type: 'string', fieldType: 'textarea', groupName: 'inspection_results',
+  });
   // QC Turn Re-Inspect: the overall failure comment (why the re-inspect failed),
   // stamped at qc-finalize so completed QCs can show it in-app (and the PDF
   // regenerator can reproduce it).
@@ -3967,6 +4004,38 @@ export async function stampPropertyStatusAtCompletion(inspectionRecordId: string
     });
   } catch (e) {
     console.warn('[stampPropertyStatusAtCompletion] skipped (create the property to enable):', String(e).slice(0, 200));
+  }
+}
+
+/**
+ * Freeze the listing snapshot (status / price / listed date / Move-in Ready /
+ * lease-start move-in) onto the inspection at completion, mirroring
+ * stampPropertyStatusAtCompletion. After this, the header + report PDFs show
+ * these frozen values (via parseListingSnapshot) instead of the live listing, so
+ * a completed inspection reflects the listing as it was at the time of
+ * inspection even if the listing changes later. Best-effort: never throws.
+ */
+export async function stampListingSnapshotAtCompletion(inspectionRecordId: string): Promise<void> {
+  try {
+    const { inspection: typeId } = typeIds();
+    const insResp = await hubspotFetch(
+      `/crm/v3/objects/${typeId}/${inspectionRecordId}?properties=${encodeURIComponent('property_id_ref')}`,
+    );
+    const propertyIdRef = (insResp.properties?.property_id_ref || '').toString().trim();
+    if (!propertyIdRef) return;
+    const listing = await fetchActiveListingForProperty(propertyIdRef);
+    if (!listing) return;
+    await updateInspection(inspectionRecordId, {
+      listing_snapshot_json: JSON.stringify({
+        listingStatus: listing.listingStatus ?? null,
+        listingPrice: listing.listingPrice ?? null,
+        listingDate: listing.listingDate ?? null,
+        moveInReadyDate: listing.moveInReadyDate ?? null,
+        moveInDate: listing.moveInDate ?? null,
+      }),
+    });
+  } catch (e) {
+    console.warn('[stampListingSnapshotAtCompletion] skipped (create the property to enable):', String(e).slice(0, 200));
   }
 }
 

@@ -17,6 +17,8 @@ import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
   fetchActiveListingForProperty,
+  parseListingSnapshot,
+  stampListingSnapshotAtCompletion,
   fetchSourceSectionPhotos,
   uploadFileWithId,
   attachFilesToInspectionRecord,
@@ -217,8 +219,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const embeddedByUrl: Record<string, string> = {};
     for (const [url, dataUri] of resolved) embeddedByUrl[getPosterUrl(url)] = dataUri;
 
-    // Listing snapshot for the header listing line (best-effort).
-    const listing = await fetchActiveListingForProperty(data.propertyIdRef).catch(() => null);
+    // Listing line for the header — prefer the frozen snapshot (re-runs stay
+    // frozen), else a live lookup on first finalize. Best-effort.
+    const listing = parseListingSnapshot(data.listingSnapshotJson)
+      || await fetchActiveListingForProperty(data.propertyIdRef).catch(() => null);
 
     const ctx: QcPdfContext = {
       templateLabel: templateLabelFor(inspection.templateType) || 'Turn Re-Inspect QC',
@@ -339,6 +343,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     await stampFirstCompleted(id, nowIso); // first completion timestamp (kept on re-runs)
     await stampPropertyStatusAtCompletion(id); // freeze property status for the record
+    await stampListingSnapshotAtCompletion(id); // freeze the listing snapshot too
     bustInspectionsCache(); // status → completed; reflect in the list at once
     res.status(200).json({
       success: true,

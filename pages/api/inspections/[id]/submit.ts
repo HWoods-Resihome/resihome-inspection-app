@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, fetchAnswersForInspection } from '@/lib/hubspot';
+import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection } from '@/lib/hubspot';
 import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
@@ -71,6 +71,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!isRateCard) {
       await stampFirstCompleted(id, nowIso);
       await stampPropertyStatusAtCompletion(id);
+      // Freeze the listing snapshot (status/price/listed/MIR/move-in) too, so the
+      // completed report shows the listing as it was at the time of inspection.
+      await stampListingSnapshotAtCompletion(id);
     }
 
     // 1099 Leasing Agent: freeze the standardized report fields (listing-price
