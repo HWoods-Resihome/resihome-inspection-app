@@ -174,13 +174,6 @@ function QcDoc({ ctx }: { ctx: QcPdfContext }) {
           </View>
         )}
 
-        {/* Source reference line */}
-        {ctx.sourceRateCardName && (
-          <Text style={{ fontFamily: 'Helvetica', fontSize: 8, color: PDF_COLORS.gray, marginBottom: 6 }}>
-            Validating: {ctx.sourceRateCardName}
-          </Text>
-        )}
-
         {/* Page 1: condensed summary. Scope-backed QC lists every re-inspected
             LINE grouped by room; a standalone QC (no line items) lists each ROOM
             with its optional Pass/Fail + note. */}

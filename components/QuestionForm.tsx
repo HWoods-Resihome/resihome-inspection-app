@@ -1734,7 +1734,7 @@ export function QuestionForm({
                 min={11}
               />
               {headerBadge && (
-                <span className={`inline-flex items-center shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap ${headerBadge.color}`}>{headerBadge.label}</span>
+                <span className={`inline-flex items-center shrink-0 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold border whitespace-nowrap ${headerBadge.color}`}>{headerBadge.label}</span>
               )}
             </div>
           </div>

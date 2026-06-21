@@ -122,7 +122,6 @@ export function QcReinspectForm(props: Props) {
   const [roomNote, setRoomNote] = useState<Record<string, string>>({});
   const roomVerdictRef = useRef(roomVerdict); roomVerdictRef.current = roomVerdict;
   const roomNoteRef = useRef(roomNote); roomNoteRef.current = roomNote;
-  const [sourceName, setSourceName] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<'pass' | 'fail' | ''>('');
   // Overall failure comment — REQUIRED when the verdict is Fail; carried onto the
   // QC PDF so the vendor/MC see why the re-inspect failed overall.
@@ -212,7 +211,6 @@ export function QcReinspectForm(props: Props) {
         setAfterPhotoRecordIds(afterIds);
         setRoomVerdict(roomV);
         setRoomNote(roomN);
-        setSourceName(d.sourceRateCardName || null);
         if (d.qcVerdict === 'pass' || d.qcVerdict === 'fail') setVerdict(d.qcVerdict);
         if (typeof d.qcOverallNote === 'string') setOverallNote(d.qcOverallNote);
 
@@ -770,7 +768,7 @@ export function QcReinspectForm(props: Props) {
             <div className="flex items-center gap-2">
               <FitText text={props.templateLabel} className="font-heading font-bold text-gray-900 flex-1 min-w-0" max={22} min={11} />
               {statusLabel && (
-                <span className={`inline-flex items-center shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap ${statusLabel.color}`}>{statusLabel.label}</span>
+                <span className={`inline-flex items-center shrink-0 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold border whitespace-nowrap ${statusLabel.color}`}>{statusLabel.label}</span>
               )}
             </div>
           </div>
@@ -798,7 +796,6 @@ export function QcReinspectForm(props: Props) {
             so it never truncates under the buttons. */}
         <div className="text-xs text-gray-500 mt-0.5 truncate">
           Inspector: {props.inspectorName}
-          {sourceName && <span> &middot; Validating: {sourceName}</span>}
         </div>
         {props.pdfUrl && (
           <a
