@@ -17,6 +17,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
+  fetchActiveListingForProperty,
   readInspectionProps,
   uploadFileWithId,
   attachFilesToInspectionRecord,
@@ -473,6 +474,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const galleryOrigin = galleryHost ? `${galleryProto}://${galleryHost}` : '';
     const photoGalleryBase = galleryOrigin ? buildShortLink(galleryOrigin, id, 'photos') : undefined;
 
+    // Listing snapshot for the header listing line (status · price · listed ·
+    // Move-In). Best-effort — never block finalize on a listing lookup.
+    const listing = await fetchActiveListingForProperty(inspectionData.propertyIdRef).catch(() => null);
+
     const ctx: PdfBuildContext = {
       inspectionRecordId: id,
       templateLabel,
@@ -482,6 +487,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       bathrooms: inspection.bathroomsAtInspection || 0,
       squareFootage: inspectionData.propertySquareFootage,
       region: inspection.regionSnapshot || null,
+      listingStatus: listing?.listingStatus ?? null,
+      listingPrice: listing?.listingPrice ?? null,
+      listingDate: listing?.listingDate ?? null,
+      moveInDate: listing?.moveInDate ?? null,
       generatedAtIso: new Date().toISOString(),
       // Submit/approve stamps for the Master PDF. Approver = the current
       // finalizer (or the previously-recorded approver on a re-finalize).

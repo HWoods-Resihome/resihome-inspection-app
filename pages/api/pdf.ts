@@ -33,6 +33,7 @@ interface GeneratePdfBody {
   listingStatus?: string | null;
   listingPrice?: number | null;
   listingDate?: string | null;
+  moveInDate?: string | null;
   completedAt: string;
   answers: AnswerInput[];
   sectionPhotoUrls: Record<string, string[]>;
@@ -150,6 +151,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       region: body.region ?? null,
       listingStatus: body.listingStatus ?? null,
       listingPrice: body.listingPrice ?? null,
+      moveInDate: body.moveInDate ?? null,
       listingDate: body.listingDate ?? null,
       finalChecklist: body.finalChecklist,
       finalChecklistPhotos: body.finalChecklistPhotos,

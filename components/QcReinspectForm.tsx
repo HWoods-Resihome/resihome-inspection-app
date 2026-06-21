@@ -71,6 +71,12 @@ interface Props {
   /** Move-in Ready date from the listing (M/D/YY) — shown as "MIR: …" to the
    *  right of the property status. */
   moveInReadyDate?: string | null;
+  /** Listing line (status · price · listed · Move-In far-right) — same as the
+   *  other templates. Move-In shows on deposit-taken listings only. */
+  listingStatus?: string | null;
+  listingPrice?: number | null;
+  listingDate?: string | null;
+  moveInDate?: string | null;
   inspectionStatus: string;
   /** Completed QC report — shown as an in-app "View PDF Report" link. */
   pdfUrl?: string;
@@ -832,6 +838,26 @@ export function QcReinspectForm(props: Props) {
                 {props.moveInReadyDate && <span>MIR: {props.moveInReadyDate}</span>}
               </div>
             )}
+            {/* Listing line (status · price · listed · Move-In far-right). Move-In
+                shows on deposit-taken listings only. */}
+            {(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0) || props.listingDate) ? (
+              <div className={`text-xs flex items-center gap-2 ${
+                props.listingStatus
+                  ? (/active/i.test(props.listingStatus) ? 'text-emerald-700' : 'text-amber-600')
+                  : 'text-gray-500'
+              }`}>
+                <span className="truncate min-w-0">
+                  {props.listingStatus && <span>{props.listingStatus}</span>}
+                  {typeof props.listingPrice === 'number' && props.listingPrice > 0 && (
+                    <span>{props.listingStatus ? ' · ' : ''}Listing ${props.listingPrice.toLocaleString()}</span>
+                  )}
+                  {props.listingDate && (
+                    <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0)) ? ' · ' : ''}Listed {props.listingDate}</span>
+                  )}
+                </span>
+                {props.moveInDate && <span className="ml-auto shrink-0 whitespace-nowrap">Move-In: {props.moveInDate}</span>}
+              </div>
+            ) : null}
           </div>
           {/* Right column: Pass/Fail tally stacked ABOVE the standardized save
               indicator, right-aligned and vertically centered — same layout as

@@ -14,7 +14,7 @@ import {
 } from '@react-pdf/renderer';
 import { isVideoEntry, getPosterUrl, getVideoUrl } from '@/lib/media';
 import {
-  PDF_COLORS, pdfStyles, PdfHeaderStrip, PdfFooter, isoToHumanDate,
+  PDF_COLORS, pdfStyles, PdfHeaderStrip, PdfFooter, isoToHumanDate, buildListingLine,
 } from '@/lib/pdfShared';
 
 const COLORS = {
@@ -154,6 +154,8 @@ export interface PdfData {
   listingStatus?: string | null;
   listingPrice?: number | null;
   listingDate?: string | null;
+  /** Tenant move-in (leasing deal lease start) — deposit-taken listings only. */
+  moveInDate?: string | null;
   completedAt: string;
   totalAnswered: number;
   totalPhotos: number;
@@ -281,12 +283,14 @@ export function InspectionPdf({ data }: { data: PdfData }) {
     ? `${data.templateLabel} - ${data.communityName}`
     : data.templateLabel;
 
-  // Listing highlights line for the header (Active · Listing $X · Listed date).
-  const listingParts: string[] = [];
-  if (data.listingStatus) listingParts.push(data.listingStatus);
-  if (typeof data.listingPrice === 'number' && data.listingPrice > 0) listingParts.push(`Listing $${data.listingPrice.toLocaleString()}`);
-  if (data.listingDate) listingParts.push(`Listed ${data.listingDate}`);
-  const listingLine = listingParts.length ? listingParts.join(' · ') : null;
+  // Listing highlights line for the header (Status · Listing $X · Listed date ·
+  // Move-In M/D/YY). Move-In only appears on deposit-taken listings.
+  const listingLine = buildListingLine({
+    listingStatus: data.listingStatus,
+    listingPrice: data.listingPrice,
+    listingDate: data.listingDate,
+    moveInDate: data.moveInDate,
+  });
 
   const chipStyle = (tone: 'pass' | 'fail' | null) => {
     if (tone === 'pass') return { ...styles.chip, backgroundColor: COLORS.greenBg, color: COLORS.emerald };

@@ -19,6 +19,7 @@ import {
   PdfSectionPhotos,
   PdfSummaryTable,
   PdfGalleryBaseProvider,
+  buildListingLine,
   formatMoneyPdf,
   formatQtyPdf,
   isoToHumanDate,
@@ -60,6 +61,12 @@ export interface QcPdfContext {
   region: string | null;
   sourceRateCardName: string | null;
   generatedAtIso: string;
+  // Listing snapshot for the header listing line (status · price · listed ·
+  // Move-In). Move-In is set only on deposit-taken listings.
+  listingStatus?: string | null;
+  listingPrice?: number | null;
+  listingDate?: string | null;
+  moveInDate?: string | null;
   verdict: 'pass' | 'fail';
   // Overall failure comment (verdict === 'fail') — shown prominently on the report.
   overallNote?: string;
@@ -129,6 +136,7 @@ function QcDoc({ ctx }: { ctx: QcPdfContext }) {
           bedrooms={ctx.bedrooms}
           bathrooms={ctx.bathrooms}
           generatedAtLabel={generatedAtLabel}
+          listingLine={buildListingLine({ listingStatus: ctx.listingStatus, listingPrice: ctx.listingPrice, listingDate: ctx.listingDate, moveInDate: ctx.moveInDate })}
           inspectorTopRight
           summary={
             <>

@@ -16,6 +16,7 @@ import { externalWriteDenial } from '@/lib/inspectionGuard';
 import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
+  fetchActiveListingForProperty,
   fetchSourceSectionPhotos,
   uploadFileWithId,
   attachFilesToInspectionRecord,
@@ -216,6 +217,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const embeddedByUrl: Record<string, string> = {};
     for (const [url, dataUri] of resolved) embeddedByUrl[getPosterUrl(url)] = dataUri;
 
+    // Listing snapshot for the header listing line (best-effort).
+    const listing = await fetchActiveListingForProperty(data.propertyIdRef).catch(() => null);
+
     const ctx: QcPdfContext = {
       templateLabel: templateLabelFor(inspection.templateType) || 'Turn Re-Inspect QC',
       propertyName: inspection.propertyAddressSnapshot || `Property ${data.propertyIdRef}`,
@@ -225,6 +229,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       squareFootage: data.propertySquareFootage,
       region: inspection.regionSnapshot || null,
       sourceRateCardName: inspection.sourceRateCardName || null,
+      listingStatus: listing?.listingStatus ?? null,
+      listingPrice: listing?.listingPrice ?? null,
+      listingDate: listing?.listingDate ?? null,
+      moveInDate: listing?.moveInDate ?? null,
       generatedAtIso: new Date().toISOString(),
       verdict: verdict as 'pass' | 'fail',
       overallNote: verdict === 'fail' ? overallNote : '',

@@ -2543,9 +2543,74 @@ function formatListingStatus(raw: string | null | undefined): string | null {
   return s.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// ---- Move-in date from the listing's associated leasing deal -----------------
+// On a DEPOSIT-TAKEN listing we surface the tenant's actual move-in (= the deal's
+// `lease_start_date`). The listing has many associated deals across pipelines, so
+// narrow to: the LEASING pipeline, one of the post-deposit dealstages, and a deal
+// that carries an hf_transaction_id (a real, transacted lease) — then take the
+// most-recently-created match. All ids are env-overridable in case the portal
+// renumbers them.
+const LEASING_PIPELINE_ID = (process.env.HUBSPOT_LEASING_PIPELINE_ID || '').trim() || '24505349';
+const LEASING_MOVEIN_DEALSTAGES = new Set(
+  (((process.env.HUBSPOT_LEASING_MOVEIN_DEALSTAGES || '').trim())
+    || '93711524,93679033,1345950475,57133602,57133603')
+    .split(',').map((s) => s.trim()).filter(Boolean),
+);
+let _dealsTypeId: string | undefined;
+function dealsTypeId(): string {
+  if (!_dealsTypeId) _dealsTypeId = normalizeTypeId(process.env.HUBSPOT_DEALS_TYPE_ID) || '0-3';
+  return _dealsTypeId;
+}
+
+async function fetchListingMoveInDate(listingRecordId: string): Promise<string | null> {
+  if (!listingRecordId) return null;
+  try {
+    const lid = listingTypeId();
+    const did = dealsTypeId();
+    // 1) Deals associated to this listing.
+    const ids: string[] = [];
+    let after: string | undefined;
+    let pages = 0;
+    do {
+      const qs = new URLSearchParams({ limit: '100' });
+      if (after) qs.set('after', after);
+      const resp = await hubspotFetch(`/crm/v4/objects/${lid}/${listingRecordId}/associations/${did}?${qs.toString()}`);
+      for (const r of resp.results || []) { const id = r.toObjectId ?? r.id; if (id != null) ids.push(String(id)); }
+      after = resp.paging?.next?.after;
+    } while (after && ++pages < 20);
+    if (!ids.length) return null;
+
+    // 2) Batch-read deal props; keep only qualifying deals (leasing pipeline +
+    //    post-deposit dealstage + a known hf_transaction_id).
+    const wantProps = ['pipeline', 'dealstage', 'hf_transaction_id', 'lease_start_date', 'createdate', 'hs_createdate'];
+    const candidates: Array<{ lease: any; created: number }> = [];
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const resp = await hubspotFetch(`/crm/v3/objects/${did}/batch/read`, {
+        method: 'POST',
+        body: JSON.stringify({ properties: wantProps, inputs: chunk.map((id) => ({ id })) }),
+      });
+      for (const rec of resp.results || []) {
+        const p = rec.properties || {};
+        if (String(p.pipeline ?? '') !== LEASING_PIPELINE_ID) continue;
+        if (!LEASING_MOVEIN_DEALSTAGES.has(String(p.dealstage ?? ''))) continue;
+        if (!String(p.hf_transaction_id ?? '').trim()) continue;
+        const createdMs = Date.parse(String(p.createdate || p.hs_createdate || ''));
+        candidates.push({ lease: p.lease_start_date ?? null, created: isNaN(createdMs) ? 0 : createdMs });
+      }
+    }
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.created - a.created); // most recently created first
+    return formatShortDateYY(candidates[0].lease);
+  } catch (e) {
+    console.warn('[listing] move-in deal lookup failed:', e);
+    return null;
+  }
+}
+
 export async function fetchActiveListingForProperty(
   propertyRecordId: string
-): Promise<{ listingPrice: number | null; listingDate: string | null; listingStatus: string | null; moveInReadyDate: string | null } | null> {
+): Promise<{ listingPrice: number | null; listingDate: string | null; listingStatus: string | null; moveInReadyDate: string | null; moveInDate: string | null } | null> {
   if (!propertyRecordId) return null;
   const tids = typeIds();
   const lid = listingTypeId();
@@ -2573,7 +2638,7 @@ export async function fetchActiveListingForProperty(
     if (statusProp) wantProps.push(statusProp);
     if (displayInfo?.prop && !wantProps.includes(displayInfo.prop)) wantProps.push(displayInfo.prop);
     if (mirProp && !wantProps.includes(mirProp)) wantProps.push(mirProp);
-    type Row = { price: number | null; date: any; created: number; status: string; displayRaw: string; mir: any };
+    type Row = { id: string; price: number | null; date: any; created: number; status: string; displayRaw: string; mir: any };
     const rows: Row[] = [];
     for (let i = 0; i < ids.length; i += 100) {
       const chunk = ids.slice(i, i + 100);
@@ -2587,6 +2652,7 @@ export async function fetchActiveListingForProperty(
         const price = priceRaw != null && priceRaw !== '' && isFinite(Number(priceRaw)) ? Number(priceRaw) : null;
         const createdMs = p.hs_createdate ? Date.parse(p.hs_createdate) : 0;
         rows.push({
+          id: String(rec.id),
           price,
           date: p.listing_date ?? null,
           created: isNaN(createdMs) ? 0 : createdMs,
@@ -2627,11 +2693,17 @@ export async function fetchActiveListingForProperty(
       ? (displayInfo.labels[pick.displayRaw.toLowerCase()] || pick.displayRaw)
       : '';
     const listingStatus = formatListingStatus(displayLabel) || formatListingStatus(pick.status);
+    // Only deposit-taken listings carry a meaningful move-in (lease start) — and
+    // it's an extra HubSpot round-trip, so skip it otherwise.
+    const moveInDate = /deposit/i.test(listingStatus || '')
+      ? await fetchListingMoveInDate(pick.id)
+      : null;
     return {
       listingPrice: pick.price,
       listingDate: formatShortDateYY(pick.date),
       listingStatus,
       moveInReadyDate: formatShortDateYY(pick.mir),
+      moveInDate,
     };
   } catch (e) {
     console.warn('[listing] lookup failed:', e);

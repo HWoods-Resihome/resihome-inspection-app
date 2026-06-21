@@ -110,6 +110,11 @@ interface RateCardFormProps {
    *  question templates). Optional. */
   listingPrice?: number | null;
   listingDate?: string | null;
+  /** Listing status (e.g. "Active" / "Deposit Taken") shown in front of the price. */
+  listingStatus?: string | null;
+  /** Tenant move-in (leasing deal lease start, M/D/YY) — far-right on the listing
+   *  line; deposit-taken listings only. */
+  moveInDate?: string | null;
   /** Final Checklist: air-filter qty/types (prefilled + written back) + septic
    *  fee (gates the conditional septic question), and the live filter-size
    *  dropdown options pulled from the HubSpot field. All optional. */
@@ -3659,6 +3664,27 @@ export function RateCardForm(props: RateCardFormProps) {
                   {props.moveInReadyDate && <span>MIR: {props.moveInReadyDate}</span>}
                 </div>
               )}
+              {/* Listing line (status · price · listed · Move-In far-right) —
+                  matches the other templates' headers; Move-In shows on
+                  deposit-taken listings only. */}
+              {(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0) || props.listingDate) ? (
+                <div className={`text-xs flex items-center gap-2 ${
+                  props.listingStatus
+                    ? (/active/i.test(props.listingStatus) ? 'text-emerald-700' : 'text-amber-600')
+                    : 'text-gray-500'
+                }`}>
+                  <span className="truncate min-w-0">
+                    {props.listingStatus && <span>{props.listingStatus}</span>}
+                    {typeof props.listingPrice === 'number' && props.listingPrice > 0 && (
+                      <span>{props.listingStatus ? ' · ' : ''}Listing ${props.listingPrice.toLocaleString()}</span>
+                    )}
+                    {props.listingDate && (
+                      <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0)) ? ' · ' : ''}Listed {props.listingDate}</span>
+                    )}
+                  </span>
+                  {props.moveInDate && <span className="ml-auto shrink-0 whitespace-nowrap">Move-In: {props.moveInDate}</span>}
+                </div>
+              ) : null}
               {/* Internal Resolution client total (Scope-specific) — just the next
                   line down, called out in its own color. */}
               <div className="text-xs font-heading font-semibold text-violet-700 truncate">

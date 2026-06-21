@@ -156,7 +156,7 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
   const fcPhotos = fcBlob ? finalChecklistPhotos(fcBlob) : [];
 
   // Listing highlights for the header (Active / Deposit Taken · price · date).
-  let listing: { listingStatus: string | null; listingPrice: number | null; listingDate: string | null } | null = null;
+  let listing: { listingStatus: string | null; listingPrice: number | null; listingDate: string | null; moveInDate: string | null } | null = null;
   try { listing = await fetchActiveListingForProperty(data.propertyIdRef); } catch { /* optional */ }
 
   // Community/Visit only: the property's associated Community object name, used
@@ -191,6 +191,7 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
     listingStatus: listing?.listingStatus ?? null,
     listingPrice: listing?.listingPrice ?? null,
     listingDate: listing?.listingDate ?? null,
+    moveInDate: listing?.moveInDate ?? null,
     completedAt: insp.completedAt || insp.updatedAt || new Date().toISOString(),
     totalAnswered: Object.values(answersBySection).reduce((n, arr) => n + arr.length, 0),
     totalPhotos: allUrls.length,

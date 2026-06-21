@@ -362,6 +362,24 @@ export function PdfFooter(props: { docName: string; propertyName: string }) {
  *     address, then meta (inspector + bed/bath/sqft + region + generated date)
  *   - RIGHT: caller-supplied summary block (typically the main money total)
  */
+/** Compose the header listing line: "Status · Listing $X · Listed M/D/YY ·
+ *  Move-In: M/D/YY". Shared by every report that shows listing info (all except
+ *  Community). Move-In is only present on deposit-taken listings (set upstream).
+ *  Returns null when there's nothing to show. */
+export function buildListingLine(opts: {
+  listingStatus?: string | null;
+  listingPrice?: number | null;
+  listingDate?: string | null;
+  moveInDate?: string | null;
+}): string | null {
+  const parts: string[] = [];
+  if (opts.listingStatus) parts.push(opts.listingStatus);
+  if (typeof opts.listingPrice === 'number' && opts.listingPrice > 0) parts.push(`Listing $${opts.listingPrice.toLocaleString()}`);
+  if (opts.listingDate) parts.push(`Listed ${opts.listingDate}`);
+  if (opts.moveInDate) parts.push(`Move-In: ${opts.moveInDate}`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
 export function PdfHeaderStrip(props: {
   docTitle: string;
   propertyName: string;
@@ -744,6 +762,14 @@ export interface PdfBuildContext {
    *  "Approver: … Approved" line. */
   approverName?: string | null;
   approvedAtIso?: string | null;
+  /** Listing snapshot for the header listing line (status · price · listed ·
+   *  Move-In). Shown on every report EXCEPT Community and Turn Re-Inspect QC.
+   *  moveInDate (the leasing deal's lease start) is only set on deposit-taken
+   *  listings. */
+  listingStatus?: string | null;
+  listingPrice?: number | null;
+  listingDate?: string | null;
+  moveInDate?: string | null;
   sections: PdfSectionGroup[];
   grandTotals: { vendor: number; client: number; tenant: number; lineCount: number };
   /** Final Checklist Q&A — rendered on the MASTER pdf only. Each section is a

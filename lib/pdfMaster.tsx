@@ -7,6 +7,7 @@ import {
   pdfStyles,
   ensureFontRegistered,
   PdfHeaderStrip,
+  buildListingLine,
   PdfFooter,
   PdfSectionHeader,
   PdfSectionPhotos,
@@ -108,6 +109,7 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
           bedrooms={ctx.bedrooms}
           bathrooms={ctx.bathrooms}
           generatedAtLabel={generatedAtLabel}
+          listingLine={buildListingLine({ listingStatus: ctx.listingStatus, listingPrice: ctx.listingPrice, listingDate: ctx.listingDate, moveInDate: ctx.moveInDate })}
           summary={
             <>
               <Text style={pdfStyles.headerRightLabel}>Client Total</Text>

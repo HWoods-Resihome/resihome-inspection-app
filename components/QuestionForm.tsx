@@ -76,6 +76,9 @@ type Props = {
   listingDate?: string | null;
   /** Listing status (e.g. "Active" / "Deposit Taken") shown in front of the price. */
   listingStatus?: string | null;
+  /** Tenant move-in (leasing deal lease start, M/D/YY) — shown far-right on the
+   *  listing line. Only set on deposit-taken listings. */
+  moveInDate?: string | null;
   /** Community/Visit only: the name of the community associated with the
    *  property, shown above the address in the header. */
   communityName?: string | null;
@@ -196,7 +199,7 @@ function slugify(s: string): string {
 
 export function QuestionForm({
   questions, templateType, templateLabel, inspectorName, propertyName, propertyRecordId,
-  bedrooms, bathrooms, squareFootage, propertyStatus, moveInReadyDate, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, communityName, onSubmit, onCancel,
+  bedrooms, bathrooms, squareFootage, propertyStatus, moveInReadyDate, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, moveInDate, communityName, onSubmit, onCancel,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
   propertyAirFiltersTotal, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
@@ -1834,18 +1837,22 @@ export function QuestionForm({
                   the COLOR differs: green when Active, amber otherwise, so listing
                   state still reads at a glance. */}
               {!isCommunity && (listingStatus || (typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? (
-                <div className={`text-xs truncate ${
+                <div className={`text-xs flex items-center gap-2 ${
                   listingStatus
                     ? (/active/i.test(listingStatus) ? 'text-emerald-700' : 'text-amber-600')
                     : 'text-gray-500'
                 }`}>
-                  {listingStatus && <span>{listingStatus}</span>}
-                  {typeof listingPrice === 'number' && listingPrice > 0 && (
-                    <span>{listingStatus ? ' · ' : ''}Listing ${listingPrice.toLocaleString()}</span>
-                  )}
-                  {listingDate && (
-                    <span>{(listingStatus || (typeof listingPrice === 'number' && listingPrice > 0)) ? ' · ' : ''}Listed {listingDate}</span>
-                  )}
+                  <span className="truncate min-w-0">
+                    {listingStatus && <span>{listingStatus}</span>}
+                    {typeof listingPrice === 'number' && listingPrice > 0 && (
+                      <span>{listingStatus ? ' · ' : ''}Listing ${listingPrice.toLocaleString()}</span>
+                    )}
+                    {listingDate && (
+                      <span>{(listingStatus || (typeof listingPrice === 'number' && listingPrice > 0)) ? ' · ' : ''}Listed {listingDate}</span>
+                    )}
+                  </span>
+                  {/* Move-In (lease start) pinned far-right — deposit-taken listings only. */}
+                  {moveInDate && <span className="ml-auto shrink-0 whitespace-nowrap">Move-In: {moveInDate}</span>}
                 </div>
               ) : null}
             </div>

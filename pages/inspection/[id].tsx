@@ -95,6 +95,7 @@ export default function ExistingInspection() {
   const [listingDate, setListingDate] = useState<string | null>(null);
   const [listingStatus, setListingStatus] = useState<string | null>(null);
   const [moveInReadyDate, setMoveInReadyDate] = useState<string | null>(null);
+  const [moveInDate, setMoveInDate] = useState<string | null>(null);
   const [communityName, setCommunityName] = useState<string | null>(null);
   const [filterSizeOptions, setFilterSizeOptions] = useState<string[]>([]);
   const [existingAnswers, setExistingAnswers] = useState<SavedAnswer[]>([]);
@@ -140,6 +141,7 @@ export default function ExistingInspection() {
         setListingDate(typeof data.listingDate === 'string' ? data.listingDate : null);
         setListingStatus(typeof data.listingStatus === 'string' ? data.listingStatus : null);
         setMoveInReadyDate(typeof data.moveInReadyDate === 'string' ? data.moveInReadyDate : null);
+        setMoveInDate(typeof data.moveInDate === 'string' ? data.moveInDate : null);
         setCommunityName(typeof data.communityName === 'string' ? data.communityName : null);
         setFilterSizeOptions(Array.isArray(data.filterSizeOptions) ? data.filterSizeOptions : []);
         setExistingAnswers(data.answers || []);
@@ -238,6 +240,7 @@ export default function ExistingInspection() {
           listingStatus,
           listingPrice,
           listingDate,
+          moveInDate,
           completedAt: new Date().toISOString(),
           answers,
           sectionPhotoUrls,
@@ -535,6 +538,10 @@ export default function ExistingInspection() {
           squareFootage={propertySquareFootage}
           propertyStatus={inspection.propertyStatusAtCompletion || propertyStatus}
           moveInReadyDate={moveInReadyDate}
+          listingStatus={listingStatus}
+          listingPrice={listingPrice}
+          listingDate={listingDate}
+          moveInDate={moveInDate}
           inspectionStatus={inspection.status}
           pdfUrl={isCompleted ? (shareLinks?.report || inspection.pdfUrl || undefined) : undefined}
           readOnly={readOnly}
@@ -563,6 +570,8 @@ export default function ExistingInspection() {
           communityName={communityName}
           listingPrice={listingPrice}
           listingDate={listingDate}
+          listingStatus={listingStatus}
+          moveInDate={moveInDate}
           lastTenantMonths={propertyLastTenantMonths}
           propertyAirFiltersTotal={propertyAirFiltersTotal}
           propertyAirFiltersType1={propertyAirFiltersType1}
@@ -602,6 +611,7 @@ export default function ExistingInspection() {
           listingPrice={listingPrice}
           listingDate={listingDate}
           listingStatus={listingStatus}
+          moveInDate={moveInDate}
           communityName={communityName}
           propertyAirFiltersTotal={propertyAirFiltersTotal}
           propertyAirFiltersType1={propertyAirFiltersType1}

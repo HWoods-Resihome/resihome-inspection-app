@@ -25,6 +25,7 @@ import {
   fetchInspections,
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
+  fetchActiveListingForProperty,
   fetchSourceSectionPhotos,
   uploadFileWithId,
   attachPdfUrlToInspection,
@@ -165,6 +166,8 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
     ? inspection.qcVerdict
     : (failCount > 0 ? 'fail' : 'pass');
 
+  const listing = await fetchActiveListingForProperty(data.propertyIdRef).catch(() => null);
+
   const ctx: QcPdfContext = {
     templateLabel: templateLabelFor(inspection.templateType) || 'Turn Re-Inspect QC',
     propertyName: inspection.propertyAddressSnapshot || `Property ${data.propertyIdRef}`,
@@ -174,6 +177,10 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
     squareFootage: data.propertySquareFootage,
     region: inspection.regionSnapshot || null,
     sourceRateCardName: inspection.sourceRateCardName || null,
+    listingStatus: listing?.listingStatus ?? null,
+    listingPrice: listing?.listingPrice ?? null,
+    listingDate: listing?.listingDate ?? null,
+    moveInDate: listing?.moveInDate ?? null,
     generatedAtIso: new Date().toISOString(),
     verdict,
     overallNote: verdict === 'fail' ? (inspection.qcOverallNote || '') : '',
