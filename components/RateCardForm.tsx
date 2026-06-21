@@ -3668,21 +3668,21 @@ export function RateCardForm(props: RateCardFormProps) {
                   matches the other templates' headers; Move-In shows on
                   deposit-taken listings only. */}
               {(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0) || props.listingDate) ? (
-                <div className={`text-xs flex items-center gap-2 ${
+                <div className={`text-xs truncate ${
                   props.listingStatus
                     ? (/active/i.test(props.listingStatus) ? 'text-emerald-700' : 'text-amber-600')
                     : 'text-gray-500'
                 }`}>
-                  <span className="truncate min-w-0">
-                    {props.listingStatus && <span>{props.listingStatus}</span>}
-                    {typeof props.listingPrice === 'number' && props.listingPrice > 0 && (
-                      <span>{props.listingStatus ? ' · ' : ''}Listing ${props.listingPrice.toLocaleString()}</span>
-                    )}
-                    {props.listingDate && (
-                      <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0)) ? ' · ' : ''}Listed {props.listingDate}</span>
-                    )}
-                  </span>
-                  {props.moveInDate && <span className="ml-auto shrink-0 whitespace-nowrap">Move-In: {props.moveInDate}</span>}
+                  {props.listingStatus && <span>{props.listingStatus}</span>}
+                  {typeof props.listingPrice === 'number' && props.listingPrice > 0 && (
+                    <span>{props.listingStatus ? ' · ' : ''}Listing ${props.listingPrice.toLocaleString()}</span>
+                  )}
+                  {props.listingDate && (
+                    <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0)) ? ' · ' : ''}Listed {props.listingDate}</span>
+                  )}
+                  {props.moveInDate && (
+                    <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0) || props.listingDate) ? ' · ' : ''}Move-In: {props.moveInDate}</span>
+                  )}
                 </div>
               ) : null}
               {/* Internal Resolution client total (Scope-specific) — just the next

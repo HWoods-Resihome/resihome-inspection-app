@@ -1837,22 +1837,21 @@ export function QuestionForm({
                   the COLOR differs: green when Active, amber otherwise, so listing
                   state still reads at a glance. */}
               {!isCommunity && (listingStatus || (typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? (
-                <div className={`text-xs flex items-center gap-2 ${
+                <div className={`text-xs truncate ${
                   listingStatus
                     ? (/active/i.test(listingStatus) ? 'text-emerald-700' : 'text-amber-600')
                     : 'text-gray-500'
                 }`}>
-                  <span className="truncate min-w-0">
-                    {listingStatus && <span>{listingStatus}</span>}
-                    {typeof listingPrice === 'number' && listingPrice > 0 && (
-                      <span>{listingStatus ? ' · ' : ''}Listing ${listingPrice.toLocaleString()}</span>
-                    )}
-                    {listingDate && (
-                      <span>{(listingStatus || (typeof listingPrice === 'number' && listingPrice > 0)) ? ' · ' : ''}Listed {listingDate}</span>
-                    )}
-                  </span>
-                  {/* Move-In (lease start) pinned far-right — deposit-taken listings only. */}
-                  {moveInDate && <span className="ml-auto shrink-0 whitespace-nowrap">Move-In: {moveInDate}</span>}
+                  {listingStatus && <span>{listingStatus}</span>}
+                  {typeof listingPrice === 'number' && listingPrice > 0 && (
+                    <span>{listingStatus ? ' · ' : ''}Listing ${listingPrice.toLocaleString()}</span>
+                  )}
+                  {listingDate && (
+                    <span>{(listingStatus || (typeof listingPrice === 'number' && listingPrice > 0)) ? ' · ' : ''}Listed {listingDate}</span>
+                  )}
+                  {moveInDate && (
+                    <span>{(listingStatus || (typeof listingPrice === 'number' && listingPrice > 0) || listingDate) ? ' · ' : ''}Move-In: {moveInDate}</span>
+                  )}
                 </div>
               ) : null}
             </div>
