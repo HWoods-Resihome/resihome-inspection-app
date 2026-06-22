@@ -13,6 +13,10 @@ import { recordAuditEvent } from '@/lib/auditLog';
  *
  * The PDF is generated separately via /api/pdf (unchanged from earlier rounds).
  */
+// Rate-card submit also pre-generates the review (Master) PDF server-side
+// (regenerate), which can take ~15-20s — give it the same ceiling as finalize.
+export const config = { maxDuration: 300 };
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -143,6 +147,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         });
       } catch (e) {
         console.warn('[submit] could not record submitted_by_email/submitted_at/resolution_timing_json (create these HubSpot properties to enable the self-approval lockout + Complete Later):', e);
+      }
+      // Generate the review (Master) PDF now, SERVER-SIDE and awaited, so the
+      // pending-approval scope reliably has pdf_master_url set (the "View PDFs"
+      // link) the moment this returns — instead of depending on a client
+      // fire-and-forget. Reuses the finalize "regenerate" path: it builds + stores
+      // the PDFs but changes NO status and sends NO email/ticket, so it's safe on
+      // a pending-approval scope. Best-effort: a failure never blocks the submit
+      // (the PDFs can still be regenerated at finalize or via Admin Flows).
+      try {
+        const host = req.headers['x-forwarded-host'] || req.headers.host;
+        const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
+        if (host) {
+          const r = await fetch(`${proto}://${host}/api/inspections/${id}/finalize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', cookie: req.headers.cookie || '' },
+            body: JSON.stringify({ regenerateOnly: true }),
+          });
+          if (!r.ok) console.warn(`[submit] review PDF pre-generate returned HTTP ${r.status}`);
+        }
+      } catch (e) {
+        console.warn('[submit] review PDF pre-generate failed (continuing):', e);
       }
     }
     const inspection = await fetchInspectionById(id);

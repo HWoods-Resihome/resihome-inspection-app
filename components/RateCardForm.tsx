@@ -3345,19 +3345,10 @@ export function RateCardForm(props: RateCardFormProps) {
       }
       // Confirmation toast — it lives at the app root, so it stays visible after
       // onSubmit() routes back to the inspections home screen (app + desktop).
+      // The review (Master) PDF is generated SERVER-SIDE by /submit before it
+      // responds, so by now pdf_master_url is set and the pending-approval scope
+      // already shows "View PDFs". (It's overwritten with any edits at finalize.)
       flashApi.flash('Scope Submitted - Pending Approval ✔️', 'success', 8000);
-      // Generate the Master PDF NOW (at pending-approval) so the approver can
-      // review the full report before finalizing. Reuses the finalize
-      // regenerate path — it builds + stores the PDFs but changes NO status and
-      // fires NO emails/tickets, so it's safe on a pending-approval scope.
-      // Fire-and-forget: once the request reaches the server it runs to
-      // completion there regardless of this client navigating away. The Master
-      // is overwritten with any review edits when the scope is finalized.
-      void fetch(`/api/inspections/${props.inspectionRecordId}/finalize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ regenerateOnly: true }),
-      }).catch(() => { /* non-fatal — regenerates at finalize or via the admin tool */ });
       props.onSubmit();
     } catch (e: any) {
       await dialog.alert(`Submit failed: ${e.message || e}`);
