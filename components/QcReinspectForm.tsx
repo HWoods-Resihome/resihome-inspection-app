@@ -817,49 +817,12 @@ export function QcReinspectForm(props: Props) {
       {/* Frozen header — logo + address + bed/bath/sqft + the Pass/Fail tally
           (the subheading). The ONLY thing pinned on scroll (mirrors Scope/1099). */}
       <header className="sticky top-0 z-10 -mx-5 sm:-mx-6 px-5 sm:px-6 bg-white border-b-2 border-brand shadow-sm">
-        <div className="max-w-7xl mx-auto py-1.5 flex items-center gap-2.5">
-          <button type="button" onClick={props.onCancel} aria-label="Back to inspections" title="Back to inspections" className="shrink-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
-          </button>
-          <div className="min-w-0 flex-1">
-            <FitText text={props.propertyName} className="font-heading font-semibold text-ink" />
-            <div className="text-xs text-gray-500 truncate">
-              {props.bedrooms} Bed / {props.bathrooms} Bath
-              {props.squareFootage != null && props.squareFootage > 0 && (
-                <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
-              )}
-            </div>
-            {(props.propertyStatus || props.moveInReadyDate) && (
-              <div className="text-xs text-gray-500 truncate">
-                {props.propertyStatus}
-                {props.propertyStatus && props.moveInReadyDate && <span> &middot; </span>}
-                {props.moveInReadyDate && <span>MIR: {props.moveInReadyDate}</span>}
-              </div>
-            )}
-            {/* Listing line — allowed to WRAP (no truncate) so the Move-In date
-                shows in full even though the Pass/Fail column narrows this block. */}
-            {/active|deposit/i.test(props.listingStatus || '') ? (
-              <div className={`text-xs ${
-                /active/i.test(props.listingStatus || '') ? 'text-emerald-700' : 'text-amber-600'
-              }`}>
-                {props.listingStatus && <span>{props.listingStatus}</span>}
-                {typeof props.listingPrice === 'number' && props.listingPrice > 0 && (
-                  <span>{props.listingStatus ? ' · ' : ''}${props.listingPrice.toLocaleString()}</span>
-                )}
-                {!/deposit/i.test(props.listingStatus || '') && props.listingDate && (
-                  <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0)) ? ' · ' : ''}Listed {props.listingDate}</span>
-                )}
-                {/deposit/i.test(props.listingStatus || '') && props.moveInDate && (
-                  <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0)) ? ' · ' : ''}Move-In: {props.moveInDate}</span>
-                )}
-              </div>
-            ) : null}
-          </div>
-          {/* Right column: Pass/Fail tally stacked ABOVE the standardized save
-              indicator, right-aligned and vertically centered — same layout as
-              every other template. */}
-          <div className="shrink-0 flex flex-col items-end justify-center gap-1">
+        <div className="max-w-7xl mx-auto py-1.5 relative">
+          {/* Pass/Fail tally + save indicator, pinned to the TOP-right (out of
+              flow). The address/bed-bath lines get right padding to clear it, but
+              the lower status/listing lines run the FULL width beneath it — so the
+              listing line (Move-In date) never has to truncate or wrap. */}
+          <div className="absolute top-0 right-0 flex flex-col items-end gap-1">
             <div className="flex items-center gap-1.5 text-[11px] font-heading font-bold">
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{totalPass} Pass</span>
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{totalFail} Fail</span>
@@ -867,6 +830,49 @@ export function QcReinspectForm(props: Props) {
             {!props.readOnly && (
               <div className="text-right"><SaveIndicator phase={saveStatus} /></div>
             )}
+          </div>
+          <div className="flex items-start gap-2.5">
+            <button type="button" onClick={props.onCancel} aria-label="Back to inspections" title="Back to inspections" className="shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
+            </button>
+            <div className="min-w-0 flex-1">
+              {/* Address + bed/bath clear the pinned Pass/Fail column on the right. */}
+              <div className="pr-32">
+                <FitText text={props.propertyName} className="font-heading font-semibold text-ink" />
+                <div className="text-xs text-gray-500 truncate">
+                  {props.bedrooms} Bed / {props.bathrooms} Bath
+                  {props.squareFootage != null && props.squareFootage > 0 && (
+                    <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
+                  )}
+                </div>
+              </div>
+              {(props.propertyStatus || props.moveInReadyDate) && (
+                <div className="text-xs text-gray-500 truncate">
+                  {props.propertyStatus}
+                  {props.propertyStatus && props.moveInReadyDate && <span> &middot; </span>}
+                  {props.moveInReadyDate && <span>MIR: {props.moveInReadyDate}</span>}
+                </div>
+              )}
+              {/* Listing line runs the full width beneath the pinned chips — shows
+                  in full, no truncate, no wrap. */}
+              {/active|deposit/i.test(props.listingStatus || '') ? (
+                <div className={`text-xs whitespace-nowrap ${
+                  /active/i.test(props.listingStatus || '') ? 'text-emerald-700' : 'text-amber-600'
+                }`}>
+                  {props.listingStatus && <span>{props.listingStatus}</span>}
+                  {typeof props.listingPrice === 'number' && props.listingPrice > 0 && (
+                    <span>{props.listingStatus ? ' · ' : ''}${props.listingPrice.toLocaleString()}</span>
+                  )}
+                  {!/deposit/i.test(props.listingStatus || '') && props.listingDate && (
+                    <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0)) ? ' · ' : ''}Listed {props.listingDate}</span>
+                  )}
+                  {/deposit/i.test(props.listingStatus || '') && props.moveInDate && (
+                    <span>{(props.listingStatus || (typeof props.listingPrice === 'number' && props.listingPrice > 0)) ? ' · ' : ''}Move-In: {props.moveInDate}</span>
+                  )}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       </header>
