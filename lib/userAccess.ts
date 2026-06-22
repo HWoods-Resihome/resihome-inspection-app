@@ -94,7 +94,7 @@ export function externalCanCreate1099ForStatus(status: string | null | undefined
 /** The message shown when an external user tries to start a 1099 on a property
  *  whose status isn't yet a leasing status. */
 export const EXTERNAL_1099_STATUS_BLOCK_MSG =
-  'Please wait until the Turn is completed and the property status is moved to On-Market to walk the property.';
+  'Wait until the Turn is complete and the property is On-Market to walk it.';
 
 /**
  * Does this email own the inspection (i.e. is the recorded inspector)?

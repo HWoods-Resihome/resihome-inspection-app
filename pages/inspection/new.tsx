@@ -32,7 +32,7 @@ const TEMPLATE_OPTIONS: { value: TemplateType; label: string; sublabel: string; 
   { value: 'pm_turn_reinspect_qc',                      group: 'Turn', label: 'Turn Re-Inspect QC',              sublabel: 'Validate vendor work against a Scope Rate Card' },
   { value: 'pm_community_inspection',                   group: 'PM',   label: 'Community / Visit Inspection',    sublabel: 'Community grounds, amenities, signage' },
   { value: 'pm_vacancy_occupancy_check',                group: 'PM',   label: 'Vacancy / Occupancy Check',       sublabel: 'Quick visit to confirm vacancy/security' },
-  { value: 'leasing_agent_1099_property_inspection',    group: '1099', label: 'Leasing Agent Inspection',          sublabel: 'Pre-tour assessment by leasing agent' },
+  { value: 'leasing_agent_1099_property_inspection',    group: '1099', label: 'Leasing Agent Inspection',          sublabel: 'Market Ready assessment by leasing agent' },
   { value: 'qc_new_construction_rrqc',                  group: 'QC',   label: 'New Construction RRQC',           sublabel: 'Rent-ready QC for new construction' },
 ];
 
@@ -664,7 +664,8 @@ export default function NewInspection() {
 
               {/* External-user property-status gate: explain why Begin is locked. */}
               {blockedByPropertyStatus && (
-                <div className="mt-2 p-3 rounded-lg bg-amber-50 border border-amber-300 text-sm text-amber-800">
+                <div className="mt-2 p-3 rounded-lg bg-pink-50 border border-pink-200 text-sm text-pink-900">
+                  <div className="font-heading font-bold text-brand mb-0.5">Not ready to walk</div>
                   {EXTERNAL_1099_STATUS_BLOCK_MSG}
                 </div>
               )}
