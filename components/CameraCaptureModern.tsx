@@ -199,6 +199,11 @@ const PROXIMITY_THRESHOLD_M = Number(process.env.NEXT_PUBLIC_PROXIMITY_THRESHOLD
 // silent watch stall) flips the verdict to "unverified" instead of freezing the
 // last distance.
 const FIX_TTL_MS = 15000;
+// Battery: we DON'T keep a continuous high-accuracy watchPosition (that pins the
+// GPS radio on for the whole camera session). Instead we take a fresh one-shot
+// high-accuracy fix this often — just under FIX_TTL_MS so the badge/stamp never
+// actually go stale in normal use, while letting the GPS sleep between fixes.
+const GEO_REFRESH_MS = 12000;
 
 // Great-circle distance between two lat/lng points, in meters.
 function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
@@ -303,6 +308,9 @@ export function CameraCaptureModern({
   // Latest GPS fix, kept fresh while the camera is open, burned into captures.
   const geoRef = useRef<GeolocationPosition | null>(null);
   const geoWatchRef = useRef<number | null>(null);
+  // Guards against stacking overlapping one-shot fixes (the periodic refresh
+  // replaces the old continuous watch — see startWatch).
+  const geoFixInFlightRef = useRef(false);
   // Property reference location + the latest fix as state, so the live
   // proximity badge re-renders and captures can stamp a ✓/✗ verdict.
   const [refCoords, setRefCoords] = useState<{ lat: number; lng: number; source: string } | null>(null);
@@ -1455,11 +1463,9 @@ export function CameraCaptureModern({
   // action behind the badge.
   const startWatch = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) return;
-    if (geoWatchRef.current != null) {
-      try { navigator.geolocation.clearWatch(geoWatchRef.current); } catch { /* noop */ }
-      geoWatchRef.current = null;
-    }
+    if (geoFixInFlightRef.current) return; // a fix is already being acquired
     const onPos = (pos: GeolocationPosition) => {
+      geoFixInFlightRef.current = false;
       geoRef.current = pos;
       geoTsRef.current = Date.now();
       geoErrorRef.current = false;
@@ -1470,32 +1476,36 @@ export function CameraCaptureModern({
     const onErr = () => {
       // Denied / location services off / position unavailable: drop the stale
       // fix so the verdict can't keep showing a frozen distance.
+      geoFixInFlightRef.current = false;
       geoErrorRef.current = true;
       geoRef.current = null;
       setGeoError(true);
     };
-    // maximumAge:0 forces a current reading, so recovery doesn't return a
-    // cached "off" result.
+    // BATTERY: a single high-accuracy one-shot fix, re-taken periodically by the
+    // tick below — NOT a continuous watchPosition. A high-accuracy watch keeps
+    // the GPS radio powered for the entire camera session; since the inspector
+    // is stationary at one property, periodic one-shots keep the stamp precise
+    // and the proximity verdict current while letting GPS sleep between fixes.
+    // maximumAge:0 forces a current reading so recovery never returns a cached
+    // "off" result.
+    geoFixInFlightRef.current = true;
     navigator.geolocation.getCurrentPosition(onPos, onErr, {
       enableHighAccuracy: true, timeout: 8000, maximumAge: 0,
     });
-    try {
-      geoWatchRef.current = navigator.geolocation.watchPosition(onPos, onErr, {
-        enableHighAccuracy: true, timeout: 20000, maximumAge: 15000,
-      });
-    } catch { /* watchPosition unsupported — getCurrentPosition fix still applies */ }
   }, []);
 
   useEffect(() => {
     if (!isOpen || typeof navigator === 'undefined' || !navigator.geolocation) return;
     startWatch();
-    // Re-evaluate staleness on a timer (no GPS events fire once location is
-    // off). While in a bad state, also re-attempt acquisition so the verdict
-    // recovers automatically when the user turns location back on.
+    // Re-evaluate staleness on a timer (no GPS events fire once location is off)
+    // AND drive the periodic refresh: re-fix a little before the fix goes stale
+    // so the badge/stamp stay current, and immediately when in a bad state so the
+    // verdict recovers when the user turns location back on.
     const tick = setInterval(() => {
       setGeoTick((t) => t + 1);
-      const bad = geoErrorRef.current || !geoRef.current || Date.now() - geoTsRef.current > FIX_TTL_MS;
-      if (bad) startWatch();
+      const age = Date.now() - geoTsRef.current;
+      const bad = geoErrorRef.current || !geoRef.current || age > FIX_TTL_MS;
+      if (bad || age > GEO_REFRESH_MS) startWatch();
     }, 3000);
     return () => {
       if (geoWatchRef.current != null) {
