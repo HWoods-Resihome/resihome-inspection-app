@@ -3098,16 +3098,54 @@ export function RateCardForm(props: RateCardFormProps) {
     }
   }
 
+  // A photo that has failed to upload many times shouldn't trap the inspector on
+  // this screen. The offline photo store surfaces a "failed to upload N×"
+  // lastError and `syncStuck` flags no-progress; when that's the case we let them
+  // submit WITHOUT the stuck photo (made explicit) rather than be stranded —
+  // mirroring the question/QC forms. Line-data saves (pendingSync) are NOT
+  // dropped this way: those carry scope dollars, so they still block (Retry/Clear).
+  const photosStuck = pendingPhotos > 0 && (syncStuck || /failed to upload\s*\d+/i.test(lastSyncError || ''));
+
   async function handleSubmitOrFinalize() {
     if (submitGuardRef.current) return; // a submit/finalize is already in flight
     // Don't submit/finalize until the AI-applied (and any other) changes have
     // actually synced to the server — otherwise approval would run on a stale
     // or partial scope. The Submit button is also disabled in this state.
-    if (aiApplying || (pendingSync + pendingPhotos) > 0) {
+    if (aiApplying) {
+      await dialog.alert('Your AI review changes are still applying. Give it a moment, then submit again.');
+      return;
+    }
+    // Queued LINE saves still pending → wait (they carry scope data; never drop).
+    if (pendingSync > 0) {
       await dialog.alert(
-        `Your latest changes are still saving (${pendingSync + pendingPhotos} pending). Please wait for "Synced" before submitting.\n\nIf it stays stuck, use Retry or Clear on the sync banner.`
+        `Your latest changes are still saving (${pendingSync} pending). Please wait for "Synced" before submitting.\n\nIf it stays stuck, use Retry or Clear on the sync banner.`
       );
       return;
+    }
+    // Queued PHOTOS still pending: offline → wait; genuinely stuck (failed
+    // repeatedly) → let them submit without it; otherwise it's mid-upload → wait.
+    if (pendingPhotos > 0) {
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      if (offline) {
+        await dialog.alert(
+          `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} still need${pendingPhotos === 1 ? 's' : ''} to upload, but you're offline. ` +
+          `Move to an area with signal and stay on this screen until they finish — they aren't saved yet.`
+        );
+        return;
+      }
+      if (!photosStuck) {
+        await dialog.alert(
+          `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} ${pendingPhotos === 1 ? 'is' : 'are'} still uploading. ` +
+          `Keep this screen open a few more seconds and submit again — ${pendingPhotos === 1 ? "it isn't" : "they aren't"} saved yet.`
+        );
+        return;
+      }
+      const proceed = await dialog.confirm(
+        `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} keep${pendingPhotos === 1 ? 's' : ''} failing to upload (check your signal). ` +
+        `If you submit now ${pendingPhotos === 1 ? 'it' : 'they'} will NOT be attached to the report. Submit without ${pendingPhotos === 1 ? 'it' : 'them'}?`,
+        { confirmLabel: 'Submit without photos', cancelLabel: 'Keep trying' }
+      );
+      if (!proceed) return;
     }
     // Pre-flight: required section photos present?
     const missingSections: string[] = [];
@@ -4248,13 +4286,15 @@ export function RateCardForm(props: RateCardFormProps) {
               showCancelInspection={!!props.onCancelInspection}
               submitLabel={submitLabel}
               submitLabelShort={submitLabelShort}
-              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || submitting || aiApplying || (pendingSync + pendingPhotos) > 0 || selfApprovalLocked || (fcEditable && !finalChecklistComplete)}
+              submitDisabled={!!props.readOnly || saveStatus.kind === "saving" || finalizing || submitting || aiApplying || pendingSync > 0 || (pendingPhotos > 0 && !photosStuck) || selfApprovalLocked || (fcEditable && !finalChecklistComplete)}
               submitTitle={
                 props.readOnly ? undefined
                 : saveStatus.kind === 'saving' ? 'Saving — wait a moment, then submit.'
                 : finalizing ? 'Finalizing…'
                 : aiApplying ? 'Applying AI review…'
-                : (pendingSync + pendingPhotos) > 0 ? 'Waiting for offline changes to finish syncing.'
+                : pendingSync > 0 ? 'Waiting for offline changes to finish syncing.'
+                : (pendingPhotos > 0 && !photosStuck) ? 'Waiting for photos to finish uploading.'
+                : (pendingPhotos > 0 && photosStuck) ? 'A photo keeps failing to upload — you can submit without it.'
                 : (fcEditable && fcGap) ? `Finish the Final Checklist — ${fcGap}`
                 : (isScopeTemplate && props.inspectionStatus !== 'pending_approval' && !reviewValid) ? 'Run the AI Review before submitting.'
                 : undefined
