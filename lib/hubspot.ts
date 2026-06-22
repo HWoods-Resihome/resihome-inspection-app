@@ -2338,19 +2338,18 @@ const COMPLIANCE_TICKET_STAGE_NEW_ID = (process.env.HUBSPOT_COMPLIANCE_STAGE_NEW
 // alongside the numeric id ('0-5') — use the name for the same compatibility.
 const TICKET_TYPE_ID = 'tickets';
 
-// Resolve (and cache) a usable Ticket<->Property association type + direction +
-// category, MIRRORING resolveInspToPropertyAssoc. The earlier v4 "default"
-// approach failed because no HubSpot-default association exists between Tickets
-// and the custom Property object — the link is a labeled (USER_DEFINED) type, so
-// we must discover its typeId AND category and create with both.
-type TicketAssoc = { fromTypeId: string; toTypeId: string; typeId: number; category: string; reversed: boolean };
-let _ticketPropAssocCache: TicketAssoc | null = null;
+// Resolve a usable Ticket<->Property association and link the records. The
+// property link can be EITHER the property_id_ref field OR an inspection→property
+// association, and the ticket↔property association type may be exposed under the
+// object NAME or the numeric id — so we try numeric id + name, both directions,
+// caching the first combo that works. Mirrors the proven inspection→property path.
+type TicketAssoc = { fromType: string; toType: string; typeId: number; category: string; reversed: boolean };
+let _ticketPropAssoc: TicketAssoc | null = null;
 
-/** Scan the association labels between two objects; pick the labeled match (when
- *  asked) else the unlabeled/primary else the first. Returns typeId + category. */
-async function pickAssocTypeAndCategory(fromTypeId: string, toTypeId: string, preferLabel: string | null): Promise<{ typeId: number; category: string } | null> {
+/** Scan association labels; pick the labeled match (when asked) else unlabeled else first. */
+async function pickAssocTypeAndCategory(fromType: string, toType: string, preferLabel: string | null): Promise<{ typeId: number; category: string } | null> {
   try {
-    const resp = await hubspotFetch(assocLabelsUrl(fromTypeId, toTypeId));
+    const resp = await hubspotFetch(assocLabelsUrl(fromType, toType));
     const results: any[] = resp.results || [];
     if (results.length === 0) return null;
     const byLabel = preferLabel ? results.find((a) => a.label === preferLabel) : undefined;
@@ -2359,54 +2358,94 @@ async function pickAssocTypeAndCategory(fromTypeId: string, toTypeId: string, pr
     const typeId = Number(chosen.typeId ?? chosen.associationTypeId);
     if (!Number.isFinite(typeId)) return null;
     return { typeId, category: String(chosen.category || 'USER_DEFINED') };
-  } catch (e) {
-    console.warn(`[compliance-ticket] association labels lookup ${fromTypeId}->${toTypeId} failed:`, e);
-    return null;
+  } catch {
+    return null; // this from→to / identifier combo isn't valid; caller tries the next
   }
 }
 
-async function resolveTicketToPropertyAssoc(): Promise<TicketAssoc | null> {
-  if (_ticketPropAssocCache) return _ticketPropAssocCache;
-  const { property } = typeIds();
-  if (!property) return null;
-
-  // 1) Ticket -> Property: prefer a "Property" label, else the primary/first.
-  const fwd = await pickAssocTypeAndCategory(TICKET_TYPE_ID, property, 'Property');
-  if (fwd) return (_ticketPropAssocCache = { fromTypeId: TICKET_TYPE_ID, toTypeId: property, ...fwd, reversed: false });
-
-  // 2) Property -> Ticket (reverse) — linking that way connects them too.
-  const rev = await pickAssocTypeAndCategory(property, TICKET_TYPE_ID, null);
-  if (rev) return (_ticketPropAssocCache = { fromTypeId: property, toTypeId: TICKET_TYPE_ID, ...rev, reversed: true });
-
-  // 3) Neither exists — create a labeled association type Ticket -> Property.
+async function tryAssocCreate(a: TicketAssoc, ticketId: string, propertyId: string): Promise<boolean> {
+  const pair = a.reversed ? { from: { id: propertyId }, to: { id: ticketId } } : { from: { id: ticketId }, to: { id: propertyId } };
   try {
-    const created = await hubspotFetch(assocLabelsUrl(TICKET_TYPE_ID, property), {
+    const resp = await hubspotFetch(assocBatchCreateUrl(a.fromType, a.toType), {
+      method: 'POST',
+      body: JSON.stringify({ inputs: [{ ...pair, types: [{ associationCategory: a.category, associationTypeId: a.typeId }] }] }),
+    });
+    if ((resp.results || []).length > 0) return true;
+    if ((resp.numErrors || 0) > 0 || (resp.errors || []).length) console.warn('[compliance-ticket] assoc create returned errors:', JSON.stringify(resp).slice(0, 300));
+    return false;
+  } catch (e) {
+    console.warn(`[compliance-ticket] assoc create threw (${a.fromType}->${a.toType} type ${a.typeId}/${a.category}):`, e);
+    return false;
+  }
+}
+
+/** Associate a ticket to a property, trying id+name and both directions. */
+async function associateTicketToProperty(ticketId: string, propertyId: string): Promise<boolean> {
+  const { property } = typeIds();
+  if (!property) return false;
+
+  // Fast path: reuse the first combo that worked this run.
+  if (_ticketPropAssoc) {
+    if (await tryAssocCreate(_ticketPropAssoc, ticketId, propertyId)) return true;
+    _ticketPropAssoc = null; // stale → re-resolve
+  }
+
+  for (const ticket of ['0-5', 'tickets']) {
+    // forward: ticket -> property (prefer a "Property" label)
+    const fwd = await pickAssocTypeAndCategory(ticket, property, 'Property');
+    if (fwd) {
+      const a: TicketAssoc = { fromType: ticket, toType: property, ...fwd, reversed: false };
+      if (await tryAssocCreate(a, ticketId, propertyId)) { _ticketPropAssoc = a; return true; }
+    }
+    // reverse: property -> ticket
+    const rev = await pickAssocTypeAndCategory(property, ticket, null);
+    if (rev) {
+      const a: TicketAssoc = { fromType: property, toType: ticket, ...rev, reversed: true };
+      if (await tryAssocCreate(a, ticketId, propertyId)) { _ticketPropAssoc = a; return true; }
+    }
+  }
+
+  // Last resort: create a labeled Ticket->Property type, then link.
+  try {
+    const created = await hubspotFetch(assocLabelsUrl('0-5', property), {
       method: 'POST',
       body: JSON.stringify({ label: 'Property', name: 'ticket_to_property' }),
     });
     const newId = created?.results?.[0]?.typeId ?? created?.typeId ?? created?.results?.[0]?.associationTypeId;
-    if (newId != null) return (_ticketPropAssocCache = { fromTypeId: TICKET_TYPE_ID, toTypeId: property, typeId: Number(newId), category: 'USER_DEFINED', reversed: false });
+    if (newId != null) {
+      const a: TicketAssoc = { fromType: '0-5', toType: property, typeId: Number(newId), category: 'USER_DEFINED', reversed: false };
+      if (await tryAssocCreate(a, ticketId, propertyId)) { _ticketPropAssoc = a; return true; }
+    }
   } catch (e) {
     console.warn('[compliance-ticket] could not create Ticket->Property association type:', e);
   }
-  return null;
+  console.warn(`[compliance-ticket] all ticket→property association strategies failed (ticket ${ticketId}, property ${propertyId})`);
+  return false;
 }
 
-/** Associate a ticket to a property using the resolved type + category + direction. */
-async function associateTicketToProperty(ticketId: string, propertyId: string): Promise<boolean> {
-  const a = await resolveTicketToPropertyAssoc();
-  if (!a) { console.warn('[compliance-ticket] no Ticket<->Property association type available'); return false; }
-  const pair = a.reversed ? { from: { id: propertyId }, to: { id: ticketId } } : { from: { id: ticketId }, to: { id: propertyId } };
+/**
+ * Resolve the Property record id linked to an inspection: prefer the explicit
+ * property_id_ref field, else fall back to the inspection→property association
+ * (the property object), so tickets associate even when the field is blank.
+ */
+export async function resolveInspectionPropertyId(inspectionRecordId: string, knownRef?: string | null): Promise<string | null> {
+  const ref = (knownRef || '').toString().trim();
+  if (ref) return ref;
+  const { inspection, property } = typeIds();
   try {
-    const resp = await hubspotFetch(assocBatchCreateUrl(a.fromTypeId, a.toTypeId), {
-      method: 'POST',
-      body: JSON.stringify({ inputs: [{ ...pair, types: [{ associationCategory: a.category, associationTypeId: a.typeId }] }] }),
-    });
-    return (resp.results || []).length > 0;
-  } catch (e) {
-    console.warn(`[compliance-ticket] ticket→property association create failed (ticket ${ticketId}, property ${propertyId}):`, e);
-    return false;
+    const insp = await hubspotFetch(`/crm/v3/objects/${inspection}/${inspectionRecordId}?properties=property_id_ref`);
+    const fromField = (insp?.properties?.property_id_ref || '').toString().trim();
+    if (fromField) return fromField;
+  } catch (e) { console.warn('[compliance-ticket] property_id_ref read failed:', e); }
+  if (property) {
+    try {
+      const resp = await hubspotFetch(`/crm/v4/objects/${inspection}/${inspectionRecordId}/associations/${property}?limit=1`);
+      const first = (resp?.results || [])[0];
+      const id = first?.toObjectId ?? first?.id;
+      if (id != null) return String(id);
+    } catch (e) { console.warn('[compliance-ticket] inspection→property association read failed:', e); }
   }
+  return null;
 }
 
 /**

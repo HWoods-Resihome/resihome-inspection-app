@@ -11,21 +11,22 @@
  *   - Trash Bins = Missing  → "1099-Inspection - Trash Bins Missing - {address}"
  *
  * Each ticket lands in the Compliance Issues pipeline at the NEW stage, is
- * associated to the inspection's Property, and gets a Note carrying the same
- * details as the description PLUS a link to the inspection, with the inspection's
- * photos attached (so they show on the ticket's Attachments card). Best-effort:
- * never blocks the inspection submission.
+ * associated to the inspection's Property (field OR association), and gets a Note
+ * carrying the details + a link to the inspection, with ONLY that issue's own
+ * photo(s) attached (e.g. the Water ticket gets the water-meter photo). The meter
+ * number is shown bold + red in the note. Best-effort: never blocks submission.
  */
 import { parseFcAnswers } from '@/lib/finalChecklist';
 import {
   createComplianceTicket, createTicketNoteWithAttachments, uploadPhotoUrlForAttachment,
-  type SavedAnswer,
+  resolveInspectionPropertyId, type SavedAnswer,
 } from '@/lib/hubspot';
 
 interface ComplianceIssue {
   key: 'electric' | 'water' | 'gas' | 'trash';
   reason: string;          // human label used in the ticket subject
   meterNumber?: string;    // the OFF utility's captured meter number, if any
+  photoUrls: string[];     // ONLY this issue's own photos (e.g. its meter photo)
 }
 
 export interface ComplianceInspectionRef {
@@ -42,52 +43,31 @@ function findFcBlob(answers: SavedAnswer[]): SavedAnswer | undefined {
   );
 }
 
-/** Compute which compliance issues a 1099's Final Checklist answers represent. */
+/** Compute which compliance issues a 1099's Final Checklist answers represent,
+ *  capturing each issue's own meter number + photo(s). */
 export function complianceIssuesFromAnswers(answers: SavedAnswer[]): ComplianceIssue[] {
   const fcBlob = findFcBlob(answers);
   if (!fcBlob) return [];
   const fc = parseFcAnswers(fcBlob.note);
   const valOf = (k: string) => String(fc[k]?.value ?? '').trim().toLowerCase();
-  const noteOf = (k: string) => {
-    const n = String(fc[k]?.note ?? '').trim();
-    return n || undefined;
-  };
+  const noteOf = (k: string) => { const n = String(fc[k]?.note ?? '').trim(); return n || undefined; };
+  const photosOf = (k: string) => (fc[k]?.photoUrls || []).filter(Boolean);
 
   const issues: ComplianceIssue[] = [];
-  if (valOf('fc_electric') === 'off') issues.push({ key: 'electric', reason: 'Electric Off', meterNumber: noteOf('fc_electric') });
-  if (valOf('fc_water') === 'off') issues.push({ key: 'water', reason: 'Water Off', meterNumber: noteOf('fc_water') });
-  if (valOf('fc_gas') === 'off') issues.push({ key: 'gas', reason: 'Gas Off', meterNumber: noteOf('fc_gas') });
-  if (valOf('fc_trash_bins') === 'missing') issues.push({ key: 'trash', reason: 'Trash Bins Missing' });
+  if (valOf('fc_electric') === 'off') issues.push({ key: 'electric', reason: 'Electric Off', meterNumber: noteOf('fc_electric'), photoUrls: photosOf('fc_electric') });
+  if (valOf('fc_water') === 'off') issues.push({ key: 'water', reason: 'Water Off', meterNumber: noteOf('fc_water'), photoUrls: photosOf('fc_water') });
+  if (valOf('fc_gas') === 'off') issues.push({ key: 'gas', reason: 'Gas Off', meterNumber: noteOf('fc_gas'), photoUrls: photosOf('fc_gas') });
+  if (valOf('fc_trash_bins') === 'missing') issues.push({ key: 'trash', reason: 'Trash Bins Missing', photoUrls: photosOf('fc_trash_bins') });
   return issues;
 }
 
-/** Collect every distinct photo URL captured on the inspection (regular answers
- *  + the Final Checklist per-question photos), preserving order. */
-function collectInspectionPhotoUrls(answers: SavedAnswer[]): string[] {
-  const urls: string[] = [];
-  const seen = new Set<string>();
-  const add = (u?: string | null) => { const v = (u || '').trim(); if (v && !seen.has(v)) { seen.add(v); urls.push(v); } };
-  for (const a of answers) {
-    for (const u of (a.photoUrls || [])) add(u);
-    for (const u of ((a as any).afterPhotoUrls || [])) add(u);
-  }
-  const fcBlob = findFcBlob(answers);
-  if (fcBlob) {
-    try {
-      const fc = parseFcAnswers(fcBlob.note);
-      for (const st of Object.values(fc)) {
-        for (const u of (st.photoUrls || [])) add(u);
-        for (const arr of Object.values(st.stickerPhotos || {})) for (const u of (arr || [])) add(u);
-      }
-    } catch { /* malformed blob → no FC photos */ }
-  }
-  return urls;
+function escHtml(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
 }
 
 /**
- * Create the compliance tickets for a completed 1099. Returns a summary for
- * logging. Each issue is independent — one failing create doesn't stop the rest.
- * The inspection's photos are uploaded ONCE and reused across every ticket's note.
+ * Create the compliance tickets for a completed 1099. Each issue is independent —
+ * one failing create doesn't stop the rest. Each ticket gets ONLY its own photos.
  */
 export async function createComplianceTicketsOnSubmit(
   inspection: ComplianceInspectionRef,
@@ -103,36 +83,51 @@ export async function createComplianceTicketsOnSubmit(
   const base = (opts?.baseUrl || 'https://resiwalk.com').replace(/\/+$/, '');
   const inspectionUrl = `${base}/inspection/${inspection.recordId}`;
 
-  // Upload the inspection's photos ONCE to get File IDs, then reuse those ids on
-  // every ticket's note (so the photos land on each ticket's Attachments card).
-  const photoUrls = collectInspectionPhotoUrls(answers);
-  const fileIds: string[] = [];
-  for (const url of photoUrls) {
+  // Resolve the property once: the explicit field, else the inspection→property
+  // association (so tickets associate even when property_id_ref is blank).
+  const propertyId = await resolveInspectionPropertyId(inspection.recordId, inspection.propertyRecordId);
+  if (!propertyId) console.warn(`[compliance-tickets] ${inspection.recordId}: no property id (field or association) — tickets will not be property-linked`);
+
+  // Cache photo re-uploads by URL so a shared photo isn't uploaded twice.
+  const fileIdByUrl = new Map<string, string | null>();
+  const uploadOnce = async (url: string): Promise<string | null> => {
+    if (fileIdByUrl.has(url)) return fileIdByUrl.get(url)!;
     const id = await uploadPhotoUrlForAttachment(url);
-    if (id) fileIds.push(id);
-  }
-  if (photoUrls.length && fileIds.length < photoUrls.length) {
-    console.warn(`[compliance-tickets] ${inspection.recordId}: attached ${fileIds.length}/${photoUrls.length} photos (some uploads failed)`);
-  }
+    fileIdByUrl.set(url, id);
+    return id;
+  };
 
   for (const issue of issues) {
     const subject = `1099-Inspection - ${issue.reason}${address ? ' - ' + address : ''}`;
-    const body = [
+    // Plain-text ticket description.
+    const description = [
       'Auto-created from a completed 1099 Leasing Agent Inspection.',
       address ? `Property: ${address}` : '',
       inspection.inspectorName ? `Inspector: ${inspection.inspectorName}` : '',
       issue.meterNumber ? `Meter Number: ${issue.meterNumber}` : '',
       `Inspection: ${inspectionUrl}`,
     ].filter(Boolean).join('\n');
+
     try {
-      const r = await createComplianceTicket({ subject, content: body, propertyRecordId: inspection.propertyRecordId });
-      // Add the note (same info + inspection link) carrying the photo attachments,
-      // unless this was a dedupe hit (the note already exists from the first run).
+      const r = await createComplianceTicket({ subject, content: description, propertyRecordId: propertyId });
+
       let noteNote = '';
       if (!r.deduped) {
-        const noteBody = body.replace(/\n/g, '<br>');
-        const noteId = await createTicketNoteWithAttachments(r.ticketId, noteBody, fileIds);
-        noteNote = noteId ? `, note #${noteId} (${fileIds.length} photo${fileIds.length === 1 ? '' : 's'})` : ', note FAILED';
+        // This issue's own photos only (e.g. the water-meter photo on the Water ticket).
+        const ids: string[] = [];
+        for (const url of issue.photoUrls) { const id = await uploadOnce(url); if (id) ids.push(id); }
+
+        // HTML note body — meter number rendered BOLD + RED.
+        const noteBody = [
+          'Auto-created from a completed 1099 Leasing Agent Inspection.',
+          address ? `Property: ${escHtml(address)}` : '',
+          inspection.inspectorName ? `Inspector: ${escHtml(inspection.inspectorName)}` : '',
+          issue.meterNumber ? `<strong style="color:#e00000;">Meter Number: ${escHtml(issue.meterNumber)}</strong>` : '',
+          `Inspection: <a href="${escHtml(inspectionUrl)}">${escHtml(inspectionUrl)}</a>`,
+        ].filter(Boolean).join('<br>');
+
+        const noteId = await createTicketNoteWithAttachments(r.ticketId, noteBody, ids);
+        noteNote = noteId ? `, note #${noteId} (${ids.length}/${issue.photoUrls.length} photo${issue.photoUrls.length === 1 ? '' : 's'})` : ', note FAILED';
       }
       created.push(`${issue.reason} → ticket #${r.ticketId}${r.deduped ? ' (existing — deduped)' : ''}${r.associatedProperty ? '' : ' (property NOT associated)'}${noteNote}`);
     } catch (e) {
