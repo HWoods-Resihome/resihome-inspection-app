@@ -52,7 +52,7 @@ interface BodyShape {
   sections: InSection[];
   lines: InLine[];
   photosBySection?: Record<string, string[]>;
-  property?: { bedrooms?: number; bathrooms?: number; squareFootage?: number | null; tenantMonths?: number };
+  property?: { bedrooms?: number; bathrooms?: number; squareFootage?: number | null; tenantMonths?: number; lastTenantPetCount?: number | null };
   region?: string;
   ignoredLineIds?: string[];
 }
@@ -252,10 +252,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (rows.length) scopeBlocks.push(`  Room "${s.name}" (id=${s.id}):\n${rows.join('\n')}`);
     }
 
+    const rawPetCount = Number(body?.property?.lastTenantPetCount);
+    const lastTenantPetCount = Number.isFinite(rawPetCount) && rawPetCount >= 0 ? rawPetCount : null;
     const houseDetails = [
       `Bedrooms: ${body?.property?.bedrooms ?? '?'}, Bathrooms: ${body?.property?.bathrooms ?? '?'}, Square footage: ${body?.property?.squareFootage ?? '?'}`,
       `Region: ${region || 'unknown'}`,
       `Tenant time in home: ~${tenantMonths} months.`,
+      `Last tenant pet count: ${lastTenantPetCount == null ? 'unknown' : lastTenantPetCount}${(lastTenantPetCount ?? 0) > 1 ? ' (MULTIPLE PETS — see the carpet replacement-vs-cleaning rule).' : ''}`,
       `DEPRECIATION SCHEDULE at ${tenantMonths} months → cap-eligible PAINT lines should be ${depreciationRates(tenantMonths).paint}% tenant, cap-eligible FLOORING lines ${depreciationRates(tenantMonths).flooring}% tenant. Apply these EXACT percentages to cap-eligible paint/flooring lines (whole-house paint, mist-match, normal-wear touchups; carpet/pad/LVP/tile/grout flooring material). Do NOT cap tenant-damage paint patches, removals, fixtures, bulbs, or cleaning. Flag cap-eligible lines whose tenant % differs and suggest the scheduled %.`,
       `Sum of all PAINT line client costs so far: ${money(paintTotal)} (compare against a whole-house mist-match Level 1/2).`,
     ].join('\n');

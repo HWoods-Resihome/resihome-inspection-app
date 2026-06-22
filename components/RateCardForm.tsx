@@ -114,6 +114,9 @@ interface RateCardFormProps {
   /** True when the last tenant had a pet (last_tenant_pet_count >= 1). Shows a
    *  dog mark by the address. */
   tenantHasPet?: boolean;
+  /** Raw last_tenant_pet_count (null when unset). Sent to the AI review so it can
+   *  prefer carpet REPLACEMENT over cleaning when >1 pet. */
+  lastTenantPetCount?: number | null;
   /** Most-recent active listing price + date, shown in the header (same as the
    *  question templates). Optional. */
   listingPrice?: number | null;
@@ -2574,6 +2577,7 @@ export function RateCardForm(props: RateCardFormProps) {
         squareFootage: props.squareFootage,
         // Real value when present; the endpoint defaults null/invalid to 12.
         tenantMonths: (typeof props.lastTenantMonths === 'number' && props.lastTenantMonths >= 0) ? props.lastTenantMonths : null,
+        lastTenantPetCount: (typeof props.lastTenantPetCount === 'number') ? props.lastTenantPetCount : null,
       },
       region: inspectionRegion,
     });

@@ -143,6 +143,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // Pest/pet marks: frozen snapshot when completed, else live.
         propertyPestControlEnrolled: listingSnapshot ? !!listingSnapshot.pestControlEnrolled : data.propertyPestControlEnrolled,
         propertyTenantHasPet: listingSnapshot ? !!listingSnapshot.tenantHasPet : data.propertyTenantHasPet,
+        propertyLastTenantPetCount: data.propertyLastTenantPetCount,
         propertyLastTenantMonths: data.propertyLastTenantMonths,
         propertyAirFiltersTotal: data.propertyAirFiltersTotal,
         propertyAirFiltersType1: data.propertyAirFiltersType1,

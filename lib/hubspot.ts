@@ -2373,6 +2373,9 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   /** True when the property's `last_tenant_pet_count` is known and >= 1. Scope
    *  header shows a pet (dog) mark. */
   propertyTenantHasPet: boolean;
+  /** The property's raw `last_tenant_pet_count` (null when unset). The AI review
+   *  uses >1 (multiple pets) to prefer carpet REPLACEMENT over cleaning. */
+  propertyLastTenantPetCount: number | null;
   /** Frozen listing snapshot JSON (status/price/listed/MIR/move-in) captured at
    *  completion. Empty until the inspection is completed. */
   listingSnapshotJson: string | null;
@@ -2422,6 +2425,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     let propertyHbmmId: string | null = null;
     let propertyPestControlEnrolled = false;
     let propertyTenantHasPet = false;
+    let propertyLastTenantPetCount: number | null = null;
     let propertyAirFiltersTotal: number | null = null;
     let propertyAirFiltersType1: string | null = null;
     let propertyAirFiltersType2: string | null = null;
@@ -2489,6 +2493,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         {
           const petN = Number((pp.last_tenant_pet_count ?? '').toString().trim());
           propertyTenantHasPet = Number.isFinite(petN) && petN >= 1;
+          propertyLastTenantPetCount = Number.isFinite(petN) ? petN : null;
         }
         if (pp.air_filters___total_quantity != null && pp.air_filters___total_quantity !== '') {
           const n = Number(pp.air_filters___total_quantity);
@@ -2571,6 +2576,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       propertyTeamGroupEmail,
       propertyPestControlEnrolled,
       propertyTenantHasPet,
+      propertyLastTenantPetCount,
       listingSnapshotJson: (p.listing_snapshot_json || '').toString() || null,
     };
   } catch (e: any) {
