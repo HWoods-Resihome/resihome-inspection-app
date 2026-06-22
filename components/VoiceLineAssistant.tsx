@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RateCardLineInput, RateCardLineItem } from '@/lib/types';
-import { defaultVendorForCode } from '@/lib/vendors';
+import { defaultVendorForItem } from '@/lib/vendors';
 import { isAiWarm, warmAi } from '@/lib/aiWarm';
 import { sendAiFeedback } from '@/lib/aiFeedbackClient';
 
@@ -52,6 +52,8 @@ interface Props {
   catalog?: RateCardLineItem[];
   // Tenant months in home — paint/flooring depreciation default for voice adds.
   tenantMonths?: number;
+  // Property is enrolled in pest control → PESTL1007 lines default to Pest Share.
+  pestControlEnrolled?: boolean;
   // Property square footage — so the server can fill whole-house SF lines with
   // the real quantity (and show the right price) instead of a placeholder 1.
   squareFootage?: number | null;
@@ -267,7 +269,7 @@ function speak(
   }
 }
 
-export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, onMoveLine, linesBySection, currentLines, catalog, tenantMonths = 12, squareFootage, disabled, onEngagedChange, inspectionId }: Props) {
+export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, region, onAddLine, onRemoveLine, onAddLineTo, onRemoveLineFrom, onMoveLine, linesBySection, currentLines, catalog, tenantMonths = 12, pestControlEnrolled, squareFootage, disabled, onEngagedChange, inspectionId }: Props) {
   // The room the assistant is working on right now.
   const currentSection = useMemo(
     () => sections.find((s) => s.id === currentSectionId) || sections[0],
@@ -558,7 +560,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
               // Per-code default vendor on NEW voice-added lines (eviction codes /
               // flooring) — overrides the agent's vendor; inspector can change it.
               if (action === 'add') {
-                const dv = defaultVendorForCode(line.lineItemCode);
+                const dv = defaultVendorForItem({ lineItemCode: line.lineItemCode }, { pestControlEnrolled });
                 if (dv) line.assignedTo = dv;
               }
               const spokenLabel = data.spokenSummary || data.summary;
@@ -714,7 +716,7 @@ export function VoiceLineAssistant({ sections, currentSectionId, onNavigate, reg
         setBusy(false);
       }
     },
-    [section, location, region, tenantMonths, squareFootage, currentLines, onAddLine, onAddLineTo, sections, onNavigate, currentRoomName, currentSection, currentSectionId, inspectionId]
+    [section, location, region, tenantMonths, pestControlEnrolled, squareFootage, currentLines, onAddLine, onAddLineTo, sections, onNavigate, currentRoomName, currentSection, currentSectionId, inspectionId]
   );
 
   const submitUtterance = useCallback(

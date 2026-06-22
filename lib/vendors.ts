@@ -21,8 +21,15 @@ export const VENDORS: string[] = [
   'PPW',
   'GE Appliances',
   'CapEx Vendor',
+  'Pest Share',
   'Eviction Vendor (Past)',
 ];
+
+// Pest-control vendor. Lines default here for the pest-treatment code (PESTL1007)
+// ONLY when the property is enrolled in pest control (pest_control_enrolled=Yes);
+// gets its own per-vendor PDF at finalize like the others.
+export const PEST_SHARE_VENDOR = 'Pest Share';
+export const PEST_CONTROL_CODE = 'PESTL1007';
 
 // The in-house vendor. Lines assigned here are work ResiHome resolves itself,
 // so they REQUIRE after-photos (proof the work was completed) before finalize.
@@ -80,8 +87,15 @@ export function defaultVendorForCode(lineItemCode: string | null | undefined): s
  */
 export function defaultVendorForItem(
   item: { lineItemCode?: string | null; laborShortDescription?: string | null; laborFullDescription?: string | null; description?: string | null; category?: string | null; subcategory?: string | null } | null | undefined,
+  opts?: { pestControlEnrolled?: boolean },
 ): string | null {
   if (!item) return null;
+  // Pest treatment on a pest-control-enrolled property → Pest Share (conditional;
+  // no default otherwise).
+  if (opts?.pestControlEnrolled
+    && (item.lineItemCode || '').trim().toUpperCase() === PEST_CONTROL_CODE) {
+    return PEST_SHARE_VENDOR;
+  }
   const byCode = defaultVendorForCode(item.lineItemCode);
   if (byCode) return byCode;
   const hay = [item.laborShortDescription, item.laborFullDescription, item.description, item.category, item.subcategory]
@@ -124,6 +138,7 @@ export const VENDOR_COLORS: Record<string, VendorPillStyle> = {
   'PPW':                 { bg: 'bg-emerald-500', text: 'text-white' },     // emerald green
   'GE Appliances':       { bg: 'bg-violet-500',  text: 'text-white' },     // violet
   'CapEx Vendor':        { bg: 'bg-amber-500',   text: 'text-white' },     // amber/gold
+  'Pest Share':          { bg: 'bg-orange-500',  text: 'text-white' },     // orange — pest control
   'Eviction Vendor (Past)': { bg: 'bg-rose-600', text: 'text-white' },       // rose (distinguishable from brand pink)
   'Eviction Vendor':        { bg: 'bg-rose-600', text: 'text-white' },       // legacy label on historical lines
 };

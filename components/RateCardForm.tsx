@@ -107,6 +107,10 @@ interface RateCardFormProps {
    *  `last_tenant_time_in_home_months` on the property). Drives AI-review
    *  depreciation. null/absent → AI review defaults to 12. */
   lastTenantMonths?: number | null;
+  /** True when the property is enrolled in pest control (pest_control_enrolled).
+   *  Shows the pest-control mark by the address and defaults PESTL1007 lines to
+   *  the Pest Share vendor. */
+  pestControlEnrolled?: boolean;
   /** Most-recent active listing price + date, shown in the header (same as the
    *  question templates). Optional. */
   listingPrice?: number | null;
@@ -3663,7 +3667,13 @@ export function RateCardForm(props: RateCardFormProps) {
                 other template's header (see QuestionForm / QcReinspectForm). Each
                 fact is a tight consecutive line, including Internal Resolution. */}
             <div className="text-left min-w-0 flex-1">
-              <FitText text={props.propertyName} className="font-heading font-semibold text-ink" />
+              <div className="flex items-center gap-1.5">
+                <FitText text={props.propertyName} className="font-heading font-semibold text-ink flex-1 min-w-0" />
+                {props.pestControlEnrolled && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src="/pest-control.svg" alt="Pest control enrolled" title="Enrolled in pest control" className="h-5 w-5 shrink-0" />
+                )}
+              </div>
               <div className="text-xs text-gray-500 truncate">
                 {props.bedrooms} Bed / {props.bathrooms} Bath
                 {props.squareFootage != null && props.squareFootage > 0 && (
@@ -4104,6 +4114,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               readOnly={props.readOnly}
                               mobile={isMobile}
                               tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
+                              pestControlEnrolled={props.pestControlEnrolled}
                               afterPhotosEnabled={afterPhotosEnabled}
                               onCaptureAfterPhotos={() => setAfterCameraTarget({ sectionId: s.id, lineExternalId: line.externalId })}
                               onOpenAfterPhoto={(index) => setLightbox({ kind: 'after', sectionId: s.id, externalId: line.externalId, index })}
@@ -4139,6 +4150,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               startInEditMode
                               autoSfQuantity={/whole\s*house/i.test(s.label) && props.squareFootage ? props.squareFootage : null}
                               tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
+                              pestControlEnrolled={props.pestControlEnrolled}
                               afterPhotosEnabled={afterPhotosEnabled}
                               onSetResolutionTiming={setLineTiming}
                               onSave={(created) => handleSaveLineForSection(s.id, created)}
@@ -4309,6 +4321,7 @@ export function RateCardForm(props: RateCardFormProps) {
                 section={wh.label}
                 location={wh.location || ''}
                 tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
+                              pestControlEnrolled={props.pestControlEnrolled}
                 autoSfQuantity={/whole\s*house/i.test(wh.label) && props.squareFootage ? props.squareFootage : null}
                 onSave={(line) => { void handleSaveLineForSection(wh.id, line); finishAiAddItems(1); }}
                 onDelete={() => finishAiAddItems(0)}
@@ -4464,6 +4477,7 @@ export function RateCardForm(props: RateCardFormProps) {
                   currentLines={linesBySection[voiceSectionId] || []}
                   catalog={catalog}
                   tenantMonths={typeof props.lastTenantMonths === 'number' ? props.lastTenantMonths : 12}
+                              pestControlEnrolled={props.pestControlEnrolled}
                   squareFootage={props.squareFootage}
                   onAddLine={(line) => { const p = handleSaveLineForSection(voiceSectionId, line); if (!cameraOpen) revealSection(voiceSectionId, line.externalId); return p; }}
                   onRemoveLine={(externalId) => handleDeleteLine(voiceSectionId, externalId)}

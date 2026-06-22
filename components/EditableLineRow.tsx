@@ -65,6 +65,8 @@ interface Props {
   // Tenant's months in the home — auto-sets the tenant % on paint/flooring lines
   // per the depreciation schedule (new rows only, until manually changed).
   tenantMonths?: number | null;
+  // Property is enrolled in pest control → PESTL1007 lines default to Pest Share.
+  pestControlEnrolled?: boolean;
   // Whether the Internal Resolution "After Photos" feature is active (the
   // after_photo_urls property exists in HubSpot). When false the panel is hidden
   // so nothing tries to save after-photos before the migration has run.
@@ -293,7 +295,7 @@ export function EditableLineRow(props: Props) {
   const {
     line, catalog, catalogByCode: catalogByCodeProp, regions, inspectionRegion,
     section, location, readOnly, startInEditMode, mobile,
-    onSave, onDelete, onDiscardNew, autoSfQuantity, tenantMonths, afterPhotosEnabled,
+    onSave, onDelete, onDiscardNew, autoSfQuantity, tenantMonths, pestControlEnrolled, afterPhotosEnabled,
     onCaptureAfterPhotos, onOpenAfterPhoto,
   } = props;
 
@@ -503,7 +505,7 @@ export function EditableLineRow(props: Props) {
     // (e.g. eviction codes → Eviction Vendor; flooring FLORL1011 → Vendor 2;
     // grass cuts / mowing → PPW). Only when the new item matches a rule —
     // otherwise leave the current vendor as-is. Still editable.
-    const dv = defaultVendorForItem(selectedItem);
+    const dv = defaultVendorForItem(selectedItem, { pestControlEnrolled });
     if (dv) setVendor(dv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedItem]);
