@@ -9,7 +9,7 @@ import type {
 import { Combobox } from '@/components/Combobox';
 import { NumberField } from '@/components/NumberPad';
 import { loadCachedProperties, saveCachedProperties, loadCachedMe, saveCachedMe } from '@/lib/offlineCache';
-import { EXTERNAL_TEMPLATE } from '@/lib/userAccess';
+import { EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
 
 type Stage = 'setup' | 'loading_questions' | 'error';
 
@@ -273,11 +273,20 @@ export default function NewInspection() {
     return [...builtIn, ...custom];
   }, [isExternal, customTemplates]);
 
+  // External (1099) users may only START a 1099 walk once the property is in a
+  // leasing status (Vacant - Pre-Leasing / On Market). Otherwise the Begin button
+  // is disabled and we show why.
+  const blockedByPropertyStatus = isExternal
+    && selectedTemplate === EXTERNAL_TEMPLATE
+    && !!selectedProp
+    && !externalCanCreate1099ForStatus(selectedProp.status);
+
   const setupReady = !!selectedTemplate
     && !!selectedPropertyId
     && !!sessionUser
     && bedrooms != null
-    && bathrooms != null;
+    && bathrooms != null
+    && !blockedByPropertyStatus;
     // QC's source Scope is OPTIONAL — when none is selected the QC starts
     // standalone (empty rooms for after-photos + a final pass/fail verdict).
 
@@ -653,6 +662,12 @@ export default function NewInspection() {
                 )}
               </div>
 
+              {/* External-user property-status gate: explain why Begin is locked. */}
+              {blockedByPropertyStatus && (
+                <div className="mt-2 p-3 rounded-lg bg-amber-50 border border-amber-300 text-sm text-amber-800">
+                  {EXTERNAL_1099_STATUS_BLOCK_MSG}
+                </div>
+              )}
               {/* Single action button: Begin now (today) or Schedule & Save (future). */}
               <button
                 onClick={isFuture ? handleConfirmSchedule : handleBegin}

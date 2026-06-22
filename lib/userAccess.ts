@@ -75,6 +75,27 @@ export function isCompletedStatus(status: string | null | undefined): boolean {
   return s === 'completed' || s === 'complete';
 }
 
+// Property statuses at which an EXTERNAL (1099) user may START a 1099 walk. The
+// Turn must be done and the property moved to a leasing status first. Matched
+// case-insensitively, tolerant of spacing.
+const EXTERNAL_1099_ALLOWED_STATUSES = new Set([
+  'vacant - pre-leasing',
+  'vacant - on market',
+]);
+
+/** True when an external user may create a 1099 against a property in this
+ *  status (Vacant - Pre-Leasing / Vacant - On Market). Internal users are
+ *  unrestricted, so callers should only apply this for external users. */
+export function externalCanCreate1099ForStatus(status: string | null | undefined): boolean {
+  const s = (status || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return EXTERNAL_1099_ALLOWED_STATUSES.has(s);
+}
+
+/** The message shown when an external user tries to start a 1099 on a property
+ *  whose status isn't yet a leasing status. */
+export const EXTERNAL_1099_STATUS_BLOCK_MSG =
+  'Please wait until the Turn is completed and the property status is moved to On-Market to walk the property.';
+
 /**
  * Does this email own the inspection (i.e. is the recorded inspector)?
  * Case-insensitive. When the owner is unknown (blank inspector_email), returns

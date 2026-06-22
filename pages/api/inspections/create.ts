@@ -3,7 +3,7 @@ import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, 
 import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
-import { externalAccessDenial, isExternalEmail } from '@/lib/userAccess';
+import { externalAccessDenial, isExternalEmail, EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 
@@ -58,6 +58,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // External (1099) users may only create the 1099 template.
     const denial = externalAccessDenial(session.email, body.templateType, { write: true });
     if (denial) return res.status(403).json({ error: denial });
+
+    // External 1099 walks are only allowed once the property is in a leasing
+    // status (Vacant - Pre-Leasing / On Market) — the Turn must be done first.
+    if (isExternalEmail(session.email) && body.templateType === EXTERNAL_TEMPLATE) {
+      const status = await fetchPropertyStatus(body.propertyRecordId);
+      if (!externalCanCreate1099ForStatus(status)) {
+        return res.status(403).json({ error: EXTERNAL_1099_STATUS_BLOCK_MSG });
+      }
+    }
 
     const externalId = `INSP-${nowIso().slice(0, 10)}-${shortId().slice(0, 8)}`;
 
