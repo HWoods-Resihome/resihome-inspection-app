@@ -136,49 +136,52 @@ function hasOpenOverlay(): boolean {
 /** What a back press should do, given the current page + overlay state. Pure so
  *  it can be unit-tested without the native runtime:
  *    'overlay'  → an overlay is open; pop history to close it (stay put)
- *    'minimize' → leave the app (home screen / nothing left to go back to)
- *    'home'     → route to the inspections list ('/')
+ *    'minimize' → leave the app (we're on the home screen / nothing left back)
  *    'back'     → ordinary history back
+ *
+ *  We deliberately do NOT special-case inspection routes here: in-app navigation
+ *  keeps a CLEAN history (opening a card pushes; the pager + Back/finalize use
+ *  router.replace), so the stack inside an inspection is just
+ *  [home, currentInspection] — a plain history back lands on the home list, and
+ *  the home screen is the bottom of the stack so back there leaves the app. This
+ *  works whether or not the native backButton listener is what fires.
  */
-export type BackAction = 'overlay' | 'minimize' | 'home' | 'back';
+export type BackAction = 'overlay' | 'minimize' | 'back';
 export function decideBackAction(opts: {
   pathname: string;
   overlayOpen: boolean;
   canGoBack: boolean;
 }): BackAction {
-  if (opts.overlayOpen) return 'overlay';
-  if (opts.pathname === '/') return 'minimize';        // home → exit the app
-  if (opts.pathname.startsWith('/inspection/')) return 'home'; // inspection → home list
-  return opts.canGoBack ? 'back' : 'minimize';         // elsewhere → history back
+  if (opts.overlayOpen) return 'overlay';      // close the open overlay first
+  if (opts.pathname === '/') return 'minimize'; // home screen → leave the app
+  return opts.canGoBack ? 'back' : 'minimize';  // else history back (→ home)
 }
 
 // Android hardware/gesture back-button guard for the Capacitor shell.
 //
-// By DEFAULT, Capacitor's back behavior is: go back in the WebView's page
-// history, and if there's nothing to go back to, QUIT the app. That's both
-// destructive (a back inside a PDF could quit the app) and — because the in-app
-// Back button and the prev/next pager navigate with router.push (STACKING
-// history) — unreliable: a plain history.back() from an inspection can land on a
-// previously-viewed inspection instead of the home list. This installs a
-// `backButton` listener (Android-only) that makes back DETERMINISTIC:
-//   1. An open overlay (camera / number pad / modal / PDF viewer or gallery)
-//      owns the press → pop its history entry so it closes (stay on the page).
-//   2. On the HOME/root screen ('/'), back LEAVES the app (minimize → device
-//      home screen) — the inspections list is the app's top level / exit point.
-//   3. Inside an inspection ('/inspection/...', any template), back returns to
-//      the home list — routed explicitly, NOT via history depth, so it always
-//      lands on home regardless of how many inspections the pager walked through.
-//   4. Any other route → ordinary history back (minimize when nothing's left).
+// By DEFAULT, Capacitor's back behavior is already what we want — go back in the
+// WebView history, exit the app when there's nothing left — PROVIDED the history
+// is clean. The actual fix lives in the navigation calls: opening an inspection
+// pushes, while the prev/next pager and the in-app Back/finalize buttons use
+// router.replace, so inside an inspection the stack is just
+// [home, currentInspection]. With that, a back press from any inspection (any
+// template) lands on the home list, and the home screen — the bottom of the
+// stack — exits the app.
 //
-// `goHome` performs the SPA navigation to '/' (router.push from _app); a full-
-// reload fallback is used if it's not supplied or throws. Registering a
-// backButton listener disables Capacitor's default handling, so we drive
-// navigation ourselves. Uses the runtime-registered global plugin
+// This listener is a thin reliability layer on top of that:
+//   • an open overlay (camera / number pad / modal / PDF viewer or gallery) →
+//     pop its pushed history entry so it closes (stay on the page),
+//   • the HOME/root screen ('/') → MINIMIZE (background to the device home
+//     screen, keeping session/state) rather than a hard quit,
+//   • everywhere else → ordinary history back (→ home, thanks to clean history).
+//
+// Registering a backButton listener disables Capacitor's default handling, so we
+// drive it ourselves. Uses the runtime-registered global plugin
 // (window.Capacitor.Plugins.App) — same approach as the StatusBar/Keyboard
 // helpers — so @capacitor/app isn't forced into the browser bundle's critical
 // path. HARD GATE: no-op in any normal browser (isNativePlatform() === false).
 let backGuardInstalled = false;
-export function installNativeBackGuard(goHome?: () => void): void {
+export function installNativeBackGuard(): void {
   if (typeof window === 'undefined' || backGuardInstalled) return;
   const cap = (window as any).Capacitor;
   if (!cap?.isNativePlatform?.()) return;
@@ -190,11 +193,6 @@ export function installNativeBackGuard(goHome?: () => void): void {
     // keeps the session/state alive for when the user reopens the app.
     try { app.minimizeApp?.(); } catch { /* older plugin — just ignore */ }
   };
-  const navHome = () => {
-    if (window.location.pathname === '/') return;
-    try { if (goHome) { goHome(); return; } } catch { /* fall through to reload */ }
-    try { window.location.assign('/'); } catch { /* nothing else to try */ }
-  };
   try {
     app.addListener('backButton', (e: { canGoBack?: boolean }) => {
       const action = decideBackAction({
@@ -203,12 +201,11 @@ export function installNativeBackGuard(goHome?: () => void): void {
         canGoBack: !!e?.canGoBack || window.history.length > 1,
       });
       switch (action) {
-        // An open overlay owns the press: pop its pushed entry so popstate
-        // closes it and we stay on the current page.
+        // 'overlay' / 'back' both pop history: an overlay's popstate closes it;
+        // otherwise the (clean) history back lands on the home list.
         case 'overlay': window.history.back(); break;
-        case 'minimize': minimize(); break;
-        case 'home': navHome(); break;
         case 'back': window.history.back(); break;
+        case 'minimize': minimize(); break;
       }
     });
   } catch { /* plugin unavailable in this build — default behavior stands */ }

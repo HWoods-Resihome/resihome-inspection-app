@@ -307,7 +307,7 @@ export default function ExistingInspection() {
         const data = await r.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${r.status}`);
       }
-      router.push('/?just_cancelled=1');
+      router.replace('/?just_cancelled=1');
     } catch (e: any) {
       void dialog.alert(`Cancel failed: ${e.message || e}`);
     }
@@ -348,7 +348,7 @@ export default function ExistingInspection() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 mb-3">
           <div className="font-heading font-bold mb-1">Could not load inspection</div>
           <div>{errorMsg}</div>
-          <button onClick={() => router.push('/')} className="mt-3 text-brand underline text-xs">
+          <button onClick={() => router.replace('/')} className="mt-3 text-brand underline text-xs">
             Back to Inspections List
           </button>
         </div>
@@ -425,7 +425,7 @@ export default function ExistingInspection() {
               )}
             </div>
           )}
-          <button onClick={() => router.push('/?just_submitted=1')} className="mt-4 bg-brand text-white font-heading font-semibold px-4 py-2 rounded-lg">
+          <button onClick={() => router.replace('/?just_submitted=1')} className="mt-4 bg-brand text-white font-heading font-semibold px-4 py-2 rounded-lg">
             Back to Inspections List
           </button>
         </div>
@@ -549,9 +549,9 @@ export default function ExistingInspection() {
           inspectionStatus={inspection.status}
           pdfUrl={isCompleted ? (shareLinks?.report || inspection.pdfUrl || undefined) : undefined}
           readOnly={readOnly}
-          onSubmit={() => router.push('/')}
-          onCancel={() => router.push('/')}
-          onNavigateTo={(navId) => router.push(`/inspection/${navId}`)}
+          onSubmit={() => router.replace('/')}
+          onCancel={() => router.replace('/')}
+          onNavigateTo={(navId) => router.replace(`/inspection/${navId}`)}
           onCancelInspection={readOnly ? undefined : handleCancelInspection}
         />
       ) : inspection.templateType === 'pm_scope_rate_card' ? (
@@ -589,9 +589,9 @@ export default function ExistingInspection() {
           inspectionStatus={inspection.status}
           inspectionRegion={inspection.regionSnapshot || ''}
           sectionListJson={inspection.sectionListJson}
-          onSubmit={() => router.push('/')}
-          onCancel={() => router.push('/')}
-          onNavigateTo={(navId) => router.push(`/inspection/${navId}`)}
+          onSubmit={() => router.replace('/')}
+          onCancel={() => router.replace('/')}
+          onNavigateTo={(navId) => router.replace(`/inspection/${navId}`)}
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}
           pdfUrl={shareLinks?.report || inspection.pdfUrl || undefined}
@@ -627,8 +627,8 @@ export default function ExistingInspection() {
           propertyAirFiltersType3={propertyAirFiltersType3}
           filterSizeOptions={filterSizeOptions}
           onSubmit={handleSubmit}
-          onCancel={() => router.push('/')}
-          onNavigateTo={(navId) => router.push(`/inspection/${navId}`)}
+          onCancel={() => router.replace('/')}
+          onNavigateTo={(navId) => router.replace(`/inspection/${navId}`)}
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}
           pdfUrl={shareLinks?.report || inspection.pdfUrl || undefined}
