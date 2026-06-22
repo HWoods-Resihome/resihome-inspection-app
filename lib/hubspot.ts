@@ -6,7 +6,7 @@ import { isInternalResolution } from './vendors';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from './answerProps';
 import { extractLeasingAgent1099Fields } from './leasingAgent1099';
 import { calculateLine } from './rateCardMath';
-import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion } from './userAccess';
+import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion, isExternalEmail } from './userAccess';
 
 const API_BASE = 'https://api.hubapi.com';
 
@@ -4090,11 +4090,13 @@ export async function writeSftpWatchQueue(items: any[]): Promise<void> {
 
 /** Default client invoice when the agent has no client cost. */
 const DEFAULT_CLIENT_INVOICE = '60';
-/** Default vendor invoice ("vendor cost"). Must ALWAYS resolve to a number so the
- *  inspection's vendor cost is never null/blank on completion — the matched
- *  Agent's configured vendor cost overrides it when present (e.g. $50 for a 1099
- *  leasing agent); otherwise it falls back to $0 (internal / no agent billing). */
-const DEFAULT_VENDOR_INVOICE = '0';
+/** Default vendor invoice ("vendor cost") when no agent value matches. Must ALWAYS
+ *  resolve to a number so the inspection's vendor cost is never null/blank on
+ *  completion. Keyed off the inspector: a 1099 (external) inspector floors at $50
+ *  even with no matched agent record; internal staff floor at $0. A matched
+ *  Agent's configured vendor cost still overrides either default. */
+const VENDOR_INVOICE_DEFAULT_EXTERNAL = '50';
+const VENDOR_INVOICE_DEFAULT_INTERNAL = '0';
 
 /**
  * Copy billing fields onto an inspection from the Property + matched Agent.
@@ -4125,10 +4127,12 @@ export async function populateBillingFields(inspectionRecordId: string): Promise
 
   // Invoice amounts always default to a NUMBER so they're never null/blank on the
   // inspection — the matched agent's values override when present. Client → $60;
-  // vendor ("vendor cost") → $0 (a 1099 leasing agent's agent record carries the
-  // $50 that overrides this; internal / unmatched inspectors stay $0, never null).
+  // vendor ("vendor cost") → $50 for a 1099 (external) inspector, $0 for internal
+  // staff. A matched agent's configured vendor cost still overrides this default.
+  const defaultVendorInvoice = isExternalEmail(inspectorEmail)
+    ? VENDOR_INVOICE_DEFAULT_EXTERNAL : VENDOR_INVOICE_DEFAULT_INTERNAL;
   update.client_invoice_amount = DEFAULT_CLIENT_INVOICE;
-  update.vendor_invoice_amount = DEFAULT_VENDOR_INVOICE;
+  update.vendor_invoice_amount = defaultVendorInvoice;
 
   // Owner → Agent → broker_code + invoice amounts
   let ownerId = (insp.hubspot_owner_id || '').toString().trim();
@@ -4140,7 +4144,7 @@ export async function populateBillingFields(inspectionRecordId: string): Promise
       update.broker_code = agent.brokerCode || '';
       // Keep the agent's configured vendor/client cost when set; otherwise fall
       // back to the numeric defaults above (NEVER blank → never null).
-      update.vendor_invoice_amount = agent.vendorCost !== '' ? agent.vendorCost : DEFAULT_VENDOR_INVOICE;
+      update.vendor_invoice_amount = agent.vendorCost !== '' ? agent.vendorCost : defaultVendorInvoice;
       update.client_invoice_amount = agent.clientCost !== '' ? agent.clientCost : DEFAULT_CLIENT_INVOICE;
     }
   }
