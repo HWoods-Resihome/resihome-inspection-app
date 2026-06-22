@@ -23,7 +23,7 @@ const CONCURRENCY = 3;
 const MAX_RETRY = 2;
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export function RegenPdfPicker() {
+export function RegenPdfPicker({ embedded = false }: { embedded?: boolean } = {}) {
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set()); // selected templateTypes
@@ -150,17 +150,17 @@ export function RegenPdfPicker() {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
-  if (error) return <div className="min-h-screen flex items-center justify-center text-sm text-red-600 p-6">{error}</div>;
+  if (error) return <div className={embedded ? 'text-sm text-red-600 p-2' : 'min-h-screen flex items-center justify-center text-sm text-red-600 p-6'}>{error}</div>;
 
   const totalSelected = selectedItems.length;
   const pct = totalSelected ? Math.round((done / totalSelected) * 100) : 0;
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <Head><title>Regenerate PDFs</title></Head>
-      <div className="max-w-2xl mx-auto px-5 py-6">
-        <h1 className="font-heading font-extrabold text-xl text-ink">Regenerate PDFs</h1>
-        <p className="text-sm text-gray-600 mt-1 leading-relaxed">
+  // Embedded: render just the tool body (the host page provides the section
+  // header + chrome). Standalone: keep the full-page layout for any direct visit.
+  const body = (
+    <>
+      {!embedded && <h1 className="font-heading font-extrabold text-xl text-ink">Regenerate PDFs</h1>}
+      <p className="text-sm text-gray-600 mt-1 leading-relaxed">
           Pick the inspection types to regenerate, then Run. PDFs are rebuilt <b>in place</b> from
           saved data — never changing status, bypassing approval, or sending any email/ticket. Keep
           this tab open while it runs.
@@ -245,7 +245,13 @@ export function RegenPdfPicker() {
             )}
           </>
         )}
-      </div>
+    </>
+  );
+
+  return embedded ? body : (
+    <div className="min-h-screen bg-gray-50">
+      <Head><title>Regenerate PDFs</title></Head>
+      <div className="max-w-2xl mx-auto px-5 py-6">{body}</div>
     </div>
   );
 }

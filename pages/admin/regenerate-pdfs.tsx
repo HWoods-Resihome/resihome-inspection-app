@@ -1,13 +1,13 @@
 /**
- * /admin/regenerate-pdfs  (admin only)
- *
- * One combined PDF-regeneration tool: pick which inspection TYPES to regenerate
- * (Scope, 1099, Vacancy/Occupancy, Community/Visit, Turn Re-Inspect QC) and run
- * with live progress. Each id is dispatched to its own regenerate endpoint. PDFs
- * are rebuilt in place — no status change, no email/ticket.
+ * /admin/regenerate-pdfs — consolidated into /admin/flows (the "Admin Flows" hub,
+ * which holds Setup, Regenerate PDFs, and the maintenance backfills). This route
+ * now just redirects there so old links/bookmarks keep working.
  */
-import { RegenPdfPicker } from '@/components/admin/RegenPdfPicker';
+import { useEffect } from 'react';
+import { useRouter } from 'next/router';
 
-export default function RegeneratePdfsPage() {
-  return <RegenPdfPicker />;
+export default function RegeneratePdfsRedirect() {
+  const router = useRouter();
+  useEffect(() => { router.replace('/admin/flows'); }, [router]);
+  return null;
 }
