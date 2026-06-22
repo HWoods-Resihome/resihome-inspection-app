@@ -10,9 +10,10 @@
  *
  * AUTO-DRAINS: each call keeps processing batches until the whole dataset is done
  * OR a ~250s time budget is hit. If it hits the budget it returns `nextAfter` +
- * a `resume` URL — re-POST that to continue. Usually one call finishes everything.
+ * a `resume` URL — open that to continue. Usually one call finishes everything.
  *
- * Gated to authenticated @resihome.com staff.
+ * Accepts GET or POST so it can be triggered by just opening the URL in a
+ * signed-in admin browser. Gated to authenticated @resihome.com staff.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -27,8 +28,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!(await isAppAdmin(session.email))) {
     return res.status(403).json({ error: 'Admin only.' });
   }
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Method not allowed' });
   }
   try {
