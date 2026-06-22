@@ -128,8 +128,12 @@ export function primeLocationPermissionNative(): void {
 // history, and if there's nothing to go back to, QUIT the app. That makes the
 // back gesture feel destructive — e.g. opening a PDF and pressing back could
 // exit the whole app. This installs a `backButton` listener (Android-only) that:
-//   • navigates web history back when possible (this also closes the in-app PDF
-//     viewer overlay and any other history-backed overlay), and
+//   • on the HOME/root screen ('/'), MINIMIZES the app (returns to the device
+//     home screen, the standard Android convention) instead of walking back
+//     through in-app history — the home screen is the app's exit point, so a
+//     back gesture there should leave the app, not navigate inside it;
+//   • elsewhere, navigates web history back when possible (this also closes the
+//     in-app PDF viewer overlay and any other history-backed overlay), and
 //   • MINIMIZES the app (sends it to the background, like Home) instead of
 //     exiting when there's nowhere left to go back to.
 //
@@ -146,15 +150,26 @@ export function installNativeBackGuard(): void {
   const app = cap.Plugins?.App;
   if (!app?.addListener) return;
   backGuardInstalled = true;
+  const minimize = () => {
+    // Don't exitApp() — backgrounding is the expected Android behavior and
+    // keeps the session/state alive for when the user reopens the app.
+    try { app.minimizeApp?.(); } catch { /* older plugin — just ignore */ }
+  };
   try {
     app.addListener('backButton', (e: { canGoBack?: boolean }) => {
+      // On the home/root screen, back should LEAVE the app (return to the device
+      // home screen) — not navigate within in-app history. The inspections list
+      // is the app's top level, so the back gesture there is an exit gesture.
+      const onHome = window.location.pathname === '/';
+      if (onHome) {
+        minimize();
+        return;
+      }
       // canGoBack is the WebView's own signal; history.length is a fallback.
       if (e?.canGoBack || window.history.length > 1) {
         window.history.back();
       } else {
-        // Don't exitApp() — backgrounding is the expected Android behavior and
-        // keeps the session/state alive for when the user reopens the app.
-        try { app.minimizeApp?.(); } catch { /* older plugin — just ignore */ }
+        minimize();
       }
     });
   } catch { /* plugin unavailable in this build — default behavior stands */ }
