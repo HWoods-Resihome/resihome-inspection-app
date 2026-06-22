@@ -2639,6 +2639,10 @@ export interface ListingInfo {
   listingStatus: string | null;
   moveInReadyDate: string | null;
   moveInDate: string | null;
+  /** Property marks frozen alongside the listing at completion (Scope header):
+   *  pest-control enrollment and whether the last tenant had a pet. */
+  pestControlEnrolled?: boolean;
+  tenantHasPet?: boolean;
 }
 
 /** Parse the frozen `listing_snapshot_json` (written at completion) back into a
@@ -2660,6 +2664,8 @@ export function parseListingSnapshot(json: string | null | undefined): ListingIn
       listingStatus,
       moveInReadyDate: o.moveInReadyDate ?? null,
       moveInDate,
+      pestControlEnrolled: o.pestControlEnrolled === true,
+      tenantHasPet: o.tenantHasPet === true,
     };
   } catch { return null; }
 }
@@ -4111,21 +4117,34 @@ export async function stampPropertyStatusAtCompletion(inspectionRecordId: string
  */
 export async function stampListingSnapshotAtCompletion(inspectionRecordId: string): Promise<void> {
   try {
-    const { inspection: typeId } = typeIds();
+    const { inspection: typeId, property: propType } = typeIds();
     const insResp = await hubspotFetch(
       `/crm/v3/objects/${typeId}/${inspectionRecordId}?properties=${encodeURIComponent('property_id_ref')}`,
     );
     const propertyIdRef = (insResp.properties?.property_id_ref || '').toString().trim();
     if (!propertyIdRef) return;
     const listing = await fetchActiveListingForProperty(propertyIdRef);
-    if (!listing) return;
+    // Property marks (pest-control enrollment + last-tenant pet count) frozen
+    // alongside the listing — these can change later, so capture them as-of the
+    // inspection. Best-effort.
+    let pestControlEnrolled = false;
+    let tenantHasPet = false;
+    try {
+      const pr = await hubspotFetch(`/crm/v3/objects/${propType}/${propertyIdRef}?properties=pest_control_enrolled&properties=last_tenant_pet_count`);
+      const pp = pr.properties || {};
+      pestControlEnrolled = /^y/i.test((pp.pest_control_enrolled || '').toString().trim());
+      const petN = Number((pp.last_tenant_pet_count ?? '').toString().trim());
+      tenantHasPet = Number.isFinite(petN) && petN >= 1;
+    } catch { /* best-effort */ }
     await updateInspection(inspectionRecordId, {
       listing_snapshot_json: JSON.stringify({
-        listingStatus: listing.listingStatus ?? null,
-        listingPrice: listing.listingPrice ?? null,
-        listingDate: listing.listingDate ?? null,
-        moveInReadyDate: listing.moveInReadyDate ?? null,
-        moveInDate: listing.moveInDate ?? null,
+        listingStatus: listing?.listingStatus ?? null,
+        listingPrice: listing?.listingPrice ?? null,
+        listingDate: listing?.listingDate ?? null,
+        moveInReadyDate: listing?.moveInReadyDate ?? null,
+        moveInDate: listing?.moveInDate ?? null,
+        pestControlEnrolled,
+        tenantHasPet,
       }),
     });
   } catch (e) {

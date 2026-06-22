@@ -14,6 +14,7 @@ import React from 'react';
 import { StyleSheet, Text, View, Image, Link, Font } from '@react-pdf/renderer';
 import { isVideoEntry, getPosterUrl, getVideoUrl } from '@/lib/media';
 import { BRAND_LOGO_DATA_URI } from '@/lib/brandLogo';
+import { PET_MARK_DATA_URI, PEST_MARK_DATA_URI } from '@/lib/propertyMarks';
 
 // Brand mark for the PDF header: the app logo (pink #ff0060 tile + white house &
 // footprint), inlined as a base64 data URI. Because the header background is the
@@ -411,6 +412,9 @@ export function PdfHeaderStrip(props: {
   inspectorTopRight?: boolean;
   /** Right-aligned summary content — typically a Tenant Total or Vendor Total. */
   summary?: React.ReactNode;
+  /** Scope marks rendered right after the property name (Master PDF only). */
+  tenantHasPet?: boolean;
+  pestControlEnrolled?: boolean;
 }) {
   // Inspector + (optional) submitted stamp on one line.
   const inspectorLine = props.submittedLabel
@@ -455,7 +459,15 @@ export function PdfHeaderStrip(props: {
       {logoSrc ? <Image src={logoSrc} style={pdfStyles.headerLogo} /> : null}
       <View style={pdfStyles.headerLeft}>
         <Text style={pdfStyles.headerTitle}>{props.docTitle}</Text>
-        <Text style={pdfStyles.headerProperty}>{props.propertyName}</Text>
+        {(props.tenantHasPet || props.pestControlEnrolled) ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={[pdfStyles.headerProperty, { flexShrink: 1 }]}>{props.propertyName}</Text>
+            {props.tenantHasPet ? <Image src={PET_MARK_DATA_URI} style={{ width: 11, height: 11, marginLeft: 4 }} /> : null}
+            {props.pestControlEnrolled ? <Image src={PEST_MARK_DATA_URI} style={{ width: 11, height: 11, marginLeft: 4 }} /> : null}
+          </View>
+        ) : (
+          <Text style={pdfStyles.headerProperty}>{props.propertyName}</Text>
+        )}
         {props.detailsFirst ? (
           <>
             {detailsEl}
@@ -776,6 +788,10 @@ export interface PdfBuildContext {
   listingPrice?: number | null;
   listingDate?: string | null;
   moveInDate?: string | null;
+  /** Scope property marks shown next to the address (Master PDF): pet (dog) when
+   *  the last tenant had a pet, and the pest-control bug when enrolled. */
+  tenantHasPet?: boolean;
+  pestControlEnrolled?: boolean;
   sections: PdfSectionGroup[];
   grandTotals: { vendor: number; client: number; tenant: number; lineCount: number };
   /** Final Checklist Q&A — rendered on the MASTER pdf only. Each section is a

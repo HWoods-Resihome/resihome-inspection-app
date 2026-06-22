@@ -480,8 +480,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // FROZEN snapshot (set at first finalize / re-finalize) so regenerated PDFs
     // keep the listing as it was at completion; fall back to a live lookup on the
     // first finalize before the snapshot exists. Best-effort.
-    const listing = parseListingSnapshot(inspectionData.listingSnapshotJson)
+    const listingSnap = parseListingSnapshot(inspectionData.listingSnapshotJson);
+    const listing = listingSnap
       || await fetchActiveListingForProperty(inspectionData.propertyIdRef).catch(() => null);
+    // Pest/pet marks: frozen snapshot when present (re-finalize/regenerate), else
+    // the live property values from this inspection load.
+    const pestControlEnrolled = listingSnap ? !!listingSnap.pestControlEnrolled : inspectionData.propertyPestControlEnrolled;
+    const tenantHasPet = listingSnap ? !!listingSnap.tenantHasPet : inspectionData.propertyTenantHasPet;
 
     const ctx: PdfBuildContext = {
       inspectionRecordId: id,
@@ -496,6 +501,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       listingPrice: listing?.listingPrice ?? null,
       listingDate: listing?.listingDate ?? null,
       moveInDate: listing?.moveInDate ?? null,
+      tenantHasPet,
+      pestControlEnrolled,
       generatedAtIso: new Date().toISOString(),
       // Submit/approve stamps for the Master PDF. Approver = the current
       // finalizer (or the previously-recorded approver on a re-finalize).

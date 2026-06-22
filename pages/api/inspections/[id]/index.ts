@@ -133,8 +133,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         propertySquareFootage: data.propertySquareFootage,
         propertyZip: data.propertyZip,
         propertyStatus: data.propertyStatus,
-        propertyPestControlEnrolled: data.propertyPestControlEnrolled,
-        propertyTenantHasPet: data.propertyTenantHasPet,
+        // Pest/pet marks: frozen snapshot when completed, else live.
+        propertyPestControlEnrolled: listingSnapshot ? !!listingSnapshot.pestControlEnrolled : data.propertyPestControlEnrolled,
+        propertyTenantHasPet: listingSnapshot ? !!listingSnapshot.tenantHasPet : data.propertyTenantHasPet,
         propertyLastTenantMonths: data.propertyLastTenantMonths,
         propertyAirFiltersTotal: data.propertyAirFiltersTotal,
         propertyAirFiltersType1: data.propertyAirFiltersType1,

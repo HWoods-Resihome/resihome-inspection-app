@@ -109,6 +109,8 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
           bedrooms={ctx.bedrooms}
           bathrooms={ctx.bathrooms}
           generatedAtLabel={generatedAtLabel}
+          tenantHasPet={ctx.tenantHasPet}
+          pestControlEnrolled={ctx.pestControlEnrolled}
           listingLine={buildListingLine({ listingStatus: ctx.listingStatus, listingPrice: ctx.listingPrice, listingDate: ctx.listingDate, moveInDate: ctx.moveInDate })}
           summary={
             <>
