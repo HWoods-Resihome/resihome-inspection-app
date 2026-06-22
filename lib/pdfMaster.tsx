@@ -120,6 +120,15 @@ function MasterDoc(props: { ctx: PdfBuildContext }) {
           }
         />
 
+        {/* DRAFT mark — shown only while NOT yet approved (i.e. the Master built
+            for a Pending-Approval scope). Disappears once the inspection is
+            approved/finalized, where approvedAtIso is stamped. */}
+        {!ctx.approvedAtIso && (
+          <View style={{ backgroundColor: '#FEF2F2', borderColor: '#FCA5A5', borderWidth: 1, borderRadius: 4, paddingVertical: 3, paddingHorizontal: 8, marginBottom: 6, alignItems: 'center' }}>
+            <Text style={{ color: '#B91C1C', fontSize: 9, fontWeight: 700, letterSpacing: 1 }}>DRAFT · PENDING APPROVAL — NOT FINAL</Text>
+          </View>
+        )}
+
         {/* Grand totals strip — Scope Items + Vendor / Client / Tenant / Net Turn */}
         <View style={pdfStyles.grandTotalsStrip}>
           <View style={pdfStyles.grandTotalsItem}>
