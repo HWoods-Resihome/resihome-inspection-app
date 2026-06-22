@@ -449,8 +449,12 @@ export default function ExistingInspection() {
 
   // Scope reports for the in-app "View PDFs" dropdown in RateCardForm. Prefer the
   // clean short links; PDFs open in the in-app viewer, the xlsx import downloads.
+  // Shown once COMPLETED and also while PENDING APPROVAL — the Master PDF is
+  // generated at submit so the approver can review the full report before
+  // finalizing (it's regenerated/overwritten with any edits at finalize).
+  const isPendingApproval = (inspection.status || '').toLowerCase() === 'pending_approval';
   const scopeReportLinks: { label: string; url: string; isPdf: boolean; primary?: boolean }[] = [];
-  if (isCompleted && inspection.templateType === 'pm_scope_rate_card') {
+  if ((isCompleted || isPendingApproval) && inspection.templateType === 'pm_scope_rate_card') {
     if (inspection.pdfMasterUrl) scopeReportLinks.push({ label: 'Master Report', url: shareLinks?.master || inspection.pdfMasterUrl, isPdf: true, primary: true });
     if (inspection.pdfChargebackUrl) scopeReportLinks.push({ label: 'Tenant Chargeback (PDF)', url: shareLinks?.chargeback || inspection.pdfChargebackUrl, isPdf: true });
     let vendorUrls: Record<string, string> = {};
