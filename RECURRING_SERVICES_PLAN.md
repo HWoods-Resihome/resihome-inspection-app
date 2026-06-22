@@ -1,5 +1,10 @@
 # ResiWALK → Recurring Services — Planning Doc
 
+> **Codename / reference: "PPW Replacement."** This is the in-house recurring-services
+> initiative meant to replace the external PPW vendor (the current default for grass
+> cuts / cleans / pools — see `lib/vendors.ts`) by bringing those recurring services
+> in-house with our own scheduling, dispatch, evidence, and invoicing.
+>
 > **Status: PLANNING (living doc). No code yet.** This captures the vision, what we
 > can reuse from the existing inspection app, and what's net-new, so we can keep
 > refining and then execute in phases. Edit freely as decisions land.

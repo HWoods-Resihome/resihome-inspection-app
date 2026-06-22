@@ -51,6 +51,13 @@ When a change touches any of these, update the native side too (on
 If a web change is purely UI/logic on an existing capability, **no native change
 is needed** — it flows through `server.url` on the next deploy.
 
+## Planning: "PPW Replacement" (Recurring Services) — not started
+A future initiative to bring recurring services (grass cuts / cleans / pools) in-house
+— replacing the external **PPW** vendor — with scheduling (a Rules Engine), vendor
+dispatch, field evidence, and invoicing. Vision, reuse map, proposed objects, and
+phased roadmap live in **`RECURRING_SERVICES_PLAN.md`** (reference it as "PPW
+Replacement"). Planning only; no code yet.
+
 ## Hard rules
 - **Never change `server.url` casually** — it controls which site the app loads.
 - Brand color is **`#ff0060`** (pink). Status bar / splash / icon background match it.
