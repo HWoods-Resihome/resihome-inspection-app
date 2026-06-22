@@ -97,6 +97,25 @@ export const EXTERNAL_1099_STATUS_BLOCK_MSG =
   'Please wait until the Turn is completed and the property status is moved to On-Market to walk the property.';
 
 /**
+ * The state that prefixes a region value. Regions are stored as
+ * "<STATE>: <City>" (e.g. "GA: Atlanta", "FL: Tampa"); the part before the
+ * first colon is the state code. Upper-cased and trimmed; '' for a blank
+ * region. External users' view access is unlocked one state at a time, so this
+ * is how we group a region into its state.
+ */
+export function stateOfRegion(region: string | null | undefined): string {
+  const r = (region || '').trim();
+  if (!r) return '';
+  const i = r.indexOf(':');
+  return (i >= 0 ? r.slice(0, i) : r).trim().toUpperCase();
+}
+
+/** Denial message when an external user opens a completed Scope/Re-Inspect in a
+ *  state they haven't unlocked yet (no inspection of their own there). */
+export const EXTERNAL_VIEW_STATE_BLOCK_MSG =
+  'You can only view inspections in states where you have an assigned inspection.';
+
+/**
  * Does this email own the inspection (i.e. is the recorded inspector)?
  * Case-insensitive. When the owner is unknown (blank inspector_email), returns
  * true — we can't prove non-ownership, so we don't lock out legacy/blank-field
@@ -117,14 +136,27 @@ export function ownsInspection(email: string | null | undefined, ownerEmail: str
  * External users:
  *   - WRITE (create/edit/re-open/cancel/submit): only the 1099 template, only
  *     ones they OWN, and never once completed. Scope/Re-Inspect are view-only.
- *   - READ: any 1099, plus COMPLETED Scope Rate Card / Re-Inspect (view + PDF).
+ *   - READ: any 1099, plus COMPLETED Scope Rate Card / Re-Inspect (view + PDF) —
+ *     but only in STATES the user has unlocked by having an inspection of their
+ *     own there (see `unlockedStates`).
  *
  * Call from every inspection read/write API route (server-side enforcement).
  */
 export function externalAccessDenial(
   email: string | null | undefined,
   templateType: string | null | undefined,
-  opts: { write?: boolean; status?: string | null; ownerEmail?: string | null } = {},
+  opts: {
+    write?: boolean;
+    status?: string | null;
+    ownerEmail?: string | null;
+    // For the READ gate on view-only (Scope/Re-Inspect) types: the inspection's
+    // region and the set of state codes the user has unlocked. When
+    // `unlockedStates` is provided (an array — possibly empty), a completed
+    // Scope/Re-Inspect is visible only if its region's state is in the set.
+    // Omit (undefined) to skip the state gate (back-compat / 1099-only callers).
+    region?: string | null;
+    unlockedStates?: string[] | null;
+  } = {},
 ): string | null {
   if (!isExternalEmail(email)) return null; // internal = full access
 
@@ -150,6 +182,14 @@ export function externalAccessDenial(
       return 'You can only view completed Scope Rate Card or Re-Inspect inspections.';
     }
     return 'Your account can only access 1099 Leasing Agent Property Inspections.';
+  }
+  // State gate for the view-only types (Scope/Re-Inspect). Their OWN 1099s
+  // (edit templates) are never state-gated. A completed Scope/Re-Inspect is
+  // visible only in a state the user has unlocked. `unlockedStates` undefined →
+  // gate not applied (callers that don't supply it keep the prior behavior).
+  if (!externalCanEditTemplate(templateType) && Array.isArray(opts.unlockedStates)) {
+    const st = stateOfRegion(opts.region);
+    if (!st || !opts.unlockedStates.includes(st)) return EXTERNAL_VIEW_STATE_BLOCK_MSG;
   }
   return null;
 }

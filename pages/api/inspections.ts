@@ -4,6 +4,7 @@ import {
   searchInspectionsPage,
   countInspectionsByStatus,
   inspectionFacets,
+  externalUnlockedView,
 } from '@/lib/hubspot';
 import type {
   InspectionQuery,
@@ -129,20 +130,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const externalEmail = isExternalEmail(session.email) ? session.email : null;
   const templates = templatesRaw;
 
-  const baseQuery: InspectionQuery = { search, status, inspectors, templates, regions, externalEmail };
+  // State gate (external only): the view-only completed Scope/QC set is limited
+  // to the regions in states where this user has an inspection of their own.
+  // Empty array = no states unlocked yet (they see only their own 1099s). The
+  // value is folded into every cache key below since it's per-user.
+  let externalViewRegions: string[] | undefined;
+  if (externalEmail) {
+    try { externalViewRegions = (await externalUnlockedView(externalEmail)).regions; }
+    catch { externalViewRegions = []; }
+  }
+
+  const baseQuery: InspectionQuery = { search, status, inspectors, templates, regions, externalEmail, externalViewRegions };
   // Stable key parts: sort the multi-value arrays so equivalent selections share
   // a cache entry regardless of click order.
   const insKey = [...inspectors].sort();
   const tmpKey = [...templates].sort();
   const regKey = [...regions].sort();
+  // Per-user view-region unlock — part of every key (external lists vary by it).
+  const viewKey = externalViewRegions ? [...externalViewRegions].sort() : null;
   // Counts ignore the selected status (each chip shows its own total) and the
   // page/sort, so cache them on just the constraining filters.
-  const countKey = JSON.stringify({ search, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail });
-  const listKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail, sortField, sortDir, page, pageSize });
+  const countKey = JSON.stringify({ search, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail, viewKey });
+  const listKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail, viewKey, sortField, sortDir, page, pageSize });
   // Facets are DEPENDENT: each dropdown is constrained by the other active
   // filters (status, search, and the other dimensions' selections), so the cache
   // key includes them all.
-  const facetKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail });
+  const facetKey = JSON.stringify({ search, status, inspectors: insKey, templates: tmpKey, regions: regKey, externalEmail, viewKey });
 
   // The filter dropdown options (facets) require a multi-page scan and are NOT
   // needed to render the inspection cards. On a slow connection that scan would

@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals, fetchActiveUsers, fetchPropertyStatus } from '@/lib/hubspot';
+import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals, fetchActiveUsers, fetchPropertyStatus, bustExternalUnlockedView } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
@@ -253,6 +253,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     bustInspectionsCache(); // show the new inspection in the list immediately
+    // Starting an inspection can unlock a new state's view-only Scope/QC for an
+    // external creator — drop their cached unlock so it recomputes next load.
+    if (isExternalEmail(session.email)) bustExternalUnlockedView(session.email);
 
     // Billing sync: copy entity_id/full_address (property) + broker_code +
     // vendor/client invoice (agent owned by the inspector's owner) onto the new

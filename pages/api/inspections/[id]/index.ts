@@ -10,10 +10,11 @@ import {
   parseListingSnapshot,
   fetchPropertyCommunityName,
   syncInspectorFromOwner,
+  externalUnlockedView,
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { buildShortLink } from '@/lib/shortLinks';
-import { externalAccessDenial } from '@/lib/userAccess';
+import { externalAccessDenial, isExternalEmail } from '@/lib/userAccess';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -36,10 +37,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const data = await fetchInspectionWithPropertyRef(id);
       if (!data) { answersPromise.catch(() => {}); return res.status(404).json({ error: 'Inspection not found' }); }
       // External (1099) users can open any 1099, plus COMPLETED Scope Rate Card
-      // / Re-Inspect inspections (view-only). Pass the status so the read rule
-      // can allow completed view-only types and reject non-completed ones.
+      // / Re-Inspect inspections (view-only) — but the latter only in states they
+      // have unlocked (an inspection of their own there). Pass status + region +
+      // unlocked states so the read rule can enforce both gates.
+      const unlockedStates = isExternalEmail(session.email)
+        ? await externalUnlockedView(session.email).then((v) => v.states).catch(() => [] as string[])
+        : undefined;
       const denial = externalAccessDenial(session.email, data.inspection.templateType, {
         status: data.inspection.status,
+        region: data.inspection.regionSnapshot,
+        unlockedStates,
       });
       if (denial) { answersPromise.catch(() => {}); return res.status(403).json({ error: denial }); }
       // Answers + the property's active listing + (Community/Visit only) the

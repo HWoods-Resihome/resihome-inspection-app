@@ -6,7 +6,7 @@ import { isInternalResolution } from './vendors';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from './answerProps';
 import { extractLeasingAgent1099Fields } from './leasingAgent1099';
 import { calculateLine } from './rateCardMath';
-import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES } from './userAccess';
+import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion } from './userAccess';
 
 const API_BASE = 'https://api.hubapi.com';
 
@@ -1005,6 +1005,16 @@ export interface InspectionQuery {
   // Scope/Re-Inspect from anyone (view-only). Lists become per-user — callers
   // MUST include this email in any cache key.
   externalEmail?: string | null;
+  // State gate for the view-only (Scope/Re-Inspect) set: the exact
+  // region_snapshot values an external user has unlocked (regions in the states
+  // where they have an inspection of their own — see externalUnlockedView). The
+  // completed Scope/Re-Inspect group is restricted to these regions.
+  //   • undefined → not gated (back-compat; the list endpoint always sets it),
+  //   • []        → no states unlocked yet → the view-only group is dropped
+  //                 (the user sees only their OWN 1099s),
+  //   • [..]      → restrict the view-only group to these regions.
+  // Derived from `externalEmail`, so callers MUST fold it into any cache key.
+  externalViewRegions?: string[] | null;
 }
 
 export interface InspectionCounts {
@@ -1077,12 +1087,22 @@ function externalAllowGroups(q: InspectionQuery): { filters: any[] }[] {
       : { propertyName: 'status', operator: 'NOT_IN', values: CANCELLED_VARIANTS };
     groups.push({ filters: [{ propertyName: 'template_type', operator: 'IN', values: editTpls }, statusFilter, ...ownerFilter, ...common] });
   }
-  // Scope / Re-Inspect group: COMPLETED only. Contributes only when the selected
-  // status includes completed (the "all" tab or the "completed" chip).
-  if (viewTpls.length && (status === '' || status === 'completed')) {
+  // Scope / Re-Inspect group: COMPLETED only, and STATE-GATED — restricted to
+  // the regions the user has unlocked (regions in the states where they have an
+  // inspection of their own). Contributes only when the selected status includes
+  // completed (the "all" tab or the "completed" chip). `externalViewRegions`:
+  // undefined → not gated; [] → drop the group (no states unlocked); [..] →
+  // restrict to those regions.
+  const viewRegions = q.externalViewRegions;
+  const viewGated = Array.isArray(viewRegions);
+  if (viewTpls.length && (status === '' || status === 'completed') && (!viewGated || viewRegions!.length > 0)) {
+    const regionGate = viewGated
+      ? [{ propertyName: 'region_snapshot', operator: 'IN', values: viewRegions }]
+      : [];
     groups.push({ filters: [
       { propertyName: 'template_type', operator: 'IN', values: viewTpls },
       { propertyName: 'status', operator: 'IN', values: STATUS_VARIANTS.completed },
+      ...regionGate,
       ...common,
     ] });
   }
@@ -1314,6 +1334,102 @@ async function scanInspectionProps(q: InspectionQuery, properties: string[]): Pr
 const distinct = (vals: any[]): string[] =>
   Array.from(new Set(vals.map((v) => String(v || '').trim()).filter(Boolean)));
 
+// ---------------------------------------------------------------------------
+// External users' per-STATE view unlock.
+//
+// An external (1099) user only sees completed Scope/Re-Inspect inspections in
+// STATES where they have an inspection of their OWN. They start with nothing;
+// the first inspection they're assigned in (say) FL unlocks view-only access to
+// every completed Turn / QC in all FL regions. Their own 1099s define the
+// unlocked states (any template/status counts). Cached per email — states
+// change rarely, only when the user starts work in a new state — and busted on
+// create (bustExternalUnlockedView).
+// ---------------------------------------------------------------------------
+const unlockedViewCache = new Map<string, { data: { states: string[]; regions: string[] }; at: number }>();
+const UNLOCKED_VIEW_TTL_MS = 5 * 60 * 1000;
+
+/** Drop the cached unlock for one email (after they create an inspection), or
+ *  all of them when called with no argument. */
+export function bustExternalUnlockedView(email?: string | null): void {
+  const key = (email || '').trim().toLowerCase();
+  if (key) unlockedViewCache.delete(key);
+  else unlockedViewCache.clear();
+}
+
+/**
+ * The states an external user has unlocked, plus the region_snapshot values
+ * within them. `states` are distinct 2-letter codes (e.g. ['FL','GA']) derived
+ * from the regions on the inspections ASSIGNED to this email. `regions` is every
+ * region_snapshot value (the canonical region matrix, unioned with the user's
+ * own observed regions) whose state is unlocked — used as the IN-filter that
+ * scopes the completed Scope/QC they may see. Empty arrays when they have no
+ * inspections yet (the clean first-login state).
+ */
+export async function externalUnlockedView(
+  email: string | null | undefined,
+): Promise<{ states: string[]; regions: string[] }> {
+  const key = (email || '').trim().toLowerCase();
+  if (!key) return { states: [], regions: [] };
+  const hit = unlockedViewCache.get(key);
+  if (hit && Date.now() - hit.at < UNLOCKED_VIEW_TTL_MS) return hit.data;
+
+  const { inspection: typeId } = typeIds();
+  const ownerValues = Array.from(new Set([(email || '').trim(), key].filter(Boolean)));
+
+  // Scan the user's OWN inspections (matched on inspector_email, any template /
+  // status) for their region_snapshot values.
+  const ownRegions: string[] = [];
+  try {
+    let after: string | undefined;
+    let pages = 0;
+    do {
+      const body: any = {
+        filterGroups: [{ filters: [{ propertyName: 'inspector_email', operator: 'IN', values: ownerValues }] }],
+        properties: ['region_snapshot'],
+        limit: 100,
+        sorts: [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }],
+      };
+      if (after) body.after = after;
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+        method: 'POST', body: JSON.stringify(body),
+      });
+      for (const r of resp.results || []) {
+        const v = (r.properties?.region_snapshot || '').toString().trim();
+        if (v) ownRegions.push(v);
+      }
+      after = resp.paging?.next?.after;
+      pages++;
+    } while (after && pages < 20);
+  } catch (e) {
+    console.warn('[externalUnlockedView] own-inspection scan failed:', e);
+  }
+
+  const states = Array.from(new Set(ownRegions.map((r) => stateOfRegion(r)).filter(Boolean)));
+  if (states.length === 0) {
+    const data = { states: [], regions: [] };
+    unlockedViewCache.set(key, { data, at: Date.now() });
+    return data;
+  }
+
+  // Expand to every region in those states: the canonical region matrix (so a
+  // sibling region the user hasn't personally worked still counts) unioned with
+  // their own observed regions (in case one isn't in the matrix).
+  let regionUniverse: string[] = [];
+  try {
+    regionUniverse = (await fetchRegionRates()).map((r) => r.region).filter(Boolean);
+  } catch (e) {
+    console.warn('[externalUnlockedView] region matrix load failed:', e);
+  }
+  const stateSet = new Set(states);
+  const regions = Array.from(new Set(
+    [...regionUniverse, ...ownRegions].filter((r) => stateSet.has(stateOfRegion(r))),
+  ));
+
+  const data = { states, regions };
+  unlockedViewCache.set(key, { data, at: Date.now() });
+  return data;
+}
+
 /**
  * Options for the inspector + template filter dropdowns, computed DEPENDENTLY:
  * each dimension is constrained by the OTHER active filters (exclude-self
@@ -1329,9 +1445,10 @@ export async function inspectionFacets(query: InspectionQuery): Promise<{ inspec
   // change it) but respect the OTHER active filters. The external visibility
   // rule (own 1099 + completed Scope/Re-Inspect) is carried through
   // `externalEmail`, so every scan is already bounded to what the user may see.
-  const inspectorQ: InspectionQuery = { search: query.search, status: query.status, templates: query.templates, regions: query.regions, externalEmail: extEmail };
-  const templateQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, regions: query.regions, externalEmail: extEmail };
-  const regionQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, templates: query.templates, externalEmail: extEmail };
+  const extViewRegions = query.externalViewRegions;
+  const inspectorQ: InspectionQuery = { search: query.search, status: query.status, templates: query.templates, regions: query.regions, externalEmail: extEmail, externalViewRegions: extViewRegions };
+  const templateQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, regions: query.regions, externalEmail: extEmail, externalViewRegions: extViewRegions };
+  const regionQ: InspectionQuery = { search: query.search, status: query.status, inspectors: query.inspectors, templates: query.templates, externalEmail: extEmail, externalViewRegions: extViewRegions };
   const noneSelected = (query.inspectors?.length || 0) === 0
     && (query.templates?.length || 0) === 0
     && (query.regions?.length || 0) === 0;
