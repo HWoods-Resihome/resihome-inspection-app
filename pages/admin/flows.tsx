@@ -27,6 +27,7 @@ const BACKFILLS: { label: string; href: string; desc: string }[] = [
   { label: 'Backfill region', href: '/api/admin/backfill-region?apply=1', desc: 'Stamp region_snapshot on inspections missing it.' },
   { label: 'Seed Device Installed = No', href: '/api/admin/backfill-device-installed', desc: 'Fill the blank Smart Home “Device Installed” field with “No” on existing records.' },
   { label: 'Backfill Device Type', href: '/api/admin/backfill-device-type', desc: 'Populate Smart Home “Device Type” from each inspection’s Final Checklist answer.' },
+  { label: 'Generate pending-approval Master PDFs', href: '/api/admin/backfill-pending-master', desc: 'Build the Master PDF for submitted / pending-approval scopes missing one, so the in-app “View PDFs” link appears.' },
 ];
 
 function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
