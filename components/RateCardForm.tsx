@@ -3668,7 +3668,7 @@ export function RateCardForm(props: RateCardFormProps) {
                 fact is a tight consecutive line, including Internal Resolution. */}
             <div className="text-left min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <FitText text={props.propertyName} className="font-heading font-semibold text-ink flex-1 min-w-0" />
+                <FitText text={props.propertyName} className="font-heading font-semibold text-ink min-w-0" />
                 {props.pestControlEnrolled && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src="/pest-control.svg" alt="Pest control enrolled" title="Enrolled in pest control" className="h-5 w-5 shrink-0" />
