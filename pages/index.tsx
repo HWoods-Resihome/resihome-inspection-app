@@ -672,6 +672,18 @@ export default function Home() {
                         {/* Gmail connect/disconnect — only when the server is
                             configured for Gmail (component returns null otherwise). */}
                         <GmailMenuItem email={me?.email} onClose={() => setSettingsOpen(false)} />
+                        {/* Training guide — available to ALL users. Opens the
+                            ResiWALK guide in a new tab / the system browser. */}
+                        <a
+                          href="https://www.resihome.com/resiwalkguide"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => setSettingsOpen(false)}
+                          className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>
+                          Training Guide
+                        </a>
                         {/* Admin tools — admins only. */}
                         {isAdmin && (
                           <>
