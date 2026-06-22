@@ -163,21 +163,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ...(propertyStatusSnapshot ? { property_status_snapshot: propertyStatusSnapshot } : {}),
     };
 
-    // For Rate Card inspections, snapshot the property's `region` field onto the
-    // new inspection's `region_snapshot`. The math layer falls back to GA:Atlanta
-    // automatically if region is missing or doesn't match the matrix, so we just
-    // pass through whatever the property has (including empty string).
-    if (isRateCard) {
-      try {
-        const region = await fetchPropertyRegion(body.propertyRecordId);
-        if (region) {
-          inspectionProps.region_snapshot = region;
-        }
-      } catch (e) {
-        // Don't block inspection creation if region lookup fails; log and continue.
-        // Math will fall back to GA:Atlanta.
-        console.warn(`Region lookup failed for property ${body.propertyRecordId}; using fallback.`, e);
+    // Snapshot the property's `region` onto the new inspection's `region_snapshot`
+    // for EVERY template — region is a property attribute, so 1099 / Vacancy /
+    // Community inspections need it too (otherwise they're invisible under the
+    // region filter and their inspectors don't surface when filtering by region).
+    // The math layer falls back to GA:Atlanta if region is missing/unmatched.
+    try {
+      const region = await fetchPropertyRegion(body.propertyRecordId);
+      if (region) {
+        inspectionProps.region_snapshot = region;
       }
+    } catch (e) {
+      // Don't block inspection creation if region lookup fails; log and continue.
+      console.warn(`Region lookup failed for property ${body.propertyRecordId}; using fallback.`, e);
     }
 
     // QC Turn Re-Inspect: stamp the source inspection ref + carry its region
