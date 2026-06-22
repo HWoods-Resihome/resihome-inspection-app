@@ -831,7 +831,7 @@ export function QcReinspectForm(props: Props) {
               <div className="text-right"><SaveIndicator phase={saveStatus} /></div>
             )}
           </div>
-          <div className="flex items-start gap-2.5">
+          <div className="flex items-center gap-2.5">
             <button type="button" onClick={props.onCancel} aria-label="Back to inspections" title="Back to inspections" className="shrink-0">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
