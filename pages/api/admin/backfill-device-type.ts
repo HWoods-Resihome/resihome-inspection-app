@@ -50,13 +50,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         set++;
       } catch (e: any) {
         errors++;
-        if (errorSamples.length < 8) errorSamples.push(`${insp.recordId}: ${String(e?.message || e).slice(0, 160)}`);
+        if (errorSamples.length < 8) errorSamples.push(`${insp.recordId}: ${String(e?.detail || e?.message || e).slice(0, 160)}`);
       }
       if (Date.now() > deadline) { i++; break; }
     }
 
     const done = i >= all.length;
     const nextAfter = done ? null : i;
+    // Every write failing usually means the field isn't provisioned yet.
+    const hint = (set === 0 && errors > 0)
+      ? 'All writes failed — the "device_type" property may not exist yet. Run Admin Flows → Provision Fields (Setup), then re-run this backfill.'
+      : undefined;
     return res.status(200).json({
       ok: true,
       total: all.length,
@@ -67,6 +71,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       done,
       nextAfter,
       resume: nextAfter != null ? `/api/admin/backfill-device-type?after=${nextAfter}&limit=${limit}` : null,
+      ...(hint ? { hint } : {}),
       errorSamples,
     });
   } catch (e: any) {

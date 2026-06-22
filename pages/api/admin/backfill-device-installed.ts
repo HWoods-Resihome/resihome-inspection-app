@@ -49,13 +49,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         set++;
       } catch (e: any) {
         errors++;
-        if (errorSamples.length < 8) errorSamples.push(`${insp.recordId}: ${String(e?.message || e).slice(0, 160)}`);
+        if (errorSamples.length < 8) errorSamples.push(`${insp.recordId}: ${String(e?.detail || e?.message || e).slice(0, 160)}`);
       }
       if (Date.now() > deadline) { i++; break; }
     }
 
     const done = i >= all.length;
     const nextAfter = done ? null : i;
+    const hint = (set === 0 && errors > 0)
+      ? 'All writes failed — the "device_installed" property may not exist yet. Run Admin Flows → Provision Fields (Setup), then re-run this backfill.'
+      : undefined;
     return res.status(200).json({
       ok: true,
       mode: force ? 'force (set every record to "No")' : 'fill blanks only',
@@ -69,6 +72,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       resume: nextAfter != null
         ? `/api/admin/backfill-device-installed?after=${nextAfter}&limit=${limit}${force ? '&force=1' : ''}`
         : null,
+      ...(hint ? { hint } : {}),
       errorSamples,
     });
   } catch (e: any) {
