@@ -26,6 +26,7 @@ const BACKFILLS: { label: string; href: string; desc: string }[] = [
   { label: 'Backfill billing fields', href: '/api/admin/backfill-billing-fields', desc: 'Vendor/client cost, broker code, entity id — never null vendor cost.' },
   { label: 'Backfill region', href: '/api/admin/backfill-region?apply=1', desc: 'Stamp region_snapshot on inspections missing it.' },
   { label: 'Seed Device Installed = No', href: '/api/admin/backfill-device-installed', desc: 'Fill the blank Smart Home “Device Installed” field with “No” on existing records.' },
+  { label: 'Backfill Device Type', href: '/api/admin/backfill-device-type', desc: 'Populate Smart Home “Device Type” from each inspection’s Final Checklist answer.' },
 ];
 
 function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {

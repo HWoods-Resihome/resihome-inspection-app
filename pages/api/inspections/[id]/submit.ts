@@ -104,7 +104,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const answers = await fetchAnswersForInspection(id);
         const fcRec = answers.find((a) => a.questionIdExternal === 'fc__all' || String(a.answerIdExternal || '').startsWith('FINALCHECKLIST-'));
         const stamps = fcSmartHomeStamps(parseFcAnswers(fcRec?.note));
-        await updateInspection(id, { device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber });
+        await updateInspection(id, { device_type: stamps.deviceType, device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber });
       } catch (e) {
         console.warn('[submit] smart-home field stamp skipped (provision via /admin/setup):', e);
       }

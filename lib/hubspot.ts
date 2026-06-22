@@ -3991,6 +3991,9 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   // (Yes/No); Serial Number = the device serial (Bluetooth Lock always; Smart
   // Home Hub only when a new hub was installed).
   await ensureGroup(inspection, 'inspection_smart_home', 'Smart Home Tech');
+  await ensureProp(inspection, 'device_type', {
+    name: 'device_type', label: 'Device Type', type: 'string', fieldType: 'text', groupName: 'inspection_smart_home',
+  });
   await ensureProp(inspection, 'device_installed', {
     name: 'device_installed', label: 'Device Installed', type: 'string', fieldType: 'text', groupName: 'inspection_smart_home',
   });

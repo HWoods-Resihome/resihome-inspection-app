@@ -414,21 +414,23 @@ export function parseFcAnswers(note: string | null | undefined): FcAnswers {
 }
 
 /** Smart Home Tech values mirrored to their own inspection fields at completion:
+ *    deviceType      — the selected Device Type (Bluetooth Lock / Smart Home Hub
+ *                      / No Smart Devices); '' when unanswered
  *    deviceInstalled — the "Did you install a new lock/hub?" answer (Yes/No)
  *    serialNumber    — the device Serial Number (only when that field is visible:
  *                      always for a Bluetooth Lock, and for a Smart Home Hub only
- *                      when a new hub was installed)
- *  Both empty when no real device (lock/hub) was selected. */
-export function fcSmartHomeStamps(a: FcAnswers): { deviceInstalled: string; serialNumber: string } {
+ *                      when a new hub was installed) */
+export function fcSmartHomeStamps(a: FcAnswers): { deviceType: string; deviceInstalled: string; serialNumber: string } {
   const ans = a['fc_smart_home_device'] || {};
-  const picked = ans.value || '';
+  const picked = (ans.value || '').trim();
   const section = FINAL_CHECKLIST.find((s) => s.id === 'smart_home_tech');
   const q = section?.questions.find((x) => x.id === 'fc_smart_home_device');
   const dev = (q?.devices || []).find((d) => d.value === picked);
-  if (!dev || !dev.fields) return { deviceInstalled: '', serialNumber: '' };
+  if (!dev || !dev.fields) return { deviceType: picked, deviceInstalled: '', serialNumber: '' };
   const visible = fcVisibleDeviceFields(dev, ans);
   const get = (id: string) => (ans.device?.[id] || '').trim();
   return {
+    deviceType: picked,
     deviceInstalled: get('installed_new'),
     serialNumber: visible.some((f) => f.id === 'serial') ? get('serial') : '',
   };

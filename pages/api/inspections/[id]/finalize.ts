@@ -769,7 +769,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (fcAnswers) {
         try {
           const stamps = fcSmartHomeStamps(fcAnswers);
-          await updateInspection(id, { device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber });
+          await updateInspection(id, { device_type: stamps.deviceType, device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber });
         } catch (e) { console.warn('[finalize] smart-home field stamp skipped (provision via /admin/setup):', e); }
       }
     }

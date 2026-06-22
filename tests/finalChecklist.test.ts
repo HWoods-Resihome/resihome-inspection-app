@@ -93,22 +93,26 @@ describe('finalChecklistGap', () => {
     expect(finalChecklistGap(done, baseCtx)).toBeNull();
   });
 
-  it('fcSmartHomeStamps mirrors Device Installed + Serial Number', () => {
-    // No device → both blank.
+  it('fcSmartHomeStamps mirrors Device Type + Device Installed + Serial Number', () => {
+    // No device → device type recorded, install/serial blank.
     expect(fcSmartHomeStamps({ fc_smart_home_device: { value: 'No Smart Devices' } }))
-      .toEqual({ deviceInstalled: '', serialNumber: '' });
+      .toEqual({ deviceType: 'No Smart Devices', deviceInstalled: '', serialNumber: '' });
 
-    // Bluetooth Lock → install answer + the (always-present) serial.
+    // Unanswered → all blank.
+    expect(fcSmartHomeStamps({}))
+      .toEqual({ deviceType: '', deviceInstalled: '', serialNumber: '' });
+
+    // Bluetooth Lock → type + install answer + the (always-present) serial.
     expect(fcSmartHomeStamps({ fc_smart_home_device: { value: 'Bluetooth Lock', device: { installed_new: 'Yes', status: 'Online', serial: 'BT-9' } } }))
-      .toEqual({ deviceInstalled: 'Yes', serialNumber: 'BT-9' });
+      .toEqual({ deviceType: 'Bluetooth Lock', deviceInstalled: 'Yes', serialNumber: 'BT-9' });
 
     // Hub, no new install → serial is hidden, so it's NOT stamped (even if stale).
     expect(fcSmartHomeStamps({ fc_smart_home_device: { value: 'Smart Home Hub', device: { installed_new: 'No', serial: 'STALE' } } }))
-      .toEqual({ deviceInstalled: 'No', serialNumber: '' });
+      .toEqual({ deviceType: 'Smart Home Hub', deviceInstalled: 'No', serialNumber: '' });
 
     // Hub + installed new → serial stamped.
     expect(fcSmartHomeStamps({ fc_smart_home_device: { value: 'Smart Home Hub', device: { installed_new: 'Yes', serial: 'HUB-1', location: 'Closet', status: 'Online' } } }))
-      .toEqual({ deviceInstalled: 'Yes', serialNumber: 'HUB-1' });
+      .toEqual({ deviceType: 'Smart Home Hub', deviceInstalled: 'Yes', serialNumber: 'HUB-1' });
   });
 
   it('requires septic only when septic_fee > 0', () => {
