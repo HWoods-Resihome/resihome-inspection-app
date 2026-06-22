@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import type { AppProps } from 'next/app';
+import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AppDialogProvider } from '@/components/AppDialog';
@@ -28,6 +29,7 @@ const raleway = Raleway({
 });
 
 export default function App({ Component, pageProps }: AppProps) {
+  const router = useRouter();
   useEffect(() => {
     // Field reliability: capture crashes/silent failures, catch session
     // expiry, and install the offline-shell service worker.
@@ -55,10 +57,11 @@ export default function App({ Component, pageProps }: AppProps) {
     // stamped from the first capture. No-op on web/PWA. (Requires the native
     // build to declare the location usage string — see mobile/ runbooks.)
     primeLocationPermissionNative();
-    // Native-only: make the Android back gesture close overlays / go back
-    // instead of quitting the app (minimizes when there's nowhere to go back).
-    // No-op on web/PWA. Works with the in-app PDF viewer's history-backed close.
-    installNativeBackGuard();
+    // Native-only: make the Android back gesture deterministic — close an open
+    // overlay, take you HOME from inside an inspection (any template), and EXIT
+    // the app from the home screen. `goHome` does the SPA route to '/'. No-op on
+    // web/PWA. Works with the in-app PDF viewer's / camera's history-backed close.
+    installNativeBackGuard(() => { void router.push('/'); });
   }, []);
 
   return (
