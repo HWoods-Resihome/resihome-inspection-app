@@ -28,6 +28,7 @@ import {
   stampFirstCompleted,
   stampPropertyStatusAtCompletion,
   upsertAnswers,
+  populateBillingFields,
 } from '@/lib/hubspot';
 import { buildQaAnswerProps } from '@/lib/answerProps';
 import { isFinalizeAdmin } from '@/lib/finalizeAccess';
@@ -760,6 +761,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       await stampFirstCompleted(id, nowIso);
       await stampPropertyStatusAtCompletion(id);
       await stampListingSnapshotAtCompletion(id);
+      // Guarantee a non-null vendor cost on the completed record ($0, or the
+      // matched agent's value). Best-effort — never blocks finalize.
+      try { await populateBillingFields(id); } catch (e) { console.warn('[finalize] billing populate failed (continuing):', e); }
     }
     finalizePhase = 'side-effects'; // status is now persisted; remaining steps are best-effort
 

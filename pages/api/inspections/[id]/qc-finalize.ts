@@ -25,6 +25,7 @@ import {
   updateInspection,
   stampFirstCompleted,
   stampPropertyStatusAtCompletion,
+  populateBillingFields,
 } from '@/lib/hubspot';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { bustInspectionsCache } from '@/pages/api/inspections';
@@ -344,6 +345,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     await stampFirstCompleted(id, nowIso); // first completion timestamp (kept on re-runs)
     await stampPropertyStatusAtCompletion(id); // freeze property status for the record
     await stampListingSnapshotAtCompletion(id); // freeze the listing snapshot too
+    // Guarantee a non-null vendor cost on the completed record ($0, or the
+    // matched agent's value). Best-effort — never blocks the completion.
+    try { await populateBillingFields(id); } catch (e) { console.warn('[qc-finalize] billing populate failed (continuing):', e); }
     bustInspectionsCache(); // status → completed; reflect in the list at once
     res.status(200).json({
       success: true,

@@ -4090,6 +4090,11 @@ export async function writeSftpWatchQueue(items: any[]): Promise<void> {
 
 /** Default client invoice when the agent has no client cost. */
 const DEFAULT_CLIENT_INVOICE = '60';
+/** Default vendor invoice ("vendor cost"). Must ALWAYS resolve to a number so the
+ *  inspection's vendor cost is never null/blank on completion — the matched
+ *  Agent's configured vendor cost overrides it when present (e.g. $50 for a 1099
+ *  leasing agent); otherwise it falls back to $0 (internal / no agent billing). */
+const DEFAULT_VENDOR_INVOICE = '0';
 
 /**
  * Copy billing fields onto an inspection from the Property + matched Agent.
@@ -4118,9 +4123,12 @@ export async function populateBillingFields(inspectionRecordId: string): Promise
     }
   }
 
-  // Client invoice always defaults to 60 (overridden by the agent's value when
-  // matched). Vendor invoice stays blank unless the agent provides one.
+  // Invoice amounts always default to a NUMBER so they're never null/blank on the
+  // inspection — the matched agent's values override when present. Client → $60;
+  // vendor ("vendor cost") → $0 (a 1099 leasing agent's agent record carries the
+  // $50 that overrides this; internal / unmatched inspectors stay $0, never null).
   update.client_invoice_amount = DEFAULT_CLIENT_INVOICE;
+  update.vendor_invoice_amount = DEFAULT_VENDOR_INVOICE;
 
   // Owner → Agent → broker_code + invoice amounts
   let ownerId = (insp.hubspot_owner_id || '').toString().trim();
@@ -4130,7 +4138,9 @@ export async function populateBillingFields(inspectionRecordId: string): Promise
     const agent = await fetchAgentBillingByOwner(ownerId);
     if (agent) {
       update.broker_code = agent.brokerCode || '';
-      update.vendor_invoice_amount = agent.vendorCost !== '' ? agent.vendorCost : '';  // blank if null
+      // Keep the agent's configured vendor/client cost when set; otherwise fall
+      // back to the numeric defaults above (NEVER blank → never null).
+      update.vendor_invoice_amount = agent.vendorCost !== '' ? agent.vendorCost : DEFAULT_VENDOR_INVOICE;
       update.client_invoice_amount = agent.clientCost !== '' ? agent.clientCost : DEFAULT_CLIENT_INVOICE;
     }
   }

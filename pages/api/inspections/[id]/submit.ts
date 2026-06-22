@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection } from '@/lib/hubspot';
+import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection, populateBillingFields } from '@/lib/hubspot';
 import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
@@ -74,6 +74,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Freeze the listing snapshot (status/price/listed/MIR/move-in) too, so the
       // completed report shows the listing as it was at the time of inspection.
       await stampListingSnapshotAtCompletion(id);
+      // Re-stamp billing at completion so the vendor cost (vendor_invoice_amount)
+      // is guaranteed non-null — $0 (internal) or the agent's value (e.g. $50 for
+      // a 1099 leasing agent). Best-effort: never blocks the completion.
+      try { await populateBillingFields(id); } catch (e) { console.warn('[submit] billing populate at completion failed (continuing):', e); }
     }
 
     // 1099 Leasing Agent: freeze the standardized report fields (listing-price
