@@ -3671,7 +3671,7 @@ export function RateCardForm(props: RateCardFormProps) {
                 <FitText text={props.propertyName} className="font-heading font-semibold text-ink min-w-0" />
                 {props.pestControlEnrolled && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src="/pest-control.svg" alt="Pest control enrolled" title="Enrolled in pest control" className="h-5 w-5 shrink-0" />
+                  <img src="/pest-control.png" alt="Pest control enrolled" title="Enrolled in pest control" className="h-5 w-5 shrink-0" />
                 )}
               </div>
               <div className="text-xs text-gray-500 truncate">
