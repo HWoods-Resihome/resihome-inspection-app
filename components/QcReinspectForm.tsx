@@ -830,8 +830,25 @@ export function QcReinspectForm(props: Props) {
                 <span> &middot; {props.squareFootage.toLocaleString()} sqft</span>
               )}
             </div>
-            {/* Property status (Turnkey / Vacant / …) on its OWN line, with the
-                listing's Move-in Ready date to its right (MIR: M/D/YY). */}
+          </div>
+          {/* Right column: Pass/Fail tally stacked ABOVE the standardized save
+              indicator, right-aligned and vertically centered — same layout as
+              every other template. */}
+          <div className="shrink-0 flex flex-col items-end justify-center gap-1">
+            <div className="flex items-center gap-1.5 text-[11px] font-heading font-bold">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{totalPass} Pass</span>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{totalFail} Fail</span>
+            </div>
+            {!props.readOnly && (
+              <div className="text-right"><SaveIndicator phase={saveStatus} /></div>
+            )}
+          </div>
+        </div>
+        {/* Property status / MIR + listing lines on a FULL-WIDTH row below (indented
+            to align with the address) so they use the whole width instead of being
+            squeezed — and truncated — by the Pass/Fail column above. */}
+        {(props.propertyStatus || props.moveInReadyDate || /active|deposit/i.test(props.listingStatus || '')) && (
+          <div className="max-w-7xl mx-auto pb-1.5 pl-[46px]">
             {(props.propertyStatus || props.moveInReadyDate) && (
               <div className="text-xs text-gray-500 truncate">
                 {props.propertyStatus}
@@ -839,8 +856,6 @@ export function QcReinspectForm(props: Props) {
                 {props.moveInReadyDate && <span>MIR: {props.moveInReadyDate}</span>}
               </div>
             )}
-            {/* Listing line (status · price · listed · Move-In far-right). Move-In
-                shows on deposit-taken listings only. */}
             {/active|deposit/i.test(props.listingStatus || '') ? (
               <div className={`text-xs truncate ${
                 /active/i.test(props.listingStatus || '') ? 'text-emerald-700' : 'text-amber-600'
@@ -858,19 +873,7 @@ export function QcReinspectForm(props: Props) {
               </div>
             ) : null}
           </div>
-          {/* Right column: Pass/Fail tally stacked ABOVE the standardized save
-              indicator, right-aligned and vertically centered — same layout as
-              every other template. */}
-          <div className="shrink-0 flex flex-col items-end justify-center gap-1">
-            <div className="flex items-center gap-1.5 text-[11px] font-heading font-bold">
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{totalPass} Pass</span>
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/10 text-brand border border-brand/30">{totalFail} Fail</span>
-            </div>
-            {!props.readOnly && (
-              <div className="text-right"><SaveIndicator phase={saveStatus} /></div>
-            )}
-          </div>
-        </div>
+        )}
       </header>
 
       {/* Item/room count + vendor filter (left) · Collapse all (RIGHT). */}
