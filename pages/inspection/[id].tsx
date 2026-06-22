@@ -86,6 +86,7 @@ export default function ExistingInspection() {
   const [propertyZip, setPropertyZip] = useState<string | null>(null);
   const [propertyStatus, setPropertyStatus] = useState<string | null>(null);
   const [pestControlEnrolled, setPestControlEnrolled] = useState(false);
+  const [tenantHasPet, setTenantHasPet] = useState(false);
   const [propertyLastTenantMonths, setPropertyLastTenantMonths] = useState<number | null>(null);
   const [propertyAirFiltersTotal, setPropertyAirFiltersTotal] = useState<number | null>(null);
   const [propertyAirFiltersType1, setPropertyAirFiltersType1] = useState<string | null>(null);
@@ -127,6 +128,7 @@ export default function ExistingInspection() {
         setPropertyZip(typeof data.propertyZip === 'string' ? data.propertyZip : null);
         setPropertyStatus(typeof data.propertyStatus === 'string' ? data.propertyStatus : null);
         setPestControlEnrolled(data.propertyPestControlEnrolled === true);
+        setTenantHasPet(data.propertyTenantHasPet === true);
         setPropertyLastTenantMonths(
           typeof data.propertyLastTenantMonths === 'number' ? data.propertyLastTenantMonths : null
         );
@@ -577,6 +579,7 @@ export default function ExistingInspection() {
           moveInDate={moveInDate}
           lastTenantMonths={propertyLastTenantMonths}
           pestControlEnrolled={pestControlEnrolled}
+          tenantHasPet={tenantHasPet}
           propertyAirFiltersTotal={propertyAirFiltersTotal}
           propertyAirFiltersType1={propertyAirFiltersType1}
           propertyAirFiltersType2={propertyAirFiltersType2}

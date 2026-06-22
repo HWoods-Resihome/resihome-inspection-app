@@ -111,6 +111,9 @@ interface RateCardFormProps {
    *  Shows the pest-control mark by the address and defaults PESTL1007 lines to
    *  the Pest Share vendor. */
   pestControlEnrolled?: boolean;
+  /** True when the last tenant had a pet (last_tenant_pet_count >= 1). Shows a
+   *  dog mark by the address. */
+  tenantHasPet?: boolean;
   /** Most-recent active listing price + date, shown in the header (same as the
    *  question templates). Optional. */
   listingPrice?: number | null;
@@ -3669,6 +3672,10 @@ export function RateCardForm(props: RateCardFormProps) {
             <div className="text-left min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <FitText text={props.propertyName} className="font-heading font-semibold text-ink min-w-0" />
+                {props.tenantHasPet && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src="/pet.svg" alt="Tenant had a pet" title="Tenant had a pet" className="h-5 w-5 shrink-0" />
+                )}
                 {props.pestControlEnrolled && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src="/pest-control.png" alt="Pest control enrolled" title="Enrolled in pest control" className="h-5 w-5 shrink-0" />

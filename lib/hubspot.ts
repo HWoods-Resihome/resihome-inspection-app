@@ -2253,6 +2253,9 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   /** True when the property's `pest_control_enrolled` = Yes. Scope header shows
    *  the pest-control mark and PESTL1007 lines default to the Pest Share vendor. */
   propertyPestControlEnrolled: boolean;
+  /** True when the property's `last_tenant_pet_count` is known and >= 1. Scope
+   *  header shows a pet (dog) mark. */
+  propertyTenantHasPet: boolean;
   /** Frozen listing snapshot JSON (status/price/listed/MIR/move-in) captured at
    *  completion. Empty until the inspection is completed. */
   listingSnapshotJson: string | null;
@@ -2301,6 +2304,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     let propertyLastTenantMonths: number | null = null;
     let propertyHbmmId: string | null = null;
     let propertyPestControlEnrolled = false;
+    let propertyTenantHasPet = false;
     let propertyAirFiltersTotal: number | null = null;
     let propertyAirFiltersType1: string | null = null;
     let propertyAirFiltersType2: string | null = null;
@@ -2343,6 +2347,9 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
           // Pest-control enrollment (Yes/No) — shows the pest-control mark on the
           // Scope header and defaults PESTL1007 lines to the Pest Share vendor.
           'pest_control_enrolled',
+          // Last tenant's pet count — shows a pet (dog) mark on the Scope header
+          // when known and >= 1.
+          'last_tenant_pet_count',
         ];
         const propQs = propProps.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
         const propResp = await hubspotFetch(
@@ -2362,6 +2369,10 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         propertyLastPrimaryTenant = (pp.last_primary_tenant || '').toString().trim() || null;
         propertyHbmmId = (pp.hbmm_property_id || '').toString().trim() || null;
         propertyPestControlEnrolled = /^y/i.test((pp.pest_control_enrolled || '').toString().trim());
+        {
+          const petN = Number((pp.last_tenant_pet_count ?? '').toString().trim());
+          propertyTenantHasPet = Number.isFinite(petN) && petN >= 1;
+        }
         if (pp.air_filters___total_quantity != null && pp.air_filters___total_quantity !== '') {
           const n = Number(pp.air_filters___total_quantity);
           if (Number.isFinite(n)) propertyAirFiltersTotal = n;
@@ -2442,6 +2453,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       propertySepticFee,
       propertyTeamGroupEmail,
       propertyPestControlEnrolled,
+      propertyTenantHasPet,
       listingSnapshotJson: (p.listing_snapshot_json || '').toString() || null,
     };
   } catch (e: any) {
