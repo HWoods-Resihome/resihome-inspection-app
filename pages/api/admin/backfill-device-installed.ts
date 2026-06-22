@@ -13,7 +13,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { fetchInspections, readInspectionProps, updateInspection } from '@/lib/hubspot';
+import { fetchInspections, readInspectionProps, updateInspection, provisionAppProperties } from '@/lib/hubspot';
 
 export const config = { maxDuration: 300 };
 
@@ -24,6 +24,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // Self-provision: ensure device_installed exists before writing it. Idempotent.
+  const provision = await provisionAppProperties().catch((e: any) => ({ device_installed: 'error: ' + String(e?.message || e) }));
+  const diStatus = provision['device_installed'] || 'unknown';
+  if (diStatus !== 'exists' && diStatus !== 'created') {
+    return res.status(500).json({
+      error: 'The "device_installed" property could not be provisioned, so the backfill can\'t write it.',
+      deviceInstalledStatus: diStatus,
+      hint: 'This usually means the HubSpot token lacks schema-write scope. Grant the token "CRM → schemas" write access, then retry — or create the "device_installed" text property manually.',
+    });
   }
 
   const force = String(req.query.force || '') === '1';

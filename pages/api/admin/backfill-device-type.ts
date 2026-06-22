@@ -14,7 +14,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { fetchInspections, fetchAnswersForInspection, updateInspection } from '@/lib/hubspot';
+import { fetchInspections, fetchAnswersForInspection, updateInspection, provisionAppProperties } from '@/lib/hubspot';
 import { fcSmartHomeStamps, parseFcAnswers } from '@/lib/finalChecklist';
 
 export const config = { maxDuration: 300 };
@@ -26,6 +26,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // Self-provision: make sure the device_type property exists before writing it,
+  // so this single URL works even if Provision Fields wasn't run. Idempotent.
+  const provision = await provisionAppProperties().catch((e: any) => ({ device_type: 'error: ' + String(e?.message || e) }));
+  const dtStatus = provision['device_type'] || 'unknown';
+  if (dtStatus !== 'exists' && dtStatus !== 'created') {
+    return res.status(500).json({
+      error: 'The "device_type" property could not be provisioned, so the backfill can\'t write it.',
+      deviceTypeStatus: dtStatus,
+      hint: 'This usually means the HubSpot token lacks schema-write scope. Grant the token "CRM → schemas" write access, then retry — or create the "device_type" text property on the Inspection object manually.',
+    });
   }
 
   const startIdx = Math.max(0, Number(req.query.after) || 0);
