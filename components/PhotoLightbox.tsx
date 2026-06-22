@@ -181,11 +181,11 @@ export function PhotoLightbox({
                     <LightboxVideo entry={p} poster={displayImageSrc(p)} />
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={displayImageSrc(p)} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
+                    <img src={displayImageSrc(p)} alt="" className="w-full h-full object-contain" draggable={false} />
                   )
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={displayImageSrc(p)} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
+                  <img src={displayImageSrc(p)} alt="" className="w-full h-full object-contain" draggable={false} />
                 )
               ) : null}
             </div>
