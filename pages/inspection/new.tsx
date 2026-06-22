@@ -665,7 +665,7 @@ export default function NewInspection() {
               {/* External-user property-status gate: explain why Begin is locked. */}
               {blockedByPropertyStatus && (
                 <div className="mt-2 p-3 rounded-lg bg-pink-50 border border-pink-200 text-sm text-pink-900">
-                  <div className="font-heading font-bold text-brand mb-0.5">Not ready to walk</div>
+                  <div className="font-heading font-bold text-brand mb-0.5">Not Ready to Walk</div>
                   {EXTERNAL_1099_STATUS_BLOCK_MSG}
                 </div>
               )}
