@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection, populateBillingFields } from '@/lib/hubspot';
 import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
+import { createComplianceTicketsOnSubmit } from '@/lib/complianceTickets';
 import { fcSmartHomeStamps, parseFcAnswers } from '@/lib/finalChecklist';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
@@ -95,6 +96,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const answers = await fetchAnswersForInspection(id);
         const fields = extractLeasingAgent1099Fields(answers);
         if (Object.keys(fields).length > 0) await updateInspection(id, fields as Record<string, any>);
+
+        // Compliance Issue tickets: a SEPARATE HubSpot ticket per utility that's
+        // OFF (Electric / Water / Gas) or trash bins MISSING, each associated to
+        // the inspection's Property. Best-effort — never blocks the submission.
+        try {
+          const summary = await createComplianceTicketsOnSubmit(
+            {
+              recordId: id,
+              propertyAddressSnapshot: existing?.propertyAddressSnapshot || '',
+              propertyRecordId: existing?.propertyRecordId || null,
+              inspectorName: existing?.inspectorName || '',
+            },
+            answers,
+          );
+          if (summary.created.length || summary.failed.length) {
+            console.log(`[submit] 1099 compliance tickets for ${id}: created [${summary.created.join('; ')}]${summary.failed.length ? ` failed [${summary.failed.join(', ')}]` : ''}`);
+          }
+        } catch (e) {
+          console.warn('[submit] compliance ticket creation skipped (continuing):', e);
+        }
       } catch (e) {
         console.warn('[submit] 1099 field stamp skipped (provision via /admin/setup):', e);
       }

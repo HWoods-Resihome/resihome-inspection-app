@@ -2327,6 +2327,101 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
   }
 }
 
+// ── Compliance Issue tickets (1099 utilities / trash) ───────────────────────
+// A HubSpot CRM Ticket (object 0-5) raised when a 1099 Leasing Agent Inspection
+// reports a utility OFF or trash bins MISSING. Pipeline + stage are fixed (the
+// "Compliance Issues" pipeline, NEW stage) but overridable via env.
+const COMPLIANCE_TICKET_PIPELINE_ID = (process.env.HUBSPOT_COMPLIANCE_PIPELINE_ID || '81076231').trim();
+const COMPLIANCE_TICKET_STAGE_NEW_ID = (process.env.HUBSPOT_COMPLIANCE_STAGE_NEW_ID || '153077089').trim();
+
+/**
+ * Create a Compliance Issue ticket and associate it to the inspection's Property.
+ * Property association tries the v4 default (primary) link first, then falls back
+ * to a labeled association — mirroring the proven note-attach path — so it works
+ * whether or not a user-defined ticket↔property label exists. Best-effort on the
+ * association: the created ticket is always returned (never lost) even if the
+ * link fails (logged). Throws only if the ticket itself can't be created.
+ */
+export async function createComplianceTicket(args: {
+  subject: string;
+  content?: string;
+  propertyRecordId?: string | null;
+}): Promise<{ ticketId: string; associatedProperty: boolean; deduped: boolean }> {
+  const { property: propertyTypeId } = typeIds();
+
+  // Idempotency: the subject encodes property + reason, so an identical OPEN
+  // subject in this pipeline means this exact issue was already raised (a
+  // double-submit or a reopen→resubmit). Skip creating a duplicate. Best-effort:
+  // if the search fails we fall through and create (never block on dedupe).
+  try {
+    const found = await hubspotFetch('/crm/v3/objects/tickets/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        filterGroups: [{ filters: [
+          { propertyName: 'subject', operator: 'EQ', value: args.subject },
+          { propertyName: 'hs_pipeline', operator: 'EQ', value: COMPLIANCE_TICKET_PIPELINE_ID },
+        ] }],
+        properties: ['subject'],
+        limit: 1,
+      }),
+    });
+    const existingId = String(found?.results?.[0]?.id || '');
+    if (existingId) {
+      console.log(`[compliance-ticket] dedupe: "${args.subject}" already exists as #${existingId} — skipping create`);
+      return { ticketId: existingId, associatedProperty: true, deduped: true };
+    }
+  } catch (e) {
+    console.warn('[compliance-ticket] dedupe search failed (creating anyway):', e);
+  }
+
+  const properties: Record<string, string> = {
+    subject: args.subject,
+    hs_pipeline: COMPLIANCE_TICKET_PIPELINE_ID,
+    hs_pipeline_stage: COMPLIANCE_TICKET_STAGE_NEW_ID,
+  };
+  if (args.content) properties.content = args.content;
+
+  const created = await hubspotFetch('/crm/v3/objects/tickets', {
+    method: 'POST',
+    body: JSON.stringify({ properties }),
+  });
+  const ticketId = String(created?.id || '');
+  if (!ticketId) throw new Error('ticket create returned no id');
+
+  let associatedProperty = false;
+  const propId = (args.propertyRecordId || '').toString().trim();
+  if (propId && propertyTypeId) {
+    // 1) v4 default (primary/unlabeled) association — one call, no type lookup.
+    try {
+      await hubspotFetch(
+        `/crm/v4/objects/tickets/${ticketId}/associations/default/${propertyTypeId}/${propId}`,
+        { method: 'PUT' },
+      );
+      associatedProperty = true;
+    } catch (e) {
+      console.warn(`[compliance-ticket] v4 default ticket→property association failed for ticket ${ticketId}:`, e);
+    }
+    // 2) Fallback: a labeled association via the date-based API.
+    if (!associatedProperty) {
+      try {
+        const labels = await hubspotFetch(assocLabelsUrl('tickets', propertyTypeId));
+        const first = (labels.results || [])[0];
+        const assocTypeId = first ? Number(first.typeId ?? first.associationTypeId) : NaN;
+        if (Number.isFinite(assocTypeId)) {
+          const r = await batchCreateAssociations('tickets', propertyTypeId, assocTypeId, [{ fromId: ticketId, toId: propId }]);
+          associatedProperty = r.ok > 0;
+        }
+      } catch (e) {
+        console.warn(`[compliance-ticket] labeled ticket→property association fallback failed for ticket ${ticketId}:`, e);
+      }
+    }
+    if (!associatedProperty) {
+      console.warn(`[compliance-ticket] ticket ${ticketId} created but could NOT be associated to property ${propId}.`);
+    }
+  }
+  return { ticketId, associatedProperty, deduped: false };
+}
+
 /**
  * Also returns the property_id_ref so we can resolve the property record link.
  */
