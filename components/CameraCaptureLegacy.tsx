@@ -457,18 +457,17 @@ export function CameraCaptureLegacy({
       // whatever lens can — frequently the ULTRA-WIDE — which made the camera
       // open on the wide lens. The continuous AF/AE/AWB is applied AFTER
       // acquisition (applyAutoFocus below) where it can't change the lens.
-      // In AI mode we capture audio on the SAME stream so the AI layer can use a
-      // single, high-quality mic feed (a separate getUserMedia mic is low-gain /
-      // flaky on mobile). If the combined request fails, fall back to video-only
-      // so the camera itself NEVER breaks because of the mic.
-      const tryGUM = async (vc: MediaTrackConstraints) => {
-        try {
-          return await navigator.mediaDevices.getUserMedia({ video: vc, audio: !!aiAssist });
-        } catch (e) {
-          if (aiAssist) return await navigator.mediaDevices.getUserMedia({ video: vc, audio: false });
-          throw e;
-        }
-      };
+      // Open the camera VIDEO-ONLY — never request the mic on this shared preview
+      // stream. The AI layer opens its OWN mic only when the inspector turns AI
+      // ON, and releases it the instant they turn AI OFF. So (a) we never prompt
+      // for the microphone until AI is actually engaged, and (b) the mic is freed
+      // for phone calls whenever AI is off — the inspector can keep snapping
+      // photos during a call. (Previously this requested `audio:!!aiAssist`, which
+      // grabbed the mic the moment the AI camera opened and HELD it for the whole
+      // session — even with AI toggled off — because the AI layer deliberately
+      // never stops the shared stream. That blocked taking a call on iOS.)
+      const tryGUM = (vc: MediaTrackConstraints) =>
+        navigator.mediaDevices.getUserMedia({ video: vc });
       let stream: MediaStream;
       try {
         stream = await tryGUM(videoConstraint);
