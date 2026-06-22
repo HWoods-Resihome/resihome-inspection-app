@@ -7,6 +7,7 @@ import type { InspectionSummary } from '@/lib/types';
 import { InspectionCard } from '@/components/InspectionCard';
 import { INSPECTION_NAV_KEY } from '@/components/InspectionPager';
 import { ListPicker } from '@/components/ListPicker';
+import { ViewAsPicker } from '@/components/ViewAsPicker';
 import {
   loadCachedRateCard, saveCachedRateCard,
   loadCachedMe, saveCachedMe,
@@ -74,6 +75,7 @@ export default function Home() {
   const [isAdmin, setIsAdmin] = useState(false);
   // Admin "Settings" dropdown (Knowledge Base / Form Builder / Admins).
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [viewAsOpen, setViewAsOpen] = useState(false);
 
   const [inspections, setInspections] = useState<InspectionSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -693,6 +695,14 @@ export default function Home() {
                               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
                               Regenerate PDFs
                             </Link>
+                            <button
+                              type="button"
+                              onClick={() => { setSettingsOpen(false); setViewAsOpen(true); }}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100"
+                            >
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M1 1l22 22" /></svg>
+                              View as user
+                            </button>
                           </>
                         )}
                         {/* Sign Out — last, divided from the rest. */}
@@ -1067,6 +1077,7 @@ export default function Home() {
           </div>
         )}
       </main>
+      {viewAsOpen && <ViewAsPicker onClose={() => setViewAsOpen(false)} />}
     </>
   );
 }

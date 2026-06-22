@@ -15,8 +15,56 @@ const SESSION_DURATION_HOURS = 24 * 30;
 
 export interface SessionUser {
   userId: string;  // HubSpot user ID
-  email: string;
+  email: string;   // EFFECTIVE email (the impersonated user when an admin is "viewing as")
   name: string;    // Full name from HubSpot user record
+  /** When an admin is impersonating ("view as"), the admin's REAL identity is
+   *  preserved here. realEmail drives the can-stop / audit logic; email/name are
+   *  the impersonated user so all permission checks see THAT user. */
+  realEmail?: string;
+  realName?: string;
+  impersonating?: boolean;
+}
+
+// Admin "view as / login as" — a separate signed cookie holding the impersonated
+// user. Only the admin-only /api/admin/impersonate endpoint mints it (after
+// verifying admin), and it's bound to the admin's email (`by`) so a leaked cookie
+// can't be used from a non-admin session. Short-lived (a testing aid).
+export const IMPERSONATE_COOKIE_NAME = 'resihome_impersonate';
+const IMPERSONATE_DURATION_HOURS = 12;
+
+export async function createImpersonationCookie(target: { email: string; name: string }, byEmail: string): Promise<string> {
+  const token = await new SignJWT({ typ: 'impersonate', email: target.email, name: target.name, by: byEmail } as JWTPayload)
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(`${IMPERSONATE_DURATION_HOURS}h`)
+    .sign(sessionSecret());
+  return serialize(IMPERSONATE_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: IMPERSONATE_DURATION_HOURS * 60 * 60,
+  });
+}
+
+export function clearImpersonationCookie(): string {
+  return serialize(IMPERSONATE_COOKIE_NAME, '', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 0,
+  });
+}
+
+async function verifyImpersonationToken(token: string): Promise<{ email: string; name: string; by: string } | null> {
+  try {
+    const { payload } = await jwtVerify(token, sessionSecret());
+    if (payload.typ !== 'impersonate' || !payload.email || !payload.by) return null;
+    return { email: String(payload.email), name: String(payload.name || ''), by: String(payload.by) };
+  } catch {
+    return null;
+  }
 }
 
 function sessionSecret(): Uint8Array {
@@ -133,7 +181,31 @@ export async function getSessionFromRequest(req: NextApiRequest): Promise<Sessio
   const cookies = parse(cookieHeader);
   const token = cookies[SESSION_COOKIE_NAME];
   if (!token) return null;
-  return verifySessionToken(token);
+  const real = await verifySessionToken(token);
+  if (!real) return null;
+
+  // Admin "view as": when a valid impersonation cookie is present AND it was
+  // minted FOR this exact admin (by === real session email), return the
+  // impersonated user as the effective identity — so every email-keyed
+  // permission check (isExternalEmail / isAppAdmin / ownsInspection / …) sees
+  // that user — while preserving the admin's real identity for the banner + the
+  // ability to stop. The signature + the `by` binding mean a leaked cookie can't
+  // be used from any other session.
+  const impToken = cookies[IMPERSONATE_COOKIE_NAME];
+  if (impToken) {
+    const imp = await verifyImpersonationToken(impToken);
+    if (imp && imp.by.toLowerCase() === real.email.toLowerCase() && imp.email.toLowerCase() !== real.email.toLowerCase()) {
+      return {
+        userId: real.userId,
+        email: imp.email,
+        name: imp.name || imp.email,
+        realEmail: real.email,
+        realName: real.name,
+        impersonating: true,
+      };
+    }
+  }
+  return real;
 }
 
 export async function requireSession(

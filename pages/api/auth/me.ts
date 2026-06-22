@@ -29,5 +29,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // start one, view 1099-type inspections, no editing completed ones.
     isExternal: external,
     allowedTemplate: external ? EXTERNAL_TEMPLATE : null,
+    // Admin "view as": when set, isAdmin/isExternal above reflect the IMPERSONATED
+    // user (so the app shows exactly what they'd see); realEmail is the admin, used
+    // to render the banner + allow stopping.
+    impersonating: !!user.impersonating,
+    realEmail: user.realEmail || null,
+    realName: user.realName || null,
   });
 }
