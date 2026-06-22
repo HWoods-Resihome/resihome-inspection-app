@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   finalChecklistGap, isFinalChecklistComplete,
   finalChecklistAnswerRecords, summarizeFinalChecklist,
-  fcReferencedLineCodes, fcMissingLineCodes,
+  fcReferencedLineCodes, fcMissingLineCodes, fcSmartHomeStamps,
   type FcAnswers, type FcCompletionCtx,
 } from '@/lib/finalChecklist';
 
@@ -67,8 +67,48 @@ describe('finalChecklistGap', () => {
     const a = complete(); a.fc_trash_bins = { value: 'Present', count: 2 };
     expect(finalChecklistGap(a, baseCtx)).toContain('Trash Bins'); // photo required
 
-    const b = complete(); b.fc_smart_home_device = { value: 'Bluetooth Lock', device: { status: 'Online' } }; // serial missing
+    // Picking a device first requires the "Did you install a new lock?" answer.
+    const inst = complete(); inst.fc_smart_home_device = { value: 'Bluetooth Lock', device: { status: 'Online', serial: 'X1' } };
+    expect(finalChecklistGap(inst, baseCtx)).toContain('install a new lock');
+
+    // Bluetooth Lock serial is ALWAYS required (once install answered).
+    const b = complete(); b.fc_smart_home_device = { value: 'Bluetooth Lock', device: { installed_new: 'No', status: 'Online' } }; // serial missing
     expect(finalChecklistGap(b, baseCtx)).toContain('Serial');
+  });
+
+  it('Smart Home Hub: serial required only when a new hub was installed', () => {
+    // Did NOT install a new hub → serial is hidden, so the section is complete.
+    const noInstall = complete();
+    noInstall.fc_smart_home_device = { value: 'Smart Home Hub', device: { installed_new: 'No', status: 'Online', location: 'Closet' } };
+    expect(finalChecklistGap(noInstall, baseCtx)).toBeNull();
+
+    // Installed a new hub → serial shows and is required.
+    const installed = complete();
+    installed.fc_smart_home_device = { value: 'Smart Home Hub', device: { installed_new: 'Yes', status: 'Online', location: 'Closet' } };
+    expect(finalChecklistGap(installed, baseCtx)).toContain('Serial');
+
+    // With the serial filled, it's complete.
+    const done = complete();
+    done.fc_smart_home_device = { value: 'Smart Home Hub', device: { installed_new: 'Yes', status: 'Online', location: 'Closet', serial: 'HUB-123' } };
+    expect(finalChecklistGap(done, baseCtx)).toBeNull();
+  });
+
+  it('fcSmartHomeStamps mirrors Device Installed + Serial Number', () => {
+    // No device → both blank.
+    expect(fcSmartHomeStamps({ fc_smart_home_device: { value: 'No Smart Devices' } }))
+      .toEqual({ deviceInstalled: '', serialNumber: '' });
+
+    // Bluetooth Lock → install answer + the (always-present) serial.
+    expect(fcSmartHomeStamps({ fc_smart_home_device: { value: 'Bluetooth Lock', device: { installed_new: 'Yes', status: 'Online', serial: 'BT-9' } } }))
+      .toEqual({ deviceInstalled: 'Yes', serialNumber: 'BT-9' });
+
+    // Hub, no new install → serial is hidden, so it's NOT stamped (even if stale).
+    expect(fcSmartHomeStamps({ fc_smart_home_device: { value: 'Smart Home Hub', device: { installed_new: 'No', serial: 'STALE' } } }))
+      .toEqual({ deviceInstalled: 'No', serialNumber: '' });
+
+    // Hub + installed new → serial stamped.
+    expect(fcSmartHomeStamps({ fc_smart_home_device: { value: 'Smart Home Hub', device: { installed_new: 'Yes', serial: 'HUB-1', location: 'Closet', status: 'Online' } } }))
+      .toEqual({ deviceInstalled: 'Yes', serialNumber: 'HUB-1' });
   });
 
   it('requires septic only when septic_fee > 0', () => {

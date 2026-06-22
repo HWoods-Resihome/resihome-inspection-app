@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import {
-  FINAL_CHECKLIST, FC_FILTER_OTHER, fcSectionCounts,
+  FINAL_CHECKLIST, FC_FILTER_OTHER, fcSectionCounts, fcVisibleDeviceFields,
   type FcQuestion, type FcAddLineRule,
   type FcAnswerState, type FcAnswers, type FcCompletionCtx,
 } from '@/lib/finalChecklist';
@@ -457,7 +457,7 @@ export function FinalChecklist(props: Props) {
                 <span>{titleCase(picked.value)}</span>
                 <span className="text-[10px] font-bold uppercase tracking-wide text-white bg-violet-600 rounded px-1.5 py-0.5">Device</span>
               </div>
-              {picked.fields.map((f) => (
+              {fcVisibleDeviceFields(picked, a).map((f) => (
                 <div key={f.id} className="mb-2.5 last:mb-0">
                   <div className="text-[11px] font-heading font-bold text-gray-700 mb-1">{titleCase(f.label)} {f.required ? <span className="text-brand">(Required)</span> : <span className="text-gray-400">(Optional)</span>}</div>
                   {f.type === 'single_select'

@@ -56,6 +56,10 @@ export interface FcDeviceField {
   type: 'single_select' | 'text';
   options?: string[];
   required?: boolean;
+  /** Conditional visibility: only show (and only require) this field when another
+   *  field in the SAME device equals a value — e.g. the Hub's Serial Number shows
+   *  only when "Did you install a new hub?" = Yes. */
+  showWhen?: { field: string; equals: string };
 }
 
 export interface FcDevice {
@@ -63,6 +67,18 @@ export interface FcDevice {
   value: string;
   /** null = a terminal "none" choice (e.g. "No Smart Devices") with no sub-fields. */
   fields: FcDeviceField[] | null;
+}
+
+/** The device sub-fields currently visible given the entered values — applies
+ *  each field's `showWhen` against the device's other answers. Used by the
+ *  renderer, the completeness gate, the rendered value, and the field stamps so
+ *  a hidden conditional field is never shown, required, or recorded. */
+export function fcVisibleDeviceFields(dev: FcDevice | undefined, ans: FcAnswerState): FcDeviceField[] {
+  if (!dev?.fields) return [];
+  return dev.fields.filter((f) => {
+    if (!f.showWhen) return true;
+    return (ans.device?.[f.showWhen.field] || '').trim() === f.showWhen.equals;
+  });
 }
 
 export interface FcQuestion {
@@ -207,7 +223,7 @@ export function fcRenderValue(
     if (!ans.value) return '—';
     const dev = (q.devices || []).find((d) => d.value === ans.value);
     const parts: string[] = [];
-    for (const f of (dev?.fields || [])) {
+    for (const f of fcVisibleDeviceFields(dev, ans)) {
       const fv = (ans.device?.[f.id] || '').trim();
       if (fv) parts.push(`${f.label}: ${fv}`);
     }
@@ -322,7 +338,7 @@ function fcQuestionGap(
   if (q.type === 'device_subform') {
     if (q.required && !ans.value) return 'choose a device type';
     const dev = (q.devices || []).find((d) => d.value === ans.value);
-    if (dev?.fields) for (const f of dev.fields) {
+    for (const f of fcVisibleDeviceFields(dev, ans)) {
       if (f.required && !((ans.device?.[f.id] || '').trim())) return `${f.label} required`;
     }
     return null;
@@ -391,6 +407,33 @@ export function fcSectionCounts(
   return { completed, total };
 }
 
+/** Parse the persisted Final Checklist blob (one `qa` record's JSON `note`) back
+ *  into FcAnswers. Returns {} on anything malformed. */
+export function parseFcAnswers(note: string | null | undefined): FcAnswers {
+  try { return note ? (JSON.parse(note) as FcAnswers) : {}; } catch { return {}; }
+}
+
+/** Smart Home Tech values mirrored to their own inspection fields at completion:
+ *    deviceInstalled — the "Did you install a new lock/hub?" answer (Yes/No)
+ *    serialNumber    — the device Serial Number (only when that field is visible:
+ *                      always for a Bluetooth Lock, and for a Smart Home Hub only
+ *                      when a new hub was installed)
+ *  Both empty when no real device (lock/hub) was selected. */
+export function fcSmartHomeStamps(a: FcAnswers): { deviceInstalled: string; serialNumber: string } {
+  const ans = a['fc_smart_home_device'] || {};
+  const picked = ans.value || '';
+  const section = FINAL_CHECKLIST.find((s) => s.id === 'smart_home_tech');
+  const q = section?.questions.find((x) => x.id === 'fc_smart_home_device');
+  const dev = (q?.devices || []).find((d) => d.value === picked);
+  if (!dev || !dev.fields) return { deviceInstalled: '', serialNumber: '' };
+  const visible = fcVisibleDeviceFields(dev, ans);
+  const get = (id: string) => (ans.device?.[id] || '').trim();
+  return {
+    deviceInstalled: get('installed_new'),
+    serialNumber: visible.some((f) => f.id === 'serial') ? get('serial') : '',
+  };
+}
+
 /** True only when every required (and visible) checklist item is satisfied —
  *  including that each line-item prompt has been explicitly accepted or declined.
  *  Derived from finalChecklistGap so the gate and the message can never diverge. */
@@ -412,6 +455,7 @@ export const FINAL_CHECKLIST: FcSection[] = [
           {
             value: 'Bluetooth Lock',
             fields: [
+              { id: 'installed_new', label: 'Did you install a new lock?', type: 'single_select', options: ['Yes', 'No'], required: true },
               { id: 'status', label: 'Status', type: 'single_select', options: ['Online', 'Offline'], required: true },
               { id: 'serial', label: 'Serial Number', type: 'text', required: true },
             ],
@@ -419,6 +463,9 @@ export const FINAL_CHECKLIST: FcSection[] = [
           {
             value: 'Smart Home Hub',
             fields: [
+              { id: 'installed_new', label: 'Did you install a new hub?', type: 'single_select', options: ['Yes', 'No'], required: true },
+              // Serial Number shows + is required only when a new hub was installed.
+              { id: 'serial', label: 'Serial Number', type: 'text', required: true, showWhen: { field: 'installed_new', equals: 'Yes' } },
               { id: 'status', label: 'Status', type: 'single_select', options: ['Online', 'Offline'], required: true },
               { id: 'location', label: 'Location of Hub', type: 'text', required: true },
             ],

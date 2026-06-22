@@ -56,7 +56,7 @@ import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, type C
 import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
 import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
-import { summarizeFinalChecklist, finalChecklistPhotos, finalChecklistAnswerRecords, fcMissingLineCodes, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
+import { summarizeFinalChecklist, finalChecklistPhotos, finalChecklistAnswerRecords, fcMissingLineCodes, fcSmartHomeStamps, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
 
 export const config = {
   api: {
@@ -764,6 +764,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Guarantee a non-null vendor cost on the completed record ($0, or the
       // matched agent's value). Best-effort — never blocks finalize.
       try { await populateBillingFields(id); } catch (e) { console.warn('[finalize] billing populate failed (continuing):', e); }
+      // Smart Home Tech → dedicated inspection fields (Device Installed + Serial
+      // Number). Best-effort; no-op until the fields are provisioned (/admin/setup).
+      if (fcAnswers) {
+        try {
+          const stamps = fcSmartHomeStamps(fcAnswers);
+          await updateInspection(id, { device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber });
+        } catch (e) { console.warn('[finalize] smart-home field stamp skipped (provision via /admin/setup):', e); }
+      }
     }
     finalizePhase = 'side-effects'; // status is now persisted; remaining steps are best-effort
 

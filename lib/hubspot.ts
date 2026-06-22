@@ -3986,6 +3986,18 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
     name: 'trash_bins', label: 'Trash Bins', type: 'string', fieldType: 'text', groupName: 'inspection_utilities',
   });
 
+  // Smart Home Tech (from the Final Checklist) — stamped onto the inspection at
+  // completion: Device Installed = the "Did you install a new lock/hub?" answer
+  // (Yes/No); Serial Number = the device serial (Bluetooth Lock always; Smart
+  // Home Hub only when a new hub was installed).
+  await ensureGroup(inspection, 'inspection_smart_home', 'Smart Home Tech');
+  await ensureProp(inspection, 'device_installed', {
+    name: 'device_installed', label: 'Device Installed', type: 'string', fieldType: 'text', groupName: 'inspection_smart_home',
+  });
+  await ensureProp(inspection, 'serial_number', {
+    name: 'serial_number', label: 'Serial Number', type: 'string', fieldType: 'text', groupName: 'inspection_smart_home',
+  });
+
   // Drop the "does this property exist?" caches so the just-provisioned fields
   // are picked up by this warm instance without waiting for a cold start.
   _afterPhotoPropCache = null;

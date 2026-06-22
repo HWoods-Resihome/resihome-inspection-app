@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection, populateBillingFields } from '@/lib/hubspot';
 import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
+import { fcSmartHomeStamps, parseFcAnswers } from '@/lib/finalChecklist';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { recordAuditEvent } from '@/lib/auditLog';
@@ -92,6 +93,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (Object.keys(fields).length > 0) await updateInspection(id, fields as Record<string, any>);
       } catch (e) {
         console.warn('[submit] 1099 field stamp skipped (provision via /admin/setup):', e);
+      }
+    }
+    // Smart Home Tech (Final Checklist) → Device Installed + Serial Number fields.
+    // The checklist renders on the question-form templates that complete here
+    // (1099 / Vacancy / Community). Best-effort; no-op until provisioned (/admin/setup).
+    const FC_TEMPLATES = new Set(['leasing_agent_1099_property_inspection', 'pm_vacancy_occupancy_check', 'pm_community_inspection']);
+    if (!isRateCard && FC_TEMPLATES.has(existing?.templateType || '')) {
+      try {
+        const answers = await fetchAnswersForInspection(id);
+        const fcRec = answers.find((a) => a.questionIdExternal === 'fc__all' || String(a.answerIdExternal || '').startsWith('FINALCHECKLIST-'));
+        const stamps = fcSmartHomeStamps(parseFcAnswers(fcRec?.note));
+        await updateInspection(id, { device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber });
+      } catch (e) {
+        console.warn('[submit] smart-home field stamp skipped (provision via /admin/setup):', e);
       }
     }
     // Persist the overall verdict to the standardized `inspection_result` field
