@@ -31,9 +31,19 @@ export type QueuedPhoto = {
   inspectionRecordId: string;
   sectionId: string;
   kind: 'photo' | 'video';
-  blob: Blob;            // photo: the jpeg; video: the poster jpeg
+  // Bytes of the jpeg (photo) / poster (video). Stored as an ArrayBuffer, NOT a
+  // Blob: on iOS WebKit a Blob persisted in IndexedDB is a REFERENCE into a
+  // separate file store that the OS can reclaim under storage pressure — it then
+  // reads back EMPTY, so the upload sent 0 bytes and the server rejected it
+  // forever (the "photo failed to upload 39×" loop, while freshly-captured photos
+  // in the same session still uploaded). ArrayBuffers live inline in the record's
+  // structured-clone value, so they survive. `blob` is kept optional only to read
+  // legacy records written before this change (see blobFor()).
+  bytes?: ArrayBuffer;
+  blob?: Blob;           // legacy/back-compat (older queued records)
   filename: string;
-  videoBlob?: Blob;      // video only
+  videoBytes?: ArrayBuffer; // video only — the clip bytes (durable, as above)
+  videoBlob?: Blob;      // legacy/back-compat (older queued video records)
   videoType?: string;    // video only
   // Annotation/markup: this draft REPLACES an existing URL (in the section
   // strip and, if lineExternalId is set, on that line's photos) rather than
@@ -52,6 +62,23 @@ const DB_NAME = 'resiwalk_photos';
 const STORE = 'queue';
 const DB_VERSION = 1;
 const MAX_ATTEMPTS = 6;
+
+// Reconstruct a fresh, valid Blob from a queued record. Prefers the durable
+// ArrayBuffer bytes (new records); falls back to a legacy stored Blob. Returns
+// null only when the record carries NEITHER usable bytes nor a non-empty blob —
+// i.e. the data is genuinely gone (an old iOS-evicted record), so retrying it
+// could never succeed.
+function blobFor(rec: QueuedPhoto): Blob | null {
+  if (rec.bytes && rec.bytes.byteLength > 0) return new Blob([rec.bytes], { type: 'image/jpeg' });
+  if (rec.blob && rec.blob.size > 0) return rec.blob;
+  return null;
+}
+function videoBlobFor(rec: QueuedPhoto): Blob | null {
+  const type = rec.videoType || 'video/mp4';
+  if (rec.videoBytes && rec.videoBytes.byteLength > 0) return new Blob([rec.videoBytes], { type });
+  if (rec.videoBlob && rec.videoBlob.size > 0) return rec.videoBlob;
+  return null;
+}
 
 // localId -> live display URL + the raw object URLs to revoke (session-scoped;
 // not persisted). For a video the display URL is the composite poster#v=video
@@ -314,8 +341,11 @@ export async function uploadPhotoOrQueue(
   // draft URL for immediate display. The photo is NEVER lost to a stuck spinner.
   const queueDraft = async (): Promise<string> => {
     const localId = `idbph_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    // Store the bytes (ArrayBuffer), NOT the Blob — see QueuedPhoto.bytes. The
+    // local `blob` var below still drives the immediate on-screen draft.
+    const bytes = await blob.arrayBuffer();
     const rec: QueuedPhoto = {
-      localId, inspectionRecordId, sectionId, kind: 'photo', blob, filename,
+      localId, inspectionRecordId, sectionId, kind: 'photo', bytes, filename,
       replacesUrl: opts?.replacesUrl, lineExternalId: opts?.lineExternalId, createdAt: Date.now(),
     };
     // Persist durably in the BACKGROUND. The capture (and the camera's "Done")
@@ -416,9 +446,12 @@ export async function uploadVideoEntryOrQueue(
   const filename = `clip_${Date.now()}_poster.jpg`;
   const queueDraft = async (): Promise<string> => {
     const localId = `idbvid_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    // Durable ArrayBuffer bytes for both the poster and the clip (see
+    // QueuedPhoto.bytes) — the local posterBlob/videoFile drive the live draft.
+    const [bytes, videoBytes] = await Promise.all([posterBlob.arrayBuffer(), videoFile.arrayBuffer()]);
     await putRecord({
       localId, inspectionRecordId, sectionId, kind: 'video',
-      blob: posterBlob, filename, videoBlob: videoFile, videoType: videoFile.type || 'video/mp4',
+      bytes, filename, videoBytes, videoType: videoFile.type || 'video/mp4',
       createdAt: Date.now(),
     });
     const pThumb = await makeThumbBlob(posterBlob, 400);
@@ -478,19 +511,22 @@ export async function rehydrateQueuedPhotos(
     if (r.inspectionRecordId !== inspectionRecordId) continue;
     let entry = urlByLocalId.get(r.localId);
     if (!entry) {
-      if (r.kind === 'video' && r.videoBlob) {
+      const pb = blobFor(r);
+      if (!pb) continue; // data gone (legacy iOS-evicted record) — nothing to show
+      const vb = r.kind === 'video' ? videoBlobFor(r) : null;
+      if (r.kind === 'video' && vb) {
         // Poster shown small; the clip itself isn't decoded as an image.
-        const pThumb = await makeThumbBlob(r.blob, 400);
-        const pObj = URL.createObjectURL(pThumb || r.blob);
-        const vObj = URL.createObjectURL(r.videoBlob);
+        const pThumb = await makeThumbBlob(pb, 400);
+        const pObj = URL.createObjectURL(pThumb || pb);
+        const vObj = URL.createObjectURL(vb);
         entry = { displayUrl: makeVideoEntry(pObj, vObj), revokables: [pObj, vObj] };
       } else {
         // Small thumbnail for grids (sequential decode bounds peak memory on a
         // heavy reopen) + a full-res local blob for the viewer (registered so the
         // full-size view is sharp). Full-res original also stays in IndexedDB.
-        const thumb = await makeThumbBlob(r.blob, 400);
-        const url = URL.createObjectURL(thumb || r.blob);
-        const fullUrl = URL.createObjectURL(r.blob);
+        const thumb = await makeThumbBlob(pb, 400);
+        const url = URL.createObjectURL(thumb || pb);
+        const fullUrl = URL.createObjectURL(pb);
         entry = { displayUrl: url, revokables: [url, fullUrl] };
         registerDraftFullRes(url, fullUrl);
       }
@@ -600,14 +636,31 @@ async function doFlushQueuedPhotos(
     // Already uploaded by the background-sync service worker (tab was closed) —
     // skip the network and go straight to attaching it.
     if (rec.uploadedUrl) { await finishSynced(rec, rec.uploadedUrl); return; }
+    // Reconstruct the bytes. If they're genuinely gone (an old record whose iOS
+    // Blob was evicted — the root cause this change prevents going forward), the
+    // upload can NEVER succeed: stop the futile "check your signal" retry loop,
+    // surface a clear retake message, and remove the dead record so it can't
+    // block submit. New records carry durable ArrayBuffer bytes, so this only
+    // ever fires for pre-existing broken entries.
+    const photoBlob = blobFor(rec);
+    const videoBlob = rec.kind === 'video' ? videoBlobFor(rec) : null;
+    if (!photoBlob || (rec.kind === 'video' && !videoBlob)) {
+      lastError = 'A photo couldn’t be recovered from this device and was removed — please retake it.';
+      console.warn(`[offlinePhotoStore] ${rec.localId} has no recoverable bytes (evicted) — removing dead record`);
+      memQueue.delete(rec.localId);
+      try { await deleteRecord(rec.localId); } catch { /* memory-only or IDB gone */ }
+      const entry = urlByLocalId.get(rec.localId);
+      if (entry) { for (const u of entry.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } } urlByLocalId.delete(rec.localId); }
+      return;
+    }
     let newUrl: string;
     try {
-      if (rec.kind === 'video' && rec.videoBlob) {
-        const vFile = new File([rec.videoBlob], `clip.${/(webm)/i.test(rec.videoType || '') ? 'webm' : /(quicktime|mov)/i.test(rec.videoType || '') ? 'mov' : 'mp4'}`, { type: rec.videoType || 'video/mp4' });
-        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(rec.blob, rec.filename, { attempts: 3, timeoutMs: 25000 }), uploadVideo(vFile)]);
+      if (rec.kind === 'video' && videoBlob) {
+        const vFile = new File([videoBlob], `clip.${/(webm)/i.test(rec.videoType || '') ? 'webm' : /(quicktime|mov)/i.test(rec.videoType || '') ? 'mov' : 'mp4'}`, { type: rec.videoType || 'video/mp4' });
+        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(photoBlob, rec.filename, { attempts: 3, timeoutMs: 25000 }), uploadVideo(vFile)]);
         newUrl = makeVideoEntry(pUrl, vUrl);
       } else {
-        newUrl = await uploadJpegBlob(rec.blob, rec.filename, { attempts: 3, timeoutMs: 25000 });
+        newUrl = await uploadJpegBlob(photoBlob, rec.filename, { attempts: 3, timeoutMs: 25000 });
       }
     } catch (e: any) {
       lastError = `Photo upload failed (${String(e?.message || e).slice(0, 90)}).`;

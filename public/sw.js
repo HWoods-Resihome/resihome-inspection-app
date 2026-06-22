@@ -183,15 +183,18 @@ async function uploadQueuedPhotosInBackground() {
   // syncs via the foreground flush when the app reopens. Skip photos that have
   // exhausted their background attempts (they'll be retried by the foreground
   // flush when the app reopens, which surfaces errors to the user).
+  // Records now store durable ArrayBuffer bytes (`bytes`); older records may
+  // still carry a Blob (`blob`). Accept either; skip ones with neither.
   const pending = all
-    .filter((r) => r && r.kind === 'photo' && !r.uploadedUrl && r.blob && (r.bgAttempts || 0) < MAX_BG_PHOTO_ATTEMPTS)
+    .filter((r) => r && r.kind === 'photo' && !r.uploadedUrl && ((r.bytes && r.bytes.byteLength) || (r.blob && r.blob.size)) && (r.bgAttempts || 0) < MAX_BG_PHOTO_ATTEMPTS)
     .sort((a, b) => a.createdAt - b.createdAt);
 
   let hadRetryableFailure = false;
   for (const rec of pending) {
     let res;
     try {
-      const base64 = bufToBase64(await rec.blob.arrayBuffer());
+      const buf = (rec.bytes && rec.bytes.byteLength) ? rec.bytes : await rec.blob.arrayBuffer();
+      const base64 = bufToBase64(buf);
       res = await fetch('/api/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
