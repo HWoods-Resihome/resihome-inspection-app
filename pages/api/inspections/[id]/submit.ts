@@ -101,6 +101,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // OFF (Electric / Water / Gas) or trash bins MISSING, each associated to
         // the inspection's Property. Best-effort — never blocks the submission.
         try {
+          const fwdHost = req.headers['x-forwarded-host'] || req.headers.host;
+          const fwdProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+          const baseUrl = fwdHost ? `${fwdProto}://${fwdHost}` : undefined;
           const summary = await createComplianceTicketsOnSubmit(
             {
               recordId: id,
@@ -109,6 +112,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               inspectorName: existing?.inspectorName || '',
             },
             answers,
+            { baseUrl },
           );
           if (summary.created.length || summary.failed.length) {
             console.log(`[submit] 1099 compliance tickets for ${id}: created [${summary.created.join('; ')}]${summary.failed.length ? ` failed [${summary.failed.join(', ')}]` : ''}`);

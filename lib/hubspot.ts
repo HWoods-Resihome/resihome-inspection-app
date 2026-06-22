@@ -2333,12 +2333,167 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
 // "Compliance Issues" pipeline, NEW stage) but overridable via env.
 const COMPLIANCE_TICKET_PIPELINE_ID = (process.env.HUBSPOT_COMPLIANCE_PIPELINE_ID || '81076231').trim();
 const COMPLIANCE_TICKET_STAGE_NEW_ID = (process.env.HUBSPOT_COMPLIANCE_STAGE_NEW_ID || '153077089').trim();
+// Ticket object identifier for the association + object endpoints. The proven
+// note-attach path passes the object NAME (e.g. 'notes'), which HubSpot accepts
+// alongside the numeric id ('0-5') — use the name for the same compatibility.
+const TICKET_TYPE_ID = 'tickets';
+
+// Resolve (and cache) a usable Ticket<->Property association type + direction +
+// category, MIRRORING resolveInspToPropertyAssoc. The earlier v4 "default"
+// approach failed because no HubSpot-default association exists between Tickets
+// and the custom Property object — the link is a labeled (USER_DEFINED) type, so
+// we must discover its typeId AND category and create with both.
+type TicketAssoc = { fromTypeId: string; toTypeId: string; typeId: number; category: string; reversed: boolean };
+let _ticketPropAssocCache: TicketAssoc | null = null;
+
+/** Scan the association labels between two objects; pick the labeled match (when
+ *  asked) else the unlabeled/primary else the first. Returns typeId + category. */
+async function pickAssocTypeAndCategory(fromTypeId: string, toTypeId: string, preferLabel: string | null): Promise<{ typeId: number; category: string } | null> {
+  try {
+    const resp = await hubspotFetch(assocLabelsUrl(fromTypeId, toTypeId));
+    const results: any[] = resp.results || [];
+    if (results.length === 0) return null;
+    const byLabel = preferLabel ? results.find((a) => a.label === preferLabel) : undefined;
+    const unlabeled = results.find((a) => !a.label);
+    const chosen = byLabel || unlabeled || results[0];
+    const typeId = Number(chosen.typeId ?? chosen.associationTypeId);
+    if (!Number.isFinite(typeId)) return null;
+    return { typeId, category: String(chosen.category || 'USER_DEFINED') };
+  } catch (e) {
+    console.warn(`[compliance-ticket] association labels lookup ${fromTypeId}->${toTypeId} failed:`, e);
+    return null;
+  }
+}
+
+async function resolveTicketToPropertyAssoc(): Promise<TicketAssoc | null> {
+  if (_ticketPropAssocCache) return _ticketPropAssocCache;
+  const { property } = typeIds();
+  if (!property) return null;
+
+  // 1) Ticket -> Property: prefer a "Property" label, else the primary/first.
+  const fwd = await pickAssocTypeAndCategory(TICKET_TYPE_ID, property, 'Property');
+  if (fwd) return (_ticketPropAssocCache = { fromTypeId: TICKET_TYPE_ID, toTypeId: property, ...fwd, reversed: false });
+
+  // 2) Property -> Ticket (reverse) — linking that way connects them too.
+  const rev = await pickAssocTypeAndCategory(property, TICKET_TYPE_ID, null);
+  if (rev) return (_ticketPropAssocCache = { fromTypeId: property, toTypeId: TICKET_TYPE_ID, ...rev, reversed: true });
+
+  // 3) Neither exists — create a labeled association type Ticket -> Property.
+  try {
+    const created = await hubspotFetch(assocLabelsUrl(TICKET_TYPE_ID, property), {
+      method: 'POST',
+      body: JSON.stringify({ label: 'Property', name: 'ticket_to_property' }),
+    });
+    const newId = created?.results?.[0]?.typeId ?? created?.typeId ?? created?.results?.[0]?.associationTypeId;
+    if (newId != null) return (_ticketPropAssocCache = { fromTypeId: TICKET_TYPE_ID, toTypeId: property, typeId: Number(newId), category: 'USER_DEFINED', reversed: false });
+  } catch (e) {
+    console.warn('[compliance-ticket] could not create Ticket->Property association type:', e);
+  }
+  return null;
+}
+
+/** Associate a ticket to a property using the resolved type + category + direction. */
+async function associateTicketToProperty(ticketId: string, propertyId: string): Promise<boolean> {
+  const a = await resolveTicketToPropertyAssoc();
+  if (!a) { console.warn('[compliance-ticket] no Ticket<->Property association type available'); return false; }
+  const pair = a.reversed ? { from: { id: propertyId }, to: { id: ticketId } } : { from: { id: ticketId }, to: { id: propertyId } };
+  try {
+    const resp = await hubspotFetch(assocBatchCreateUrl(a.fromTypeId, a.toTypeId), {
+      method: 'POST',
+      body: JSON.stringify({ inputs: [{ ...pair, types: [{ associationCategory: a.category, associationTypeId: a.typeId }] }] }),
+    });
+    return (resp.results || []).length > 0;
+  } catch (e) {
+    console.warn(`[compliance-ticket] ticket→property association create failed (ticket ${ticketId}, property ${propertyId}):`, e);
+    return false;
+  }
+}
+
+/**
+ * Re-upload a stored photo URL to HubSpot Files and return its File ID, so it can
+ * be attached to a ticket note (hs_attachment_ids needs File IDs, not URLs — our
+ * answers only keep URLs). RETURN_EXISTING dedupes on re-submit (same name+folder
+ * returns the existing file id, no duplicate, no 409). null on any failure.
+ */
+export async function uploadPhotoUrlForAttachment(photoUrl: string): Promise<string | null> {
+  const u = (photoUrl || '').trim();
+  if (!u) return null;
+  try {
+    const r = await fetchWithTimeout(u, {}, FILE_UPLOAD_TIMEOUT_MS);
+    if (!r.ok) { console.warn(`[compliance-ticket] photo fetch ${r.status} for ${u}`); return null; }
+    const buf = Buffer.from(await r.arrayBuffer());
+    const contentType = r.headers.get('content-type') || 'image/jpeg';
+    const base = (u.split('?')[0].split('/').pop() || `photo_${Date.now()}.jpg`).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const form = new FormData();
+    form.append('file', new Blob([buf], { type: contentType }), base);
+    form.append('options', JSON.stringify({
+      access: 'PUBLIC_INDEXABLE',
+      duplicateValidationStrategy: 'RETURN_EXISTING',
+      duplicateValidationScope: 'EXACT_FOLDER',
+    }));
+    form.append('folderPath', '/compliance_ticket_photos');
+    const up = await fetchWithTimeout(`${API_BASE}/files/v3/files`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token()}` }, body: form,
+    }, FILE_UPLOAD_TIMEOUT_MS);
+    if (!up.ok) { console.warn(`[compliance-ticket] photo re-upload failed ${up.status}`); return null; }
+    const json = await up.json();
+    return String(json.id || '') || null;
+  } catch (e) {
+    console.warn(`[compliance-ticket] photo re-upload error for ${u}:`, e);
+    return null;
+  }
+}
+
+/**
+ * Create a Note on a ticket carrying the body text AND (optionally) file
+ * attachments, so the note shows in the ticket timeline and the photos appear on
+ * the ticket's Attachments card. notes↔tickets is a standard association (the v4
+ * default works), with a labeled fallback. Returns the note id (best-effort).
+ */
+export async function createTicketNoteWithAttachments(ticketId: string, noteBody: string, fileIds: string[] = []): Promise<string | null> {
+  const ids = (fileIds || []).filter(Boolean);
+  try {
+    const props: Record<string, string> = {
+      hs_timestamp: new Date().toISOString(),
+      hs_note_body: noteBody,
+    };
+    if (ids.length) props.hs_attachment_ids = ids.join(';');
+    const created = await hubspotFetch('/crm/v3/objects/notes', { method: 'POST', body: JSON.stringify({ properties: props }) });
+    const noteId = String(created?.id || '');
+    if (!noteId) return null;
+
+    let associated = false;
+    try {
+      await hubspotFetch(`/crm/v4/objects/notes/${noteId}/associations/default/${TICKET_TYPE_ID}/${ticketId}`, { method: 'PUT' });
+      associated = true;
+    } catch (e) {
+      console.warn(`[compliance-ticket] note→ticket v4 default association failed (note ${noteId}):`, e);
+    }
+    if (!associated) {
+      try {
+        const labels = await hubspotFetch(assocLabelsUrl('notes', TICKET_TYPE_ID));
+        const first = (labels.results || [])[0];
+        const assocTypeId = first ? Number(first.typeId ?? first.associationTypeId) : NaN;
+        if (Number.isFinite(assocTypeId)) {
+          const rr = await batchCreateAssociations('notes', TICKET_TYPE_ID, assocTypeId, [{ fromId: noteId, toId: ticketId }]);
+          associated = rr.ok > 0;
+        }
+      } catch (e) {
+        console.warn(`[compliance-ticket] note→ticket labeled association fallback failed (note ${noteId}):`, e);
+      }
+    }
+    if (!associated) console.warn(`[compliance-ticket] note ${noteId} created but NOT associated to ticket ${ticketId}`);
+    return noteId;
+  } catch (e) {
+    console.warn(`[compliance-ticket] note creation for ticket ${ticketId} failed:`, e);
+    return null;
+  }
+}
 
 /**
  * Create a Compliance Issue ticket and associate it to the inspection's Property.
- * Property association tries the v4 default (primary) link first, then falls back
- * to a labeled association — mirroring the proven note-attach path — so it works
- * whether or not a user-defined ticket↔property label exists. Best-effort on the
+ * Property association is resolved against the portal's Ticket↔Property
+ * association schema (labeled type + category + direction). Best-effort on the
  * association: the created ticket is always returned (never lost) even if the
  * link fails (logged). Throws only if the ticket itself can't be created.
  */
@@ -2347,8 +2502,6 @@ export async function createComplianceTicket(args: {
   content?: string;
   propertyRecordId?: string | null;
 }): Promise<{ ticketId: string; associatedProperty: boolean; deduped: boolean }> {
-  const { property: propertyTypeId } = typeIds();
-
   // Idempotency: the subject encodes property + reason, so an identical OPEN
   // subject in this pipeline means this exact issue was already raised (a
   // double-submit or a reopen→resubmit). Skip creating a duplicate. Best-effort:
@@ -2390,34 +2543,8 @@ export async function createComplianceTicket(args: {
 
   let associatedProperty = false;
   const propId = (args.propertyRecordId || '').toString().trim();
-  if (propId && propertyTypeId) {
-    // 1) v4 default (primary/unlabeled) association — one call, no type lookup.
-    try {
-      await hubspotFetch(
-        `/crm/v4/objects/tickets/${ticketId}/associations/default/${propertyTypeId}/${propId}`,
-        { method: 'PUT' },
-      );
-      associatedProperty = true;
-    } catch (e) {
-      console.warn(`[compliance-ticket] v4 default ticket→property association failed for ticket ${ticketId}:`, e);
-    }
-    // 2) Fallback: a labeled association via the date-based API.
-    if (!associatedProperty) {
-      try {
-        const labels = await hubspotFetch(assocLabelsUrl('tickets', propertyTypeId));
-        const first = (labels.results || [])[0];
-        const assocTypeId = first ? Number(first.typeId ?? first.associationTypeId) : NaN;
-        if (Number.isFinite(assocTypeId)) {
-          const r = await batchCreateAssociations('tickets', propertyTypeId, assocTypeId, [{ fromId: ticketId, toId: propId }]);
-          associatedProperty = r.ok > 0;
-        }
-      } catch (e) {
-        console.warn(`[compliance-ticket] labeled ticket→property association fallback failed for ticket ${ticketId}:`, e);
-      }
-    }
-    if (!associatedProperty) {
-      console.warn(`[compliance-ticket] ticket ${ticketId} created but could NOT be associated to property ${propId}.`);
-    }
+  if (propId) {
+    associatedProperty = await associateTicketToProperty(ticketId, propId);
   }
   return { ticketId, associatedProperty, deduped: false };
 }
