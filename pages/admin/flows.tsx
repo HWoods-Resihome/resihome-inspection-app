@@ -80,15 +80,24 @@ export default function AdminFlowsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Head><title>Admin Flows</title></Head>
+      <Head><title>Admin</title></Head>
       <header className="bg-brand text-white">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="font-heading font-extrabold text-lg">Admin Flows</h1>
+          <h1 className="font-heading font-extrabold text-lg">Admin</h1>
           <Link href="/" className="text-xs font-heading font-semibold text-white/90 hover:text-white inline-flex items-center gap-1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M11 18l-6-6 6-6" /></svg> Inspections</Link>
         </div>
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-6">
+        {/* ---- Admins ---- */}
+        <Section title="Admins" desc="Manage who has admin access to ResiWALK (insights, form builder, these flows, and view-as).">
+          <Link href="/admin/admins"
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-brand text-white font-heading font-bold text-sm hover:opacity-90">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+            Manage Admins
+          </Link>
+        </Section>
+
         {/* ---- Provision Fields (Setup) ---- */}
         <Section
           title="Provision Fields (Setup)"
