@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 
+// iOS/iPadOS WebKit. iOS shows NO system confirmation for a programmatic clipboard
+// write (unlike Android), so we surface our own "Link copied" toast only there.
+const IS_IOS = typeof navigator !== 'undefined'
+  && (/iP(hone|ad|od)/i.test(navigator.userAgent || '')
+    || (/Macintosh/.test(navigator.userAgent || '') && ((navigator as any).maxTouchPoints || 0) > 1));
+
 // Renders text on a single line, shrinking the font until it fits the available
 // width (down to a floor) so long titles/addresses never wrap or truncate.
 // Re-measures when the text, bounds, or container width changes.
@@ -13,7 +19,9 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState(max);
+  const [copied, setCopied] = useState(false);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startPt = useRef<{ x: number; y: number } | null>(null);
   const longPressFired = useRef(false);
   const copiedNative = useRef(false);
@@ -39,10 +47,19 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
     return () => { ro?.disconnect(); };
   }, [text, max, min]);
 
-  // Clean up the long-press timer on unmount.
+  // Clean up timers on unmount.
   useEffect(() => () => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
   }, []);
+
+  // iOS-only "Link copied" toast (Android shows its own system confirmation).
+  const showCopiedToast = () => {
+    if (!IS_IOS) return;
+    setCopied(true);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(false), 1600);
+  };
 
   const cancelPress = () => {
     if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; }
@@ -101,6 +118,7 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
         pressTimer.current = null;
         longPressFired.current = true;
         copiedNative.current = nativeCopy(resolvedUrl());
+        if (copiedNative.current) showCopiedToast();
         haptic();
       }, 500);
     },
@@ -114,7 +132,7 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
       cancelPress();
       // Native already copied on the hold; on web, copy now inside this pointerup
       // gesture (the only place iOS Safari permits clipboard.writeText).
-      if (fired && !already) void webCopy(resolvedUrl());
+      if (fired && !already) { void webCopy(resolvedUrl()); showCopiedToast(); }
     },
     onPointerLeave: cancelPress,
     onPointerCancel: cancelPress,
@@ -122,7 +140,7 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
     onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); },
   } : {};
 
-  return (
+  const textDiv = (
     <div
       ref={ref}
       className={className}
@@ -135,5 +153,21 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
     >
       {text}
     </div>
+  );
+
+  if (!copyLink) return textDiv;
+  return (
+    <>
+      {textDiv}
+      {copied && (
+        <div style={{
+          position: 'fixed', left: '50%', bottom: 28, transform: 'translateX(-50%)', zIndex: 9999,
+          background: '#111827', color: '#fff', fontSize: 13, fontWeight: 600,
+          padding: '8px 14px', borderRadius: 9999, boxShadow: '0 4px 16px rgba(0,0,0,.25)', pointerEvents: 'none',
+        }}>
+          Link copied
+        </div>
+      )}
+    </>
   );
 }
