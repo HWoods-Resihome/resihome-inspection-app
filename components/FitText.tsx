@@ -103,7 +103,21 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
     } catch { /* nothing else to try */ }
   };
 
-  const haptic = () => { try { navigator.vibrate?.(15); } catch { /* iOS has no vibrate — fine */ } };
+  // Haptic confirmation on copy. Prefer the native Capacitor Haptics plugin — the
+  // only way to buzz on iOS (navigator.vibrate is unsupported there) and reliable
+  // on Android in the app — and fall back to the web Vibration API (Android
+  // browser/PWA). iOS Safari has neither, so it just no-ops there.
+  const haptic = () => {
+    try {
+      const cap = (window as any).Capacitor;
+      if (cap?.isNativePlatform?.()) {
+        const h = cap.Plugins?.Haptics;
+        if (h?.impact) { void h.impact({ style: 'MEDIUM' }); return; }
+        if (h?.vibrate) { void h.vibrate({ duration: 20 }); return; }
+      }
+    } catch { /* plugin unavailable — fall through */ }
+    try { navigator.vibrate?.(20); } catch { /* no web vibrate — fine */ }
+  };
 
   const bind = copyLink ? {
     onPointerDown: (e: React.PointerEvent) => {
@@ -118,8 +132,9 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
         pressTimer.current = null;
         longPressFired.current = true;
         copiedNative.current = nativeCopy(resolvedUrl());
-        if (copiedNative.current) showCopiedToast();
-        haptic();
+        // Confirm only on a successful copy (native path). The web path copies on
+        // pointerUp and buzzes there.
+        if (copiedNative.current) { showCopiedToast(); haptic(); }
       }, 500);
     },
     onPointerMove: (e: React.PointerEvent) => {
@@ -132,7 +147,7 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
       cancelPress();
       // Native already copied on the hold; on web, copy now inside this pointerup
       // gesture (the only place iOS Safari permits clipboard.writeText).
-      if (fired && !already) { void webCopy(resolvedUrl()); showCopiedToast(); }
+      if (fired && !already) { void webCopy(resolvedUrl()); showCopiedToast(); haptic(); }
     },
     onPointerLeave: cancelPress,
     onPointerCancel: cancelPress,
