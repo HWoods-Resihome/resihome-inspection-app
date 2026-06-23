@@ -13,6 +13,7 @@ import Link from 'next/link';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { RegenPdfPicker } from '@/components/admin/RegenPdfPicker';
+import { ApprovalRoutingManager } from '@/components/admin/ApprovalRoutingManager';
 
 const SETUP_LABELS: Record<string, string> = {
   app_admins_json: 'Admins storage (Agent)',
@@ -96,6 +97,11 @@ export default function AdminFlowsPage() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
             Manage Admins
           </Link>
+        </Section>
+
+        {/* ---- Approval Routing (PODs / Regions) ---- */}
+        <Section title="Approval Routing" desc="PODs → Regions (PM / Sr. PM) + RM + Director tier with Slack IDs and NTE ceilings. Decides who gets tagged on Slack when a rate-card scope goes to pending approval.">
+          <ApprovalRoutingManager />
         </Section>
 
         {/* ---- Provision Fields (Setup) ---- */}

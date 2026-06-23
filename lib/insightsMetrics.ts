@@ -239,31 +239,24 @@ export interface ScopeApprovalRow {
   approver: string;
   count: number;          // scopes approved
   total: number;          // $ approved
-  nte: number | null;     // this approver's not-to-exceed ceiling (if configured)
-  overCount: number;      // # approvals over the NTE
-  scopes: { recordId: string; propertyAddress: string; cost: number; over: boolean; scheduledDate: string | null }[];
+  scopes: { recordId: string; propertyAddress: string; cost: number; scheduledDate: string | null }[];
 }
 
-/** Scopes approved per reviewer (count + $), flagging approvals over that
- *  approver's NTE ceiling. nte/overCount are null/0 until thresholds are set. */
-export function scopeApprovalsByApprover(rows: InsightsRow[], nte: Record<string, number>): ScopeApprovalRow[] {
+/** Scopes approved per reviewer (count + $ approved). */
+export function scopeApprovalsByApprover(rows: InsightsRow[]): ScopeApprovalRow[] {
   const map = new Map<string, ScopeApprovalRow>();
   for (const r of scopeRows(rows)) {
     const approver = (r.approverName || '').trim();
     if (!approver) continue; // not yet approved → not an approval
-    const limit = typeof nte[approver] === 'number' ? nte[approver] : null;
     const cost = r.totalClientCost || 0;
-    const over = limit != null && cost > limit;
     let g = map.get(approver);
-    if (!g) { g = { approver, count: 0, total: 0, nte: limit, overCount: 0, scopes: [] }; map.set(approver, g); }
-    g.count++; g.total += cost; g.nte = limit;
-    if (over) g.overCount++;
-    g.scopes.push({ recordId: r.recordId, propertyAddress: r.propertyAddress, cost, over, scheduledDate: r.scheduledDate });
+    if (!g) { g = { approver, count: 0, total: 0, scopes: [] }; map.set(approver, g); }
+    g.count++; g.total += cost;
+    g.scopes.push({ recordId: r.recordId, propertyAddress: r.propertyAddress, cost, scheduledDate: r.scheduledDate });
   }
   const out = Array.from(map.values());
   for (const g of out) g.scopes.sort((a, b) => b.cost - a.cost);
-  // Over-NTE approvers first (most flags), then by $ approved.
-  return out.sort((a, b) => (b.overCount - a.overCount) || (b.total - a.total));
+  return out.sort((a, b) => b.total - a.total); // most $ approved first
 }
 
 // Mode B is a 3-level drill-down: Category → Inspector → Inspection. Each level

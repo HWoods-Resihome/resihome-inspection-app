@@ -7,6 +7,7 @@ import { buildSectionPhotoAnswerProps, joinPhotoUrls } from './answerProps';
 import { extractLeasingAgent1099Fields } from './leasingAgent1099';
 import { calculateLine } from './rateCardMath';
 import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion, isExternalEmail } from './userAccess';
+import { normalizeApprovalRouting, type ApprovalRoutingConfig } from './approvalRouting';
 
 const API_BASE = 'https://api.hubapi.com';
 
@@ -4217,81 +4218,69 @@ export async function writeInsightsUsers(users: InsightsUserRecord[]): Promise<v
 }
 
 // ---------------------------------------------------------------------------
-// Approver NTE (not-to-exceed) thresholds — per-approver $ ceilings used by the
-// Insights scope-approvals card to flag approvals above an approver's limit.
-// Stored as JSON { approverName: dollars } on the same admin Agent record.
+// Approval routing config — PODs → Regions (PM/Sr.PM) + RM + Directors, used to
+// decide who to @-mention on Slack when a rate-card scope goes to pending
+// approval. Stored as one JSON blob on the same admin Agent record.
 // ---------------------------------------------------------------------------
-const APP_APPROVER_NTE_PROP = 'app_approver_nte_json';
-export type ApproverNteMap = Record<string, number>;
+const APP_APPROVAL_ROUTING_PROP = 'app_approval_routing_json';
 
-/** Read the approver NTE thresholds. Best-effort: {} on any error. */
-export async function readApproverNte(): Promise<ApproverNteMap> {
+/** Read the approval routing config. Best-effort: a normalized empty config on any error. */
+export async function readApprovalRouting(): Promise<ApprovalRoutingConfig> {
   const recId = await resolveKnowledgeAgentRecordId();
-  if (!recId) return {};
+  if (!recId) return normalizeApprovalRouting(null);
   try {
-    const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}?properties=${APP_APPROVER_NTE_PROP}`);
-    const raw = resp?.properties?.[APP_APPROVER_NTE_PROP];
-    if (!raw) return {};
-    const parsed = JSON.parse(String(raw));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    const out: ApproverNteMap = {};
-    for (const [k, v] of Object.entries(parsed)) {
-      const n = Number(v);
-      if (k && Number.isFinite(n) && n > 0) out[k] = n;
-    }
-    return out;
+    const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}?properties=${APP_APPROVAL_ROUTING_PROP}`);
+    const raw = resp?.properties?.[APP_APPROVAL_ROUTING_PROP];
+    if (!raw) return normalizeApprovalRouting(null);
+    return normalizeApprovalRouting(JSON.parse(String(raw)));
   } catch (e) {
-    console.warn('[approver-nte] read failed:', e);
-    return {};
+    console.warn('[approval-routing] read failed:', e);
+    return normalizeApprovalRouting(null);
   }
 }
 
-async function ensureApproverNteProperty(): Promise<void> {
+async function ensureApprovalRoutingProperty(): Promise<void> {
   try {
-    await hubspotFetch(`/crm/v3/properties/${agentTypeId()}/${APP_APPROVER_NTE_PROP}`);
+    await hubspotFetch(`/crm/v3/properties/${agentTypeId()}/${APP_APPROVAL_ROUTING_PROP}`);
     return; // exists
   } catch { /* fall through to create */ }
   try {
     await hubspotFetch(`/crm/v3/properties/${agentTypeId()}`, {
       method: 'POST',
       body: JSON.stringify({
-        name: APP_APPROVER_NTE_PROP, label: 'Approver NTE thresholds (JSON)', type: 'string', fieldType: 'textarea',
+        name: APP_APPROVAL_ROUTING_PROP, label: 'Approval routing config (JSON)', type: 'string', fieldType: 'textarea',
         groupName: 'ai_knowledge',
-        description: 'ResiWalk Insights per-approver not-to-exceed $ thresholds (managed by the app).',
+        description: 'ResiWALK approval routing — PODs/Regions/RM/Directors for Slack approval tagging (managed by the app).',
       }),
     });
   } catch (e: any) {
     const blob = `${String(e?.message || e)} ${String(e?.detail || '')}`;
     if (e?.status === 409 || /already exists|PROPERTY_ALREADY_EXISTS/i.test(blob)) return;
     throw new Error(
-      'Approver-NTE storage is not provisioned: the property “app_approver_nte_json” is missing on the Agent '
+      'Approval-routing storage is not provisioned: the property “app_approval_routing_json” is missing on the Agent '
       + 'object and auto-create failed — the HubSpot token likely lacks CRM schema-write scope. Detail: ' + blob.slice(0, 200),
     );
   }
 }
 
-/** Persist the approver NTE thresholds (sanitized to positive numbers). */
-export async function writeApproverNte(map: ApproverNteMap): Promise<void> {
+/** Persist the approval routing config (normalized to the canonical shape). */
+export async function writeApprovalRouting(config: ApprovalRoutingConfig): Promise<void> {
   const recId = await resolveKnowledgeAgentRecordId();
   if (!recId) throw new Error('Admin Agent record not found — set AI_KNOWLEDGE_AGENT_RECORD_ID, or ensure the admin is a HubSpot owner with an Agent record.');
-  const clean: ApproverNteMap = {};
-  for (const [k, v] of Object.entries(map || {})) {
-    const n = Number(v);
-    if (k && Number.isFinite(n) && n > 0) clean[k] = n;
-  }
+  const clean = normalizeApprovalRouting(config);
   const doWrite = () => hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}`, {
     method: 'PATCH',
-    body: JSON.stringify({ properties: { [APP_APPROVER_NTE_PROP]: JSON.stringify(clean) } }),
+    body: JSON.stringify({ properties: { [APP_APPROVAL_ROUTING_PROP]: JSON.stringify(clean) } }),
   });
   try {
     await doWrite();
   } catch (e: any) {
-    if (isMissingPropertyError(e, APP_APPROVER_NTE_PROP)) {
-      await ensureApproverNteProperty();
+    if (isMissingPropertyError(e, APP_APPROVAL_ROUTING_PROP)) {
+      await ensureApprovalRoutingProperty();
       await doWrite();
     } else {
       const detail = String(e?.detail || '').slice(0, 200);
-      throw new Error(`Could not save approver NTE thresholds (HubSpot ${e?.status || ''}).${detail ? ' ' + detail : ''}`.trim());
+      throw new Error(`Could not save approval routing (HubSpot ${e?.status || ''}).${detail ? ' ' + detail : ''}`.trim());
     }
   }
 }

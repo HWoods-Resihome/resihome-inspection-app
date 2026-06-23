@@ -15,7 +15,6 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { InsightsDashboard } from '@/components/insights/Dashboard';
 import { InsightsUsersManager } from '@/components/insights/InsightsUsersManager';
-import { ApproverNteManager } from '@/components/insights/ApproverNteManager';
 
 interface Access {
   authenticated: boolean;
@@ -146,10 +145,11 @@ function AccountMenu({ name, email }: { name: string; email: string }) {
   );
 }
 
-/** Collapsible admin-only menu: manage Insights-Only users + approver NTE from inside the portal. */
+/** Collapsible admin-only menu: manage Insights-Only users from inside the portal.
+ *  (Approver NTE moved to Admin → Approval Routing under the home page.) */
 function AdminMenu() {
-  const [panel, setPanel] = useState<'users' | 'nte' | null>(null);
-  const toggle = (p: 'users' | 'nte') => setPanel((cur) => (cur === p ? null : p));
+  const [panel, setPanel] = useState<'users' | null>(null);
+  const toggle = (p: 'users') => setPanel((cur) => (cur === p ? null : p));
   const gear = (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
   );
@@ -163,12 +163,8 @@ function AdminMenu() {
         <button type="button" onClick={() => toggle('users')} aria-expanded={panel === 'users'} className={btn}>
           {gear} Admin · Insights users {chev(panel === 'users')}
         </button>
-        <button type="button" onClick={() => toggle('nte')} aria-expanded={panel === 'nte'} className={btn}>
-          {gear} Set Approver NTE {chev(panel === 'nte')}
-        </button>
       </div>
       {panel === 'users' && <div className="mt-3"><InsightsUsersManager dark /></div>}
-      {panel === 'nte' && <div className="mt-3"><ApproverNteManager /></div>}
     </section>
   );
 }
