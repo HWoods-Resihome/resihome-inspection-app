@@ -138,6 +138,10 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
     answersBySection[sec] = qaItems.filter((it) => it.sec === sec).sort((x, y) => x.d - y.d).map((it) => it.ans);
   }
 
+  // Occupied vacancy check hides HVAC + Utilities in the form — exclude them from
+  // the regenerated PDF too so they don't render as empty sections.
+  const occupied = tmpl === 'pm_vacancy_occupancy_check' && answers.some((a) => /\boccupied\b/i.test(a.answerValue || ''));
+  const fcExclude = occupied ? { excludeSectionIds: ['hvac_air_filters', 'utilities'] } : undefined;
   // Final Checklist → label/value groups (same as the Master report).
   let finalChecklist: { name: string; rows: { label: string; value: string }[] }[] | undefined;
   if (fcBlob) {
@@ -151,9 +155,9 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
         (data as any).propertyAirFiltersType3 ?? null,
       ],
     };
-    try { finalChecklist = summarizeFinalChecklist(fcBlob, fcCtx); } catch { /* skip */ }
+    try { finalChecklist = summarizeFinalChecklist(fcBlob, fcCtx, fcExclude); } catch { /* skip */ }
   }
-  const fcPhotos = fcBlob ? finalChecklistPhotos(fcBlob) : [];
+  const fcPhotos = fcBlob ? finalChecklistPhotos(fcBlob, fcExclude) : [];
 
   // Listing highlights for the header (Active / Deposit Taken · price · date).
   // Prefer the frozen snapshot so regenerated reports keep the listing as it was

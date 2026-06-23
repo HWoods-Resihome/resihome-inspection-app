@@ -299,9 +299,13 @@ export function finalChecklistAnswerRecords(a: FcAnswers, ctx: FcCompletionCtx):
 export function summarizeFinalChecklist(
   a: FcAnswers,
   ctx: FcCompletionCtx,
+  opts?: { excludeSectionIds?: string[] },
 ): { name: string; rows: { label: string; value: string }[] }[] {
   const out: { name: string; rows: { label: string; value: string }[] }[] = [];
   for (const section of FINAL_CHECKLIST) {
+    // Sections the form hid (e.g. HVAC + Utilities on an OCCUPIED vacancy check)
+    // must not render on the PDF either — otherwise they show as a blank section.
+    if (opts?.excludeSectionIds?.includes(section.id)) continue;
     const rows: { label: string; value: string }[] = [];
     for (const q of section.questions) {
       if (!fcQuestionVisible(q, ctx)) continue;
@@ -315,9 +319,10 @@ export function summarizeFinalChecklist(
 /** Collect every photo URL captured in the Final Checklist — per-question photos
  *  plus all label-sticker photos — so the PDFs can render them (same as the
  *  Master report). Order: by checklist section/question, stickers after photos. */
-export function finalChecklistPhotos(a: FcAnswers): string[] {
+export function finalChecklistPhotos(a: FcAnswers, opts?: { excludeSectionIds?: string[] }): string[] {
   const out: string[] = [];
   for (const section of FINAL_CHECKLIST) {
+    if (opts?.excludeSectionIds?.includes(section.id)) continue;
     for (const q of section.questions) {
       const ans = a[q.id];
       if (!ans) continue;

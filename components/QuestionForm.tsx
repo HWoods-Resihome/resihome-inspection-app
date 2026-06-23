@@ -1554,11 +1554,14 @@ export function QuestionForm({
         });
       }
     }
+    const fcPdfExcludeOpts = occupied ? { excludeSectionIds: ['hvac_air_filters', 'utilities'] } : undefined;
     const meta: QuestionFormSubmitMeta = {
       inspectionResult: overallResult,
       maintenanceTicket: { wanted: wantsTicket, description: wantsTicket ? maintTicketDescription.trim() : '' },
-      finalChecklist: fcEnabled ? summarizeFinalChecklist(fcAnswers, fcCtx) : undefined,
-      finalChecklistPhotos: fcEnabled ? finalChecklistPhotos(fcAnswers) : undefined,
+      // Occupied vacancy check hides HVAC + Utilities in the form, so drop them
+      // from the PDF too (otherwise they render as empty sections).
+      finalChecklist: fcEnabled ? summarizeFinalChecklist(fcAnswers, fcCtx, fcPdfExcludeOpts) : undefined,
+      finalChecklistPhotos: fcEnabled ? finalChecklistPhotos(fcAnswers, fcPdfExcludeOpts) : undefined,
     };
 
     onSubmit(finalAnswers, sectionPhotoUrlsForApi, meta);
