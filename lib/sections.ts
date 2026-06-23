@@ -42,7 +42,6 @@ type SectionDef =
 // expand inline.
 const SECTION_ORDER: SectionDef[] = [
   { type: 'static',         key: 'yard_exterior',       label: 'Yard / Exterior' },
-  { type: 'static',         key: 'entry_foyer',         label: 'Entry / Foyer' },
   { type: 'static',         key: 'family_living_room',  label: 'Family / Living Room' },
   { type: 'static',         key: 'dining_room',         label: 'Dining Room' },
   { type: 'static',         key: 'kitchen',             label: 'Kitchen' },
