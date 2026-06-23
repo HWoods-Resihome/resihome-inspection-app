@@ -180,7 +180,7 @@ export function ApprovalRoutingManager() {
     return resolveApprovers(config, pvRegion, Number(pvAmount) || 0);
   }, [config, pvRegion, pvAmount]);
 
-  const levelLabel = (lvl: string) => lvl === 'pm' ? 'PM' : lvl === 'sr_pm' ? 'Sr. PM' : lvl === 'rm' ? 'RM' : 'Director';
+  const levelLabel = (lvl: string) => lvl === 'pm' ? 'PM' : lvl === 'sr_pm' ? 'SR / AM' : lvl === 'rm' ? 'RM' : 'Director';
 
   return (
     <section className="mt-5 border border-gray-200 rounded-xl bg-white">
@@ -271,13 +271,14 @@ export function ApprovalRoutingManager() {
                                 <button type="button" onClick={() => removeRegion(pod.id, rc.region)} className="text-gray-400 hover:text-rose-600 text-sm font-heading font-semibold" aria-label="Delete region">Delete</button>
                               </div>
 
-                              {/* PM tier — many PMs, one ceiling; all tagged within it */}
-                              {([{ key: 'pms', list: rc.pms, nte: rc.pmNte, label: 'PM' }, { key: 'srPms', list: rc.srPms, nte: rc.srPmNte, label: 'Sr. PM' }] as const).map((tier) => (
+                              {/* SR / AM and PM tiers — many users, one ceiling each; all tagged within it.
+                                  SR / AM shown first per the region breakdown layout. */}
+                              {([{ key: 'srPms', list: rc.srPms, nte: rc.srPmNte, label: 'SR / AM', nteKey: 'srPmNte' }, { key: 'pms', list: rc.pms, nte: rc.pmNte, label: 'PM', nteKey: 'pmNte' }] as const).map((tier) => (
                                 <div key={tier.key} className="mt-2 first:mt-0">
                                   <div className="flex items-center justify-between">
-                                    <span className="text-[11px] font-heading font-semibold text-gray-500">{tier.label}s</span>
+                                    <span className="text-[11px] font-heading font-semibold text-gray-500">{tier.label}</span>
                                     <NteInput label={`${tier.label} NTE`} value={tier.nte}
-                                      onChange={(n) => patchRegion(pod.id, rc.region, (r) => ({ ...r, [tier.key === 'pms' ? 'pmNte' : 'srPmNte']: n }))} />
+                                      onChange={(n) => patchRegion(pod.id, rc.region, (r) => ({ ...r, [tier.nteKey]: n }))} />
                                   </div>
                                   <div className="space-y-1 mt-1">
                                     {(tier.list || []).length === 0 && <p className="text-[11px] text-gray-400 pl-1">none</p>}

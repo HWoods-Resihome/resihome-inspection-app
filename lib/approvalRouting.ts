@@ -220,14 +220,14 @@ export function resolveApprovers(
   // (so an empty PM/Sr. PM defaults to the RM).
   const lowerTiers: { users: ApprovalUser[]; nte: number | null; level: ApprovalLevel; label: string }[] = [
     { users: rc.pms, nte: rc.pmNte, level: 'pm', label: 'PM' },
-    { users: rc.srPms, nte: rc.srPmNte, level: 'sr_pm', label: 'Sr. PM' },
+    { users: rc.srPms, nte: rc.srPmNte, level: 'sr_pm', label: 'SR / AM' },
   ];
   for (const t of lowerTiers) {
     const valid = t.users.filter(isUser);
     if (valid.length > 0 && t.nte != null && amtOk && amt <= t.nte) {
       return {
         level: t.level, users: valid, podId: pod.id, podName: pod.name, channelId, channelName, region: rc.region,
-        reason: `${amtStr} is within the ${rc.region} ${t.label} ceiling (${money(t.nte)}) → ${valid.length > 1 ? `${valid.length} ${t.label}s` : t.label}.`,
+        reason: `${amtStr} is within the ${rc.region} ${t.label} ceiling (${money(t.nte)}) → ${t.label}${valid.length > 1 ? ` (${valid.length})` : ''}.`,
       };
     }
   }
@@ -238,8 +238,8 @@ export function resolveApprovers(
     return {
       level: 'rm', users: [pod.rm], podId: pod.id, podName: pod.name, channelId, channelName, region: rc.region,
       reason: noLower
-        ? `No PM / Sr. PM set for ${rc.region} → defaults to the ${pod.name} RM.`
-        : `${amtStr} is above the PM / Sr. PM ceilings → ${pod.name} RM${pod.rmNte != null ? ` (ceiling ${money(pod.rmNte)})` : ''}.`,
+        ? `No PM / SR / AM set for ${rc.region} → defaults to the ${pod.name} RM.`
+        : `${amtStr} is above the PM / SR / AM ceilings → ${pod.name} RM${pod.rmNte != null ? ` (ceiling ${money(pod.rmNte)})` : ''}.`,
     };
   }
 
