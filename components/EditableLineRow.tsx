@@ -254,6 +254,8 @@ function PhotoChipRow({
             <img
               src={thumbImageSrc(u)}
               alt=""
+              loading="lazy"
+              decoding="async"
               onClick={onOpen ? (e) => { e.stopPropagation(); onOpen(i); } : undefined}
               className={`w-12 h-12 object-cover rounded border border-gray-200 ${onOpen ? 'cursor-pointer' : ''}`}
               title={onOpen ? (isVideoEntry(u) ? 'Tap to play' : 'Tap to view') : undefined}
@@ -1480,6 +1482,8 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
                       <img
                         src={thumbImageSrc(u)}
                         alt=""
+                        loading="lazy"
+                        decoding="async"
                         onClick={(e) => { e.stopPropagation(); onOpenPhoto?.(i); }}
                         className="w-10 h-10 object-cover rounded border border-gray-200 cursor-pointer"
                         title={isVideoEntry(u) ? 'Tap to play' : 'Tap to view / mark up'}
@@ -1621,6 +1625,8 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
                 <img
                   src={thumbImageSrc(u)}
                   alt=""
+                  loading="lazy"
+                  decoding="async"
                   onClick={(e) => { e.stopPropagation(); onOpenPhoto?.(i); }}
                   className="w-10 h-10 object-cover rounded border border-gray-200 cursor-pointer"
                   title={isVideoEntry(u) ? 'Click to play' : 'Click to view / mark up'}

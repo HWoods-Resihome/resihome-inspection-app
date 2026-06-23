@@ -1156,7 +1156,7 @@ export function CameraAILayer(props: Props) {
         <div key={savedShot.key} className="fixed left-1/2 -translate-x-1/2 top-28 z-40 pointer-events-none animate-shotSaved">
           <div className="flex items-center gap-2 bg-black/75 text-white rounded-xl pl-2 pr-3 py-2 shadow-lg">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={thumbImageSrc(savedShot.url)} alt="" className="w-9 h-9 object-cover rounded-md border border-white/30" />
+            <img src={thumbImageSrc(savedShot.url)} alt="" loading="lazy" decoding="async" className="w-9 h-9 object-cover rounded-md border border-white/30" />
             <div className="leading-tight">
               <div className="text-[12px] font-semibold flex items-center gap-1">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
@@ -1236,7 +1236,7 @@ export function CameraAILayer(props: Props) {
               {s.stillUrl && (
                 <button type="button" onClick={(e) => { e.stopPropagation(); setZoomUrl(s.stillUrl!); }} className="shrink-0" aria-label="View the photo for this call-out">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={thumbImageSrc(s.stillUrl)} alt="" className="w-11 h-11 object-cover rounded border border-gray-200" />
+                  <img src={thumbImageSrc(s.stillUrl)} alt="" loading="lazy" decoding="async" className="w-11 h-11 object-cover rounded border border-gray-200" />
                 </button>
               )}
               <div className="min-w-0 flex-1">

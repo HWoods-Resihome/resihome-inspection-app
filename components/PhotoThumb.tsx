@@ -35,7 +35,11 @@ interface PhotoThumbProps {
 }
 
 export function PhotoThumb({
-  url, width = 400, alt = '', className, style, title, loading, decoding, onClick,
+  // Default to lazy + async decoding so off-screen tiles in long photo grids
+  // don't all decode their bitmaps up front (and can be reclaimed under memory
+  // pressure) — the iOS WebKit OOM that jettisons the renderer ("a problem
+  // repeatedly occurred" + white screen) on photo-heavy inspections.
+  url, width = 400, alt = '', className, style, title, loading = 'lazy', decoding = 'async', onClick,
 }: PhotoThumbProps) {
   const [stage, setStage] = useState(0);
   const [loaded, setLoaded] = useState(false);
