@@ -27,6 +27,10 @@ const SLACK_CHANNEL = (process.env.SLACK_LISTING_PRICE_CHANNEL || LIVE_CHANNEL).
 // repeated test submits to the sandbox re-post freely while production never
 // duplicates. In production (default) the gate is ON.
 const GATE_ACTIVE = SLACK_CHANNEL !== SANDBOX_CHANNEL;
+// Slack user IDs @-mentioned on each alert (override via SLACK_LISTING_PRICE_MENTIONS,
+// comma-separated). Defaults to the listing-price reviewers.
+const ALERT_MENTIONS = (process.env.SLACK_LISTING_PRICE_MENTIONS || 'UAZ5C6C5P,UFW4K81TQ')
+  .split(',').map((s) => s.trim()).filter(Boolean);
 const LISTING_RE = /evaluate listing price|listing price/i;
 
 export interface ListingPriceInspectionRef {
@@ -150,6 +154,10 @@ export async function postListingPriceAlertOnSubmit(
   if (note) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Agent note:*\n>${note.replace(/\n/g, '\n>')}` } });
 
   blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `<${inspectionUrl}|Open inspection ↗>` } });
+  // Notify the listing-price reviewers (Slack user IDs).
+  if (ALERT_MENTIONS.length) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: ALERT_MENTIONS.map((u) => `<@${u}>`).join(' ') } });
+  }
   blocks.push({ type: 'divider' });
   // Comps live in the thread to keep the parent compact — pointer here.
   blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: '💬 *Comparable homes in thread* — tap *replies* below' }] });
