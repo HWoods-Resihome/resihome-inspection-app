@@ -248,6 +248,9 @@ export function QuestionForm({
   const fcRecordIdRef = useRef<string | null>(null);
   const fcHydratedRef = useRef(false);
   const fcSaveTimer = useRef<any>(null);
+  // Last server-reported reason a checklist save failed (e.g. over HubSpot's size
+  // limit), surfaced in the submit-block dialog so it's actionable, not cryptic.
+  const fcSaveErrRef = useRef<string>('');
 
   // Hydrate the checklist blob from the saved answer on open.
   useEffect(() => {
@@ -306,7 +309,17 @@ export function QuestionForm({
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...body, bumpStatusToInProgress: true }),
       });
-      if (r.ok) { const d = await r.json(); const rid = d.results?.[0]?.recordId; if (rid) fcRecordIdRef.current = rid; return true; }
+      if (r.ok) {
+        const d = await r.json().catch(() => ({} as any));
+        const result = d.results?.[0];
+        // HTTP 200 can still carry a PER-ITEM failure (e.g. the blob exceeds
+        // HubSpot's size limit). Treat that as a failed save so the submit gate
+        // BLOCKS — otherwise the checklist would be silently dropped on finalize.
+        if (result?.failed) { fcSaveErrRef.current = result.reason || ''; return false; }
+        if (result?.recordId) fcRecordIdRef.current = result.recordId;
+        fcSaveErrRef.current = '';
+        return true;
+      }
       return false;
     } catch { return false; /* offline — the next save / submit retries */ }
   }, [readOnly, inspectionRecordId, inspectionExternalId, fcStripBlobs]);
@@ -1529,7 +1542,8 @@ export function QuestionForm({
       if (!fcOk) {
         await dialog.alert(
           'Could not save the HVAC / Smart Home checklist before submitting. ' +
-          'Your inspection was NOT submitted so nothing is lost — check your connection and try Submit again.',
+          'Your inspection was NOT submitted so nothing is lost — check your connection and try Submit again.' +
+          (fcSaveErrRef.current ? `\n\nReason: ${fcSaveErrRef.current.slice(0, 600)}` : ''),
         );
         return;
       }

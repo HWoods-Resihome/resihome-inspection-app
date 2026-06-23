@@ -55,6 +55,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const t0 = Date.now();
 
+    // Preflight: a `note` over HubSpot's text ceiling 400s the write with a
+    // cryptic "Cannot set PropertyValueCoordinates{…}" error. The Final Checklist
+    // persists its whole state (incl. photo URLs) as a JSON blob in `note`, which
+    // we CAN'T safely truncate (that corrupts the JSON), so reject it here with a
+    // clear, actionable reason instead of forwarding HubSpot's opaque one — and
+    // skip the doomed round-trip. No data is lost: the client blocks submit and
+    // the inspector removes a few checklist photos. (answer_value / answer_summary
+    // are already capped in buildQaAnswerProps, so only `note` can reach this.)
+    const HUBSPOT_TEXT_MAX = 65536;
+    const overLimit: Array<{ recordId: string; answerIdExternal: string; failed: true; reason: string }> = [];
+    const sendable: AnswerUpsert[] = [];
+    for (const u of upserts) {
+      const note = u?.answerProps?.note;
+      if (typeof note === 'string' && note.length > HUBSPOT_TEXT_MAX) {
+        overLimit.push({
+          recordId: u.recordId || '',
+          answerIdExternal: String(u.answerProps?.answer_id_external || ''),
+          failed: true,
+          reason: `This record is too large to save (${note.length.toLocaleString()} characters; HubSpot's limit is ${HUBSPOT_TEXT_MAX.toLocaleString()}). Remove a few checklist photos and try again.`,
+        });
+      } else {
+        sendable.push(u);
+      }
+    }
+
     // Server-side status transition: if this is the FIRST edit and the
     // inspection is still Scheduled, flip it to In Progress.
     if (body.bumpStatusToInProgress) {
@@ -67,7 +92,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    const upsertResults = await upsertAnswers(id, upserts);
+    const upsertResults = await upsertAnswers(id, sendable);
     if (archives.length > 0) {
       await archiveAnswers(archives);
     }
@@ -79,7 +104,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.warn(`[answers] slow autosave: ${elapsed}ms, upserts=${upserts.length}, archives=${archives.length}`);
     }
 
-    return res.status(200).json({ success: true, results: upsertResults, elapsedMs: elapsed });
+    return res.status(200).json({ success: true, results: [...upsertResults, ...overLimit], elapsedMs: elapsed });
   } catch (e: any) {
     console.error(`POST /api/inspections/${id}/answers failed:`, e);
     // Surface HubSpot's validation detail (this is an internal staff write path,

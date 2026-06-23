@@ -1553,7 +1553,13 @@ export function RateCardForm(props: RateCardFormProps) {
         });
         if (!r.ok) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0, 300)}`); }
         const data = await r.json();
-        const rid = data.results?.[0]?.recordId;
+        // HTTP 200 can still carry a PER-ITEM failure (e.g. the blob exceeds
+        // HubSpot's size limit) — surface it as an error rather than a false
+        // "saved", so the checklist isn't silently dropped. Not an offline error,
+        // so the catch routes it to the visible error status (no doomed retry).
+        const result = data.results?.[0];
+        if (result?.failed) throw new Error(result.reason || 'The checklist could not be saved.');
+        const rid = result?.recordId;
         if (rid) fcRecordIdRef.current = rid;
         setSaveStatus({ kind: 'saved', at: Date.now() });
       } catch (e: any) {
