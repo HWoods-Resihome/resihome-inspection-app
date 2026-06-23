@@ -30,6 +30,10 @@ const nextConfig = {
       '/api/video-proxy': ['./node_modules/ffmpeg-static/ffmpeg'],
       '/api/video-transcode': ['./node_modules/ffmpeg-static/ffmpeg'],
       '/api/admin/ffmpeg-check': ['./node_modules/ffmpeg-static/ffmpeg'],
+      // The committed training-guide HTML, force-included so the connector can
+      // read it at runtime and push it into HubSpot Files.
+      '/api/cron/training-guide-sync': ['./content/training/ResiWalk_Training_Guide.html'],
+      '/api/admin/training-guide/deploy': ['./content/training/ResiWalk_Training_Guide.html'],
     },
   },
   env: {

@@ -26,6 +26,12 @@
     },
     "pages/api/insights/rebuild.ts": {
       "maxDuration": 300
+    },
+    "pages/api/cron/training-guide-sync.ts": {
+      "maxDuration": 120
+    },
+    "pages/api/admin/training-guide/deploy.ts": {
+      "maxDuration": 120
     }
   },
   "crons": [
@@ -44,6 +50,10 @@
     {
       "path": "/api/insights/rebuild",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/training-guide-sync",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

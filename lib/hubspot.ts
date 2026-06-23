@@ -2121,6 +2121,48 @@ export async function uploadFileWithId(
 }
 
 /**
+ * Replace an existing HubSpot File's CONTENT in place, by id, preserving its URL
+ * (the "Replace" action in the Files UI). Reads the file's current name / folder
+ * / access, then re-uploads with overwrite — HubSpot keeps the SAME file id + URL
+ * when the name + folder match. Best-effort: returns { ok:false, error } instead
+ * of throwing. Used by the training-guide connector to push the latest manual.
+ */
+export async function replaceHubspotFileById(
+  fileId: string,
+  buffer: Buffer,
+  contentType: string,
+): Promise<{ ok: boolean; id?: string; url?: string; error?: string }> {
+  try {
+    // 1) Current metadata so we overwrite THIS file (same name + folder), not make a new one.
+    const meta = await hubspotFetch(`/files/v3/files/${fileId}`);
+    const name = String(meta?.name || '').trim();
+    if (!name) return { ok: false, error: `file ${fileId} not found / has no name` };
+    const extension = String(meta?.extension || '').trim();
+    const fullName = extension ? `${name}.${extension}` : name;
+    const folderId = meta?.parentFolderId != null ? String(meta.parentFolderId) : '';
+    const access = String(meta?.access || 'PUBLIC_INDEXABLE');
+
+    // 2) Re-upload with overwrite → replaces content, keeps id + URL.
+    const form = new FormData();
+    form.append('file', new Blob([buffer], { type: contentType }), fullName);
+    form.append('options', JSON.stringify({ access, overwrite: true }));
+    if (folderId) form.append('folderId', folderId);
+
+    const res = await fetchWithTimeout(`${API_BASE}/files/v3/files`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token()}` },
+      body: form,
+    }, 60000);
+    const body = await res.text();
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}: ${body.slice(0, 300)}` };
+    const j = JSON.parse(body);
+    return { ok: true, id: String(j.id || fileId), url: j.url || meta.url || '' };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message || e).slice(0, 300) };
+  }
+}
+
+/**
  * Attach one or more uploaded HubSpot Files to an Inspection record so they
  * appear under the record's "Attachments" card. HubSpot surfaces attachments
  * via Note engagements that carry `hs_attachment_ids`, associated to the
