@@ -6,7 +6,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { fetchActiveUsers } from '@/lib/hubspot';
 import { getMicrosoftOAuthConfig, buildMicrosoftConsentUrl } from '@/lib/microsoftAuth';
-import { isInternalEmail } from '@/lib/userAccess';
+import { isWorkspaceDomainEmail } from '@/lib/userAccess';
 import { randomBytes } from 'crypto';
 import { serialize } from 'cookie';
 
@@ -25,10 +25,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  // Microsoft sign-in is for EXTERNAL (1099) agents only; internal staff use
-  // Google (Workspace identity + the Gmail-send token). Block internal emails
-  // even if this route is hit directly.
-  if (isInternalEmail(email)) {
+  // Microsoft sign-in is for outside-domain agents only; company Workspace staff
+  // use Google (Workspace identity + the Gmail-send token). Block Workspace-domain
+  // emails even if this route is hit directly. (Keyed on domain, not permission
+  // role, so an allowlisted internal staffer on a personal address can still use
+  // it — and a personal-email Google user is unaffected.)
+  if (isWorkspaceDomainEmail(email)) {
     res.redirect(302, '/login?error=microsoft_internal_blocked');
     return;
   }

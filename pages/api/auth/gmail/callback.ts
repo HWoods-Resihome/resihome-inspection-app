@@ -20,7 +20,7 @@ import {
   encryptToken,
 } from '@/lib/gmailAuth';
 import { fetchActiveUsers } from '@/lib/hubspot';
-import { isInternalEmail } from '@/lib/userAccess';
+import { isWorkspaceDomainEmail } from '@/lib/userAccess';
 import { parse, serialize } from 'cookie';
 
 const LOGIN_STATE_COOKIE = 'resihome_login_oauth_state';
@@ -76,8 +76,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // The code must be exchanged with the SAME OAuth client that issued it.
     // External logins start on the External app, so pick the client by the
-    // claimed email's domain (mirrors google-login.ts).
-    const externalLogin = !isInternalEmail(claimedEmail);
+    // claimed email's Workspace DOMAIN — must mirror google-login.ts exactly
+    // (permission allowlisting does NOT change which OAuth app was used).
+    const externalLogin = !isWorkspaceDomainEmail(claimedEmail);
     const loginCfg = getLoginOAuthConfig(externalLogin) || cfg;
 
     let verifiedEmail: string | null = null;

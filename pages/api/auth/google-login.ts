@@ -10,7 +10,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { fetchActiveUsers } from '@/lib/hubspot';
 import { getLoginOAuthConfig, buildGmailConsentUrl, LOGIN_SCOPES, IDENTITY_SCOPES, GMAIL_TOKEN_COOKIE } from '@/lib/gmailAuth';
-import { isInternalEmail } from '@/lib/userAccess';
+import { isWorkspaceDomainEmail } from '@/lib/userAccess';
 import { randomBytes } from 'crypto';
 import { serialize } from 'cookie';
 
@@ -23,9 +23,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  // External (1099) users sign in through the SEPARATE External OAuth app
-  // (identity-only, non-Workspace-allowed); internal users use the main app.
-  const external = !isInternalEmail(email);
+  // Pick the OAuth app by Google Workspace DOMAIN, not by permission role: only
+  // company-domain emails can sign into the main "Internal" app (Google blocks
+  // anyone else with 403 org_internal). Outside-domain users — 1099 agents AND
+  // allowlisted internal staff on a personal address — go through the SEPARATE
+  // External identity OAuth app (non-Workspace-allowed). Their in-app access is
+  // decided later by isInternalEmail.
+  const external = !isWorkspaceDomainEmail(email);
   const cfg = getLoginOAuthConfig(external);
   if (!cfg) {
     res.redirect(302, '/login?error=google_not_configured');

@@ -39,6 +39,22 @@ export function isInternalEmail(email: string | null | undefined): boolean {
   return INTERNAL_DOMAINS.includes(domainOf(e));
 }
 
+/**
+ * Belongs to a company Google Workspace DOMAIN — i.e. can authenticate against
+ * the main "Internal" user-type Google OAuth app.
+ *
+ * This is DELIBERATELY domain-only and does NOT honor INTERNAL_EMAIL_ALLOWLIST:
+ * a personal address (e.g. a gmail) physically cannot sign into a Workspace-
+ * Internal OAuth app — Google returns "403 org_internal" before the app is ever
+ * reached. So allowlisted outside-domain staff are INTERNAL for permissions
+ * (isInternalEmail) but must still authenticate through the External identity
+ * OAuth app. Use THIS for picking the OAuth app/provider; use isInternalEmail
+ * for what the signed-in user may see and do.
+ */
+export function isWorkspaceDomainEmail(email: string | null | undefined): boolean {
+  return INTERNAL_DOMAINS.includes(domainOf(email));
+}
+
 // Templates an external user can CREATE and EDIT (own, until completed).
 export const EXTERNAL_EDIT_TEMPLATES: TemplateType[] = ['leasing_agent_1099_property_inspection'];
 // Templates an external user can VIEW (read + completed PDF) but never edit —
