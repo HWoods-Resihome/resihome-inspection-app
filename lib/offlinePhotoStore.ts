@@ -120,11 +120,9 @@ export function kickFlush(): void {
   }, 700);
 }
 
-// On iOS the flush is SUSPENDED while a camera is open (memory safeguard), so the
-// per-capture kickFlush() calls are no-ops during the session and the queue would
-// otherwise sit untouched until the form's next 15s tick after Done. Kick the
-// flush the instant the LAST camera closes so the queued photos start uploading
-// immediately — this is what makes post-Done sync feel fast on iOS.
+// Photos upload DURING the camera session (bounded concurrency), but kick one more
+// flush the instant the LAST camera closes so anything still queued drains promptly
+// without waiting for the form's next 15s tick — keeps post-Done sync feeling fast.
 if (typeof window !== 'undefined') {
   subscribeCameraOpen((open) => { if (!open) kickFlush(); });
 }
@@ -613,13 +611,15 @@ export async function flushQueuedPhotos(
   const existing = flushInFlight.get(inspectionRecordId);
   if (existing) return existing;
   // iOS uploads DURING the camera session too — photos save as they're taken, not
-  // piled up until Done. This is now safe because the actual cause of the wedged
-  // "Syncing…" is fixed at the root: every IndexedDB op is timeout-guarded (see
-  // tx/openDb), so an iOS IDB stall during the camera can no longer hang the flush
-  // forever. While a camera is open we still drain ONE AT A TIME (a single upload's
-  // encode never overlaps the next capture) and skip the per-shot thumbnail decode
-  // (makeThumbBlob guard); full concurrency once the camera is closed.
-  const concurrency = (IS_IOS_WEBKIT && isAnyCameraOpen()) ? 1 : FLUSH_CONCURRENCY;
+  // piled up until Done. Drain at the SAME bounded concurrency whether or not the
+  // camera is open, so a long continuous Scope keeps pace with the shutter instead
+  // of building a big backlog that only fully drains after the camera closes (what
+  // let 180+ photos queue on good service). This is safe now because: every IDB op
+  // is timeout-guarded (see tx/openDb); the per-shot full-res thumbnail decode is
+  // still skipped while the camera is open (makeThumbBlob guard); and the flush
+  // loads each photo's bytes just-in-time, so only ~concurrency compressed images
+  // are ever resident — never the whole queue.
+  const concurrency = FLUSH_CONCURRENCY;
   const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, concurrency);
   flushInFlight.set(inspectionRecordId, run);
   try { return await run; }
