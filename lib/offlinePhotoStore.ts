@@ -89,7 +89,7 @@ const urlByLocalId = new Map<string, { displayUrl: string; revokables: string[] 
 // stalled (private mode, quota, or an iOS/Android IDB chain stall). Volatile —
 // lost if the tab is killed before they upload — but it keeps capture + "Done"
 // instant and the photo uploading in the background, instead of blocking the
-// camera on (or failing it from) a wedged IndexedDB write. getAllRecords() merges
+// camera on (or failing it from) a wedged IndexedDB write. listQueueMeta() merges
 // it in, so the flush + the queued-count submit gate treat these like any other
 // queued photo. Keyed by localId.
 const memQueue = new Map<string, QueuedPhoto>();
@@ -291,19 +291,55 @@ async function txInner<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) 
   }), mode);
 }
 
-async function getAllRecords(): Promise<QueuedPhoto[]> {
-  let idb: QueuedPhoto[] = [];
+// Lightweight view of a queued record: everything EXCEPT the heavy byte payloads.
+type QueuedPhotoMeta = Omit<QueuedPhoto, 'bytes' | 'blob' | 'videoBytes' | 'videoBlob'>;
+
+function stripBytes(rec: QueuedPhoto): QueuedPhotoMeta {
+  const m: Partial<QueuedPhoto> = { ...rec };
+  delete m.bytes; delete m.blob; delete m.videoBytes; delete m.videoBlob;
+  return m as QueuedPhotoMeta;
+}
+
+// Enumerate the queue as METADATA ONLY (no bytes), via a cursor so each record's
+// bytes are deserialized one at a time and released as we advance — peak memory
+// is ~one photo, not the whole backlog. getAll() (above) instead materializes
+// EVERY record's bytes at once, which OOM-crashed the iOS WebKit renderer when a
+// big offline queue (180+ shots) tried to sync. Use this for worklists/counts;
+// load the actual bytes just-in-time with getRecord(). Merges the in-memory
+// fallback queue (dedupe by localId).
+async function listQueueMeta(): Promise<QueuedPhotoMeta[]> {
+  const out: QueuedPhotoMeta[] = [];
   if (idbAvailable()) {
-    try { idb = (await tx<QueuedPhoto[]>('readonly', (s) => s.getAll())) || []; }
-    catch { idb = []; }
+    try {
+      const db = await withIdbTimeout(openDb(), 'open');
+      await withIdbTimeout(new Promise<void>((resolve, reject) => {
+        const t = db.transaction(STORE, 'readonly');
+        const req = t.objectStore(STORE).openCursor();
+        req.onsuccess = () => {
+          const cursor = req.result as IDBCursorWithValue | null;
+          if (!cursor) return; // exhausted — t.oncomplete resolves
+          out.push(stripBytes(cursor.value as QueuedPhoto));
+          cursor.continue();
+        };
+        req.onerror = () => reject(req.error);
+        t.oncomplete = () => { try { db.close(); } catch { /* noop */ } resolve(); };
+        t.onerror = () => reject(t.error || new Error('IndexedDB tx error'));
+        t.onabort = () => reject(t.error || new Error('IndexedDB tx aborted'));
+      }), 'readonly');
+    } catch { /* fall back to the in-memory queue only */ }
   }
-  // Merge the in-memory fallback queue (photos whose durable IndexedDB write
-  // failed/stalled). Dedupe by localId — a durable copy in IDB wins — so the
-  // flush, the queued-count submit gate, and rehydrate all see these photos and
-  // never lose them, even though they never reached IndexedDB.
-  if (memQueue.size === 0) return idb;
-  const seen = new Set(idb.map((r) => r.localId));
-  return [...idb, ...Array.from(memQueue.values()).filter((r) => !seen.has(r.localId))];
+  if (memQueue.size === 0) return out;
+  const seen = new Set(out.map((r) => r.localId));
+  for (const r of memQueue.values()) if (!seen.has(r.localId)) out.push(stripBytes(r));
+  return out;
+}
+
+// Fetch ONE full record (with its bytes) by localId — used to load a photo's
+// bytes just-in-time, so only the photos actively uploading are ever resident.
+async function getRecord(localId: string): Promise<QueuedPhoto | undefined> {
+  if (!idbAvailable()) return undefined;
+  try { return (await tx<QueuedPhoto | undefined>('readonly', (s) => s.get(localId))) || undefined; }
+  catch { return undefined; }
 }
 
 async function putRecord(rec: QueuedPhoto): Promise<void> {
@@ -480,13 +516,16 @@ export async function uploadVideoEntryOrQueue(
 }
 
 export async function countQueuedPhotos(inspectionRecordId: string): Promise<number> {
-  const all = await getAllRecords();
+  // Metadata-only (no bytes) — this is called frequently (submit gate + flush
+  // polling); loading every photo's bytes just to count them was a recurring
+  // memory spike on big queues.
+  const all = await listQueueMeta();
   return all.filter((r) => r.inspectionRecordId === inspectionRecordId).length;
 }
 
 /** Discard every queued photo/video for an inspection (manual "clear stuck"). */
 export async function clearQueuedPhotos(inspectionRecordId: string): Promise<number> {
-  const all = await getAllRecords();
+  const all = await listQueueMeta();
   let n = 0;
   for (const r of all) {
     if (r.inspectionRecordId !== inspectionRecordId) continue;
@@ -505,12 +544,16 @@ export async function clearQueuedPhotos(inspectionRecordId: string): Promise<num
 export async function rehydrateQueuedPhotos(
   inspectionRecordId: string,
 ): Promise<{ localId: string; sectionId: string; url: string; replacesUrl?: string; lineExternalId?: string }[]> {
-  const all = await getAllRecords();
+  // Metadata first (no bytes), then load each record's bytes ONE AT A TIME below
+  // so a heavy reopen (180+ queued shots) never materializes the whole queue's
+  // bytes at once — the iOS WebKit OOM crash.
+  const metas = (await listQueueMeta()).filter((r) => r.inspectionRecordId === inspectionRecordId);
   const out: { localId: string; sectionId: string; url: string; replacesUrl?: string; lineExternalId?: string }[] = [];
-  for (const r of all) {
-    if (r.inspectionRecordId !== inspectionRecordId) continue;
-    let entry = urlByLocalId.get(r.localId);
+  for (const meta of metas) {
+    let entry = urlByLocalId.get(meta.localId);
     if (!entry) {
+      const r = memQueue.get(meta.localId) || await getRecord(meta.localId);
+      if (!r) continue; // synced/removed since we listed — nothing to show
       const pb = blobFor(r);
       if (!pb) continue; // data gone (legacy iOS-evicted record) — nothing to show
       const vb = r.kind === 'video' ? videoBlobFor(r) : null;
@@ -530,9 +573,9 @@ export async function rehydrateQueuedPhotos(
         entry = { displayUrl: url, revokables: [url, fullUrl] };
         registerDraftFullRes(url, fullUrl);
       }
-      urlByLocalId.set(r.localId, entry);
+      urlByLocalId.set(meta.localId, entry);
     }
-    out.push({ localId: r.localId, sectionId: r.sectionId, url: entry.displayUrl, replacesUrl: r.replacesUrl, lineExternalId: r.lineExternalId });
+    out.push({ localId: meta.localId, sectionId: meta.sectionId, url: entry.displayUrl, replacesUrl: meta.replacesUrl, lineExternalId: meta.lineExternalId });
   }
   return out;
 }
@@ -592,13 +635,15 @@ async function doFlushQueuedPhotos(
   // Only flush THIS inspection's photos — the mounted form is what persists the
   // section answer record after upload, so another inspection's photos must wait
   // until that inspection is open (otherwise they'd upload but never attach).
-  const all = (await getAllRecords())
+  // Worklist is METADATA ONLY (no bytes); each photo's bytes are loaded
+  // just-in-time in processOne so the whole backlog is never resident at once.
+  const all = (await listQueueMeta())
     .filter((r) => r.inspectionRecordId === inspectionRecordId)
     .sort((a, b) => a.createdAt - b.createdAt);
   let synced = 0;
   let stop = false; // set when offline/transient — stop taking NEW work, retry next tick
 
-  const finishSynced = async (rec: QueuedPhoto, newUrl: string) => {
+  const finishSynced = async (rec: QueuedPhotoMeta, newUrl: string) => {
     const entry = urlByLocalId.get(rec.localId);
     const oldUrl = entry?.displayUrl || '';
     memQueue.delete(rec.localId);     // clear the in-memory fallback copy (if any)
@@ -632,10 +677,17 @@ async function doFlushQueuedPhotos(
     synced++;
   };
 
-  const processOne = async (rec: QueuedPhoto) => {
+  const processOne = async (meta: QueuedPhotoMeta) => {
     // Already uploaded by the background-sync service worker (tab was closed) —
-    // skip the network and go straight to attaching it.
-    if (rec.uploadedUrl) { await finishSynced(rec, rec.uploadedUrl); return; }
+    // skip the network and go straight to attaching it. No bytes needed.
+    if (meta.uploadedUrl) { await finishSynced(meta, meta.uploadedUrl); return; }
+    // Load THIS photo's bytes JUST-IN-TIME (in-memory fallback wins, else IDB) so
+    // only the ~concurrency photos actively uploading are ever resident — never
+    // the whole backlog, which is what OOM-crashed the iOS WebKit renderer mid-
+    // sync on big offline queues (180+ shots). It may have been synced/removed by
+    // a concurrent pass since we listed; if so, skip.
+    const rec = memQueue.get(meta.localId) || await getRecord(meta.localId);
+    if (!rec) return;
     // Reconstruct the bytes. If they're genuinely gone (an old record whose iOS
     // Blob was evicted — the root cause this change prevents going forward), the
     // upload can NEVER succeed: stop the futile "check your signal" retry loop,
@@ -711,6 +763,6 @@ async function doFlushQueuedPhotos(
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, all.length) }, worker));
 
-  const remaining = (await getAllRecords()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
+  const remaining = (await listQueueMeta()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
   return { synced, remaining, lastError };
 }
