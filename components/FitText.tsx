@@ -16,6 +16,7 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startPt = useRef<{ x: number; y: number } | null>(null);
   const longPressFired = useRef(false);
+  const copiedNative = useRef(false);
 
   useEffect(() => {
     const el = ref.current;
@@ -47,46 +48,60 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
     if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; }
     startPt.current = null;
     longPressFired.current = false;
+    copiedNative.current = false;
   };
 
-  const doCopy = async () => {
-    if (!copyLink) return;
-    const url = /^https?:/i.test(copyLink)
+  const resolvedUrl = () => {
+    if (!copyLink) return '';
+    return /^https?:/i.test(copyLink)
       ? copyLink
       : (typeof window !== 'undefined' ? `${window.location.origin}${copyLink}` : copyLink);
-    let ok = false;
-    try {
-      await navigator.clipboard.writeText(url);
-      ok = true;
-    } catch {
-      // Fallback for webviews/older browsers without the async clipboard API.
-      try {
-        const ta = document.createElement('textarea');
-        ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
-        document.body.appendChild(ta); ta.focus(); ta.select();
-        ok = document.execCommand('copy');
-        document.body.removeChild(ta);
-      } catch { ok = false; }
-    }
-    // No in-app toast — the device shows its own copy confirmation; a subtle
-    // haptic is the only extra feedback.
-    if (ok) { try { navigator.vibrate?.(15); } catch { /* no haptics — fine */ } }
   };
+
+  // Native (Capacitor) clipboard — works in the iOS/Android webview WITHOUT a
+  // user-gesture requirement (the reason the web clipboard API silently failed on
+  // a long-press in the iOS WKWebView). Uses the runtime-registered global plugin
+  // so @capacitor/clipboard isn't pulled into the web bundle. Returns true if it
+  // handled the copy. No-op (false) in a normal browser.
+  const nativeCopy = (text: string): boolean => {
+    if (typeof window === 'undefined') return false;
+    const cap = (window as any).Capacitor;
+    if (!cap?.isNativePlatform?.()) return false;
+    const clip = cap.Plugins?.Clipboard;
+    if (!clip?.write) return false;
+    try { void clip.write({ string: text }); return true; } catch { return false; }
+  };
+
+  // Web clipboard (needs a user gesture — call from pointerUp). Async API first,
+  // then an execCommand fallback for older webviews.
+  const webCopy = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); return; }
+    catch { /* fall through to execCommand */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch { /* nothing else to try */ }
+  };
+
+  const haptic = () => { try { navigator.vibrate?.(15); } catch { /* iOS has no vibrate — fine */ } };
 
   const bind = copyLink ? {
     onPointerDown: (e: React.PointerEvent) => {
       startPt.current = { x: e.clientX, y: e.clientY };
       longPressFired.current = false;
+      copiedNative.current = false;
       if (pressTimer.current) clearTimeout(pressTimer.current);
-      // The timer only RECOGNIZES the hold (+ a haptic where supported). The
-      // clipboard write itself must run inside a user gesture — iOS WKWebView
-      // rejects clipboard.writeText/execCommand from a setTimeout (no active user
-      // activation), which is why the copy silently failed. So we copy on
-      // pointerUP (a real gesture) instead.
+      // When the hold is recognized: copy IMMEDIATELY via the native plugin (no
+      // gesture needed in the webview). On plain web the native path is a no-op
+      // and we instead copy on pointerUp, which is a valid user gesture.
       pressTimer.current = setTimeout(() => {
         pressTimer.current = null;
         longPressFired.current = true;
-        try { navigator.vibrate?.(15); } catch { /* iOS has no vibrate — fine */ }
+        copiedNative.current = nativeCopy(resolvedUrl());
+        haptic();
       }, 500);
     },
     onPointerMove: (e: React.PointerEvent) => {
@@ -95,8 +110,11 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
     },
     onPointerUp: () => {
       const fired = longPressFired.current;
+      const already = copiedNative.current;
       cancelPress();
-      if (fired) void doCopy(); // writeText is invoked synchronously in the pointerup gesture (iOS-safe)
+      // Native already copied on the hold; on web, copy now inside this pointerup
+      // gesture (the only place iOS Safari permits clipboard.writeText).
+      if (fired && !already) void webCopy(resolvedUrl());
     },
     onPointerLeave: cancelPress,
     onPointerCancel: cancelPress,
