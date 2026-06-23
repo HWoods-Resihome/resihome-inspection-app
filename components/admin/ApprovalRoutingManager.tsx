@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   type ApprovalRoutingConfig, type ApprovalUser, type PodRouting, type RegionRouting,
-  resolveApprovers, emptyApprovalRouting,
+  resolveApprovers, emptyApprovalRouting, DEFAULT_POD_CHANNELS,
 } from '@/lib/approvalRouting';
 
 interface OwnerOption { name: string; slackId: string; }
@@ -126,13 +126,22 @@ export function ApprovalRoutingManager() {
   };
   const patchRegion = (podId: string, region: string, fn: (r: RegionRouting) => RegionRouting) =>
     patchPod(podId, (p) => ({ ...p, regions: p.regions.map((r) => (r.region === region ? fn(r) : r)) }));
+  // Add / set / remove a PM or Sr. PM line (key = 'pms' | 'srPms').
+  const addUser = (podId: string, region: string, key: 'pms' | 'srPms') =>
+    patchRegion(podId, region, (r) => ({ ...r, [key]: [...(r[key] || []), { name: '', slackId: '' }] }));
+  const setUser = (podId: string, region: string, key: 'pms' | 'srPms', idx: number, u: ApprovalUser | null) =>
+    patchRegion(podId, region, (r) => {
+      const list = (r[key] || []).slice();
+      if (u == null) list.splice(idx, 1); else list[idx] = u;
+      return { ...r, [key]: list };
+    });
 
   const addRegion = (podId: string) => {
     const picked = (customRegion[podId]?.trim()) || addSel[podId] || '';
     if (!picked) return;
     if (usedRegions.has(picked)) { setError(`"${picked}" is already assigned to a POD.`); return; }
     setError(null);
-    patchPod(podId, (p) => ({ ...p, regions: [...p.regions, { region: picked, pm: null, pmNte: null, srPm: null, srPmNte: null }] }));
+    patchPod(podId, (p) => ({ ...p, regions: [...p.regions, { region: picked, pms: [], pmNte: null, srPms: [], srPmNte: null }] }));
     setAddSel((m) => ({ ...m, [podId]: '' }));
     setCustomRegion((m) => ({ ...m, [podId]: '' }));
   };
@@ -236,6 +245,15 @@ export function ApprovalRoutingManager() {
 
                     {podOpen && (
                       <div className="p-4">
+                        {/* Slack channel (name fixed per POD; ID editable, pre-filled) */}
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                          <span className="text-[11px] font-heading font-semibold text-gray-500 w-14 shrink-0">Slack</span>
+                          <span className="text-sm text-gray-400 select-none" title="Fixed review channel for this POD">#{DEFAULT_POD_CHANNELS[pod.id]?.channelName || pod.id}</span>
+                          <input className={`${inputCls} w-44`} value={pod.channelId}
+                            onChange={(e) => patchPod(pod.id, (p) => ({ ...p, channelId: e.target.value }))}
+                            placeholder="Channel ID (C…)" title="Slack channel ID this POD posts to" />
+                        </div>
+
                         {/* RM */}
                         <div className="mb-3 pb-3 border-b border-gray-100">
                           <OwnerPicker label="RM" user={pod.rm} owners={owners}
@@ -252,14 +270,28 @@ export function ApprovalRoutingManager() {
                                 <span className="font-heading font-semibold text-sm text-ink">{rc.region}</span>
                                 <button type="button" onClick={() => removeRegion(pod.id, rc.region)} className="text-gray-400 hover:text-rose-600 text-sm font-heading font-semibold" aria-label="Delete region">Delete</button>
                               </div>
-                              <div className="space-y-2">
-                                <OwnerPicker label="PM" user={rc.pm} owners={owners}
-                                  onChange={(u) => patchRegion(pod.id, rc.region, (r) => ({ ...r, pm: u }))}
-                                  nteValue={rc.pmNte} onNte={(n) => patchRegion(pod.id, rc.region, (r) => ({ ...r, pmNte: n }))} />
-                                <OwnerPicker label="Sr. PM" user={rc.srPm} owners={owners}
-                                  onChange={(u) => patchRegion(pod.id, rc.region, (r) => ({ ...r, srPm: u }))}
-                                  nteValue={rc.srPmNte} onNte={(n) => patchRegion(pod.id, rc.region, (r) => ({ ...r, srPmNte: n }))} />
-                              </div>
+
+                              {/* PM tier — many PMs, one ceiling; all tagged within it */}
+                              {([{ key: 'pms', list: rc.pms, nte: rc.pmNte, label: 'PM' }, { key: 'srPms', list: rc.srPms, nte: rc.srPmNte, label: 'Sr. PM' }] as const).map((tier) => (
+                                <div key={tier.key} className="mt-2 first:mt-0">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[11px] font-heading font-semibold text-gray-500">{tier.label}s</span>
+                                    <NteInput label={`${tier.label} NTE`} value={tier.nte}
+                                      onChange={(n) => patchRegion(pod.id, rc.region, (r) => ({ ...r, [tier.key === 'pms' ? 'pmNte' : 'srPmNte']: n }))} />
+                                  </div>
+                                  <div className="space-y-1 mt-1">
+                                    {(tier.list || []).length === 0 && <p className="text-[11px] text-gray-400 pl-1">none</p>}
+                                    {(tier.list || []).map((u, i) => (
+                                      <div key={i} className="flex items-center gap-2">
+                                        <OwnerPicker label={`#${i + 1}`} user={u} owners={owners}
+                                          onChange={(nu) => setUser(pod.id, rc.region, tier.key, i, nu)} />
+                                        <button type="button" onClick={() => setUser(pod.id, rc.region, tier.key, i, null)} className="text-gray-400 hover:text-rose-600 text-lg leading-none px-1" aria-label={`Remove ${tier.label}`}>×</button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <button type="button" onClick={() => addUser(pod.id, rc.region, tier.key)} className="mt-1 text-xs font-heading font-semibold text-brand hover:underline">+ Add {tier.label}</button>
+                                </div>
+                              ))}
                             </div>
                           ))}
                         </div>
@@ -311,7 +343,10 @@ export function ApprovalRoutingManager() {
                       Tags: {preview.users.length ? preview.users.map((u) => u.slackId ? `${u.name} (@${u.slackId})` : `${u.name} (no Slack ID)`).join(', ') : '— nobody configured —'}
                       <span className="ml-2 text-[11px] uppercase tracking-wide text-gray-400">{levelLabel(preview.level)}</span>
                     </div>
-                    <div className="text-[12px] text-gray-500 mt-0.5">{preview.reason}</div>
+                    <div className="text-[12px] text-gray-500 mt-0.5">
+                      {preview.channelName ? <>Posts to <span className="font-heading font-semibold">#{preview.channelName}</span>{preview.channelId ? ` (${preview.channelId})` : ''}. </> : null}
+                      {preview.reason}
+                    </div>
                   </div>
                 )}
               </div>

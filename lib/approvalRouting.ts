@@ -34,13 +34,13 @@ export interface ApprovalUser {
 export interface RegionRouting {
   /** The property region value this card maps to (e.g. "GA: Atlanta"). */
   region: string;
-  /** Optional PM for this region. */
-  pm?: ApprovalUser | null;
-  /** PM not-to-exceed ceiling ($). null = not set (PM tier skipped). */
+  /** PMs for this region — ALL are tagged when an approval is within the PM tier ceiling. */
+  pms: ApprovalUser[];
+  /** PM tier not-to-exceed ceiling ($). null = not set (PM tier skipped). */
   pmNte: number | null;
-  /** Optional Sr. PM for this region. */
-  srPm?: ApprovalUser | null;
-  /** Sr. PM not-to-exceed ceiling ($). null = not set (Sr. PM tier skipped). */
+  /** Sr. PMs for this region — ALL are tagged when within the Sr. PM tier ceiling. */
+  srPms: ApprovalUser[];
+  /** Sr. PM tier not-to-exceed ceiling ($). null = not set (Sr. PM tier skipped). */
   srPmNte: number | null;
 }
 
@@ -49,6 +49,8 @@ export type PodId = 'georgia' | 'florida' | 'scattered' | 'west';
 export interface PodRouting {
   id: PodId;
   name: string;
+  /** Slack channel ID the POD's pending-approval notifications post to. */
+  channelId: string;
   /** Regional Manager for the POD. */
   rm?: ApprovalUser | null;
   /** RM not-to-exceed ceiling ($); above it escalates to the directors. null = no ceiling. */
@@ -70,6 +72,14 @@ export const POD_DEFS: { id: PodId; name: string }[] = [
   { id: 'west', name: 'West' },
 ];
 
+/** Default Slack rate-card-review channel per POD (editable in the admin UI). */
+export const DEFAULT_POD_CHANNELS: Record<PodId, { channelName: string; channelId: string }> = {
+  georgia: { channelName: 'ga-ratecard-review', channelId: 'C08NEJYDW65' },
+  florida: { channelName: 'florida-ratecard-review', channelId: 'C06ET3QPYRY' },
+  scattered: { channelName: 'scattered-ratecard-review', channelId: 'C08LQCBGTD1' },
+  west: { channelName: 'west-ratecard-review', channelId: 'C087UENA8RF' },
+};
+
 export type ApprovalLevel = 'pm' | 'sr_pm' | 'rm' | 'director';
 
 export interface ApprovalRecipients {
@@ -78,6 +88,9 @@ export interface ApprovalRecipients {
   users: ApprovalUser[];
   podId: PodId | null;
   podName: string | null;
+  /** Slack channel to post to (the matched POD's channel); null when unmapped. */
+  channelId: string | null;
+  channelName: string | null;
   region: string | null;
   /** Human-readable explanation of why this tier was chosen (for the preview + logs). */
   reason: string;
@@ -90,7 +103,7 @@ function isUser(u: ApprovalUser | null | undefined): u is ApprovalUser {
 /** Build an empty config with the 4 fixed PODs and no users. */
 export function emptyApprovalRouting(): ApprovalRoutingConfig {
   return {
-    pods: POD_DEFS.map((p) => ({ id: p.id, name: p.name, rm: null, rmNte: null, regions: [] })),
+    pods: POD_DEFS.map((p) => ({ id: p.id, name: p.name, channelId: DEFAULT_POD_CHANNELS[p.id].channelId, rm: null, rmNte: null, regions: [] })),
     directors: [],
   };
 }
@@ -106,6 +119,14 @@ function cleanUser(u: any): ApprovalUser | null {
 function cleanNte(v: any): number | null {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Sanitize a list of users; accepts an array, falling back to a legacy single user. */
+function cleanUserList(arr: any, legacySingle?: any): ApprovalUser[] {
+  const src = Array.isArray(arr) ? arr : (legacySingle != null ? [legacySingle] : []);
+  const out: ApprovalUser[] = [];
+  for (const u of src) { const c = cleanUser(u); if (c) out.push(c); }
+  return out;
 }
 
 /**
@@ -131,14 +152,16 @@ export function normalizeApprovalRouting(raw: any): ApprovalRoutingConfig {
       seen.add(region);
       regions.push({
         region,
-        pm: cleanUser(r?.pm),
+        // Accept arrays; migrate a legacy single `pm`/`srPm` into the list.
+        pms: cleanUserList(r?.pms, r?.pm),
         // Migrate the legacy single region `nte` onto the PM tier when present.
         pmNte: cleanNte(r?.pmNte ?? r?.nte),
-        srPm: cleanUser(r?.srPm),
+        srPms: cleanUserList(r?.srPms, r?.srPm),
         srPmNte: cleanNte(r?.srPmNte),
       });
     }
-    return { id: def.id, name: def.name, rm: cleanUser(src.rm), rmNte: cleanNte(src.rmNte), regions };
+    const channelId = String(src.channelId || '').trim() || DEFAULT_POD_CHANNELS[def.id].channelId;
+    return { id: def.id, name: def.name, channelId, rm: cleanUser(src.rm), rmNte: cleanNte(src.rmNte), regions };
   });
 
   const directors: ApprovalUser[] = [];
@@ -175,41 +198,45 @@ export function resolveApprovers(
   region: string,
   amount: number,
 ): ApprovalRecipients {
-  const directorsResult = (reason: string): ApprovalRecipients => ({
-    level: 'director', users: config.directors.slice(), podId: null, podName: null, region: region || null, reason,
-  });
-
   const match = findRegion(config, region);
   if (!match) {
-    return directorsResult(`Region "${region || '(none)'}" isn't mapped to a POD — defaulting to the director tier.`);
+    return {
+      level: 'director', users: config.directors.slice(), podId: null, podName: null,
+      channelId: null, channelName: null, region: region || null,
+      reason: `Region "${region || '(none)'}" isn't mapped to a POD — defaulting to the director tier.`,
+    };
   }
   const { pod, region: rc } = match;
+  const channelId = pod.channelId || DEFAULT_POD_CHANNELS[pod.id].channelId;
+  const channelName = DEFAULT_POD_CHANNELS[pod.id].channelName;
   const amt = Number(amount);
   const amtOk = Number.isFinite(amt) && amt >= 0;
   const money = (n: number) => `$${Number(n || 0).toLocaleString()}`;
   const amtStr = amtOk ? money(amt) : 'Amount';
 
-  // Ladder: PM → Sr. PM → RM → Directors. A tier is chosen only if its user is
-  // set AND its NTE covers the amount; an unset user OR an unset/too-low NTE
-  // falls through to the next tier (so an empty PM/Sr. PM defaults to the RM).
-  const lowerTiers: { user: ApprovalUser | null | undefined; nte: number | null; level: ApprovalLevel; label: string }[] = [
-    { user: rc.pm, nte: rc.pmNte, level: 'pm', label: 'PM' },
-    { user: rc.srPm, nte: rc.srPmNte, level: 'sr_pm', label: 'Sr. PM' },
+  // Ladder: PM → Sr. PM → RM → Directors. A tier is chosen only if it has at
+  // least one user AND its NTE covers the amount; ALL users at the chosen tier
+  // are tagged. An empty tier or an unset/too-low NTE falls through to the next
+  // (so an empty PM/Sr. PM defaults to the RM).
+  const lowerTiers: { users: ApprovalUser[]; nte: number | null; level: ApprovalLevel; label: string }[] = [
+    { users: rc.pms, nte: rc.pmNte, level: 'pm', label: 'PM' },
+    { users: rc.srPms, nte: rc.srPmNte, level: 'sr_pm', label: 'Sr. PM' },
   ];
   for (const t of lowerTiers) {
-    if (isUser(t.user) && t.nte != null && amtOk && amt <= t.nte) {
+    const valid = t.users.filter(isUser);
+    if (valid.length > 0 && t.nte != null && amtOk && amt <= t.nte) {
       return {
-        level: t.level, users: [t.user], podId: pod.id, podName: pod.name, region: rc.region,
-        reason: `${amtStr} is within the ${rc.region} ${t.label} ceiling (${money(t.nte)}) → ${t.label}.`,
+        level: t.level, users: valid, podId: pod.id, podName: pod.name, channelId, channelName, region: rc.region,
+        reason: `${amtStr} is within the ${rc.region} ${t.label} ceiling (${money(t.nte)}) → ${valid.length > 1 ? `${valid.length} ${t.label}s` : t.label}.`,
       };
     }
   }
 
   // RM tier — within the RM ceiling (or RM has no ceiling set).
   if (isUser(pod.rm) && (pod.rmNte == null || (amtOk && amt <= pod.rmNte))) {
-    const noLower = !isUser(rc.pm) && !isUser(rc.srPm);
+    const noLower = !rc.pms.some(isUser) && !rc.srPms.some(isUser);
     return {
-      level: 'rm', users: [pod.rm], podId: pod.id, podName: pod.name, region: rc.region,
+      level: 'rm', users: [pod.rm], podId: pod.id, podName: pod.name, channelId, channelName, region: rc.region,
       reason: noLower
         ? `No PM / Sr. PM set for ${rc.region} → defaults to the ${pod.name} RM.`
         : `${amtStr} is above the PM / Sr. PM ceilings → ${pod.name} RM${pod.rmNte != null ? ` (ceiling ${money(pod.rmNte)})` : ''}.`,
@@ -218,7 +245,7 @@ export function resolveApprovers(
 
   // Directors — above the RM ceiling, or no RM configured.
   return {
-    level: 'director', users: config.directors.slice(), podId: pod.id, podName: pod.name, region: rc.region,
+    level: 'director', users: config.directors.slice(), podId: pod.id, podName: pod.name, channelId, channelName, region: rc.region,
     reason: isUser(pod.rm)
       ? `${amtStr} exceeds the ${pod.name} RM ceiling (${money(pod.rmNte ?? 0)}) → director tier.`
       : `No RM configured for ${pod.name} → director tier.`,
