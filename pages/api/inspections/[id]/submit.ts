@@ -114,7 +114,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             answers,
             { baseUrl },
           );
-          if (summary.created.length || summary.failed.length) {
+          if (summary.gated) {
+            console.log(`[submit] 1099 compliance tickets for ${id}: gated (already processed) — none created`);
+          } else if (summary.created.length || summary.failed.length) {
             console.log(`[submit] 1099 compliance tickets for ${id}: created [${summary.created.join('; ')}]${summary.failed.length ? ` failed [${summary.failed.join(', ')}]` : ''}`);
           }
         } catch (e) {

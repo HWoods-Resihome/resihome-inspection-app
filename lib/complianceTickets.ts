@@ -19,7 +19,8 @@
 import { parseFcAnswers } from '@/lib/finalChecklist';
 import {
   createComplianceTicket, createTicketNoteWithAttachments, uploadPhotoUrlForAttachment,
-  resolveInspectionPropertyId, type SavedAnswer,
+  resolveInspectionPropertyId, getComplianceTicketsStamp, stampComplianceTicketsCreated,
+  type SavedAnswer,
 } from '@/lib/hubspot';
 
 interface ComplianceIssue {
@@ -73,11 +74,26 @@ export async function createComplianceTicketsOnSubmit(
   inspection: ComplianceInspectionRef,
   answers: SavedAnswer[],
   opts?: { baseUrl?: string },
-): Promise<{ created: string[]; failed: string[] }> {
-  const issues = complianceIssuesFromAnswers(answers);
+): Promise<{ created: string[]; failed: string[]; gated: boolean }> {
   const created: string[] = [];
   const failed: string[] = [];
-  if (issues.length === 0) return { created, failed };
+
+  // GATE: compliance tickets are created ONCE per inspection. If this inspection
+  // was already processed (stamp present), re-entering / re-submitting and
+  // changing answers must NOT create the tickets again.
+  const stamp = await getComplianceTicketsStamp(inspection.recordId);
+  if (stamp) {
+    console.log(`[compliance-tickets] ${inspection.recordId}: already processed (${stamp}) — gate active, skipping`);
+    return { created, failed, gated: true };
+  }
+
+  const issues = complianceIssuesFromAnswers(answers);
+  if (issues.length === 0) {
+    // First submit, no compliance issues — stamp anyway so a later re-entry that
+    // flips a utility OFF doesn't open a ticket on an already-submitted inspection.
+    await stampComplianceTicketsCreated(inspection.recordId);
+    return { created, failed, gated: false };
+  }
 
   const address = (inspection.propertyAddressSnapshot || '').trim();
   const base = (opts?.baseUrl || 'https://resiwalk.com').replace(/\/+$/, '');
@@ -135,5 +151,12 @@ export async function createComplianceTicketsOnSubmit(
       failed.push(issue.reason);
     }
   }
-  return { created, failed };
+
+  // Stamp the inspection so future submits short-circuit (gate). Only when every
+  // issue was handled — if one failed, leave it unstamped so a re-submit can
+  // retry it (the subject dedupe still prevents duplicating the ones that did
+  // succeed).
+  if (failed.length === 0) await stampComplianceTicketsCreated(inspection.recordId);
+
+  return { created, failed, gated: false };
 }

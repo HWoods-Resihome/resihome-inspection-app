@@ -2333,6 +2333,10 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
 // "Compliance Issues" pipeline, NEW stage) but overridable via env.
 const COMPLIANCE_TICKET_PIPELINE_ID = (process.env.HUBSPOT_COMPLIANCE_PIPELINE_ID || '81076231').trim();
 const COMPLIANCE_TICKET_STAGE_NEW_ID = (process.env.HUBSPOT_COMPLIANCE_STAGE_NEW_ID || '153077089').trim();
+// Per-inspection gate: a datetime stamped on the inspection once its compliance
+// tickets have been processed, so re-entering / re-submitting the SAME inspection
+// never creates the tickets again.
+const COMPLIANCE_STAMP_PROP = 'compliance_tickets_created_at';
 // Ticket object identifier for the association + object endpoints. The proven
 // note-attach path passes the object NAME (e.g. 'notes'), which HubSpot accepts
 // alongside the numeric id ('0-5') — use the name for the same compatibility.
@@ -2586,6 +2590,60 @@ export async function createComplianceTicket(args: {
     associatedProperty = await associateTicketToProperty(ticketId, propId);
   }
   return { ticketId, associatedProperty, deduped: false };
+}
+
+/** Read the per-inspection compliance-tickets stamp (null if never processed). */
+export async function getComplianceTicketsStamp(inspectionRecordId: string): Promise<string | null> {
+  const { inspection } = typeIds();
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${inspection}/${inspectionRecordId}?properties=${COMPLIANCE_STAMP_PROP}`);
+    const v = resp?.properties?.[COMPLIANCE_STAMP_PROP];
+    return v ? String(v) : null;
+  } catch (e) {
+    // If the property doesn't exist yet, treat as "never processed" (the subject
+    // dedupe still prevents duplicates). Never block on a read failure.
+    return null;
+  }
+}
+
+async function ensureComplianceStampProperty(): Promise<void> {
+  const { inspection } = typeIds();
+  try { await hubspotFetch(`/crm/v3/properties/${inspection}/${COMPLIANCE_STAMP_PROP}`); return; } catch { /* missing → create */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${inspection}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: COMPLIANCE_STAMP_PROP, label: 'Compliance Tickets Created At', type: 'datetime', fieldType: 'date',
+        groupName: 'inspection_results',
+        description: 'Set once the 1099 utilities/trash compliance tickets have been created for this inspection — gates re-creation on re-submit.',
+      }),
+    });
+  } catch (e: any) {
+    const blob = `${String(e?.message || e)} ${String(e?.detail || '')}`;
+    if (!(e?.status === 409 || /already exists|PROPERTY_ALREADY_EXISTS/i.test(blob))) {
+      console.warn('[compliance-ticket] could not provision compliance_tickets_created_at:', blob.slice(0, 200));
+    }
+  }
+}
+
+/** Stamp the inspection as compliance-processed (epoch ms). Best-effort; auto-
+ *  provisions the property on first use. */
+export async function stampComplianceTicketsCreated(inspectionRecordId: string): Promise<void> {
+  const { inspection } = typeIds();
+  const doWrite = () => hubspotFetch(`/crm/v3/objects/${inspection}/${inspectionRecordId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ properties: { [COMPLIANCE_STAMP_PROP]: Date.now() } }),
+  });
+  try {
+    await doWrite();
+  } catch (e) {
+    if (isMissingPropertyError(e, COMPLIANCE_STAMP_PROP)) {
+      await ensureComplianceStampProperty();
+      await doWrite().catch((e2) => console.warn('[compliance-ticket] stamp write retry failed:', e2));
+    } else {
+      console.warn('[compliance-ticket] stamp write failed:', e);
+    }
+  }
 }
 
 /**
@@ -4225,6 +4283,11 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   // regenerator can reproduce it).
   await ensureProp(inspection, 'qc_overall_note', {
     name: 'qc_overall_note', label: 'QC Overall Failure Comment', type: 'string', fieldType: 'textarea', groupName: 'inspection_results',
+  });
+  // Per-inspection gate so re-submitting a 1099 never re-creates its utilities/
+  // trash compliance tickets (also auto-provisioned at first write).
+  await ensureProp(inspection, 'compliance_tickets_created_at', {
+    name: 'compliance_tickets_created_at', label: 'Compliance Tickets Created At', type: 'datetime', fieldType: 'date', groupName: 'inspection_results',
   });
 
   // 1099 Leasing Agent report fields — stamped onto the inspection at completion
