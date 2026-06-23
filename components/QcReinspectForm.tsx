@@ -694,11 +694,20 @@ export function QcReinspectForm(props: Props) {
     // would be missing from the record. Retry, then HARD-BLOCK while pending;
     // only allow finalizing without them when a photo is genuinely stuck.
     {
+      // Count After photos that haven't uploaded yet. countQueuedPhotos reads
+      // IndexedDB and returns 0 on error/timeout (iOS under storage pressure), so
+      // ALSO count in-memory draft (blob:) URLs across every room — those are not
+      // saved and persistAfterPhotos would silently DROP them. Block on either
+      // signal so unsynced After photos can never be lost at submit.
+      const countUnsyncedAfter = () => sections.reduce((n, s) =>
+        n + (afterPhotosRef.current[s.key] || []).filter((u) => typeof u === 'string' && u.startsWith('blob:')).length, 0);
       let pendingPhotos = 0;
       let lastErr: string | undefined;
       for (let i = 0; i < 5; i++) {
         try { const fr = await runQcFlushRef.current(); lastErr = (fr as any)?.lastError; } catch { /* checked below */ }
-        try { pendingPhotos = await countQueuedPhotos(props.inspectionRecordId); } catch { pendingPhotos = 0; }
+        let queued = 0;
+        try { queued = await countQueuedPhotos(props.inspectionRecordId); } catch { queued = 0; }
+        pendingPhotos = Math.max(queued, countUnsyncedAfter());
         if (pendingPhotos === 0) break;
         await new Promise((r) => setTimeout(r, 1500));
       }

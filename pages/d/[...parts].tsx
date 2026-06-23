@@ -11,7 +11,7 @@
 import type { GetServerSideProps } from 'next';
 import { Readable } from 'stream';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { readInspectionProps, fetchAnswersForInspection, fetchInspectionById } from '@/lib/hubspot';
+import { readInspectionProps, fetchAnswersForInspection, fetchInspectionById, fetchSourceSectionPhotos } from '@/lib/hubspot';
 import { resolveSections } from '@/lib/sections';
 import { finalChecklistPhotos } from '@/lib/finalChecklist';
 import { verifyShareSig, slugifyVendor, SHARE_TYPE_TO_PROP, type ShareDocType } from '@/lib/shortLinks';
@@ -128,9 +128,27 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
           afterBySection.set(s.id, arr);
         }
       }
+      // QC "Before" photos live on the SOURCE scope inspection (not this QC's own
+      // answers), so they'd otherwise be missing from the gallery — the QC PDF
+      // links each by URL, so a missing one silently falls back to photo #1 (the
+      // bug: clicking a Before photo showed the first After set). Pull them in,
+      // mapped to each section, and render them BEFORE the After photos to match
+      // the PDF layout.
+      const beforeBySection = new Map<string, string[]>();
+      if (insp?.templateType === 'pm_turn_reinspect_qc' && insp.sourceRateCardId) {
+        try {
+          const beforeByLoc = await fetchSourceSectionPhotos(insp.sourceRateCardId);
+          for (const s of sections) {
+            const b = beforeByLoc[`${s.label}||${s.location}`] || (s.location ? beforeByLoc[s.location] : undefined) || beforeByLoc[s.label] || [];
+            const clean = b.filter(ok);
+            if (clean.length) beforeBySection.set(s.id, clean);
+          }
+        } catch { /* before photos unavailable — after photos still show */ }
+      }
       const seen = new Set<string>();
       const photos: string[] = [];
       const pushKey = (key: string) => {
+        for (const u of (beforeBySection.get(key) || [])) if (!seen.has(u)) { seen.add(u); photos.push(u); }
         for (const u of (bySection.get(key) || [])) if (!seen.has(u)) { seen.add(u); photos.push(u); }
         for (const u of (afterBySection.get(key) || [])) if (!seen.has(u)) { seen.add(u); photos.push(u); }
       };
