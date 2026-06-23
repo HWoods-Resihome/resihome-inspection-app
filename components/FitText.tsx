@@ -15,6 +15,7 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
   const [size, setSize] = useState(max);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startPt = useRef<{ x: number; y: number } | null>(null);
+  const longPressFired = useRef(false);
 
   useEffect(() => {
     const el = ref.current;
@@ -45,6 +46,7 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
   const cancelPress = () => {
     if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; }
     startPt.current = null;
+    longPressFired.current = false;
   };
 
   const doCopy = async () => {
@@ -74,14 +76,28 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
   const bind = copyLink ? {
     onPointerDown: (e: React.PointerEvent) => {
       startPt.current = { x: e.clientX, y: e.clientY };
+      longPressFired.current = false;
       if (pressTimer.current) clearTimeout(pressTimer.current);
-      pressTimer.current = setTimeout(() => { pressTimer.current = null; void doCopy(); }, 500);
+      // The timer only RECOGNIZES the hold (+ a haptic where supported). The
+      // clipboard write itself must run inside a user gesture — iOS WKWebView
+      // rejects clipboard.writeText/execCommand from a setTimeout (no active user
+      // activation), which is why the copy silently failed. So we copy on
+      // pointerUP (a real gesture) instead.
+      pressTimer.current = setTimeout(() => {
+        pressTimer.current = null;
+        longPressFired.current = true;
+        try { navigator.vibrate?.(15); } catch { /* iOS has no vibrate — fine */ }
+      }, 500);
     },
     onPointerMove: (e: React.PointerEvent) => {
       const s = startPt.current;
       if (s && (Math.abs(e.clientX - s.x) > 10 || Math.abs(e.clientY - s.y) > 10)) cancelPress();
     },
-    onPointerUp: cancelPress,
+    onPointerUp: () => {
+      const fired = longPressFired.current;
+      cancelPress();
+      if (fired) void doCopy(); // writeText is invoked synchronously in the pointerup gesture (iOS-safe)
+    },
     onPointerLeave: cancelPress,
     onPointerCancel: cancelPress,
     // Suppress the desktop right-click / iOS text-selection callout on hold.
