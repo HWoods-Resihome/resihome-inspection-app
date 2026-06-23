@@ -3127,7 +3127,11 @@ export function RateCardForm(props: RateCardFormProps) {
   // dropped this way: those carry scope dollars, so they still block (Retry/Clear).
   const photosStuck = pendingPhotos > 0 && (syncStuck || /failed to upload\s*\d+/i.test(lastSyncError || ''));
 
-  async function handleSubmitOrFinalize() {
+  async function handleSubmitOrFinalize(opts?: { zeroDollar?: boolean }) {
+    // Zero Dollar Turn: finalize directly (one tap) with NO line items — skips
+    // AI review + the pending-approval/second-reviewer step. Section photos are
+    // still required (checked below). See /finalize zeroDollarTurn.
+    const zeroDollar = !!opts?.zeroDollar;
     if (submitGuardRef.current) return; // a submit/finalize is already in flight
     // Don't submit/finalize until the AI-applied (and any other) changes have
     // actually synced to the server — otherwise approval would run on a stale
@@ -3210,8 +3214,15 @@ export function RateCardForm(props: RateCardFormProps) {
     }
     // No lines at all? Probably a mistake.
     const totalLines = Object.values(linesBySection).reduce((s, arr) => s + arr.length, 0);
-    if (totalLines === 0) {
+    if (totalLines === 0 && !zeroDollar) {
       const ok = await dialog.confirm('No line items have been added. Submit anyway?', { confirmLabel: 'Submit' });
+      if (!ok) return;
+    }
+    if (zeroDollar) {
+      const ok = await dialog.confirm(
+        'Submit a ZERO DOLLAR turn with no line items?\n\nThis completes the inspection at $0, generates the PDFs, and raises a Turnkey ticket — no AI review, no approval step, no tenant charge import.',
+        { confirmLabel: 'Submit $0 turn' },
+      );
       if (!ok) return;
     }
     // AI Review gate at SUBMIT — a Scope rate card must pass AI Review for the
@@ -3231,7 +3242,7 @@ export function RateCardForm(props: RateCardFormProps) {
       void dialog.alert(`Finish the Final Checklist before submitting:\n\n• ${fcGap}`);
       return;
     }
-    if (props.templateType === 'pm_scope_rate_card' && props.inspectionStatus !== 'pending_approval' && !reviewValid) {
+    if (props.templateType === 'pm_scope_rate_card' && props.inspectionStatus !== 'pending_approval' && !reviewValid && !zeroDollar) {
       if (aiConnectivityFailed) {
         const ok = await dialog.confirm(
           'AI Review couldn’t complete after several attempts (weak connection).\n\nSubmit for approval WITHOUT the AI Review? It will still be required before the inspection can be finalized.',
@@ -3255,13 +3266,15 @@ export function RateCardForm(props: RateCardFormProps) {
       await dialog.alert(`Could not finish saving before submit: ${e.message || e}\n\nPlease try again.`);
       return;
     }
-    // Branch on status: pending_approval -> finalize flow, else submit flow.
-    const isFinalizing = props.inspectionStatus === 'pending_approval';
+    // Branch on status: pending_approval (or a Zero Dollar Turn) -> finalize flow,
+    // else the normal submit-for-approval flow.
+    const isFinalizing = props.inspectionStatus === 'pending_approval' || zeroDollar;
     if (isFinalizing) {
       // Belt-and-suspenders: the button is disabled for the submitter, but guard
       // the handler too so a stray call can't slip a self-approval finalize past
-      // the (also server-enforced) lock.
-      if (selfApprovalLocked) {
+      // the (also server-enforced) lock. A Zero Dollar Turn is exempt (one-tap by
+      // the inspector — nothing to approve at $0).
+      if (selfApprovalLocked && !zeroDollar) {
         await dialog.alert(
           `You submitted this inspection for approval, so you can't finalize it yourself.\n\nA second reviewer needs to finalize it. Tap "Save & Close".`
         );
@@ -3273,7 +3286,7 @@ export function RateCardForm(props: RateCardFormProps) {
       // escape hatch, and it's the approver's own QC pass (reviewValid is
       // per-device, so a second reviewer runs it fresh here). Any edit since the
       // last review invalidates it (see reviewValid), so this re-prompts too.
-      if (props.templateType === 'pm_scope_rate_card' && !reviewValid) {
+      if (props.templateType === 'pm_scope_rate_card' && !reviewValid && !zeroDollar) {
         const ok = await dialog.confirm(
           'AI Review must be completed before finalizing.\n\nIt checks the scope against the turn standard (depreciation, duplicates, tenant responsibility) and suggests adjustments to approve or decline.',
           { confirmLabel: 'Run AI Review', cancelLabel: 'Not now' }
@@ -3291,7 +3304,7 @@ export function RateCardForm(props: RateCardFormProps) {
         const statusRes = await fetch('/api/auth/gmail/status');
         if (statusRes.ok) {
           const status = await statusRes.json();
-          if (status.configured && !status.connected) {
+          if (!zeroDollar && status.configured && !status.connected) {
             // Redirect to connect, carrying this inspection id so we can
             // auto-resume finalize after authorization.
             window.location.href =
@@ -3319,7 +3332,7 @@ export function RateCardForm(props: RateCardFormProps) {
           headers: { 'Content-Type': 'application/json' },
           // Send the timing map so same-device finalize honors "Complete Later"
           // even for inspections submitted before the map was persisted.
-          body: JSON.stringify({ resolutionTimings }),
+          body: JSON.stringify({ resolutionTimings, zeroDollarTurn: zeroDollar }),
         });
         if (!r.ok) {
           // Surface the server's clean message (e.g. the self-approval lockout)
@@ -4279,6 +4292,28 @@ export function RateCardForm(props: RateCardFormProps) {
             onToggleOpen={() => setFcOpen((o) => !o)}
             readOnly={!!props.readOnly}
           />
+        )}
+
+        {/* Zero Dollar Turn — appears at the very bottom (below the Final
+            Checklist) ONLY while the scope has no line items and is still in the
+            pre-submit state. Adding any line hides it; removing them all brings
+            it back (grandTotals.count is reactive). One tap finalizes the turn at
+            $0 (no AI review, no approval) — section photos are still enforced in
+            the handler. */}
+        {!props.readOnly && props.inspectionStatus !== 'pending_approval' && grandTotals.count === 0 && (
+          <div className="max-w-3xl mx-auto px-4 mt-4 mb-2 flex flex-col items-center text-center">
+            <button
+              type="button"
+              onClick={() => void handleSubmitOrFinalize({ zeroDollar: true })}
+              disabled={finalizing || submitting}
+              className="inline-flex items-center gap-2 rounded-full border-2 border-brand text-brand hover:bg-brand hover:text-white disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-brand font-heading font-bold text-sm px-5 py-2.5 transition-colors"
+            >
+              {finalizing ? 'Submitting $0 turn…' : 'Submit Zero Dollar Turn Rate Card'}
+            </button>
+            <p className="text-[11px] text-gray-400 mt-1.5 max-w-sm leading-snug">
+              No line items needed — completes the turn at $0, generates the PDFs, and raises a Turnkey ticket. Section photos are still required.
+            </p>
+          </div>
         )}
       </div>
 

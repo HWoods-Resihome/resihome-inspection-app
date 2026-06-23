@@ -107,6 +107,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // submitted / pending_approval reports — it never completes them, bypasses
   // approval, or re-sends emails — as well as completed ones.
   const regenerateOnly = !!(req.body || {}).regenerateOnly;
+  // "Zero Dollar Turn" mode: the inspector submits a final turn with NO line
+  // items (total $0) in one tap from the scope. It completes directly (no
+  // pending-approval / second reviewer / AI review), still generates the PDFs
+  // and raises the Turnkey ticket (description "Zero Dollar Turn"), but does NOT
+  // do the tenant charge import (there are no chargebacks). Section photos are
+  // still required (enforced client-side before this call).
+  const zeroDollarTurn = !!(req.body || {}).zeroDollarTurn;
 
   // ONE preflight read of every inspection property the pre-flight gates need —
   // the self-approval lockout, the durable cross-instance lock, and the
@@ -125,7 +132,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // user) must. This is the approval layer. A finalize admin is exempt and may
   // finalize their own work. (regenerateOnly is an admin-only PDF refresh that
   // changes no status / sends nothing, so it is not subject to this lock.)
-  if (!regenerateOnly) {
+  // A Zero Dollar Turn is finalized in one tap by the inspector (there's nothing
+  // to approve at $0), so it's exempt from the dual-approval lock.
+  if (!regenerateOnly && !zeroDollarTurn) {
     const submitter = String(preflight?.submitted_by_email || '').trim().toLowerCase();
     if (submitter && submitter === session.email.trim().toLowerCase() && !isFinalizeAdmin(session.email)) {
       return res.status(423).json({
@@ -371,7 +380,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       grandLineCount += g.lines.length;
     }
 
-    if (grandLineCount === 0) {
+    // Zero line items normally means a mistake — but a Zero Dollar Turn is the
+    // explicit, intended $0 case, so allow it through.
+    if (grandLineCount === 0 && !zeroDollarTurn) {
       return res.status(400).json({
         error: 'Cannot finalize: no line items have been added to this inspection.',
       });
@@ -610,7 +621,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // xlsx is NOT regenerated and NOT re-dropped to SFTP (and the email +
     // maintenance ticket are already skipped below). A re-save just makes the
     // PDFs latest — nothing outbound fires again.
-    const chargebackXlsxBuf = isRefinalize ? null : await renderChargebackXlsx(ctx, {
+    // Zero Dollar Turn has no chargeback lines → skip the xlsx render AND the
+    // SFTP tenant-charge import entirely (both keyed off this buffer).
+    const chargebackXlsxBuf = (isRefinalize || zeroDollarTurn) ? null : await renderChargebackXlsx(ctx, {
       entityId: inspectionData.propertyEntityId || '',
       primaryTenantName: inspectionData.propertyLastPrimaryTenant || '',
       addressStreet: inspectionData.propertyAddressStreet || '',
@@ -865,7 +878,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         } else {
           ticketResult = await createMaintenanceTicket({
             propertyId: hbmmId,
-            description: buildTicketDescription(shareVendorLinks, shareMasterUrl),
+            description: zeroDollarTurn
+              ? `Zero Dollar Turn${shareMasterUrl ? `\n\nMaster: ${shareMasterUrl}` : ''}`
+              : buildTicketDescription(shareVendorLinks, shareMasterUrl),
           });
           if (ticketResult.ok) {
             const tu = ticketResult.typeUpdate;
