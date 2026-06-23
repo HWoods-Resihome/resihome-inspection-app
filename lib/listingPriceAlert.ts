@@ -150,21 +150,34 @@ export async function postListingPriceAlertOnSubmit(
 
   blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `<${inspectionUrl}|Open inspection ↗>` } });
   blocks.push({ type: 'divider' });
+  // Comps live in the thread to keep the parent compact — pointer here.
+  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: '💬 *Comparable homes in thread* — tap *replies* below' }] });
 
+  // Build the threaded reply that carries the full comp data + assessment.
+  const replyBlocks: any[] = [];
+  let replyText = 'Comparable homes';
   if (comps.ok && comps.comps.length) {
     const avmLine = comps.avmRent > 0 ? `  ·  AVM ${usd(comps.avmRent)} (${usd(comps.avmLow)}–${usd(comps.avmHigh)})` : '';
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Active market comps (RentCast)*${avmLine}` } });
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: comps.comps.map(compLine).join('\n\n') } });
-    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `📊 ${assessment(recommended, comps.comps, comps.avmRent, comps.avmLow, comps.avmHigh)}` }] });
+    replyBlocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Active market comps (RentCast)*${avmLine}` } });
+    replyBlocks.push({ type: 'section', text: { type: 'mrkdwn', text: comps.comps.map(compLine).join('\n\n') } });
+    replyBlocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `📊 ${assessment(recommended, comps.comps, comps.avmRent, comps.avmLow, comps.avmHigh)}` }] });
+    replyText = `${comps.comps.length} comparable homes for ${address}`;
   } else {
-    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `📊 No comps available to validate (${comps.error || 'none found'}) — review manually.` }] });
+    replyBlocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `📊 No comps available to validate (${comps.error || 'none found'}) — review manually.` }] });
+    replyText = 'No comparable homes found';
   }
 
-  // 6) Post + stamp on success.
+  // 6) Post the parent, then the comps as a threaded reply. Stamp on parent success.
   const res = await postSlackMessage(SLACK_CHANNEL, { text, blocks });
   if (res.ok) {
     if (GATE_ACTIVE) await stampListingPriceAlert(inspection.recordId);
-    console.log(`[listing-price-alert] ${inspection.recordId}: posted to ${res.channel} (${dirWord} ${usd(recommended)}, ${comps.comps?.length || 0} comps)`);
+    let threadOk = false;
+    if (res.ts) {
+      const reply = await postSlackMessage(SLACK_CHANNEL, { text: replyText, blocks: replyBlocks, thread_ts: res.ts });
+      threadOk = reply.ok;
+      if (!reply.ok) console.warn(`[listing-price-alert] ${inspection.recordId}: comps thread reply failed: ${reply.error}`);
+    }
+    console.log(`[listing-price-alert] ${inspection.recordId}: posted to ${res.channel} (${dirWord} ${usd(recommended)}, ${comps.comps?.length || 0} comps, thread ${threadOk ? 'ok' : 'missing'})`);
     return { posted: true, channel: res.channel };
   }
   console.warn(`[listing-price-alert] ${inspection.recordId}: Slack post failed: ${res.error}`);

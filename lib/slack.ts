@@ -9,7 +9,7 @@ export interface SlackPostResult { ok: boolean; ts?: string; channel?: string; e
 
 export async function postSlackMessage(
   channel: string,
-  opts: { text: string; blocks?: any[] },
+  opts: { text: string; blocks?: any[]; thread_ts?: string },
 ): Promise<SlackPostResult> {
   const token = (process.env.SLACK_BOT_TOKEN || '').trim();
   if (!token) return { ok: false, error: 'SLACK_BOT_TOKEN not set' };
@@ -18,7 +18,7 @@ export async function postSlackMessage(
     const resp = await fetch('https://slack.com/api/chat.postMessage', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ channel, text: opts.text, blocks: opts.blocks, unfurl_links: false }),
+      body: JSON.stringify({ channel, text: opts.text, blocks: opts.blocks, thread_ts: opts.thread_ts, unfurl_links: false }),
     });
     const j = await resp.json().catch(() => ({} as any));
     if (!j.ok) return { ok: false, channel, error: String(j.error || `http ${resp.status}`) };
