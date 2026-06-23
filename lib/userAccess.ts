@@ -19,14 +19,13 @@ import type { TemplateType } from './types';
 // domain is added.
 export const INTERNAL_DOMAINS = ['resihome.com', 'resicap.com', 'resipro.com'];
 
-// Templates an external user can CREATE and EDIT (own, until completed).
-export const EXTERNAL_EDIT_TEMPLATES: TemplateType[] = ['leasing_agent_1099_property_inspection'];
-// Templates an external user can VIEW (read + completed PDF) but never edit —
-// and only when COMPLETED. They never see non-completed records of these types.
-export const EXTERNAL_VIEW_TEMPLATES: TemplateType[] = ['pm_scope_rate_card', 'pm_turn_reinspect_qc'];
-// The single template an external user may create/open for editing. Kept for
-// back-compat (login hint, the new-inspection picker, /api/auth/me).
-export const EXTERNAL_TEMPLATE: TemplateType = EXTERNAL_EDIT_TEMPLATES[0];
+// Specific addresses on OUTSIDE domains that should nonetheless be treated as
+// internal employees (full access to every template, not just 1099 walks) — e.g.
+// an internal staffer who signs in with a personal Google account. Compared
+// case-insensitively. Keep this short and explicit.
+export const INTERNAL_EMAIL_ALLOWLIST = new Set<string>([
+  'romack.dustin@gmail.com',
+]);
 
 function domainOf(email: string | null | undefined): string {
   const e = (email || '').trim().toLowerCase();
@@ -35,8 +34,19 @@ function domainOf(email: string | null | undefined): string {
 }
 
 export function isInternalEmail(email: string | null | undefined): boolean {
-  return INTERNAL_DOMAINS.includes(domainOf(email));
+  const e = (email || '').trim().toLowerCase();
+  if (INTERNAL_EMAIL_ALLOWLIST.has(e)) return true;
+  return INTERNAL_DOMAINS.includes(domainOf(e));
 }
+
+// Templates an external user can CREATE and EDIT (own, until completed).
+export const EXTERNAL_EDIT_TEMPLATES: TemplateType[] = ['leasing_agent_1099_property_inspection'];
+// Templates an external user can VIEW (read + completed PDF) but never edit —
+// and only when COMPLETED. They never see non-completed records of these types.
+export const EXTERNAL_VIEW_TEMPLATES: TemplateType[] = ['pm_scope_rate_card', 'pm_turn_reinspect_qc'];
+// The single template an external user may create/open for editing. Kept for
+// back-compat (login hint, the new-inspection picker, /api/auth/me).
+export const EXTERNAL_TEMPLATE: TemplateType = EXTERNAL_EDIT_TEMPLATES[0];
 
 /** External = a valid signed-in user whose email is NOT an internal domain. */
 export function isExternalEmail(email: string | null | undefined): boolean {
