@@ -1465,7 +1465,7 @@ export function QuestionForm({
           await dialog.alert(
             `Could not save answers to HubSpot before submitting (${resp.status}). ` +
             `Your inspection was NOT submitted so nothing is lost — please check your ` +
-            `connection and try Submit again.${text ? `\n\n${text.slice(0, 160)}` : ''}`
+            `connection and try Submit again.${text ? `\n\n${text.slice(0, 600)}` : ''}`
           );
           return; // Block submit — do not finalize an empty record.
         }
@@ -1478,7 +1478,7 @@ export function QuestionForm({
           await dialog.alert(
             `${failedItems.length} answer${failedItems.length === 1 ? '' : 's'} could not be saved to HubSpot. ` +
             `Your inspection was NOT submitted so nothing is lost — try Submit again.` +
-            `${failedItems[0].reason ? `\n\n${failedItems[0].reason.slice(0, 160)}` : ''}`,
+            `${failedItems[0].reason ? `\n\nReason: ${failedItems[0].reason.slice(0, 600)}` : ''}`,
           );
           return;
         }
