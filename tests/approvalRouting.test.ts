@@ -11,8 +11,8 @@ function cfg(): ApprovalRoutingConfig {
         id: 'georgia', name: 'Georgia',
         rm: { name: 'Rita RM', slackId: 'URM' }, rmNte: 5000,
         regions: [
-          { region: 'GA: Atlanta', pm: { name: 'Pam PM', slackId: 'UPM' }, srPm: { name: 'Sam SrPM', slackId: 'USR' }, nte: 1000 },
-          { region: 'GA: Macon', pm: null, srPm: null, nte: 1000 }, // no PM/SrPM → defaults to RM
+          { region: 'GA: Atlanta', pm: { name: 'Pam PM', slackId: 'UPM' }, pmNte: 1000, srPm: { name: 'Sam SrPM', slackId: 'USR' }, srPmNte: 3000 },
+          { region: 'GA: Macon', pm: null, pmNte: null, srPm: null, srPmNte: null }, // no PM/SrPM → defaults to RM
         ],
       },
       { id: 'florida', name: 'Florida', rm: null, rmNte: null, regions: [] },
@@ -28,10 +28,10 @@ describe('approvalRouting.normalize', () => {
     const n = normalizeApprovalRouting({ pods: [{ id: 'georgia' }], directors: [] });
     expect(n.pods.map((p) => p.id)).toEqual(['georgia', 'florida', 'scattered', 'west']);
   });
-  it('drops blank users, non-positive NTEs, and duplicate regions', () => {
+  it('drops blank users, non-positive NTEs, and duplicate regions; migrates legacy region nte → PM', () => {
     const n = normalizeApprovalRouting({
       pods: [{ id: 'west', rm: { name: '', slackId: '' }, rmNte: -5, regions: [
-        { region: 'W: A', nte: 0 }, { region: 'W: A', nte: 100 },
+        { region: 'W: A', nte: 750 }, { region: 'W: A', pmNte: 100 }, // legacy `nte` migrates to pmNte
       ] }],
       directors: [{ name: '', slackId: '' }, { name: 'D', slackId: 'U1' }],
     });
@@ -39,7 +39,8 @@ describe('approvalRouting.normalize', () => {
     expect(west.rm).toBeNull();
     expect(west.rmNte).toBeNull();
     expect(west.regions).toHaveLength(1);
-    expect(west.regions[0].nte).toBeNull();
+    expect(west.regions[0].pmNte).toBe(750); // migrated from legacy `nte`
+    expect(west.regions[0].srPmNte).toBeNull();
     expect(n.directors).toEqual([{ name: 'D', slackId: 'U1' }]);
   });
   it('emptyApprovalRouting has 4 pods and no directors', () => {
@@ -50,18 +51,23 @@ describe('approvalRouting.normalize', () => {
 });
 
 describe('approvalRouting.resolve', () => {
-  it('tags PM + Sr.PM when within the region NTE', () => {
+  it('tags the PM within the PM NTE', () => {
     const r = resolveApprovers(cfg(), 'GA: Atlanta', 800);
-    expect(r.level).toBe('pm_srpm');
-    expect(r.users.map((u) => u.slackId)).toEqual(['UPM', 'USR']);
+    expect(r.level).toBe('pm');
+    expect(r.users.map((u) => u.slackId)).toEqual(['UPM']);
   });
-  it('defaults to the RM when no PM/Sr.PM is set, even within the region NTE', () => {
+  it('escalates to the Sr. PM above the PM NTE but within the Sr. PM NTE', () => {
+    const r = resolveApprovers(cfg(), 'GA: Atlanta', 2000);
+    expect(r.level).toBe('sr_pm');
+    expect(r.users.map((u) => u.slackId)).toEqual(['USR']);
+  });
+  it('defaults to the RM when no PM/Sr.PM is set', () => {
     const r = resolveApprovers(cfg(), 'GA: Macon', 500);
     expect(r.level).toBe('rm');
     expect(r.users[0].slackId).toBe('URM');
   });
-  it('escalates to the RM above the region NTE', () => {
-    const r = resolveApprovers(cfg(), 'GA: Atlanta', 2500);
+  it('escalates to the RM above the Sr. PM NTE', () => {
+    const r = resolveApprovers(cfg(), 'GA: Atlanta', 4000);
     expect(r.level).toBe('rm');
     expect(r.users[0].slackId).toBe('URM');
   });

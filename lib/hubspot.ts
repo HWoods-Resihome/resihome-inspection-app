@@ -3771,6 +3771,66 @@ async function fetchAgentBillingByOwner(ownerId: string): Promise<{ brokerCode: 
   }
 }
 
+/**
+ * W2 agents (owners) for the approval-routing pickers: name + Slack ID (from the
+ * agent's `slack_user_id`). The "type" + slack property names are env-overridable;
+ * the W2 filter is applied CLIENT-SIDE (an unknown property in a Search `filters`
+ * clause is a hard 400, while the projection silently ignores unknowns). If no
+ * candidate type field is present on ANY agent, we can't filter — return every
+ * named agent and flag typeFieldFound=false so the UI can say so.
+ */
+export interface AgentOwnerOption { name: string; slackId: string; }
+const AGENT_TYPE_CANDIDATE_PROPS = (() => {
+  const configured = (process.env.HUBSPOT_AGENT_TYPE_PROP || '').trim();
+  return Array.from(new Set([
+    configured, 'agent_type', 'type', 'employment_type', 'worker_type', 'employee_type', 'classification', 'w2_1099',
+  ].filter(Boolean)));
+})();
+function agentSlackProp(): string { return (process.env.HUBSPOT_AGENT_SLACK_PROP || 'slack_user_id').trim(); }
+function isW2Value(v: unknown): boolean {
+  return String(v ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase().includes('W2');
+}
+
+export async function fetchW2Agents(): Promise<{ owners: AgentOwnerOption[]; typeFieldFound: boolean }> {
+  const slackProp = agentSlackProp();
+  const properties = Array.from(new Set(['name', 'firstname', 'lastname', slackProp, ...AGENT_TYPE_CANDIDATE_PROPS]));
+  const all: { name: string; slackId: string; typeVals: unknown[] }[] = [];
+  let after: string | undefined;
+  let pages = 0;
+  const MAX_PAGES = 25; // 2,500 agents — far beyond any realistic staff roster
+  do {
+    const body: any = { filterGroups: [], properties, limit: 100 };
+    if (after) body.after = after;
+    let resp: any;
+    try {
+      resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/search?archived=false`, { method: 'POST', body: JSON.stringify(body) });
+    } catch (e) {
+      console.warn('[approval-routing] agent search failed:', e);
+      break;
+    }
+    for (const r of resp.results || []) {
+      const p = r.properties || {};
+      let name = String(p.name || '').trim();
+      if (!name) name = `${String(p.firstname || '').trim()} ${String(p.lastname || '').trim()}`.trim();
+      if (!name) continue;
+      all.push({ name, slackId: String(p[slackProp] || '').trim(), typeVals: AGENT_TYPE_CANDIDATE_PROPS.map((tp) => p[tp]) });
+    }
+    after = resp.paging?.next?.after;
+  } while (after && ++pages < MAX_PAGES);
+
+  const typeFieldFound = all.some((a) => a.typeVals.some((v) => v != null && String(v).trim() !== ''));
+  const picked = typeFieldFound ? all.filter((a) => a.typeVals.some(isW2Value)) : all;
+  const seen = new Set<string>();
+  const owners: AgentOwnerOption[] = [];
+  for (const a of picked.sort((x, y) => x.name.localeCompare(y.name))) {
+    const key = a.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    owners.push({ name: a.name, slackId: a.slackId });
+  }
+  return { owners, typeFieldFound };
+}
+
 // ---------------------------------------------------------------------------
 // AI Knowledge Base (live-camera operator notes)
 //

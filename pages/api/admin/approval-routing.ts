@@ -14,7 +14,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { readApprovalRouting, writeApprovalRouting } from '@/lib/hubspot';
+import { readApprovalRouting, writeApprovalRouting, fetchW2Agents } from '@/lib/hubspot';
 import { normalizeApprovalRouting } from '@/lib/approvalRouting';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
 
@@ -25,14 +25,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     if (req.method === 'GET') {
-      const [config, regions] = await Promise.all([
+      const [config, regions, agents] = await Promise.all([
         readApprovalRouting(),
         getCachedRegions().catch(() => []),
+        fetchW2Agents().catch(() => ({ owners: [], typeFieldFound: false })),
       ]);
       const availableRegions = Array.from(new Set(
         regions.map((r) => (r.region || '').trim()).filter(Boolean),
       )).sort((a, b) => a.localeCompare(b));
-      return res.status(200).json({ config, availableRegions });
+      return res.status(200).json({ config, availableRegions, owners: agents.owners, typeFieldFound: agents.typeFieldFound });
     }
     if (req.method === 'POST') {
       const body = (req.body || {}) as { config?: unknown };

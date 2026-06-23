@@ -36,10 +36,12 @@ export interface RegionRouting {
   region: string;
   /** Optional PM for this region. */
   pm?: ApprovalUser | null;
+  /** PM not-to-exceed ceiling ($). null = not set (PM tier skipped). */
+  pmNte: number | null;
   /** Optional Sr. PM for this region. */
   srPm?: ApprovalUser | null;
-  /** PM/Sr.PM tier not-to-exceed ceiling ($). null = not set. */
-  nte: number | null;
+  /** Sr. PM not-to-exceed ceiling ($). null = not set (Sr. PM tier skipped). */
+  srPmNte: number | null;
 }
 
 export type PodId = 'georgia' | 'florida' | 'scattered' | 'west';
@@ -68,7 +70,7 @@ export const POD_DEFS: { id: PodId; name: string }[] = [
   { id: 'west', name: 'West' },
 ];
 
-export type ApprovalLevel = 'pm_srpm' | 'rm' | 'director';
+export type ApprovalLevel = 'pm' | 'sr_pm' | 'rm' | 'director';
 
 export interface ApprovalRecipients {
   level: ApprovalLevel;
@@ -127,7 +129,14 @@ export function normalizeApprovalRouting(raw: any): ApprovalRoutingConfig {
       const region = String(r?.region || '').trim();
       if (!region || seen.has(region)) continue;
       seen.add(region);
-      regions.push({ region, pm: cleanUser(r?.pm), srPm: cleanUser(r?.srPm), nte: cleanNte(r?.nte) });
+      regions.push({
+        region,
+        pm: cleanUser(r?.pm),
+        // Migrate the legacy single region `nte` onto the PM tier when present.
+        pmNte: cleanNte(r?.pmNte ?? r?.nte),
+        srPm: cleanUser(r?.srPm),
+        srPmNte: cleanNte(r?.srPmNte),
+      });
     }
     return { id: def.id, name: def.name, rm: cleanUser(src.rm), rmNte: cleanNte(src.rmNte), regions };
   });
@@ -177,31 +186,41 @@ export function resolveApprovers(
   const { pod, region: rc } = match;
   const amt = Number(amount);
   const amtOk = Number.isFinite(amt) && amt >= 0;
+  const money = (n: number) => `$${Number(n || 0).toLocaleString()}`;
+  const amtStr = amtOk ? money(amt) : 'Amount';
 
-  // Tier 1 — PM / Sr. PM, when within the region ceiling AND at least one is set.
-  const pmTier = [rc.pm, rc.srPm].filter(isUser) as ApprovalUser[];
-  const withinRegion = rc.nte == null ? true : (amtOk && amt <= rc.nte);
-  if (pmTier.length > 0 && withinRegion) {
+  // Ladder: PM → Sr. PM → RM → Directors. A tier is chosen only if its user is
+  // set AND its NTE covers the amount; an unset user OR an unset/too-low NTE
+  // falls through to the next tier (so an empty PM/Sr. PM defaults to the RM).
+  const lowerTiers: { user: ApprovalUser | null | undefined; nte: number | null; level: ApprovalLevel; label: string }[] = [
+    { user: rc.pm, nte: rc.pmNte, level: 'pm', label: 'PM' },
+    { user: rc.srPm, nte: rc.srPmNte, level: 'sr_pm', label: 'Sr. PM' },
+  ];
+  for (const t of lowerTiers) {
+    if (isUser(t.user) && t.nte != null && amtOk && amt <= t.nte) {
+      return {
+        level: t.level, users: [t.user], podId: pod.id, podName: pod.name, region: rc.region,
+        reason: `${amtStr} is within the ${rc.region} ${t.label} ceiling (${money(t.nte)}) → ${t.label}.`,
+      };
+    }
+  }
+
+  // RM tier — within the RM ceiling (or RM has no ceiling set).
+  if (isUser(pod.rm) && (pod.rmNte == null || (amtOk && amt <= pod.rmNte))) {
+    const noLower = !isUser(rc.pm) && !isUser(rc.srPm);
     return {
-      level: 'pm_srpm', users: pmTier, podId: pod.id, podName: pod.name, region: rc.region,
-      reason: `${amtOk ? `$${amt.toLocaleString()}` : 'Amount'} is within the ${rc.region} region ceiling${rc.nte != null ? ` ($${rc.nte.toLocaleString()})` : ''} → PM / Sr. PM.`,
+      level: 'rm', users: [pod.rm], podId: pod.id, podName: pod.name, region: rc.region,
+      reason: noLower
+        ? `No PM / Sr. PM set for ${rc.region} → defaults to the ${pod.name} RM.`
+        : `${amtStr} is above the PM / Sr. PM ceilings → ${pod.name} RM${pod.rmNte != null ? ` (ceiling ${money(pod.rmNte)})` : ''}.`,
     };
   }
 
-  // Tier 2 — RM, when within the RM ceiling (or no PM/Sr.PM was set, or no region ceiling).
-  const withinRm = pod.rmNte == null ? true : (amtOk && amt <= pod.rmNte);
-  if (isUser(pod.rm) && withinRm) {
-    const why = pmTier.length === 0
-      ? `No PM / Sr. PM set for ${rc.region} → defaults to the ${pod.name} RM.`
-      : `${amtOk ? `$${amt.toLocaleString()}` : 'Amount'} is above the region ceiling → ${pod.name} RM (ceiling ${pod.rmNte != null ? `$${pod.rmNte.toLocaleString()}` : 'none'}).`;
-    return { level: 'rm', users: [pod.rm], podId: pod.id, podName: pod.name, region: rc.region, reason: why };
-  }
-
-  // Tier 3 — directors (above the RM ceiling, or no RM configured).
+  // Directors — above the RM ceiling, or no RM configured.
   return {
     level: 'director', users: config.directors.slice(), podId: pod.id, podName: pod.name, region: rc.region,
     reason: isUser(pod.rm)
-      ? `${amtOk ? `$${amt.toLocaleString()}` : 'Amount'} exceeds the ${pod.name} RM ceiling ($${(pod.rmNte ?? 0).toLocaleString()}) → director tier.`
+      ? `${amtStr} exceeds the ${pod.name} RM ceiling (${money(pod.rmNte ?? 0)}) → director tier.`
       : `No RM configured for ${pod.name} → director tier.`,
   };
 }

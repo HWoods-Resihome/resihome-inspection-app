@@ -99,10 +99,8 @@ export default function AdminFlowsPage() {
           </Link>
         </Section>
 
-        {/* ---- Approval Routing (PODs / Regions) ---- */}
-        <Section title="Approval Routing" desc="PODs → Regions (PM / Sr. PM) + RM + Director tier with Slack IDs and NTE ceilings. Decides who gets tagged on Slack when a rate-card scope goes to pending approval.">
-          <ApprovalRoutingManager />
-        </Section>
+        {/* ---- Approval Routing (PODs / Regions) — self-contained collapsible card ---- */}
+        <ApprovalRoutingManager />
 
         {/* ---- Provision Fields (Setup) ---- */}
         <Section
