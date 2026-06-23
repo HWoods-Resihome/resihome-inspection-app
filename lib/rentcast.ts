@@ -54,6 +54,12 @@ function buildQuery(params: Record<string, string>): string {
     .join('&');
 }
 
+/** Normalize an address for the geocoder: collapse a comma between state and ZIP
+ *  ("McDonough, GA, 30253" → "McDonough, GA 30253") and squeeze whitespace. */
+export function normalizeAddress(a: string): string {
+  return (a || '').replace(/,\s*([A-Za-z]{2}),\s*(\d{5})/, ', $1 $2').replace(/\s{2,}/g, ' ').trim();
+}
+
 /** Parse state/zip/city out of a "Street, City, ST ZIP" snapshot when not given. */
 export function parseAddressParts(full: string): { state: string; zip: string; city: string } {
   const s = (full || '').trim();
@@ -140,10 +146,12 @@ function filterComps(allComps: any[], subject: RentSubject, sp: typeof SEARCH_AT
 
 /** Fetch active rental comps for a subject, broadening until some pass filters. */
 export async function fetchRentComps(subjectIn: RentSubject): Promise<RentCompResult> {
-  // Fill state/zip/city from the address if not supplied.
-  const parts = parseAddressParts(subjectIn.address);
+  // Normalize the address, then fill state/zip/city from it if not supplied.
+  const address = normalizeAddress(subjectIn.address);
+  const parts = parseAddressParts(address);
   const subject: RentSubject = {
     ...subjectIn,
+    address,
     state: subjectIn.state || parts.state,
     city: subjectIn.city || parts.city,
     zip: subjectIn.zip || parts.zip,

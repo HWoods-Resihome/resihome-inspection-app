@@ -129,9 +129,14 @@ export async function postListingPriceAlertOnSubmit(
       { type: 'mrkdwn', text: `*Agent recommends:*\n${arrow} ${dirWord} to *${usd(recommended)}/mo*${deltaStr}` },
       { type: 'mrkdwn', text: `*Inspector:*\n${inspection.inspectorName || '—'}` },
     ] },
-    { type: 'section', text: { type: 'mrkdwn', text: `<${inspectionUrl}|Open inspection ↗>` } },
-    { type: 'divider' },
   ];
+
+  // Inspector's note/feedback on the listing-price recommendation, when present.
+  const note = (ans.note || '').trim();
+  if (note) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Agent note:*\n>${note.replace(/\n/g, '\n>')}` } });
+
+  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `<${inspectionUrl}|Open inspection ↗>` } });
+  blocks.push({ type: 'divider' });
 
   if (comps.ok && comps.comps.length) {
     const avmLine = comps.avmRent > 0 ? `  ·  AVM ${usd(comps.avmRent)} (${usd(comps.avmLow)}–${usd(comps.avmHigh)})` : '';
