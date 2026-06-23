@@ -280,17 +280,18 @@ export function ApprovalRoutingManager() {
                                     <NteInput label={`${tier.label} NTE`} value={tier.nte}
                                       onChange={(n) => patchRegion(pod.id, rc.region, (r) => ({ ...r, [tier.nteKey]: n }))} />
                                   </div>
-                                  <div className="space-y-1 mt-1">
-                                    {(tier.list || []).length === 0 && <p className="text-[11px] text-gray-400 pl-1">none</p>}
-                                    {(tier.list || []).map((u, i) => (
-                                      <div key={i} className="flex items-center gap-2">
-                                        <OwnerPicker label={`#${i + 1}`} user={u} owners={owners}
-                                          onChange={(nu) => setUser(pod.id, rc.region, tier.key, i, nu)} />
-                                        <button type="button" onClick={() => setUser(pod.id, rc.region, tier.key, i, null)} className="text-gray-400 hover:text-rose-600 text-lg leading-none px-1" aria-label={`Remove ${tier.label}`}>×</button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <button type="button" onClick={() => addUser(pod.id, rc.region, tier.key)} className="mt-1 text-xs font-heading font-semibold text-brand hover:underline">+ Add {tier.label}</button>
+                                  {(tier.list || []).length > 0 && (
+                                    <div className="space-y-1 mt-1">
+                                      {(tier.list || []).map((u, i) => (
+                                        <div key={i} className="flex items-center gap-2">
+                                          <OwnerPicker label={`#${i + 1}`} user={u} owners={owners}
+                                            onChange={(nu) => setUser(pod.id, rc.region, tier.key, i, nu)} />
+                                          <button type="button" onClick={() => setUser(pod.id, rc.region, tier.key, i, null)} className="text-gray-400 hover:text-rose-600 text-lg leading-none px-1" aria-label={`Remove ${tier.label}`}>×</button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <button type="button" onClick={() => addUser(pod.id, rc.region, tier.key)} className="mt-0.5 text-xs font-heading font-semibold text-brand hover:underline">+ Add {tier.label}</button>
                                 </div>
                               ))}
                             </div>
