@@ -3,11 +3,21 @@ import { useEffect, useRef, useState } from 'react';
 // Renders text on a single line, shrinking the font until it fits the available
 // width (down to a floor) so long titles/addresses never wrap or truncate.
 // Re-measures when the text, bounds, or container width changes.
-export function FitText({ text, className, max = 14, min = 11 }: {
-  text: string; className?: string; max?: number; min?: number;
+//
+// Optional `copyLink`: when provided, PRESS-AND-HOLD (long-press, ~500ms) on the
+// text copies that link to the clipboard and shows a brief "Link copied" toast —
+// e.g. hold the inspection title to copy a shareable link to it, at any status. A
+// relative path ("/inspection/123") is resolved against the current origin.
+export function FitText({ text, className, max = 14, min = 11, copyLink }: {
+  text: string; className?: string; max?: number; min?: number; copyLink?: string;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState(max);
+  const [copied, setCopied] = useState(false);
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startPt = useRef<{ x: number; y: number } | null>(null);
+
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -28,14 +38,90 @@ export function FitText({ text, className, max = 14, min = 11 }: {
     }
     return () => { ro?.disconnect(); };
   }, [text, max, min]);
-  return (
+
+  // Clean up timers on unmount.
+  useEffect(() => () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+  }, []);
+
+  const cancelPress = () => {
+    if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; }
+    startPt.current = null;
+  };
+
+  const doCopy = async () => {
+    if (!copyLink) return;
+    const url = /^https?:/i.test(copyLink)
+      ? copyLink
+      : (typeof window !== 'undefined' ? `${window.location.origin}${copyLink}` : copyLink);
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(url);
+      ok = true;
+    } catch {
+      // Fallback for webviews/older browsers without the async clipboard API.
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch { ok = false; }
+    }
+    if (ok) {
+      try { navigator.vibrate?.(15); } catch { /* no haptics — fine */ }
+      setCopied(true);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 1600);
+    }
+  };
+
+  const bind = copyLink ? {
+    onPointerDown: (e: React.PointerEvent) => {
+      startPt.current = { x: e.clientX, y: e.clientY };
+      if (pressTimer.current) clearTimeout(pressTimer.current);
+      pressTimer.current = setTimeout(() => { pressTimer.current = null; void doCopy(); }, 500);
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const s = startPt.current;
+      if (s && (Math.abs(e.clientX - s.x) > 10 || Math.abs(e.clientY - s.y) > 10)) cancelPress();
+    },
+    onPointerUp: cancelPress,
+    onPointerLeave: cancelPress,
+    onPointerCancel: cancelPress,
+    // Suppress the desktop right-click / iOS text-selection callout on hold.
+    onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); },
+  } : {};
+
+  const textDiv = (
     <div
       ref={ref}
       className={className}
-      style={{ whiteSpace: 'nowrap', overflow: 'hidden', fontSize: `${size}px`, lineHeight: 1.2 }}
-      title={text}
+      style={{
+        whiteSpace: 'nowrap', overflow: 'hidden', fontSize: `${size}px`, lineHeight: 1.2,
+        ...(copyLink ? { cursor: 'copy', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' } as React.CSSProperties : {}),
+      }}
+      title={copyLink ? 'Press & hold to copy a link to this inspection' : text}
+      {...bind}
     >
       {text}
     </div>
+  );
+
+  if (!copyLink) return textDiv;
+  return (
+    <>
+      {textDiv}
+      {copied && (
+        <div style={{
+          position: 'fixed', left: '50%', bottom: 28, transform: 'translateX(-50%)', zIndex: 9999,
+          background: '#111827', color: '#fff', fontSize: 13, fontWeight: 600,
+          padding: '8px 14px', borderRadius: 9999, boxShadow: '0 4px 16px rgba(0,0,0,.25)', pointerEvents: 'none',
+        }}>
+          Link copied
+        </div>
+      )}
+    </>
   );
 }

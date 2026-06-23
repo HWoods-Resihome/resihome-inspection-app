@@ -3459,6 +3459,7 @@ export function RateCardForm(props: RateCardFormProps) {
               className="font-heading font-bold text-gray-900"
               max={26}
               min={11}
+              copyLink={`/inspection/${props.inspectionRecordId}`}
             />
           </div>
 

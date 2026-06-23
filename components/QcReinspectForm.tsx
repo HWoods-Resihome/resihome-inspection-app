@@ -766,7 +766,7 @@ export function QcReinspectForm(props: Props) {
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <FitText text={props.templateLabel} className="font-heading font-bold text-gray-900 flex-1 min-w-0" max={22} min={11} />
+              <FitText text={props.templateLabel} className="font-heading font-bold text-gray-900 flex-1 min-w-0" max={22} min={11} copyLink={`/inspection/${props.inspectionRecordId}`} />
               {statusLabel && (
                 <span className={`inline-flex items-center shrink-0 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold border whitespace-nowrap ${statusLabel.color}`}>{statusLabel.label}</span>
               )}
