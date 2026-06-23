@@ -50,9 +50,10 @@ const SECTION_ORDER: SectionDef[] = [
   { type: 'half_bath' },
   { type: 'static',         key: 'laundry_room',        label: 'Laundry Room' },
   { type: 'static',         key: 'garage',              label: 'Garage' },
-  { type: 'static',         key: 'whole_house',         label: 'Whole House' },
+  // HVAC / Mechanicals comes BEFORE Whole House. Smart Home / Locks is no longer
+  // a default Scope section (the inspector can still add it as a custom section).
   { type: 'static',         key: 'mechanicals_hvac',    label: 'HVAC / Mechanicals' },
-  { type: 'static',         key: 'smart_home_locks',    label: 'Smart Home / Locks', photoOptional: true },
+  { type: 'static',         key: 'whole_house',         label: 'Whole House' },
 ];
 
 /**

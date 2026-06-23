@@ -26,6 +26,16 @@ describe('section resolution', () => {
     expect(bathrooms.map((s) => s.location)).toEqual(['Bathroom 1', 'Bathroom 2']);
   });
 
+  it('drops Smart Home / Locks and puts HVAC / Mechanicals before Whole House', () => {
+    const secs = deriveDefaultSections(2, 1);
+    expect(secs.some((s) => s.key === 'smart_home_locks')).toBe(false);
+    const hvac = secs.findIndex((s) => s.key === 'mechanicals_hvac');
+    const whole = secs.findIndex((s) => s.key === 'whole_house');
+    expect(hvac).toBeGreaterThanOrEqual(0);
+    expect(whole).toBeGreaterThanOrEqual(0);
+    expect(hvac).toBeLessThan(whole);
+  });
+
   it('adds a Half Bath for a .5 bathroom count', () => {
     const secs = deriveDefaultSections(2, 1.5);
     expect(secs.some((s) => s.location === 'Half Bath')).toBe(true);
