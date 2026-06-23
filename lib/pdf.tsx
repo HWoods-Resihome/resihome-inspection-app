@@ -149,6 +149,8 @@ export interface PdfData {
   bathrooms: number;
   /** Optional header meta (mirrors Scope): sqft + region. */
   squareFootage?: number | null;
+  /** Property lifecycle status (e.g. "Pending MOI/Rekey"), shown in the header. */
+  propertyStatus?: string | null;
   region?: string | null;
   /** Listing highlights for the header (mirrors the app header). */
   listingStatus?: string | null;
@@ -312,6 +314,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           inspectorName={data.inspectorName}
           region={data.region ?? null}
           squareFootage={data.squareFootage ?? null}
+          propertyStatus={data.propertyStatus ?? null}
           bedrooms={data.bedrooms}
           bathrooms={data.bathrooms}
           generatedAtLabel={isoToHumanDate(data.completedAt)}

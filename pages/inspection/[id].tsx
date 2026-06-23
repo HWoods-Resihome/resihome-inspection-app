@@ -244,6 +244,7 @@ export default function ExistingInspection() {
           bedrooms: inspection.bedroomsAtInspection || 0,
           bathrooms: inspection.bathroomsAtInspection || 0,
           squareFootage: propertySquareFootage,
+          propertyStatus: inspection.propertyStatusAtCompletion || propertyStatus || null,
           region: inspection.regionSnapshot || null,
           listingStatus,
           listingPrice,
@@ -515,6 +516,15 @@ export default function ExistingInspection() {
                   <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                 </svg>
                 {isCompleted ? 'Completed (read-only)' : 'Cancelled (read-only)'}
+                {isCompleted && (() => {
+                  const raw = inspection.completedAt || inspection.submittedAt || '';
+                  const s = String(raw).trim();
+                  if (!s) return null;
+                  const d = /^\d+$/.test(s) ? new Date(Number(s)) : new Date(s);
+                  if (isNaN(d.getTime())) return null;
+                  const mdy = `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
+                  return <span className="text-gray-400 font-normal">{'  ·  '}{mdy}</span>;
+                })()}
               </span>
             </div>
 

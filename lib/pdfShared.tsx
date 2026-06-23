@@ -396,6 +396,9 @@ export function PdfHeaderStrip(props: {
   bedrooms: number;
   bathrooms: number;
   generatedAtLabel: string;
+  /** Optional property lifecycle status (e.g. "Pending MOI/Rekey") shown in the
+   *  details line, matching the app header. */
+  propertyStatus?: string | null;
   /** Optional "M/DD/YY Submitted" stamp shown right after the inspector name. */
   submittedLabel?: string | null;
   /** Optional approver name + "M/DD/YY Approved" stamp shown on a second line. */
@@ -431,6 +434,9 @@ export function PdfHeaderStrip(props: {
   }
   if (props.squareFootage && props.squareFootage > 0) {
     metaParts.push(`${props.squareFootage.toLocaleString()} sqft`);
+  }
+  if (props.propertyStatus && props.propertyStatus.trim()) {
+    metaParts.push(props.propertyStatus.trim());
   }
   metaParts.push(props.generatedAtLabel);
 

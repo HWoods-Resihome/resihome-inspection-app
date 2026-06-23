@@ -29,6 +29,7 @@ interface GeneratePdfBody {
   bedrooms: number;
   bathrooms: number;
   squareFootage?: number | null;
+  propertyStatus?: string | null;
   region?: string | null;
   listingStatus?: string | null;
   listingPrice?: number | null;
@@ -148,6 +149,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       bedrooms: body.bedrooms,
       bathrooms: body.bathrooms,
       squareFootage: body.squareFootage ?? null,
+      propertyStatus: body.propertyStatus ?? null,
       region: body.region ?? null,
       listingStatus: body.listingStatus ?? null,
       listingPrice: body.listingPrice ?? null,
