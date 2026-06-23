@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection, populateBillingFields } from '@/lib/hubspot';
 import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
 import { createComplianceTicketsOnSubmit } from '@/lib/complianceTickets';
+import { postListingPriceAlertOnSubmit } from '@/lib/listingPriceAlert';
 import { fcSmartHomeStamps, fcPoolStamps, parseFcAnswers } from '@/lib/finalChecklist';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
@@ -121,6 +122,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
         } catch (e) {
           console.warn('[submit] compliance ticket creation skipped (continuing):', e);
+        }
+
+        // Listing-price Slack alert: when the agent recommends Reduce/Increase on
+        // "Evaluate Listing Price", post the property + active-listing price +
+        // RentCast comps to Slack. Best-effort; gated per inspection.
+        try {
+          const fwdHost = req.headers['x-forwarded-host'] || req.headers.host;
+          const fwdProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+          const baseUrl = fwdHost ? `${fwdProto}://${fwdHost}` : undefined;
+          const alert = await postListingPriceAlertOnSubmit(
+            {
+              recordId: id,
+              propertyAddressSnapshot: existing?.propertyAddressSnapshot || '',
+              propertyRecordId: existing?.propertyRecordId || null,
+              inspectorName: existing?.inspectorName || '',
+              bedrooms: existing?.bedroomsAtInspection ?? null,
+              bathrooms: existing?.bathroomsAtInspection ?? null,
+            },
+            answers,
+            { baseUrl },
+          );
+          console.log(`[submit] 1099 listing-price alert for ${id}: ${alert.posted ? `posted to ${alert.channel}` : `skipped (${alert.reason || alert.error})`}`);
+        } catch (e) {
+          console.warn('[submit] listing-price alert skipped (continuing):', e);
         }
       } catch (e) {
         console.warn('[submit] 1099 field stamp skipped (provision via /admin/setup):', e);

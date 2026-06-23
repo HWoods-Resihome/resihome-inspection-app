@@ -2646,6 +2646,57 @@ export async function stampComplianceTicketsCreated(inspectionRecordId: string):
   }
 }
 
+// ── 1099 listing-price Slack alert gate ─────────────────────────────────────
+// Stamped once a listing-price (Reduce/Increase) Slack alert has been posted for
+// an inspection, so re-submitting the same inspection doesn't re-post.
+const LISTING_PRICE_ALERT_PROP = 'listing_price_alert_at';
+
+export async function getListingPriceAlertStamp(inspectionRecordId: string): Promise<string | null> {
+  const { inspection } = typeIds();
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${inspection}/${inspectionRecordId}?properties=${LISTING_PRICE_ALERT_PROP}`);
+    const v = resp?.properties?.[LISTING_PRICE_ALERT_PROP];
+    return v ? String(v) : null;
+  } catch { return null; }
+}
+
+async function ensureListingPriceAlertProperty(): Promise<void> {
+  const { inspection } = typeIds();
+  try { await hubspotFetch(`/crm/v3/properties/${inspection}/${LISTING_PRICE_ALERT_PROP}`); return; } catch { /* create */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${inspection}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: LISTING_PRICE_ALERT_PROP, label: 'Listing Price Alert Posted At', type: 'datetime', fieldType: 'date',
+        groupName: 'inspection_1099',
+        description: 'Set once the 1099 listing-price (Reduce/Increase) Slack alert has been posted — gates re-posting on re-submit.',
+      }),
+    });
+  } catch (e: any) {
+    const blob = `${String(e?.message || e)} ${String(e?.detail || '')}`;
+    if (!(e?.status === 409 || /already exists|PROPERTY_ALREADY_EXISTS/i.test(blob))) {
+      console.warn('[listing-price-alert] could not provision listing_price_alert_at:', blob.slice(0, 200));
+    }
+  }
+}
+
+export async function stampListingPriceAlert(inspectionRecordId: string): Promise<void> {
+  const { inspection } = typeIds();
+  const doWrite = () => hubspotFetch(`/crm/v3/objects/${inspection}/${inspectionRecordId}`, {
+    method: 'PATCH', body: JSON.stringify({ properties: { [LISTING_PRICE_ALERT_PROP]: Date.now() } }),
+  });
+  try {
+    await doWrite();
+  } catch (e) {
+    if (isMissingPropertyError(e, LISTING_PRICE_ALERT_PROP)) {
+      await ensureListingPriceAlertProperty();
+      await doWrite().catch((e2) => console.warn('[listing-price-alert] stamp write retry failed:', e2));
+    } else {
+      console.warn('[listing-price-alert] stamp write failed:', e);
+    }
+  }
+}
+
 /**
  * Also returns the property_id_ref so we can resolve the property record link.
  */
@@ -4301,6 +4352,10 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   });
   await ensureProp(inspection, 'listing_price_feedback_1099', {
     name: 'listing_price_feedback_1099', label: '1099 Listing Price Feedback', type: 'string', fieldType: 'textarea', groupName: 'inspection_1099',
+  });
+  // Gate: set once the listing-price (Reduce/Increase) Slack alert has posted.
+  await ensureProp(inspection, 'listing_price_alert_at', {
+    name: 'listing_price_alert_at', label: 'Listing Price Alert Posted At', type: 'datetime', fieldType: 'date', groupName: 'inspection_1099',
   });
   await ensureProp(inspection, 'landscaping_response_1099', {
     name: 'landscaping_response_1099', label: '1099 Landscaping Response', type: 'string', fieldType: 'text', groupName: 'inspection_1099',
