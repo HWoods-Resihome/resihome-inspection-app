@@ -31,6 +31,10 @@ interface Props {
   /** Upload a photo for a field. fieldKey ("qid:photoKey") lets the parent queue
    *  it offline and swap the draft for the real URL on reconnect. */
   uploadPhoto: (file: File, fieldKey?: string) => Promise<string>;
+  /** Translate a returned photo URL to its real URL if it already synced — guards
+   *  against a draft (blob:) being handed back AFTER its upload completed, which
+   *  would otherwise stick on "Syncing…" forever. Defaults to identity. */
+  resolveSyncedUrl?: (url: string) => string;
   propertyName?: string;
   propertyRecordId?: string;
   propertyValues?: Record<string, string | number | null | undefined>;
@@ -668,7 +672,11 @@ export function FinalChecklist(props: Props) {
         onClose={() => setCamera(null)}
         uploadPhoto={(file) => props.uploadPhoto(file, camFor || undefined)}
         onComplete={(urls) => {
-          if (camFor && urls.length > 0) setPhotoList(camFor, [...getPhotoList(camFor), ...urls]);
+          // Translate any draft that already finished uploading to its real URL
+          // (the camera can hand back a stale blob: for a photo whose queued record
+          // was already synced + deleted — that would stick on "Syncing…" forever).
+          const resolve = props.resolveSyncedUrl || ((u: string) => u);
+          if (camFor && urls.length > 0) setPhotoList(camFor, [...getPhotoList(camFor), ...urls.map(resolve)]);
           setCamera(null);
         }}
       />

@@ -251,6 +251,12 @@ export function QuestionForm({
   // Last server-reported reason a checklist save failed (e.g. over HubSpot's size
   // limit), surfaced in the submit-block dialog so it's actionable, not cryptic.
   const fcSaveErrRef = useRef<string>('');
+  // Running draft(blob:)→real URL map for every synced Final Checklist photo. A
+  // draft can finish uploading (queue record deleted, sync fired) just BEFORE the
+  // camera's "Done" hands it back, leaving a stale blob: that the swap already
+  // moved past — stuck on "Syncing…" forever. We translate returned urls through
+  // this when they land (resolveSyncedUrl) so that orphan can't happen.
+  const fcSyncedUrlMapRef = useRef<Map<string, string>>(new Map());
 
   // Hydrate the checklist blob from the saved answer on open.
   useEffect(() => {
@@ -980,6 +986,8 @@ export function QuestionForm({
       // their camKey in lineExternalId. Without this the synced photo's draft URL
       // is revoked and never replaced (the broken "?" tile + "photo disappeared").
       if (sectionId === FC_PHOTO_SECTION) {
+        if (oldUrl) fcSyncedUrlMapRef.current.set(oldUrl, newUrl);
+        if (replacesUrl) fcSyncedUrlMapRef.current.set(replacesUrl, newUrl);
         const matchesFc = (u: string) => u === oldUrl || (!!replacesUrl && u === replacesUrl);
         setFcAnswers((cur) => {
           let changed = false;
@@ -1689,6 +1697,7 @@ export function QuestionForm({
       answers={fcAnswers}
       onPatch={onFcPatch}
       uploadPhoto={(file, fieldKey) => uploadPhotoOrQueue(file, inspectionRecordId, FC_PHOTO_SECTION, { lineExternalId: fieldKey })}
+      resolveSyncedUrl={(u) => fcSyncedUrlMapRef.current.get(u) || u}
       propertyName={propertyName}
       propertyRecordId={propertyRecordId}
       propertyValues={propertyValues}

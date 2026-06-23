@@ -944,6 +944,14 @@ export function RateCardForm(props: RateCardFormProps) {
   savePhotosRef.current = savePhotosForSection;
 
   const flushingRef = useRef(false);
+  // Running draft(blob:)→real URL map for EVERY Final Checklist photo that syncs,
+  // kept across flushes. A draft can finish uploading (its queue record deleted,
+  // sync fired) in the brief window BEFORE the camera's "Done" hands that url back
+  // to the FC field — so the field receives a stale blob: the flush swap already
+  // moved past, and it sticks on "Syncing…" forever. We translate returned urls
+  // through this map when they land (see resolveSyncedUrl below) so that orphan
+  // can't happen.
+  const fcSyncedUrlMapRef = useRef<Map<string, string>>(new Map());
   const runFlush = useCallback(async () => {
     // CONCURRENCY GUARD: runFlush fires from many triggers (online, SW message,
     // poll interval, mount, photo-resume, tab-visible, manual Retry). Without
@@ -982,8 +990,8 @@ export function RateCardForm(props: RateCardFormProps) {
       }).catch(() => ({ synced: 0, remaining: 0 } as any)),
       flushQueuedPhotos(props.inspectionRecordId, ({ oldUrl, newUrl, replacesUrl, lineExternalId, sectionId }) => {
         if (sectionId === FC_PHOTO_SECTION) {
-          if (oldUrl) fcUrlMap.set(oldUrl, newUrl);
-          if (replacesUrl) fcUrlMap.set(replacesUrl, newUrl);
+          if (oldUrl) { fcUrlMap.set(oldUrl, newUrl); fcSyncedUrlMapRef.current.set(oldUrl, newUrl); }
+          if (replacesUrl) { fcUrlMap.set(replacesUrl, newUrl); fcSyncedUrlMapRef.current.set(replacesUrl, newUrl); }
           return;
         }
         if (lineExternalId) {
@@ -4256,6 +4264,7 @@ export function RateCardForm(props: RateCardFormProps) {
             answers={fcAnswers}
             onPatch={handleFcPatch}
             uploadPhoto={(file, fieldKey) => uploadPhotoOrQueue(file, props.inspectionRecordId, FC_PHOTO_SECTION, { lineExternalId: fieldKey })}
+            resolveSyncedUrl={(u) => fcSyncedUrlMapRef.current.get(u) || u}
             propertyName={props.propertyName}
             propertyRecordId={props.propertyRecordId}
             propertyValues={fcPropertyValues}
