@@ -179,7 +179,7 @@ function tools() {
           suggestedLineItemCode: { type: 'string', description: 'For add (or an item swap): a real catalog code from search_catalog.' },
           suggestedQuantity: { type: 'number' },
           suggestedTenantBillBackPercent: { type: 'number', description: 'Suggested tenant % (0-100, steps of 5).' },
-          suggestedVendorCost: { type: 'number', description: 'Suggested vendor cost override, if proposing a specific dollar amount.' },
+          suggestedVendorCost: { type: 'number', description: 'Suggested vendor cost override (a specific dollar amount). REQUIRED when re-pricing a BID ITEM — set it to your estimate of real labor hours × the region labor rate + materials. The inspector can override it before approving.' },
           suggestedTenantDollars: { type: 'number', description: 'Resulting tenant $ after the change, if you can estimate it.' },
         },
         required: ['type', 'sectionId', 'title', 'rationale'],
@@ -235,17 +235,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (!item) continue;
         let costStr = '';
         let tenantStr = `${l.tenantBillBackPercent}% tenant`;
+        let laborRate = 0;   // region $/hr — lets the model price a bid item in labor hours
+        let curVendor = 0;   // current vendor cost (the placeholder default on an unpriced bid item)
         try {
           const c = calculateLine(item, region, regions, {
             quantity: l.quantity, tenantBillBackPercent: l.tenantBillBackPercent,
             customLaborRate: l.customLaborRate ?? null, customAdjustedMaterialCost: l.customAdjustedMaterialCost ?? null, customVendorCost: l.customVendorCost ?? null,
           });
+          laborRate = c.laborHourlyRateSnapshot || 0;
+          curVendor = c.vendorCost || 0;
           costStr = `vendor ${money(c.vendorCost)}, client ${money(c.clientCost)}, tenant ${money(c.tenantCost)}`;
           tenantStr = `${l.tenantBillBackPercent}% tenant = ${money(c.tenantCost)}`;
           if (/paint/i.test(item.category)) paintTotal += c.clientCost;
         } catch { /* noop */ }
+        // Bid items are custom call-outs priced off-matrix; surface the current
+        // (often placeholder) vendor cost + the region labor rate so the model can
+        // estimate real labor hours + materials and propose a realistic vendor cost.
         const bidTag = item.isBidItem
-          ? ` | BID ITEM (${l.customVendorCost != null ? 'vendor cost set' : 'vendor cost NOT set'})`
+          ? ` | BID ITEM — REVIEW & PRICE: current vendor ${money(curVendor)}${l.customVendorCost == null ? ' (PLACEHOLDER ~1 labor hr default — almost certainly too low)' : ' (inspector-set)'}; region labor ≈${money(laborRate)}/hr — estimate the real labor hours + materials for this work and propose a vendor cost`
           : '';
         rows.push(`    - id=${l.externalId} | ${item.laborShortDescription} [${item.category}/${item.subcategory}, ${item.laborMeas}] | qty ${l.quantity} | ${tenantStr} | ${costStr} | vendor: ${l.assignedTo || 'Vendor 1'}${bidTag}${l.note ? ` | note: ${l.note}` : ''}`);
       }
