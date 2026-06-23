@@ -13,9 +13,7 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState(max);
-  const [copied, setCopied] = useState(false);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startPt = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
@@ -39,10 +37,9 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
     return () => { ro?.disconnect(); };
   }, [text, max, min]);
 
-  // Clean up timers on unmount.
+  // Clean up the long-press timer on unmount.
   useEffect(() => () => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
-    if (copiedTimer.current) clearTimeout(copiedTimer.current);
   }, []);
 
   const cancelPress = () => {
@@ -69,12 +66,9 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
         document.body.removeChild(ta);
       } catch { ok = false; }
     }
-    if (ok) {
-      try { navigator.vibrate?.(15); } catch { /* no haptics — fine */ }
-      setCopied(true);
-      if (copiedTimer.current) clearTimeout(copiedTimer.current);
-      copiedTimer.current = setTimeout(() => setCopied(false), 1600);
-    }
+    // No in-app toast — the device shows its own copy confirmation; a subtle
+    // haptic is the only extra feedback.
+    if (ok) { try { navigator.vibrate?.(15); } catch { /* no haptics — fine */ } }
   };
 
   const bind = copyLink ? {
@@ -94,7 +88,7 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
     onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); },
   } : {};
 
-  const textDiv = (
+  return (
     <div
       ref={ref}
       className={className}
@@ -107,21 +101,5 @@ export function FitText({ text, className, max = 14, min = 11, copyLink }: {
     >
       {text}
     </div>
-  );
-
-  if (!copyLink) return textDiv;
-  return (
-    <>
-      {textDiv}
-      {copied && (
-        <div style={{
-          position: 'fixed', left: '50%', bottom: 28, transform: 'translateX(-50%)', zIndex: 9999,
-          background: '#111827', color: '#fff', fontSize: 13, fontWeight: 600,
-          padding: '8px 14px', borderRadius: 9999, boxShadow: '0 4px 16px rgba(0,0,0,.25)', pointerEvents: 'none',
-        }}>
-          Link copied
-        </div>
-      )}
-    </>
   );
 }
