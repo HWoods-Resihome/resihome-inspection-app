@@ -44,6 +44,17 @@ function findListingPriceAnswer(answers: SavedAnswer[]): SavedAnswer | undefined
   return answers.filter((a) => (a.answerType || 'qa') === 'qa').find((a) => LISTING_RE.test(a.answerSummary || ''));
 }
 
+/** Zillow address deep-link: /homes/<slug>_rb/ resolves to the property page
+ *  (RentCast gives no zpid, so we can't build the canonical /homedetails/…_zpid/). */
+function zillowUrl(addr: string): string {
+  const slug = (addr || '').replace(/#/g, '').replace(/[.,]/g, '').trim().replace(/\s+/g, '-').replace(/-{2,}/g, '-');
+  return `https://www.zillow.com/homes/${slug}_rb/`;
+}
+/** Pre-filled Google "zillow {address} for rent" search — reliable fallback. */
+function googleUrl(addr: string): string {
+  return 'https://www.google.com/search?q=' + encodeURIComponent(`zillow ${addr} for rent`);
+}
+
 function compLine(c: RentComp, i: number): string {
   const bits = [
     usd(c.price) + '/mo',
@@ -52,7 +63,9 @@ function compLine(c: RentComp, i: number): string {
     c.daysOnMarket ? `${c.daysOnMarket}d DOM` : '',
     c.distance ? `${c.distance.toFixed(2)}mi` : '',
   ].filter(Boolean).join(' · ');
-  return `*${i + 1}. ${c.address || '(address n/a)'}*\n${bits}`;
+  const addr = c.address || '(address n/a)';
+  // Address links straight to Zillow; a small Google link as a fallback.
+  return `*${i + 1}. <${zillowUrl(addr)}|${addr}>*\n${bits}  ·  <${googleUrl(addr)}|🔎 Google>`;
 }
 
 /** Advisory read on whether the recommended rent sits inside the comp/AVM range. */
