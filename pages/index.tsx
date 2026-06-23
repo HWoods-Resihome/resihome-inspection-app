@@ -1021,7 +1021,12 @@ export default function Home() {
               )}
             </div>
           )}
-          {inspections.map((i) => (
+          {/* Only render rows when NOT loading. While an uncached filter/search
+              combo is fetching, `inspections` still holds the PREVIOUS query's
+              rows — showing them under the "Loading…" spinner looked like the
+              filter hadn't applied (the misleading lag). Cached views paint
+              instantly with loading=false, so this never blanks a cached switch. */}
+          {!loading && inspections.map((i) => (
             <InspectionCard
               key={i.recordId}
               inspection={i}
