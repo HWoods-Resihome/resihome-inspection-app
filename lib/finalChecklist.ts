@@ -154,6 +154,9 @@ export type FcAnswers = Record<string, FcAnswerState>;
 export interface FcCompletionCtx {
   /** property septic_fee — gates the conditional septic question's visibility. */
   septicFee: number | null;
+  /** property pool_fee — gates the conditional Pool Condition question's
+   *  visibility (shown only when known and > 0). */
+  poolFee?: number | null;
   /** property air_filters___total_quantity — the effective qty when unanswered. */
   airQtyPrefill: number | null;
   /** Whether the HubSpot field exposes any filter-size options. When false we
@@ -203,7 +206,8 @@ export function fcQuestionVisible(q: FcQuestion, ctx: FcCompletionCtx): boolean 
   // Community-only questions (mailbox keys) hide on non-community properties.
   if (q.requiresCommunity && !ctx.hasCommunity) return false;
   if (q.showWhenProperty) {
-    const v = ctx.septicFee ?? 0;
+    const f = q.showWhenProperty.field;
+    const v = (f === 'pool_fee' ? ctx.poolFee : f === 'septic_fee' ? ctx.septicFee : null) ?? 0;
     return v > (q.showWhenProperty.gt ?? 0);
   }
   return true;
@@ -436,6 +440,17 @@ export function fcSmartHomeStamps(a: FcAnswers): { deviceType: string; deviceIns
   };
 }
 
+/** Pool Condition values mirrored to their own inspection fields at completion:
+ *    poolCondition — the Pass/Fail answer ('' when the question wasn't shown)
+ *    poolFeedback  — the required note when Failed (the "what's wrong" reason) */
+export function fcPoolStamps(a: FcAnswers): { poolCondition: string; poolFeedback: string } {
+  const ans = a['fc_pool_condition'] || {};
+  return {
+    poolCondition: (ans.value || '').trim(),
+    poolFeedback: (ans.note || '').trim(),
+  };
+}
+
 /** True only when every required (and visible) checklist item is satisfied —
  *  including that each line-item prompt has been explicitly accepted or declined.
  *  Derived from finalChecklistGap so the gate and the message can never diverge. */
@@ -605,6 +620,21 @@ export const FINAL_CHECKLIST: FcSection[] = [
         addLineOnValues: [
           { value: 'Needs Pump-Out', rule: { lineItemCode: 'SPTCL1003', label: 'Septic Pump Out', ...t(0), optional: true } },
         ],
+      },
+      {
+        id: 'fc_pool_condition',
+        label: 'Pool Condition',
+        type: 'single_select',
+        options: ['Pass', 'Fail'],
+        required: true,
+        help: 'Shown Because This Property Has a Pool Fee on File.',
+        // Only visible when the property carries a pool fee (known and > 0).
+        showWhenProperty: { field: 'pool_fee', gt: 0 },
+        // On Fail, require photo evidence AND a written reason.
+        photoRequiredOnValues: ['Fail'],
+        photoHint: 'Photo of the pool showing its condition.',
+        noteRequiredOnValues: ['Fail'],
+        notePrompt: 'What is wrong with the pool?',
       },
     ],
   },

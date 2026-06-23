@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection, populateBillingFields } from '@/lib/hubspot';
 import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
 import { createComplianceTicketsOnSubmit } from '@/lib/complianceTickets';
-import { fcSmartHomeStamps, parseFcAnswers } from '@/lib/finalChecklist';
+import { fcSmartHomeStamps, fcPoolStamps, parseFcAnswers } from '@/lib/finalChecklist';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { recordAuditEvent } from '@/lib/auditLog';
@@ -132,8 +132,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try {
         const answers = await fetchAnswersForInspection(id);
         const fcRec = answers.find((a) => a.questionIdExternal === 'fc__all' || String(a.answerIdExternal || '').startsWith('FINALCHECKLIST-'));
-        const stamps = fcSmartHomeStamps(parseFcAnswers(fcRec?.note));
-        await updateInspection(id, { device_type: stamps.deviceType, device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber });
+        const fc = parseFcAnswers(fcRec?.note);
+        const stamps = fcSmartHomeStamps(fc);
+        const pool = fcPoolStamps(fc);
+        await updateInspection(id, { device_type: stamps.deviceType, device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber, pool_condition: pool.poolCondition, pool_feedback: pool.poolFeedback });
       } catch (e) {
         console.warn('[submit] smart-home field stamp skipped (provision via /admin/setup):', e);
       }

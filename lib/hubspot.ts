@@ -2626,6 +2626,9 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   propertyAirFiltersType2: string | null;
   propertyAirFiltersType3: string | null;
   propertySepticFee: number | null;
+  /** Property's pool_fee — gates the Final Checklist Pool Condition question
+   *  (shown only when known and > 0). null when unset. */
+  propertyPoolFee: number | null;
   /** Property's team_group_email — preferred finalize CC. */
   propertyTeamGroupEmail: string | null;
   /** True when the property's `pest_control_enrolled` = Yes. Scope header shows
@@ -2692,6 +2695,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     let propertyAirFiltersType2: string | null = null;
     let propertyAirFiltersType3: string | null = null;
     let propertySepticFee: number | null = null;
+    let propertyPoolFee: number | null = null;
     let propertyTeamGroupEmail: string | null = null;
     if (propertyIdRef) {
       // ISOLATED fetch for the (possibly not-yet-created) tenant-occupancy field.
@@ -2721,6 +2725,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
           'air_filters___total_quantity',
           'air_filters___type__1', 'air_filters___type__2', 'air_filters___type__3',
           'septic_fee',
+          'pool_fee',
           // Preferred email CC for finalize (falls back to team{STATE}@resihome.com).
           'team_group_email',
           // Property lifecycle status (Turnkey / Vacant / Unmarketed / …) — shown
@@ -2766,6 +2771,10 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         if (pp.septic_fee != null && pp.septic_fee !== '') {
           const n = Number(pp.septic_fee);
           if (Number.isFinite(n)) propertySepticFee = n;
+        }
+        if (pp.pool_fee != null && pp.pool_fee !== '') {
+          const n = Number(pp.pool_fee);
+          if (Number.isFinite(n)) propertyPoolFee = n;
         }
         propertyTeamGroupEmail = (pp.team_group_email || '').toString().trim() || null;
         propertyStatus = (pp[PROPERTY_STATUS_PROPERTY] || '').toString().trim() || null;
@@ -2834,6 +2843,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       propertyAirFiltersType2,
       propertyAirFiltersType3,
       propertySepticFee,
+      propertyPoolFee,
       propertyTeamGroupEmail,
       propertyPestControlEnrolled,
       propertyTenantHasPet,
@@ -4251,6 +4261,14 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   });
   await ensureProp(inspection, 'trash_bins', {
     name: 'trash_bins', label: 'Trash Bins', type: 'string', fieldType: 'text', groupName: 'inspection_utilities',
+  });
+  // Pool Condition (Final Checklist, conditional on the property's pool_fee > 0):
+  // Pass/Fail, plus the required feedback note on Fail. Stamped at completion.
+  await ensureProp(inspection, 'pool_condition', {
+    name: 'pool_condition', label: 'Pool Condition', type: 'string', fieldType: 'text', groupName: 'inspection_utilities',
+  });
+  await ensureProp(inspection, 'pool_feedback', {
+    name: 'pool_feedback', label: 'Pool Feedback', type: 'string', fieldType: 'textarea', groupName: 'inspection_utilities',
   });
 
   // Smart Home Tech (from the Final Checklist) — stamped onto the inspection at

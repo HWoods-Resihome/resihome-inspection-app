@@ -134,6 +134,7 @@ interface RateCardFormProps {
   propertyAirFiltersType2?: string | null;
   propertyAirFiltersType3?: string | null;
   propertySepticFee?: number | null;
+  propertyPoolFee?: number | null;
   filterSizeOptions?: string[];
   /** Current HubSpot status value, e.g. 'scheduled' | 'in_progress' |
    *  'pending_approval' | 'completed' | 'cancelled'. Controls which terminal
@@ -1503,6 +1504,7 @@ export function RateCardForm(props: RateCardFormProps) {
     air_filters___type__2: props.propertyAirFiltersType2 ?? null,
     air_filters___type__3: props.propertyAirFiltersType3 ?? null,
     septic_fee: props.propertySepticFee ?? null,
+    pool_fee: props.propertyPoolFee ?? null,
   };
 
   // Drop device-local draft (blob:) photo URLs before persisting — those are
@@ -2455,6 +2457,7 @@ export function RateCardForm(props: RateCardFormProps) {
   const fcGap = useMemo(
     () => finalChecklistGap(fcAnswers, {
       septicFee: props.propertySepticFee ?? null,
+      poolFee: props.propertyPoolFee ?? null,
       airQtyPrefill: props.propertyAirFiltersTotal ?? null,
       filterOptionsAvailable: (props.filterSizeOptions?.length ?? 0) > 0,
       filterPrefills: [props.propertyAirFiltersType1 ?? null, props.propertyAirFiltersType2 ?? null, props.propertyAirFiltersType3 ?? null],

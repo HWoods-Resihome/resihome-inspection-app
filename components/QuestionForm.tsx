@@ -86,6 +86,8 @@ type Props = {
   /** Property air-filter fields — prefill the HVAC widget and are written back
    *  to the property as the inspector confirms/corrects them. */
   propertyAirFiltersTotal?: number | null;
+  /** property pool_fee — gates the Final Checklist Pool Condition question. */
+  propertyPoolFee?: number | null;
   propertyAirFiltersType1?: string | null;
   propertyAirFiltersType2?: string | null;
   propertyAirFiltersType3?: string | null;
@@ -205,7 +207,7 @@ export function QuestionForm({
   bedrooms, bathrooms, squareFootage, propertyStatus, moveInReadyDate, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, moveInDate, communityName, onSubmit, onCancel, onNavigateTo,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
-  propertyAirFiltersTotal, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
+  propertyAirFiltersTotal, propertyPoolFee, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
   filterSizeOptions,
 }: Props) {
   const dialog = useAppDialog();
@@ -228,7 +230,8 @@ export function QuestionForm({
     air_filters___type__1: propertyAirFiltersType1 || '',
     air_filters___type__2: propertyAirFiltersType2 || '',
     air_filters___type__3: propertyAirFiltersType3 || '',
-  }), [propertyAirFiltersTotal, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3]);
+    pool_fee: propertyPoolFee != null ? String(propertyPoolFee) : '',
+  }), [propertyAirFiltersTotal, propertyPoolFee, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3]);
 
   // ── Reused Scope FinalChecklist (HVAC & Air Filters + Smart Home Tech) ──────
   // The Q&A templates render the EXACT Scope widgets and persist them the same
@@ -322,6 +325,7 @@ export function QuestionForm({
   // Validation context (HVAC + Smart Home only; no septic, no line rules).
   const fcCtx: FcCompletionCtx = {
     septicFee: null,
+    poolFee: propertyPoolFee ?? null,
     airQtyPrefill: propertyAirFiltersTotal ?? null,
     filterOptionsAvailable: (filterSizeOptions?.length || 0) > 0,
     filterPrefills: [propertyAirFiltersType1 || null, propertyAirFiltersType2 || null, propertyAirFiltersType3 || null],

@@ -94,6 +94,7 @@ export default function ExistingInspection() {
   const [propertyAirFiltersType2, setPropertyAirFiltersType2] = useState<string | null>(null);
   const [propertyAirFiltersType3, setPropertyAirFiltersType3] = useState<string | null>(null);
   const [propertySepticFee, setPropertySepticFee] = useState<number | null>(null);
+  const [propertyPoolFee, setPropertyPoolFee] = useState<number | null>(null);
   const [listingPrice, setListingPrice] = useState<number | null>(null);
   const [listingDate, setListingDate] = useState<string | null>(null);
   const [listingStatus, setListingStatus] = useState<string | null>(null);
@@ -143,6 +144,7 @@ export default function ExistingInspection() {
         setPropertySepticFee(
           typeof data.propertySepticFee === 'number' ? data.propertySepticFee : null
         );
+        setPropertyPoolFee(typeof data.propertyPoolFee === 'number' ? data.propertyPoolFee : null);
         setListingPrice(typeof data.listingPrice === 'number' ? data.listingPrice : null);
         setListingDate(typeof data.listingDate === 'string' ? data.listingDate : null);
         setListingStatus(typeof data.listingStatus === 'string' ? data.listingStatus : null);
@@ -592,6 +594,7 @@ export default function ExistingInspection() {
           propertyAirFiltersType2={propertyAirFiltersType2}
           propertyAirFiltersType3={propertyAirFiltersType3}
           propertySepticFee={propertySepticFee}
+          propertyPoolFee={propertyPoolFee}
           filterSizeOptions={filterSizeOptions}
           inspectionStatus={inspection.status}
           inspectionRegion={inspection.regionSnapshot || ''}
@@ -628,6 +631,7 @@ export default function ExistingInspection() {
           listingStatus={listingStatus}
           moveInDate={moveInDate}
           communityName={communityName}
+          propertyPoolFee={propertyPoolFee}
           propertyAirFiltersTotal={propertyAirFiltersTotal}
           propertyAirFiltersType1={propertyAirFiltersType1}
           propertyAirFiltersType2={propertyAirFiltersType2}

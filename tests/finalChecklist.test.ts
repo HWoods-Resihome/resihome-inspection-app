@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   finalChecklistGap, isFinalChecklistComplete,
   finalChecklistAnswerRecords, summarizeFinalChecklist,
-  fcReferencedLineCodes, fcMissingLineCodes, fcSmartHomeStamps,
+  fcReferencedLineCodes, fcMissingLineCodes, fcSmartHomeStamps, fcPoolStamps,
   type FcAnswers, type FcCompletionCtx,
 } from '@/lib/finalChecklist';
 
@@ -113,6 +113,30 @@ describe('finalChecklistGap', () => {
     // Hub + installed new → serial stamped.
     expect(fcSmartHomeStamps({ fc_smart_home_device: { value: 'Smart Home Hub', device: { installed_new: 'Yes', serial: 'HUB-1', location: 'Closet', status: 'Online' } } }))
       .toEqual({ deviceType: 'Smart Home Hub', deviceInstalled: 'Yes', serialNumber: 'HUB-1' });
+  });
+
+  it('Pool Condition: hidden unless pool_fee > 0; Fail requires photo + note', () => {
+    const poolCtx: FcCompletionCtx = { ...baseCtx, poolFee: 25 };
+    // No pool fee → question hidden → a complete checklist stays complete.
+    expect(finalChecklistGap(complete(), baseCtx)).toBeNull();
+    // pool_fee > 0 → shown + required → unanswered blocks.
+    expect(finalChecklistGap(complete(), poolCtx)).toContain('Pool Condition');
+    // Pass → satisfied (no photo/note needed).
+    const pass = complete(); pass.fc_pool_condition = { value: 'Pass' };
+    expect(finalChecklistGap(pass, poolCtx)).toBeNull();
+    // Fail without a photo → still incomplete.
+    const failNoPhoto = complete(); failNoPhoto.fc_pool_condition = { value: 'Fail', note: 'green water' };
+    expect(finalChecklistGap(failNoPhoto, poolCtx)).toContain('Pool Condition');
+    // Fail with photo + note → satisfied.
+    const failOk = complete(); failOk.fc_pool_condition = { value: 'Fail', note: 'green water', photoUrls: ['u'] };
+    expect(finalChecklistGap(failOk, poolCtx)).toBeNull();
+  });
+
+  it('fcPoolStamps mirrors Pool Condition + feedback', () => {
+    expect(fcPoolStamps({})).toEqual({ poolCondition: '', poolFeedback: '' });
+    expect(fcPoolStamps({ fc_pool_condition: { value: 'Pass' } })).toEqual({ poolCondition: 'Pass', poolFeedback: '' });
+    expect(fcPoolStamps({ fc_pool_condition: { value: 'Fail', note: 'green water', photoUrls: ['u'] } }))
+      .toEqual({ poolCondition: 'Fail', poolFeedback: 'green water' });
   });
 
   it('requires septic only when septic_fee > 0', () => {

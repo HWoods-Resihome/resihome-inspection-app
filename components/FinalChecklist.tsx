@@ -133,6 +133,7 @@ export function FinalChecklist(props: Props) {
   // Completion context for the per-section "X/Y" pills (built from props).
   const countCtx: FcCompletionCtx = {
     septicFee: num(props.propertyValues?.septic_fee),
+    poolFee: num(props.propertyValues?.pool_fee),
     airQtyPrefill: num(props.propertyValues?.air_filters___total_quantity),
     filterOptionsAvailable: (props.filterSizeOptions?.length || 0) > 0,
     filterPrefills: [

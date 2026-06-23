@@ -150,6 +150,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         propertyAirFiltersType2: data.propertyAirFiltersType2,
         propertyAirFiltersType3: data.propertyAirFiltersType3,
         propertySepticFee: data.propertySepticFee,
+        propertyPoolFee: data.propertyPoolFee,
         listingPrice: listing?.listingPrice ?? null,
         listingDate: listing?.listingDate ?? null,
         listingStatus: listing?.listingStatus ?? null,

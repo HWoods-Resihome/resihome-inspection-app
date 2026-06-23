@@ -56,7 +56,7 @@ import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, type C
 import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
 import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
-import { summarizeFinalChecklist, finalChecklistPhotos, finalChecklistAnswerRecords, fcMissingLineCodes, fcSmartHomeStamps, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
+import { summarizeFinalChecklist, finalChecklistPhotos, finalChecklistAnswerRecords, fcMissingLineCodes, fcSmartHomeStamps, fcPoolStamps, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
 
 export const config = {
   api: {
@@ -456,6 +456,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       fcAnswers = parsed;
       fcCtx = {
         septicFee: inspectionData.propertySepticFee ?? null,
+        poolFee: inspectionData.propertyPoolFee ?? null,
         airQtyPrefill: inspectionData.propertyAirFiltersTotal ?? null,
         filterOptionsAvailable: true,
         filterPrefills: [
@@ -769,7 +770,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (fcAnswers) {
         try {
           const stamps = fcSmartHomeStamps(fcAnswers);
-          await updateInspection(id, { device_type: stamps.deviceType, device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber });
+          const pool = fcPoolStamps(fcAnswers);
+          await updateInspection(id, { device_type: stamps.deviceType, device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber, pool_condition: pool.poolCondition, pool_feedback: pool.poolFeedback });
         } catch (e) { console.warn('[finalize] smart-home field stamp skipped (provision via /admin/setup):', e); }
       }
     }
