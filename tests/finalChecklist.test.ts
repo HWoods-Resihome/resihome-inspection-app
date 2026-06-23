@@ -132,11 +132,11 @@ describe('finalChecklistGap', () => {
     expect(finalChecklistGap(failOk, poolCtx)).toBeNull();
   });
 
-  it('fcPoolStamps mirrors Pool Condition + feedback', () => {
-    expect(fcPoolStamps({})).toEqual({ poolCondition: '', poolFeedback: '' });
-    expect(fcPoolStamps({ fc_pool_condition: { value: 'Pass' } })).toEqual({ poolCondition: 'Pass', poolFeedback: '' });
-    expect(fcPoolStamps({ fc_pool_condition: { value: 'Fail', note: 'green water', photoUrls: ['u'] } }))
-      .toEqual({ poolCondition: 'Fail', poolFeedback: 'green water' });
+  it('fcPoolStamps mirrors Pool Condition + feedback + photo urls', () => {
+    expect(fcPoolStamps({})).toEqual({ poolCondition: '', poolFeedback: '', poolPhotoUrls: '' });
+    expect(fcPoolStamps({ fc_pool_condition: { value: 'Pass' } })).toEqual({ poolCondition: 'Pass', poolFeedback: '', poolPhotoUrls: '' });
+    expect(fcPoolStamps({ fc_pool_condition: { value: 'Fail', note: 'green water', photoUrls: ['u1', 'u2'] } }))
+      .toEqual({ poolCondition: 'Fail', poolFeedback: 'green water', poolPhotoUrls: 'u1\nu2' });
   });
 
   it('requires septic only when septic_fee > 0', () => {

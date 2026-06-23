@@ -4388,6 +4388,12 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   await ensureProp(inspection, 'pool_feedback', {
     name: 'pool_feedback', label: 'Pool Feedback', type: 'string', fieldType: 'textarea', groupName: 'inspection_utilities',
   });
+  // Pool photo(s) from the Final Checklist (required on Fail). Stamped as a
+  // newline-joined list of HubSpot file URLs so they're accessible directly on
+  // the inspection record (the originals also live in the fc__all blob).
+  await ensureProp(inspection, 'pool_photo_urls', {
+    name: 'pool_photo_urls', label: 'Pool Photo URLs', type: 'string', fieldType: 'textarea', groupName: 'inspection_utilities',
+  });
 
   // Smart Home Tech (from the Final Checklist) — stamped onto the inspection at
   // completion: Device Installed = the "Did you install a new lock/hub?" answer

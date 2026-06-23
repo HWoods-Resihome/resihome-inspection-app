@@ -446,13 +446,16 @@ export function fcSmartHomeStamps(a: FcAnswers): { deviceType: string; deviceIns
 }
 
 /** Pool Condition values mirrored to their own inspection fields at completion:
- *    poolCondition — the Pass/Fail answer ('' when the question wasn't shown)
- *    poolFeedback  — the required note when Failed (the "what's wrong" reason) */
-export function fcPoolStamps(a: FcAnswers): { poolCondition: string; poolFeedback: string } {
+ *    poolCondition  — the Pass/Fail answer ('' when the question wasn't shown)
+ *    poolFeedback   — the required note when Failed (the "what's wrong" reason)
+ *    poolPhotoUrls  — the pool photo(s) (required on Fail), newline-joined so they
+ *                     land in a single text field on the inspection */
+export function fcPoolStamps(a: FcAnswers): { poolCondition: string; poolFeedback: string; poolPhotoUrls: string } {
   const ans = a['fc_pool_condition'] || {};
   return {
     poolCondition: (ans.value || '').trim(),
     poolFeedback: (ans.note || '').trim(),
+    poolPhotoUrls: (ans.photoUrls || []).filter(Boolean).join('\n'),
   };
 }
 

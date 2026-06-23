@@ -162,7 +162,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const fc = parseFcAnswers(fcRec?.note);
         const stamps = fcSmartHomeStamps(fc);
         const pool = fcPoolStamps(fc);
-        await updateInspection(id, { device_type: stamps.deviceType, device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber, pool_condition: pool.poolCondition, pool_feedback: pool.poolFeedback });
+        await updateInspection(id, { device_type: stamps.deviceType, device_installed: stamps.deviceInstalled, serial_number: stamps.serialNumber, pool_condition: pool.poolCondition, pool_feedback: pool.poolFeedback, pool_photo_urls: pool.poolPhotoUrls });
       } catch (e) {
         console.warn('[submit] smart-home field stamp skipped (provision via /admin/setup):', e);
       }
