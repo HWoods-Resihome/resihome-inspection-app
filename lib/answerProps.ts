@@ -62,10 +62,16 @@ export function buildQaAnswerProps(
 ): Record<string, any> {
   const props: Record<string, any> = {
     answer_id_external: f.answerIdExternal,
-    answer_summary: `${f.section} ${f.summaryInstanceLabel} / ${f.questionText.slice(0, 80)}`,
+    // HubSpot limits: `answer_summary` overflows a VALIDATION_ERROR past ~255
+    // chars (section + instance label are otherwise unbounded), and `answer_value`
+    // past HubSpot's 65,536-char text ceiling. Both 400 the whole create/update
+    // with "Cannot set PropertyValueCoordinates{…propertyName=answer_*}", which
+    // blocks submit (and silently fails autosave). Cap here — the single source
+    // of truth — so every caller is safe, matching the rate-card line path.
+    answer_summary: `${f.section} ${f.summaryInstanceLabel} / ${f.questionText.slice(0, 80)}`.slice(0, 250),
     answer_type: 'qa',
     section: f.section,
-    answer_value: f.answerValue || '',
+    answer_value: (f.answerValue || '').slice(0, 65000),
     submitted_at: new Date().toISOString(),
     inspection_id_external: f.inspectionIdExternal,
     question_id_external: f.questionIdExternal,
@@ -134,7 +140,8 @@ export function buildSectionPhotoAnswerProps(
       : 'Section Photo';
   const props: Record<string, any> = {
     answer_id_external: f.answerIdExternal,
-    answer_summary: `${f.summaryLabel} / ${phaseLabel} (${f.photoUrls.length})`,
+    // Cap to dodge HubSpot's answer_summary length ceiling (see buildQaAnswerProps).
+    answer_summary: `${f.summaryLabel} / ${phaseLabel} (${f.photoUrls.length})`.slice(0, 250),
     answer_type: 'section_photo',
     section: f.section,
     photo_urls: joinPhotoUrls(f.photoUrls),
