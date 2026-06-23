@@ -18,13 +18,14 @@ import {
 import { fetchRentComps, type RentComp } from '@/lib/rentcast';
 import { postSlackMessage } from '@/lib/slack';
 
-// Sandbox/test channel until the flow is verified; flip via env to go live
-// (live channel: C04K24M3UH5).
+// LIVE: posts to the production channel by default. Override via
+// SLACK_LISTING_PRICE_CHANNEL (e.g. set back to the sandbox C06CW2VMJNR to test).
 const SANDBOX_CHANNEL = 'C06CW2VMJNR';
-const SLACK_CHANNEL = (process.env.SLACK_LISTING_PRICE_CHANNEL || SANDBOX_CHANNEL).trim();
+const LIVE_CHANNEL = 'C04K24M3UH5';
+const SLACK_CHANNEL = (process.env.SLACK_LISTING_PRICE_CHANNEL || LIVE_CHANNEL).trim();
 // The per-inspection gate (post once) engages only OFF the sandbox channel, so
 // repeated test submits to the sandbox re-post freely while production never
-// duplicates.
+// duplicates. In production (default) the gate is ON.
 const GATE_ACTIVE = SLACK_CHANNEL !== SANDBOX_CHANNEL;
 const LISTING_RE = /evaluate listing price|listing price/i;
 
