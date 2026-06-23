@@ -16,7 +16,46 @@ import { getPosterUrl } from '@/lib/media';
 
 const EMBED_EDGE = 520;     // long-edge px — plenty for a 90×65pt cell, even zoomed
 const EMBED_QUALITY = 70;
-const CONCURRENCY = 8;      // bounded parallel fetch+resize (caps memory/time)
+const CONCURRENCY = 6;      // bounded parallel fetch+resize (caps memory/time + CDN throttling)
+const FETCH_TIMEOUT_MS = 18000;
+const MAX_ATTEMPTS = 4;
+
+/**
+ * Fetch + downscale ONE photo to a JPEG data URI, robustly: time-boxed, and
+ * retried on transient failures — a just-uploaded HubSpot file can briefly
+ * 404/403/5xx before its CDN propagates, and a momentary throttle/timeout would
+ * otherwise leave the photo as a "View photo" link in the report instead of the
+ * image. A sharp DECODE error isn't retried (won't change on re-fetch).
+ */
+async function fetchAndEmbed(url: string): Promise<string | null> {
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal });
+      if (!r.ok) {
+        const retryable = r.status === 404 || r.status === 403 || r.status === 429 || r.status >= 500;
+        if (retryable && attempt < MAX_ATTEMPTS) { clearTimeout(timer); await new Promise((res) => setTimeout(res, 600 * attempt)); continue; }
+        return null;
+      }
+      const buf = Buffer.from(await r.arrayBuffer());
+      const jpeg = await sharp(buf)
+        .rotate()
+        .resize(EMBED_EDGE, EMBED_EDGE, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: EMBED_QUALITY })
+        .toBuffer();
+      return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
+    } catch (e: any) {
+      const isAbort = e?.name === 'AbortError';
+      const transient = isAbort || /fetch failed|network|ECONN|ETIMEDOUT|socket/i.test(String(e?.message || e));
+      if (transient && attempt < MAX_ATTEMPTS) { clearTimeout(timer); await new Promise((res) => setTimeout(res, 600 * attempt)); continue; }
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return null;
+}
 
 /**
  * Build a map of poster-URL → downscaled JPEG data URI for every photo entry
@@ -33,19 +72,8 @@ export async function buildEmbeddedPhotoMap(entries: string[]): Promise<Record<s
   const worker = async () => {
     while (cursor < posters.length) {
       const url = posters[cursor++];
-      try {
-        const r = await fetch(url);
-        if (!r.ok) continue;
-        const buf = Buffer.from(await r.arrayBuffer());
-        const jpeg = await sharp(buf)
-          .rotate()
-          .resize(EMBED_EDGE, EMBED_EDGE, { fit: 'inside', withoutEnlargement: true })
-          .jpeg({ quality: EMBED_QUALITY })
-          .toBuffer();
-        out[url] = `data:image/jpeg;base64,${jpeg.toString('base64')}`;
-      } catch {
-        /* leave unmapped → renderer uses the original URL */
-      }
+      const data = await fetchAndEmbed(url);
+      if (data) out[url] = data; // else leave unmapped → renderer falls back to the link
     }
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, posters.length) }, worker));

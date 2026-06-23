@@ -14,7 +14,7 @@ const MAX_HEIGHT = 400;  // max height
 const JPEG_QUALITY = 62;
 // Per-image fetch ceiling. One stalled HubSpot file download must never hang the
 // whole PDF render (which would blow the serverless timeout and fail finalize).
-const IMAGE_FETCH_TIMEOUT_MS = 12000;
+const IMAGE_FETCH_TIMEOUT_MS = 18000;
 
 /**
  * Fetch a single image URL and resize it to a JPEG data URI.
@@ -26,7 +26,7 @@ const IMAGE_FETCH_TIMEOUT_MS = 12000;
  * image. A sharp DECODE failure isn't retried (it won't change on a re-fetch).
  */
 async function fetchAndResize(url: string): Promise<string | null> {
-  const MAX_ATTEMPTS = 3;
+  const MAX_ATTEMPTS = 4;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     // Time-box each fetch: on timeout we retry (or skip), so the report still
     // renders rather than hanging the whole PDF on one bad URL.
@@ -36,7 +36,7 @@ async function fetchAndResize(url: string): Promise<string | null> {
       const res = await fetch(url, { signal: ctrl.signal });
       if (!res.ok) {
         // Retry the propagation-lag statuses; give up on a genuine client error.
-        const retryable = res.status === 404 || res.status === 403 || res.status >= 500;
+        const retryable = res.status === 404 || res.status === 403 || res.status === 429 || res.status >= 500;
         if (retryable && attempt < MAX_ATTEMPTS) { clearTimeout(timer); await new Promise((r) => setTimeout(r, 600)); continue; }
         console.warn(`[pdf-images] Failed to fetch ${url}: ${res.status}`);
         return null;
