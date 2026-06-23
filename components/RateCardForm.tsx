@@ -4308,7 +4308,7 @@ export function RateCardForm(props: RateCardFormProps) {
               disabled={finalizing || submitting}
               className="inline-flex items-center gap-2 rounded-full border-2 border-brand text-brand hover:bg-brand hover:text-white disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-brand font-heading font-bold text-sm px-5 py-2.5 transition-colors"
             >
-              {finalizing ? 'Submitting $0 turn…' : 'Submit Zero Dollar Turn Rate Card'}
+              {finalizing ? 'Submitting $0 turn…' : 'Submit $0 Turn Rate Card'}
             </button>
             <p className="text-[11px] text-gray-400 mt-1.5 max-w-sm leading-snug">
               No line items needed — completes the turn at $0, generates the PDFs, and raises a Turnkey ticket. Section photos are still required.
