@@ -8,6 +8,31 @@
 // the inspection. Renders identically on Chrome, Safari, and the native shells.
 import { useState } from 'react';
 
+/** Online/offline ring shown around the lock icon. null = no determination
+ *  (unknown device) → no ring. */
+export type LockRing = 'online' | 'offline' | null;
+
+/**
+ * Decide the lock ring from the property's Rently telemetry:
+ *  - Unknown device type → null (no ring; we can't say).
+ *  - A known device that is NOT a "Smart Home Hub" (e.g. a Bluetooth Lock) is
+ *    treated as ONLINE → green ring.
+ *  - A "Smart Home Hub" is ONLINE only when BOTH rently_sh_hub_status AND
+ *    rently_sh_lock_status equal "Online"; if either is not "Online" the hub/lock
+ *    is OFFLINE → red ring.
+ */
+export function lockRingFromProperty(
+  deviceType: string | null | undefined,
+  hubStatus: string | null | undefined,
+  lockStatus: string | null | undefined,
+): LockRing {
+  const dt = (deviceType || '').trim();
+  if (!dt) return null;
+  if (dt.toLowerCase() !== 'smart home hub') return 'online';
+  const isOnline = (s: string | null | undefined) => (s || '').trim().toLowerCase() === 'online';
+  return isOnline(hubStatus) && isOnline(lockStatus) ? 'online' : 'offline';
+}
+
 interface UnlockButtonProps {
   /** HubSpot Property record id (preferred lookup path). */
   propertyId?: string;
@@ -15,6 +40,9 @@ interface UnlockButtonProps {
   address?: string;
   /** Optional inspection record id (round-tripped to label the Rently code). */
   inspectionId?: string;
+  /** Online/offline ring around the lock icon (see lockRingFromProperty).
+   *  Omit/null to render no ring. */
+  lockRing?: LockRing;
   /** Extra classes if a caller needs to tweak the circle. */
   className?: string;
 }
@@ -23,7 +51,7 @@ type ModalState =
   | { kind: 'success' | 'warn'; title: string; code?: string; subtitle?: string }
   | { kind: 'error'; title: string; subtitle?: string };
 
-export function UnlockButton({ propertyId, address, inspectionId, className }: UnlockButtonProps) {
+export function UnlockButton({ propertyId, address, inspectionId, lockRing, className }: UnlockButtonProps) {
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<ModalState | null>(null);
 
@@ -61,6 +89,18 @@ export function UnlockButton({ propertyId, address, inspectionId, className }: U
     }
   }
 
+  // Online/offline ring around the lock icon. Offset from the button so it reads
+  // as a distinct ring rather than a recolored border.
+  const ringClass =
+    lockRing === 'online' ? 'ring-2 ring-offset-2 ring-offset-white ring-emerald-500 '
+    : lockRing === 'offline' ? 'ring-2 ring-offset-2 ring-offset-white ring-red-500 '
+    : '';
+  const statusText =
+    lockRing === 'online' ? 'Lock online. '
+    : lockRing === 'offline' ? 'Lock/hub OFFLINE. '
+    : '';
+  const label = `${statusText}Unlock — get a Rently access code for this property`;
+
   return (
     <>
       <button
@@ -68,12 +108,13 @@ export function UnlockButton({ propertyId, address, inspectionId, className }: U
         onClick={handleUnlock}
         disabled={loading}
         aria-busy={loading}
-        aria-label="Unlock — get a Rently access code for this property"
-        title="Unlock — get a Rently access code for this property"
+        aria-label={label}
+        title={label}
         className={
           'inline-flex items-center justify-center w-8 h-8 rounded-full text-black shrink-0 ' +
           'transition-colors disabled:cursor-default ' +
           (loading ? 'bg-[#A8EEEB] ' : 'bg-[#73E3DF] hover:bg-[#5fd8d3] active:scale-95 ') +
+          ringClass +
           (className || '')
         }
       >

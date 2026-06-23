@@ -15,6 +15,7 @@ import {
 } from '@/lib/offlineCache';
 import { getGeoFix } from '@/lib/evidenceStamp';
 import { openPdf } from '@/lib/pdfViewerBus';
+import { lockRingFromProperty } from '@/components/UnlockButton';
 import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
 
 
@@ -95,6 +96,10 @@ export default function ExistingInspection() {
   const [propertyAirFiltersType3, setPropertyAirFiltersType3] = useState<string | null>(null);
   const [propertySepticFee, setPropertySepticFee] = useState<number | null>(null);
   const [propertyPoolFee, setPropertyPoolFee] = useState<number | null>(null);
+  // Rently smart-lock telemetry → online/offline ring on the Unlock icon.
+  const [rentlyDeviceType, setRentlyDeviceType] = useState<string | null>(null);
+  const [rentlyShHubStatus, setRentlyShHubStatus] = useState<string | null>(null);
+  const [rentlyShLockStatus, setRentlyShLockStatus] = useState<string | null>(null);
   const [listingPrice, setListingPrice] = useState<number | null>(null);
   const [listingDate, setListingDate] = useState<string | null>(null);
   const [listingStatus, setListingStatus] = useState<string | null>(null);
@@ -145,6 +150,9 @@ export default function ExistingInspection() {
           typeof data.propertySepticFee === 'number' ? data.propertySepticFee : null
         );
         setPropertyPoolFee(typeof data.propertyPoolFee === 'number' ? data.propertyPoolFee : null);
+        setRentlyDeviceType(typeof data.propertyRentlyDeviceType === 'string' ? data.propertyRentlyDeviceType : null);
+        setRentlyShHubStatus(typeof data.propertyRentlyShHubStatus === 'string' ? data.propertyRentlyShHubStatus : null);
+        setRentlyShLockStatus(typeof data.propertyRentlyShLockStatus === 'string' ? data.propertyRentlyShLockStatus : null);
         setListingPrice(typeof data.listingPrice === 'number' ? data.listingPrice : null);
         setListingDate(typeof data.listingDate === 'string' ? data.listingDate : null);
         setListingStatus(typeof data.listingStatus === 'string' ? data.listingStatus : null);
@@ -480,6 +488,10 @@ export default function ExistingInspection() {
     return `${baseAddress} ${propertyZip}`;
   })();
 
+  // Online/offline ring for the Unlock (lock) icon, from the property's Rently
+  // telemetry. null → no ring (unknown device).
+  const lockRing = lockRingFromProperty(rentlyDeviceType, rentlyShHubStatus, rentlyShLockStatus);
+
   return (
     <>
       <Head>
@@ -555,6 +567,7 @@ export default function ExistingInspection() {
           templateLabel={templateLabel}
           inspectorName={inspection.inspectorName}
           propertyName={propertyName}
+          lockRing={lockRing}
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
@@ -585,6 +598,7 @@ export default function ExistingInspection() {
           approverName={inspection.approvedByName}
           approvedAt={inspection.approvedAt}
           propertyName={propertyName}
+          lockRing={lockRing}
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}
@@ -628,6 +642,7 @@ export default function ExistingInspection() {
           templateLabel={templateLabel}
           inspectorName={inspection.inspectorName}
           propertyName={propertyName}
+          lockRing={lockRing}
           bedrooms={inspection.bedroomsAtInspection || 0}
           bathrooms={inspection.bathroomsAtInspection || 0}
           squareFootage={propertySquareFootage}

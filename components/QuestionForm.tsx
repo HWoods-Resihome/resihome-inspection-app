@@ -23,7 +23,7 @@ import { buildQaAnswerProps, buildSectionPhotoAnswerProps } from '@/lib/answerPr
 import { isHvacSection, isSmartHomeSection } from '@/lib/scopeWidgetSections';
 import { FinalChecklist } from '@/components/FinalChecklist';
 import { SyncingBadge } from '@/components/SyncingBadge';
-import { UnlockButton } from '@/components/UnlockButton';
+import { UnlockButton, type LockRing } from '@/components/UnlockButton';
 import InspectionPager from '@/components/InspectionPager';
 import { FitText } from '@/components/FitText';
 import { openPdf } from '@/lib/pdfViewerBus';
@@ -50,6 +50,8 @@ type Props = {
   templateLabel: string;
   inspectorName: string;
   propertyName: string;
+  /** Online/offline ring for the Unlock (lock) icon (from Rently telemetry). */
+  lockRing?: LockRing;
   /** Property record id — used to validate camera GPS against the property. */
   propertyRecordId?: string;
   bedrooms: number;
@@ -203,7 +205,7 @@ function slugify(s: string): string {
 }
 
 export function QuestionForm({
-  questions, templateType, templateLabel, inspectorName, propertyName, propertyRecordId,
+  questions, templateType, templateLabel, inspectorName, propertyName, lockRing, propertyRecordId,
   bedrooms, bathrooms, squareFootage, propertyStatus, moveInReadyDate, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, moveInDate, communityName, onSubmit, onCancel, onNavigateTo,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
@@ -1800,6 +1802,7 @@ export function QuestionForm({
               propertyId={propertyRecordId}
               address={propertyName}
               inspectionId={inspectionRecordId}
+              lockRing={lockRing}
             />
           )}
           </div>

@@ -151,6 +151,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         propertyAirFiltersType3: data.propertyAirFiltersType3,
         propertySepticFee: data.propertySepticFee,
         propertyPoolFee: data.propertyPoolFee,
+        // Rently smart-lock telemetry → online/offline ring on the Unlock icon.
+        propertyRentlyDeviceType: data.propertyRentlyDeviceType,
+        propertyRentlyShHubStatus: data.propertyRentlyShHubStatus,
+        propertyRentlyShLockStatus: data.propertyRentlyShLockStatus,
         listingPrice: listing?.listingPrice ?? null,
         listingDate: listing?.listingDate ?? null,
         listingStatus: listing?.listingStatus ?? null,

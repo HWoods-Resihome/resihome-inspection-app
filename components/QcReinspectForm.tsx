@@ -29,7 +29,7 @@ import { PhotoStrip } from '@/components/PhotoStrip';
 import { useAppDialog } from '@/components/AppDialog';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
-import { UnlockButton } from '@/components/UnlockButton';
+import { UnlockButton, type LockRing } from '@/components/UnlockButton';
 import InspectionPager from '@/components/InspectionPager';
 import { FitText } from '@/components/FitText';
 import { SaveIndicator } from '@/components/inspection/SaveIndicator';
@@ -61,6 +61,8 @@ interface Props {
   templateLabel: string;
   inspectorName: string;
   propertyName: string;
+  /** Online/offline ring for the Unlock (lock) icon (from Rently telemetry). */
+  lockRing?: LockRing;
   /** Property record id — used to validate camera GPS against the property. */
   propertyRecordId?: string;
   bedrooms: number;
@@ -797,6 +799,7 @@ export function QcReinspectForm(props: Props) {
                 propertyId={props.propertyRecordId}
                 address={props.propertyName}
                 inspectionId={props.inspectionRecordId}
+                lockRing={props.lockRing}
               />
             )}
           </div>

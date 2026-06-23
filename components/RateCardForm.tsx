@@ -19,7 +19,7 @@ import {
 import { buildSectionPhotoAnswerProps, buildQaAnswerProps } from '@/lib/answerProps';
 import { VoiceLineAssistant } from '@/components/VoiceLineAssistant';
 import { CameraCapture } from '@/components/CameraCapture';
-import { UnlockButton } from '@/components/UnlockButton';
+import { UnlockButton, type LockRing } from '@/components/UnlockButton';
 import InspectionPager from '@/components/InspectionPager';
 import { FitText } from '@/components/FitText';
 import { SaveIndicator } from '@/components/inspection/SaveIndicator';
@@ -87,6 +87,8 @@ interface RateCardFormProps {
   approverName?: string | null;
   approvedAt?: string | null;
   propertyName: string;
+  /** Online/offline ring for the Unlock (lock) icon (from Rently telemetry). */
+  lockRing?: LockRing;
   /** Property record id — used to validate camera GPS against the property. */
   propertyRecordId?: string;
   bedrooms: number;
@@ -3578,6 +3580,7 @@ export function RateCardForm(props: RateCardFormProps) {
                 propertyId={props.propertyRecordId}
                 address={props.propertyName}
                 inspectionId={props.inspectionRecordId}
+                lockRing={props.lockRing}
                 className="order-2"
               />
             )}

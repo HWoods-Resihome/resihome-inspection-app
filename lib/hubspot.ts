@@ -2781,6 +2781,13 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   /** Property's pool_fee — gates the Final Checklist Pool Condition question
    *  (shown only when known and > 0). null when unset. */
   propertyPoolFee: number | null;
+  /** Rently smart-lock telemetry from the property — drives the online/offline
+   *  ring on the Unlock (lock) icon. `rently_device_type` (e.g. "Smart Home Hub",
+   *  "Bluetooth Lock"), and for a hub the two component statuses (each "Online"
+   *  when healthy). All null/empty when unset. */
+  propertyRentlyDeviceType: string | null;
+  propertyRentlyShHubStatus: string | null;
+  propertyRentlyShLockStatus: string | null;
   /** Property's team_group_email — preferred finalize CC. */
   propertyTeamGroupEmail: string | null;
   /** True when the property's `pest_control_enrolled` = Yes. Scope header shows
@@ -2848,6 +2855,9 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     let propertyAirFiltersType3: string | null = null;
     let propertySepticFee: number | null = null;
     let propertyPoolFee: number | null = null;
+    let propertyRentlyDeviceType: string | null = null;
+    let propertyRentlyShHubStatus: string | null = null;
+    let propertyRentlyShLockStatus: string | null = null;
     let propertyTeamGroupEmail: string | null = null;
     if (propertyIdRef) {
       // ISOLATED fetch for the (possibly not-yet-created) tenant-occupancy field.
@@ -2933,6 +2943,23 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       } catch (e: any) {
         console.warn(`[fetchInspectionWithPropertyRef] could not fetch property ${propertyIdRef} extras:`, String(e).slice(0, 200));
       }
+
+      // ISOLATED fetch for the Rently smart-lock fields (online/offline ring on
+      // the Unlock icon). Kept separate from the extras batch above because a
+      // HubSpot GET 400s on any unknown property name — if these aren't
+      // provisioned yet they'd otherwise wipe out square_footage/zip/etc. On any
+      // error each stays null and the ring simply doesn't render.
+      try {
+        const rentlyProps = ['rently_device_type', 'rently_sh_hub_status', 'rently_sh_lock_status'];
+        const rQs = rentlyProps.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
+        const rResp = await hubspotFetch(`/crm/v3/objects/${propertyTypeId}/${propertyIdRef}?${rQs}`);
+        const rp = rResp.properties || {};
+        propertyRentlyDeviceType = (rp.rently_device_type || '').toString().trim() || null;
+        propertyRentlyShHubStatus = (rp.rently_sh_hub_status || '').toString().trim() || null;
+        propertyRentlyShLockStatus = (rp.rently_sh_lock_status || '').toString().trim() || null;
+      } catch (e: any) {
+        console.warn(`[fetchInspectionWithPropertyRef] Rently lock fields unavailable for ${propertyIdRef}:`, String(e).slice(0, 160));
+      }
     }
 
     return {
@@ -2996,6 +3023,9 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       propertyAirFiltersType3,
       propertySepticFee,
       propertyPoolFee,
+      propertyRentlyDeviceType,
+      propertyRentlyShHubStatus,
+      propertyRentlyShLockStatus,
       propertyTeamGroupEmail,
       propertyPestControlEnrolled,
       propertyTenantHasPet,
