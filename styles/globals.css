@@ -170,7 +170,11 @@ button, input, select, textarea {
    insets non-zero. The top bar drops below the notch; the footer (shutter) is
    lifted above the home indicator / toolbar grab area. */
 .lz-head-top { padding-top: calc(0.3rem + env(safe-area-inset-top)) !important; }
-.lz-foot { padding-bottom: calc(0.2rem + env(safe-area-inset-bottom)) !important; }
+/* Match the bar's non-inset bottom padding to its top padding (the `py-1.5` =
+   0.375rem on the wrapper) so the buttons sit vertically centered within the
+   visible bar. The safe-area inset is added BELOW that (the home-indicator gap),
+   so it no longer pushes the buttons up off-center. */
+.lz-foot { padding-bottom: calc(0.375rem + env(safe-area-inset-bottom)) !important; }
 
 /* ---- Landscape / short-viewport compaction --------------------------------
    On short viewports (landscape phones, ≲ 540px tall) reclaim vertical space:
