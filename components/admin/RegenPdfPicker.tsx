@@ -23,10 +23,35 @@ const CONCURRENCY = 3;
 const MAX_RETRY = 2;
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Which Scope Rate Card PDF(s) to rebuild. 'all' keeps the original behavior
+// (Master + Chargeback + every vendor). The rest regenerate just that kind and
+// leave the other PDFs' stored URLs untouched. Vendors are generic slots
+// ("Vendor 1"…), so a specific vendor that doesn't exist on a given inspection
+// is simply skipped for that one.
+const SCOPE_KINDS: { value: string; label: string }[] = [
+  { value: 'all', label: 'All PDFs (Master + Chargeback + Vendors)' },
+  { value: 'master', label: 'Master only' },
+  { value: 'chargeback', label: 'Tenant Chargeback only' },
+  { value: 'vendor', label: 'All Vendor PDFs' },
+  { value: 'vendor:Vendor 1', label: 'Vendor 1 only' },
+  { value: 'vendor:Vendor 2', label: 'Vendor 2 only' },
+  { value: 'vendor:Vendor 3', label: 'Vendor 3 only' },
+];
+
+// Translate a SCOPE_KINDS value into the finalize request body for a scope regen.
+function scopeRegenBody(kind: string): Record<string, any> {
+  if (kind === 'all' || !kind) return { regenerateOnly: true };
+  if (kind.startsWith('vendor:')) {
+    return { regenerateOnly: true, regenerateTypes: ['vendor'], regenerateVendor: kind.slice('vendor:'.length) };
+  }
+  return { regenerateOnly: true, regenerateTypes: [kind] };
+}
+
 export function RegenPdfPicker({ embedded = false }: { embedded?: boolean } = {}) {
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set()); // selected templateTypes
+  const [scopeKind, setScopeKind] = useState<string>('all'); // which Scope PDF(s) to regenerate
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(0);
   const [okCount, setOkCount] = useState(0);
@@ -68,6 +93,13 @@ export function RegenPdfPicker({ embedded = false }: { embedded?: boolean } = {}
     return m;
   }, [items]);
 
+  // Route per template type (so we can show the Scope-only PDF-kind dropdown).
+  const routeByType = useMemo(() => {
+    const m = new Map<string, Route>();
+    for (const i of items || []) if (!m.has(i.templateType)) m.set(i.templateType, i.route);
+    return m;
+  }, [items]);
+
   const selectedItems = useMemo(
     () => (items || []).filter((i) => selected.has(i.templateType)),
     [items, selected],
@@ -84,7 +116,7 @@ export function RegenPdfPicker({ embedded = false }: { embedded?: boolean } = {}
         let ok = false; let status = 0; let errMsg = '';
         if (item.route === 'scope') {
           const r = await fetch(`/api/inspections/${item.id}/finalize`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ regenerateOnly: true }),
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scopeRegenBody(scopeKind)),
           });
           status = r.status;
           const d = await r.json().catch(() => ({} as any));
@@ -185,14 +217,34 @@ export function RegenPdfPicker({ embedded = false }: { embedded?: boolean } = {}
                 <div className="mt-3 text-sm text-gray-500">No regeneratable inspections found.</div>
               ) : (
                 <div className="mt-3 space-y-1.5">
-                  {groups.map((g) => (
-                    <label key={g.type} className="flex items-center gap-2.5 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" disabled={running} checked={selected.has(g.type)} onChange={() => toggle(g.type)}
-                        className="w-4 h-4 accent-brand" />
-                      <span className="flex-1">{g.label}</span>
-                      <span className="text-xs text-gray-400 tabular-nums">{g.ids.length}</span>
-                    </label>
-                  ))}
+                  {groups.map((g) => {
+                    const isScope = routeByType.get(g.type) === 'scope';
+                    return (
+                      <div key={g.type}>
+                        <label className="flex items-center gap-2.5 text-sm text-gray-700 cursor-pointer">
+                          <input type="checkbox" disabled={running} checked={selected.has(g.type)} onChange={() => toggle(g.type)}
+                            className="w-4 h-4 accent-brand" />
+                          <span className="flex-1">{g.label}</span>
+                          <span className="text-xs text-gray-400 tabular-nums">{g.ids.length}</span>
+                        </label>
+                        {/* Scope Rate Card: choose WHICH PDF(s) to rebuild so you
+                            don't have to regenerate all of them every time. */}
+                        {isScope && selected.has(g.type) && (
+                          <div className="mt-1.5 ml-7 flex items-center gap-2 text-[12px] text-gray-600">
+                            <span>Regenerate:</span>
+                            <select
+                              value={scopeKind}
+                              disabled={running}
+                              onChange={(e) => setScopeKind(e.target.value)}
+                              className="border border-gray-300 rounded-md px-2 py-1 text-[12px] bg-white text-gray-700 disabled:opacity-50"
+                            >
+                              {SCOPE_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

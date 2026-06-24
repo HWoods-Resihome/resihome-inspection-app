@@ -178,7 +178,7 @@ function VendorSection(props: { section: PdfSectionGroup }) {
   );
 }
 
-export async function renderVendorPdfs(ctx: PdfBuildContext): Promise<Map<string, Buffer>> {
+export async function renderVendorPdfs(ctx: PdfBuildContext, opts?: { onlyVendor?: string }): Promise<Map<string, Buffer>> {
   // Group lines by vendor across sections
   const byVendor = new Map<string, PdfSectionGroup[]>();
   const lineCountByVendor = new Map<string, number>();
@@ -219,7 +219,10 @@ export async function renderVendorPdfs(ctx: PdfBuildContext): Promise<Map<string
 
   // Vendors that actually get their own packet. (Some, e.g. Eviction Vendor
   // (Past), don't — their lines still ride the Master + Tenant Chargeback PDFs.)
-  const vendors = [...byVendor.entries()].filter(([v, s]) => s.length > 0 && vendorGetsOwnPdf(v));
+  // onlyVendor (selective regen) narrows this to a single vendor by name.
+  const onlyVendor = (opts?.onlyVendor || '').trim().toLowerCase();
+  const vendors = [...byVendor.entries()].filter(([v, s]) =>
+    s.length > 0 && vendorGetsOwnPdf(v) && (!onlyVendor || v.trim().toLowerCase() === onlyVendor));
 
   // Render with BOUNDED concurrency. Each @react-pdf render transiently
   // allocates 100+ MB, so we never run more than VENDOR_RENDER_CONCURRENCY at

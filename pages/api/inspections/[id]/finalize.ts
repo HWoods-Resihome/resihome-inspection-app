@@ -115,6 +115,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // still required (enforced client-side before this call).
   const zeroDollarTurn = !!(req.body || {}).zeroDollarTurn;
 
+  // Selective regeneration (admin Regenerate-PDFs tool): when regenerateOnly is
+  // set, `regenerateTypes` limits WHICH PDFs are rebuilt so an admin can refresh
+  // just the Master (or just one vendor) without re-rendering everything. Values:
+  // 'master' | 'chargeback' | 'vendor'. `regenerateVendor` narrows 'vendor' to a
+  // single vendor by name. Empty/absent ⇒ regenerate ALL (the original behavior).
+  // Kinds NOT regenerated keep their existing stored URLs untouched.
+  const regenerateTypes: string[] = regenerateOnly && Array.isArray((req.body || {}).regenerateTypes)
+    ? (req.body.regenerateTypes as any[]).map((s) => String(s).trim().toLowerCase()).filter(Boolean)
+    : [];
+  const regenerateVendor = regenerateOnly && typeof (req.body || {}).regenerateVendor === 'string'
+    ? (req.body.regenerateVendor as string).trim() : '';
+  const selectiveRegen = regenerateTypes.length > 0;
+  const genMaster = !selectiveRegen || regenerateTypes.includes('master');
+  const genChargeback = !selectiveRegen || regenerateTypes.includes('chargeback');
+  const genVendor = !selectiveRegen || regenerateTypes.includes('vendor');
+
   // ONE preflight read of every inspection property the pre-flight gates need —
   // the self-approval lockout, the durable cross-instance lock, and the
   // partial-failure resume stamps — instead of three sequential HubSpot reads.
@@ -571,11 +587,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // (each transiently allocates 100+ MB). Every render is self-contained — the
     // photo-gallery base flows through React context, not a shared global — so
     // overlapping them can't cross-wire one PDF's gallery links into another.
-    const masterBuf = await renderMasterPdf(ctx);
-    const [chargebackBuf, vendorBufs] = await Promise.all([
-      renderChargebackPdf(ctx),
-      renderVendorPdfs(ctx),
-    ]);
+    // Render only the requested kinds (selective regen rebuilds a subset; a full
+    // finalize / unfiltered regen renders all three). @react-pdf needs ONE render
+    // awaited alone first to warm yoga — whichever kind renders first serves as
+    // that warm-up, then the remaining kinds overlap.
+    const renderVendor = () => renderVendorPdfs(ctx, regenerateVendor ? { onlyVendor: regenerateVendor } : undefined);
+    let masterBuf: Buffer | null = null;
+    let chargebackBuf: Buffer | null = null;
+    let vendorBufs: Map<string, Buffer> = new Map();
+    if (genMaster) {
+      masterBuf = await renderMasterPdf(ctx);
+      const [cb, vb] = await Promise.all([
+        genChargeback ? renderChargebackPdf(ctx) : Promise.resolve<Buffer | null>(null),
+        genVendor ? renderVendor() : Promise.resolve(new Map<string, Buffer>()),
+      ]);
+      chargebackBuf = cb; vendorBufs = vb;
+    } else if (genChargeback) {
+      chargebackBuf = await renderChargebackPdf(ctx);
+      if (genVendor) vendorBufs = await renderVendor();
+    } else if (genVendor) {
+      vendorBufs = await renderVendor();
+    }
 
     // Pretty file naming. New format puts the file TYPE first so files sort
     // and read clearly:
@@ -643,7 +675,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // push is independent of the HubSpot uploads, so it rides along in parallel.
     const vendorEntries = [...vendorBufs.entries()];
     const [masterUp, chargebackUp, chargebackXlsxUp, vendorUps, sftpRes] = await Promise.all([
-      uploadFileWithId(masterBuf, masterFilename, 'application/pdf', '/inspection_pdfs', true),
+      masterBuf
+        ? uploadFileWithId(masterBuf, masterFilename, 'application/pdf', '/inspection_pdfs', true)
+        : Promise.resolve(null),
       chargebackBuf
         ? uploadFileWithId(chargebackBuf, chargebackFilename, 'application/pdf', '/inspection_pdfs', true)
         : Promise.resolve(null),
@@ -660,12 +694,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         : Promise.resolve(null),
     ]);
 
+    // Existing stored URLs — preserved for any kind NOT regenerated this run, so
+    // a selective regen (e.g. Master only) never blanks the vendor/chargeback URLs.
+    const existingVendorUrls: Record<string, string> = (() => {
+      try { const o = JSON.parse(inspection.pdfVendorUrlsJson || '{}'); return o && typeof o === 'object' ? o : {}; }
+      catch { return {}; }
+    })();
+
     // Assemble results in a deterministic order (master, chargeback, xlsx, vendors).
     const attachmentFileIds: string[] = [];
-    const masterUrl = masterUp.url;
-    if (masterUp.id) attachmentFileIds.push(masterUp.id);
+    // Master URL: the freshly-uploaded one when regenerated, else the stored one.
+    const masterUrl = masterUp ? masterUp.url : (inspection.pdfMasterUrl || '');
+    if (masterUp?.id) attachmentFileIds.push(masterUp.id);
 
-    let chargebackUrl: string | null = null;
+    // Chargeback URL: fresh when regenerated; when NOT regenerated, keep stored;
+    // when regenerated but there are no chargeback lines, it's correctly cleared.
+    let chargebackUrl: string | null = genChargeback ? null : (inspection.pdfChargebackUrl || null);
     if (chargebackUp) {
       chargebackUrl = chargebackUp.url;
       if (chargebackUp.id) attachmentFileIds.push(chargebackUp.id);
@@ -678,7 +722,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (chargebackXlsxUp.id) attachmentFileIds.push(chargebackXlsxUp.id);
     }
 
-    const vendorUrls: Record<string, string> = {};
+    // Vendor URLs. When vendors weren't regenerated, keep the stored map. When
+    // they were, start from the freshly-uploaded set; but if only ONE vendor was
+    // targeted (regenerateVendor), MERGE onto the stored map so the other vendors'
+    // URLs survive.
+    const vendorUrls: Record<string, string> = genVendor
+      ? (regenerateVendor ? { ...existingVendorUrls } : {})
+      : { ...existingVendorUrls };
     for (const [vendor, up] of vendorUps) {
       vendorUrls[vendor] = up.url;
       if (up.id) attachmentFileIds.push(up.id);
@@ -711,8 +761,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const shareHost = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
     const shareProto = (req.headers['x-forwarded-proto'] as string) || 'https';
     const shareBase = `${shareProto}://${shareHost}`;
+    // Gate on the EFFECTIVE URLs (which include preserved-from-storage values for
+    // kinds not regenerated this run) so a selective regen never blanks a link.
     const shareMasterUrl = masterUrl ? buildShortLink(shareBase, id, 'master') : null;
-    const shareChargebackUrl = (chargebackBuf && chargebackUrl) ? buildShortLink(shareBase, id, 'chargeback') : null;
+    const shareChargebackUrl = chargebackUrl ? buildShortLink(shareBase, id, 'chargeback') : null;
     const shareXlsxUrl = (chargebackXlsxBuf && chargebackXlsxUrl) ? buildShortLink(shareBase, id, 'xlsx') : null;
     const shareVendorLinks: Record<string, string> = {};
     for (const vendor of Object.keys(vendorUrls)) {
@@ -1069,7 +1121,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // Hand the client the clean short links (resolve to the real files) so
         // the post-finalize "Downloads" use them everywhere.
         master: { name: masterFilename, url: shareMasterUrl || masterUrl },
-        chargeback: chargebackBuf ? { name: chargebackFilename, url: shareChargebackUrl || chargebackUrl } : null,
+        chargeback: chargebackUrl ? { name: chargebackFilename, url: shareChargebackUrl || chargebackUrl } : null,
         chargebackXlsx: chargebackXlsxBuf ? { name: chargebackXlsxFilename, url: shareXlsxUrl || chargebackXlsxUrl } : null,
         vendors: Object.entries(vendorUrls).map(([vendor, url]) => ({
           vendor,
