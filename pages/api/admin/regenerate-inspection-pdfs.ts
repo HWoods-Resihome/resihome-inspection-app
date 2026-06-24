@@ -33,7 +33,7 @@ import { buildShortLink } from '@/lib/shortLinks';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
 import { getPosterUrl } from '@/lib/media';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
-import { summarizeFinalChecklist, finalChecklistPhotos, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
+import { summarizeFinalChecklist, finalChecklistPhotos, type FcAnswers, type FcCompletionCtx, type FcSummaryGroup } from '@/lib/finalChecklist';
 
 // Strip a trailing "__<hash>" so an answer's question id matches the template's
 // question id even when one carries the uniqueness suffix and the other doesn't.
@@ -143,7 +143,7 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
   const occupied = tmpl === 'pm_vacancy_occupancy_check' && answers.some((a) => /\boccupied\b/i.test(a.answerValue || ''));
   const fcExclude = occupied ? { excludeSectionIds: ['hvac_air_filters', 'utilities'] } : undefined;
   // Final Checklist → label/value groups (same as the Master report).
-  let finalChecklist: { name: string; rows: { label: string; value: string }[] }[] | undefined;
+  let finalChecklist: FcSummaryGroup[] | undefined;
   if (fcBlob) {
     const fcCtx: FcCompletionCtx = {
       septicFee: (data as any).propertySepticFee ?? null,

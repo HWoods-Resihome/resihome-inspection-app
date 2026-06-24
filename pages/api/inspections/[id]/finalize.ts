@@ -56,7 +56,7 @@ import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, type C
 import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
 import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
-import { summarizeFinalChecklist, finalChecklistPhotos, finalChecklistAnswerRecords, fcMissingLineCodes, fcSmartHomeStamps, fcPoolStamps, type FcAnswers, type FcCompletionCtx } from '@/lib/finalChecklist';
+import { summarizeFinalChecklist, finalChecklistPhotos, finalChecklistAnswerRecords, fcMissingLineCodes, fcSmartHomeStamps, fcPoolStamps, type FcAnswers, type FcCompletionCtx, type FcSummaryGroup } from '@/lib/finalChecklist';
 
 export const config = {
   api: {
@@ -453,7 +453,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // completion context are hoisted so step 6c can ALSO materialize each item
     // as its own structured HubSpot answer record (the fc__all blob stays the
     // form's working store; these are an idempotent reporting projection).
-    let finalChecklistGroups: { name: string; rows: { label: string; value: string }[] }[] | undefined;
+    let finalChecklistGroups: FcSummaryGroup[] | undefined;
     let finalChecklistPhotoUrls: string[] | undefined;
     let fcAnswers: FcAnswers | null = null;
     let fcCtx: FcCompletionCtx | null = null;

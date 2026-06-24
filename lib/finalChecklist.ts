@@ -293,23 +293,37 @@ export function finalChecklistAnswerRecords(a: FcAnswers, ctx: FcCompletionCtx):
   return out;
 }
 
+/** One label/value row of the Final Checklist summary. `photos` are the photos
+ *  captured FOR THIS question (per-question photos + label-sticker photos) so the
+ *  PDF can anchor them directly under their line item instead of dumping every
+ *  checklist photo at the bottom. */
+export interface FcSummaryRow { label: string; value: string; photos?: string[]; }
+export interface FcSummaryGroup { name: string; rows: FcSummaryRow[]; }
+
 /** Build a human-readable summary of the checklist for the Master PDF. Renders
  *  each visible question as one label/value row (Title Case, prefilled values
- *  included). Empty sections are dropped. */
+ *  included), with that question's photos attached for inline rendering. Empty
+ *  sections are dropped. */
 export function summarizeFinalChecklist(
   a: FcAnswers,
   ctx: FcCompletionCtx,
   opts?: { excludeSectionIds?: string[] },
-): { name: string; rows: { label: string; value: string }[] }[] {
-  const out: { name: string; rows: { label: string; value: string }[] }[] = [];
+): FcSummaryGroup[] {
+  const out: FcSummaryGroup[] = [];
   for (const section of FINAL_CHECKLIST) {
     // Sections the form hid (e.g. HVAC + Utilities on an OCCUPIED vacancy check)
     // must not render on the PDF either — otherwise they show as a blank section.
     if (opts?.excludeSectionIds?.includes(section.id)) continue;
-    const rows: { label: string; value: string }[] = [];
+    const rows: FcSummaryRow[] = [];
     for (const q of section.questions) {
       if (!fcQuestionVisible(q, ctx)) continue;
-      rows.push({ label: q.label, value: fcRenderValue(q, a[q.id] || {}, a, ctx) });
+      const ans = a[q.id] || {};
+      // Photos captured for THIS question — per-question photos first, then any
+      // label-sticker photos (same source/order as finalChecklistPhotos).
+      const photos: string[] = [];
+      for (const u of (ans.photoUrls || [])) if (u) photos.push(u);
+      for (const p of (q.photos || [])) for (const u of (ans.stickerPhotos?.[p.id] || [])) if (u) photos.push(u);
+      rows.push({ label: q.label, value: fcRenderValue(q, ans, a, ctx), ...(photos.length ? { photos } : {}) });
     }
     if (rows.length) out.push({ name: section.name, rows });
   }

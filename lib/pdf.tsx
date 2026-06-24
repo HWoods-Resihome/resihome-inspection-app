@@ -14,7 +14,7 @@ import {
 } from '@react-pdf/renderer';
 import { isVideoEntry, getPosterUrl, getVideoUrl } from '@/lib/media';
 import {
-  PDF_COLORS, pdfStyles, PdfHeaderStrip, PdfFooter, isoToHumanDate, buildListingLine,
+  PDF_COLORS, pdfStyles, PdfHeaderStrip, PdfFooter, isoToHumanDate, buildListingLine, PdfFinalChecklist, PdfGalleryBaseProvider,
 } from '@/lib/pdfShared';
 
 const COLORS = {
@@ -177,8 +177,9 @@ export interface PdfData {
   photoGalleryBase?: string;
   /** Final Checklist (HVAC / Smart Home / Air Filters / Utilities) summarized to
    *  label/value rows — rendered the same way as the Master report. */
-  finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
-  /** Final Checklist photos (label stickers etc.), rendered under the block. */
+  finalChecklist?: { name: string; rows: { label: string; value: string; photos?: string[] }[] }[];
+  /** Final Checklist photos (label stickers etc.) — flat list for embedding +
+   *  gallery; rendered only as a fallback for photos not anchored to a row. */
   finalChecklistPhotos?: string[];
   /** Community/Visit inspection: name of the property's associated Community
    *  object (e.g. "Southport"). Appended to the doc title on community PDFs. */
@@ -455,29 +456,16 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           );
         })}
 
-        {/* Final Checklist (HVAC / Smart Home / Air Filters / Utilities) — same
-            label/value layout as the Master report. */}
-        {data.finalChecklist && data.finalChecklist.length > 0 && (
-          <View style={{ marginTop: 10 }}>
-            <Text style={pdfStyles.sectionTitle}>Final Checklist</Text>
-            {data.finalChecklist.map((g) => (
-              <View key={g.name} style={{ marginBottom: 6 }} wrap={false}>
-                <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 9, marginTop: 4, marginBottom: 2, color: '#374151' }}>{g.name}</Text>
-                {g.rows.map((r, i) => (
-                  <View key={i} style={{ flexDirection: 'row', paddingVertical: 1.5, borderBottomWidth: 0.5, borderBottomColor: '#eeeeee' }}>
-                    <Text style={{ width: '42%', fontSize: 8.5, color: '#111111', paddingRight: 6 }}>{r.label}</Text>
-                    <Text style={{ width: '58%', fontSize: 8.5, color: '#333333' }}>{r.value}</Text>
-                  </View>
-                ))}
-              </View>
-            ))}
-            {data.finalChecklistPhotos && data.finalChecklistPhotos.length > 0 && (
-              <View style={styles.photoGrid}>
-                {renderPhotos(data.finalChecklistPhotos, data.embeddedByUrl, data.photoGalleryBase)}
-              </View>
-            )}
-          </View>
-        )}
+        {/* Final Checklist — shared block (structured Item/Detail tables with
+            photos anchored under their line item), identical to the Master. The
+            provider gives its photos the same gallery links + embedded thumbs
+            that this PDF's other photos get via renderPhotos. */}
+        <PdfGalleryBaseProvider base={data.photoGalleryBase} embedded={data.embeddedByUrl}>
+          <PdfFinalChecklist
+            groups={data.finalChecklist || []}
+            fallbackPhotos={data.finalChecklistPhotos || []}
+          />
+        </PdfGalleryBaseProvider>
 
         <PdfFooter docName={data.templateLabel} propertyName={data.propertyAddress} />
       </Page>

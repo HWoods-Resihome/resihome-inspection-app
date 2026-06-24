@@ -243,6 +243,25 @@ export const pdfStyles = StyleSheet.create({
     marginTop: 1,
   },
 
+  // ---- Final Checklist (master + Q&A PDFs) ----
+  // A sub-section heading under the pink "Final Checklist" section title. Lighter
+  // than a room title (no pink rule) so it reads as a group within the section.
+  fcGroupTitle: {
+    fontFamily: 'Helvetica-Bold',
+    fontSize: 8.5,
+    color: PDF_COLORS.ink,
+    marginTop: 8,
+    marginBottom: 3,
+  },
+  // The "Item" (field name) cell — bold so the field reads as a label against
+  // its detail value, matching the structured feel of the line-item tables.
+  fcItemCell: {
+    fontFamily: 'Helvetica-Bold',
+    fontSize: 7.5,
+    color: PDF_COLORS.ink,
+    paddingHorizontal: 3,
+  },
+
   // ---- Subtotal row (bold, slightly different background) ----
   subtotalRow: {
     flexDirection: 'row',
@@ -582,6 +601,64 @@ export function PdfSectionHeader(props: { title: string; photoUrls: string[]; mi
 }
 
 /**
+ * Final Checklist block — shared by the Master report and the Q&A PDFs so they
+ * never drift. Renders the same structured look as the rest of the report: the
+ * pink "Final Checklist" section title, then each group as a 2-column
+ * Item / Detail table (header row + bordered rows). Photos are anchored UNDER
+ * the line item that captured them (e.g. label-sticker photos sit beneath
+ * "Label Sticker Photos"), not dumped at the bottom.
+ *
+ * `fallbackPhotos` (the legacy flat list) is rendered at the very end only for
+ * any photo not already anchored to a row — a safety net so nothing is dropped.
+ */
+export function PdfFinalChecklist(props: {
+  groups: { name: string; rows: { label: string; value: string; photos?: string[] }[] }[];
+  fallbackPhotos?: string[];
+}) {
+  const groups = props.groups || [];
+  const fallback = props.fallbackPhotos || [];
+  if (!groups.length && !fallback.length) return null;
+
+  // Don't double-render: collect every photo already anchored to a row.
+  const anchored = new Set<string>();
+  for (const g of groups) for (const r of g.rows) for (const u of (r.photos || [])) anchored.add(u);
+  const leftover = fallback.filter((u) => !anchored.has(u));
+
+  return (
+    <View style={{ marginTop: 10 }}>
+      <PdfSectionHeader title="Final Checklist" photoUrls={[]} />
+      {groups.map((g) => (
+        <View key={g.name} style={{ marginBottom: 6 }}>
+          {/* Group title + column header stay together so they never strand at
+              the bottom of a page (rows below wrap normally). */}
+          <View wrap={false} minPresenceAhead={40}>
+            <Text style={pdfStyles.fcGroupTitle}>{g.name}</Text>
+            <View style={pdfStyles.tableHeaderRow}>
+              <Text style={[pdfStyles.tableHeaderCell, { width: '40%' }]}>Item</Text>
+              <Text style={[pdfStyles.tableHeaderCell, { width: '60%' }]}>Detail</Text>
+            </View>
+          </View>
+          {g.rows.map((r, i) => (
+            <View key={i} wrap={false}>
+              <View style={pdfStyles.tableRow}>
+                <Text style={[pdfStyles.fcItemCell, { width: '40%' }]}>{r.label}</Text>
+                <Text style={[pdfStyles.tableCell, { width: '60%' }]}>{r.value}</Text>
+              </View>
+              {r.photos && r.photos.length > 0 && (
+                <View style={{ paddingLeft: 3 }}>
+                  <PdfSectionPhotos photoUrls={r.photos} />
+                </View>
+              )}
+            </View>
+          ))}
+        </View>
+      ))}
+      {leftover.length > 0 && <PdfSectionPhotos photoUrls={leftover} />}
+    </View>
+  );
+}
+
+/**
  * Page-1 condensed summary table. Combines EVERY line item into ONE clean,
  * flat table — Room is its own column (shown once per room run), one row per
  * line item, no photos and no per-room subtotals, with a single grand-total
@@ -801,9 +878,11 @@ export interface PdfBuildContext {
   sections: PdfSectionGroup[];
   grandTotals: { vendor: number; client: number; tenant: number; lineCount: number };
   /** Final Checklist Q&A — rendered on the MASTER pdf only. Each section is a
-   *  group of label/value rows. Absent/empty on non-scope templates. */
-  finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
-  /** Final Checklist photos (label stickers etc.) — rendered under the block. */
+   *  group of label/value rows; `photos` on a row are anchored under that item. */
+  finalChecklist?: { name: string; rows: { label: string; value: string; photos?: string[] }[] }[];
+  /** Final Checklist photos (label stickers etc.) — flat list kept for photo
+   *  embedding + the gallery; rendered only as a fallback for any photo not
+   *  already anchored to its row. */
   finalChecklistPhotos?: string[];
   /** Signed base URL for the in-app photo gallery (e.g.
    *  https://resiwalk.com/d/{id}/photos/{sig}). When set, PDF photos link here

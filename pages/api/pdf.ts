@@ -38,7 +38,7 @@ interface GeneratePdfBody {
   completedAt: string;
   answers: AnswerInput[];
   sectionPhotoUrls: Record<string, string[]>;
-  finalChecklist?: { name: string; rows: { label: string; value: string }[] }[];
+  finalChecklist?: { name: string; rows: { label: string; value: string; photos?: string[] }[] }[];
   finalChecklistPhotos?: string[];
   communityName?: string | null;
 }

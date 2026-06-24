@@ -10,7 +10,7 @@ import {
   buildListingLine,
   PdfFooter,
   PdfSectionHeader,
-  PdfSectionPhotos,
+  PdfFinalChecklist,
   PdfSummaryTable,
   PdfGalleryBaseProvider,
   formatMoneyPdf,
@@ -244,28 +244,15 @@ function MasterSection(props: { section: PdfSectionGroup }) {
   );
 }
 
-// Final Checklist Q&A — master report only. One label/value row per question,
-// grouped by section. Renders nothing when there's no checklist data.
+// Final Checklist Q&A — master report only. Delegates to the shared
+// PdfFinalChecklist so the master + Q&A PDFs render identically (structured
+// Item/Detail tables, photos anchored under their line item).
 function FinalChecklistBlock(props: { ctx: PdfBuildContext }) {
-  const groups = props.ctx.finalChecklist || [];
-  const photos = props.ctx.finalChecklistPhotos || [];
-  if (!groups.length && !photos.length) return null;
   return (
-    <View style={{ marginTop: 10 }}>
-      <PdfSectionHeader title="Final Checklist" photoUrls={[]} />
-      {groups.map((g) => (
-        <View key={g.name} style={{ marginBottom: 5 }} wrap={false}>
-          <Text style={{ fontSize: 9, fontWeight: 700, marginTop: 4, marginBottom: 2, color: '#374151' }}>{g.name}</Text>
-          {g.rows.map((r, i) => (
-            <View key={i} style={{ flexDirection: 'row', paddingVertical: 1.5, borderBottomWidth: 0.5, borderBottomColor: '#eeeeee' }}>
-              <Text style={{ width: '42%', fontSize: 8.5, color: '#111111', paddingRight: 6 }}>{r.label}</Text>
-              <Text style={{ width: '58%', fontSize: 8.5, color: '#333333' }}>{r.value}</Text>
-            </View>
-          ))}
-        </View>
-      ))}
-      {photos.length > 0 && <PdfSectionPhotos photoUrls={photos} />}
-    </View>
+    <PdfFinalChecklist
+      groups={props.ctx.finalChecklist || []}
+      fallbackPhotos={props.ctx.finalChecklistPhotos || []}
+    />
   );
 }
 
