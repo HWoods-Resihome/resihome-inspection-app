@@ -228,18 +228,32 @@ export function RegenPdfPicker({ embedded = false }: { embedded?: boolean } = {}
                           <span className="text-xs text-gray-400 tabular-nums">{g.ids.length}</span>
                         </label>
                         {/* Scope Rate Card: choose WHICH PDF(s) to rebuild so you
-                            don't have to regenerate all of them every time. */}
+                            don't have to regenerate all of them every time. A
+                            vertical radio list (not a cramped native dropdown) —
+                            full-width, big tap targets, readable on a phone. */}
                         {isScope && selected.has(g.type) && (
-                          <div className="mt-1.5 ml-7 flex items-center gap-2 text-[12px] text-gray-600">
-                            <span>Regenerate:</span>
-                            <select
-                              value={scopeKind}
-                              disabled={running}
-                              onChange={(e) => setScopeKind(e.target.value)}
-                              className="border border-gray-300 rounded-md px-2 py-1 text-[12px] bg-white text-gray-700 disabled:opacity-50"
-                            >
-                              {SCOPE_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
-                            </select>
+                          <div className="mt-2 ml-7 rounded-lg border border-gray-200 bg-gray-50 p-2.5">
+                            <div className="text-[11px] font-heading font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                              Which Scope PDFs to rebuild
+                            </div>
+                            <div className="space-y-0.5">
+                              {SCOPE_KINDS.map((k) => (
+                                <label
+                                  key={k.value}
+                                  className={`flex items-center gap-2.5 px-2 py-2 rounded-md cursor-pointer text-sm ${
+                                    scopeKind === k.value ? 'bg-white border border-brand/40 text-ink font-semibold' : 'text-gray-700 hover:bg-white/70'
+                                  }`}
+                                >
+                                  <input
+                                    type="radio" name="scopeKind" value={k.value}
+                                    checked={scopeKind === k.value} disabled={running}
+                                    onChange={() => setScopeKind(k.value)}
+                                    className="w-4 h-4 accent-brand shrink-0"
+                                  />
+                                  <span>{k.label}</span>
+                                </label>
+                              ))}
+                            </div>
                           </div>
                         )}
                       </div>
