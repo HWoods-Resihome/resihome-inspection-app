@@ -41,6 +41,10 @@ export interface AiAdjustment {
   /** Snapshot of the line as it is now (for display on edit/remove). */
   current?: {
     description?: string;
+    /** The inspector's free-text note on the line — for a BID ITEM this is the
+     *  verbiage describing what the bid is for (e.g. "replace fridge handle").
+     *  Surfaced so the reviewer can judge the price instead of skipping it. */
+    note?: string;
     quantity?: number;
     tenantBillBackPercent?: number;
     tenantDollars?: number;

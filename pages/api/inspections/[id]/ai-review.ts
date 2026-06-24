@@ -324,7 +324,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const item = byCode.get(cur.lineItemCode);
         let tenantDollars: number | undefined; let vendorCost: number | undefined;
         try { if (item) { const c = calculateLine(item, region, regions, { quantity: cur.quantity, tenantBillBackPercent: cur.tenantBillBackPercent, customVendorCost: cur.customVendorCost ?? null }); tenantDollars = c.tenantCost; vendorCost = c.vendorCost; } } catch { /* noop */ }
-        current = { description: item?.laborShortDescription || cur.lineItemCode, quantity: cur.quantity, tenantBillBackPercent: cur.tenantBillBackPercent, tenantDollars, vendorCost, unit: item?.laborMeas, lineItemCode: cur.lineItemCode };
+        current = { description: item?.laborShortDescription || cur.lineItemCode, note: (cur.note || '').trim() || undefined, quantity: cur.quantity, tenantBillBackPercent: cur.tenantBillBackPercent, tenantDollars, vendorCost, unit: item?.laborMeas, lineItemCode: cur.lineItemCode };
       }
 
       const sCode = a?.suggestedLineItemCode ? String(a.suggestedLineItemCode) : undefined;
