@@ -89,11 +89,12 @@ export function UnlockButton({ propertyId, address, inspectionId, lockRing, clas
     }
   }
 
-  // Online/offline ring around the lock icon. Offset from the button so it reads
-  // as a distinct ring rather than a recolored border.
+  // Online/offline ring around the lock icon. Drawn INSET so the button keeps
+  // its exact w-8 h-8 footprint and lines up with the other header buttons —
+  // an outset/offset ring would balloon the visual diameter and look too tall.
   const ringClass =
-    lockRing === 'online' ? 'ring-2 ring-offset-2 ring-offset-white ring-emerald-500 '
-    : lockRing === 'offline' ? 'ring-2 ring-offset-2 ring-offset-white ring-red-500 '
+    lockRing === 'online' ? 'ring-2 ring-inset ring-emerald-500 '
+    : lockRing === 'offline' ? 'ring-2 ring-inset ring-red-500 '
     : '';
   const statusText =
     lockRing === 'online' ? 'Lock online. '
