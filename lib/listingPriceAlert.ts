@@ -17,16 +17,13 @@ import {
 } from '@/lib/hubspot';
 import { fetchRentComps, type RentComp } from '@/lib/rentcast';
 import { postSlackMessage } from '@/lib/slack';
+import { resolveSlackTarget } from '@/lib/slackNotifications';
 
-// LIVE: posts to the production channel by default. Override via
-// SLACK_LISTING_PRICE_CHANNEL (e.g. set back to the sandbox C06CW2VMJNR to test).
-const SANDBOX_CHANNEL = 'C06CW2VMJNR';
-const LIVE_CHANNEL = 'C04K24M3UH5';
-const SLACK_CHANNEL = (process.env.SLACK_LISTING_PRICE_CHANNEL || LIVE_CHANNEL).trim();
-// The per-inspection gate (post once) engages only OFF the sandbox channel, so
-// repeated test submits to the sandbox re-post freely while production never
-// duplicates. In production (default) the gate is ON.
-const GATE_ACTIVE = SLACK_CHANNEL !== SANDBOX_CHANNEL;
+// Live destination (override via SLACK_LISTING_PRICE_CHANNEL). On/off + sandbox
+// routing now come from the admin "Slack Notifications" table (key
+// 'listing_price'); the per-inspection gate engages OFF sandbox so production
+// posts once while sandbox testing re-posts freely.
+const LIVE_CHANNEL = (process.env.SLACK_LISTING_PRICE_CHANNEL || 'C04K24M3UH5').trim();
 // Slack user IDs @-mentioned on each alert (override via SLACK_LISTING_PRICE_MENTIONS,
 // comma-separated). Defaults to the listing-price reviewers.
 const ALERT_MENTIONS = (process.env.SLACK_LISTING_PRICE_MENTIONS || 'UAZ5C6C5P,UFW4K81TQ')
@@ -102,7 +99,11 @@ export async function postListingPriceAlertOnSubmit(
   const recommended = Number(ans.recommendedAmount) || 0;
   if (recommended <= 0) return { posted: false, reason: 'no recommended amount' };
 
-  // 2) Gate: one alert per inspection (production only; sandbox re-posts freely).
+  // 2) Admin gate: on/off + sandbox routing from the Slack Notifications table.
+  const target = await resolveSlackTarget('listing_price', LIVE_CHANNEL);
+  if (!target.enabled) return { posted: false, reason: 'disabled' };
+  const channel = target.channel;
+  const GATE_ACTIVE = !target.sandbox; // sandbox re-posts freely; production posts once
   if (GATE_ACTIVE) {
     const stamp = await getListingPriceAlertStamp(inspection.recordId);
     if (stamp) return { posted: false, reason: 'gated (already posted)' };
@@ -177,12 +178,12 @@ export async function postListingPriceAlertOnSubmit(
   }
 
   // 6) Post the parent, then the comps as a threaded reply. Stamp on parent success.
-  const res = await postSlackMessage(SLACK_CHANNEL, { text, blocks });
+  const res = await postSlackMessage(channel, { text, blocks });
   if (res.ok) {
     if (GATE_ACTIVE) await stampListingPriceAlert(inspection.recordId);
     let threadOk = false;
     if (res.ts) {
-      const reply = await postSlackMessage(SLACK_CHANNEL, { text: replyText, blocks: replyBlocks, thread_ts: res.ts });
+      const reply = await postSlackMessage(channel, { text: replyText, blocks: replyBlocks, thread_ts: res.ts });
       threadOk = reply.ok;
       if (!reply.ok) console.warn(`[listing-price-alert] ${inspection.recordId}: comps thread reply failed: ${reply.error}`);
     }
@@ -190,5 +191,5 @@ export async function postListingPriceAlertOnSubmit(
     return { posted: true, channel: res.channel };
   }
   console.warn(`[listing-price-alert] ${inspection.recordId}: Slack post failed: ${res.error}`);
-  return { posted: false, reason: 'slack post failed', error: res.error, channel: SLACK_CHANNEL };
+  return { posted: false, reason: 'slack post failed', error: res.error, channel };
 }

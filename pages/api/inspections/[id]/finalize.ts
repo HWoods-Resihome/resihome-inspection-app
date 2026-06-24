@@ -14,6 +14,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { postScopeApproved } from '@/lib/scopeApprovalSlack';
 import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
@@ -866,6 +867,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           url: `/inspection/${id}`,
           tag: `approved-${id}`,
         }).then((r) => console.log(`[push] approval → ${submitter}: ${JSON.stringify(r)}`)).catch(() => {});
+      }
+
+      // Scope APPROVED Slack notification (ported from HubSpot Workflow B): post
+      // the threaded blue reply on the original pending card + recolor it APPROVED.
+      // First approval only. Best-effort — never blocks finalize.
+      try {
+        const r = await postScopeApproved(id);
+        console.log(`[finalize] scope approved Slack for ${id}: ${r.status}${r.error ? ' — ' + r.error : ''}`);
+      } catch (e) {
+        console.warn('[finalize] scope approved Slack skipped (continuing):', e);
       }
     }
 

@@ -27,3 +27,33 @@ export async function postSlackMessage(
     return { ok: false, channel, error: String(e?.message || e).slice(0, 200) };
   }
 }
+
+/** Low-level Slack Web API POST (JSON). Returns the raw response object. */
+export async function slackCall(method: string, body: any): Promise<any> {
+  const token = (process.env.SLACK_BOT_TOKEN || '').trim();
+  if (!token) return { ok: false, error: 'SLACK_BOT_TOKEN not set' };
+  try {
+    const resp = await fetch(`https://slack.com/api/${method}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify(body),
+    });
+    return await resp.json().catch(() => ({ ok: false, error: `http ${resp.status}` }));
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message || e).slice(0, 200) };
+  }
+}
+
+/** chat.getPermalink → permalink string, or '' on failure. */
+export async function getSlackPermalink(channel: string, ts: string): Promise<string> {
+  const token = (process.env.SLACK_BOT_TOKEN || '').trim();
+  if (!token || !channel || !ts) return '';
+  try {
+    const url = `https://slack.com/api/chat.getPermalink?channel=${encodeURIComponent(channel)}&message_ts=${encodeURIComponent(ts)}`;
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const j = await resp.json().catch(() => ({} as any));
+    return j.ok && j.permalink ? String(j.permalink) : '';
+  } catch {
+    return '';
+  }
+}

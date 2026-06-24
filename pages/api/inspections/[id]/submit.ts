@@ -3,6 +3,7 @@ import { updateInspection, fetchInspectionById, stampFirstCompleted, stampProper
 import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
 import { createComplianceTicketsOnSubmit } from '@/lib/complianceTickets';
 import { postListingPriceAlertOnSubmit } from '@/lib/listingPriceAlert';
+import { postScopePendingApproval } from '@/lib/scopeApprovalSlack';
 import { fcSmartHomeStamps, fcPoolStamps, parseFcAnswers } from '@/lib/finalChecklist';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
@@ -222,6 +223,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       } catch (e) {
         console.warn('[submit] review PDF pre-generate failed (continuing):', e);
+      }
+      // Scope PENDING APPROVAL Slack notification (ported from HubSpot Workflow
+      // A): region → POD channel → post the pending card → write back the
+      // permalink to slackmessagelink. Runs AFTER the master PDF pre-gen above so
+      // the card's "Open report" link is populated. Deduped on slackmessagelink;
+      // best-effort — never blocks the submit.
+      try {
+        const r = await postScopePendingApproval(id);
+        console.log(`[submit] scope pending Slack for ${id}: ${r.status}${r.error ? ' — ' + r.error : ''}`);
+      } catch (e) {
+        console.warn('[submit] scope pending Slack skipped (continuing):', e);
       }
     }
     const inspection = await fetchInspectionById(id);

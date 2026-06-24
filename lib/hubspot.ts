@@ -4376,6 +4376,75 @@ export async function writeApprovalRouting(config: ApprovalRoutingConfig): Promi
 }
 
 
+// ── Scope-approval Slack notifications (ported from the HubSpot workflows) ──
+// Read arbitrary inspection / property properties by id (forgiving projection —
+// HubSpot ignores unknown names), used by the scope notification port.
+export async function fetchInspectionProperties(inspectionRecordId: string, props: string[]): Promise<Record<string, any>> {
+  const { inspection } = typeIds();
+  const qs = props.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
+  const resp = await hubspotFetch(`/crm/v3/objects/${inspection}/${inspectionRecordId}?${qs}`);
+  return resp?.properties || {};
+}
+
+/** Write the Slack permalink back onto the inspection (slackmessagelink). */
+export async function writeInspectionSlackLink(inspectionRecordId: string, permalink: string): Promise<void> {
+  try {
+    await updateInspection(inspectionRecordId, { slackmessagelink: permalink });
+  } catch (e) {
+    console.warn('[scope-slack] writeback to slackmessagelink failed:', e);
+  }
+}
+
+// ── Slack-notification admin config (on/off + sandbox), JSON on the Agent record ──
+const APP_SLACK_NOTIFS_PROP = 'app_slack_notifications_json';
+export type SlackNotifConfigMap = Record<string, { enabled?: boolean; sandbox?: boolean; sandboxChannel?: string }>;
+
+export async function readSlackNotifConfig(): Promise<SlackNotifConfigMap> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) return {};
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}?properties=${APP_SLACK_NOTIFS_PROP}`);
+    const raw = resp?.properties?.[APP_SLACK_NOTIFS_PROP];
+    if (!raw) return {};
+    const parsed = JSON.parse(String(raw));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (e) {
+    console.warn('[slack-notif] config read failed:', e);
+    return {};
+  }
+}
+
+async function ensureSlackNotifProperty(): Promise<void> {
+  try { await hubspotFetch(`/crm/v3/properties/${agentTypeId()}/${APP_SLACK_NOTIFS_PROP}`); return; } catch { /* create */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${agentTypeId()}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: APP_SLACK_NOTIFS_PROP, label: 'Slack Notifications config (JSON)', type: 'string', fieldType: 'textarea',
+        groupName: 'ai_knowledge', description: 'Per-notification on/off + sandbox routing for ResiWalk Slack notifications.',
+      }),
+    });
+  } catch (e: any) {
+    const blob = `${String(e?.message || e)} ${String(e?.detail || '')}`;
+    if (!(e?.status === 409 || /already exists|PROPERTY_ALREADY_EXISTS/i.test(blob))) {
+      console.warn('[slack-notif] could not provision app_slack_notifications_json:', blob.slice(0, 200));
+    }
+  }
+}
+
+export async function writeSlackNotifConfig(map: SlackNotifConfigMap): Promise<void> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) throw new Error('Admin Agent record not found.');
+  const doWrite = () => hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}`, {
+    method: 'PATCH', body: JSON.stringify({ properties: { [APP_SLACK_NOTIFS_PROP]: JSON.stringify(map || {}) } }),
+  });
+  try { await doWrite(); }
+  catch (e) {
+    if (isMissingPropertyError(e, APP_SLACK_NOTIFS_PROP)) { await ensureSlackNotifProperty(); await doWrite(); }
+    else { const detail = String((e as any)?.detail || '').slice(0, 200); throw new Error(`Could not save Slack notification config.${detail ? ' ' + detail : ''}`.trim()); }
+  }
+}
+
 /**
  * One-click provisioning of the HubSpot properties the new admin features need
  * (so an admin can run it from /admin/setup instead of the Python scripts).
