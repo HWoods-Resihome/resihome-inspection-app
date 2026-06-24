@@ -21,16 +21,6 @@ const SETUP_LABELS: Record<string, string> = {
   is_enabled: 'Question on/off flag (Question)',
 };
 
-// Maintenance backfills — GET endpoints safe to open in a signed-in admin tab
-// (each is idempotent + resumable; see the endpoint docs).
-const BACKFILLS: { label: string; href: string; desc: string }[] = [
-  { label: 'Backfill billing fields', href: '/api/admin/backfill-billing-fields', desc: 'Vendor/client cost, broker code, entity id — never null vendor cost.' },
-  { label: 'Backfill region', href: '/api/admin/backfill-region?apply=1', desc: 'Stamp region_snapshot on inspections missing it.' },
-  { label: 'Seed Device Installed = No', href: '/api/admin/backfill-device-installed', desc: 'Fill the blank Smart Home “Device Installed” field with “No” on existing records.' },
-  { label: 'Backfill Device Type', href: '/api/admin/backfill-device-type', desc: 'Populate Smart Home “Device Type” from each inspection’s Final Checklist answer.' },
-  { label: 'Generate pending-approval Master PDFs', href: '/api/admin/backfill-pending-master', desc: 'Build the Master PDF for submitted / pending-approval scopes missing one, so the in-app “View PDFs” link appears.' },
-];
-
 function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
   return (
     <section className="mt-5 border border-gray-200 rounded-xl bg-white p-4">
@@ -136,24 +126,6 @@ export default function AdminFlowsPage() {
         {/* ---- Regenerate PDFs ---- */}
         <Section title="Regenerate PDFs" desc="Rebuild inspection PDFs in place from saved data — never changing status, bypassing approval, or sending email/ticket. Keep this tab open while it runs.">
           <RegenPdfPicker embedded />
-        </Section>
-
-        {/* ---- Maintenance backfills ---- */}
-        <Section title="Maintenance Backfills" desc="One-off, idempotent data backfills. Each opens its endpoint in a new tab and runs as you (admin); re-open the returned resume link if it reports more to do.">
-          <ul className="space-y-2">
-            {BACKFILLS.map((b) => (
-              <li key={b.href}>
-                <a href={b.href} target="_blank" rel="noopener noreferrer"
-                  className="flex items-start gap-2.5 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2.5 hover:bg-gray-100 transition-colors">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 text-gray-400 shrink-0"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-                  <div>
-                    <div className="text-sm font-heading font-semibold text-brand">{b.label}</div>
-                    <div className="text-[11.5px] text-gray-500">{b.desc}</div>
-                  </div>
-                </a>
-              </li>
-            ))}
-          </ul>
         </Section>
       </main>
     </div>
