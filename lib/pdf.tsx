@@ -400,19 +400,22 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           if (answers.length === 0 && sectionPhotos.length === 0) return null;
           return (
             <View key={sectionName} wrap>
-              <View wrap={false}>
-                <View style={styles.sectionHeader}>
-                  <Text>{sectionName}</Text>
-                </View>
-                {sectionPhotos.length > 0 && (
-                  <View style={styles.sectionPhotosBlock}>
-                    <Text style={styles.sectionPhotosLabel}>Section Photos</Text>
-                    <View style={styles.photoGrid}>
-                      {renderPhotos(sectionPhotos, data.embeddedByUrl, data.photoGalleryBase)}
-                    </View>
-                  </View>
-                )}
+              {/* Section title — kept off the very bottom of a page via
+                  minPresenceAhead (so it never strands above a page break), but
+                  NOT wrapped atomically with its photos: a section with many
+                  photos must be free to paginate, or the block overflows the
+                  page (photos run under the footer, next title overlaps them). */}
+              <View style={styles.sectionHeader} minPresenceAhead={72}>
+                <Text>{sectionName}</Text>
               </View>
+              {sectionPhotos.length > 0 && (
+                <View style={styles.sectionPhotosBlock}>
+                  <Text style={styles.sectionPhotosLabel}>Section Photos</Text>
+                  <View style={styles.photoGrid}>
+                    {renderPhotos(sectionPhotos, data.embeddedByUrl, data.photoGalleryBase)}
+                  </View>
+                </View>
+              )}
               <View style={styles.sectionContent}>
                 {answers.map((a, idx) => {
                   const tone = toneOf(a.answerValue);
@@ -431,18 +434,24 @@ export function InspectionPdf({ data }: { data: PdfData }) {
                     );
                   }
                   return (
-                    <View key={idx} style={isLast ? styles.qaWithExtrasLast : styles.qaWithExtras} wrap={false}>
-                      <View style={styles.qaRow}>
-                        <Text style={styles.qaQuestion}>{a.questionText}</Text>
-                        <Text style={{ ...styles.qaAnswer, color: answerColor }}>{displayAnswer}</Text>
-                      </View>
-                      {(a.note || (a.quantity != null) || a.assignedTo) && (
-                        <View style={styles.noteBox}>
-                          {a.note && <Text style={styles.noteText}>Note: {a.note}</Text>}
-                          {a.assignedTo && <Text style={styles.scoreText}>Assigned to: {a.assignedTo}</Text>}
-                          {a.quantity != null && <Text style={styles.scoreText}>Quantity: {a.quantity}</Text>}
+                    // Outer block WRAPS so a question with many photos paginates
+                    // instead of overflowing the page. The question + answer +
+                    // note stay together (inner wrap={false}); the photo grid
+                    // flows across pages on its own.
+                    <View key={idx} style={isLast ? styles.qaWithExtrasLast : styles.qaWithExtras} wrap>
+                      <View wrap={false} minPresenceAhead={90}>
+                        <View style={styles.qaRow}>
+                          <Text style={styles.qaQuestion}>{a.questionText}</Text>
+                          <Text style={{ ...styles.qaAnswer, color: answerColor }}>{displayAnswer}</Text>
                         </View>
-                      )}
+                        {(a.note || (a.quantity != null) || a.assignedTo) && (
+                          <View style={styles.noteBox}>
+                            {a.note && <Text style={styles.noteText}>Note: {a.note}</Text>}
+                            {a.assignedTo && <Text style={styles.scoreText}>Assigned to: {a.assignedTo}</Text>}
+                            {a.quantity != null && <Text style={styles.scoreText}>Quantity: {a.quantity}</Text>}
+                          </View>
+                        )}
+                      </View>
                       {a.photoUrls && a.photoUrls.length > 0 && (
                         <View style={styles.photoGrid}>
                           {renderPhotos(a.photoUrls, data.embeddedByUrl, data.photoGalleryBase)}
