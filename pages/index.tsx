@@ -601,7 +601,7 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>ResiHome Inspection</title>
+        <title>ResiWalk</title>
       </Head>
       {/* On desktop the page becomes a fixed-height flex column: the header +
           filters are frozen at the top, only the card list scrolls, and the
