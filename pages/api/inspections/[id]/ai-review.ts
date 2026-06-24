@@ -171,7 +171,7 @@ function tools() {
           sectionId: { type: 'string', description: 'The room/section id this applies to.' },
           lineExternalId: { type: 'string', description: 'For edit/remove: the externalId of the target line (from the scope listing).' },
           title: { type: 'string', description: 'A SHORT imperative action, max ~6 words, saying what happens if approved — e.g. "Remove duplicate appliance clean", "Lower tenant to 50%", "Add blind replacement", "Move to Bathroom". No internal ids or line codes.' },
-          rationale: { type: 'string', description: 'ONE short plain-language sentence (~15-20 words). NEVER include internal ids (voice_*, RCLINE-*, "id=..."), line codes, or raw dollar-math dumps — just the reason.' },
+          rationale: { type: 'string', description: 'ONE short plain-language sentence (~15-20 words). NEVER include internal ids (voice_*, RCLINE-*, "id=..."), line codes, or raw dollar-math dumps — just the reason. When the line is a BID ITEM (or the inspector added their own note describing the specific work), briefly SUMMARIZE what the inspector said the item is for — e.g. "Inspector noted a fridge handle replacement; \$5 is too low for ~1 hr labor." Summarize the inspector\'s ADDITIONAL detail only — do NOT echo the generic catalog/default description ("Appliance Bid Item") or quote the whole note verbatim. If the note adds nothing beyond the default, omit it.' },
           severity: { type: 'string', enum: ['high', 'medium', 'low'] },
           needsPhoto: { type: 'boolean', description: 'Set true when a damage / tenant-responsibility line is NOT supported by a photo. Use type "remove" with needsPhoto true so the inspector can either add a photo of the damage or remove the line.' },
           wrongRoom: { type: 'boolean', description: 'Set true when a line is simply in the WRONG room (e.g. a tub clean filed under Kitchen). Also set suggestedRoom to the correct room. Use type "edit" — the inspector will MOVE it, not delete it.' },
@@ -324,7 +324,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const item = byCode.get(cur.lineItemCode);
         let tenantDollars: number | undefined; let vendorCost: number | undefined;
         try { if (item) { const c = calculateLine(item, region, regions, { quantity: cur.quantity, tenantBillBackPercent: cur.tenantBillBackPercent, customVendorCost: cur.customVendorCost ?? null }); tenantDollars = c.tenantCost; vendorCost = c.vendorCost; } } catch { /* noop */ }
-        current = { description: item?.laborShortDescription || cur.lineItemCode, note: (cur.note || '').trim() || undefined, quantity: cur.quantity, tenantBillBackPercent: cur.tenantBillBackPercent, tenantDollars, vendorCost, unit: item?.laborMeas, lineItemCode: cur.lineItemCode };
+        current = { description: item?.laborShortDescription || cur.lineItemCode, quantity: cur.quantity, tenantBillBackPercent: cur.tenantBillBackPercent, tenantDollars, vendorCost, unit: item?.laborMeas, lineItemCode: cur.lineItemCode };
       }
 
       const sCode = a?.suggestedLineItemCode ? String(a.suggestedLineItemCode) : undefined;

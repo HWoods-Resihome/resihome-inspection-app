@@ -313,16 +313,6 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                             <div className="min-w-0">
                               <div className="text-xs text-gray-600 mt-1 leading-snug">{a.rationale}</div>
 
-                              {/* Inspector's own note on the line (e.g. what a bid
-                                  item is actually for) — surfaced so the reviewer
-                                  can price it instead of skipping over a $5 bid. */}
-                              {a.current?.note && (
-                                <div className="text-xs mt-1.5 px-2 py-1.5 rounded-md bg-amber-50 border border-amber-200 text-gray-700 leading-snug">
-                                  <span className="font-heading font-semibold text-amber-700">Inspector note: </span>
-                                  {a.current.note}
-                                </div>
-                              )}
-
                               {a.needsVendorCost ? (
                                 /* $0 line — enter a vendor charge (Apply), or confirm none needed. */
                                 <div className="mt-2">
