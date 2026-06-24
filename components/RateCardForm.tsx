@@ -369,6 +369,39 @@ export function RateCardForm(props: RateCardFormProps) {
     | { kind: 'saved'; at: number }
     | { kind: 'error'; message: string };
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: 'idle' });
+
+  // Audit trail: log ONE "edited" event per editing SESSION — on the first
+  // successful save after opening, and again after the app is re-entered
+  // following an absence — not per line/keystroke. The rate card saves lines
+  // outside useAutosave, so it mirrors that hook's once-per-session logic here.
+  // This is what surfaces "Edited by <approver>" between Submitted and Approved.
+  const editAuditLoggedRef = useRef(false);
+  const logEditOnce = useCallback(() => {
+    if (editAuditLoggedRef.current || props.readOnly) return;
+    editAuditLoggedRef.current = true;
+    try {
+      void fetch(`/api/inspections/${props.inspectionRecordId}/audit-edit`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', keepalive: true,
+      }).catch(() => { /* best-effort — never blocks editing */ });
+    } catch { /* ignore */ }
+  }, [props.readOnly, props.inspectionRecordId]);
+  // Wrap the "saved" transition so every successful persist also records the
+  // once-per-session edit. (The server dedupes duplicate pings within ~45s.)
+  const markSaved = useCallback(() => {
+    setSaveStatus({ kind: 'saved', at: Date.now() });
+    logEditOnce();
+  }, [logEditOnce]);
+  // Re-arm a fresh session after the inspector backgrounds the app a while then
+  // returns, so a later editing session is recorded as its own edit.
+  useEffect(() => {
+    let hiddenAt = 0;
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+      if (hiddenAt && Date.now() - hiddenAt > 60_000) editAuditLoggedRef.current = false;
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
   // Live status for the header badge: mirrors the prop but flips Scheduled →
   // In Progress the moment the first edit saves (the server bumps it too), so
   // the pill doesn't keep showing "Scheduled" after edits.
@@ -1073,7 +1106,7 @@ export function RateCardForm(props: RateCardFormProps) {
     }
 
     refreshPending();
-    if (outboxRes.synced > 0 || (photoRes && photoRes.synced > 0)) setSaveStatus({ kind: 'saved', at: Date.now() });
+    if (outboxRes.synced > 0 || (photoRes && photoRes.synced > 0)) markSaved();
     // Capture the last failure reason for the banner's "Details"; clear it once
     // everything has drained.
     const stillPending = (outboxRes.remaining || 0) > 0 || (photoRes && (photoRes as any).remaining > 0);
@@ -1478,7 +1511,7 @@ export function RateCardForm(props: RateCardFormProps) {
             [result.answerIdExternal]: result.recordId,
           }));
         }
-        setSaveStatus({ kind: 'saved', at: Date.now() });
+        markSaved();
         return { ok: true, ...routing, recordId: result?.recordId };
       } catch (e: any) {
         console.error('[RateCardForm] line save failed:', e);
@@ -1495,7 +1528,7 @@ export function RateCardForm(props: RateCardFormProps) {
             meta: { sectionId: effSectionId, line: persistLine, externalId: line.externalId },
           });
           setPendingSync(outboxCountFor(props.inspectionRecordId));
-          setSaveStatus({ kind: 'saved', at: Date.now() });
+          markSaved();
           return { ok: true, ...routing, recordId: undefined };
         }
         setSaveStatus({ kind: 'error', message: error });
@@ -1571,7 +1604,7 @@ export function RateCardForm(props: RateCardFormProps) {
         if (result?.failed) throw new Error(result.reason || 'The checklist could not be saved.');
         const rid = result?.recordId;
         if (rid) fcRecordIdRef.current = rid;
-        setSaveStatus({ kind: 'saved', at: Date.now() });
+        markSaved();
       } catch (e: any) {
         if (isOfflineError(e)) {
           // Replayed verbatim when back online (stitch is a no-op for this kind).
@@ -1581,7 +1614,7 @@ export function RateCardForm(props: RateCardFormProps) {
             method: 'POST', body, kind: 'sectionList', meta: {},
           });
           setPendingSync(outboxCountFor(props.inspectionRecordId));
-          setSaveStatus({ kind: 'saved', at: Date.now() });
+          markSaved();
         } else {
           setSaveStatus({ kind: 'error', message: String(e?.message || e) });
         }
@@ -1723,7 +1756,7 @@ export function RateCardForm(props: RateCardFormProps) {
           delete next[externalId];
           return next;
         });
-        setSaveStatus({ kind: 'saved', at: Date.now() });
+        markSaved();
       } catch (e: any) {
         console.error('[RateCardForm] line delete failed:', e);
         // Offline / transient: queue the archive and keep the line removed (it
@@ -1737,7 +1770,7 @@ export function RateCardForm(props: RateCardFormProps) {
             kind: 'lineArchive',
           });
           setPendingSync(outboxCountFor(props.inspectionRecordId));
-          setSaveStatus({ kind: 'saved', at: Date.now() });
+          markSaved();
         } else {
           if (removed) {
             setLinesBySection((m) => {
@@ -1980,7 +2013,7 @@ export function RateCardForm(props: RateCardFormProps) {
           for (const ext of clearedExternalIds) delete next[ext];
           return next;
         });
-        setSaveStatus({ kind: 'saved', at: Date.now() });
+        markSaved();
       } catch (e: any) {
         console.error('[RateCardForm] clear sections: line archive failed', e);
         setSaveStatus({ kind: 'error', message: String(e?.message || e) });
@@ -2004,7 +2037,7 @@ export function RateCardForm(props: RateCardFormProps) {
           for (const id of sectionIds) delete next[id];
           return next;
         });
-        setSaveStatus({ kind: 'saved', at: Date.now() });
+        markSaved();
       } catch (e: any) {
         console.error('[RateCardForm] clear sections: photo archive failed', e);
         setSaveStatus({ kind: 'error', message: String(e?.message || e) });
@@ -2046,7 +2079,7 @@ export function RateCardForm(props: RateCardFormProps) {
       const isArchive = urls.length === 0;
       if (isArchive && !existingRecordId) {
         // Nothing persisted and nothing to persist.
-        setSaveStatus({ kind: 'saved', at: Date.now() });
+        markSaved();
         saveInFlightRef.current--;
         return;
       }
@@ -2088,7 +2121,7 @@ export function RateCardForm(props: RateCardFormProps) {
           const newRecordId = data.results?.[0]?.recordId;
           if (newRecordId) setSectionPhotoRecordIds((cur) => ({ ...cur, [sectionId]: newRecordId }));
         }
-        setSaveStatus({ kind: 'saved', at: Date.now() });
+        markSaved();
       } catch (e: any) {
         console.error('[RateCardForm] photo save failed:', e);
         // Offline: queue the section-photo record change (delete / list update)
@@ -2103,7 +2136,7 @@ export function RateCardForm(props: RateCardFormProps) {
             meta: { sectionId },
           });
           setPendingSync(outboxCountFor(props.inspectionRecordId));
-          setSaveStatus({ kind: 'saved', at: Date.now() });
+          markSaved();
         } else {
           setSaveStatus({ kind: 'error', message: String(e?.message || e) });
         }
@@ -2891,7 +2924,7 @@ export function RateCardForm(props: RateCardFormProps) {
           if (Array.isArray(data.failures) && data.failures.length) {
             partialFailures = data.failures.map((f: any) => `• ${f.code}: ${f.error}`).join('\n');
           }
-          setSaveStatus({ kind: 'saved', at: Date.now() });
+          markSaved();
         } catch (e: any) {
           // ONLY defer-save when the device is genuinely offline — then the
           // changes are queued and will sync, and we mark the review applied.
@@ -2907,7 +2940,7 @@ export function RateCardForm(props: RateCardFormProps) {
               outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint, method: 'POST', body: { upserts: [], archives: [rid] }, kind: 'lineArchive' });
             }
             refreshPending();
-            setSaveStatus({ kind: 'saved', at: Date.now() });
+            markSaved();
           } else {
             setSaveStatus({ kind: 'error', message: String(e?.message || e) });
             throw e;
