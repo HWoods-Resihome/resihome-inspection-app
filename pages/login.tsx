@@ -164,7 +164,7 @@ export default function LoginPage() {
   return (
     <>
       <Head>
-        <title>Sign in - ResiHome Inspection</title>
+        <title>Sign in - ResiWalk</title>
       </Head>
       <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-white">
         <div className="w-full max-w-md">
