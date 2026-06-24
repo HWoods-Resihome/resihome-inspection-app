@@ -1,15 +1,15 @@
 /**
- * /api/insights/slack-notifications
- *   GET  -> { notifications, config, defaultSandbox }   (canView)
- *   POST -> { ok, config }   body: { config }            (app-admin)
+ * /api/admin/slack-notifications  (admin only)
+ *   GET  -> { notifications, config, defaultSandbox }
+ *   POST -> { ok, config }   body: { config }
  *
- * The admin "Slack Notifications" table: per-notification on/off + sandbox
- * routing. Config is JSON on the admin Agent record (read/writeSlackNotifConfig).
+ * The admin "Slack Notifications" table (Admin → Flows, below Approval Routing):
+ * per-notification on/off + sandbox routing. Config is JSON on the admin Agent
+ * record (read/writeSlackNotifConfig).
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { canViewInsights } from '@/lib/insightsAccess';
 import { readSlackNotifConfig, writeSlackNotifConfig, type SlackNotifConfigMap } from '@/lib/hubspot';
 import { SLACK_NOTIFICATIONS, DEFAULT_SANDBOX_CHANNEL } from '@/lib/slackNotifications';
 
@@ -18,7 +18,7 @@ const KNOWN_KEYS = new Set(SLACK_NOTIFICATIONS.map((n) => n.key));
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
-  if (!(await canViewInsights(session.email))) return res.status(403).json({ error: 'Insights access required.' });
+  if (!(await isAppAdmin(session.email))) return res.status(403).json({ error: 'Admin only.' });
 
   try {
     if (req.method === 'GET') {
@@ -26,7 +26,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ notifications: SLACK_NOTIFICATIONS, config, defaultSandbox: DEFAULT_SANDBOX_CHANNEL });
     }
     if (req.method === 'POST') {
-      if (!(await isAppAdmin(session.email))) return res.status(403).json({ error: 'Admin only.' });
       const body = (req.body || {}) as { config?: Record<string, any> };
       const clean: SlackNotifConfigMap = {};
       for (const [k, v] of Object.entries(body.config || {})) {

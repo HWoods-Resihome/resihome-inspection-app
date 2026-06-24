@@ -14,6 +14,7 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { RegenPdfPicker } from '@/components/admin/RegenPdfPicker';
 import { ApprovalRoutingManager } from '@/components/admin/ApprovalRoutingManager';
+import { SlackNotificationsManager } from '@/components/admin/SlackNotificationsManager';
 
 const SETUP_LABELS: Record<string, string> = {
   app_admins_json: 'Admins storage (Agent)',
@@ -91,6 +92,9 @@ export default function AdminFlowsPage() {
 
         {/* ---- Approval Routing (PODs / Regions) — self-contained collapsible card ---- */}
         <ApprovalRoutingManager />
+
+        {/* ---- Slack Notifications (on/off + sandbox) — self-contained card ---- */}
+        <SlackNotificationsManager />
 
         {/* ---- Provision Fields (Setup) ---- */}
         <Section
