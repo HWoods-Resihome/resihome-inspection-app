@@ -1008,6 +1008,14 @@ export function RateCardForm(props: RateCardFormProps) {
     const sectionUrlMap = new Map<string, string>();   // url-to-replace -> real url (in section strips)
     const lineUrlMap = new Map<string, string>();      // url-to-replace -> real url (on line photos)
     const fcUrlMap = new Map<string, string>();        // url-to-replace -> real url (in the Final Checklist)
+    // Durability net: every PLAIN add (a brand-new section/line/after photo, not an
+    // annotation replacement) that finished uploading. After the swap pass we make
+    // sure each real URL is actually ATTACHED to its target — appending it if the
+    // in-place swap matched nothing (e.g. the draft drifted out of state after a
+    // reload). Without this, a synced photo whose draft is gone uploads to HubSpot
+    // Files but never lands on the line/section record — the "lost after sync" bug.
+    const syncedSectionAdds: { sectionId: string; newUrl: string }[] = [];
+    const syncedLineAdds: { sectionId: string; lineExternalId: string; lineField?: 'photos' | 'after'; newUrl: string }[] = [];
     const [outboxRes, photoRes] = await Promise.all([
       flushOutbox((entry, data) => {
         // Stitch results back so the in-memory state stays correct without a reload.
@@ -1023,7 +1031,7 @@ export function RateCardForm(props: RateCardFormProps) {
           if (rid) setSectionPhotoRecordIds((cur) => ({ ...cur, [entry.meta!.sectionId as string]: rid }));
         }
       }).catch(() => ({ synced: 0, remaining: 0 } as any)),
-      flushQueuedPhotos(props.inspectionRecordId, ({ oldUrl, newUrl, replacesUrl, lineExternalId, sectionId }) => {
+      flushQueuedPhotos(props.inspectionRecordId, ({ oldUrl, newUrl, replacesUrl, lineExternalId, sectionId, lineField }) => {
         if (sectionId === FC_PHOTO_SECTION) {
           if (oldUrl) { fcUrlMap.set(oldUrl, newUrl); fcSyncedUrlMapRef.current.set(oldUrl, newUrl); }
           if (replacesUrl) { fcUrlMap.set(replacesUrl, newUrl); fcSyncedUrlMapRef.current.set(replacesUrl, newUrl); }
@@ -1034,15 +1042,17 @@ export function RateCardForm(props: RateCardFormProps) {
           // both map to the real URL on that line.
           if (oldUrl) lineUrlMap.set(oldUrl, newUrl);
           if (replacesUrl) lineUrlMap.set(replacesUrl, newUrl);
+          else syncedLineAdds.push({ sectionId, lineExternalId, lineField, newUrl });
         } else {
           if (oldUrl) sectionUrlMap.set(oldUrl, newUrl);
           // Section-photo annotation: keep any line tagged with the original in sync.
           if (replacesUrl) lineUrlMap.set(replacesUrl, newUrl);
+          else syncedSectionAdds.push({ sectionId, newUrl });
         }
       }).catch(() => ({ synced: 0 } as any)),
     ]);
 
-    if (sectionUrlMap.size > 0) {
+    if (sectionUrlMap.size > 0 || syncedSectionAdds.length > 0) {
       const cur = photosBySectionRef.current;
       const nextPhotos: Record<string, string[]> = { ...cur };
       const touched = new Set<string>();
@@ -1050,6 +1060,12 @@ export function RateCardForm(props: RateCardFormProps) {
         let changed = false;
         const swapped = urls.map((u) => { const real = sectionUrlMap.get(u); if (real) { changed = true; touched.add(sid); return real; } return u; });
         if (changed) nextPhotos[sid] = swapped;
+      }
+      // Durability net: ensure every synced section photo is attached even if its
+      // draft wasn't present to swap (append-if-missing, deduped by URL).
+      for (const add of syncedSectionAdds) {
+        const arr = nextPhotos[add.sectionId] || [];
+        if (!arr.includes(add.newUrl)) { nextPhotos[add.sectionId] = [...arr, add.newUrl]; touched.add(add.sectionId); }
       }
       if (touched.size > 0) {
         setPhotosBySection(nextPhotos);
@@ -1059,9 +1075,9 @@ export function RateCardForm(props: RateCardFormProps) {
       }
     }
 
-    if (lineUrlMap.size > 0) {
+    if (lineUrlMap.size > 0 || syncedLineAdds.length > 0) {
       const cur = linesBySectionRef.current;
-      const toPersist: { sectionId: string; line: RateCardLineInput }[] = [];
+      const toPersist = new Map<string, { sectionId: string; line: RateCardLineInput }>();
       const nextLines: Record<string, RateCardLineInput[]> = { ...cur };
       for (const [sid, lines] of Object.entries(cur)) {
         let sectionChanged = false;
@@ -1076,14 +1092,31 @@ export function RateCardForm(props: RateCardFormProps) {
           if (!lineChanged) return l;
           sectionChanged = true;
           const updated = { ...l, photoUrls: swappedPhotos, afterPhotoUrls: swappedAfter };
-          toPersist.push({ sectionId: sid, line: updated });
+          toPersist.set(l.externalId, { sectionId: sid, line: updated });
           return updated;
         });
         if (sectionChanged) nextLines[sid] = updatedLines;
       }
-      if (toPersist.length > 0) {
+      // Durability net: ensure every synced line/after photo is attached to its
+      // line even if its draft wasn't present to swap (e.g. dropped from state by
+      // a reload). Append to the correct field, deduped across BOTH arrays so a
+      // photo the swap already placed isn't duplicated.
+      for (const add of syncedLineAdds) {
+        const lines = nextLines[add.sectionId];
+        if (!lines) continue;
+        const idx = lines.findIndex((l) => l.externalId === add.lineExternalId);
+        if (idx < 0) continue;
+        const l = toPersist.get(add.lineExternalId)?.line || lines[idx];
+        if ((l.photoUrls || []).includes(add.newUrl) || (l.afterPhotoUrls || []).includes(add.newUrl)) continue;
+        const updated = add.lineField === 'after'
+          ? { ...l, afterPhotoUrls: [...(l.afterPhotoUrls || []), add.newUrl] }
+          : { ...l, photoUrls: [...(l.photoUrls || []), add.newUrl] };
+        nextLines[add.sectionId] = (nextLines[add.sectionId] || []).map((x) => (x.externalId === add.lineExternalId ? updated : x));
+        toPersist.set(add.lineExternalId, { sectionId: add.sectionId, line: updated });
+      }
+      if (toPersist.size > 0) {
         setLinesBySection(nextLines);
-        for (const u of toPersist) void handleSaveLineForSection(u.sectionId, u.line);
+        for (const u of toPersist.values()) void handleSaveLineForSection(u.sectionId, u.line);
       }
     }
 
@@ -1262,8 +1295,26 @@ export function RateCardForm(props: RateCardFormProps) {
             next[d.sectionId] = lines.map((l) => {
               if (l.externalId !== d.lineExternalId) return l;
               const photos = l.photoUrls || [];
+              const after = l.afterPhotoUrls || [];
+              // Annotation replacement: swap the original URL (in whichever array
+              // holds it) for the new draft.
               if (d.replacesUrl && photos.includes(d.replacesUrl)) {
                 return { ...l, photoUrls: photos.map((u) => (u === d.replacesUrl ? d.url : u)) };
+              }
+              if (d.replacesUrl && after.includes(d.replacesUrl)) {
+                return { ...l, afterPhotoUrls: after.map((u) => (u === d.replacesUrl ? d.url : u)) };
+              }
+              // Plain add (no replacesUrl): re-attach the draft to its field so it
+              // shows again AND is present in state for the sync-swap. After-photos
+              // (lineField 'after') go to afterPhotoUrls; everything else to
+              // photoUrls. Previously this returned the line unchanged, so reloaded
+              // after-photo drafts were never re-attached and got orphaned on sync.
+              if (!d.replacesUrl) {
+                if (d.lineField === 'after') {
+                  if (!after.includes(d.url)) return { ...l, afterPhotoUrls: [...after, d.url] };
+                } else if (!photos.includes(d.url)) {
+                  return { ...l, photoUrls: [...photos, d.url] };
+                }
               }
               return l;
             });
@@ -4505,7 +4556,7 @@ export function RateCardForm(props: RateCardFormProps) {
           // Use the offline-aware, fail-fast uploader (12s × 2 + offline cache)
           // instead of the raw uploader (3 × 20s) so after-photos don't hang on a
           // weak signal. Tagged with the line so a queued draft attaches on sync.
-          uploadPhoto={(file) => uploadPhotoOrQueue(file, props.inspectionRecordId, afterCameraTarget.sectionId, { lineExternalId: afterCameraTarget.lineExternalId })}
+          uploadPhoto={(file) => uploadPhotoOrQueue(file, props.inspectionRecordId, afterCameraTarget.sectionId, { lineExternalId: afterCameraTarget.lineExternalId, lineField: 'after' })}
           rooms={(() => { const s = sections.find((x) => x.id === afterCameraTarget.sectionId); return [{ id: afterCameraTarget.sectionId, name: `${s?.displayName || s?.label || 'Room'} — After`, photoCount: 0, needsPhotos: false }]; })()}
           currentRoomId={afterCameraTarget.sectionId}
         />

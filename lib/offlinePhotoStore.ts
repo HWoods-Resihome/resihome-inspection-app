@@ -50,6 +50,12 @@ export type QueuedPhoto = {
   // being a brand-new add.
   replacesUrl?: string;
   lineExternalId?: string;
+  // Which field on the target line this photo belongs to: a regular line photo
+  // ('photos') or an Internal-Resolution AFTER photo ('after'). Lets the rehydrate
+  // + sync-swap re-attach a plain (non-annotation) line draft to the CORRECT array
+  // even after a reload drops it from React state — otherwise after-photos that
+  // upload while the form re-mounted get orphaned (uploaded but never attached).
+  lineField?: 'photos' | 'after';
   createdAt: number;
   attempts?: number;     // failed upload attempts (telemetry only — NEVER dropped)
   // Set by the service worker's Background Sync handler once the blob has been
@@ -367,7 +373,7 @@ export async function uploadPhotoOrQueue(
   file: File,
   inspectionRecordId: string,
   sectionId: string,
-  opts?: { replacesUrl?: string; lineExternalId?: string },
+  opts?: { replacesUrl?: string; lineExternalId?: string; lineField?: 'photos' | 'after' },
 ): Promise<string> {
   const blob = await compressToJpeg(file);
   const filename = toJpegName(file.name);
@@ -380,7 +386,7 @@ export async function uploadPhotoOrQueue(
     const bytes = await blob.arrayBuffer();
     const rec: QueuedPhoto = {
       localId, inspectionRecordId, sectionId, kind: 'photo', bytes, filename,
-      replacesUrl: opts?.replacesUrl, lineExternalId: opts?.lineExternalId, createdAt: Date.now(),
+      replacesUrl: opts?.replacesUrl, lineExternalId: opts?.lineExternalId, lineField: opts?.lineField, createdAt: Date.now(),
     };
     // Persist durably in the BACKGROUND. The capture (and the camera's "Done")
     // must NEVER wait on — or fail from — a stalled IndexedDB write: the IDB ops
@@ -541,12 +547,12 @@ export async function clearQueuedPhotos(inspectionRecordId: string): Promise<num
  */
 export async function rehydrateQueuedPhotos(
   inspectionRecordId: string,
-): Promise<{ localId: string; sectionId: string; url: string; replacesUrl?: string; lineExternalId?: string }[]> {
+): Promise<{ localId: string; sectionId: string; url: string; replacesUrl?: string; lineExternalId?: string; lineField?: 'photos' | 'after' }[]> {
   // Metadata first (no bytes), then load each record's bytes ONE AT A TIME below
   // so a heavy reopen (180+ queued shots) never materializes the whole queue's
   // bytes at once — the iOS WebKit OOM crash.
   const metas = (await listQueueMeta()).filter((r) => r.inspectionRecordId === inspectionRecordId);
-  const out: { localId: string; sectionId: string; url: string; replacesUrl?: string; lineExternalId?: string }[] = [];
+  const out: { localId: string; sectionId: string; url: string; replacesUrl?: string; lineExternalId?: string; lineField?: 'photos' | 'after' }[] = [];
   for (const meta of metas) {
     let entry = urlByLocalId.get(meta.localId);
     if (!entry) {
@@ -573,7 +579,7 @@ export async function rehydrateQueuedPhotos(
       }
       urlByLocalId.set(meta.localId, entry);
     }
-    out.push({ localId: meta.localId, sectionId: meta.sectionId, url: entry.displayUrl, replacesUrl: meta.replacesUrl, lineExternalId: meta.lineExternalId });
+    out.push({ localId: meta.localId, sectionId: meta.sectionId, url: entry.displayUrl, replacesUrl: meta.replacesUrl, lineExternalId: meta.lineExternalId, lineField: meta.lineField });
   }
   return out;
 }
@@ -591,7 +597,7 @@ export async function rehydrateQueuedPhotos(
 const FLUSH_CONCURRENCY = 2; // gentle on HubSpot Files (too many parallel uploads timed out)
 
 type FlushResult = { synced: number; remaining: number; lastError?: string };
-type FlushOnSynced = (info: { localId: string; sectionId: string; oldUrl: string; newUrl: string; replacesUrl?: string; lineExternalId?: string }) => void;
+type FlushOnSynced = (info: { localId: string; sectionId: string; oldUrl: string; newUrl: string; replacesUrl?: string; lineExternalId?: string; lineField?: 'photos' | 'after' }) => void;
 
 // Coalesce overlapping flushes per inspection. The 15s interval, the 'online'
 // event, kickFlush() after a capture, visibility/foreground kicks, and a
@@ -648,7 +654,7 @@ async function doFlushQueuedPhotos(
     const oldUrl = entry?.displayUrl || '';
     memQueue.delete(rec.localId);     // clear the in-memory fallback copy (if any)
     try { await deleteRecord(rec.localId); } catch { /* memory-only record, or IDB gone — fine */ }
-    onSynced({ localId: rec.localId, sectionId: rec.sectionId, oldUrl, newUrl, replacesUrl: rec.replacesUrl, lineExternalId: rec.lineExternalId });
+    onSynced({ localId: rec.localId, sectionId: rec.sectionId, oldUrl, newUrl, replacesUrl: rec.replacesUrl, lineExternalId: rec.lineExternalId, lineField: rec.lineField });
     // Also tell any open camera so it can swap its draft URL for the real one
     // (clears "Saved Offline" live; Done then returns real URLs, not stale drafts).
     if (oldUrl) notifyPhotoSynced({ localId: rec.localId, oldUrl, newUrl });
