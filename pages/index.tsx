@@ -12,6 +12,7 @@ import {
   loadCachedRateCard, saveCachedRateCard,
   loadCachedMe, saveCachedMe,
 } from '@/lib/offlineCache';
+import { precacheActiveInspections } from '@/lib/precache';
 import { warmAi } from '@/lib/aiWarm';
 import { templateLabel } from '@/lib/templateLabels';
 import { openOAuthStartNative } from '@/lib/nativeBridge';
@@ -240,12 +241,20 @@ export default function Home() {
     return () => { clearTimeout(timer); ctrl.abort(); };
   }, []);
 
-  // NOTE: a home-screen prefetch that warmed each inspection's full detail (+QC
-  // data) for offline use was REMOVED — it fired dozens of heavy HubSpot calls
-  // per home load and tripped HubSpot's account-wide rate limit (429s that even
-  // failed the inspection list). Offline access instead relies on caching an
-  // inspection the moment it's opened (see pages/inspection/[id]) — which is the
-  // real field flow — without any background call storm.
+  // Pre-cache active (non-completed) inspections for offline use, so the inspector
+  // can open + work them in a dead zone they've never opened before. An EARLIER
+  // version of this was removed for firing dozens of HubSpot calls at once and
+  // tripping the account-wide rate limit; this one is safe by construction —
+  // online-only, throttled to once per 10 min (localStorage timestamp), capped at
+  // 25, and a SLOW SEQUENTIAL trickle (one detail fetch at a time, spaced out) so
+  // it never bursts HubSpot. See lib/precache.ts. Completed/cancelled are skipped.
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    // Start after the visible list + catalog warm above have had the first beat
+    // of bandwidth, then trickle in the background.
+    const t = setTimeout(() => { void precacheActiveInspections(); }, 3000);
+    return () => clearTimeout(t);
+  }, []);
 
   // Pre-warm the AI assistants from the HOME screen — the first authenticated
   // page after login — so the heavy cold-start work (catalog embeddings, the

@@ -120,7 +120,7 @@ export function clearCachedMe(): void {
 // from the home list — opens and is fully editable in a dead zone. LRU-capped.
 const INSP_PREFIX = 'insp_v1:';
 const INSP_INDEX = 'insp_index_v1';
-const INSP_MAX = 15;
+const INSP_MAX = 30;   // holds a pre-cached day of active inspections + a few opened manually
 
 export function loadCachedInspection<T = any>(id: string): T | null {
   if (typeof window === 'undefined' || !id) return null;
@@ -199,7 +199,7 @@ function lruRemove(prefix: string, indexKey: string, id: string): void {
 const QC_PREFIX = 'qcdata_v1:';
 const QC_INDEX = 'qcdata_index_v1';
 export function loadCachedQcData<T = any>(id: string): T | null { return lruGet<T>(QC_PREFIX, id); }
-export function saveCachedQcData(id: string, payload: any): void { lruPut(QC_PREFIX, QC_INDEX, 15, id, payload); }
+export function saveCachedQcData(id: string, payload: any): void { lruPut(QC_PREFIX, QC_INDEX, 30, id, payload); }
 
 // ---- questionnaire answer drafts (keyed by record id) ----
 // A mirror of the form's answer map, so offline edits re-appear if the
