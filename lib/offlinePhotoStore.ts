@@ -715,10 +715,15 @@ async function doFlushQueuedPhotos(
     try {
       if (rec.kind === 'video' && videoBlob) {
         const vFile = new File([videoBlob], `clip.${/(webm)/i.test(rec.videoType || '') ? 'webm' : /(quicktime|mov)/i.test(rec.videoType || '') ? 'mov' : 'mp4'}`, { type: rec.videoType || 'video/mp4' });
-        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(photoBlob, rec.filename, { attempts: 3, timeoutMs: 25000 }), uploadVideo(vFile)]);
+        // Photos compress to UP TO ~3MB (3024px / q0.92). On a weak field uplink a
+        // 25s timeout aborts mid-upload and the photo retries forever ("stuck
+        // syncing"), while a smaller/later shot slips through — exactly the
+        // out-of-order stall inspectors hit. Give each attempt 60s and one extra
+        // try so big evidence photos actually complete on a poor signal.
+        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(photoBlob, rec.filename, { attempts: 4, timeoutMs: 60000 }), uploadVideo(vFile)]);
         newUrl = makeVideoEntry(pUrl, vUrl);
       } else {
-        newUrl = await uploadJpegBlob(photoBlob, rec.filename, { attempts: 3, timeoutMs: 25000 });
+        newUrl = await uploadJpegBlob(photoBlob, rec.filename, { attempts: 4, timeoutMs: 60000 });
       }
     } catch (e: any) {
       lastError = `Photo upload failed (${String(e?.message || e).slice(0, 90)}).`;
