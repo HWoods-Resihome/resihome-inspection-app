@@ -12,11 +12,13 @@ import { readSlackNotifConfig, type SlackNotifConfigMap } from '@/lib/hubspot';
 
 export const DEFAULT_SANDBOX_CHANNEL = 'C06CW2VMJNR';
 
-/** The notifications surfaced in the admin table (stable keys + display names). */
-export const SLACK_NOTIFICATIONS: { key: string; name: string }[] = [
+/** The notifications surfaced in the admin table (stable keys + display names).
+ *  `defaultSandbox` is the sandbox state used until an admin saves a config for
+ *  that key (listing-price stays in the sandbox test channel until go-live). */
+export const SLACK_NOTIFICATIONS: { key: string; name: string; defaultSandbox?: boolean }[] = [
   { key: 'scope_pending', name: 'Scope Review — Pending Approval' },
   { key: 'scope_approved', name: 'Scope Review — Approved' },
-  { key: 'listing_price', name: '1099 Listing Price Recommendation' },
+  { key: 'listing_price', name: '1099 Listing Price Recommendation', defaultSandbox: true },
 ];
 
 export interface ResolvedSlackTarget {
@@ -27,18 +29,20 @@ export interface ResolvedSlackTarget {
 
 /**
  * Resolve a notification's on/off + channel against the admin config.
- * Defaults (no saved config) are ENABLED + real channel, so notifications keep
- * working before anyone opens the admin table.
+ * With NO saved config, a notification is ENABLED and uses its registry
+ * `defaultSandbox` (live unless the registry opts it into sandbox) — so
+ * notifications keep working before anyone opens the admin table.
  */
 export function resolveSlackTargetFromConfig(
   cfg: SlackNotifConfigMap,
   key: string,
   intendedChannel: string,
 ): ResolvedSlackTarget {
-  const c = cfg[key] || {};
-  const enabled = c.enabled !== false; // default ON
-  const sandbox = c.sandbox === true;
-  const channel = sandbox ? (c.sandboxChannel?.trim() || DEFAULT_SANDBOX_CHANNEL) : intendedChannel;
+  const def = SLACK_NOTIFICATIONS.find((n) => n.key === key);
+  const c = cfg[key];
+  const enabled = c ? c.enabled !== false : true; // default ON
+  const sandbox = c ? c.sandbox === true : !!def?.defaultSandbox; // saved wins; else registry default
+  const channel = sandbox ? (c?.sandboxChannel?.trim() || DEFAULT_SANDBOX_CHANNEL) : intendedChannel;
   return { enabled, channel, sandbox };
 }
 

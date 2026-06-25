@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 
-interface NotifDef { key: string; name: string }
+interface NotifDef { key: string; name: string; defaultSandbox?: boolean }
 interface NotifCfg { enabled: boolean; sandbox: boolean; sandboxChannel: string }
 
 function Chevron({ open }: { open: boolean }) {
@@ -45,11 +45,12 @@ export function SlackNotificationsManager() {
       setDefaultSandbox(d.defaultSandbox || 'C06CW2VMJNR');
       const next: Record<string, NotifCfg> = {};
       for (const n of (d.notifications || [])) {
-        const c = (d.config || {})[n.key] || {};
+        const saved = (d.config || {})[n.key];
         next[n.key] = {
-          enabled: c.enabled !== false,
-          sandbox: c.sandbox === true,
-          sandboxChannel: String(c.sandboxChannel || '').trim() || (d.defaultSandbox || 'C06CW2VMJNR'),
+          enabled: saved ? saved.enabled !== false : true,
+          // No saved config → use the registry default (listing-price → sandbox).
+          sandbox: saved ? saved.sandbox === true : !!n.defaultSandbox,
+          sandboxChannel: String(saved?.sandboxChannel || '').trim() || (d.defaultSandbox || 'C06CW2VMJNR'),
         };
       }
       setCfg(next);
