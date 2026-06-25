@@ -93,26 +93,35 @@ export function SlackNotificationsManager() {
             <div className="text-sm text-gray-500">Loading…</div>
           ) : (
             <>
+              {/* Stacked one-card-per-notification layout — the old 4-column grid
+                  (with a fixed-width channel input) overflowed a phone and squeezed
+                  the name column to nothing, hiding the label under the toggle. */}
               <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
-                <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-3 py-2 text-[11px] uppercase tracking-wide text-gray-400 font-heading font-semibold">
-                  <div>Notification</div><div className="text-center w-12">On</div><div className="text-center w-16">Sandbox</div><div className="w-44">Sandbox channel</div>
-                </div>
                 {defs.map((n) => {
                   const c = cfg[n.key] || { enabled: true, sandbox: false, sandboxChannel: defaultSandbox };
                   return (
-                    <div key={n.key} className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-3 py-3 items-center">
-                      <div className="min-w-0">
-                        <div className="text-sm text-ink truncate">{n.name}</div>
-                        <div className="text-[10px] text-gray-400 font-mono">{n.key}{c.sandbox ? ' · SANDBOX' : c.enabled ? '' : ' · OFF'}</div>
+                    <div key={n.key} className="px-3 py-3">
+                      <div className="text-sm text-ink font-heading font-semibold">{n.name}</div>
+                      <div className="text-[10px] text-gray-400 font-mono">{n.key}{c.sandbox ? ' · SANDBOX' : c.enabled ? '' : ' · OFF'}</div>
+                      <div className="mt-2 flex items-center gap-6">
+                        <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                          <Toggle on={c.enabled} onClick={() => patch(n.key, { enabled: !c.enabled })} label={`${n.name} on/off`} />
+                          <span>On</span>
+                        </label>
+                        <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                          <Toggle on={c.sandbox} onClick={() => patch(n.key, { sandbox: !c.sandbox })} label={`${n.name} sandbox`} />
+                          <span>Sandbox</span>
+                        </label>
                       </div>
-                      <div className="w-12 flex justify-center"><Toggle on={c.enabled} onClick={() => patch(n.key, { enabled: !c.enabled })} label={`${n.name} on/off`} /></div>
-                      <div className="w-16 flex justify-center"><Toggle on={c.sandbox} onClick={() => patch(n.key, { sandbox: !c.sandbox })} label={`${n.name} sandbox`} /></div>
-                      <div className="w-44">
-                        <input type="text" value={c.sandboxChannel} disabled={!c.sandbox}
-                          onChange={(e) => patch(n.key, { sandboxChannel: e.target.value })}
-                          placeholder={defaultSandbox}
-                          className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm font-mono focus:outline-none focus:border-brand disabled:bg-gray-50 disabled:text-gray-400" />
-                      </div>
+                      {c.sandbox && (
+                        <div className="mt-2">
+                          <label className="block text-[11px] text-gray-500 mb-1">Sandbox channel</label>
+                          <input type="text" value={c.sandboxChannel}
+                            onChange={(e) => patch(n.key, { sandboxChannel: e.target.value })}
+                            placeholder={defaultSandbox}
+                            className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm font-mono focus:outline-none focus:border-brand" />
+                        </div>
+                      )}
                     </div>
                   );
                 })}
