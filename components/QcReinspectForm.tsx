@@ -516,33 +516,53 @@ export function QcReinspectForm(props: Props) {
   const runQcFlush = async () => {
     if (!rehydratedRef.current) return undefined; // wait until drafts are in state to swap
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return undefined;
-    const sectionSwaps = new Map<string, string>();
-    const lineSwaps = new Map<string, string>();
+    // ONE swap map (draft AND any replaced original -> real url) applied to BOTH
+    // after-photos and lines — a section After photo can be TAGGED onto a line, so
+    // its blob lives in both places and must swap in both. Plus a durability net:
+    // every plain (non-annotation) synced photo is APPENDED to its section if the
+    // swap didn't find its draft (e.g. state drifted after a reload), so an
+    // uploaded photo is never orphaned — the QC photo-loss + "can't submit
+    // because a draft blob lingers" bug.
+    const swaps = new Map<string, string>();
+    const sectionAdds: { key: string; newUrl: string }[] = [];
     const flushResult = await flushQueuedPhotos(props.inspectionRecordId, ({ sectionId, oldUrl, newUrl, replacesUrl, lineExternalId }) => {
-      if (lineExternalId) { if (oldUrl) lineSwaps.set(oldUrl, newUrl); if (replacesUrl) lineSwaps.set(replacesUrl, newUrl); }
-      else { if (oldUrl) sectionSwaps.set(oldUrl, newUrl); if (replacesUrl) sectionSwaps.set(replacesUrl, newUrl); }
+      if (oldUrl) swaps.set(oldUrl, newUrl);
+      if (replacesUrl) swaps.set(replacesUrl, newUrl);
+      // A brand-new section After photo (QC has no per-line photo queue) — ensure
+      // it lands on its room even if the swap matches nothing. lineExternalId is
+      // unused by QC captures, but guard anyway.
+      if (!replacesUrl && !lineExternalId) sectionAdds.push({ key: sectionId, newUrl });
     }).catch(() => ({ synced: 0, remaining: 0 } as any));
-    if (sectionSwaps.size) {
+
+    // ---- after-photos: swap matched drafts, then append any un-attached adds ----
+    {
       const cur = afterPhotosRef.current;
       const next: Record<string, string[]> = { ...cur };
-      const persistKeys: string[] = [];
+      const persistKeys = new Set<string>();
       for (const [k, urls] of Object.entries(cur)) {
         let changed = false;
-        const sw = urls.map((u) => { const r = sectionSwaps.get(u); if (r) { changed = true; return r; } return u; });
-        if (changed) { next[k] = sw; persistKeys.push(k); }
+        const sw = urls.map((u) => { const r = swaps.get(u); if (r) { changed = true; return r; } return u; });
+        if (changed) { next[k] = sw; persistKeys.add(k); }
       }
-      if (persistKeys.length) {
+      for (const add of sectionAdds) {
+        const arr = next[add.key] || [];
+        if (!arr.includes(add.newUrl)) { next[add.key] = [...arr, add.newUrl]; persistKeys.add(add.key); }
+      }
+      if (persistKeys.size) {
         setAfterPhotos(next);
         for (const k of persistKeys) { const [section, location] = k.split('||'); void persistRef.current(k, section, location || '', next[k]); }
       }
     }
-    if (lineSwaps.size) {
+
+    // ---- lines: swap the same map so a tagged After photo's blob becomes its
+    // real url on the line too (else the burn-label step keeps a dead blob) ----
+    if (swaps.size) {
       const cur = linesRef.current;
       const toSave: { id: string; urls: string[] }[] = [];
       const next = cur.map((l) => {
         const photos = l.photoUrls || [];
         let changed = false;
-        const sw = photos.map((u) => { const r = lineSwaps.get(u); if (r) { changed = true; return r; } return u; });
+        const sw = photos.map((u) => { const r = swaps.get(u); if (r) { changed = true; return r; } return u; });
         if (!changed) return l;
         toSave.push({ id: l.recordId, urls: sw });
         return { ...l, photoUrls: sw };
@@ -1339,7 +1359,13 @@ export function QcReinspectForm(props: Props) {
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || !allMarked || !allSectionsHaveAfter || !standaloneFailRoomsOk || !verdict}
+                /* Only disable while actively submitting. The completeness checks
+                   (all marked, every section has an After photo, fail rooms have a
+                   note, a verdict is set) are ALL re-validated in handleSubmit and
+                   show a specific reason — disabling the button for them instead
+                   made the tap do nothing with no explanation (the "nothing happens
+                   when I hit submit" report, which a lost After photo triggered). */
+                disabled={submitting}
                 className="px-3 sm:px-5 py-2 text-xs sm:text-sm bg-brand text-white font-semibold rounded hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed whitespace-nowrap"
               >
                 {submitting ? 'Submitting...' : 'Submit'}
