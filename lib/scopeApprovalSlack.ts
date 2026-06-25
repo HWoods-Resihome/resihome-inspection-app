@@ -16,9 +16,10 @@
  * instead of a HubSpot workflow, and (b) the admin Slack-Notifications gate
  * (on/off + sandbox reroute) via resolveSlackTarget().
  */
-import { fetchInspectionProperties, fetchPropertyRegion, writeInspectionSlackLink } from '@/lib/hubspot';
+import { fetchInspectionProperties, fetchPropertyRegion, writeInspectionSlackLink, readApprovalRouting } from '@/lib/hubspot';
 import { slackCall, getSlackPermalink } from '@/lib/slack';
 import { resolveSlackTarget, DEFAULT_SANDBOX_CHANNEL } from '@/lib/slackNotifications';
+import { resolveApprovers, type ApprovalRoutingConfig } from '@/lib/approvalRouting';
 
 // ---- CONFIG (verbatim from the workflow code) -------------------------------
 const PORTAL_ID = (process.env.HUBSPOT_PORTAL_ID || '22536354').trim();
@@ -76,11 +77,38 @@ export async function postScopePendingApproval(inspectionId: string): Promise<{ 
   const ratecardTotal = p.total_client_cost ?? '';
   const tenantTotal = p.total_tenant_cost ?? '';
 
-  // 1) Region → 2) intended POD channel (approver tracks the real region).
+  // 1) Region → who to tag + which channel. Phase 2: drive this from the
+  // Approval Routing table (PODs → Regions → PM/Sr.PM/RM/Director with NTE
+  // ceilings) via the SAME pure resolver the admin preview uses. The approver(s)
+  // track the real region even when posting is sandbox-rerouted.
   const region = propertyRecordId ? await fetchPropertyRegion(propertyRecordId) : null;
-  const intendedChannel = channelForRegion(region);
-  const approverId = POD_APPROVERS[intendedChannel];
-  const approverMention = approverId ? `<@${approverId}>` : 'your regional approver';
+  const amount = Number(ratecardTotal) || 0;
+  let routing: ApprovalRoutingConfig | null = null;
+  try { routing = await readApprovalRouting(); } catch (e) { console.warn('[scope-slack] approval routing read failed:', e); }
+  const recip = routing ? resolveApprovers(routing, region || '', amount) : null;
+  const mapped = !!(recip && recip.channelId); // region is mapped to a POD in the routing table
+
+  // Channel: the POD's configured channel when mapped, else the legacy region-
+  // prefix routing (so an unmapped region still lands somewhere sensible).
+  const intendedChannel = (mapped ? recip!.channelId! : channelForRegion(region));
+
+  // The approver line: dynamic (total + tier tags / @channel) when the region is
+  // mapped; otherwise the original hard-coded line as a safe fallback.
+  let approverText: string;
+  if (mapped) {
+    const totalLine = `*This Scope has a completion total of ${money(amount)}.*`;
+    if (recip!.level === 'pm') {
+      approverText = `${totalLine}\nAny PM can approve — <!channel>`;
+    } else {
+      const mentions = recip!.users.map((u) => (u.slackId ? `<@${u.slackId}>` : u.name)).filter(Boolean).join(' ');
+      const tierLabel = recip!.level === 'sr_pm' ? 'SR / AM' : recip!.level === 'rm' ? 'RM' : 'Director';
+      approverText = `${totalLine}\nApproval required from ${mentions || '_no approver configured_'} (${tierLabel})`;
+    }
+  } else {
+    const approverId = POD_APPROVERS[intendedChannel];
+    const approverMention = approverId ? `<@${approverId}>` : 'your regional approver';
+    approverText = `Exceeding $1,500 will require *APPROVAL* from ${approverMention}. Exceeding $5,000 will require approval from Director.`;
+  }
 
   // Admin gate: on/off + sandbox reroute.
   const target = await resolveSlackTarget('scope_pending', intendedChannel);
@@ -91,7 +119,7 @@ export async function postScopePendingApproval(inspectionId: string): Promise<{ 
   const blocks: any[] = [
     { type: 'section', text: { type: 'mrkdwn', text: `*Requesting a Scope review for:* ${propertyAddress}  |  *Submitted By:* ${inspectorName}` } },
     { type: 'section', text: { type: 'mrkdwn', text: `*Ratecard Total:* ${money(ratecardTotal)}\n*Tenant Total:* ${money(tenantTotal)}` } },
-    { type: 'section', text: { type: 'mrkdwn', text: `Exceeding $1,500 will require *APPROVAL* from ${approverMention}. Exceeding $5,000 will require approval from Director.` } },
+    { type: 'section', text: { type: 'mrkdwn', text: approverText } },
   ];
   if (pdfUrl) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*PDF — Master Report URL:* <${pdfUrl}|Open report>` } });
   const buttons: any[] = [{ type: 'button', text: { type: 'plain_text', text: 'View Inspection in HubSpot', emoji: true }, url: recordUrl }];
@@ -114,7 +142,7 @@ export async function postScopePendingApproval(inspectionId: string): Promise<{ 
   if (!permalink) permalink = `https://resicap.slack.com/archives/${messageChannel}/p${String(messageTs).replace('.', '')}`;
   await writeInspectionSlackLink(inspectionId, permalink);
 
-  console.log(`[scope-slack] pending posted for ${inspectionId} → ${messageChannel} (region ${region || 'UNKNOWN'}${target.sandbox ? ', sandbox' : ''})`);
+  console.log(`[scope-slack] pending posted for ${inspectionId} → ${messageChannel} (region ${region || 'UNKNOWN'}, ${mapped ? `routed:${recip!.level}` : 'unmapped-fallback'}${target.sandbox ? ', sandbox' : ''})`);
   return { status: 'SENT', channel: messageChannel, permalink };
 }
 
