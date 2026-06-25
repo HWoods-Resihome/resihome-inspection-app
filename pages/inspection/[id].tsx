@@ -163,11 +163,26 @@ export default function ExistingInspection() {
         setExistingAnswers(data.answers || []);
       };
 
+      // Fetch with a hard timeout. In a weak-signal area the request often
+      // CONNECTS but never responds — a plain fetch then hangs forever (the
+      // "Loading inspection…" that never resolves) and the cache-fallback catch
+      // never fires. Aborting after a few seconds turns that stall into a fast
+      // failure we can recover from with the cached copy. When a cached copy
+      // exists we abort sooner (open offline fast); with no cache we wait longer
+      // since the network is the only way to get it.
+      const fetchWithTimeout = async (url: string, ms: number): Promise<Response> => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), ms);
+        try { return await fetch(url, { signal: ctrl.signal }); }
+        finally { clearTimeout(t); }
+      };
+
       // Load a questionnaire template's questions, caching for offline reuse and
       // falling back to the cached copy when the network is unavailable.
       const loadQuestionsFor = async (tmpl: string): Promise<Question[] | null> => {
         try {
-          const qr = await fetch(`/api/questions?template=${encodeURIComponent(tmpl)}`);
+          const hasCachedQs = !!loadCachedQuestions<Question>(tmpl);
+          const qr = await fetchWithTimeout(`/api/questions?template=${encodeURIComponent(tmpl)}`, hasCachedQs ? 6000 : 15000);
           const qData = await qr.json();
           if (!qr.ok || qData.error) throw new Error(qData.error || `Questions HTTP ${qr.status}`);
           const qs: Question[] = qData.questions || [];
@@ -199,21 +214,31 @@ export default function ExistingInspection() {
         setStage('error');
       };
 
+      // If we already have a cached copy, fall back FAST on a weak signal so the
+      // inspector can keep working offline; with no cache, wait longer because the
+      // network is the only way to get the inspection at all.
+      const cachedInspection = loadCachedInspection(inspectionId);
       try {
-        const r = await fetch(`/api/inspections/${inspectionId}`);
+        const r = await fetchWithTimeout(`/api/inspections/${inspectionId}`, cachedInspection ? 7000 : 20000);
         const data = await r.json();
         if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
         if (cancelled) return;
         saveCachedInspection(inspectionId, data); // warm the offline cache for dead-zone re-opens
         await finish(data, false);
       } catch (e: any) {
-        // Offline / fetch failed → use the cached payload so the inspection still
-        // opens and is fully editable; saves queue and sync when service returns.
-        const cached = loadCachedInspection(inspectionId);
-        if (cached && !cancelled) {
-          await finish(cached, true);
+        // Offline / fetch failed or timed out → use the cached payload so the
+        // inspection still opens and is fully editable; saves queue and sync when
+        // service returns.
+        if (cachedInspection && !cancelled) {
+          await finish(cachedInspection, true);
         } else if (!cancelled) {
-          setErrorMsg(String(e?.message || e));
+          // No cache and no network: this inspection was never opened on a good
+          // connection, so there's nothing to show. Make the reason actionable
+          // instead of a generic abort/error string.
+          const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+          setErrorMsg(offline || /abort/i.test(String(e?.message || e))
+            ? 'Can’t load this inspection — you appear to be offline or on a weak signal, and it hasn’t been downloaded for offline use yet. Open it once on a good connection, then it’ll work offline.'
+            : String(e?.message || e));
           setStage('error');
         }
       }
@@ -361,9 +386,14 @@ export default function ExistingInspection() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 mb-3">
           <div className="font-heading font-bold mb-1">Could not load inspection</div>
           <div>{errorMsg}</div>
-          <button onClick={() => router.replace('/')} className="mt-3 text-brand underline text-xs">
-            Back to Inspections List
-          </button>
+          <div className="mt-3 flex items-center gap-4">
+            <button onClick={() => window.location.reload()} className="px-3 py-1.5 rounded-lg bg-brand text-white font-heading font-semibold text-xs hover:bg-brand-dark">
+              Try again
+            </button>
+            <button onClick={() => router.replace('/')} className="text-brand underline text-xs">
+              Back to Inspections List
+            </button>
+          </div>
         </div>
       </Layout>
     );
