@@ -987,6 +987,11 @@ export function QuestionForm({
       // then persist. MUST run before the lineExternalId guard — FC photos carry
       // their camKey in lineExternalId. Without this the synced photo's draft URL
       // is revoked and never replaced (the broken "?" tile + "photo disappeared").
+      // Durability net (all branches): when a synced photo's draft URL isn't found
+      // to swap (it drifted out of state, e.g. after a reload), APPEND the real URL
+      // to its target so an uploaded photo is never orphaned — uploaded to Files
+      // but missing from the record. Only for plain adds (no replacesUrl, which is
+      // an annotation REPLACEMENT, not a new photo).
       if (sectionId === FC_PHOTO_SECTION) {
         if (oldUrl) fcSyncedUrlMapRef.current.set(oldUrl, newUrl);
         if (replacesUrl) fcSyncedUrlMapRef.current.set(replacesUrl, newUrl);
@@ -1001,6 +1006,20 @@ export function QuestionForm({
             if (a.stickerPhotos) n.stickerPhotos = Object.fromEntries(Object.entries(a.stickerPhotos).map(([k, v]) => [k, swap(v)]));
             next[qid] = n;
           }
+          // Append-if-missing to the exact slot (camKey "qid:key" rides in lineExternalId).
+          if (!changed && !replacesUrl && lineExternalId) {
+            const [qid, slot] = lineExternalId.split(':');
+            if (qid && slot) {
+              const a: FcAnswerState = { ...(next[qid] || {}) };
+              if (slot === 'photo') {
+                if (!(a.photoUrls || []).includes(newUrl)) { a.photoUrls = [...(a.photoUrls || []), newUrl]; changed = true; }
+              } else {
+                const sp = { ...(a.stickerPhotos || {}) };
+                if (!(sp[slot] || []).includes(newUrl)) { sp[slot] = [...(sp[slot] || []), newUrl]; a.stickerPhotos = sp; changed = true; }
+              }
+              next[qid] = a;
+            }
+          }
           if (changed) void saveFc(next);
           return changed ? next : cur;
         });
@@ -1009,23 +1028,44 @@ export function QuestionForm({
       if (lineExternalId) return;
       const matches = (u: string) => u === oldUrl || (!!replacesUrl && u === replacesUrl);
       if (sectionId.includes('::')) {
-        // Inline question photo → swap in that answer + persist real URLs.
+        // Inline question photo → swap in that answer + persist real URLs; if the
+        // draft isn't present (drifted), append the real URL instead of dropping it.
         const key = sectionId;
         const a = answersRef.current[key];
-        if (!a || !(a.photoUrls || []).some(matches)) return;
-        const sw = (a.photoUrls || []).map((u) => (matches(u) ? newUrl : u));
-        setAnswers((cur) => (cur[key] ? { ...cur, [key]: { ...cur[key], photoUrls: (cur[key].photoUrls || []).map((u) => (matches(u) ? newUrl : u)) } } : cur));
+        if (!a) return;
+        const present = (a.photoUrls || []).some(matches);
+        if (!present && (replacesUrl || (a.photoUrls || []).includes(newUrl))) return; // annotation w/o target, or already attached
+        const sw = present
+          ? (a.photoUrls || []).map((u) => (matches(u) ? newUrl : u))
+          : [...(a.photoUrls || []), newUrl];
+        setAnswers((cur) => {
+          if (!cur[key]) return cur;
+          const photos = cur[key].photoUrls || [];
+          const nextPhotos = present
+            ? photos.map((u) => (matches(u) ? newUrl : u))
+            : (photos.includes(newUrl) ? photos : [...photos, newUrl]);
+          return { ...cur, [key]: { ...cur[key], photoUrls: nextPhotos } };
+        });
         const [, instanceKey] = key.split('::');
         const persist = { ...a, photoUrls: sw.filter((u) => !u.startsWith('blob:')) };
         autosaveRef.current.noteEdit(key, persist, persist.questionHubspotRecordId, instanceKey);
         return;
       }
-      // Section photo → swap + mark dirty so the debounced save persists it.
+      // Section photo → swap (or append if the draft drifted) + mark dirty so the
+      // debounced save persists it.
       setSectionPhotos((cur) => {
         const arr = cur[sectionId];
-        if (!arr || !arr.some(matches)) return cur;
-        sectionPhotoDirtyRef.current.add(sectionId);
-        return { ...cur, [sectionId]: arr.map((u) => (matches(u) ? newUrl : u)) };
+        const present = !!arr && arr.some(matches);
+        if (present) {
+          sectionPhotoDirtyRef.current.add(sectionId);
+          return { ...cur, [sectionId]: arr!.map((u) => (matches(u) ? newUrl : u)) };
+        }
+        // Durability net: append a plain add that wasn't found (deduped).
+        if (!replacesUrl && !(arr || []).includes(newUrl)) {
+          sectionPhotoDirtyRef.current.add(sectionId);
+          return { ...cur, [sectionId]: [...(arr || []), newUrl] };
+        }
+        return cur;
       });
     }).catch(() => undefined);
   }, [readOnly, inspectionRecordId, saveFc]);
