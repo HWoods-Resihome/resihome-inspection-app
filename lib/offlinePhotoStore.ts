@@ -588,13 +588,17 @@ export async function rehydrateQueuedPhotos(
  * Upload all queued photos for an inspection. For each one that uploads, calls
  * onSynced with the local placeholder URL to replace and the new HubSpot URL.
  *
- * Uploads run with bounded CONCURRENCY (not one-at-a-time) so a backlog from a
- * weak-signal property drains in parallel instead of serially — the old serial
- * loop could take ~1 minute PER photo on a bad signal, which is what made the
- * sync feel "very slow." Each upload also fails fast (2 attempts) so a single
- * stuck photo can't hog a slot; the periodic flush retries it next tick.
+ * Uploads run ONE AT A TIME. On a weak signal two parallel uploads split the
+ * already-tiny uplink, so BOTH crawl past the timeout and neither finishes —
+ * the "I can't sync multiple photos in a low-signal area" report. Single-flight
+ * gives each photo the FULL pipe, so it completes and the next starts right
+ * after — sequential, but each one actually lands. Each upload also makes just
+ * ONE attempt per pass (not 4): a photo that can't go through now is skipped so
+ * it can't monopolize the lone worker for minutes — the periodic flush (15s +
+ * reconnect/foreground kicks) rotates back to it next pass. Photos are never
+ * dropped, so this only changes WHEN each lands, never whether.
  */
-const FLUSH_CONCURRENCY = 2; // gentle on HubSpot Files (too many parallel uploads timed out)
+const FLUSH_CONCURRENCY = 1; // single-flight: full bandwidth per photo on weak signal
 
 type FlushResult = { synced: number; remaining: number; lastError?: string };
 type FlushOnSynced = (info: { localId: string; sectionId: string; oldUrl: string; newUrl: string; replacesUrl?: string; lineExternalId?: string; lineField?: 'photos' | 'after' }) => void;
@@ -720,10 +724,10 @@ async function doFlushQueuedPhotos(
         // syncing"), while a smaller/later shot slips through — exactly the
         // out-of-order stall inspectors hit. Give each attempt 60s and one extra
         // try so big evidence photos actually complete on a poor signal.
-        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(photoBlob, rec.filename, { attempts: 4, timeoutMs: 60000 }), uploadVideo(vFile)]);
+        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(photoBlob, rec.filename, { attempts: 1, timeoutMs: 60000 }), uploadVideo(vFile)]);
         newUrl = makeVideoEntry(pUrl, vUrl);
       } else {
-        newUrl = await uploadJpegBlob(photoBlob, rec.filename, { attempts: 4, timeoutMs: 60000 });
+        newUrl = await uploadJpegBlob(photoBlob, rec.filename, { attempts: 1, timeoutMs: 60000 });
       }
     } catch (e: any) {
       lastError = `Photo upload failed (${String(e?.message || e).slice(0, 90)}).`;
