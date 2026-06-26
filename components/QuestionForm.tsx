@@ -1363,6 +1363,10 @@ export function QuestionForm({
 
   async function handleSubmit() {
     if (submittingRef.current) return;
+    // Outer guard so Submit can NEVER silently do nothing: any unexpected throw
+    // (or a path that would otherwise reject unhandled) surfaces a dialog and
+    // re-enables the button, instead of the inspector tapping with no feedback.
+    try {
     const err = validate();
     if (err) {
       await dialog.alert(err.message);
@@ -1518,11 +1522,17 @@ export function QuestionForm({
       }
 
       if (upserts.length > 0) {
+        // Hard timeout so a hung request on weak signal can't strand the button on
+        // "Submitting…" forever — on abort it throws to the outer catch, which
+        // re-enables Submit with a retry message.
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 45000);
         const resp = await fetch(`/api/inspections/${inspectionRecordId}/answers`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ upserts, archives: [], bumpStatusToInProgress: true }),
-        });
+          signal: ctrl.signal,
+        }).finally(() => clearTimeout(to));
         if (!resp.ok) {
           const text = await resp.text().catch(() => '');
           await dialog.alert(
@@ -1632,6 +1642,18 @@ export function QuestionForm({
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
+    }
+    } catch (e: any) {
+      console.error('[QuestionForm] submit failed unexpectedly', e);
+      submittingRef.current = false;
+      setSubmitting(false);
+      try {
+        await dialog.alert(
+          `Couldn't submit: ${String(e?.message || e).slice(0, 300)}\n\n` +
+          `Your inspection was NOT submitted, so nothing is lost. Please try Submit again; ` +
+          `if it keeps happening, send this message to Hayden.`,
+        );
+      } catch { /* dialog itself failed — nothing more we can do */ }
     }
   }
 
