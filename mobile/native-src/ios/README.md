@@ -51,29 +51,53 @@ compiled target. Do the integration on a Mac with Xcode.
 6. Regression check: Google sign-in `resiwalk://auth-callback` still works (you
    edited `AppDelegate`/`Info.plist`).
 
-## Notes / limitations (Phase 1)
-- Uploads run with an async `URLSession` inside the granted execution window (a
-  BGProcessingTask window, or a `beginBackgroundTask` assertion on
-  `didEnterBackground`). This covers the dominant field case. **Hardening (phase
-  3):** switch to a `background`-configured `URLSession` with file-backed
-  upload/download tasks so a transfer that outlives the window survives full
-  suspension. The store + state machine are already shaped for that.
+## Notes / limitations
+- **Transfers survive suspension (Phase 3).** `BgUploader` uses a
+  `background`-configured `URLSession` with **file-backed upload tasks** + a
+  delegate, so a transfer kicked while the app was alive (or in the background
+  grace window) keeps running even if iOS suspends/terminates the app — and iOS
+  relaunches the app on completion (`sessionSendsLaunchEvents`) to finish the
+  state update. The BGProcessingTask just *enqueues* tasks and completes; it
+  doesn't need to stay alive for the transfer.
 - **Auth:** `BgUploader.refreshCookies(from:)` copies the webview session cookie
   into `HTTPCookieStorage.shared` (spec §6 — the main correctness risk). If the
-  session is expired when the task runs, POSTs 401 → the queue is **kept** (never
+  session is expired when a task runs, POSTs 401 → the work is **kept** (never
   dropped) and drains after the next in-app login.
-- **No duplicates:** the server attach dedupes by URL, and the web clears its
-  native mirror in `finishSynced`; a brief foreground/background overlap could
-  attach two hosted copies of one image until phase-3 `dedupeKey` lands (spec §7).
+- **No duplicate hosted copies (Phase 3).** Both the foreground flush and this
+  uploader send `dedupeKey = localId`; `/api/upload` folds it into the stored
+  filename, so HubSpot's `RETURN_EXISTING` returns the SAME URL for the same
+  photo. Combined with attach-by-URL dedupe, foreground/background overlap can no
+  longer create a second copy.
+- **Still OS-paced after force-quit:** iOS decides when to grant the
+  BGProcessingTask window that *kicks* a cold-start drain (typically charging /
+  Wi-Fi / overnight, more often for frequently-used apps). The in-flight
+  background session from the last live moment continues regardless.
 - **Server origin** is read from the live webview URL (so it follows a future
   `resiwalk.com` switch) with a constant fallback matching `capacitor.config.ts`.
 
 ## Phase 2 (built)
 The **answer/line/section** outbox (`lib/offlineOutbox.ts`) is mirrored the same
 way — `mirrorAnswer`/`clearAnswer`/`reconcileAnswers` on the plugin, `.ans` files
-in the store, and `drainAnswers()` (run BEFORE photos, since an attach can depend
-on the answer record a replay creates) replaying each entry's
-`{endpoint, method, body}` against the same idempotent server routes. So text +
-selection edits also drain after a force-quit. The web half is shipped to `main`;
-the same plugin sources cover both phases, so there's no extra integration step
-beyond the ones above.
+in the store, and answer tasks replayed BEFORE photos (an attach can depend on the
+answer record a replay creates), each replaying its `{endpoint, method, body}`
+against the same idempotent server routes. So text + selection edits also drain
+after a force-quit. The web half is shipped to `main`; the same plugin sources
+cover all phases, so there's no extra integration step beyond the ones above.
+
+## Phase 3 (built) — the final phase
+- **Background URLSession.** `BgUploader` is now a `URLSessionDataDelegate` over a
+  `background`-configured session. Each step (upload / attach / answer-replay) is
+  a **file-backed `uploadTask`** tagged with a `taskDescription`
+  (`upload:<id>` / `attach:<id>` / `answer:<id>`); the delegate advances the
+  store's `pending → uploaded → done` state machine as tasks finish and chains
+  upload → attach automatically. Transfers survive app suspension/termination and
+  relaunch the app to finish (`handleEventsForBackgroundURLSession`, see
+  AppDelegate additions §1b). `drain()` enqueues only work not already in flight
+  (it checks `getAllTasks`).
+- **Upload dedupeKey.** Both halves send `dedupeKey = localId`; the server folds
+  it into the stored filename so the same photo resolves to the same hosted URL
+  (HubSpot `RETURN_EXISTING`) — zero duplicate hosted copies on foreground/
+  background overlap. (Web half shipped to `main`.)
+
+This is the last planned phase — Phases 1–3 cover the full force-quit durability
+goal for both photos and edits. No further phases are planned.

@@ -48,6 +48,10 @@ public class NativeBgUploadPlugin: CAPPlugin, CAPBridgedPlugin {
         // background task can authenticate even if the webview is gone by then.
         uploader.serverBase = serverBase()
         uploader.refreshCookies(from: self.webView)
+        // Register the background-session delegate now so iOS can deliver any
+        // pending completion events (from a transfer that finished while the app
+        // was suspended) as soon as we're back.
+        uploader.activate()
     }
 
     @objc func mirrorPhoto(_ call: CAPPluginCall) {

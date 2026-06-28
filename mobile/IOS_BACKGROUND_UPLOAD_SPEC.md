@@ -230,10 +230,11 @@ export interface NativeBgUploadPlugin {
   - **Mitigation:** native clears its mirror on `clearPhoto(localId)` (step 4.2)
     as soon as the web confirms its own upload+attach; and the web's `reconcile()`
     drops drafts whose `localId` native reports `done`. Whichever finishes first
-    wins; the other no-ops. A brief overlap could attach two URLs of the same
-    photo — acceptable and rare, and dedupe-by-visual is out of scope. To make it
-    airtight, phase 2 can switch `/api/upload` to accept a client-supplied
-    `dedupeKey = localId` and return the same hosted URL for repeat keys.
+    wins; the other no-ops. **Made airtight in Phase 3:** `/api/upload` accepts a
+    client-supplied `dedupeKey = localId` (folded into the stored filename), so
+    repeat uploads of the same photo resolve to the SAME hosted URL via HubSpot
+    `RETURN_EXISTING` — foreground/background overlap can no longer create a second
+    copy.
 
 ## 8. Files to add / touch
 **Native (this branch, `chore/native-oauth-outbound`):**
@@ -278,18 +279,24 @@ design — out of scope here.)
 - Confirm the OAuth `resiwalk://auth-callback` return still works (don't regress
   `AppDelegate`/`Info.plist` while editing them).
 
-## 11. Phasing
-- **Phase 1 (photos):** §4.1–4.3, §5, §6, §7 — the field-critical case.
-- **Phase 2 (answers/edits):** mirror the answer outbox (§3c, §4.4). Smaller
-  payloads, same plumbing.
-- **Phase 3 (hardening):** `dedupeKey` on `/api/upload` (§7) for airtight
-  no-duplicate guarantee.
+## 11. Phasing — ALL PHASES BUILT
+- **Phase 1 (photos) — built:** §4.1–4.3, §5, §6, §7. The field-critical case.
+- **Phase 2 (answers/edits) — built:** the answer outbox is mirrored + replayed
+  (§3c, §4.4). Same plumbing, smaller payloads.
+- **Phase 3 (hardening) — built:** (a) a `background`-configured `URLSession`
+  with file-backed `uploadTask`s + a delegate state machine, so transfers survive
+  app suspension/termination (and relaunch the app to finish); (b) `dedupeKey =
+  localId` on `/api/upload`, folded into the stored filename so HubSpot
+  `RETURN_EXISTING` returns the same hosted URL — airtight no-duplicate guarantee.
+
+This is the final planned phase; no further phases remain.
 
 ## 12. Honest limitations (tell the owner)
-- Not instant after force-quit: drains in iOS's next granted background window.
-  The in-flight background `URLSession` from the last live moment continues; the
-  cold-start re-kick is OS-scheduled.
-- If the session cookie is expired when the task runs, upload waits for the next
+- **Untested on device.** All native Swift was authored without a Mac/Xcode build
+  in the loop — it is architecturally complete but MUST be compiled + run through
+  the §10 real-device test before trusting it in the field.
+- Cold-start after force-quit is still OS-paced: iOS decides when to grant the
+  BGProcessingTask window that *kicks* a fresh drain. A transfer already in flight
+  when the app was suspended continues regardless (that's the Phase-3 win).
+- If the session cookie is expired when a task runs, the work waits for the next
   in-app login (by design — never drops data).
-- A rare foreground/background overlap could attach two hosted copies of one
-  photo until phase 3's `dedupeKey` lands.

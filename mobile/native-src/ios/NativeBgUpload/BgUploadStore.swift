@@ -72,6 +72,15 @@ final class BgUploadStore {
 
     func updateMeta(_ meta: BgPhotoMeta) { q.sync { writeMeta(meta) } }
 
+    /// Look up one photo's meta by localId (used by the background-session delegate
+    /// when a finished task only carries the localId in its taskDescription).
+    func photoMeta(_ localId: String) -> BgPhotoMeta? {
+        q.sync {
+            guard let d = try? Data(contentsOf: json(localId)) else { return nil }
+            return try? JSONDecoder().decode(BgPhotoMeta.self, from: d)
+        }
+    }
+
     func bytes(for localId: String) -> Data? { q.sync { try? Data(contentsOf: jpg(localId)) } }
 
     /// All pending/uploaded photos, oldest first (by file creation date).
@@ -139,6 +148,13 @@ final class BgUploadStore {
     }
 
     func removeAnswer(id: String) { q.sync { try? fm.removeItem(at: ans(id)) } }
+
+    func answerMeta(_ id: String) -> BgAnswerMeta? {
+        q.sync {
+            guard let d = try? Data(contentsOf: ans(id)) else { return nil }
+            return try? JSONDecoder().decode(BgAnswerMeta.self, from: d)
+        }
+    }
 
     /// All pending answer entries, oldest first.
     func pendingAnswers() -> [BgAnswerMeta] {

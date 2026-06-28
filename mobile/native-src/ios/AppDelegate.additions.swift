@@ -7,7 +7,9 @@
 import BackgroundTasks   // add to the imports at the top of AppDelegate.swift
 
 // --- 1. In application(_:didFinishLaunchingWithOptions:), BEFORE `return true`,
-//        register the background task handler. Registration must happen during
+//        register the background task handler AND activate the background URLSession
+//        (so its delegate is ready to receive completion events from transfers that
+//        finished while the app was suspended). Registration must happen during
 //        launch or iOS throws. ---
 //
 //        BGTaskScheduler.shared.register(
@@ -16,28 +18,36 @@ import BackgroundTasks   // add to the imports at the top of AppDelegate.swift
 //        ) { task in
 //            BgUploader.shared.handleProcessingTask(task as! BGProcessingTask)
 //        }
+//        BgUploader.shared.activate()
 
-// --- 2. Drain (and re-arm) when the app goes to the background, so work started
-//        in-session continues into the OS-granted window. Add this method to the
-//        AppDelegate class: ---
+// --- 1b. PHASE 3: handle background URLSession completion events. iOS relaunches
+//        the app (sessionSendsLaunchEvents) when background transfers finish; it
+//        passes a completion handler we must store and call once the session has
+//        delivered all its events. Add this method to the AppDelegate class: ---
 //
-//    func applicationDidEnterBackground(_ application: UIApplication) {
-//        // Hold a short background-task assertion so an in-flight drain isn't
-//        // suspended the instant we background; also schedule the BGProcessingTask
-//        // for the force-quit / later case.
-//        var bgTask: UIBackgroundTaskIdentifier = .invalid
-//        bgTask = application.beginBackgroundTask(withName: "resiwalk-bgupload-drain") {
-//            application.endBackgroundTask(bgTask); bgTask = .invalid
-//        }
-//        BgUploader.shared.scheduleProcessing()
-//        Task {
-//            await BgUploader.shared.drainAsync()
-//            if bgTask != .invalid { application.endBackgroundTask(bgTask); bgTask = .invalid }
+//    func application(_ application: UIApplication,
+//                     handleEventsForBackgroundURLSession identifier: String,
+//                     completionHandler: @escaping () -> Void) {
+//        if identifier == BgUploader.sessionIdentifier {
+//            BgUploader.shared.backgroundCompletionHandler = completionHandler
+//            BgUploader.shared.activate()   // ensure the delegate is wired
+//        } else {
+//            completionHandler()
 //        }
 //    }
+
+// --- 2. On entering the background, enqueue any pending work onto the background
+//        session and re-arm the BGProcessingTask. The background-session tasks run
+//        on their own (they survive suspension/termination), so we DON'T need to
+//        hold a background-task assertion open for them. Add to the AppDelegate: ---
 //
-// --- 3. (Optional) also kick a drain on becoming active, as a belt-and-suspenders
-//        in addition to the web reconcile loop: ---
+//    func applicationDidEnterBackground(_ application: UIApplication) {
+//        BgUploader.shared.scheduleProcessing()
+//        BgUploader.shared.drain()
+//    }
+//
+// --- 3. (Optional) also kick a drain on becoming active, belt-and-suspenders in
+//        addition to the web reconcile loop: ---
 //
 //    func applicationDidBecomeActive(_ application: UIApplication) {
 //        BgUploader.shared.drain()
