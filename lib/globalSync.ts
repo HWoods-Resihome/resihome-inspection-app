@@ -21,7 +21,7 @@
  * so neither blocks the other) so it never piles on or wedges.
  */
 import { flushOutbox } from '@/lib/offlineOutbox';
-import { requestPhotoBackgroundSync, queuedInspectionIds, flushQueuedPhotos, getActiveFormInspectionIds } from '@/lib/offlinePhotoStore';
+import { requestPhotoBackgroundSync, queuedInspectionIds, flushQueuedPhotos, getActiveFormInspectionIds, reconcileNativeBackgroundUploads } from '@/lib/offlinePhotoStore';
 import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
 
 let installed = false;
@@ -55,6 +55,10 @@ async function tick(): Promise<void> {
       // Attach uploaded photos (section/line) server-side, from any page, so they
       // land on the record without reopening. Idempotent; skips the open inspection.
       await drainPhotoAttachOutbox({ skipInspectionIds: activeIds }).catch(() => {});
+      // iOS-only: drop drafts the native background uploader already handled after
+      // a force-quit (so the foreground flush doesn't re-upload them). No-op
+      // elsewhere — the call returns 0 immediately off-iOS.
+      await reconcileNativeBackgroundUploads().catch(() => {});
     })();
 
     await Promise.allSettled([answers, photos]);

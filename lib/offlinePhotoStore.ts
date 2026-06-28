@@ -19,7 +19,8 @@ import { makeVideoEntry } from '@/lib/media';
 import { isQuotaError, StorageFullError } from '@/lib/storageQuota';
 import { registerSyncedBlob, registerDraftFullRes, clearDraftFullRes } from '@/lib/photoDisplay';
 import { isAnyCameraOpen, subscribeCameraOpen } from '@/lib/cameraOpenState';
-import { enqueuePhotoAttach } from '@/lib/photoAttachOutbox';
+import { enqueuePhotoAttach, type PhotoAttachTarget } from '@/lib/photoAttachOutbox';
+import { isNativeBgUploadAvailable, mirrorPhotoToNativeBgUpload, clearNativeBgUploadPhoto, reconcileNativeBgUpload, scheduleNativeBgProcessing } from '@/lib/nativeBridge';
 
 // iOS/iPadOS WebKit (incl. Chrome on iOS, which is WebKit). Several canvas/bitmap
 // paths misbehave here, so we branch on it below.
@@ -91,6 +92,46 @@ function videoBlobFor(rec: QueuedPhoto): Blob | null {
   if (rec.videoBytes && rec.videoBytes.byteLength > 0) return new Blob([rec.videoBytes], { type });
   if (rec.videoBlob && rec.videoBlob.size > 0) return rec.videoBlob;
   return null;
+}
+
+// FC photo section tag — mirrors the forms' local FC_PHOTO_SECTION constant;
+// inlined here to avoid importing a form module into the store.
+const FC_PHOTO_SECTION = '__final_checklist__';
+
+// The single source of truth for "where does this queued photo attach?" Used by
+// BOTH the foreground flush (finishSynced → durable attach outbox) and the iOS
+// native background-upload mirror, so the two paths can never drift:
+//   • Final Checklist photo → 'fc' slot in the FINALCHECKLIST blob,
+//   • line / after photo     → 'line' (field from lineField),
+//   • section photo          → 'section' (explicit descriptor).
+function attachTargetForRecord(
+  rec: Pick<QueuedPhoto, 'kind' | 'sectionId' | 'lineExternalId' | 'lineField' | 'attach' | 'inspectionRecordId'>,
+): PhotoAttachTarget | null {
+  if (rec.kind === 'video') return null;
+  if (rec.sectionId === FC_PHOTO_SECTION && rec.lineExternalId) {
+    return { kind: 'fc', externalId: `FINALCHECKLIST-${rec.inspectionRecordId}`, fcSlot: rec.lineExternalId };
+  }
+  if (rec.lineExternalId) {
+    return { kind: 'line', externalId: rec.lineExternalId, field: rec.lineField === 'after' ? 'after_photo_urls' : 'photo_urls' };
+  }
+  if (rec.attach && rec.attach.externalId) {
+    return { kind: rec.attach.kind, externalId: rec.attach.externalId, field: rec.attach.field || 'photo_urls', section: rec.attach.section, location: rec.attach.location, summaryLabel: rec.attach.summaryLabel };
+  }
+  return null;
+}
+
+// ArrayBuffer → base64 (for handing photo bytes to the native iOS background
+// uploader over the Capacitor bridge). Only ever called on iOS (gated by
+// isNativeBgUploadAvailable), so the per-photo cost is never paid on web/Android.
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  if (typeof btoa === 'undefined') return '';
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const CHUNK = 0x8000; // build in chunks so a 2MB image doesn't blow the call stack
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK) as unknown as number[]);
+  }
+  return btoa(binary);
 }
 
 // localId -> live display URL + the raw object URLs to revoke (session-scoped;
@@ -406,6 +447,25 @@ export async function uploadPhotoOrQueue(
       memQueue.set(localId, rec);
       kickFlush();
     });
+    // iOS-only: ALSO hand the (already-compressed) bytes + attach target to the
+    // native background uploader, so the photo lands even after the app is force-
+    // quit (iOS WebKit has no SW Background Sync — the one gap the foreground
+    // global-sync driver can't cover). No-op on web/PWA and Android; base64 is
+    // only computed when the native plugin is actually present, so no other
+    // platform pays the cost. Idempotent with the foreground path (server dedupes
+    // by URL; finishSynced clears the mirror), so they can't double-attach.
+    if (isNativeBgUploadAvailable()) {
+      try {
+        const target = attachTargetForRecord(rec);
+        if (target) {
+          mirrorPhotoToNativeBgUpload({
+            localId, inspectionRecordId, base64: arrayBufferToBase64(bytes), filename,
+            replacesUrl: opts?.replacesUrl, target,
+          });
+          scheduleNativeBgProcessing();
+        }
+      } catch { /* best-effort — the foreground flush still uploads it */ }
+    }
     // Build the display URL for this draft. While a camera is open on iOS, do
     // NOT decode the full-res blob to make a thumbnail: the section grid is HIDDEN
     // during capture (RateCardForm gates it on !anyCameraOpen) and the in-camera
@@ -640,6 +700,41 @@ export async function rehydrateQueuedPhotos(
  */
 const FLUSH_CONCURRENCY = 1; // single-flight: full bandwidth per photo on weak signal
 
+/**
+ * Reconcile drafts the iOS native background uploader already uploaded + attached
+ * after a force-quit. For each one native reports done, delete the local queue
+ * record (so the foreground flush won't re-upload it) and swap any visible draft
+ * tile to the real URL. No-op off-iOS / when nothing reconciled. Driven by the
+ * global sync loop on resume. Idempotent and best-effort.
+ */
+export async function reconcileNativeBackgroundUploads(): Promise<number> {
+  const done = await reconcileNativeBgUpload();
+  if (done.length === 0) return 0;
+  let n = 0;
+  for (const { localId, url } of done) {
+    const entry = urlByLocalId.get(localId);
+    const oldUrl = entry?.displayUrl || '';
+    memQueue.delete(localId);
+    try { await deleteRecord(localId); } catch { /* memory-only / IDB gone — fine */ }
+    if (oldUrl) {
+      // Swap the on-screen draft to the real URL and keep the local thumb mapped
+      // to it (same grid self-heal the foreground flush does in finishSynced).
+      notifyPhotoSynced({ localId, oldUrl, newUrl: url });
+      try { registerSyncedBlob(url, oldUrl); } catch { /* noop */ }
+    }
+    if (entry) {
+      for (const u of entry.revokables) {
+        if (u === entry.displayUrl) continue; // keep the small thumb alive for the grid
+        try { URL.revokeObjectURL(u); } catch { /* noop */ }
+      }
+      clearDraftFullRes(entry.displayUrl);
+      urlByLocalId.delete(localId);
+    }
+    n++;
+  }
+  return n;
+}
+
 type FlushResult = { synced: number; remaining: number; lastError?: string };
 type FlushOnSynced = (info: { localId: string; sectionId: string; oldUrl: string; newUrl: string; replacesUrl?: string; lineExternalId?: string; lineField?: 'photos' | 'after' }) => void;
 
@@ -704,28 +799,18 @@ async function doFlushQueuedPhotos(
     //   • Final Checklist photo  → 'fc' slot in the FINALCHECKLIST blob,
     //   • line / after photo      → 'line' (field from lineField),
     //   • section photo           → 'section' (explicit descriptor).
-    // '__final_checklist__' is the FC photo section tag (mirrors the forms' local
-    // FC_PHOTO_SECTION constant); inlined here to avoid importing a form module.
     if (rec.kind !== 'video') {
       try {
-        if (rec.sectionId === '__final_checklist__' && rec.lineExternalId) {
-          enqueuePhotoAttach({
-            inspectionRecordId: rec.inspectionRecordId, url: newUrl, replacesUrl: rec.replacesUrl,
-            target: { kind: 'fc', externalId: `FINALCHECKLIST-${rec.inspectionRecordId}`, fcSlot: rec.lineExternalId },
-          });
-        } else if (rec.lineExternalId) {
-          enqueuePhotoAttach({
-            inspectionRecordId: rec.inspectionRecordId, url: newUrl, replacesUrl: rec.replacesUrl,
-            target: { kind: 'line', externalId: rec.lineExternalId, field: rec.lineField === 'after' ? 'after_photo_urls' : 'photo_urls' },
-          });
-        } else if (rec.attach && rec.attach.externalId) {
-          enqueuePhotoAttach({
-            inspectionRecordId: rec.inspectionRecordId, url: newUrl, replacesUrl: rec.replacesUrl,
-            target: { kind: rec.attach.kind, externalId: rec.attach.externalId, field: rec.attach.field || 'photo_urls', section: rec.attach.section, location: rec.attach.location, summaryLabel: rec.attach.summaryLabel },
-          });
+        const target = attachTargetForRecord(rec);
+        if (target) {
+          enqueuePhotoAttach({ inspectionRecordId: rec.inspectionRecordId, url: newUrl, replacesUrl: rec.replacesUrl, target });
         }
       } catch { /* best-effort — the form's live attach still runs when open */ }
     }
+    // The foreground path uploaded + queued the attach for this photo, so the iOS
+    // native background uploader no longer needs its mirrored copy (idempotent
+    // either way; this just keeps the native queue small). No-op off-iOS.
+    clearNativeBgUploadPhoto(rec.localId);
     memQueue.delete(rec.localId);     // clear the in-memory fallback copy (if any)
     try { await deleteRecord(rec.localId); } catch { /* memory-only record, or IDB gone — fine */ }
     onSynced({ localId: rec.localId, sectionId: rec.sectionId, oldUrl, newUrl, replacesUrl: rec.replacesUrl, lineExternalId: rec.lineExternalId, lineField: rec.lineField });

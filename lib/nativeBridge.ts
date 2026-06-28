@@ -374,3 +374,95 @@ export async function installPushBridge(): Promise<void> {
     try { console.warn('[push] native bridge setup failed:', e); } catch { /* noop */ }
   }
 }
+
+// ---------------------------------------------------------------------------
+// iOS background photo upload bridge (custom `NativeBgUpload` plugin).
+//
+// The web global-sync driver (lib/globalSync.ts) drains queued photos/answers
+// while the app is RUNNING on any page, and the service worker covers Android
+// with the tab closed. The one gap is iOS FORCE-QUIT: WebKit has no Background
+// Sync API, so once the app is swiped away no JS runs and queued photos sit on
+// the device until the inspector reopens it. This bridge mirrors each queued
+// photo's already-compressed bytes + attach target to the native layer, which
+// uploads + attaches them via a background URLSession driven by a
+// BGProcessingTask — surviving force-quit. See mobile/IOS_BACKGROUND_UPLOAD_SPEC.md.
+//
+// HARD GATE: every call routes through the runtime-registered global plugin and
+// is restricted to iOS native. Complete no-op on web/PWA and on Android (the SW
+// already covers Android). Safe to call before the native plugin exists in the
+// build — it just no-ops.
+// ---------------------------------------------------------------------------
+
+export interface NativeBgUploadTarget {
+  kind: 'section' | 'line' | 'fc';
+  externalId: string;
+  field?: 'photo_urls' | 'after_photo_urls';
+  section?: string;
+  location?: string;
+  summaryLabel?: string;
+  fcSlot?: string;
+}
+
+function nativeBgUploadPlugin(): any | null {
+  if (typeof window === 'undefined') return null;
+  const cap = (window as any).Capacitor;
+  if (!cap?.isNativePlatform?.()) return null;
+  // iOS-only: Android already drains with the tab closed via the service worker.
+  if (cap.getPlatform?.() !== 'ios') return null;
+  return cap.Plugins?.NativeBgUpload || null;
+}
+
+/** True only inside the iOS Capacitor shell with the NativeBgUpload plugin present. */
+export function isNativeBgUploadAvailable(): boolean {
+  return !!nativeBgUploadPlugin();
+}
+
+/** Mirror one queued photo's bytes + attach target to the native background
+ *  uploader (iOS-only). No target → nothing native could attach, so skip. */
+export function mirrorPhotoToNativeBgUpload(o: {
+  localId: string;
+  inspectionRecordId: string;
+  base64: string;
+  filename: string;
+  replacesUrl?: string;
+  target: NativeBgUploadTarget | null;
+}): void {
+  const p = nativeBgUploadPlugin();
+  if (!p?.mirrorPhoto || !o.target) return;
+  try {
+    p.mirrorPhoto({
+      localId: o.localId,
+      inspectionRecordId: o.inspectionRecordId,
+      base64: o.base64,
+      filename: o.filename,
+      replacesUrl: o.replacesUrl,
+      target: o.target,
+    });
+  } catch { /* plugin missing in this build — fine, foreground sync still covers it */ }
+}
+
+/** Tell native to drop a mirrored photo because the foreground path uploaded it. */
+export function clearNativeBgUploadPhoto(localId: string): void {
+  const p = nativeBgUploadPlugin();
+  if (!p?.clearPhoto) return;
+  try { p.clearPhoto({ localId }); } catch { /* noop */ }
+}
+
+/** Ask native which mirrored photos it already uploaded + attached in the
+ *  background, so the web can drop the matching drafts. [] off-iOS/unavailable. */
+export async function reconcileNativeBgUpload(): Promise<{ localId: string; url: string }[]> {
+  const p = nativeBgUploadPlugin();
+  if (!p?.reconcile) return [];
+  try {
+    const r = await p.reconcile();
+    const done = r?.done;
+    return Array.isArray(done) ? done.filter((d: any) => d && d.localId && d.url) : [];
+  } catch { return []; }
+}
+
+/** Nudge iOS to schedule a background-processing window now (best-effort). */
+export function scheduleNativeBgProcessing(): void {
+  const p = nativeBgUploadPlugin();
+  if (!p?.scheduleProcessing) return;
+  try { p.scheduleProcessing(); } catch { /* noop */ }
+}
