@@ -68,7 +68,12 @@ compiled target. Do the integration on a Mac with Xcode.
 - **Server origin** is read from the live webview URL (so it follows a future
   `resiwalk.com` switch) with a constant fallback matching `capacitor.config.ts`.
 
-## Phase 2 (next)
-Mirror the **answer/line/section** outbox (`lib/offlineOutbox.ts`) the same way
-(`mirrorAnswer`/`clearAnswer` + replay `POST /api/inspections/{id}/answers`), so
-text/selection edits also drain after force-quit. Same plumbing, smaller payloads.
+## Phase 2 (built)
+The **answer/line/section** outbox (`lib/offlineOutbox.ts`) is mirrored the same
+way — `mirrorAnswer`/`clearAnswer`/`reconcileAnswers` on the plugin, `.ans` files
+in the store, and `drainAnswers()` (run BEFORE photos, since an attach can depend
+on the answer record a replay creates) replaying each entry's
+`{endpoint, method, body}` against the same idempotent server routes. So text +
+selection edits also drain after a force-quit. The web half is shipped to `main`;
+the same plugin sources cover both phases, so there's no extra integration step
+beyond the ones above.

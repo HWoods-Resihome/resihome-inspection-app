@@ -81,9 +81,13 @@ final class BgUploader {
         }
     }
 
-    /// Upload + attach every pending photo, oldest first. Stops early on offline /
-    /// auth failure (keeps everything for the next window). Never throws.
+    /// Drain everything pending. ANSWERS first, then photos — an attach can depend
+    /// on the answer record an answer-replay creates (same ordering rule the web
+    /// uses). Stops early on offline / auth failure (keeps work for the next
+    /// window). Never throws.
     func drainAsync() async {
+        await drainAnswers()
+        if Task.isCancelled { return }
         let items = store.pending()
         for var meta in items {
             if Task.isCancelled { break }
@@ -117,12 +121,55 @@ final class BgUploader {
         }
     }
 
+    /// Replay every pending answer/edit entry, oldest first (idempotent upserts).
+    private func drainAnswers() async {
+        for meta in store.pendingAnswers() {
+            if Task.isCancelled { return }
+            switch await replayAnswer(meta) {
+            case .doneAttached:
+                store.completeAnswer(id: meta.id)
+            case .authFailure, .offline:
+                return // keep everything; retry next window
+            case .permanentFailure:
+                store.removeAnswer(id: meta.id) // poison — drop (logged)
+            case .deferred, .transient:
+                return // retry next window
+            }
+        }
+    }
+
     // MARK: HTTP
     private enum UploadResult { case success(String); case offline; case authFailure; case transient; case permanentFailure }
     private enum AttachResult { case doneAttached; case deferred; case offline; case authFailure; case transient; case permanentFailure }
 
+    /// Build an absolute URL from a server-relative path (endpoints come in as
+    /// full paths like "/api/upload" or "/api/inspections/123/answers").
+    private func absoluteURL(_ path: String) -> URL {
+        return URL(string: serverBase.absoluteString + path) ?? serverBase
+    }
+
+    private func replayAnswer(_ meta: BgAnswerMeta) async -> AttachResult {
+        var req = URLRequest(url: absoluteURL(meta.endpoint))
+        req.httpMethod = meta.method
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = meta.bodyJSON.data(using: .utf8)
+        do {
+            let (_, resp) = try await session.data(for: req)
+            guard let http = resp as? HTTPURLResponse else { return .transient }
+            switch http.statusCode {
+            case 200..<300: return .doneAttached
+            case 401, 403: return .authFailure
+            case 429: return .transient
+            case 400..<500: return .permanentFailure
+            default: return .transient
+            }
+        } catch {
+            return .offline
+        }
+    }
+
     private func uploadBytes(filename: String, jpeg: Data) async -> UploadResult {
-        var req = URLRequest(url: serverBase.appendingPathComponent("/api/upload"))
+        var req = URLRequest(url: absoluteURL("/api/upload"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let body: [String: Any] = ["filename": filename, "contentType": "image/jpeg", "base64": jpeg.base64EncodedString()]
@@ -146,8 +193,7 @@ final class BgUploader {
     }
 
     private func attach(inspectionRecordId: String, url: String, replacesUrl: String?, target: [String: String]) async -> AttachResult {
-        let endpoint = serverBase.appendingPathComponent("/api/inspections/\(inspectionRecordId)/attach-photo")
-        var req = URLRequest(url: endpoint)
+        var req = URLRequest(url: absoluteURL("/api/inspections/\(inspectionRecordId)/attach-photo"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         var body: [String: Any] = ["url": url, "target": target]

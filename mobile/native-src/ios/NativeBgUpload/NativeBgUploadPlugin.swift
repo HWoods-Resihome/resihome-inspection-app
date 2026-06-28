@@ -20,7 +20,10 @@ public class NativeBgUploadPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "mirrorPhoto", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearPhoto", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "reconcile", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "scheduleProcessing", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "scheduleProcessing", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "mirrorAnswer", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearAnswer", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "reconcileAnswers", returnType: CAPPluginReturnPromise)
     ]
 
     private let store = BgUploadStore.shared
@@ -106,5 +109,46 @@ public class NativeBgUploadPlugin: CAPPlugin, CAPBridgedPlugin {
         uploader.scheduleProcessing()
         uploader.drain()
         call.resolve()
+    }
+
+    // MARK: - Phase 2: answers / edits
+
+    @objc func mirrorAnswer(_ call: CAPPluginCall) {
+        guard
+            let id = call.getString("id"),
+            let inspectionRecordId = call.getString("inspectionRecordId"),
+            let endpoint = call.getString("endpoint"),
+            let method = call.getString("method")
+        else {
+            call.reject("mirrorAnswer: missing id/inspectionRecordId/endpoint/method")
+            return
+        }
+        // Serialize the arbitrary body object/array back to a JSON string.
+        var bodyJSON = "{}"
+        if let body = call.getObject("body"),
+           let data = try? JSONSerialization.data(withJSONObject: body),
+           let s = String(data: data, encoding: .utf8) {
+            bodyJSON = s
+        } else if let arr = call.getArray("body"),
+                  let data = try? JSONSerialization.data(withJSONObject: arr),
+                  let s = String(data: data, encoding: .utf8) {
+            bodyJSON = s
+        }
+        store.saveAnswer(BgAnswerMeta(id: id, inspectionRecordId: inspectionRecordId, endpoint: endpoint, method: method, bodyJSON: bodyJSON))
+        uploader.refreshCookies(from: self.webView)
+        uploader.scheduleProcessing()
+        uploader.drain()
+        call.resolve()
+    }
+
+    @objc func clearAnswer(_ call: CAPPluginCall) {
+        guard let id = call.getString("id") else { call.reject("clearAnswer: missing id"); return }
+        store.removeAnswer(id: id)
+        call.resolve()
+    }
+
+    @objc func reconcileAnswers(_ call: CAPPluginCall) {
+        let ids = store.drainAnswersCompletedLog()
+        call.resolve(["ids": ids])
     }
 }

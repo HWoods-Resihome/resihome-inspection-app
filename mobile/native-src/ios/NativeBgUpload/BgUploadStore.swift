@@ -24,6 +24,17 @@ struct BgPhotoMeta: Codable {
 
 struct CompletedEntry: Codable { let localId: String; let url: String }
 
+/// Phase 2: a mirrored answer/edit outbox entry — a self-describing, idempotent
+/// HTTP replay (server upserts by answer_id_external). `bodyJSON` is the request
+/// body serialized to a string (arbitrary JSON shape). Stored as `<id>.ans`.
+struct BgAnswerMeta: Codable {
+    let id: String
+    let inspectionRecordId: String
+    let endpoint: String   // full path, e.g. "/api/inspections/123/answers"
+    let method: String     // "POST" | "PATCH"
+    let bodyJSON: String
+}
+
 final class BgUploadStore {
     static let shared = BgUploadStore()
     private let q = DispatchQueue(label: "com.resihome.resiwalk.bgupload.store")
@@ -42,7 +53,9 @@ final class BgUploadStore {
     }
     private func jpg(_ id: String) -> URL { dir.appendingPathComponent("\(id).jpg") }
     private func json(_ id: String) -> URL { dir.appendingPathComponent("\(id).json") }
+    private func ans(_ id: String) -> URL { dir.appendingPathComponent("\(id).ans") }
     private var completedLog: URL { dir.appendingPathComponent("completed.json") }
+    private var answersCompletedLog: URL { dir.appendingPathComponent("answers-completed.json") }
 
     func savePhoto(meta: BgPhotoMeta, bytes: Data) {
         q.sync {
@@ -65,7 +78,7 @@ final class BgUploadStore {
     func pending() -> [BgPhotoMeta] {
         q.sync {
             guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey]) else { return [] }
-            let metas = files.filter { $0.pathExtension == "json" && $0.lastPathComponent != "completed.json" }
+            let metas = files.filter { $0.pathExtension == "json" && $0.lastPathComponent != "completed.json" && $0.lastPathComponent != "answers-completed.json" }
                 .compactMap { url -> (BgPhotoMeta, Date)? in
                     guard let d = try? Data(contentsOf: url),
                           let m = try? JSONDecoder().decode(BgPhotoMeta.self, from: d) else { return nil }
@@ -108,6 +121,64 @@ final class BgUploadStore {
         q.sync {
             let l = readCompleted()
             try? fm.removeItem(at: completedLog)
+            return l
+        }
+    }
+
+    // MARK: - Phase 2: answers / edits
+
+    /// Mirror (or replace) an answer entry. The consolidated-answers entry uses a
+    /// deterministic id per inspection, so re-mirroring overwrites the same `.ans`
+    /// file — the native copy can never hold a staler snapshot than the web.
+    func saveAnswer(_ meta: BgAnswerMeta) {
+        q.sync {
+            if let data = try? JSONEncoder().encode(meta) {
+                try? data.write(to: ans(meta.id), options: .atomic)
+            }
+        }
+    }
+
+    func removeAnswer(id: String) { q.sync { try? fm.removeItem(at: ans(id)) } }
+
+    /// All pending answer entries, oldest first.
+    func pendingAnswers() -> [BgAnswerMeta] {
+        q.sync {
+            guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey]) else { return [] }
+            let metas = files.filter { $0.pathExtension == "ans" }
+                .compactMap { url -> (BgAnswerMeta, Date)? in
+                    guard let d = try? Data(contentsOf: url),
+                          let m = try? JSONDecoder().decode(BgAnswerMeta.self, from: d) else { return nil }
+                    let created = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
+                    return (m, created)
+                }
+            return metas.sorted { $0.1 < $1.1 }.map { $0.0 }
+        }
+    }
+
+    /// Mark an answer entry replayed: delete it and append its id to the answers
+    /// completed log for the web to reconcile.
+    func completeAnswer(id: String) {
+        q.sync {
+            try? fm.removeItem(at: ans(id))
+            var log = readAnswersCompleted()
+            log.append(id)
+            if let data = try? JSONEncoder().encode(log) {
+                try? data.write(to: answersCompletedLog, options: .atomic)
+            }
+        }
+    }
+
+    private func readAnswersCompleted() -> [String] {
+        guard let d = try? Data(contentsOf: answersCompletedLog),
+              let l = try? JSONDecoder().decode([String].self, from: d) else { return [] }
+        return l
+    }
+
+    /// Return and clear the answers completed log (called by reconcileAnswers()).
+    func drainAnswersCompletedLog() -> [String] {
+        q.sync {
+            let l = readAnswersCompleted()
+            try? fm.removeItem(at: answersCompletedLog)
             return l
         }
     }
