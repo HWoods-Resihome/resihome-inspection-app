@@ -1,0 +1,20 @@
+<!--
+  Info.plist additions for NativeBgUpload — MERGE these keys into the generated
+  mobile/ios/App/App/Info.plist after `npx cap add ios`.
+
+  - UIBackgroundModes: declares we run background processing + fetch work.
+  - BGTaskSchedulerPermittedIdentifiers: WHITELISTS our task id; without it
+    BGTaskScheduler.submit() throws at runtime. The id MUST match
+    BgUploader.taskIdentifier ("com.resihome.resiwalk.bgupload.process").
+-->
+
+<key>UIBackgroundModes</key>
+<array>
+    <string>processing</string>
+    <string>fetch</string>
+</array>
+
+<key>BGTaskSchedulerPermittedIdentifiers</key>
+<array>
+    <string>com.resihome.resiwalk.bgupload.process</string>
+</array>

@@ -128,14 +128,16 @@ bridge module (`lib/nativeBridge.ts`). All calls are guarded by
 Plugin TS interface (`mobile/` plugin or `@capacitor/...` definitions file):
 ```ts
 export interface NativeBgUploadPlugin {
+  // Phase 1 (built): photos. `target` is the flattened PhotoAttachTarget.
   mirrorPhoto(o: { localId: string; inspectionRecordId: string; base64: string;
-    filename: string; replacesUrl?: string; attach?: PhotoAttachTarget }): Promise<void>;
+    filename: string; replacesUrl?: string; target: PhotoAttachTarget }): Promise<void>;
   clearPhoto(o: { localId: string }): Promise<void>;
+  reconcile(): Promise<{ done: { localId: string; url: string }[] }>;
+  scheduleProcessing(): Promise<void>;   // request a BGProcessingTask now
+  // Phase 2: answers/edits.
   mirrorAnswer(o: { id: string; inspectionRecordId: string; endpoint: string;
     method: string; body: unknown }): Promise<void>;
   clearAnswer(o: { id: string }): Promise<void>;
-  reconcile(): Promise<{ uploadedUrls: string[]; doneLocalIds: string[] }>;
-  scheduleProcessing(): Promise<void>;   // request a BGProcessingTask now
 }
 ```
 
