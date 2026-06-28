@@ -85,6 +85,9 @@ export default function Home() {
   // scale to 10,000+ inspections instead of being derived from a 500-row window).
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<StatusCounts>({ all: 0, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0 });
+  // Whether real counts have loaded yet — until then the filter chips show no
+  // numbers (instead of a misleading "(0)") while the list is still loading.
+  const [countsKnown, setCountsKnown] = useState(false);
   // Real-time cancel: ids cancelled this session (so a lagging server refetch
   // can't re-show them) + the optimistic counts/total to display until the
   // HubSpot search index catches up.
@@ -325,7 +328,7 @@ export default function Home() {
     } else {
       if (cancelledSet.size > 0) { cancelledSet.clear(); optimisticCountsRef.current = null; optimisticTotalRef.current = null; }
       setTotal(typeof d.total === 'number' ? d.total : raw.length);
-      if (d.counts) setCounts(d.counts);
+      if (d.counts) { setCounts(d.counts); setCountsKnown(true); }
     }
   }, []);
 
@@ -840,15 +843,18 @@ export default function Home() {
           {/* Status filter chips — two full-width rows; each chip stretches to
               fill its row so the section reads as a structured block (no
               horizontal scroll on mobile). */}
+          {/* Counts are omitted until the list has loaded — a "(0)" while loading
+              read as "no inspections". The chips stay tappable the whole time so
+              the inspector can switch/clear filters even before/while it loads. */}
           <div className="space-y-1.5 mb-3">
             <div className="flex gap-1.5">
-              <FilterChip className="flex-1" label={`All (${counts.all})`} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
-              <FilterChip className="flex-1" label={`Scheduled (${counts.scheduled})`} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter(statusFilter === 'scheduled' ? 'all' : 'scheduled')} />
-              <FilterChip className="flex-1" label={`In Progress (${counts.in_progress})`} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter(statusFilter === 'in_progress' ? 'all' : 'in_progress')} />
+              <FilterChip className="flex-1" label={countsKnown ? `All (${counts.all})` : 'All'} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
+              <FilterChip className="flex-1" label={countsKnown ? `Scheduled (${counts.scheduled})` : 'Scheduled'} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter(statusFilter === 'scheduled' ? 'all' : 'scheduled')} />
+              <FilterChip className="flex-1" label={countsKnown ? `In Progress (${counts.in_progress})` : 'In Progress'} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter(statusFilter === 'in_progress' ? 'all' : 'in_progress')} />
             </div>
             <div className="flex gap-1.5">
-              <FilterChip className="flex-1" label={`Pending Approval (${counts.pending_approval})`} active={statusFilter === 'pending_approval'} onClick={() => setStatusFilter(statusFilter === 'pending_approval' ? 'all' : 'pending_approval')} />
-              <FilterChip className="flex-1" label={`Completed (${counts.completed})`} active={statusFilter === 'completed'} onClick={() => setStatusFilter(statusFilter === 'completed' ? 'all' : 'completed')} />
+              <FilterChip className="flex-1" label={countsKnown ? `Pending Approval (${counts.pending_approval})` : 'Pending Approval'} active={statusFilter === 'pending_approval'} onClick={() => setStatusFilter(statusFilter === 'pending_approval' ? 'all' : 'pending_approval')} />
+              <FilterChip className="flex-1" label={countsKnown ? `Completed (${counts.completed})` : 'Completed'} active={statusFilter === 'completed'} onClick={() => setStatusFilter(statusFilter === 'completed' ? 'all' : 'completed')} />
             </div>
           </div>
 

@@ -28,6 +28,7 @@ import { ListPicker } from '@/components/ListPicker';
 import { PhotoStrip } from '@/components/PhotoStrip';
 import { useAppDialog } from '@/components/AppDialog';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
+import { enqueue as outboxEnqueue, isOfflineError } from '@/lib/offlineOutbox';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 import { UnlockButton, type LockRing } from '@/components/UnlockButton';
 import InspectionPager from '@/components/InspectionPager';
@@ -367,38 +368,52 @@ export function QcReinspectForm(props: Props) {
     // get swapped for the real URL when the queue flushes on reconnect.
     const urls = urlsIn.filter((u) => !u.startsWith('blob:'));
     const existingId = afterPhotoRecordIds[key];
-    const uuid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    const externalId = existingId || `QCAFTER-${props.inspectionRecordId}-${key}-${uuid}`;
+    // DETERMINISTIC external id (was a random uuid): `key` (section||location) is
+    // already unique per inspection, so a stable id lets an offline replay upsert
+    // idempotently instead of creating a duplicate record.
+    const externalId = `QCAFTER-${props.inspectionRecordId}-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+    const body = {
+      upserts: [{
+        recordId: existingId,
+        answerProps: buildSectionPhotoAnswerProps({
+          answerIdExternal: externalId,
+          section,
+          summaryLabel: section,
+          location,
+          photoUrls: urls,
+          photoPhase: 'after' as const,
+          // Standalone-QC room verdict + note ride on this same record.
+          passFail: roomVerdictRef.current[key] || '',
+          note: roomNoteRef.current[key] || '',
+        }),
+        questionHubspotRecordId: null,
+      }],
+      bumpStatusToInProgress: true,
+    };
     markSaving();
-    const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        upserts: [{
-          recordId: existingId,
-          answerProps: buildSectionPhotoAnswerProps({
-            answerIdExternal: externalId,
-            section,
-            summaryLabel: section,
-            location,
-            photoUrls: urls,
-            photoPhase: 'after',
-            // Standalone-QC room verdict + note ride on this same record.
-            passFail: roomVerdictRef.current[key] || '',
-            note: roomNoteRef.current[key] || '',
-          }),
-          questionHubspotRecordId: null,
-        }],
-        bumpStatusToInProgress: true,
-      }),
-    });
-    if (!r.ok) { markSaveError(); throw new Error(`Save after-photos failed: HTTP ${r.status}`); }
-    const data = await r.json();
-    const newId = data?.results?.[0]?.recordId;
-    if (newId && !existingId) {
-      setAfterPhotoRecordIds((cur) => ({ ...cur, [key]: newId }));
+    try {
+      const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(`Save after-photos failed: HTTP ${r.status}`);
+      const data = await r.json();
+      const newId = data?.results?.[0]?.recordId;
+      if (newId && !existingId) setAfterPhotoRecordIds((cur) => ({ ...cur, [key]: newId }));
+      markSaved();
+    } catch (e: any) {
+      // Offline / transient: QUEUE the write durably so the change — an ADD, a
+      // DELETE, or a room verdict/note — survives and syncs when back online
+      // (previously it was lost, so deleted photos reappeared on reconnect). The
+      // offline banner already conveys "saved offline", so DON'T alert here. A
+      // genuine 4xx rethrows so the caller can surface a real error.
+      if (isOfflineError(e)) {
+        outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint: `/api/inspections/${props.inspectionRecordId}/answers`, method: 'POST', body, kind: 'sectionPhoto', meta: { sectionId: key } });
+        markSaved();
+        return;
+      }
+      markSaveError();
+      throw e;
     }
-    markSaved();
   }
 
   // Persist the maintenance-ticket Q&A (new-items-not-on-scope) as synthetic qa
