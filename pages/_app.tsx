@@ -7,6 +7,7 @@ import { FlashProvider } from '@/components/Flash';
 import { FieldStatusOverlays } from '@/components/FieldStatusOverlays';
 import { PdfViewerHost } from '@/components/PdfViewerHost';
 import { ImpersonationBanner } from '@/components/ImpersonationBanner';
+import { SyncStatusBadge } from '@/components/SyncStatusBadge';
 import { initErrorReporting } from '@/lib/clientErrorReporter';
 import { installSessionGuard } from '@/lib/sessionGuard';
 import { registerServiceWorker } from '@/lib/useAppUpdate';
@@ -86,6 +87,7 @@ export default function App({ Component, pageProps }: AppProps) {
             <FieldStatusOverlays />
             <ImpersonationBanner />
             <Component {...pageProps} />
+            <SyncStatusBadge />
             <PdfViewerHost />
           </FlashProvider>
         </AppDialogProvider>

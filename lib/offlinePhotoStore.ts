@@ -553,6 +553,12 @@ export async function queuedInspectionIds(): Promise<string[]> {
   return Array.from(new Set(all.map((r) => r.inspectionRecordId).filter(Boolean)));
 }
 
+/** Total queued (un-uploaded) photos across all inspections — for the global
+ *  sync indicator. Metadata-only (no bytes loaded). */
+export async function countAllQueuedPhotos(): Promise<number> {
+  return (await listQueueMeta()).length;
+}
+
 export async function countQueuedPhotos(inspectionRecordId: string): Promise<number> {
   // Metadata-only (no bytes) — this is called frequently (submit gate + flush
   // polling); loading every photo's bytes just to count them was a recurring

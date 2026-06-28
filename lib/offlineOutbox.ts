@@ -96,6 +96,11 @@ export function countFor(inspectionRecordId: string): number {
   return entriesFor(inspectionRecordId).length;
 }
 
+/** Total queued entries across all inspections (for the global sync indicator). */
+export function countOutbox(): number {
+  return read().length;
+}
+
 export function remove(id: string): void {
   write(read().filter((e) => e.id !== id));
 }
