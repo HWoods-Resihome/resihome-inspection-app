@@ -411,6 +411,16 @@ export default function Home() {
     return () => { window.removeEventListener('focus', reload); window.removeEventListener('online', reload); };
   }, [load]);
 
+  // Auto-recover: while the list is in a failed state, retry on a timer. The
+  // `online` event is unreliable in the Android WebView, so a list that failed
+  // with no signal would otherwise stay broken even after service returned. This
+  // polls every 10s until a load succeeds (clears `error`), then stops.
+  useEffect(() => {
+    if (!error) return;
+    const iv = setInterval(() => { void load(); }, 10000);
+    return () => clearInterval(iv);
+  }, [error, load]);
+
   // Close the Sort dropdown on an outside click / Escape.
   useEffect(() => {
     if (!sortOpen) return;

@@ -122,11 +122,16 @@ export async function flushOutbox(
   for (const entry of list) {
     let res: Response;
     try {
+      // Hard timeout so a hung replay on weak signal can't block the caller
+      // forever (e.g. the global background driver, wedging all sync).
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 20000);
       res = await fetch(entry.endpoint, {
         method: entry.method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entry.body),
-      });
+        signal: ctrl.signal,
+      }).finally(() => clearTimeout(to));
     } catch (e: any) {
       // If the device is genuinely offline, keep everything and stop.
       if (typeof navigator !== 'undefined' && navigator.onLine === false) { lastError = 'Device is offline — will retry when back online.'; break; }

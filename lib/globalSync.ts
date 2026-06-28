@@ -9,15 +9,16 @@
  *    anywhere — the moment signal returns, on the home list, mid-navigation, etc.
  *    Previously they only drained while the relevant form was mounted, so edits
  *    made then "Save & Close"d sat unsynced until that inspection was reopened.
- *  - Queued PHOTO bytes: we ask the service worker to run its Background Sync,
- *    which uploads queued photos even with the tab closed (Chromium). We do NOT
- *    foreground-flush photos here: that path deletes the queue record on upload
- *    and relies on the open form to ATTACH the URL to its section/line, so
- *    running it without a form would orphan the photo. Attach still completes
- *    when the inspection is next opened (cheap, via the record's uploadedUrl).
+ *  - Queued PHOTOS: foreground-uploads queued photo bytes for every (non-open)
+ *    inspection AND attaches them to their records via the idempotent
+ *    /attach-photo endpoint (durable attach outbox) — so photos land on the
+ *    record from any page, without reopening. This foreground pass is the only
+ *    background path on iOS (no SW Background Sync); on Android we ALSO nudge the
+ *    SW so photos upload with the tab closed.
  *
  * Triggers: on install, on `online`, when the tab becomes visible, and on a
- * steady interval. Online-only and single-flight so it never piles on.
+ * steady interval. Online-only and single-flight (parallel answer + photo drains
+ * so neither blocks the other) so it never piles on or wedges.
  */
 import { flushOutbox } from '@/lib/offlineOutbox';
 import { requestPhotoBackgroundSync, queuedInspectionIds, flushQueuedPhotos, getActiveFormInspectionIds } from '@/lib/offlinePhotoStore';
@@ -32,33 +33,31 @@ async function tick(): Promise<void> {
   if (inFlight) return;                                                       // single-flight
   inFlight = true;
   try {
-    // Drain queued answer/line/section saves (all inspections, idempotent).
-    await flushOutbox().catch(() => { /* best-effort; retries next tick */ });
+    // Answers and PHOTOS drain INDEPENDENTLY (in parallel) so a slow/hung answer
+    // replay can never block photo uploads — the bug where photos didn't sync from
+    // the home page until the inspection was reopened. Each side is best-effort.
+    const answers = flushOutbox().catch(() => { /* retries next tick */ });
 
     // Upload queued PHOTO bytes for EVERY inspection from any page — not just the
-    // open form. This is the only background-upload path on iOS (no SW Background
-    // Sync there). Safe now because the upload records a DURABLE attach instruction
-    // (finishSynced → photo-attach outbox) before deleting the queue record, so a
-    // no-op onSynced here can't orphan the photo; the open form (if any) coalesces
-    // on the same per-inspection flush and self-heals its grid via notifyPhotoSynced.
-    // The open inspection's form is the SOLE writer of its records — never flush
-    // or attach it from here, or the form's next full-list save would overwrite
-    // (and erase) a background-attached photo.
-    const activeIds = getActiveFormInspectionIds();
-    try {
-      const ids = await queuedInspectionIds();
+    // open form — then attach them server-side. This foreground pass is the ONLY
+    // background-upload path on iOS (no SW Background Sync there). The open
+    // inspection's form is the SOLE writer of its records, so it's skipped here
+    // (else the form's next full-list save would overwrite a background-attached
+    // photo); its queued attaches drain idempotently after the inspector leaves.
+    const photos = (async () => {
+      const activeIds = getActiveFormInspectionIds();
+      const ids = await queuedInspectionIds().catch(() => [] as string[]);
       for (const inspId of ids) {
         if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
         if (activeIds.has(inspId)) continue;
         await flushQueuedPhotos(inspId, () => { /* attach handled durably via the outbox */ }).catch(() => {});
       }
-    } catch { /* best-effort */ }
+      // Attach uploaded photos (section/line) server-side, from any page, so they
+      // land on the record without reopening. Idempotent; skips the open inspection.
+      await drainPhotoAttachOutbox({ skipInspectionIds: activeIds }).catch(() => {});
+    })();
 
-    // Attach uploaded photos to their records server-side (section/line), from any
-    // page — so photos land on the record even after leaving the form. Idempotent.
-    // Skip the open inspection (its form writes those records) to avoid a
-    // read-modify-write clobber; its entries attach after the inspector leaves.
-    await drainPhotoAttachOutbox({ skipInspectionIds: activeIds }).catch(() => { /* best-effort */ });
+    await Promise.allSettled([answers, photos]);
     // Also nudge the SW to upload with the tab CLOSED (Chromium only; no-op on iOS,
     // where the foreground pass above is the background-upload path).
     void requestPhotoBackgroundSync();
