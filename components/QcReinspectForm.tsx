@@ -467,14 +467,14 @@ export function QcReinspectForm(props: Props) {
     const merged = [...(afterPhotos[key] || []), ...newUrls];
     setAfterPhotos((cur) => ({ ...cur, [key]: merged }));
     try { await persistAfterPhotos(key, section, location, merged); }
-    catch (e: any) { void dialog.alert(`Could not save photos: ${e?.message || e}`); }
+    catch (e: any) { if (!isOfflineError(e)) void dialog.alert(`Could not save photos: ${e?.message || e}`); }
   }
 
   async function removeAfterPhoto(key: string, section: string, location: string, url: string) {
     const merged = (afterPhotos[key] || []).filter((u) => u !== url);
     setAfterPhotos((cur) => ({ ...cur, [key]: merged }));
     try { await persistAfterPhotos(key, section, location, merged); }
-    catch (e: any) { void dialog.alert(`Could not update photos: ${e?.message || e}`); }
+    catch (e: any) { if (!isOfflineError(e)) void dialog.alert(`Could not update photos: ${e?.message || e}`); }
     // Keep line tags in sync — a deleted After photo can't stay on a line.
     const sec = sections.find((s) => s.key === key);
     for (const line of (sec?.lines || [])) {
@@ -512,22 +512,32 @@ export function QcReinspectForm(props: Props) {
     setLines((cur) => cur.map((l) => (l.recordId === lineRecordId ? { ...l, photoUrls: urls } : l)));
     // Persist only real URLs — offline drafts (blob:) sync + swap on reconnect.
     const real = urls.filter((u) => !u.startsWith('blob:'));
+    const body = {
+      upserts: [{
+        recordId: lineRecordId,
+        answerProps: { photo_urls: joinPhotoUrls(real), photo_count: real.length },
+        questionHubspotRecordId: null,
+      }],
+    };
     try {
       markSaving();
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          upserts: [{
-            recordId: lineRecordId,
-            answerProps: { photo_urls: joinPhotoUrls(real), photo_count: real.length },
-            questionHubspotRecordId: null,
-          }],
-        }),
+        body: JSON.stringify(body),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       markSaved();
-    } catch (e: any) { markSaveError(); void dialog.alert(`Could not update line tag: ${e?.message || e}`); }
+    } catch (e: any) {
+      // Offline / transient: queue the line-tag change durably (no popup); the
+      // offline pill conveys it. Genuine error → inline "Save failed" only.
+      if (isOfflineError(e)) {
+        outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint: `/api/inspections/${props.inspectionRecordId}/answers`, method: 'POST', body, kind: 'line', meta: { line: { recordId: lineRecordId } } });
+        markSaved();
+      } else {
+        markSaveError();
+      }
+    }
   }
 
   // Tag a freshly-captured photo to a QC line FROM INSIDE THE CAMERA
@@ -560,7 +570,7 @@ export function QcReinspectForm(props: Props) {
           }
         }
       }
-    } catch (e: any) { void dialog.alert(`Could not update photo: ${e?.message || e}`); }
+    } catch (e: any) { if (!isOfflineError(e)) void dialog.alert(`Could not update photo: ${e?.message || e}`); }
   }
 
   // Tag/untag an After photo to/from a QC line (non-destructive). The photo
@@ -727,21 +737,28 @@ export function QcReinspectForm(props: Props) {
   // Persist a line's QC failure note. Separate from pass/fail so a missing
   // qc_failure_note property (pre-/admin/setup) can't break pass/fail saving.
   async function saveFailureNote(recordId: string, text: string) {
+    const body = {
+      upserts: [{ recordId, answerProps: { qc_failure_note: text }, questionHubspotRecordId: null }],
+      bumpStatusToInProgress: true,
+    };
     markSaving();
     try {
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          upserts: [{ recordId, answerProps: { qc_failure_note: text }, questionHubspotRecordId: null }],
-          bumpStatusToInProgress: true,
-        }),
+        body: JSON.stringify(body),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       markSaved();
     } catch (e: any) {
-      markSaveError();
-      void dialog.alert(`Could not save the failure note (run /admin/setup if this persists): ${e?.message || e}`);
+      // Offline / transient: queue durably so the note syncs, no popup (the
+      // offline pill conveys it). Genuine error → inline "Save failed" only.
+      if (isOfflineError(e)) {
+        outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint: `/api/inspections/${props.inspectionRecordId}/answers`, method: 'POST', body, kind: 'line', meta: { line: { recordId } } });
+        markSaved();
+      } else {
+        markSaveError();
+      }
     }
   }
 
