@@ -109,13 +109,30 @@ be made idempotent rather than relying on the lock.
 
 ## 4. Prioritized action list
 1. **(Done)** Fix PATCH authorization gap. ✅
-2. **Server error monitoring (Sentry)** — finalize/PDF/HubSpot first.
-3. **CI workflow** — typecheck + test + build + native-parity on push.
-4. **Idempotent finalize side-effects** (email/ticket markers).
-5. **Rate limiting** on authenticated mutation routes.
-6. **PDF photo budget** + **HubSpot property-name constants** + **SW version
-   robustness**.
-7. **iOS Phase 3** (background URLSession + upload dedupeKey).
+2. **(Done)** Server error monitoring — `lib/serverErrorReporter.ts`, provider-
+   agnostic via `ERROR_WEBHOOK_URL`, wired into finalize/upload/attach-photo/
+   answers. ✅
+3. **(Done)** Idempotent finalize side-effects — tight re-read of `hbmm_ticket_id`
+   right before ticket creation (window shrunk from the PDF pipeline to ~ms). ✅
+4. **(Done)** Rate limiting — `lib/rateLimit.ts` on upload/answers/attach-photo. ✅
+5. **(Done)** iOS background upload **Phase 3** — background `URLSession`
+   (file-backed, survives suspension) + `/api/upload` `dedupeKey`. All three
+   phases now built (native on `chore/native-oauth-outbound`). ✅
+6. **CI workflow** — typecheck + test + build + native-parity on push. _(open —
+   was item not selected; recommended next.)_
+7. **PDF photo budget** + **HubSpot property-name constants** + **SW version
+   robustness**. _(open)_
 
-None of items 2–7 are urgent breakage; they're the difference between "works"
-and "operationally hardened." Happy to implement any of them on request.
+Remaining open items (6–7) are non-urgent hardening. The big field-loss and
+observability gaps are now closed.
+
+### Note on item 2 (monitoring) — how to activate
+The reporter is provider-agnostic: set the `ERROR_WEBHOOK_URL` env var to a Slack
+incoming webhook, a Sentry tunnel, or any HTTP collector and both client and
+server errors flow to it. Without the env it just logs structured `[server-error]`
+lines (greppable in Vercel). No new dependency or DSN was added.
+
+### Note on rate limits (item 4)
+Per-instance token bucket (no external store / secret). Effective cap ≈ configured
+max × instance count — enough to stop a single runaway client; for a hard global
+cap, back `lib/rateLimit.ts` with Vercel KV (call sites unchanged).
