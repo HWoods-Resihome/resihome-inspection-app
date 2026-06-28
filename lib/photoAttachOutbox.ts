@@ -93,7 +93,14 @@ export async function drainPhotoAttachOutbox(opts?: { skipInspectionIds?: Set<st
     } catch {
       break; // offline / network — stop, retry next tick (order preserved)
     }
-    if (res.ok) { write(read().filter((x) => x.id !== e.id)); done++; continue; }
+    if (res.ok) {
+      // The endpoint may DEFER (the parent answer record doesn't exist yet — the
+      // answer outbox hasn't synced it). Keep the entry so it retries next tick;
+      // don't treat a deferral as done (that would silently drop the attach).
+      const data = await res.json().catch(() => ({} as any));
+      if (data && data.deferred) continue;
+      write(read().filter((x) => x.id !== e.id)); done++; continue;
+    }
     if (res.status === 401 || res.status === 403) break;           // re-auth needed — keep
     if (res.status >= 400 && res.status < 500 && res.status !== 429) {
       // Permanently bad — drop so it can't wedge the queue (logged server-side).

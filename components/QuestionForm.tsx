@@ -2231,7 +2231,14 @@ export function QuestionForm({
                           question={q}
                           answer={answers[key]}
                           onUpdate={(patch) => updateAnswer(key, patch)}
-                          uploadPhoto={(file) => uploadPhotoOrQueue(file, inspectionRecordId, key)}
+                          uploadPhoto={(file) => uploadPhotoOrQueue(file, inspectionRecordId, key, {
+                            // Durable background attach (same mechanism as section
+                            // photos): the answer's photo_urls, keyed by the same
+                            // answer_id_external the autosave writes. So an inline
+                            // question photo attaches in the background / after
+                            // leaving, not only while the form is open.
+                            attach: { kind: 'line', externalId: `${inspectionExternalId}_${q.questionIdExternal.replace(/[^a-zA-Z0-9_-]/g, '_')}__${inst.instanceKey.replace(/[^a-zA-Z0-9_-]/g, '_')}`, field: 'photo_urls' },
+                          })}
                           propertyName={propertyName}
                           propertyRecordId={propertyRecordId}
                           plainStyle={scopeStyle}

@@ -346,7 +346,18 @@ export function QcReinspectForm(props: Props) {
   // signal and returns a draft URL, tagged to the camera's active section so it
   // re-attaches on sync. cameraKey tracks the room being shot.
   const uploadHelper = useCallback(
-    (file: File) => uploadPhotoOrQueue(file, props.inspectionRecordId, cameraKey || ''),
+    (file: File) => {
+      const key = cameraKey || '';
+      // Durable background attach (same mechanism as scope/question): the QC
+      // after-photo's section_photo record is keyed deterministically (matches
+      // persistAfterPhotos). The server's section attach updates ONLY the photo
+      // list, so the room's pass/fail + note are preserved. `key` is
+      // "section||location".
+      const [section, location] = key.split('||');
+      return uploadPhotoOrQueue(file, props.inspectionRecordId, key, {
+        attach: { kind: 'section', externalId: `QCAFTER-${props.inspectionRecordId}-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}`, section: section || '', location: location || '', summaryLabel: section || '' },
+      });
+    },
     [props.inspectionRecordId, cameraKey],
   );
 

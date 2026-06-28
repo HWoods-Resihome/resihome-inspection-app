@@ -109,25 +109,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // kind === 'section'
-    const cur = existing ? (existing.photoUrls || []) : [];
-    const next = nextList(cur);
-    if (existing && !next) return res.status(200).json({ ok: true, alreadyAttached: true });
-    const photoUrls = next || [url];
+    if (existing) {
+      const next = nextList(existing.photoUrls || []);
+      if (!next) return res.status(200).json({ ok: true, alreadyAttached: true });
+      // Update ONLY the photo list — preserve section/location AND any other fields
+      // on the record (notably the QC after-photo's pass_fail + room note, which a
+      // full rebuild would blank).
+      const results = await upsertAnswers(id, [{
+        recordId: existing.recordId,
+        answerProps: { answer_id_external: externalId, photo_urls: joinPhotoUrls(next), photo_count: next.length },
+      }]);
+      const failed = results.find((r) => r.failed);
+      if (failed) return res.status(502).json({ ok: false, error: failed.reason || 'attach failed' });
+      return res.status(200).json({ ok: true });
+    }
+    // No record yet → CREATE one with this photo (upsertAnswers dedupes by external id).
     const props = buildSectionPhotoAnswerProps({
       answerIdExternal: externalId,
-      section: String(target.section || existing?.section || ''),
-      summaryLabel: String(target.summaryLabel || target.section || existing?.section || ''),
-      location: target.location != null ? String(target.location) : (existing?.location || null),
-      photoUrls,
+      section: String(target.section || ''),
+      summaryLabel: String(target.summaryLabel || target.section || ''),
+      location: target.location != null ? String(target.location) : null,
+      photoUrls: [url],
     });
-    const results = await upsertAnswers(id, [{
-      recordId: existing?.recordId,           // PATCH if it exists; else CREATE (upsertAnswers dedupes by external id)
-      answerProps: props,
-      questionHubspotRecordId: null,
-    }]);
+    const results = await upsertAnswers(id, [{ answerProps: props, questionHubspotRecordId: null }]);
     const failed = results.find((r) => r.failed);
     if (failed) return res.status(502).json({ ok: false, error: failed.reason || 'attach failed' });
-    return res.status(200).json({ ok: true, created: !existing });
+    return res.status(200).json({ ok: true, created: true });
   } catch (e: any) {
     console.error(`[attach-photo] ${id} failed:`, e);
     const upstream = (e as any)?.status;

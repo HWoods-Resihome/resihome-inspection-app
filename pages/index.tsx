@@ -456,7 +456,14 @@ export default function Home() {
     // (e.g. `regions` after that filter shipped). Always coerce to the full shape
     // so `.map` can never hit undefined and crash the whole page.
     const norm = (f: any) => ({ inspectors: f?.inspectors || [], templates: f?.templates || [], regions: f?.regions || [] });
-    const cached = lsRead(FACETS_CACHE)[facetQuery];
+    const allCached = lsRead(FACETS_CACHE);
+    // Prefer this query's cached facets; offline (or first paint of a new filter
+    // combo) fall back to the MOST-RECENTLY-cached facets of ANY query so the
+    // dropdowns are never empty — otherwise the filter options show nothing with
+    // no service. The live fetch below refines them when it lands.
+    const cached = allCached[facetQuery]
+      || Object.values(allCached).sort((a, b) => (b?.at || 0) - (a?.at || 0))
+        .find((c) => c?.d && ((c.d.inspectors || []).length || (c.d.templates || []).length || (c.d.regions || []).length));
     if (cached?.d) setFacets(norm(cached.d));
     const t = setTimeout(async () => {
       try {

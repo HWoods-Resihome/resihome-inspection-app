@@ -57,11 +57,12 @@ export type QueuedPhoto = {
   // even after a reload drops it from React state — otherwise after-photos that
   // upload while the form re-mounted get orphaned (uploaded but never attached).
   lineField?: 'photos' | 'after';
-  // Durable background ATTACH descriptor (section photos): lets the photo be
-  // attached to its section_photo record server-side from any page / device,
-  // without the form open. Line photos derive their attach target from
-  // lineExternalId + lineField, so they don't need this.
-  attach?: { kind: 'section'; externalId: string; section?: string; location?: string; summaryLabel?: string };
+  // Durable background ATTACH descriptor: lets the photo attach to its record
+  // server-side from any page / device, without the form open. 'section' →
+  // section_photo (QC after-photos use this too); 'line' → a qa/rate_card_line
+  // answer's photo_urls (inline per-question photos). Scope line/after photos
+  // instead derive their target from lineExternalId + lineField.
+  attach?: { kind: 'section' | 'line'; externalId: string; field?: 'photo_urls' | 'after_photo_urls'; section?: string; location?: string; summaryLabel?: string };
   createdAt: number;
   attempts?: number;     // failed upload attempts (telemetry only — NEVER dropped)
   // Set by the service worker's Background Sync handler once the blob has been
@@ -714,7 +715,7 @@ async function doFlushQueuedPhotos(
         } else if (rec.attach && rec.attach.externalId) {
           enqueuePhotoAttach({
             inspectionRecordId: rec.inspectionRecordId, url: newUrl, replacesUrl: rec.replacesUrl,
-            target: { kind: 'section', externalId: rec.attach.externalId, field: 'photo_urls', section: rec.attach.section, location: rec.attach.location, summaryLabel: rec.attach.summaryLabel },
+            target: { kind: rec.attach.kind, externalId: rec.attach.externalId, field: rec.attach.field || 'photo_urls', section: rec.attach.section, location: rec.attach.location, summaryLabel: rec.attach.summaryLabel },
           });
         }
       } catch { /* best-effort — the form's live attach still runs when open */ }
