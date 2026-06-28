@@ -1246,6 +1246,14 @@ export function QuestionForm({
     }, 60);
   }
 
+  // When a maintenance ticket is being raised, the free-text "Additional Comments"
+  // question becomes OPTIONAL — its content is redundant with the required ticket
+  // description. Used by BOTH submit validation AND the progress counter so the
+  // two never disagree (a completed inspection showing e.g. "19/20" because the
+  // counter still required a comment the submit gate had already waived).
+  const isCommentExemptByTicket = (q: Question) =>
+    maintTicketEligible && maintTicketWanted === 'Yes' && /additional\s*comment/i.test(q.questionText || '');
+
   // Per-instance validation. Iterates instances in order so errors surface from top.
   function validate(): { message: string; scrollToDomId: string; instanceKey: string } | null {
     for (const inst of sectionInstances) {
@@ -1254,11 +1262,9 @@ export function QuestionForm({
         // Hidden conditional widget fields / occupied-hidden questions aren't required.
         if (!isWidgetVisible(q.questionIdExternal, inst.instanceKey)) continue;
         if (isHiddenWhenOccupied(q)) continue;
-        // When a maintenance ticket is being raised (Yes + the required ticket
-        // description captures the detail), the free-text "Additional Comments"
-        // question becomes optional — its content is redundant with the ticket.
-        if (maintTicketEligible && maintTicketWanted === 'Yes'
-            && /additional\s*comment/i.test(q.questionText || '')) continue;
+        // When a maintenance ticket is being raised, "Additional Comments" is
+        // optional (see isCommentExemptByTicket).
+        if (isCommentExemptByTicket(q)) continue;
         const key = answerKey(q.questionIdExternal, inst.instanceKey);
         const a = answers[key];
         const locTag = inst.location ? `${inst.location} -> ` : `${inst.displayName} -> `;
@@ -1657,41 +1663,10 @@ export function QuestionForm({
     }
   }
 
-  // Completion progress per instance
-  const sectionProgress = useMemo(() => {
-    const out: Record<string, { completed: number; total: number }> = {};
-    for (const inst of sectionInstances) {
-      let completed = 0;
-      let total = 0;
-      for (const q of inst.questions) {
-        if (!isWidgetVisible(q.questionIdExternal, inst.instanceKey)) continue;
-        if (isHiddenWhenOccupied(q)) continue;
-        // Optional questions don't count toward the progress total — e.g. the
-        // all-optional Review / Sign-Off section should not show "0/1".
-        if (!q.isRequired) continue;
-        total++;
-        const a = answers[answerKey(q.questionIdExternal, inst.instanceKey)];
-        const done = q.responseType === 'photo_only'
-          ? (a?.photoUrls?.length || 0) > 0
-          : !!a?.answerValue;
-        if (done) completed++;
-      }
-      out[inst.instanceKey] = { completed, total };
-    }
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionInstances, answers]);
-
-  // Roll the reused Scope sections (HVAC/Smart Home/Utilities) into the header
-  // total alongside the question sections.
-  const fcTotals = fcEnabled
-    ? fcGateIds.reduce((acc, id) => {
-        const c = fcSectionCounts(fcAnswers, fcCtx, id, { skipLineRules: true });
-        return { completed: acc.completed + c.completed, total: acc.total + c.total };
-      }, { completed: 0, total: 0 })
-    : { completed: 0, total: 0 };
-  const totalCompleted = Object.values(sectionProgress).reduce((acc, s) => acc + s.completed, 0) + fcTotals.completed;
-  const totalQuestions = Object.values(sectionProgress).reduce((acc, s) => acc + s.total, 0) + fcTotals.total;
+  // NOTE: completion progress + header totals are computed further down, AFTER
+  // maintTicketEligible is declared — they call isCommentExemptByTicket (which
+  // reads maintTicketEligible), and reading it here during render would hit a
+  // temporal-dead-zone error since it's defined later.
 
   // Live Pass / Fail tally across all answered Good/Fail questions — shown in
   // the header by the address and updated as the inspector makes selections.
@@ -1734,6 +1709,47 @@ export function QuestionForm({
   const maintTicketEligible =
     (templateType === 'leasing_agent_1099_property_inspection' || isVacancy)
     && overallResult === 'fail';
+
+  // Completion progress per instance. Lives here (after maintTicketEligible) so it
+  // can apply the SAME maintenance-ticket comment exemption the submit gate uses —
+  // otherwise a completed/submittable inspection shows e.g. "19/20".
+  const sectionProgress = useMemo(() => {
+    const out: Record<string, { completed: number; total: number }> = {};
+    for (const inst of sectionInstances) {
+      let completed = 0;
+      let total = 0;
+      for (const q of inst.questions) {
+        if (!isWidgetVisible(q.questionIdExternal, inst.instanceKey)) continue;
+        if (isHiddenWhenOccupied(q)) continue;
+        // Optional questions don't count toward the progress total — e.g. the
+        // all-optional Review / Sign-Off section should not show "0/1".
+        if (!q.isRequired) continue;
+        // ...and a comment the submit gate waived (maintenance ticket raised) must
+        // not be counted either, or a submittable/completed inspection reads "19/20".
+        if (isCommentExemptByTicket(q)) continue;
+        total++;
+        const a = answers[answerKey(q.questionIdExternal, inst.instanceKey)];
+        const done = q.responseType === 'photo_only'
+          ? (a?.photoUrls?.length || 0) > 0
+          : !!a?.answerValue;
+        if (done) completed++;
+      }
+      out[inst.instanceKey] = { completed, total };
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionInstances, answers, maintTicketEligible, maintTicketWanted]);
+
+  // Roll the reused Scope sections (HVAC/Smart Home/Utilities) into the header
+  // total alongside the question sections.
+  const fcTotals = fcEnabled
+    ? fcGateIds.reduce((acc, id) => {
+        const c = fcSectionCounts(fcAnswers, fcCtx, id, { skipLineRules: true });
+        return { completed: acc.completed + c.completed, total: acc.total + c.total };
+      }, { completed: 0, total: 0 })
+    : { completed: 0, total: 0 };
+  const totalCompleted = Object.values(sectionProgress).reduce((acc, s) => acc + s.completed, 0) + fcTotals.completed;
+  const totalQuestions = Object.values(sectionProgress).reduce((acc, s) => acc + s.total, 0) + fcTotals.total;
   // The failed sign-off question's id — the maintenance-ticket widget renders
   // directly under it (above Additional Comments), in line with the Fail tap.
   const summaryFailQuestionId: string | null = useMemo(() => {
