@@ -400,12 +400,15 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-fetch when the user returns to this tab (app switching, alt-tab). Goes
-  // through the cache + server single-flight (NOT a forced refresh).
+  // Re-fetch when the user returns to this tab (app switching, alt-tab) OR when
+  // connectivity returns. Without the `online` handler, a list that failed to
+  // load offline stayed blank forever once signal came back (the page never
+  // re-tried). Goes through the cache + server single-flight (not a forced refresh).
   useEffect(() => {
-    function onFocus() { void load(); }
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    function reload() { void load(); }
+    window.addEventListener('focus', reload);
+    window.addEventListener('online', reload);
+    return () => { window.removeEventListener('focus', reload); window.removeEventListener('online', reload); };
   }, [load]);
 
   // Close the Sort dropdown on an outside click / Escape.

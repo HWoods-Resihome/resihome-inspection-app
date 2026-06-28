@@ -70,11 +70,15 @@ export function countPhotoAttach(inspectionRecordId?: string): number {
  * Online-only; never throws. Drops an entry only on a permanent 4xx (so a poison
  * instruction can't wedge the queue) — transient failures stay and retry.
  */
-export async function drainPhotoAttachOutbox(): Promise<{ done: number; remaining: number }> {
+export async function drainPhotoAttachOutbox(opts?: { skipInspectionIds?: Set<string> }): Promise<{ done: number; remaining: number }> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return { done: 0, remaining: read().length };
+  const skip = opts?.skipInspectionIds;
   const list = read().sort((a, b) => a.createdAt - b.createdAt);
   let done = 0;
   for (const e of list) {
+    // Skip the currently-open inspection — its form is the sole writer of those
+    // records; the entry stays queued and attaches (idempotently) after they leave.
+    if (skip && skip.has(e.inspectionRecordId)) continue;
     let res: Response;
     try {
       res = await fetch(`/api/inspections/${e.inspectionRecordId}/attach-photo`, {

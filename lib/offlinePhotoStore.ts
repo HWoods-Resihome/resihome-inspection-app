@@ -525,6 +525,25 @@ export async function uploadVideoEntryOrQueue(
   return makeVideoEntry(pUrl, vUrl);
 }
 
+// Inspection ids whose FORM is currently mounted. The global background driver
+// must NOT flush/attach these — the open form is the sole writer of its records
+// (it swaps draft→real in state and writes the FULL photo list). A background
+// no-op flush would delete the queue record without the form swapping its state,
+// and the form's next full-list save (which strips blob: drafts) would then
+// OVERWRITE the just-attached photo — i.e. the photo disappears. The page
+// registers its inspection here on mount/unmount.
+const activeFormInspections = new Set<string>();
+export function setInspectionFormActive(id: string, active: boolean): void {
+  if (!id) return;
+  if (active) activeFormInspections.add(id); else activeFormInspections.delete(id);
+}
+export function isInspectionFormActive(id: string): boolean {
+  return activeFormInspections.has(id);
+}
+export function getActiveFormInspectionIds(): Set<string> {
+  return new Set(activeFormInspections);
+}
+
 /** Distinct inspection ids that currently have queued (un-uploaded) photos.
  *  Lets the global background driver upload photos for EVERY inspection from any
  *  page — the only background-upload path on iOS, which has no SW Background Sync. */

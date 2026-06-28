@@ -16,6 +16,7 @@ import {
 import { getGeoFix } from '@/lib/evidenceStamp';
 import { openPdf } from '@/lib/pdfViewerBus';
 import { lockRingFromProperty } from '@/components/UnlockButton';
+import { setInspectionFormActive } from '@/lib/offlinePhotoStore';
 import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
 
 
@@ -117,6 +118,15 @@ export default function ExistingInspection() {
   // Clean short links (resolve to the real files) for downloads — covers all
   // templates. Computed server-side; null until loaded.
   const [shareLinks, setShareLinks] = useState<ShareLinks | null>(null);
+
+  // Mark this inspection's form as ACTIVE while it's open, so the global
+  // background sync never flushes/attaches its photos behind the form's back
+  // (the form is the sole writer of its records — see setInspectionFormActive).
+  useEffect(() => {
+    if (!inspectionId) return;
+    setInspectionFormActive(inspectionId, true);
+    return () => setInspectionFormActive(inspectionId, false);
+  }, [inspectionId]);
 
   // Load inspection + answers
   useEffect(() => {
