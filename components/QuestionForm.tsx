@@ -819,7 +819,15 @@ export function QuestionForm({
         },
         (current) => setUploadingSection((prev) => prev ? { ...prev, current } : prev),
         // Offline-aware: caches to IndexedDB on weak signal (draft), syncs later.
-        (file) => uploadPhotoOrQueue(file, inspectionRecordId, instanceKey),
+        // The `attach` descriptor (same record the section-photo autosave writes:
+        // `${inspExt}_sp_${instanceKey}`) lets the photo attach to its record in
+        // the BACKGROUND via the durable attach outbox — even after Save & Close.
+        (file) => {
+          const inst = sectionInstances.find((x) => x.instanceKey === instanceKey);
+          return uploadPhotoOrQueue(file, inspectionRecordId, instanceKey, {
+            attach: { kind: 'section', externalId: `${inspectionExternalId}_sp_${instanceKey.replace(/[^a-zA-Z0-9_-]/g, '_')}`, section: inst?.baseSectionName, location: inst?.location, summaryLabel: inst?.displayName },
+          });
+        },
       );
       if (failed > 0) {
         // Show the first error reason so the inspector knows WHY it failed

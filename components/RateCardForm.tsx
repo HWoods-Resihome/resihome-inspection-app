@@ -2214,8 +2214,16 @@ export function RateCardForm(props: RateCardFormProps) {
         },
         (current, total) => setUploadingSection({ sectionId, current, total }),
         // Queue-aware uploader: offline captures are stored locally (as drafts)
-        // and returned as a blob: URL for immediate display; they sync later.
-        (file) => uploadPhotoOrQueue(file, props.inspectionRecordId, sectionId),
+        // and returned as a blob: URL for immediate display; they sync later. The
+        // `attach` descriptor lets the photo attach to its section_photo record in
+        // the BACKGROUND (any page / after leaving the form), via the durable
+        // attach outbox — keyed to the SAME record savePhotosForSection writes.
+        (file) => {
+          const s = sections.find((x) => x.id === sectionId);
+          return uploadPhotoOrQueue(file, props.inspectionRecordId, sectionId, {
+            attach: { kind: 'section', externalId: `SECTIONPHOTO-${props.inspectionRecordId}-${sectionId}`, section: s?.label, location: s?.location, summaryLabel: s?.label },
+          });
+        },
       );
       if (failed > 0) {
         const reason = errors[0] ? `\n\nReason: ${errors[0]}` : '';

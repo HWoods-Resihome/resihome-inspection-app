@@ -20,7 +20,8 @@
  * steady interval. Online-only and single-flight so it never piles on.
  */
 import { flushOutbox } from '@/lib/offlineOutbox';
-import { requestPhotoBackgroundSync } from '@/lib/offlinePhotoStore';
+import { requestPhotoBackgroundSync, queuedInspectionIds, flushQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
 
 let installed = false;
 let inFlight = false;
@@ -33,9 +34,26 @@ async function tick(): Promise<void> {
   try {
     // Drain queued answer/line/section saves (all inspections, idempotent).
     await flushOutbox().catch(() => { /* best-effort; retries next tick */ });
-    // Nudge the service worker to upload any queued photo bytes in the
-    // background (works with the tab closed on Chromium). Attach happens when the
-    // inspection is next opened.
+
+    // Upload queued PHOTO bytes for EVERY inspection from any page — not just the
+    // open form. This is the only background-upload path on iOS (no SW Background
+    // Sync there). Safe now because the upload records a DURABLE attach instruction
+    // (finishSynced → photo-attach outbox) before deleting the queue record, so a
+    // no-op onSynced here can't orphan the photo; the open form (if any) coalesces
+    // on the same per-inspection flush and self-heals its grid via notifyPhotoSynced.
+    try {
+      const ids = await queuedInspectionIds();
+      for (const inspId of ids) {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
+        await flushQueuedPhotos(inspId, () => { /* attach handled durably via the outbox */ }).catch(() => {});
+      }
+    } catch { /* best-effort */ }
+
+    // Attach uploaded photos to their records server-side (section/line), from any
+    // page — so photos land on the record even after leaving the form. Idempotent.
+    await drainPhotoAttachOutbox().catch(() => { /* best-effort; retries next tick */ });
+    // Also nudge the SW to upload with the tab CLOSED (Chromium only; no-op on iOS,
+    // where the foreground pass above is the background-upload path).
     void requestPhotoBackgroundSync();
   } finally {
     inFlight = false;

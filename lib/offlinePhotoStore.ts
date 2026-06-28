@@ -19,6 +19,7 @@ import { makeVideoEntry } from '@/lib/media';
 import { isQuotaError, StorageFullError } from '@/lib/storageQuota';
 import { registerSyncedBlob, registerDraftFullRes, clearDraftFullRes } from '@/lib/photoDisplay';
 import { isAnyCameraOpen, subscribeCameraOpen } from '@/lib/cameraOpenState';
+import { enqueuePhotoAttach } from '@/lib/photoAttachOutbox';
 
 // iOS/iPadOS WebKit (incl. Chrome on iOS, which is WebKit). Several canvas/bitmap
 // paths misbehave here, so we branch on it below.
@@ -56,6 +57,11 @@ export type QueuedPhoto = {
   // even after a reload drops it from React state — otherwise after-photos that
   // upload while the form re-mounted get orphaned (uploaded but never attached).
   lineField?: 'photos' | 'after';
+  // Durable background ATTACH descriptor (section photos): lets the photo be
+  // attached to its section_photo record server-side from any page / device,
+  // without the form open. Line photos derive their attach target from
+  // lineExternalId + lineField, so they don't need this.
+  attach?: { kind: 'section'; externalId: string; section?: string; location?: string; summaryLabel?: string };
   createdAt: number;
   attempts?: number;     // failed upload attempts (telemetry only — NEVER dropped)
   // Set by the service worker's Background Sync handler once the blob has been
@@ -373,7 +379,7 @@ export async function uploadPhotoOrQueue(
   file: File,
   inspectionRecordId: string,
   sectionId: string,
-  opts?: { replacesUrl?: string; lineExternalId?: string; lineField?: 'photos' | 'after' },
+  opts?: { replacesUrl?: string; lineExternalId?: string; lineField?: 'photos' | 'after'; attach?: QueuedPhoto['attach'] },
 ): Promise<string> {
   const blob = await compressToJpeg(file);
   const filename = toJpegName(file.name);
@@ -386,7 +392,7 @@ export async function uploadPhotoOrQueue(
     const bytes = await blob.arrayBuffer();
     const rec: QueuedPhoto = {
       localId, inspectionRecordId, sectionId, kind: 'photo', bytes, filename,
-      replacesUrl: opts?.replacesUrl, lineExternalId: opts?.lineExternalId, lineField: opts?.lineField, createdAt: Date.now(),
+      replacesUrl: opts?.replacesUrl, lineExternalId: opts?.lineExternalId, lineField: opts?.lineField, attach: opts?.attach, createdAt: Date.now(),
     };
     // Persist durably in the BACKGROUND. The capture (and the camera's "Done")
     // must NEVER wait on — or fail from — a stalled IndexedDB write: the IDB ops
@@ -517,6 +523,14 @@ export async function uploadVideoEntryOrQueue(
   }
   const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(posterBlob, filename, { attempts: 3, timeoutMs: 20000 }), uploadVideo(videoFile)]);
   return makeVideoEntry(pUrl, vUrl);
+}
+
+/** Distinct inspection ids that currently have queued (un-uploaded) photos.
+ *  Lets the global background driver upload photos for EVERY inspection from any
+ *  page — the only background-upload path on iOS, which has no SW Background Sync. */
+export async function queuedInspectionIds(): Promise<string[]> {
+  const all = await listQueueMeta();
+  return Array.from(new Set(all.map((r) => r.inspectionRecordId).filter(Boolean)));
 }
 
 export async function countQueuedPhotos(inspectionRecordId: string): Promise<number> {
@@ -656,6 +670,30 @@ async function doFlushQueuedPhotos(
   const finishSynced = async (rec: QueuedPhotoMeta, newUrl: string) => {
     const entry = urlByLocalId.get(rec.localId);
     const oldUrl = entry?.displayUrl || '';
+    // Durable, form-independent ATTACH: record the instruction the MOMENT bytes
+    // upload — BEFORE deleting the queue record — so the photo lands on its record
+    // even if the inspector has left the form (the global driver replays it). Line
+    // photos derive the target from lineExternalId + lineField; section photos
+    // carry an explicit descriptor (rec.attach). FC photos are attached by the
+    // open form (their swap maps live), so we skip them here. Idempotent server-
+    // side, so this never double-adds alongside the form's live attach.
+    // '__final_checklist__' is the FC photo section tag (mirrors the forms' local
+    // FC_PHOTO_SECTION constant); inlined here to avoid importing a form module.
+    if (rec.kind !== 'video' && rec.sectionId !== '__final_checklist__') {
+      try {
+        if (rec.lineExternalId) {
+          enqueuePhotoAttach({
+            inspectionRecordId: rec.inspectionRecordId, url: newUrl, replacesUrl: rec.replacesUrl,
+            target: { kind: 'line', externalId: rec.lineExternalId, field: rec.lineField === 'after' ? 'after_photo_urls' : 'photo_urls' },
+          });
+        } else if (rec.attach && rec.attach.externalId) {
+          enqueuePhotoAttach({
+            inspectionRecordId: rec.inspectionRecordId, url: newUrl, replacesUrl: rec.replacesUrl,
+            target: { kind: 'section', externalId: rec.attach.externalId, field: 'photo_urls', section: rec.attach.section, location: rec.attach.location, summaryLabel: rec.attach.summaryLabel },
+          });
+        }
+      } catch { /* best-effort — the form's live attach still runs when open */ }
+    }
     memQueue.delete(rec.localId);     // clear the in-memory fallback copy (if any)
     try { await deleteRecord(rec.localId); } catch { /* memory-only record, or IDB gone — fine */ }
     onSynced({ localId: rec.localId, sectionId: rec.sectionId, oldUrl, newUrl, replacesUrl: rec.replacesUrl, lineExternalId: rec.lineExternalId, lineField: rec.lineField });
