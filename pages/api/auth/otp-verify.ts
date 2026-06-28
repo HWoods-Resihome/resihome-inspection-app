@@ -9,12 +9,18 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { verifyOtp, readOtpToken, clearOtpCookie, createSessionCookie, readReturnTo, clearReturnToCookie, type SessionUser } from '@/lib/auth';
 import { fetchActiveUsers } from '@/lib/hubspot';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  // Per-IP cap on code guesses (defense beyond the per-cookie 5-attempt counter —
+  // stops trying many codes across freshly-minted cookies from one IP).
+  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
+  if (enforceRateLimit(res, { key: ip, route: 'otp-verify', max: 30, windowMs: 15 * 60_000 })) return;
 
   const email = String(req.body?.email || '').trim().toLowerCase();
   const code = String(req.body?.code || '').trim();

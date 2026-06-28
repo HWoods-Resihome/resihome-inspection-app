@@ -11,6 +11,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { externalViewDenial } from '@/lib/inspectionGuard';
 import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
@@ -28,6 +29,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const id = req.query.id;
   if (typeof id !== 'string' || !id) {
     res.status(400).json({ error: 'Missing inspection id' });
+    return;
+  }
+
+  // Authorization: external (1099) users may only read their OWN 1099s, or a
+  // COMPLETED Scope/Re-Inspect in a state they've unlocked. Without this gate any
+  // authenticated user could read ANY QC inspection's line items, vendor pricing,
+  // and photos by guessing its id. No-op for internal staff (full access).
+  const denial = await externalViewDenial(session.email, id);
+  if (denial) {
+    res.status(403).json({ error: denial });
     return;
   }
 

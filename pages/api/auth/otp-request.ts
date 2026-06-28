@@ -13,8 +13,13 @@ import crypto from 'crypto';
 import { createOtpCookie } from '@/lib/auth';
 import { fetchActiveUsers } from '@/lib/hubspot';
 import { sendSystemEmail } from '@/lib/gmail';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 export const config = { maxDuration: 30 };
+
+function clientIp(req: NextApiRequest): string {
+  return String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -22,10 +27,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // Pre-auth route → throttle per IP so it can't be used to spam sign-in emails
+  // to any user, or to mint unlimited fresh codes to brute-force otp-verify.
+  if (enforceRateLimit(res, { key: clientIp(req), route: 'otp-request', max: 5, windowMs: 15 * 60_000 })) return;
+
   const email = String(req.body?.email || '').trim().toLowerCase();
   if (!email || !email.includes('@')) {
     return res.status(400).json({ error: 'Valid email is required' });
   }
+  // Also throttle per email so a botnet of IPs can't single out one mailbox.
+  if (enforceRateLimit(res, { key: email, route: 'otp-request-email', max: 5, windowMs: 15 * 60_000 })) return;
 
   // Only active HubSpot users may receive a code (mirrors /api/auth/login).
   let users;

@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { externalViewDenial } from '@/lib/inspectionGuard';
 import { fetchInspectionById } from '@/lib/hubspot';
 import { readAuditLog, type AuditEvent } from '@/lib/auditLog';
 
@@ -18,6 +19,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const { id } = req.query;
   if (!id || typeof id !== 'string') return res.status(400).json({ error: 'Missing inspection id' });
+
+  // Authorization: the audit trail exposes actor names/emails + approval
+  // timestamps. Gate external (1099) users to inspections they're allowed to
+  // view; no-op for internal staff (full access).
+  const denial = await externalViewDenial(session.email, id);
+  if (denial) return res.status(403).json({ error: denial });
 
   try {
     const [recorded, inspection] = await Promise.all([

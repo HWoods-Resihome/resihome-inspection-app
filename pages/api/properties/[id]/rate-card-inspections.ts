@@ -5,12 +5,20 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { isExternalEmail } from '@/lib/userAccess';
 import { fetchSourceRateCardInspections } from '@/lib/hubspot';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
   if (!session) {
     res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  // This only feeds the QC Turn Re-Inspect creation flow, which is internal-only.
+  // External (1099) users have no business enumerating a property's scope
+  // inspections, so deny them rather than leak inspection existence/metadata.
+  if (isExternalEmail(session.email)) {
+    res.status(403).json({ error: 'Not authorized.' });
     return;
   }
   const id = req.query.id;

@@ -14,6 +14,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import sharp from 'sharp';
 import { getSessionFromRequest } from '@/lib/auth';
+import { isExternalEmail } from '@/lib/userAccess';
 import { recordAiUsage } from '@/lib/aiUsage';
 import { matchCatalog } from '@/lib/voiceCatalogMatch';
 import { calculateLine } from '@/lib/rateCardMath';
@@ -197,6 +198,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const session = await getSessionFromRequest(req);
   if (!session) return res.status(401).json({ error: 'Not authenticated' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  // AI Scope Review is an internal Scope Rate Card tool. External (1099) users
+  // have no scope workflow here, so deny them — correct scoping AND a guard
+  // against an external account driving (paid) AI calls.
+  if (isExternalEmail(session.email)) return res.status(403).json({ error: 'Not authorized.' });
 
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');

@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { updateProperty } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
+import { isExternalEmail } from '@/lib/userAccess';
 
 /**
  * Write the Final Checklist's confirmed air-filter quantity/types back onto the
@@ -16,6 +17,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const { id } = req.query;
   if (!id || typeof id !== 'string') return res.status(400).json({ error: 'Missing property id' });
   if (req.method !== 'PATCH') return res.status(405).json({ error: 'Method not allowed' });
+  // Final Checklist (Scope Rate Card) is internal-only; external (1099) users
+  // must not write property fields. No-op for internal staff.
+  if (isExternalEmail(session.email)) return res.status(403).json({ error: 'Not authorized.' });
 
   try {
     const body = req.body || {};

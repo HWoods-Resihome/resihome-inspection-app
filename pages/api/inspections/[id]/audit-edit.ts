@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { recordAuditEvent, readAuditLog } from '@/lib/auditLog';
 
 /**
@@ -23,6 +24,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const { id } = req.query;
   if (!id || typeof id !== 'string') return res.status(400).json({ error: 'Missing inspection id' });
+
+  // Only let a user mark an edit on an inspection they can actually write — stops
+  // an external account writing spurious edit events into another inspection's
+  // audit trail. No-op for internal staff.
+  const denial = await externalWriteDenial(session.email, id);
+  if (denial) return res.status(403).json({ error: denial });
 
   try {
     // Skip if this actor already logged an edit very recently.
