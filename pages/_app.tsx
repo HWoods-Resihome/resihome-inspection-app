@@ -12,6 +12,7 @@ import { installSessionGuard } from '@/lib/sessionGuard';
 import { registerServiceWorker } from '@/lib/useAppUpdate';
 import { installOAuthBridge, installPushBridge, primeLocationPermissionNative, installNativeBackGuard } from '@/lib/nativeBridge';
 import { initPushOnLoad } from '@/lib/pushClient';
+import { installGlobalSync } from '@/lib/globalSync';
 import { Raleway } from 'next/font/google';
 import '../styles/globals.css';
 
@@ -60,6 +61,10 @@ export default function App({ Component, pageProps }: AppProps) {
     // leave the app from the home screen. No-op on web/PWA. Works with the in-app
     // PDF viewer's / camera's history-backed close.
     installNativeBackGuard();
+    // Global background sync (any page): drain queued answer/line/section edits
+    // and nudge queued photo uploads, so offline work syncs the moment signal
+    // returns — not only while an inspection form is open.
+    installGlobalSync();
   }, []);
 
   return (
