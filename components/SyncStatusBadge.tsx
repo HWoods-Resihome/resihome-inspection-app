@@ -62,7 +62,7 @@ export function SyncStatusBadge() {
     ? 'Synced ✓'
     : online
       ? `Syncing ${pending} item${pending === 1 ? '' : 's'}…`
-      : `${pending} item${pending === 1 ? '' : 's'} saved offline — will sync`;
+      : `${pending} item${pending === 1 ? '' : 's'} saved offline`;
 
   return (
     <div

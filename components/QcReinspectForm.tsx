@@ -689,22 +689,32 @@ export function QcReinspectForm(props: Props) {
       // Leaving 'fail' clears the failure note (it no longer applies).
       ? { ...l, passFail: next, qcFailureNote: next === 'fail' ? l.qcFailureNote : '' }
       : l)));
+    const body = {
+      upserts: [{ recordId: line.recordId, answerProps: { pass_fail: next }, questionHubspotRecordId: null }],
+      bumpStatusToInProgress: true,
+    };
     markSaving();
     try {
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          upserts: [{ recordId: line.recordId, answerProps: { pass_fail: next }, questionHubspotRecordId: null }],
-          bumpStatusToInProgress: true,
-        }),
+        body: JSON.stringify(body),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       markSaved();
     } catch (e: any) {
-      markSaveError();
-      setLines((cur) => cur.map((l) => (l.recordId === line.recordId ? { ...l, passFail: line.passFail } : l)));
-      void dialog.alert(`Could not save pass/fail: ${e?.message || e}`);
+      // Offline / transient: QUEUE the pass/fail durably so it syncs when back
+      // online, and KEEP the optimistic selection (reverting it silently lost the
+      // inspector's tap). The offline banner conveys "saved offline" — never pop
+      // a "Could not save" dialog (it's noise in the field on every weak request).
+      if (isOfflineError(e)) {
+        outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint: `/api/inspections/${props.inspectionRecordId}/answers`, method: 'POST', body, kind: 'line', meta: { line: { recordId: line.recordId } } });
+        markSaved();
+      } else {
+        // Genuine error: show the inline "Save failed" indicator only — no popup.
+        markSaveError();
+        setLines((cur) => cur.map((l) => (l.recordId === line.recordId ? { ...l, passFail: line.passFail } : l)));
+      }
     }
     if (next !== 'fail' && line.qcFailureNote) void saveFailureNote(line.recordId, ''); // best-effort clear
   }

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 // A small in-app replacement for window.alert / window.confirm so dialogs are
-// branded "ResiHome Inspections" instead of showing the browser origin
+// branded "ResiWalk" instead of showing the browser origin
 // (e.g. "resihome-inspection-app.vercel.app says"), which the browser forces
 // on native dialogs and cannot be changed.
 
@@ -125,7 +125,7 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
           >
             <div className="px-5 pt-4 pb-2 border-b border-gray-100">
               <div className="font-heading font-bold text-ink text-base">
-                ResiHome Inspection
+                ResiWalk
               </div>
             </div>
             <div className="px-5 py-4 text-sm text-gray-800 whitespace-pre-line leading-relaxed">
