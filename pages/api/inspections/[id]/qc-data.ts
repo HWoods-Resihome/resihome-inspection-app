@@ -163,6 +163,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // (beforePhotos was loaded above, in parallel with the answers + catalog.)
 
+    // Maintenance-ticket Q&A (the "new items not on the original scope" prompt),
+    // persisted as synthetic qa answers — restored so a reopened QC re-inspect
+    // shows the inspector's selection + description.
+    let maintTicketWanted = '';
+    let maintTicketDescription = '';
+    let maintTicketRequestRecordId = '';
+    let maintTicketDescriptionRecordId = '';
+    for (const a of answers) {
+      if (a.questionIdExternal === 'maint_ticket_request') { maintTicketWanted = (a.answerValue || '').trim(); maintTicketRequestRecordId = a.recordId || ''; }
+      else if (a.questionIdExternal === 'maint_ticket_description') { maintTicketDescription = a.answerValue || ''; maintTicketDescriptionRecordId = a.recordId || ''; }
+    }
+
     res.status(200).json({
       inspection,
       propertyRecordId: data.propertyIdRef,
@@ -177,6 +189,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       sections: roomSections,
       afterPhotos,
       beforePhotos,
+      maintTicketWanted,
+      maintTicketDescription,
+      maintTicketRequestRecordId,
+      maintTicketDescriptionRecordId,
     });
   } catch (e: any) {
     console.error(`[qc-data] GET ${id} failed:`, e);

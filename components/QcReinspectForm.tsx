@@ -128,12 +128,18 @@ export function QcReinspectForm(props: Props) {
   // Overall failure comment — REQUIRED when the verdict is Fail; carried onto the
   // QC PDF so the vendor/MC see why the re-inspect failed overall.
   const [overallNote, setOverallNote] = useState('');
+  // Maintenance ticket for NEW items found on re-inspect that were NOT on the
+  // original scope (distinct from line pass/fail — see the widget callout). Yes +
+  // a required description raises a maintenance ticket on submit.
+  const [maintTicketWanted, setMaintTicketWanted] = useState<'' | 'Yes' | 'No'>('');
+  const [maintTicketDescription, setMaintTicketDescription] = useState('');
+  const maintAnswerRecordIdsRef = useRef<{ request?: string; description?: string }>({});
   const [submitting, setSubmitting] = useState(false);
   // Synchronous re-entry guard: `disabled={submitting}` only blocks taps AFTER
   // the next render, so a fast double-tap could fire two qc-finalize POSTs in
   // the same frame. The ref blocks the second call immediately.
   const submittingRef = useRef(false);
-  const [result, setResult] = useState<null | { verdict: string; passCount: number; failCount: number; pdf: { name: string; url: string }; resultSync?: { verdictSynced: boolean; inspectionResultSynced: boolean; fields: string[] } }>(null);
+  const [result, setResult] = useState<null | { verdict: string; passCount: number; failCount: number; pdf: { name: string; url: string }; resultSync?: { verdictSynced: boolean; inspectionResultSynced: boolean; fields: string[] }; ticket?: { ok: boolean; url?: string | null; error?: string } | null }>(null);
   const [cameraKey, setCameraKey] = useState<string | null>(null);
   // While a camera overlay is open, don't render before/after thumbnails — keeps
   // them from sitting decoded in memory under the camera (the iOS WebKit crash).
@@ -215,6 +221,14 @@ export function QcReinspectForm(props: Props) {
         setRoomNote(roomN);
         if (d.qcVerdict === 'pass' || d.qcVerdict === 'fail') setVerdict(d.qcVerdict);
         if (typeof d.qcOverallNote === 'string') setOverallNote(d.qcOverallNote);
+        // Restore the maintenance-ticket selection + description on reopen.
+        if (/^y/i.test(d.maintTicketWanted || '')) setMaintTicketWanted('Yes');
+        else if (/^n/i.test(d.maintTicketWanted || '')) setMaintTicketWanted('No');
+        if (typeof d.maintTicketDescription === 'string') setMaintTicketDescription(d.maintTicketDescription);
+        maintAnswerRecordIdsRef.current = {
+          request: d.maintTicketRequestRecordId || undefined,
+          description: d.maintTicketDescriptionRecordId || undefined,
+        };
 
         // Default: all sections expanded so the reviewer can see every line
         // item at a glance. (They can still collapse individually.)
@@ -385,6 +399,41 @@ export function QcReinspectForm(props: Props) {
       setAfterPhotoRecordIds((cur) => ({ ...cur, [key]: newId }));
     }
     markSaved();
+  }
+
+  // Persist the maintenance-ticket Q&A (new-items-not-on-scope) as synthetic qa
+  // answers so they appear on the record and round-trip on reopen. Mirrors the
+  // 1099/vacancy maint_ticket_request / maint_ticket_description answers, keyed by
+  // record id (QC has no inspectionExternalId). Throws on failure so submit blocks.
+  async function persistMaintTicket(): Promise<void> {
+    if (maintTicketWanted !== 'Yes' && maintTicketWanted !== 'No') return; // no choice → nothing to save
+    const mk = (qid: 'maint_ticket_request' | 'maint_ticket_description', value: string, slot: 'request' | 'description') => ({
+      recordId: maintAnswerRecordIdsRef.current[slot] || undefined,
+      answerProps: {
+        answer_id_external: `QCMAINT-${props.inspectionRecordId}-${slot}`,
+        answer_type: 'qa',
+        section: 'Maintenance Ticket',
+        answer_summary: 'Maintenance Ticket / New items not on original scope',
+        answer_value: (value || '').slice(0, 65000),
+        question_id_external: qid,
+        submitted_at: new Date().toISOString(),
+      },
+      questionHubspotRecordId: null,
+    });
+    const upserts = [mk('maint_ticket_request', maintTicketWanted, 'request')];
+    if (maintTicketWanted === 'Yes' && maintTicketDescription.trim()) {
+      upserts.push(mk('maint_ticket_description', maintTicketDescription.trim(), 'description'));
+    }
+    const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ upserts, archives: [], bumpStatusToInProgress: true }),
+    });
+    if (!r.ok) throw new Error(`Save maintenance-ticket answer failed: HTTP ${r.status}`);
+    const data = await r.json().catch(() => ({} as any));
+    for (const res of (data.results || []) as Array<{ recordId: string; answerIdExternal: string }>) {
+      if (res.answerIdExternal?.endsWith('-request')) maintAnswerRecordIdsRef.current.request = res.recordId;
+      else if (res.answerIdExternal?.endsWith('-description')) maintAnswerRecordIdsRef.current.description = res.recordId;
+    }
   }
 
   async function addAfterPhotos(key: string, section: string, location: string, newUrls: string[]) {
@@ -711,6 +760,12 @@ export function QcReinspectForm(props: Props) {
       void dialog.alert('Add an overall failure comment explaining why the re-inspect failed — it’s included on the report.');
       return;
     }
+    // Maintenance ticket (new items not on the original scope): if they chose Yes,
+    // the description is required (it becomes the ticket body).
+    if (maintTicketWanted === 'Yes' && !maintTicketDescription.trim()) {
+      void dialog.alert('Enter the maintenance ticket description for the new item(s) found, or choose “No”.');
+      return;
+    }
     // Don't finalize while After photos are still uploading — qc-finalize re-reads
     // the answers from HubSpot to build the report, so a queued (unsynced) photo
     // would be missing from the record. Retry, then HARD-BLOCK while pending;
@@ -757,6 +812,9 @@ export function QcReinspectForm(props: Props) {
         const hasData = !!(roomVerdictRef.current[s.key] || (roomNoteRef.current[s.key] || '').trim() || (afterPhotosRef.current[s.key] || []).length);
         if (hasData) await persistAfterPhotos(s.key, s.section, s.location, afterPhotosRef.current[s.key] || []);
       }
+      // Persist the maintenance-ticket selection + description (new items not on
+      // the original scope) so it's on the record before finalize.
+      await persistMaintTicket();
     } catch (e: any) {
       void dialog.alert(`Could not save the latest room results before submitting (${e?.message || e}). Your inspection was NOT submitted — check your connection and try Submit again.`);
       return;
@@ -777,7 +835,23 @@ export function QcReinspectForm(props: Props) {
         body: JSON.stringify({ verdict, overallNote: verdict === 'fail' ? overallNote.trim() : '' }),
       });
       if (!r.ok) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t.slice(0, 300)}`); }
-      setResult(await r.json());
+      const finalizeData = await r.json();
+      // Raise a maintenance ticket for the NEW items (best-effort — never blocks
+      // completion). The QC is already finalized at this point; surface the result.
+      let ticket: { ok: boolean; url?: string | null; error?: string } | null = null;
+      if (maintTicketWanted === 'Yes' && maintTicketDescription.trim()) {
+        try {
+          const tr = await fetch(`/api/inspections/${props.inspectionRecordId}/create-inspection-ticket`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: maintTicketDescription.trim() }),
+          });
+          const td = await tr.json().catch(() => ({} as any));
+          ticket = td?.ok ? { ok: true, url: td.url } : { ok: false, error: td?.error || `HTTP ${tr.status}` };
+        } catch (e: any) {
+          ticket = { ok: false, error: String(e?.message || e).slice(0, 200) };
+        }
+      }
+      setResult({ ...finalizeData, ticket });
     } catch (e: any) {
       void dialog.alert(`Submit failed: ${e?.message || e}`);
     } finally {
@@ -1314,6 +1388,53 @@ export function QcReinspectForm(props: Props) {
         </div>
       )}
 
+      {/* Maintenance ticket — NEW items only (not on the original scope). Sits at
+          the very bottom, after the verdict. The callout is deliberately blunt:
+          this is NOT the place to re-report failed checklist items (those are
+          already tracked on the lines above) — it's ONLY for additional work
+          discovered on re-inspect that was never part of the original scope. */}
+      {!props.readOnly && (
+        <div className="border-2 border-amber-300 rounded-xl p-4 mb-4 bg-amber-50">
+          <div className="font-heading font-extrabold text-ink text-sm mb-1">⚠️ New Items Only — Maintenance Ticket</div>
+          <div className="text-[13px] text-amber-900 font-bold leading-snug mb-1">
+            Use this ONLY for new issues found during this re-inspect that were NOT on the original scope.
+          </div>
+          <div className="text-xs text-gray-700 leading-snug mb-3">
+            This is <b>not</b> about whether checklist items passed or failed — failed line items above are already tracked and do <b>not</b> need a ticket here. Raise a ticket only for additional work you discovered that wasn’t part of the original scope.
+          </div>
+          <div className="font-heading font-semibold text-ink text-sm mb-2">Submit a maintenance ticket for new items?</div>
+          <div className="flex gap-2">
+            {(['Yes', 'No'] as const).map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => { setMaintTicketWanted(opt); if (opt === 'No') setMaintTicketDescription(''); }}
+                className={`px-4 py-2 rounded-lg text-sm font-heading font-semibold border transition-colors ${
+                  maintTicketWanted === opt ? 'bg-brand text-white border-brand' : 'bg-white text-ink border-gray-300 hover:border-brand/50'
+                }`}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+          {maintTicketWanted === 'Yes' && (
+            <div className="mt-3">
+              <label className="block text-sm font-heading font-semibold text-ink mb-1.5">
+                Ticket description <span className="text-brand">*</span>
+              </label>
+              <textarea
+                value={maintTicketDescription}
+                onChange={(e) => setMaintTicketDescription(e.target.value)}
+                rows={3}
+                placeholder="Describe the NEW item(s) found that weren't on the original scope. This becomes the maintenance ticket."
+                className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base bg-white"
+              />
+              <div className="text-xs text-gray-500 mt-1">Required before you can submit.</div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Completed / read-only: show the recorded overall verdict (the editable
           selector above is hidden once submitted, so without this the inspector
           couldn't see whether the re-inspect passed or failed). */}
@@ -1332,6 +1453,17 @@ export function QcReinspectForm(props: Props) {
               <div className="text-[11px] font-heading font-semibold text-brand mb-1">Overall failure comment</div>
               <div className="text-sm text-gray-800 whitespace-pre-wrap border border-brand/30 bg-brand/5 rounded-lg p-2.5">{overallNote}</div>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Completed / read-only: the recorded maintenance-ticket selection. */}
+      {props.readOnly && (maintTicketWanted === 'Yes' || maintTicketWanted === 'No') && (
+        <div className="border-2 border-gray-200 rounded-xl p-4 mb-4">
+          <div className="text-sm font-bold text-gray-900 mb-2">Maintenance Ticket — New Items</div>
+          <div className="text-sm text-gray-800">{maintTicketWanted === 'Yes' ? 'Yes — ticket requested for new items' : 'No new items'}</div>
+          {maintTicketWanted === 'Yes' && maintTicketDescription.trim() && (
+            <div className="mt-2 text-sm text-gray-800 whitespace-pre-wrap border border-gray-200 bg-gray-50 rounded-lg p-2.5">{maintTicketDescription}</div>
           )}
         </div>
       )}
@@ -1424,6 +1556,20 @@ export function QcReinspectForm(props: Props) {
               <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
                 Heads up: the report saved, but the overall verdict couldn’t be written to the inspection
                 record (the QC result fields aren’t set up in HubSpot yet). Ask an admin to provision them.
+              </div>
+            )}
+            {result.ticket && (
+              <div className={`text-xs rounded-md px-3 py-2 mb-3 border ${result.ticket.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-red-50 border-red-200 text-red-900'}`}>
+                {result.ticket.ok ? (
+                  <>
+                    <span className="font-heading font-bold">Maintenance ticket created for the new items.</span>
+                    {result.ticket.url && (
+                      <a href={result.ticket.url} target="_blank" rel="noreferrer" className="text-brand underline block mt-1">View ticket in Maintenance system</a>
+                    )}
+                  </>
+                ) : (
+                  <><span className="font-heading font-bold">Maintenance ticket not created.</span> {result.ticket.error || 'Reason unknown.'} The QC is still completed; raise it manually if needed.</>
+                )}
               </div>
             )}
             <a
