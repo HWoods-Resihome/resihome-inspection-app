@@ -1663,6 +1663,33 @@ export function QuestionForm({
     }
   }
 
+  // Save & Close: flush answer edits, then WARN if photos are still only on THIS
+  // device. Queued photos live in this phone's IndexedDB and upload only while
+  // this inspection is open — so leaving with photos pending strands them off the
+  // record (they won't be on the report or show on another device). This is the
+  // "I took 20 photos, hit Save & Close, came back on my computer and they were
+  // gone" data loss. Let the inspector stay until uploads finish.
+  async function handleSaveAndClose() {
+    try { await autosave.flush(true); } catch (e) { console.error('Save & Close: flush failed', e); }
+    if (!readOnly) {
+      try { void runPhotoFlushRef.current(); } catch { /* kick uploads in the background */ }
+      let pending = 0;
+      try { pending = await countQueuedPhotos(inspectionRecordId); } catch { pending = 0; }
+      if (pending > 0) {
+        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+        const proceed = await dialog.confirm(
+          `${pending} photo${pending === 1 ? '' : 's'} ${pending === 1 ? "hasn't" : "haven't"} finished uploading and ${pending === 1 ? 'is' : 'are'} saved only on THIS device. ` +
+          (offline ? `You're offline. ` : '') +
+          `If you close now ${pending === 1 ? 'it' : 'they'} won't be on the report or visible on another device.\n\n` +
+          `Stay on this screen ${offline ? 'until you have signal' : 'a few more seconds'} to let ${pending === 1 ? 'it' : 'them'} finish uploading.`,
+          { confirmLabel: 'Close anyway', cancelLabel: 'Keep waiting' },
+        );
+        if (!proceed) return; // stay mounted so the queued photos can finish uploading
+      }
+    }
+    onCancel();
+  }
+
   // NOTE: completion progress + header totals are computed further down, AFTER
   // maintTicketEligible is declared — they call isCommentExemptByTicket (which
   // reads maintTicketEligible), and reading it here during render would hit a
@@ -1866,12 +1893,7 @@ export function QuestionForm({
           />
           <button
             type="button"
-            onClick={async () => {
-              if (!readOnly) {
-                try { await autosave.flush(true); } catch (e) { console.error('Back: flush failed', e); }
-              }
-              onCancel();
-            }}
+            onClick={() => { void handleSaveAndClose(); }}
             aria-label="Save and go back"
             className="inline-flex items-center justify-center w-8 h-8 text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white"
             title="Save and go back"
@@ -2292,14 +2314,7 @@ export function QuestionForm({
             {!readOnly && scopeStyle && (
               <button
                 type="button"
-                onClick={async () => {
-                  try {
-                    await autosave.flush(true);
-                  } catch (e) {
-                    console.error('Save & Close: flush failed', e);
-                  }
-                  onCancel();
-                }}
+                onClick={() => { void handleSaveAndClose(); }}
                 className="px-2.5 sm:px-3 py-2 border border-emerald-300 rounded-lg hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 font-heading font-semibold text-emerald-700 text-xs sm:text-sm transition-colors whitespace-nowrap"
                 title="Save any pending changes and return to the inspection list. Inspection stays In Progress."
               >
@@ -2312,17 +2327,7 @@ export function QuestionForm({
             {!readOnly && !scopeStyle && (
               <button
                 type="button"
-                onClick={async () => {
-                  // Force a final flush so the last 2 seconds of debounced edits get saved.
-                  // Inspection remains in current status (Scheduled or In Progress).
-                  try {
-                    await autosave.flush(true);
-                  } catch (e) {
-                    // Even if save fails, we should still leave -- alert and continue
-                    console.error('Save & Close: flush failed', e);
-                  }
-                  onCancel();
-                }}
+                onClick={() => { void handleSaveAndClose(); }}
                 className="px-2.5 sm:px-3 py-2 border border-emerald-300 rounded-lg hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:bg-emerald-700 active:border-emerald-700 font-heading font-semibold text-emerald-700 text-xs sm:text-sm transition-colors whitespace-nowrap"
                 title="Save any pending changes and return to the inspection list. Inspection stays In Progress."
               >
