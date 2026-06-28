@@ -243,18 +243,21 @@ export default function Home() {
 
   // Pre-cache active (non-completed) inspections for offline use, so the inspector
   // can open + work them in a dead zone they've never opened before. An EARLIER
-  // version of this was removed for firing dozens of HubSpot calls at once and
-  // tripping the account-wide rate limit; this one is safe by construction —
-  // online-only, throttled to once per 10 min (localStorage timestamp), capped at
-  // 25, and a SLOW SEQUENTIAL trickle (one detail fetch at a time, spaced out) so
-  // it never bursts HubSpot. See lib/precache.ts. Completed/cancelled are skipped.
+  // version was removed for tripping HubSpot's account-wide rate limit and
+  // breaking the list; this one is safe by construction — online-only, throttled
+  // to once per 10 min, capped + a slow sequential trickle, it ABORTS on any 429,
+  // and (here) only starts AFTER the live list has loaded so it never competes
+  // with or starves the list/saves/submit. See lib/precache.ts.
+  const precacheStartedRef = useRef(false);
   useEffect(() => {
+    if (precacheStartedRef.current) return;
+    if (loading || error) return;                         // wait for a clean list load
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-    // Start after the visible list + catalog warm above have had the first beat
-    // of bandwidth, then trickle in the background.
-    const t = setTimeout(() => { void precacheActiveInspections(); }, 3000);
+    precacheStartedRef.current = true;
+    // Give the loaded list + its count/facet calls room to settle first.
+    const t = setTimeout(() => { void precacheActiveInspections(); }, 6000);
     return () => clearTimeout(t);
-  }, []);
+  }, [loading, error]);
 
   // Pre-warm the AI assistants from the HOME screen — the first authenticated
   // page after login — so the heavy cold-start work (catalog embeddings, the
@@ -338,7 +341,13 @@ export default function Home() {
     const maxAttempts = hasCache ? 1 : 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const r = await fetch(`/api/inspections?${buildListParams(opts).toString()}`, { cache: 'no-store' });
+        // Hard timeout so a hung/slow request (cold instance, HubSpot rate-limit
+        // retrying server-side) can't strand the screen on "Loading…" forever —
+        // it aborts, then we retry / fall back to cache / surface an error.
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 15000);
+        const r = await fetch(`/api/inspections?${buildListParams(opts).toString()}`, { cache: 'no-store', signal: ctrl.signal })
+          .finally(() => clearTimeout(to));
         const data = await r.json();
         if (!data.error) {
           applyListData(data);

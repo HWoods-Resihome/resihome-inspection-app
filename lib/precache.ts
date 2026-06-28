@@ -25,14 +25,19 @@ const MIN_INTERVAL_MS = 10 * 60 * 1000;
 // localStorage is ~5MB/origin and each inspection payload (inspection + answers +
 // property context) can be tens-to-hundreds of KB, so cap how many we warm to
 // stay well under quota. The on-disk LRU (offlineCache INSP_MAX) holds the rest.
-const MAX_INSPECTIONS = 25;
-// Pace between per-inspection detail fetches. A PRIOR home-screen prefetch was
-// removed for firing dozens of heavy HubSpot calls AT ONCE and tripping the
-// account-wide rate limit (429s that even broke the list). So this version is a
-// deliberately SLOW, SEQUENTIAL trickle — one detail fetch at a time, spaced
-// out — which warms the cache over ~20s without ever bursting HubSpot.
-const PACE_MS = 500;
+// A PRIOR home-screen prefetch was removed for firing dozens of heavy HubSpot
+// calls and tripping the account-wide rate limit (429s that even broke the
+// list/saves/submit). So this version is conservative AND self-defending:
+//  - small cap + a SLOW sequential trickle (one detail fetch at a time, spaced),
+//  - it only starts AFTER the live list has loaded (never competes with it),
+//  - and it ABORTS for the rest of the session the moment ANY request comes back
+//    429 (rate limited), so it can never pile on and degrade the list/saves.
+const MAX_INSPECTIONS = 12;
+const PACE_MS = 1500;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Set when a request returns 429 — stops this session's pre-caching entirely so
+// it can't keep hammering an already-rate-limited account.
+let rateLimited = false;
 
 const SCOPE = 'pm_scope_rate_card';
 const QC = 'pm_turn_reinspect_qc';
@@ -40,8 +45,12 @@ const QC = 'pm_turn_reinspect_qc';
 let inFlight: Promise<void> | null = null;
 
 async function safeJson(url: string): Promise<any | null> {
+  if (rateLimited) return null;
   try {
     const r = await fetch(url, { cache: 'no-store' });
+    // Account-wide rate limit hit — stop ALL pre-caching this session so we don't
+    // make the list/saves/submit flaky by piling on.
+    if (r.status === 429) { rateLimited = true; return null; }
     if (!r.ok) return null;
     const d = await r.json();
     return d && !d.error ? d : null;
@@ -104,6 +113,7 @@ export async function precacheActiveInspections(opts?: { force?: boolean }): Pro
     // background trickle that never bursts HubSpot (see PACE_MS note above). Stops
     // early the moment the device drops offline.
     for (const t of targets) {
+      if (rateLimited) break; // account hit a 429 — back off entirely
       if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
       const id = String(t.recordId);
       const payload = await safeJson(`/api/inspections/${id}`);
