@@ -36,6 +36,7 @@ import { isFinalizeAdmin } from '@/lib/finalizeAccess';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
 import { isInternalResolution } from '@/lib/vendors';
 import { recordAuditEvent } from '@/lib/auditLog';
+import { reportServerError } from '@/lib/serverErrorReporter';
 import { beginFinalizeJob, completeFinalizeJob, type FinalizeMode } from '@/lib/finalizeJobs';
 import { sendPushToUser } from '@/lib/pushSender';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
@@ -938,6 +939,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (!inspectionData.propertyHbmmId || !Number.isFinite(hbmmId)) {
           console.warn('[finalize] maintenance ticket skipped — property has no hbmm_property_id.');
           ticketResult = { ok: false, configured: true, error: 'Property has no hbmm_property_id.' };
+        } else if (await (async () => {
+          // Tight re-read RIGHT before the irreversible create: the preflight
+          // marker was read seconds ago (before the whole PDF pipeline), so a
+          // CONCURRENT finalize (durable lock fails open / not configured) could
+          // have created the ticket in the meantime. Re-checking here shrinks the
+          // double-create window from the pipeline duration to ~milliseconds.
+          const fresh = await readInspectionProps(id, ['hbmm_ticket_id']).catch(() => null);
+          const freshId = Number(String(fresh?.hbmm_ticket_id || '').trim());
+          if (freshId && Number.isFinite(freshId)) {
+            console.log(`[finalize] maintenance ticket created concurrently (#${freshId}) — skipping re-create.`);
+            ticketResult = { ok: true, configured: true, ticketId: freshId } as CreateTicketResult;
+            return true; // already created — skip the create branch below
+          }
+          return false;
+        })()) {
+          // handled in the IIFE above (ticketResult set)
         } else {
           ticketResult = await createMaintenanceTicket({
             propertyId: hbmmId,
@@ -1153,7 +1170,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   } catch (e: any) {
     const elapsed = Date.now() - t0;
-    console.error(`[finalize] failed after ${elapsed}ms:`, e);
+    // Finalize is the most consequential server path — surface failures to the
+    // monitoring channel (with the phase it died in) instead of only the logs.
+    reportServerError(e, { route: 'POST /api/inspections/[id]/finalize', method: 'POST', userEmail: session.email, inspectionId: id, phase: finalizePhase, extra: { mode: finalizeMode, elapsedMs: elapsed } });
     void completeFinalizeJob(finalizeJobId, { inspectionId: id, mode: finalizeMode, status: 'failed', phase: finalizePhase, error: String(e?.message || e), elapsedMs: elapsed, actorEmail: session.email });
     return res.status(500).json({ error: 'Finalize failed. Please try again.', elapsedMs: elapsed });
   } finally {

@@ -87,10 +87,14 @@ export async function compressToJpeg(file: File): Promise<Blob> {
 export async function uploadJpegBlob(
   blob: Blob,
   filename: string,
-  opts?: { attempts?: number; timeoutMs?: number },
+  opts?: { attempts?: number; timeoutMs?: number; dedupeKey?: string },
 ): Promise<string> {
   const base64 = await fileToBase64(blob);
-  const payload = JSON.stringify({ filename, contentType: 'image/jpeg', base64 });
+  // dedupeKey (the photo's stable localId): the server folds it into the stored
+  // filename so a repeat upload of the SAME photo — a client-timeout retry, or
+  // the iOS native background uploader racing this foreground flush — resolves to
+  // the SAME hosted URL (HubSpot RETURN_EXISTING) instead of a second copy.
+  const payload = JSON.stringify({ filename, contentType: 'image/jpeg', base64, dedupeKey: opts?.dedupeKey });
   const attempts = Math.max(1, opts?.attempts ?? MAX_UPLOAD_ATTEMPTS);
   const timeoutMs = opts?.timeoutMs ?? UPLOAD_TIMEOUT_MS;
 

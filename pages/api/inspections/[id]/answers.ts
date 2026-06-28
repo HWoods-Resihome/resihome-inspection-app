@@ -10,6 +10,8 @@ import {
 } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
+import { enforceRateLimit } from '@/lib/rateLimit';
+import { reportServerError } from '@/lib/serverErrorReporter';
 
 export const config = {
   api: { bodyParser: { sizeLimit: '5mb' } },
@@ -36,6 +38,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // External (1099) users: only their 1099 inspections, and never once completed.
   const denial = await externalWriteDenial(session.email, id);
   if (denial) return res.status(403).json({ error: denial });
+
+  // Per-user autosave throttle (generous — autosave is debounced; this only
+  // catches a runaway loop hammering HubSpot). Keyed per inspection so editing
+  // two inspections doesn't share a budget.
+  if (enforceRateLimit(res, { key: `${session.email}:${id}`, route: 'answers', max: 600 })) return;
 
   try {
     const body = req.body as BodyShape;
@@ -106,7 +113,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     return res.status(200).json({ success: true, results: [...upsertResults, ...overLimit], elapsedMs: elapsed });
   } catch (e: any) {
-    console.error(`POST /api/inspections/${id}/answers failed:`, e);
+    reportServerError(e, { route: 'POST /api/inspections/[id]/answers', method: 'POST', userEmail: session.email, inspectionId: typeof id === 'string' ? id : undefined });
     // Surface HubSpot's validation detail (this is an internal staff write path,
     // so the real reason — e.g. which property/value was rejected — is far more
     // useful than a generic "Upstream request failed (400)" when diagnosing a

@@ -879,10 +879,10 @@ async function doFlushQueuedPhotos(
         // syncing"), while a smaller/later shot slips through — exactly the
         // out-of-order stall inspectors hit. Give each attempt 60s and one extra
         // try so big evidence photos actually complete on a poor signal.
-        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(photoBlob, rec.filename, { attempts: 1, timeoutMs: 60000 }), uploadVideo(vFile)]);
+        const [pUrl, vUrl] = await Promise.all([uploadJpegBlob(photoBlob, rec.filename, { attempts: 1, timeoutMs: 60000, dedupeKey: rec.localId }), uploadVideo(vFile)]);
         newUrl = makeVideoEntry(pUrl, vUrl);
       } else {
-        newUrl = await uploadJpegBlob(photoBlob, rec.filename, { attempts: 1, timeoutMs: 60000 });
+        newUrl = await uploadJpegBlob(photoBlob, rec.filename, { attempts: 1, timeoutMs: 60000, dedupeKey: rec.localId });
       }
     } catch (e: any) {
       lastError = `Photo upload failed (${String(e?.message || e).slice(0, 90)}).`;

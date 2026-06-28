@@ -2,6 +2,8 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { uploadFile } from '@/lib/hubspot';
 import { transcodeToH264Mp4 } from '@/lib/videoFaststart';
+import { enforceRateLimit } from '@/lib/rateLimit';
+import { reportServerError } from '@/lib/serverErrorReporter';
 
 export const config = {
   api: {
@@ -27,9 +29,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+  // Per-user throttle so a runaway client (or a huge offline backlog flushing at
+  // once) can't hammer HubSpot Files into 429s. Generous: the foreground flush is
+  // single-flight (~30-60/min) and a capture burst is a few per second.
+  if (enforceRateLimit(res, { key: session.email, route: 'upload', max: 300 })) return;
   try {
-    // Frontend sends { filename, contentType, base64 } -- base64-encoded file bytes
-    const { filename, contentType, base64 } = req.body || {};
+    // Frontend sends { filename, contentType, base64 } -- base64-encoded file bytes.
+    // Optional dedupeKey (the photo's stable localId) is folded into the stored
+    // filename so a repeat upload of the SAME photo resolves to the SAME hosted
+    // URL via HubSpot's RETURN_EXISTING (see below) — no duplicate hosted copies
+    // when the foreground flush and the iOS background uploader both run.
+    const { filename, contentType, base64, dedupeKey } = req.body || {};
     if (!base64 || !filename) {
       return res.status(400).json({ error: 'Missing filename or base64 body' });
     }
@@ -54,6 +64,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!/\.[a-zA-Z0-9]{1,5}$/.test(safeName)) {
       safeName += '.jpg';
     }
+    // Fold a sanitized dedupeKey into the name (prefix) so the SAME photo always
+    // produces the SAME stored filename across the foreground flush and the iOS
+    // background uploader. HubSpot's RETURN_EXISTING (EXACT_FOLDER) then returns
+    // the already-stored file's URL on the second upload instead of duplicating.
+    if (dedupeKey != null) {
+      const safeKey = String(dedupeKey).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 64);
+      if (safeKey) safeName = `${safeKey}__${safeName}`.slice(0, 180);
+    }
 
     let buffer = Buffer.from(base64, 'base64');
     // Reject empty / clearly-bogus payloads.
@@ -75,7 +93,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const url = await uploadFile(buffer, outName, outType);
     return res.status(200).json({ url });
   } catch (e: any) {
-    console.error('POST /api/upload failed:', e);
+    reportServerError(e, { route: 'POST /api/upload', method: 'POST', userEmail: session.email });
     return res.status(500).json({ error: String(e.message || e) });
   }
 }
