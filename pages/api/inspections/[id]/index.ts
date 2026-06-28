@@ -15,6 +15,7 @@ import {
 import { getSessionFromRequest } from '@/lib/auth';
 import { buildShortLink } from '@/lib/shortLinks';
 import { externalAccessDenial, isExternalEmail } from '@/lib/userAccess';
+import { externalWriteDenial } from '@/lib/inspectionGuard';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -177,6 +178,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === 'PATCH') {
     try {
+      // External (1099) users may only write their OWN, non-completed 1099
+      // inspections — mirror the guard every other write route uses (answers,
+      // submit, finalize). Without this an external account could rewrite ANY
+      // inspection's section layout (the one allowlisted field below).
+      const denial = await externalWriteDenial(session.email, id);
+      if (denial) return res.status(403).json({ error: denial });
       const props = req.body?.properties || req.body || {};
       if (!props || typeof props !== 'object') {
         return res.status(400).json({ error: 'Missing properties' });
