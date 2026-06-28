@@ -1724,21 +1724,24 @@ export function QuestionForm({
         // Optional questions don't count toward the progress total — e.g. the
         // all-optional Review / Sign-Off section should not show "0/1".
         if (!q.isRequired) continue;
-        // ...and a comment the submit gate waived (maintenance ticket raised) must
-        // not be counted either, or a submittable/completed inspection reads "19/20".
-        if (isCommentExemptByTicket(q)) continue;
         total++;
         const a = answers[answerKey(q.questionIdExternal, inst.instanceKey)];
-        const done = q.responseType === 'photo_only'
-          ? (a?.photoUrls?.length || 0) > 0
-          : !!a?.answerValue;
+        // When a maintenance ticket is raised, the (required) ticket description
+        // STANDS IN FOR "Additional Comments" — so that slot still counts toward
+        // the total, and reads ANSWERED once the description is filled (→ 20/20,
+        // not 19/19). The submit gate likewise requires the description.
+        const done = isCommentExemptByTicket(q)
+          ? !!maintTicketDescription.trim()
+          : (q.responseType === 'photo_only'
+              ? (a?.photoUrls?.length || 0) > 0
+              : !!a?.answerValue);
         if (done) completed++;
       }
       out[inst.instanceKey] = { completed, total };
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionInstances, answers, maintTicketEligible, maintTicketWanted]);
+  }, [sectionInstances, answers, maintTicketEligible, maintTicketWanted, maintTicketDescription]);
 
   // Roll the reused Scope sections (HVAC/Smart Home/Utilities) into the header
   // total alongside the question sections.
