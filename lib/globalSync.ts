@@ -20,7 +20,7 @@
  * steady interval. Online-only and single-flight (parallel answer + photo drains
  * so neither blocks the other) so it never piles on or wedges.
  */
-import { flushOutbox } from '@/lib/offlineOutbox';
+import { flushOutbox, reconcileNativeBackgroundAnswers } from '@/lib/offlineOutbox';
 import { requestPhotoBackgroundSync, queuedInspectionIds, flushQueuedPhotos, getActiveFormInspectionIds, reconcileNativeBackgroundUploads } from '@/lib/offlinePhotoStore';
 import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
 
@@ -36,7 +36,12 @@ async function tick(): Promise<void> {
     // Answers and PHOTOS drain INDEPENDENTLY (in parallel) so a slow/hung answer
     // replay can never block photo uploads — the bug where photos didn't sync from
     // the home page until the inspection was reopened. Each side is best-effort.
-    const answers = flushOutbox().catch(() => { /* retries next tick */ });
+    const answers = flushOutbox()
+      // iOS-only: also drop outbox entries the native uploader replayed after a
+      // force-quit (no-op elsewhere). Runs after the web flush so it only clears
+      // what's genuinely native-done.
+      .then(() => reconcileNativeBackgroundAnswers())
+      .catch(() => { /* retries next tick */ });
 
     // Upload queued PHOTO bytes for EVERY inspection from any page — not just the
     // open form — then attach them server-side. This foreground pass is the ONLY

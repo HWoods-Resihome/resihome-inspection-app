@@ -466,3 +466,45 @@ export function scheduleNativeBgProcessing(): void {
   if (!p?.scheduleProcessing) return;
   try { p.scheduleProcessing(); } catch { /* noop */ }
 }
+
+// --- Phase 2: answer/edit outbox entries (text + selections + line/section
+// edits). Mirrored the same way as photos so they also drain after a force-quit.
+// Each entry is a self-describing, idempotent HTTP replay (the server upserts by
+// answer_id_external), so a native replay can never duplicate — at worst it
+// re-applies the same value. The web clears the native mirror the instant it
+// syncs an entry (remove/clearAnswersEntry), keeping the two in lockstep. ---
+
+/** Mirror one outbox entry to the native background uploader (iOS-only). */
+export function mirrorAnswerToNativeBgUpload(o: {
+  id: string;
+  inspectionRecordId: string;
+  endpoint: string;
+  method: string;
+  body: unknown;
+}): void {
+  const p = nativeBgUploadPlugin();
+  if (!p?.mirrorAnswer) return;
+  try {
+    p.mirrorAnswer({ id: o.id, inspectionRecordId: o.inspectionRecordId, endpoint: o.endpoint, method: o.method, body: o.body });
+    p.scheduleProcessing?.();
+  } catch { /* plugin missing — foreground sync still covers it */ }
+}
+
+/** Tell native to drop a mirrored answer entry (the web synced it). */
+export function clearNativeBgUploadAnswer(id: string): void {
+  const p = nativeBgUploadPlugin();
+  if (!p?.clearAnswer) return;
+  try { p.clearAnswer({ id }); } catch { /* noop */ }
+}
+
+/** Ask native which mirrored answer entries it already replayed in the
+ *  background, so the web can drop them from its outbox. [] off-iOS/unavailable. */
+export async function reconcileNativeBgUploadAnswers(): Promise<string[]> {
+  const p = nativeBgUploadPlugin();
+  if (!p?.reconcileAnswers) return [];
+  try {
+    const r = await p.reconcileAnswers();
+    const ids = r?.ids;
+    return Array.isArray(ids) ? ids.filter((x: any) => typeof x === 'string') : [];
+  } catch { return []; }
+}

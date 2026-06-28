@@ -11,6 +11,8 @@
  * upserts by external id), so a double-send updates rather than duplicates.
  */
 
+import { mirrorAnswerToNativeBgUpload, clearNativeBgUploadAnswer, reconcileNativeBgUploadAnswers } from '@/lib/nativeBridge';
+
 export type OutboxEntry = {
   id: string;
   inspectionRecordId: string;
@@ -59,12 +61,12 @@ function write(list: OutboxEntry[]): void {
 
 export function enqueue(entry: Omit<OutboxEntry, 'id' | 'createdAt'>): void {
   const list = read();
-  list.push({
-    ...entry,
-    id: `ob_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-    createdAt: Date.now(),
-  });
+  const id = `ob_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  list.push({ ...entry, id, createdAt: Date.now() });
   write(list);
+  // iOS-only: mirror to the native background uploader so this edit also drains
+  // after a force-quit. No-op on web/PWA/Android (the call early-returns).
+  mirrorAnswerToNativeBgUpload({ id, inspectionRecordId: entry.inspectionRecordId, endpoint: entry.endpoint, method: entry.method, body: entry.body });
 }
 
 /**
@@ -75,17 +77,21 @@ export function enqueue(entry: Omit<OutboxEntry, 'id' | 'createdAt'>): void {
  * idempotently (the server upserts by answer_id_external) when service returns.
  */
 export function enqueueAnswers(inspectionRecordId: string, endpoint: string, body: any): void {
+  // DETERMINISTIC id (one per inspection) so the replace-on-write here AND the
+  // native mirror replace both key on the same id — the native copy can never
+  // accumulate stale snapshots of an inspection's answers.
+  const id = `ob_answers_${inspectionRecordId}`;
   const list = read().filter((e) => !(e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId));
-  list.push({
-    id: `ob_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-    inspectionRecordId, endpoint, method: 'POST', body, kind: 'answers', createdAt: Date.now(),
-  });
+  list.push({ id, inspectionRecordId, endpoint, method: 'POST', body, kind: 'answers', createdAt: Date.now() });
   write(list);
+  mirrorAnswerToNativeBgUpload({ id, inspectionRecordId, endpoint, method: 'POST', body });
 }
 
 /** Drop the consolidated answers entry once an online save has persisted them. */
 export function clearAnswersEntry(inspectionRecordId: string): void {
   write(read().filter((e) => !(e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId)));
+  // Keep the native mirror in lockstep — the web has the authoritative latest.
+  clearNativeBgUploadAnswer(`ob_answers_${inspectionRecordId}`);
 }
 
 export function entriesFor(inspectionRecordId: string): OutboxEntry[] {
@@ -103,6 +109,8 @@ export function countOutbox(): number {
 
 export function remove(id: string): void {
   write(read().filter((e) => e.id !== id));
+  // The web synced this entry — drop the native mirror so it doesn't re-replay.
+  clearNativeBgUploadAnswer(id);
 }
 
 /**
@@ -190,6 +198,23 @@ export function clearFor(inspectionRecordId: string): number {
   const list = read();
   const remaining = list.filter((e) => e.inspectionRecordId !== inspectionRecordId);
   write(remaining);
+  // Clear the native mirrors for the dropped entries too.
+  for (const e of list) if (e.inspectionRecordId === inspectionRecordId) clearNativeBgUploadAnswer(e.id);
+  return list.length - remaining.length;
+}
+
+/**
+ * Drop outbox entries the iOS native background uploader already replayed after
+ * a force-quit, so the web doesn't redundantly re-send them. No-op off-iOS /
+ * when nothing reconciled. Driven by the global sync loop. Idempotent.
+ */
+export async function reconcileNativeBackgroundAnswers(): Promise<number> {
+  const ids = await reconcileNativeBgUploadAnswers();
+  if (ids.length === 0) return 0;
+  const set = new Set(ids);
+  const list = read();
+  const remaining = list.filter((e) => !set.has(e.id));
+  if (remaining.length !== list.length) write(remaining);
   return list.length - remaining.length;
 }
 
