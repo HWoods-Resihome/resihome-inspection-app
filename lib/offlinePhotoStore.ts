@@ -691,16 +691,22 @@ async function doFlushQueuedPhotos(
     const oldUrl = entry?.displayUrl || '';
     // Durable, form-independent ATTACH: record the instruction the MOMENT bytes
     // upload — BEFORE deleting the queue record — so the photo lands on its record
-    // even if the inspector has left the form (the global driver replays it). Line
-    // photos derive the target from lineExternalId + lineField; section photos
-    // carry an explicit descriptor (rec.attach). FC photos are attached by the
-    // open form (their swap maps live), so we skip them here. Idempotent server-
-    // side, so this never double-adds alongside the form's live attach.
+    // even if the inspector has left the form (the global driver replays it,
+    // idempotently, and skips the currently-open inspection). ONE mechanism for
+    // every photo type:
+    //   • Final Checklist photo  → 'fc' slot in the FINALCHECKLIST blob,
+    //   • line / after photo      → 'line' (field from lineField),
+    //   • section photo           → 'section' (explicit descriptor).
     // '__final_checklist__' is the FC photo section tag (mirrors the forms' local
     // FC_PHOTO_SECTION constant); inlined here to avoid importing a form module.
-    if (rec.kind !== 'video' && rec.sectionId !== '__final_checklist__') {
+    if (rec.kind !== 'video') {
       try {
-        if (rec.lineExternalId) {
+        if (rec.sectionId === '__final_checklist__' && rec.lineExternalId) {
+          enqueuePhotoAttach({
+            inspectionRecordId: rec.inspectionRecordId, url: newUrl, replacesUrl: rec.replacesUrl,
+            target: { kind: 'fc', externalId: `FINALCHECKLIST-${rec.inspectionRecordId}`, fcSlot: rec.lineExternalId },
+          });
+        } else if (rec.lineExternalId) {
           enqueuePhotoAttach({
             inspectionRecordId: rec.inspectionRecordId, url: newUrl, replacesUrl: rec.replacesUrl,
             target: { kind: 'line', externalId: rec.lineExternalId, field: rec.lineField === 'after' ? 'after_photo_urls' : 'photo_urls' },

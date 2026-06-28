@@ -15,16 +15,19 @@
 
 export interface PhotoAttachTarget {
   // 'section' → a section_photo answer; 'line' → a rate_card_line / qa answer's
-  // photo list; (fc handled by the form for now).
-  kind: 'section' | 'line';
-  /** Stable answer_id_external of the target record (used to find/create it). */
+  // photo list; 'fc' → a slot inside the Final Checklist JSON blob.
+  kind: 'section' | 'line' | 'fc';
+  /** Stable answer_id_external of the target record (used to find/create it).
+   *  For 'fc' this is the FINALCHECKLIST-<id> blob record's external id. */
   externalId: string;
-  /** Which URL list to append to. */
-  field: 'photo_urls' | 'after_photo_urls';
+  /** Which URL list to append to (section/line). */
+  field?: 'photo_urls' | 'after_photo_urls';
   /** section_photo CREATE fields (used only when the record doesn't exist yet). */
   section?: string;
   location?: string;
   summaryLabel?: string;
+  /** FC slot inside the blob: "<qid>:<key>" where key is 'photo' or a sticker id. */
+  fcSlot?: string;
 }
 
 export interface PhotoAttachEntry {
@@ -54,8 +57,9 @@ function write(list: PhotoAttachEntry[]): void {
  *  this). */
 export function enqueuePhotoAttach(e: Omit<PhotoAttachEntry, 'id' | 'createdAt'>): void {
   if (!e.url || e.url.startsWith('blob:')) return; // only real uploaded URLs
+  const slot = (t: PhotoAttachTarget) => `${t.kind}|${t.field || ''}|${t.fcSlot || ''}|${t.externalId}`;
   const list = read();
-  if (list.some((x) => x.inspectionRecordId === e.inspectionRecordId && x.url === e.url && x.target?.field === e.target?.field)) return;
+  if (list.some((x) => x.inspectionRecordId === e.inspectionRecordId && x.url === e.url && slot(x.target) === slot(e.target))) return;
   list.push({ ...e, id: `pa_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, createdAt: Date.now() });
   write(list);
 }

@@ -35,9 +35,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const url = String(req.body?.url || '').trim();
   const replacesUrl = String(req.body?.replacesUrl || '').trim();
   const target = req.body?.target || {};
-  const kind = target.kind === 'section' ? 'section' : target.kind === 'line' ? 'line' : '';
+  const kind = target.kind === 'section' ? 'section' : target.kind === 'line' ? 'line' : target.kind === 'fc' ? 'fc' : '';
   const externalId = String(target.externalId || '').trim();
   const field = target.field === 'after_photo_urls' ? 'after_photo_urls' : 'photo_urls';
+  const fcSlot = String(target.fcSlot || '').trim();
   if (!url || url.startsWith('blob:')) return res.status(400).json({ error: 'A real (uploaded) url is required.' });
   if (!kind || !externalId) return res.status(400).json({ error: 'target.kind and target.externalId are required.' });
 
@@ -55,6 +56,39 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const answers = await fetchAnswersForInspection(id);
     const existing = answers.find((a) => a.answerIdExternal === externalId);
+
+    if (kind === 'fc') {
+      // Append the URL to one slot inside the Final Checklist JSON blob. APPEND-
+      // ONLY + abort if the JSON won't parse, so a background write can never wipe
+      // checklist state. (The open form is the sole writer of an active inspection
+      // — the background driver skips active ones — so there's no concurrent write.)
+      const rec = existing || answers.find((a) => a.questionIdExternal === 'fc__all' || a.answerIdExternal.startsWith('FINALCHECKLIST-'));
+      if (!rec) return res.status(200).json({ ok: true, deferred: true, reason: 'fc blob not found yet' });
+      const [qid, slotKey] = fcSlot.split(':');
+      if (!qid || !slotKey) return res.status(400).json({ error: 'fcSlot must be "<qid>:<key>".' });
+      let blob: any;
+      try { blob = JSON.parse(rec.note || '{}'); } catch { return res.status(200).json({ ok: false, error: 'FC blob unparseable — left untouched.' }); }
+      if (!blob || typeof blob !== 'object') return res.status(200).json({ ok: false, error: 'FC blob not an object.' });
+      const ans = { ...(blob[qid] || {}) };
+      if (slotKey === 'photo') {
+        const arr = Array.isArray(ans.photoUrls) ? ans.photoUrls : [];
+        if (replacesUrl && arr.includes(replacesUrl)) ans.photoUrls = Array.from(new Set(arr.map((u: string) => (u === replacesUrl ? url : u))));
+        else if (arr.includes(url)) return res.status(200).json({ ok: true, alreadyAttached: true });
+        else ans.photoUrls = [...arr, url];
+      } else {
+        const sp = { ...(ans.stickerPhotos || {}) };
+        const arr = Array.isArray(sp[slotKey]) ? sp[slotKey] : [];
+        if (replacesUrl && arr.includes(replacesUrl)) sp[slotKey] = Array.from(new Set(arr.map((u: string) => (u === replacesUrl ? url : u))));
+        else if (arr.includes(url)) return res.status(200).json({ ok: true, alreadyAttached: true });
+        else sp[slotKey] = [...arr, url];
+        ans.stickerPhotos = sp;
+      }
+      blob[qid] = ans;
+      const results = await upsertAnswers(id, [{ recordId: rec.recordId, answerProps: { answer_id_external: rec.answerIdExternal, note: JSON.stringify(blob) } }]);
+      const failed = results.find((r) => r.failed);
+      if (failed) return res.status(502).json({ ok: false, error: failed.reason || 'fc attach failed' });
+      return res.status(200).json({ ok: true });
+    }
 
     if (kind === 'line') {
       if (!existing) {
