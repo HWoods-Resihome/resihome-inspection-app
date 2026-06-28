@@ -1396,11 +1396,8 @@ export function QcReinspectForm(props: Props) {
       {!props.readOnly && (
         <div className="border-2 border-amber-300 rounded-xl p-4 mb-4 bg-amber-50">
           <div className="font-heading font-extrabold text-ink text-sm mb-1">⚠️ New Items Only — Maintenance Ticket</div>
-          <div className="text-[13px] text-amber-900 font-bold leading-snug mb-1">
+          <div className="text-[13px] text-amber-900 font-bold leading-snug mb-3">
             Use this ONLY for new issues found during this re-inspect that were NOT on the original scope.
-          </div>
-          <div className="text-xs text-gray-700 leading-snug mb-3">
-            This is <b>not</b> about whether checklist items passed or failed — failed line items above are already tracked and do <b>not</b> need a ticket here. Raise a ticket only for additional work you discovered that wasn’t part of the original scope.
           </div>
           <div className="font-heading font-semibold text-ink text-sm mb-2">Submit a maintenance ticket for new items?</div>
           <div className="flex gap-2">
