@@ -26,32 +26,7 @@ import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
 // inspection doesn't also ship the QC + Question form bundles (and vice-versa),
 // cutting first-load JS on the field phones inspectors actually use. ssr:false
 // because the page shell is static and these are interactive client-only forms.
-// While the lazily-loaded form chunk downloads we show "Loading…". If it hasn't
-// arrived after a few seconds it almost always means the chunk isn't cached for
-// offline use (the SW precache didn't run/finish before going offline) and the
-// fetch is failing — turn the dead spinner into an actionable message instead of
-// hanging forever. Online, the chunk loads in well under this window.
-function FormLoading() {
-  const [stalled, setStalled] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setStalled(true), 8000);
-    return () => clearTimeout(t);
-  }, []);
-  if (stalled) {
-    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-    return (
-      <div className="p-6 text-sm text-gray-700 max-w-md">
-        <p className="font-heading font-semibold mb-1">This inspection screen isn’t available offline yet.</p>
-        <p className="text-gray-600">
-          {offline
-            ? 'Reconnect to the internet once and reopen the app — that downloads the screens for offline use. Your saved work is safe on this device.'
-            : 'Still loading… if this persists, reload the app once on a good connection.'}
-        </p>
-      </div>
-    );
-  }
-  return <div className="p-6 text-sm text-gray-500">Loading…</div>;
-}
+const FormLoading = () => <div className="p-6 text-sm text-gray-500">Loading…</div>;
 const QuestionForm = dynamic(() => import('@/components/QuestionForm').then((m) => m.QuestionForm), { loading: FormLoading, ssr: false });
 const RateCardForm = dynamic(() => import('@/components/RateCardForm').then((m) => m.RateCardForm), { loading: FormLoading, ssr: false });
 const QcReinspectForm = dynamic(() => import('@/components/QcReinspectForm').then((m) => m.QcReinspectForm), { loading: FormLoading, ssr: false });

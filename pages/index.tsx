@@ -19,7 +19,6 @@ import { openOAuthStartNative } from '@/lib/nativeBridge';
 import { listPendingInspections, removePendingInspection, type PendingInspection } from '@/lib/pendingInspections';
 import { drainPendingCreates } from '@/lib/deferredCreate';
 import { syncAllProperties, dropPropertyMemCache } from '@/lib/propertyCache';
-import { isOfflineReady } from '@/lib/offlineReady';
 
 interface MeUser { userId: string; email: string; name: string; }
 
@@ -86,8 +85,6 @@ export default function Home() {
   // Inspections STARTED OFFLINE that haven't synced to HubSpot yet — merged into
   // the list so they're always re-openable (and visibly "Not synced").
   const [pendingLocals, setPendingLocals] = useState<PendingInspection[]>([]);
-  // null = unknown (don't flash a cue), false = precaching, true = offline-ready.
-  const [offlineReady, setOfflineReady] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Server-computed metadata for the current query (so filtering/counting/paging
@@ -261,26 +258,6 @@ export default function Home() {
   useEffect(() => {
     const t = setTimeout(() => { void syncAllProperties().then((r) => { if (r) dropPropertyMemCache(); }); }, 3000);
     return () => clearTimeout(t);
-  }, []);
-
-  // Poll offline-readiness so the home screen can tell the inspector when the
-  // app has finished caching the screens for offline use. Checks on mount, on
-  // focus/visibility (e.g. just after a deploy auto-update), and on an interval
-  // until ready (then stops).
-  useEffect(() => {
-    let alive = true;
-    let iv: ReturnType<typeof setInterval> | null = null;
-    const check = async () => {
-      const ready = await isOfflineReady();
-      if (!alive) return;
-      setOfflineReady(ready);
-      if (ready && iv) { clearInterval(iv); iv = null; }
-    };
-    void check();
-    iv = setInterval(() => { void check(); }, 4000);
-    const onVis = () => { if (document.visibilityState === 'visible') void check(); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => { alive = false; if (iv) clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, []);
 
   // Pre-cache active (non-completed) inspections for offline use, so the inspector
@@ -885,21 +862,6 @@ export default function Home() {
               </div>
               <span className="font-heading font-bold text-base text-brand">New Inspection</span>
             </Link>
-            {/* Offline-readiness cue: tells the inspector whether the app has
-                finished caching the screens for offline use BEFORE they head into
-                a dead zone — the recurring "went offline, inspection wouldn't
-                open" was usually going offline before the precache finished. */}
-            {offlineReady === false && (
-              <div className="mt-2 flex items-center gap-2 text-[12px] text-amber-700">
-                <span className="inline-block w-3 h-3 border-2 border-amber-400 border-t-amber-700 rounded-full animate-spin" aria-hidden />
-                Preparing offline use… keep this open a moment before going offline.
-              </div>
-            )}
-            {offlineReady === true && (
-              <div className="mt-2 flex items-center gap-1.5 text-[12px] text-emerald-700">
-                <span aria-hidden>✓</span> Ready for offline use
-              </div>
-            )}
           </div>
         </header>
 
@@ -917,27 +879,26 @@ export default function Home() {
                 placeholder="Search address, name, or inspector…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="focus-brand w-full pl-3 pr-9 py-2.5 text-sm border border-gray-300 rounded-lg bg-white"
+                className={`focus-brand w-full pl-3 ${search ? 'pr-14' : 'pr-9'} py-2.5 text-sm border border-gray-300 rounded-lg bg-white`}
               />
-              {/* Search icon — far right, inside the bar. Shown only when empty;
-                  once there's a term the clear (×) takes this same slot. */}
-              {!search && (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-              )}
-              {/* Clear search — right-aligned; wipes the term and returns the full
-                  unfiltered list. Only shown when there's something to clear. */}
+              {/* Search icon — pinned to the far-right interior of the bar, always
+                  visible. The clear (×), when present, sits just to its left. */}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              {/* Clear search — wipes the term and returns the full unfiltered
+                  list. Only shown when there's something to clear; positioned to
+                  the left of the search icon. */}
               {search && (
                 <button
                   type="button"
                   onClick={() => setSearch('')}
                   aria-label="Clear search"
                   title="Clear search"
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-brand p-0.5"
+                  className="absolute right-9 top-1/2 -translate-y-1/2 text-gray-400 hover:text-brand p-0.5"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                        strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
