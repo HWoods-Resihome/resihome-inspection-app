@@ -21,6 +21,7 @@
  * so neither blocks the other) so it never piles on or wedges.
  */
 import { flushOutbox, reconcileNativeBackgroundAnswers } from '@/lib/offlineOutbox';
+import { drainPendingCreates } from '@/lib/deferredCreate';
 import { requestPhotoBackgroundSync, queuedInspectionIds, flushQueuedPhotos, getActiveFormInspectionIds, reconcileNativeBackgroundUploads } from '@/lib/offlinePhotoStore';
 import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
 
@@ -33,6 +34,11 @@ async function tick(): Promise<void> {
   if (inFlight) return;                                                       // single-flight
   inFlight = true;
   try {
+    // FIRST: replay any locally-started ("offline create") inspections so they
+    // get a real HubSpot record id and every queued answer/photo is re-keyed
+    // from the temp id BEFORE the drains below run. Best-effort; never blocks.
+    await drainPendingCreates().catch(() => { /* retries next tick */ });
+
     // Answers and PHOTOS drain INDEPENDENTLY (in parallel) so a slow/hung answer
     // replay can never block photo uploads — the bug where photos didn't sync from
     // the home page until the inspection was reopened. Each side is best-effort.

@@ -8,8 +8,9 @@ import type {
 } from '@/lib/types';
 import { Combobox } from '@/components/Combobox';
 import { NumberField } from '@/components/NumberPad';
-import { loadCachedProperties, saveCachedProperties, loadCachedMe, saveCachedMe } from '@/lib/offlineCache';
+import { loadCachedProperties, saveCachedProperties, loadCachedMe, saveCachedMe, saveCachedInspection, loadCachedQuestions, loadCachedRateCard } from '@/lib/offlineCache';
 import { EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
+import { newLocalIds, addPendingInspection } from '@/lib/pendingInspections';
 
 type Stage = 'setup' | 'loading_questions' | 'error';
 
@@ -301,31 +302,128 @@ export default function NewInspection() {
       return;
     }
     setStage('loading_questions'); // shows a loading state while we create+navigate
+    // Already offline → don't even attempt the network (avoids a long timeout);
+    // start locally and sync later.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      if (startLocalInspection()) return;
+    }
+    const body = {
+      templateType: selectedTemplate,
+      propertyRecordId: selectedPropertyId,
+      propertyAddressSnapshot: addressSnapshot,
+      inspectorName: sessionUser?.name || '',
+      inspectorEmail: sessionUser?.email,
+      bedrooms,
+      bathrooms,
+      ...(isQcTemplate ? { sourceRateCardId: selectedSourceId } : {}),
+    };
+    let r: Response;
     try {
-      const body = {
-        templateType: selectedTemplate,
-        propertyRecordId: selectedPropertyId,
-        propertyAddressSnapshot: addressSnapshot,
-        inspectorName: sessionUser?.name || '',
-        inspectorEmail: sessionUser?.email,
-        bedrooms,
-        bathrooms,
-        ...(isQcTemplate ? { sourceRateCardId: selectedSourceId } : {}),
-      };
-      const r = await fetch('/api/inspections/create', {
+      r = await fetch('/api/inspections/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+    } catch (netErr: any) {
+      // The fetch THREW → genuine network failure (dead zone / dropped signal).
+      // Start LOCALLY so the inspector can work now; the deferred-create driver
+      // mints the real HubSpot record + re-keys everything when signal returns.
+      if (startLocalInspection()) return;
+      setErrorMsg(String(netErr?.message || netErr));
+      setStage('error');
+      return;
+    }
+    // We got an HTTP response → we're online. A non-OK status is a real server
+    // decision (e.g. a 403 access denial, a 400 validation) — surface it; do NOT
+    // silently start a local copy that would only fail the same way on sync.
+    try {
       const data = await r.json();
       if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
-
-      // Hand off to the dynamic page, which will load the (empty) inspection and render the form
       router.replace(`/inspection/${data.inspectionId}`);
     } catch (e: any) {
-      setErrorMsg(String(e.message || e));
+      setErrorMsg(String(e?.message || e));
       setStage('error');
     }
+  }
+
+  // Title-case a template id for the offline display name (the server rewrites
+  // inspection_name authoritatively on sync; this is just what shows meanwhile).
+  function prettyTemplate(t: string): string {
+    return t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  // Create the inspection LOCALLY (no network): generate ids, seed the offline
+  // cache so the detail page renders, queue the deferred create, and navigate.
+  // Returns false (caller surfaces the original error) if the template's content
+  // isn't cached for offline use yet — without it the form can't render offline.
+  function startLocalInspection(): boolean {
+    const tmpl = selectedTemplate;
+    const contentCached = tmpl === 'pm_scope_rate_card'
+      ? !!loadCachedRateCard()
+      : tmpl === 'pm_turn_reinspect_qc'
+        ? true // QC starts standalone offline (empty rooms); source lines copy on sync
+        : !!loadCachedQuestions(tmpl);
+    if (!contentCached) {
+      setErrorMsg('You appear to be offline and this inspection type hasn’t been downloaded for offline use yet. Open one of this type once on a connection, then you can start it offline.');
+      setStage('error');
+      return true; // handled (we showed a clear reason) — don't surface the raw error
+    }
+    const now = Date.now();
+    const { tempId, externalId } = newLocalIds(now);
+    const today = new Date(now).toISOString().slice(0, 10);
+    const inspectionName = `${prettyTemplate(tmpl)} – ${addressSnapshot} – ${today}`;
+    const inspectorName = sessionUser?.name || '';
+    const inspectorEmail = sessionUser?.email || '';
+
+    addPendingInspection({
+      tempId,
+      externalId,
+      body: {
+        templateType: tmpl,
+        propertyRecordId: selectedPropertyId,
+        propertyAddressSnapshot: addressSnapshot,
+        inspectorName,
+        inspectorEmail,
+        bedrooms,
+        bathrooms,
+        ...(isQcTemplate ? { sourceRateCardId: selectedSourceId } : {}),
+        externalId,
+      },
+      display: { inspectionName, templateType: tmpl, propertyAddress: addressSnapshot, inspectorName },
+      status: 'pending',
+      createdAt: now,
+    });
+
+    // Seed the offline-cache payload the detail page reads (mirrors the GET shape
+    // of /api/inspections/[id]). Region is unknown offline → null (the math falls
+    // back to GA:Atlanta until the real record's region_snapshot lands on sync).
+    saveCachedInspection(tempId, {
+      inspection: {
+        recordId: tempId,
+        inspectionIdExternal: externalId,
+        inspectionName,
+        templateType: tmpl,
+        status: 'scheduled',
+        propertyAddressSnapshot: addressSnapshot,
+        inspectorName,
+        inspectorEmail,
+        bedroomsAtInspection: bedrooms,
+        bathroomsAtInspection: bathrooms,
+        regionSnapshot: null,
+        sectionListJson: null,
+        scheduledDate: today,
+        ...(isQcTemplate ? { sourceRateCardId: selectedSourceId } : {}),
+      },
+      propertyRecordId: selectedPropertyId,
+      answers: [],
+      filterSizeOptions: [],
+      shareLinks: { master: null, chargeback: null, xlsx: null, report: null, vendors: {} },
+      afterPhotosEnabled: true,
+      __localPending: true,
+    });
+
+    router.replace(`/inspection/${tempId}`);
+    return true;
   }
 
   // When a future date is picked, lazy-load the inspector list (once) and

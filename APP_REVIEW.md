@@ -136,3 +136,56 @@ lines (greppable in Vercel). No new dependency or DSN was added.
 Per-instance token bucket (no external store / secret). Effective cap ≈ configured
 max × instance count — enough to stop a single runaway client; for a hard global
 cap, back `lib/rateLimit.ts` with Vercel KV (call sites unchanged).
+
+---
+
+## 5. Offline syncing & low-cell-service — review + the "start fully offline" build
+
+### Already solid (verified)
+- **Capture/edit offline**: queue-first photos (never block on network/IDB),
+  durable answer outbox, idempotent attach outbox, single global sync driver,
+  visible sync badge, iOS force-quit background upload (Phases 1–3).
+- **Open an EXISTING inspection offline**: falls back to the cached template +
+  questions + answers (`lib/offlineCache`) — works once opened on a connection.
+- **Home list offline**: localStorage results+facets cache paints stale-while-
+  revalidate, so the list shows when warm.
+- **Submit gate**: finalize is blocked while anything is still queued, so a weak
+  link can't ship a short report.
+
+### The gap — and what was built: START AN INSPECTION FULLY OFFLINE
+Creating an inspection used to be a hard server round-trip (HubSpot mints the
+record id) → impossible in a dead zone. Now:
+- **`new.tsx`** falls back to a **local create** when offline / the create fetch
+  throws: it generates a temp record id (`local_<uuid>`) **and the inspection's
+  external id** on-device, seeds the offline cache, and opens the form — the
+  inspector fills out the whole inspection offline (answers + photos queue
+  exactly as normal).
+- **`lib/deferredCreate.ts`** (run first in the global sync tick) replays the
+  create the moment signal returns, then **re-keys every queued item** from the
+  temp id to the real HubSpot record id. Because the temp id is a globally-unique
+  opaque token, each store does a blanket token-replace — covering endpoints,
+  `inspectionRecordId`, and even Final-Checklist `FINALCHECKLIST-<id>` keys —
+  with no partial-rewrite risk (unit-tested).
+- **Idempotent create**: keyed by the client-generated external id; the server
+  returns the existing record if it already exists, so a retried create can't
+  duplicate.
+- The open detail page **auto-swaps** `local_…` → the real id when the create
+  lands; the home list **merges in** not-yet-synced inspections with a "Not
+  synced" badge so they're never lost; submit is gently gated while still local.
+- **Stable keys**: generating the external id on-device means all answer/photo
+  idempotency keys are correct from the first offline tap — only the record id
+  changes on sync. Native mirroring is skipped for local ids (re-key stays
+  web-only).
+
+### Known limitations (by design, documented)
+- The template's content must have been **cached once on a connection**
+  (questions / rate-card catalog) — a brand-new template can't render offline.
+  `new.tsx` shows a clear message in that case instead of a broken form.
+- An **offline-started QC** can't copy the source scope's lines until sync (the
+  copy is server-side) — it opens with empty rooms (standalone QC, already
+  supported) and the lines appear on reload after sync.
+- **Region** is unknown offline → scope pricing uses the GA:Atlanta fallback
+  until the synced record's `region_snapshot` lands (then the detail reloads).
+- Needs **real-device field testing** of the full offline→reconnect→re-key→
+  redirect path (the re-key logic itself is unit-tested; the orchestration can't
+  be exercised in CI).

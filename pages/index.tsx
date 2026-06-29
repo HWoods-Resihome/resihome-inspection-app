@@ -16,6 +16,7 @@ import { precacheActiveInspections } from '@/lib/precache';
 import { warmAi } from '@/lib/aiWarm';
 import { templateLabel } from '@/lib/templateLabels';
 import { openOAuthStartNative } from '@/lib/nativeBridge';
+import { listPendingInspections, removePendingInspection, type PendingInspection } from '@/lib/pendingInspections';
 
 interface MeUser { userId: string; email: string; name: string; }
 
@@ -79,6 +80,9 @@ export default function Home() {
   const [viewAsOpen, setViewAsOpen] = useState(false);
 
   const [inspections, setInspections] = useState<InspectionSummary[]>([]);
+  // Inspections STARTED OFFLINE that haven't synced to HubSpot yet — merged into
+  // the list so they're always re-openable (and visibly "Not synced").
+  const [pendingLocals, setPendingLocals] = useState<PendingInspection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Server-computed metadata for the current query (so filtering/counting/paging
@@ -332,6 +336,63 @@ export default function Home() {
     }
   }, []);
 
+  // Keep the offline-started ("not synced") inspections fresh: refresh on mount,
+  // when one syncs (the deferred-create event), on reconnect/visibility, and on a
+  // slow interval. Prune any that have synced AND now appear in the server list.
+  useEffect(() => {
+    const refresh = () => {
+      const all = listPendingInspections();
+      const serverIds = new Set(inspections.map((i) => i.recordId));
+      for (const p of all) {
+        if (p.status === 'created' && p.realId && serverIds.has(p.realId)) removePendingInspection(p.tempId);
+      }
+      setPendingLocals(listPendingInspections().filter((p) => p.status !== 'created'));
+    };
+    refresh();
+    const onCreated = () => refresh();
+    window.addEventListener('resiwalk:inspection-created', onCreated);
+    window.addEventListener('online', onCreated);
+    document.addEventListener('visibilitychange', onCreated);
+    const iv = setInterval(refresh, 7000);
+    return () => {
+      window.removeEventListener('resiwalk:inspection-created', onCreated);
+      window.removeEventListener('online', onCreated);
+      document.removeEventListener('visibilitychange', onCreated);
+      clearInterval(iv);
+    };
+  }, [inspections]);
+
+  // Map an offline-started inspection to the list-card shape, flagged so the card
+  // shows a "Not synced" badge and links to its local route.
+  const pendingAsSummaries = useMemo<InspectionSummary[]>(() => pendingLocals.map((p) => ({
+    recordId: p.tempId,
+    inspectionIdExternal: p.externalId,
+    inspectionName: p.display.inspectionName,
+    templateType: p.display.templateType,
+    status: 'in_progress',
+    propertyAddressSnapshot: p.display.propertyAddress,
+    inspectorName: p.display.inspectorName,
+    inspectorEmail: p.body.inspectorEmail || '',
+    bedroomsAtInspection: p.body.bedrooms ?? null,
+    bathroomsAtInspection: p.body.bathrooms ?? null,
+    startedAt: null, completedAt: null, scheduledDate: p.body.scheduledDate || null,
+    createdAt: new Date(p.createdAt).toISOString(), updatedAt: new Date(p.createdAt).toISOString(),
+    totalQuestionsAnswered: null, pdfUrl: null, regionSnapshot: null, sectionListJson: null,
+    pdfMasterUrl: null, pdfChargebackUrl: null, pdfChargebackXlsxUrl: null, pdfVendorUrlsJson: null, pdfGeneratedAt: null,
+    sourceRateCardId: p.body.sourceRateCardId || null, sourceRateCardName: null,
+    qcVerdict: null, qcPassCount: null, qcFailCount: null, qcOverallNote: null,
+    submittedAt: null, submittedByEmail: null, approvedByName: null, approvedAt: null,
+    resolutionTimingJson: null, totalClientCost: null,
+    localPending: true,
+  })), [pendingLocals]);
+
+  // Always show not-yet-synced inspections at the TOP so the inspector can never
+  // lose track of offline work (regardless of the active status filter).
+  const displayedInspections = useMemo<InspectionSummary[]>(
+    () => [...pendingAsSummaries, ...inspections],
+    [pendingAsSummaries, inspections],
+  );
+
   // Revalidate the list+counts from the network and refresh the cache. On a
   // failure we KEEP whatever is on screen (the cached list) rather than blanking
   // it — only surface an error when there is nothing cached to show. The very
@@ -501,6 +562,8 @@ export default function Home() {
   // A card is selectable for cancellation unless it's completed — but admins
   // may cancel completed inspections too (server-enforced in bulk-cancel).
   function isSelectable(i: InspectionSummary): boolean {
+    // Offline-started rows have only a temp id — bulk actions (cancel) would 404.
+    if (i.localPending) return false;
     if (isAdmin) return true;
     const s = (i.status || '').trim().toLowerCase();
     return !(s === 'completed' || s === 'complete' || s === 'submitted');
@@ -1070,7 +1133,7 @@ export default function Home() {
               rows — showing them under the "Loading…" spinner looked like the
               filter hadn't applied (the misleading lag). Cached views paint
               instantly with loading=false, so this never blanks a cached switch. */}
-          {!loading && inspections.map((i) => (
+          {!loading && displayedInspections.map((i) => (
             <InspectionCard
               key={i.recordId}
               inspection={i}

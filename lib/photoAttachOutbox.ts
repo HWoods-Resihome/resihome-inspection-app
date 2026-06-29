@@ -70,6 +70,20 @@ export function countPhotoAttach(inspectionRecordId?: string): number {
 }
 
 /**
+ * Re-key queued attach instructions from a temp (local) inspection id to the
+ * real record id once a deferred create lands. Blanket token replace (the temp
+ * id is a unique opaque token) rewrites the `inspectionRecordId` field — from
+ * which the attach endpoint is built at drain time — and any record-id-derived
+ * target (e.g. an 'fc' externalId `FINALCHECKLIST-<id>`) in one shot.
+ */
+export function rekeyInspectionId(tempId: string, realId: string): void {
+  if (!tempId || !realId || tempId === realId) return;
+  const list = read();
+  if (!list.some((e) => e.inspectionRecordId === tempId)) return;
+  write(JSON.parse(JSON.stringify(list).split(tempId).join(realId)));
+}
+
+/**
  * Replay queued attach instructions against the idempotent server endpoint.
  * Online-only; never throws. Drops an entry only on a permanent 4xx (so a poison
  * instruction can't wedge the queue) — transient failures stay and retry.

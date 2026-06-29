@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals, fetchActiveUsers, fetchPropertyStatus, bustExternalUnlockedView } from '@/lib/hubspot';
+import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals, fetchActiveUsers, fetchPropertyStatus, bustExternalUnlockedView, findInspectionIdByExternalId } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
@@ -40,6 +40,10 @@ interface CreateBody {
   scheduledDate?: string;
   // QC Turn Re-Inspect: the source Scope Rate Card inspection to validate.
   sourceRateCardId?: string;
+  // Offline-started ("deferred create") inspections generate their own external
+  // id on the device so queued answer/photo idempotency keys are stable. When
+  // present we create the record with THIS id (and dedupe on it for retries).
+  externalId?: string;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -68,7 +72,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    const externalId = `INSP-${nowIso().slice(0, 10)}-${shortId().slice(0, 8)}`;
+    // Use the client-supplied external id for an offline-started inspection (so
+    // its already-queued answer/photo keys match), else mint one. IDEMPOTENCY:
+    // if a record with this external id already exists, a retried deferred create
+    // would otherwise duplicate it — return the existing record instead.
+    const externalId = (typeof body.externalId === 'string' && /^INSP-/.test(body.externalId))
+      ? body.externalId
+      : `INSP-${nowIso().slice(0, 10)}-${shortId().slice(0, 8)}`;
+    if (typeof body.externalId === 'string' && body.externalId) {
+      const existingId = await findInspectionIdByExternalId(externalId);
+      if (existingId) {
+        return res.status(200).json({ success: true, inspectionId: existingId, externalId, deduped: true });
+      }
+    }
 
     // Inspection name format: Rate Card inspections use "Rate Card – <address> – <date>"
     // per the Phase 1 Q-M decision; others use a proper-cased template label

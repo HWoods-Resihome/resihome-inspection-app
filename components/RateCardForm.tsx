@@ -40,6 +40,7 @@ const FC_PHOTO_SECTION = '__final_checklist__';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
 import { reportSyncOutcome } from '@/lib/syncTelemetry';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos, onPhotoFlushResume } from '@/lib/offlinePhotoStore';
+import { isLocalInspectionId } from '@/lib/pendingInspections';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
 import { setErrorContext } from '@/lib/clientErrorReporter';
@@ -3227,6 +3228,13 @@ export function RateCardForm(props: RateCardFormProps) {
     // still required (checked below). See /finalize zeroDollarTurn.
     const zeroDollar = !!opts?.zeroDollar;
     if (submitGuardRef.current) return; // a submit/finalize is already in flight
+    // Offline-started inspection not yet synced → no server record to submit
+    // against. It auto-syncs when signal returns (then the page swaps to the real
+    // id). Work is saved; just ask them to wait.
+    if (isLocalInspectionId(props.inspectionRecordId)) {
+      void dialog.alert('This inspection is still finishing its first sync to the server. It’ll be ready to submit in a moment once you have a connection — your work is saved.');
+      return;
+    }
     // Don't submit/finalize until the AI-applied (and any other) changes have
     // actually synced to the server — otherwise approval would run on a stale
     // or partial scope. The Submit button is also disabled in this state.

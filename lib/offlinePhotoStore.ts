@@ -21,6 +21,7 @@ import { registerSyncedBlob, registerDraftFullRes, clearDraftFullRes } from '@/l
 import { isAnyCameraOpen, subscribeCameraOpen } from '@/lib/cameraOpenState';
 import { enqueuePhotoAttach, type PhotoAttachTarget } from '@/lib/photoAttachOutbox';
 import { isNativeBgUploadAvailable, mirrorPhotoToNativeBgUpload, clearNativeBgUploadPhoto, reconcileNativeBgUpload, scheduleNativeBgProcessing } from '@/lib/nativeBridge';
+import { isLocalInspectionId } from '@/lib/pendingInspections';
 
 // iOS/iPadOS WebKit (incl. Chrome on iOS, which is WebKit). Several canvas/bitmap
 // paths misbehave here, so we branch on it below.
@@ -454,7 +455,7 @@ export async function uploadPhotoOrQueue(
     // only computed when the native plugin is actually present, so no other
     // platform pays the cost. Idempotent with the foreground path (server dedupes
     // by URL; finishSynced clears the mirror), so they can't double-attach.
-    if (isNativeBgUploadAvailable()) {
+    if (isNativeBgUploadAvailable() && !isLocalInspectionId(inspectionRecordId)) {
       try {
         const target = attachTargetForRecord(rec);
         if (target) {
@@ -625,6 +626,31 @@ export async function countQueuedPhotos(inspectionRecordId: string): Promise<num
   // memory spike on big queues.
   const all = await listQueueMeta();
   return all.filter((r) => r.inspectionRecordId === inspectionRecordId).length;
+}
+
+/**
+ * Re-key every queued photo from a temp (local) inspection id to the real
+ * HubSpot record id once a deferred create lands. Rewrites the record's
+ * `inspectionRecordId` AND any record-id-derived key inside its `attach`
+ * descriptor (e.g. a Final Checklist `FINALCHECKLIST-<id>` externalId) via a
+ * blanket token replace — the temp id is a unique opaque token, so this can't
+ * touch the (external-id-derived) keys that must stay stable. Preserves bytes.
+ */
+export async function rekeyInspectionId(tempId: string, realId: string): Promise<number> {
+  if (!tempId || !realId || tempId === realId) return 0;
+  const metas = await listQueueMeta();
+  const targets = metas.filter((r) => r.inspectionRecordId === tempId);
+  let n = 0;
+  for (const meta of targets) {
+    const rec = memQueue.get(meta.localId) || await getRecord(meta.localId);
+    if (!rec) continue;
+    // Token-replace everything EXCEPT the bytes (which we re-attach as-is).
+    const { bytes, videoBytes, blob, videoBlob, ...rest } = rec as any;
+    const rewritten: QueuedPhoto = { ...JSON.parse(JSON.stringify(rest).split(tempId).join(realId)), bytes, videoBytes, blob, videoBlob };
+    if (memQueue.has(meta.localId)) memQueue.set(meta.localId, rewritten);
+    try { await putRecord(rewritten); n++; } catch { /* keep going */ }
+  }
+  return n;
 }
 
 /** Discard every queued photo/video for an inspection (manual "clear stuck"). */

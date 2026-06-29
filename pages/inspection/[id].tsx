@@ -17,6 +17,7 @@ import { getGeoFix } from '@/lib/evidenceStamp';
 import { openPdf } from '@/lib/pdfViewerBus';
 import { lockRingFromProperty } from '@/components/UnlockButton';
 import { setInspectionFormActive } from '@/lib/offlinePhotoStore';
+import { isLocalInspectionId, realIdFor } from '@/lib/pendingInspections';
 import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
 
 
@@ -128,6 +129,22 @@ export default function ExistingInspection() {
     return () => setInspectionFormActive(inspectionId, false);
   }, [inspectionId]);
 
+  // Offline-started inspection: when the deferred create lands a real HubSpot
+  // record id, swap this route from the temp id to the real one (everything has
+  // already been re-keyed by then). Also covers the case where it synced while we
+  // were away (realIdFor check on mount).
+  useEffect(() => {
+    if (!inspectionId || !isLocalInspectionId(inspectionId)) return;
+    const already = realIdFor(inspectionId);
+    if (already) { router.replace(`/inspection/${already}`); return; }
+    const onCreated = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d && d.tempId === inspectionId && d.realId) router.replace(`/inspection/${d.realId}`);
+    };
+    window.addEventListener('resiwalk:inspection-created', onCreated as EventListener);
+    return () => window.removeEventListener('resiwalk:inspection-created', onCreated as EventListener);
+  }, [inspectionId, router]);
+
   // Load inspection + answers
   useEffect(() => {
     if (!inspectionId) return;
@@ -224,6 +241,19 @@ export default function ExistingInspection() {
         setStage('error');
       };
 
+      // Offline-started ("local_") inspection: it exists ONLY on this device until
+      // the deferred create syncs it, so never hit the network (there's no server
+      // record yet) — render straight from the seeded cache.
+      if (isLocalInspectionId(inspectionId)) {
+        const local = loadCachedInspection(inspectionId);
+        if (local) { await finish(local, true); }
+        else if (!cancelled) {
+          setErrorMsg('This offline inspection couldn’t be found on this device.');
+          setStage('error');
+        }
+        return;
+      }
+
       // If we already have a cached copy, fall back FAST on a weak signal so the
       // inspector can keep working offline; with no cache, wait longer because the
       // network is the only way to get the inspection at all.
@@ -258,6 +288,13 @@ export default function ExistingInspection() {
 
   async function handleSubmit(answers: AnswerInput[], sectionPhotoUrls: Record<string, string[]>, meta?: QuestionFormSubmitMeta) {
     if (!inspection) return;
+    // A still-local (offline-started) inspection has no server record yet — submit
+    // would 404. It auto-syncs the moment signal returns (then this page swaps to
+    // the real id). Ask the inspector to wait for that rather than fail.
+    if (isLocalInspectionId(inspectionId)) {
+      void dialog.alert('This inspection is still finishing its first sync to the server. It’ll be ready to submit in a moment once you have a connection — your work is saved.');
+      return;
+    }
     setStage('submitting');
     try {
       // Finalize inspection: status -> Completed

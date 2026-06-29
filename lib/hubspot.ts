@@ -3681,6 +3681,32 @@ export async function updateInspection(recordId: string, props: Record<string, a
 }
 
 /**
+ * Find an inspection's HubSpot record id by its `inspection_id_external`, or null.
+ * Used to make /api/inspections/create idempotent for offline-started ("deferred
+ * create") inspections: the client generates the external id, so a retried create
+ * (after a partial success the client never saw) returns the EXISTING record
+ * instead of minting a duplicate.
+ */
+export async function findInspectionIdByExternalId(externalId: string): Promise<string | null> {
+  if (!externalId) return null;
+  const { inspection: typeId } = typeIds();
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search?archived=false`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filterGroups: [{ filters: [{ propertyName: 'inspection_id_external', operator: 'EQ', value: externalId }] }],
+        properties: ['inspection_id_external'],
+        limit: 1,
+      }),
+    });
+    const hit = resp.results?.[0];
+    return hit ? String(hit.id) : null;
+  } catch {
+    return null; // treat a lookup failure as "not found" → create proceeds
+  }
+}
+
+/**
  * Update a Property record's properties. Used by the Final Checklist to write
  * back the confirmed air-filter quantity/types onto the property object.
  */

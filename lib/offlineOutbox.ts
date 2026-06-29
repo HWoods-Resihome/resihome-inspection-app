@@ -12,6 +12,7 @@
  */
 
 import { mirrorAnswerToNativeBgUpload, clearNativeBgUploadAnswer, reconcileNativeBgUploadAnswers } from '@/lib/nativeBridge';
+import { isLocalInspectionId } from '@/lib/pendingInspections';
 
 export type OutboxEntry = {
   id: string;
@@ -65,8 +66,12 @@ export function enqueue(entry: Omit<OutboxEntry, 'id' | 'createdAt'>): void {
   list.push({ ...entry, id, createdAt: Date.now() });
   write(list);
   // iOS-only: mirror to the native background uploader so this edit also drains
-  // after a force-quit. No-op on web/PWA/Android (the call early-returns).
-  mirrorAnswerToNativeBgUpload({ id, inspectionRecordId: entry.inspectionRecordId, endpoint: entry.endpoint, method: entry.method, body: entry.body });
+  // after a force-quit. No-op on web/PWA/Android (the call early-returns). SKIP
+  // local (not-yet-synced) inspections — they have no server record id yet, so a
+  // native replay would 404; they sync via the foreground deferred-create + re-key.
+  if (!isLocalInspectionId(entry.inspectionRecordId)) {
+    mirrorAnswerToNativeBgUpload({ id, inspectionRecordId: entry.inspectionRecordId, endpoint: entry.endpoint, method: entry.method, body: entry.body });
+  }
 }
 
 /**
@@ -84,7 +89,9 @@ export function enqueueAnswers(inspectionRecordId: string, endpoint: string, bod
   const list = read().filter((e) => !(e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId));
   list.push({ id, inspectionRecordId, endpoint, method: 'POST', body, kind: 'answers', createdAt: Date.now() });
   write(list);
-  mirrorAnswerToNativeBgUpload({ id, inspectionRecordId, endpoint, method: 'POST', body });
+  if (!isLocalInspectionId(inspectionRecordId)) {
+    mirrorAnswerToNativeBgUpload({ id, inspectionRecordId, endpoint, method: 'POST', body });
+  }
 }
 
 /** Drop the consolidated answers entry once an online save has persisted them. */
@@ -191,6 +198,34 @@ export async function flushOutbox(
     }
   }
   return { synced, remaining: read().length, failedPermanently, lastError };
+}
+
+/**
+ * Re-key every queued entry from a temp (local) inspection id to the real
+ * HubSpot record id, once a deferred create lands. The temp id is a globally-
+ * unique opaque token (`local_<uuid>`), so a blanket string replace across the
+ * serialized queue safely rewrites EVERYTHING that referenced it — the
+ * `inspectionRecordId` field, the `/api/inspections/<id>/...` endpoint, and any
+ * record-id-derived key inside an entry body (e.g. a Final Checklist
+ * answer_id_external) — with no chance of a partial rewrite. Also re-mirrors the
+ * affected entries to the native background uploader under the real id.
+ */
+export function rekeyInspectionId(tempId: string, realId: string): void {
+  if (!tempId || !realId || tempId === realId) return;
+  const list = read();
+  const affected = list.filter((e) => e.inspectionRecordId === tempId);
+  if (affected.length === 0) return;
+  // Blanket token replace on the whole serialized list (token is unique).
+  const rekeyed: OutboxEntry[] = JSON.parse(JSON.stringify(list).split(tempId).join(realId));
+  write(rekeyed);
+  // Keep the native mirror consistent: clear the temp-keyed copies and re-mirror
+  // the now-real-keyed entries (no-op off-iOS).
+  for (const e of rekeyed) {
+    if (e.inspectionRecordId === realId && affected.some((a) => a.id === e.id)) {
+      clearNativeBgUploadAnswer(e.id);
+      mirrorAnswerToNativeBgUpload({ id: e.id, inspectionRecordId: e.inspectionRecordId, endpoint: e.endpoint, method: e.method, body: e.body });
+    }
+  }
 }
 
 /** Drop every queued entry for an inspection (manual "clear stuck items"). */

@@ -29,6 +29,7 @@ import { PhotoStrip } from '@/components/PhotoStrip';
 import { useAppDialog } from '@/components/AppDialog';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
 import { enqueue as outboxEnqueue, isOfflineError } from '@/lib/offlineOutbox';
+import { isLocalInspectionId } from '@/lib/pendingInspections';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 import { UnlockButton, type LockRing } from '@/components/UnlockButton';
 import InspectionPager from '@/components/InspectionPager';
@@ -794,6 +795,10 @@ export function QcReinspectForm(props: Props) {
 
   async function handleSubmit() {
     if (submittingRef.current) return;
+    if (isLocalInspectionId(props.inspectionRecordId)) {
+      void dialog.alert('This inspection is still finishing its first sync to the server. It’ll be ready to submit in a moment once you have a connection — your work is saved.');
+      return;
+    }
     if (!allMarked) { void dialog.alert('Every line item must be marked Pass or Fail before submitting.'); return; }
     // A failed line MUST have a note explaining what failed (for the vendor/MC).
     const failMissingNote = lines.find((l) => l.passFail === 'fail' && !(l.qcFailureNote || '').trim());

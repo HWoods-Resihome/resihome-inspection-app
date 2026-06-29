@@ -143,6 +143,11 @@ export interface InspectionSummary {
   // HubSpot Property record id (property_id_ref) — lets Insights join rows to the
   // property (e.g. future map). Optional; list mapper only.
   propertyRecordId?: string | null;
+  // TRUE for an inspection that was STARTED OFFLINE and hasn't synced to HubSpot
+  // yet (lib/pendingInspections). The home list merges these in so they're
+  // re-openable, and the card shows a "Not synced" badge. Cleared once the
+  // deferred create lands the real record.
+  localPending?: boolean;
 }
 
 export interface HubSpotUser {
