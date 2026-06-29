@@ -24,6 +24,19 @@ export function FieldStatusOverlays() {
     return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
   }, []);
 
+  // AUTO-APPLY a pending update while on the HOME screen — a safe reload point
+  // (no open form, and all offline work lives in durable storage that survives a
+  // reload). This stops a device from getting stuck on a stale build between
+  // deploys (the cause of "I fixed it but it's still broken on my phone"): just
+  // returning to the inspection list pulls the latest code, no banner tap needed.
+  // Other routes still show the banner so a reload never interrupts active work.
+  useEffect(() => {
+    if (updateReady && router.pathname === '/' && !sessionExpired) {
+      const t = setTimeout(() => reload(), 1200);
+      return () => clearTimeout(t);
+    }
+  }, [updateReady, router.pathname, sessionExpired, reload]);
+
   return (
     <>
       {updateReady && !sessionExpired && (

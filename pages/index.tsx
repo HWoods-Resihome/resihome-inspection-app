@@ -407,12 +407,6 @@ export default function Home() {
     localPending: true,
   })), [pendingLocals]);
 
-  // Always show not-yet-synced inspections at the TOP so the inspector can never
-  // lose track of offline work (regardless of the active status filter).
-  const displayedInspections = useMemo<InspectionSummary[]>(
-    () => [...pendingAsSummaries, ...inspections],
-    [pendingAsSummaries, inspections],
-  );
 
   // Revalidate the list+counts from the network and refresh the cache. On a
   // failure we KEEP whatever is on screen (the cached list) rather than blanking
@@ -1149,12 +1143,28 @@ export default function Home() {
               )}
             </div>
           )}
-          {/* Only render rows when NOT loading. While an uncached filter/search
+          {/* Offline-started ("Not synced") inspections render UNCONDITIONALLY —
+              they're local and network-independent, so they must NOT be hidden
+              behind the server list's loading state (in low/no service that list
+              can spin for a while, which would hide the very inspection the
+              inspector needs to tap back into). Always visible, always tappable. */}
+          {pendingAsSummaries.map((i) => (
+            <InspectionCard
+              key={i.recordId}
+              inspection={i}
+              selectMode={selectMode}
+              selected={selectedIds.has(i.recordId)}
+              selectable={isSelectable(i)}
+              onToggleSelect={toggleSelect}
+              onLongPress={enterSelectWith}
+            />
+          ))}
+          {/* Server rows only when NOT loading. While an uncached filter/search
               combo is fetching, `inspections` still holds the PREVIOUS query's
               rows — showing them under the "Loading…" spinner looked like the
               filter hadn't applied (the misleading lag). Cached views paint
               instantly with loading=false, so this never blanks a cached switch. */}
-          {!loading && displayedInspections.map((i) => (
+          {!loading && inspections.map((i) => (
             <InspectionCard
               key={i.recordId}
               inspection={i}

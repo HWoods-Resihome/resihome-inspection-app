@@ -369,17 +369,25 @@ export default function NewInspection() {
       setStage('error');
       return;
     }
-    // We got an HTTP response → we're online. A non-OK status is a real server
-    // decision (e.g. a 403 access denial, a 400 validation) — surface it; do NOT
-    // silently start a local copy that would only fail the same way on sync.
-    try {
-      const data = await r.json();
-      if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
+    // We got an HTTP response.
+    const data = await r.json().catch(() => ({} as any));
+    if (r.ok && data?.inspectionId) {
       router.replace(`/inspection/${data.inspectionId}`);
-    } catch (e: any) {
-      setErrorMsg(String(e?.message || e));
-      setStage('error');
+      return;
     }
+    // A genuine 4xx is a real server DECISION (permission/validation) the
+    // inspector must see — surface it; a local copy would only fail the same way.
+    if (r.status >= 400 && r.status < 500 && r.status !== 429) {
+      setErrorMsg(data?.error || `HTTP ${r.status}`);
+      setStage('error');
+      return;
+    }
+    // 5xx / 429 / malformed-success → the SERVER is the problem, not the request.
+    // Don't strand the inspector on an error: start LOCALLY and let the deferred
+    // create land the record + re-key when the server recovers.
+    if (startLocalInspection()) return;
+    setErrorMsg(data?.error || `HTTP ${r.status}`);
+    setStage('error');
   }
 
   // Title-case a template id for the offline display name (the server rewrites
