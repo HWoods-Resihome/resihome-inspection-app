@@ -43,5 +43,11 @@ const buildId = existsSync(join(nextDir, 'BUILD_ID'))
   ? readFileSync(join(nextDir, 'BUILD_ID'), 'utf8').trim()
   : String(Date.now());
 
-writeFileSync(join(root, 'public', 'sw-precache.json'), JSON.stringify({ buildId, assets }));
+// Emit as a .JS file (not .json): the service worker pulls it via importScripts,
+// and `.js` is already a PUBLIC static path in middleware.ts (isStaticAsset), so
+// the SW's install-time load never hits the auth gate that silently broke the
+// JSON fetch on the deployed site. Vercel serves files written to public/ during
+// the build.
+const js = `self.__SW_PRECACHE=${JSON.stringify(assets)};self.__SW_PRECACHE_BUILD=${JSON.stringify(buildId)};`;
+writeFileSync(join(root, 'public', 'sw-precache.js'), js);
 console.log(`[sw-precache] wrote ${assets.length} assets for build ${buildId}`);
