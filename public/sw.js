@@ -62,10 +62,20 @@ self.addEventListener('install', (event) => {
       // Without this the inspection page mounts offline but its form chunk can't be
       // fetched and hangs on the loading spinner. Tolerant: a missing asset never
       // fails the install (we cache what we can; the rest falls back to network).
-      await Promise.all(PRECACHE_CHUNKS.map(async (url) => {
-        try { const r = await fetch(url); if (r && r.status === 200) await cache.put(url, r.clone()); }
-        catch { /* one asset failing must not abort the precache */ }
-      }));
+      // Retry each chunk a couple times — a single dropped request on a flaky
+      // connection during install used to leave the new cache incomplete (old
+      // cache is purged on activate), so a form chunk could be missing and the
+      // inspection hung on "Loading…" offline. The chunks are immutable + usually
+      // already in the browser's HTTP cache from the page that registered us, so
+      // this is fast and almost always succeeds first try.
+      const cacheWithRetry = async (url, attempts = 3) => {
+        for (let i = 0; i < attempts; i++) {
+          try { const r = await fetch(url); if (r && r.status === 200) { await cache.put(url, r.clone()); return; } }
+          catch { /* retry */ }
+          await new Promise((res) => setTimeout(res, 400 * (i + 1)));
+        }
+      };
+      await Promise.all(PRECACHE_CHUNKS.map((url) => cacheWithRetry(url)));
       // Cache id-AGNOSTIC route shells so an OFFLINE hard navigation / reload /
       // deep-link to a dynamic inspection URL (/inspection/<id>) renders the app
       // instead of the dead "Offline" page. The [id] page has no per-id server
