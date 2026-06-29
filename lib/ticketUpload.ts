@@ -503,31 +503,59 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     if (!clickedUpload) throw new Error('could not click the modal Upload button (still disabled — files may not have staged)');
     log('clicked Upload');
 
-    // Wait for the async upload to actually complete, then judge by the NETWORK
-    // (the modal can close optimistically even when the upload fails).
-    await sleep(9000);
+    // Wait for the upload to reach a TERMINAL state before judging — and, just as
+    // important, before the `finally` below CLOSES the browser. A fixed pause
+    // could screenshot + return while a large rate-card PDF (many embedded photos
+    // → tens of MB) is still streaming into HoneyBadger's S3; killing the browser
+    // mid-flight leaves an orphaned document record whose object never landed —
+    // exactly the "NoSuchKey" the inspector hits on click. So poll for the Kendo
+    // widget to settle (success/error) and for the upload network to go quiet,
+    // up to a generous ceiling (env HBMM_UPLOAD_WAIT_MS, default 60s).
+    const uploadWaitMs = Number(process.env.HBMM_UPLOAD_WAIT_MS || 0) || 60000;
+    const waitEnd = Date.now() + uploadWaitMs;
+    let kendo = 'unknown';
+    let lastPostCount = postResponses.length;
+    let quietSince = Date.now();
+    while (Date.now() < waitEnd) {
+      await sleep(1000);
+      kendo = await page.evaluate(() => {
+        if (document.querySelector('.k-file-error, .k-file-invalid')) return 'error';
+        if (document.querySelector('.k-file-success')) return 'success';
+        return 'unknown';
+      }).catch(() => 'unknown');
+      // Track upload-network quiet: reset the timer whenever a new upload response
+      // lands, so "quiet" means the byte transfer to S3 has genuinely settled.
+      if (postResponses.length !== lastPostCount) { lastPostCount = postResponses.length; quietSince = Date.now(); }
+      const quietMs = Date.now() - quietSince;
+      if (kendo === 'error') break;                                   // explicit failure — stop now
+      if (kendo === 'success' && quietMs >= 3000) break;              // success AND transfer settled
+      // Some flows never paint a Kendo success class; accept the network verdict
+      // once we've seen at least one upload response and it's been quiet a while.
+      if (postResponses.length > postsBefore && quietMs >= 8000) break;
+    }
     const newPosts = postResponses.slice(postsBefore);
     log(`upload network POST/PUT: ${newPosts.join(' | ') || '(NONE — file did not submit)'}`);
     if (reqPayloads.length) log(`upload request endpoints: ${reqPayloads.join(' | ')}`);
-    // Kendo success/error indicators (use the specific file-state classes; the
-    // .k-i-close icon is the per-file REMOVE button, NOT an error).
-    const kendo = await page.evaluate(() => {
-      if (document.querySelector('.k-file-error, .k-file-invalid')) return 'error';
-      if (document.querySelector('.k-file-success')) return 'success';
-      return 'unknown';
-    }).catch(() => 'unknown');
     log(`kendo file status: ${kendo}`);
 
     const shot = await screenshotB64();
     const had2xxPost = newPosts.some((s) => /^2\d\d /.test(s));
     const hadErrPost = newPosts.some((s) => /^[45]\d\d /.test(s));
-    const succeeded = kendo === 'success' || (had2xxPost && kendo !== 'error' && !hadErrPost);
+    // A 2xx upload response can still carry an app-level failure in its BODY —
+    // HoneyBadger returns HTTP 200 with {success:false,...} when its server-side
+    // S3 write is rejected. Counting that as success is what logs a document the
+    // store never actually persisted (→ NoSuchKey). Treat an explicit
+    // success:false as a failure so we surface it and the doc isn't trusted.
+    const hadBodyFailure = newPosts.some((s) => /["']?success["']?\s*[:=]\s*false\b/i.test(s));
+    const succeeded = (kendo === 'success' || (had2xxPost && kendo !== 'error' && !hadErrPost)) && !hadBodyFailure;
     if (!succeeded) {
       return {
         ok: false, configured: true, uploaded: 0, steps,
-        error: newPosts.length
-          ? `Upload did not confirm. Server responses: ${newPosts.join(', ')}; widget status: ${kendo}.`
-          : `No upload request was sent (file may not have staged; widget status: ${kendo}).`,
+        error: !newPosts.length
+          ? `No upload request was sent (file may not have staged; widget status: ${kendo}).`
+          : hadBodyFailure
+            ? `Upload was rejected by HoneyBadger (server returned success:false). Responses: ${newPosts.join(', ')}; widget status: ${kendo}.`
+            : `Upload did not confirm. Server responses: ${newPosts.join(', ')}; widget status: ${kendo}.`,
         screenshot: shot,
       };
     }
