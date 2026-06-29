@@ -25,16 +25,17 @@ export function FieldStatusOverlays() {
   }, []);
 
   // AUTO-APPLY a pending update while on the HOME screen — a safe reload point
-  // (no open form, and all offline work lives in durable storage that survives a
-  // reload). This stops a device from getting stuck on a stale build between
-  // deploys (the cause of "I fixed it but it's still broken on my phone"): just
-  // returning to the inspection list pulls the latest code, no banner tap needed.
-  // Other routes still show the banner so a reload never interrupts active work.
+  // (no open form). ONLINE-ONLY: applying unregisters the SW + clears caches +
+  // reloads, which offline would blank the app (no shell to serve). Re-check
+  // online at fire time AND fire only on the online event, so a device that went
+  // offline mid-inspection and returned home never auto-reloads into a blank
+  // page. Other routes show the manual banner. reload() also self-guards offline.
   useEffect(() => {
-    if (updateReady && router.pathname === '/' && !sessionExpired) {
-      const t = setTimeout(() => reload(), 1200);
-      return () => clearTimeout(t);
-    }
+    if (!(updateReady && router.pathname === '/' && !sessionExpired)) return;
+    const tryApply = () => { if (typeof navigator === 'undefined' || navigator.onLine !== false) reload(); };
+    const t = setTimeout(tryApply, 1200);
+    window.addEventListener('online', tryApply);
+    return () => { clearTimeout(t); window.removeEventListener('online', tryApply); };
   }, [updateReady, router.pathname, sessionExpired, reload]);
 
   return (

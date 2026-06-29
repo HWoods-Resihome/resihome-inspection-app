@@ -56,6 +56,12 @@ function announceUpdate() {
 let _applying = false;
 function applyUpdate(): void {
   if (_applying) return;
+  // NEVER apply an update while OFFLINE. applyUpdate unregisters the service
+  // worker, deletes every cache, and reloads — offline that reload can't fetch
+  // code AND there's no SW left to serve the cached shell, so the app goes BLANK
+  // (the "homepage blank after losing service" bug). Updates can wait for signal;
+  // queued offline work is untouched (it's in IndexedDB/localStorage, not Cache).
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
   _applying = true;
   void (async () => {
     try {
