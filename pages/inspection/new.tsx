@@ -11,6 +11,7 @@ import { NumberField } from '@/components/NumberPad';
 import { loadCachedProperties, saveCachedProperties, loadCachedMe, saveCachedMe, saveCachedInspection, loadCachedQuestions, loadCachedRateCard } from '@/lib/offlineCache';
 import { EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
 import { newLocalIds, addPendingInspection, buildSeedPayload } from '@/lib/pendingInspections';
+import { syncAllProperties, searchCachedProperties, dropPropertyMemCache } from '@/lib/propertyCache';
 
 type Stage = 'setup' | 'loading_questions' | 'error';
 
@@ -107,6 +108,16 @@ export default function NewInspection() {
       setProperties(cached);
       setPropertiesError(null);
       setPropertiesLoading(false);
+    } else {
+      // No per-query cache → search the FULL offline property cache (IndexedDB,
+      // refreshed ~daily) so ANY property is selectable even offline / on a query
+      // never run on this device. Replaced by the network result below if it lands.
+      void searchCachedProperties(q).then((rows) => {
+        if (cancelled || !rows.length) return;
+        setProperties((cur) => (cur.length ? cur : rows));
+        setPropertiesError(null);
+        setPropertiesLoading(false);
+      });
     }
 
     // Time the request out so a stalled fetch on weak service fails fast instead
@@ -126,20 +137,36 @@ export default function NewInspection() {
           saveCachedProperties(q, data.properties || []);
         }
       })
-      .catch(() => {
+      .catch(async () => {
         if (cancelled) return;
-        // Weak/no service: keep the cached results if we have them; otherwise
-        // give a clear, non-blocking hint instead of an endless spinner.
-        if (!cached || !cached.length) {
+        // Weak/no service: fall back to the FULL offline property cache so the
+        // inspector can still pick ANY property and start the inspection.
+        const rows = await searchCachedProperties(q).catch(() => [] as Property[]);
+        if (cancelled) return;
+        if (rows.length) {
+          setProperties(rows);
+          setPropertiesError(null);
+        } else if (!cached || !cached.length) {
           const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
           setPropertiesError(offline
-            ? 'Offline — showing only properties you’ve already searched on this device.'
+            ? 'Offline and the full property list hasn’t downloaded yet — open the app once on a connection so it can cache the list for offline use.'
             : 'Search is slow on this signal — showing saved results. Try again when you have signal.');
         }
       })
       .finally(() => { if (!cancelled) setPropertiesLoading(false); });
     return () => { cancelled = true; clearTimeout(timer); ctrl.abort(); };
   }, [propertyQuery]);
+
+  // Warm/refresh the FULL offline property cache (~15k, IndexedDB) so a later
+  // offline start can pick ANY property. Background, online-only, and a no-op
+  // when the cache is still fresh (<20h) — see lib/propertyCache. Kicked here AND
+  // on the home page; single-flight + freshness-gated, so the double call is safe.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void syncAllProperties().then((r) => { if (r) dropPropertyMemCache(); });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, []);
 
   // Session (inspector identity) — loaded once. Hydrate from the cached identity
   // first so an offline open still shows the inspector as signed in (the auth

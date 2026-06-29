@@ -636,6 +636,49 @@ export async function fetchProperties(
 }
 
 /**
+ * Fetch ONE page of ALL properties (lean projection) for the offline full-list
+ * cache. Uses the LIST endpoint (`/crm/v3/objects/{type}`), NOT search: HubSpot's
+ * search API caps pagination at 10k results, but there are 15k+ properties, so a
+ * full pull must use the cursor-paginated list endpoint. Excludes inactive
+ * statuses (mirrors the picker). The client loops on `after` until it's absent.
+ */
+export async function fetchPropertiesPage(
+  opts: { after?: string; limit?: number } = {},
+): Promise<{ properties: Property[]; after?: string }> {
+  const { property: typeId } = typeIds();
+  const limit = Math.min(Math.max(opts.limit || 100, 1), 100);
+  const projection = [
+    'name', 'address', 'city', 'state', 'state_code', 'zip', 'zip_code',
+    'region', 'bedrooms', 'bathrooms', PROPERTY_STATUS_PROPERTY,
+  ];
+  const qs = new URLSearchParams({ limit: String(limit), properties: projection.join(','), archived: 'false' });
+  if (opts.after) qs.set('after', opts.after);
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}?${qs.toString()}`);
+  const out: Property[] = [];
+  for (const r of resp.results || []) {
+    const p = r.properties || {};
+    const status = (p[PROPERTY_STATUS_PROPERTY] || '').toString().trim();
+    if (status && PROPERTY_EXCLUDE_STATUSES.includes(status)) continue; // skip inactive
+    const address = p.address || '';
+    const city = p.city || '';
+    const state = p.state_code || p.state || '';
+    const zip = (p.zip_code || p.zip || '').toString().trim();
+    let name = p.name || '';
+    if (!name) name = [address, city, state, zip].filter(Boolean).join(', ');
+    if (!name) name = `(Property ${r.id})`;
+    const { bedrooms, bathrooms } = pickBedBathFromProps(p);
+    out.push({
+      recordId: r.id, name,
+      address: address || undefined, city: city || undefined, state: state || undefined, zip: zip || undefined,
+      region: (p.region || '').toString().trim() || undefined,
+      status: status || undefined,
+      bedrooms, bathrooms,
+    });
+  }
+  return { properties: out, after: resp.paging?.next?.after };
+}
+
+/**
  * Fetch a single Property's stored coordinates by record id. Used to validate
  * the camera's GPS fix against the property location. Returns null when the
  * property has no usable lat/long (the fields exist but aren't always filled

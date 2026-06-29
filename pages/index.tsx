@@ -17,6 +17,7 @@ import { warmAi } from '@/lib/aiWarm';
 import { templateLabel } from '@/lib/templateLabels';
 import { openOAuthStartNative } from '@/lib/nativeBridge';
 import { listPendingInspections, removePendingInspection, type PendingInspection } from '@/lib/pendingInspections';
+import { syncAllProperties, dropPropertyMemCache } from '@/lib/propertyCache';
 
 interface MeUser { userId: string; email: string; name: string; }
 
@@ -246,6 +247,16 @@ export default function Home() {
       .catch(() => { /* weak signal — RateCardForm will cache on first open instead */ })
       .finally(() => clearTimeout(timer));
     return () => { clearTimeout(timer); ctrl.abort(); };
+  }, []);
+
+  // Refresh the FULL offline property list (~15k, IndexedDB) if it's stale (~20h)
+  // — so every inspector who opens the app on a connection within a day carries a
+  // fresh full list into the field and can start an inspection OFFLINE against ANY
+  // property. Background, online-only, single-flight, no-op when fresh. Delayed so
+  // it never competes with the list load. See lib/propertyCache.
+  useEffect(() => {
+    const t = setTimeout(() => { void syncAllProperties().then((r) => { if (r) dropPropertyMemCache(); }); }, 3000);
+    return () => clearTimeout(t);
   }, []);
 
   // Pre-cache active (non-completed) inspections for offline use, so the inspector
