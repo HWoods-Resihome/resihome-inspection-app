@@ -316,8 +316,21 @@ self.addEventListener('fetch', (event) => {
           // dead "Offline" page. This is what made an offline-created inspection
           // un-openable after a hard navigation.
           if (url.pathname.startsWith('/inspection/') && url.pathname !== '/inspection/new') {
+            // a) the id-agnostic shell the page cached for us, or
             const shell = await cache.match('/inspection/__id_shell__');
             if (shell) return shell;
+            // b) ANY previously-visited inspection's cached HTML — the [id] page
+            //    is id-agnostic (reads the id from the URL), so any one works as
+            //    the shell. Covers users who opened a real inspection online even
+            //    if the explicit shell wasn't cached.
+            const keys = await cache.keys();
+            for (const k of keys) {
+              const p = new URL(k.url).pathname;
+              if (/^\/inspection\/[^/]+\/?$/.test(p) && p !== '/inspection/new') {
+                const hit = await cache.match(k);
+                if (hit) return hit;
+              }
+            }
           }
           return (await cache.match(NAV_FALLBACK)) ||
             new Response('<h1>Offline</h1><p>Reconnect to load this page. Your saved work is safe on this device.</p>', { headers: { 'Content-Type': 'text/html' } });

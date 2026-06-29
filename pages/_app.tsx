@@ -68,6 +68,44 @@ export default function App({ Component, pageProps }: AppProps) {
     installGlobalSync();
   }, []);
 
+  // BULLETPROOF offline-readiness (independent of the SW install precache, which
+  // depends on a build-generated manifest + gated fetches that can silently fail
+  // on the deployed host). While ONLINE we:
+  //   1) eagerly import the lazily-loaded inspection FORM chunks (RateCard /
+  //      Question / QC) — webpack's own import() resolves the correct chunk hashes
+  //      for THIS build and the fetch goes through the SW's stale-while-revalidate
+  //      static caching, so the forms are cached for offline. This is the chunk
+  //      that otherwise hangs on "Loading…" offline.
+  //   2) cache the id-AGNOSTIC /inspection/[id] route shell HTML directly into the
+  //      SW cache (a PAGE fetch carries the session cookie, so unlike the SW's own
+  //      install fetch it can't be redirected to /login) so an OFFLINE hard-nav /
+  //      reload to /inspection/<id> renders the app instead of bouncing to home.
+  // Runs a few seconds after load (SW is controlling by then) and again on
+  // reconnect. No build-manifest, no gated SW fetch — it can't silently no-op.
+  useEffect(() => {
+    const warm = async () => {
+      if (typeof navigator === 'undefined' || navigator.onLine === false) return;
+      try {
+        await Promise.all([
+          import('@/components/RateCardForm'),
+          import('@/components/QuestionForm'),
+          import('@/components/QcReinspectForm'),
+        ]);
+      } catch { /* best-effort — a failed warm just retries on reconnect */ }
+      try {
+        if (typeof caches === 'undefined') return;
+        const version = process.env.NEXT_PUBLIC_APP_VERSION || 'v3';
+        const cache = await caches.open('resiwalk-shell-' + version);
+        const r = await fetch('/inspection/_precache_shell_', { cache: 'no-store' });
+        if (r && r.ok) await cache.put('/inspection/__id_shell__', r.clone());
+      } catch { /* no Cache API / offline — fine */ }
+    };
+    const t = setTimeout(() => { void warm(); }, 4000);
+    const onOnline = () => { void warm(); };
+    window.addEventListener('online', onOnline);
+    return () => { clearTimeout(t); window.removeEventListener('online', onOnline); };
+  }, []);
+
   return (
     <ErrorBoundary>
       <Head>
