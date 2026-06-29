@@ -8,7 +8,7 @@ import type {
 } from '@/lib/types';
 import { Combobox } from '@/components/Combobox';
 import { NumberField } from '@/components/NumberPad';
-import { loadCachedProperties, saveCachedProperties, loadCachedMe, saveCachedMe, saveCachedInspection, loadCachedQuestions, loadCachedRateCard } from '@/lib/offlineCache';
+import { saveCachedProperties, loadCachedMe, saveCachedMe, saveCachedInspection, loadCachedQuestions, loadCachedRateCard } from '@/lib/offlineCache';
 import { EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
 import { newLocalIds, addPendingInspection, buildSeedPayload } from '@/lib/pendingInspections';
 import { syncAllProperties, searchCachedProperties, dropPropertyMemCache } from '@/lib/propertyCache';
@@ -99,26 +99,19 @@ export default function NewInspection() {
   useEffect(() => {
     let cancelled = false;
     const q = propertyQuery.trim();
+    const PICKER_LIMIT = 100; // comprehensive, vs the server's capped ~50
 
-    // Cache-first: show the last results we saw for this exact query (and the
-    // default recent page) INSTANTLY, so a weak/stalled connection doesn't leave
-    // the picker spinning or blank. The network result below replaces these.
-    const cached = loadCachedProperties<Property>(q);
-    if (cached && cached.length) {
-      setProperties(cached);
+    // PRIMARY source: the FULL property list (IndexedDB, refreshed ~daily). It's
+    // instant, comprehensive (every property — not a capped server page), and
+    // works online AND offline. We still hit the server below, but only to MERGE
+    // in brand-new properties created since the last daily sync; the cached list
+    // is what the picker leads with so you never see a truncated set.
+    void searchCachedProperties(q, PICKER_LIMIT).then((rows) => {
+      if (cancelled || !rows.length) return;
+      setProperties(rows);
       setPropertiesError(null);
       setPropertiesLoading(false);
-    } else {
-      // No per-query cache → search the FULL offline property cache (IndexedDB,
-      // refreshed ~daily) so ANY property is selectable even offline / on a query
-      // never run on this device. Replaced by the network result below if it lands.
-      void searchCachedProperties(q).then((rows) => {
-        if (cancelled || !rows.length) return;
-        setProperties((cur) => (cur.length ? cur : rows));
-        setPropertiesError(null);
-        setPropertiesLoading(false);
-      });
-    }
+    });
 
     // Time the request out so a stalled fetch on weak service fails fast instead
     // of hanging — we keep the cached list visible if it does.
@@ -127,26 +120,38 @@ export default function NewInspection() {
     const url = '/api/properties' + (q ? `?q=${encodeURIComponent(q)}` : '');
     fetch(url, { signal: ctrl.signal })
       .then((r) => r.json())
-      .then((data) => {
+      .then(async (data) => {
         if (cancelled) return;
         if (data.error) {
-          if (!cached) setPropertiesError(data.error);
-        } else {
-          setPropertiesError(null);
-          setProperties(data.properties || []);
-          saveCachedProperties(q, data.properties || []);
+          // Only surface a server error if we have nothing cached to show.
+          const cachedFull = await searchCachedProperties(q, PICKER_LIMIT).catch(() => [] as Property[]);
+          if (!cancelled && !cachedFull.length) setPropertiesError(data.error);
+          return;
         }
+        const server: Property[] = data.properties || [];
+        // Merge the comprehensive cached list with any fresh server hit it doesn't
+        // yet have (a property created since the last daily sync), deduped by id,
+        // name-sorted. The cache leads; the server only ADDS what's missing.
+        const cachedFull = await searchCachedProperties(q, PICKER_LIMIT).catch(() => [] as Property[]);
+        if (cancelled) return;
+        const seen = new Set(cachedFull.map((p) => p.recordId));
+        const merged = [...cachedFull, ...server.filter((p) => !seen.has(p.recordId))]
+          .sort((a, b) => a.name.localeCompare(b.name));
+        const finalList = merged.length ? merged : server;
+        setPropertiesError(null);
+        setProperties(finalList);
+        saveCachedProperties(q, finalList);
       })
       .catch(async () => {
         if (cancelled) return;
-        // Weak/no service: fall back to the FULL offline property cache so the
-        // inspector can still pick ANY property and start the inspection.
-        const rows = await searchCachedProperties(q).catch(() => [] as Property[]);
+        // Weak/no service: the FULL offline cache is already showing (above); only
+        // surface guidance if it's empty (cache not downloaded yet).
+        const rows = await searchCachedProperties(q, PICKER_LIMIT).catch(() => [] as Property[]);
         if (cancelled) return;
         if (rows.length) {
           setProperties(rows);
           setPropertiesError(null);
-        } else if (!cached || !cached.length) {
+        } else {
           const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
           setPropertiesError(offline
             ? 'Offline and the full property list hasn’t downloaded yet — open the app once on a connection so it can cache the list for offline use.'
