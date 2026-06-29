@@ -99,32 +99,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const fields = extractLeasingAgent1099Fields(answers);
         if (Object.keys(fields).length > 0) await updateInspection(id, fields as Record<string, any>);
 
-        // Compliance Issue tickets: a SEPARATE HubSpot ticket per utility that's
-        // OFF (Electric / Water / Gas) or trash bins MISSING, each associated to
-        // the inspection's Property. Best-effort — never blocks the submission.
-        try {
-          const fwdHost = req.headers['x-forwarded-host'] || req.headers.host;
-          const fwdProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-          const baseUrl = fwdHost ? `${fwdProto}://${fwdHost}` : undefined;
-          const summary = await createComplianceTicketsOnSubmit(
-            {
-              recordId: id,
-              propertyAddressSnapshot: existing?.propertyAddressSnapshot || '',
-              propertyRecordId: existing?.propertyRecordId || null,
-              inspectorName: existing?.inspectorName || '',
-            },
-            answers,
-            { baseUrl },
-          );
-          if (summary.gated) {
-            console.log(`[submit] 1099 compliance tickets for ${id}: gated (already processed) — none created`);
-          } else if (summary.created.length || summary.failed.length) {
-            console.log(`[submit] 1099 compliance tickets for ${id}: created [${summary.created.join('; ')}]${summary.failed.length ? ` failed [${summary.failed.join(', ')}]` : ''}`);
-          }
-        } catch (e) {
-          console.warn('[submit] compliance ticket creation skipped (continuing):', e);
-        }
-
         // Listing-price Slack alert: when the agent recommends Reduce/Increase on
         // "Evaluate Listing Price", post the property + active-listing price +
         // RentCast comps to Slack. Best-effort; gated per inspection.
@@ -152,6 +126,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         console.warn('[submit] 1099 field stamp skipped (provision via /admin/setup):', e);
       }
     }
+
+    // Compliance Issue tickets (utility OFF / trash bins MISSING) — ALL TEMPLATE
+    // TYPES, not just 1099. The Final Checklist Utilities section (Electric /
+    // Water / Gas / Trash Bins) renders on Scope / 1099 / Vacancy / Community, so
+    // any of them can report an off utility or missing bins. createComplianceTicketsOnSubmit
+    // self-gates: it reads the FC blob and creates a ticket ONLY for an actual
+    // issue (none → no-op), and is idempotent per inspection (won't re-create on
+    // re-submit). Best-effort — never blocks submission.
+    try {
+      const cAnswers = await fetchAnswersForInspection(id);
+      const fwdHost = req.headers['x-forwarded-host'] || req.headers.host;
+      const fwdProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+      const baseUrl = fwdHost ? `${fwdProto}://${fwdHost}` : undefined;
+      const summary = await createComplianceTicketsOnSubmit(
+        {
+          recordId: id,
+          propertyAddressSnapshot: existing?.propertyAddressSnapshot || '',
+          propertyRecordId: existing?.propertyRecordId || null,
+          inspectorName: existing?.inspectorName || '',
+        },
+        cAnswers,
+        { baseUrl },
+      );
+      if (summary.gated) {
+        console.log(`[submit] compliance tickets for ${id}: gated (already processed) — none created`);
+      } else if (summary.created.length || summary.failed.length) {
+        console.log(`[submit] compliance tickets for ${id}: created [${summary.created.join('; ')}]${summary.failed.length ? ` failed [${summary.failed.join(', ')}]` : ''}`);
+      }
+    } catch (e) {
+      console.warn('[submit] compliance ticket creation skipped (continuing):', e);
+    }
+
     // Smart Home Tech (Final Checklist) → Device Installed + Serial Number fields.
     // The checklist renders on the question-form templates that complete here
     // (1099 / Vacancy / Community). Best-effort; no-op until provisioned (/admin/setup).
