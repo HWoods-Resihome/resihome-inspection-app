@@ -15,7 +15,7 @@ beforeEach(() => {
 
 import {
   newLocalIds, isLocalInspectionId, addPendingInspection, getPendingInspection,
-  pendingNeedingCreate, markCreating, markCreated, listPendingInspections, type PendingInspection,
+  pendingNeedingCreate, markCreating, markCreated, listPendingInspections, buildSeedPayload, type PendingInspection,
 } from '@/lib/pendingInspections';
 import { enqueue, enqueueAnswers, entriesFor, rekeyInspectionId as rekeyOutbox } from '@/lib/offlineOutbox';
 import { enqueuePhotoAttach, countPhotoAttach, rekeyInspectionId as rekeyAttach } from '@/lib/photoAttachOutbox';
@@ -49,6 +49,24 @@ describe('pendingInspections', () => {
     // "not synced" set by the home list (status !== 'created').
     expect(pendingNeedingCreate()).toHaveLength(0);
     expect(listPendingInspections().find((p) => p.tempId === 'local_aaa')?.status).toBe('created');
+  });
+});
+
+describe('local inspection renders from the DURABLE store (not the evictable cache)', () => {
+  // Regression guard: the detail page must be able to rebuild a local_ inspection
+  // straight from the pending record, because the offline-cache copy is LRU-capped
+  // and can be evicted by the home page's precache — which is exactly what made a
+  // started-offline inspection un-openable after returning to the list.
+  it('buildSeedPayload reconstructs a renderable payload from the pending record alone', () => {
+    const p = mkPending('local_bbb', 'INSP-2026-06-29-bbbb');
+    addPendingInspection(p);
+    const payload = buildSeedPayload(getPendingInspection('local_bbb')!);
+    expect(payload.inspection.recordId).toBe('local_bbb');
+    expect(payload.inspection.inspectionIdExternal).toBe('INSP-2026-06-29-bbbb');
+    expect(payload.inspection.templateType).toBe('pm_scope_rate_card');
+    expect(payload.propertyRecordId).toBe('P1');
+    expect(payload.__localPending).toBe(true);
+    // No dependency on saveCachedInspection — proves it survives cache eviction.
   });
 });
 

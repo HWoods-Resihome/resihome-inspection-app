@@ -189,3 +189,55 @@ record id) → impossible in a dead zone. Now:
 - Needs **real-device field testing** of the full offline→reconnect→re-key→
   redirect path (the re-key logic itself is unit-tested; the orchestration can't
   be exercised in CI).
+
+---
+
+## 6. Engineering lessons — checklist for offline/field changes
+Captured after two avoidable bugs in the offline-start build (an LRU-evicted
+render source; a no-timeout create that stalled in low service). Run this list
+on every offline/field change so we stop the back-and-forth.
+
+### Root causes (what actually went wrong)
+1. **Conflated cache with source-of-truth.** The only copy of a not-yet-synced
+   inspection was written to an LRU-capped *cache* that the home page's precache
+   evicts. Authoritative, un-derivable state must live in a durable, non-evictable
+   store and be RENDERED from there — the cache is only an accelerator.
+2. **Tested the happy path, not the lifecycle.** "Start → open" worked; the bug
+   was in "start → leave → return." New persistent state must be walked through
+   its WHOLE lifecycle.
+3. **`navigator.onLine` is not "can I reach the server."** In low service it's
+   `true` while requests hang. The first build only branched to offline on
+   hard-offline / a thrown fetch, so a weak signal = an open-ended spinner.
+4. **Fuzzy heuristic instead of the precise signal.** Offline-vs-error was first
+   decided by regex on an error message; the right signal is "did `fetch` throw
+   (network) vs return an HTTP status (server decision)."
+
+### The checklist (apply BEFORE shipping)
+- [ ] **Durable vs cache:** Is this the ONLY copy of user work until sync? If so
+      it goes in a durable store (the pending store / IndexedDB / outbox), and the
+      UI renders from that store — never from an LRU/evictable cache as the sole
+      source.
+- [ ] **Lifecycle walk:** create → reload → navigate away → return → app restart →
+      reconnect. Each transition is a test case. Name the one that bites.
+- [ ] **Every field network call has a timeout + automatic fallback.** Treat
+      "slow" as "offline" for UX. Default ~8s for interactive, ~15s for background.
+      `navigator.onLine === false` is a fast-path shortcut, NOT the trigger.
+- [ ] **Branch on precise signals:** fetch-threw/aborted = network → fallback;
+      HTTP 4xx/5xx = server decision → surface it. No message-regex offline checks.
+- [ ] **Cross-subsystem interactions:** if you depend on a shared store (an LRU,
+      a queue), list who else writes/evicts/drains it and confirm they can't
+      undermine you.
+- [ ] **Idempotent + opaque-token keys:** client-generate stable ids so a retry
+      can't duplicate and a re-key is a blanket token replace, not field surgery.
+- [ ] **Write the round-trip test**, even with a mocked store, for the transition
+      you can't exercise on-device in CI.
+- [ ] **Say what still needs device testing** — don't imply CI coverage proves the
+      field path.
+
+### Seamless low-service UX (the standing bar)
+The inspector must NEVER watch an open-ended spinner. Anything that touches the
+network on the critical path (start, open, save, pick a property) shows cached/
+local content immediately and races the network behind it with a short timeout;
+on timeout it has already fallen back. Sync is silent and automatic; the only
+visible cue is the "saved offline / syncing / Not synced" status — never a dead
+wait or a blocking error for a connectivity problem.

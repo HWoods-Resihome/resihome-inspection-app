@@ -346,15 +346,24 @@ export default function NewInspection() {
     };
     let r: Response;
     try {
+      // LOW-SERVICE GUARD: in a weak-signal area navigator.onLine is usually TRUE
+      // (the radio is associated) but the request hangs. A short timeout turns
+      // that stall into an immediate LOCAL start instead of an open-ended spinner
+      // — the inspector never feels stuck. 8s is well past a healthy create
+      // (~1-2s) but short enough that a dead request falls through fast.
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 8000);
       r = await fetch('/api/inspections/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      });
+        signal: ctrl.signal,
+      }).finally(() => clearTimeout(to));
     } catch (netErr: any) {
-      // The fetch THREW → genuine network failure (dead zone / dropped signal).
-      // Start LOCALLY so the inspector can work now; the deferred-create driver
-      // mints the real HubSpot record + re-keys everything when signal returns.
+      // The fetch THREW → genuine network failure OR our timeout aborted it (weak
+      // signal). Either way, start LOCALLY so the inspector can work now; the
+      // deferred-create driver mints the real HubSpot record + re-keys everything
+      // when signal returns.
       if (startLocalInspection()) return;
       setErrorMsg(String(netErr?.message || netErr));
       setStage('error');

@@ -140,7 +140,12 @@ export async function syncAllProperties(opts: { force?: boolean } = {}): Promise
     do {
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return null; // lost signal → keep old cache
       const url = '/api/properties/all' + (after ? `?after=${encodeURIComponent(after)}` : '');
-      const r = await fetch(url);
+      // Per-page timeout so a weak-signal stall fails THIS background sync fast
+      // (we keep the prior cache and retry on the next open) instead of hanging a
+      // loop of 150 requests on a hung socket.
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 15000);
+      const r = await fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(to));
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       const rows: Property[] = Array.isArray(data.properties) ? data.properties : [];
