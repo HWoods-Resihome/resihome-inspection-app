@@ -17,7 +17,7 @@ import { getGeoFix } from '@/lib/evidenceStamp';
 import { openPdf } from '@/lib/pdfViewerBus';
 import { lockRingFromProperty } from '@/components/UnlockButton';
 import { setInspectionFormActive } from '@/lib/offlinePhotoStore';
-import { isLocalInspectionId, realIdFor } from '@/lib/pendingInspections';
+import { isLocalInspectionId, realIdFor, getPendingInspection, buildSeedPayload } from '@/lib/pendingInspections';
 import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
 
 
@@ -243,9 +243,12 @@ export default function ExistingInspection() {
 
       // Offline-started ("local_") inspection: it exists ONLY on this device until
       // the deferred create syncs it, so never hit the network (there's no server
-      // record yet) — render straight from the seeded cache.
+      // record yet). Render from the DURABLE pending record (rebuilt fresh) —
+      // falling back to the offline cache — so it stays openable even if the
+      // LRU-capped inspection cache evicted its seeded copy.
       if (isLocalInspectionId(inspectionId)) {
-        const local = loadCachedInspection(inspectionId);
+        const p = getPendingInspection(inspectionId);
+        const local = p ? buildSeedPayload(p) : loadCachedInspection(inspectionId);
         if (local) { await finish(local, true); }
         else if (!cancelled) {
           setErrorMsg('This offline inspection couldn’t be found on this device.');

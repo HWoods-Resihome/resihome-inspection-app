@@ -10,7 +10,7 @@ import { Combobox } from '@/components/Combobox';
 import { NumberField } from '@/components/NumberPad';
 import { loadCachedProperties, saveCachedProperties, loadCachedMe, saveCachedMe, saveCachedInspection, loadCachedQuestions, loadCachedRateCard } from '@/lib/offlineCache';
 import { EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
-import { newLocalIds, addPendingInspection } from '@/lib/pendingInspections';
+import { newLocalIds, addPendingInspection, buildSeedPayload } from '@/lib/pendingInspections';
 
 type Stage = 'setup' | 'loading_questions' | 'error';
 
@@ -375,7 +375,7 @@ export default function NewInspection() {
     const inspectorName = sessionUser?.name || '';
     const inspectorEmail = sessionUser?.email || '';
 
-    addPendingInspection({
+    const pending = {
       tempId,
       externalId,
       body: {
@@ -390,37 +390,15 @@ export default function NewInspection() {
         externalId,
       },
       display: { inspectionName, templateType: tmpl, propertyAddress: addressSnapshot, inspectorName },
-      status: 'pending',
+      status: 'pending' as const,
       createdAt: now,
-    });
+    };
+    addPendingInspection(pending);
 
-    // Seed the offline-cache payload the detail page reads (mirrors the GET shape
-    // of /api/inspections/[id]). Region is unknown offline → null (the math falls
-    // back to GA:Atlanta until the real record's region_snapshot lands on sync).
-    saveCachedInspection(tempId, {
-      inspection: {
-        recordId: tempId,
-        inspectionIdExternal: externalId,
-        inspectionName,
-        templateType: tmpl,
-        status: 'scheduled',
-        propertyAddressSnapshot: addressSnapshot,
-        inspectorName,
-        inspectorEmail,
-        bedroomsAtInspection: bedrooms,
-        bathroomsAtInspection: bathrooms,
-        regionSnapshot: null,
-        sectionListJson: null,
-        scheduledDate: today,
-        ...(isQcTemplate ? { sourceRateCardId: selectedSourceId } : {}),
-      },
-      propertyRecordId: selectedPropertyId,
-      answers: [],
-      filterSizeOptions: [],
-      shareLinks: { master: null, chargeback: null, xlsx: null, report: null, vendors: {} },
-      afterPhotosEnabled: true,
-      __localPending: true,
-    });
+    // Warm the offline cache too (fast path), but the DURABLE pending record above
+    // is the real source of truth — the detail page rebuilds from it via
+    // buildSeedPayload if this LRU-capped cache entry is ever evicted.
+    saveCachedInspection(tempId, buildSeedPayload(pending));
 
     router.replace(`/inspection/${tempId}`);
     return true;

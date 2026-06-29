@@ -135,3 +135,42 @@ export function removePendingInspection(tempId: string): void {
 export function realIdFor(tempId: string): string | null {
   return read().find((p) => p.tempId === tempId)?.realId || null;
 }
+
+/**
+ * Build the detail-page payload (the GET /api/inspections/[id] shape) for a
+ * locally-started inspection, straight from the DURABLE pending record. This is
+ * the source of truth for rendering a `local_` inspection — the offline-cache
+ * copy is LRU-evictable (the home page pre-caches a day of inspections, which can
+ * push it out), so the detail page must be able to rebuild from here or a started
+ * inspection becomes un-openable. Region is unknown offline (null → GA fallback);
+ * the real record's region_snapshot lands on sync.
+ */
+export function buildSeedPayload(p: PendingInspection): any {
+  const today = (p.body.scheduledDate && /^\d{4}-\d{2}-\d{2}/.test(p.body.scheduledDate))
+    ? p.body.scheduledDate.slice(0, 10)
+    : new Date(p.createdAt).toISOString().slice(0, 10);
+  return {
+    inspection: {
+      recordId: p.tempId,
+      inspectionIdExternal: p.externalId,
+      inspectionName: p.display.inspectionName,
+      templateType: p.body.templateType,
+      status: 'scheduled',
+      propertyAddressSnapshot: p.body.propertyAddressSnapshot,
+      inspectorName: p.display.inspectorName,
+      inspectorEmail: p.body.inspectorEmail || '',
+      bedroomsAtInspection: p.body.bedrooms ?? null,
+      bathroomsAtInspection: p.body.bathrooms ?? null,
+      regionSnapshot: null,
+      sectionListJson: null,
+      scheduledDate: today,
+      ...(p.body.sourceRateCardId ? { sourceRateCardId: p.body.sourceRateCardId } : {}),
+    },
+    propertyRecordId: p.body.propertyRecordId,
+    answers: [],
+    filterSizeOptions: [],
+    shareLinks: { master: null, chargeback: null, xlsx: null, report: null, vendors: {} },
+    afterPhotosEnabled: true,
+    __localPending: true,
+  };
+}
