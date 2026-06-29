@@ -157,6 +157,10 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     // to WHICH endpoint (image vs document), and what the server returned.
     const postResponses: string[] = [];
     const reqPayloads: string[] = [];
+    // FULL bodies of the document-registration response(s) — they carry the S3
+    // DocumentURL(s) we verify after upload (the truncated postResponses copy
+    // cuts the URL off mid-query, so keep the untrimmed version separately).
+    const docRegBodies: string[] = [];
     page.on('request', (req: any) => {
       try {
         const u = req.url();
@@ -176,10 +180,14 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
         const isUpload = /upload|image|document|file|attach/i.test(u);
         // Keep the full URL (incl. query — ticket id is often there) for uploads,
         // and capture the response body (a 200 can carry {success:false,...}).
-        let body = '';
+        let full = '';
         if (isUpload) {
-          try { body = (await resp.text()).replace(/\s+/g, ' ').slice(0, 300); } catch { /* ignore */ }
+          try { full = await resp.text(); } catch { /* ignore */ }
         }
+        // The document-registration call returns {"TicketDocs":[{DocumentURL,…}]}
+        // — keep its FULL body so we can verify each stored object below.
+        if (full && (/TicketDocumentUpload/i.test(u) || /"TicketDocs"\s*:/.test(full))) docRegBodies.push(full);
+        const body = full ? full.replace(/\s+/g, ' ').slice(0, 300) : '';
         postResponses.push(`${resp.status()} ${(isUpload ? u : u.split('?')[0]).slice(-90)}${body ? ` :: ${body}` : ''}`);
       } catch { /* ignore */ }
     });
@@ -538,6 +546,48 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     if (reqPayloads.length) log(`upload request endpoints: ${reqPayloads.join(' | ')}`);
     log(`kendo file status: ${kendo}`);
 
+    // VERIFY THE BYTES ACTUALLY LANDED. Field evidence shows HoneyBadger can
+    // return 200 to every upload call AND register a document with a presigned S3
+    // URL, yet never durably persist the object — so clicking it later serves S3
+    // "NoSuchKey". The network verdict can't reveal that; only fetching the URL
+    // HoneyBadger just handed back can. Pull every registered DocumentURL and
+    // check it resolves — a genuinely-missing key is a silent loss we must NOT
+    // report as success (and tells us EXACTLY which file HoneyBadger dropped).
+    const docUrls = Array.from(new Set(
+      docRegBodies.flatMap((b) => {
+        try {
+          const j = JSON.parse(b);
+          const docs = Array.isArray(j?.TicketDocs) ? j.TicketDocs : [];
+          const urls = docs.map((d: any) => d?.DocumentURL).filter((x: any) => typeof x === 'string' && x);
+          if (urls.length) return urls as string[];
+        } catch { /* not clean JSON — fall through to a URL scrape */ }
+        return (b.match(/https?:\/\/[^"'\\\s]+/g) || []).filter((x) => /hb-documents|s3\.amazonaws/i.test(x));
+      })
+    ));
+    const missingDocs: string[] = [];
+    for (const du of docUrls) {
+      let present = false;
+      // Two looks, a few seconds apart, so a brief write lag isn't a false alarm.
+      for (let attempt = 0; attempt < 2 && !present; attempt++) {
+        if (attempt) await sleep(4000);
+        try {
+          const r = await fetch(du, { headers: { Range: 'bytes=0-0' } });
+          if (r.ok) { present = true; break; }
+          const txt = await r.text().catch(() => '');
+          // ONLY a genuinely-missing key is a loss. A 403/expired-signature means
+          // the object EXISTS but this short-lived presigned URL lapsed (the live
+          // UI mints a fresh one), so it must not count as missing.
+          if (!/NoSuchKey/i.test(txt) && r.status !== 404) { present = true; break; }
+        } catch { /* network blip — retry once */ }
+      }
+      if (!present) missingDocs.push(du);
+    }
+    if (docUrls.length) {
+      log(`verified ${docUrls.length} stored document URL(s); ${missingDocs.length ? `MISSING ${missingDocs.length}: ${missingDocs.map((u) => u.split('?')[0].slice(-40)).join(', ')}` : 'all present ✓'}`);
+    } else {
+      log('no DocumentURL returned to verify (registration response carried none)');
+    }
+
     const shot = await screenshotB64();
     const had2xxPost = newPosts.some((s) => /^2\d\d /.test(s));
     const hadErrPost = newPosts.some((s) => /^[45]\d\d /.test(s));
@@ -547,15 +597,17 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     // store never actually persisted (→ NoSuchKey). Treat an explicit
     // success:false as a failure so we surface it and the doc isn't trusted.
     const hadBodyFailure = newPosts.some((s) => /["']?success["']?\s*[:=]\s*false\b/i.test(s));
-    const succeeded = (kendo === 'success' || (had2xxPost && kendo !== 'error' && !hadErrPost)) && !hadBodyFailure;
+    const succeeded = (kendo === 'success' || (had2xxPost && kendo !== 'error' && !hadErrPost)) && !hadBodyFailure && missingDocs.length === 0;
     if (!succeeded) {
       return {
         ok: false, configured: true, uploaded: 0, steps,
-        error: !newPosts.length
-          ? `No upload request was sent (file may not have staged; widget status: ${kendo}).`
-          : hadBodyFailure
-            ? `Upload was rejected by HoneyBadger (server returned success:false). Responses: ${newPosts.join(', ')}; widget status: ${kendo}.`
-            : `Upload did not confirm. Server responses: ${newPosts.join(', ')}; widget status: ${kendo}.`,
+        error: missingDocs.length
+          ? `HoneyBadger accepted the upload (HTTP 200) and registered ${docUrls.length} document(s), but ${missingDocs.length} of the stored object(s) are missing from its S3 bucket (NoSuchKey) — the file(s) were sent and registered but not durably saved on HoneyBadger's side. Missing: ${missingDocs.map((u) => u.split('?')[0].slice(-40)).join(', ')}.`
+          : !newPosts.length
+            ? `No upload request was sent (file may not have staged; widget status: ${kendo}).`
+            : hadBodyFailure
+              ? `Upload was rejected by HoneyBadger (server returned success:false). Responses: ${newPosts.join(', ')}; widget status: ${kendo}.`
+              : `Upload did not confirm. Server responses: ${newPosts.join(', ')}; widget status: ${kendo}.`,
         screenshot: shot,
       };
     }
