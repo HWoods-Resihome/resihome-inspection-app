@@ -714,17 +714,32 @@ export async function rehydrateQueuedPhotos(
  * Upload all queued photos for an inspection. For each one that uploads, calls
  * onSynced with the local placeholder URL to replace and the new HubSpot URL.
  *
- * Uploads run ONE AT A TIME. On a weak signal two parallel uploads split the
- * already-tiny uplink, so BOTH crawl past the timeout and neither finishes —
- * the "I can't sync multiple photos in a low-signal area" report. Single-flight
- * gives each photo the FULL pipe, so it completes and the next starts right
- * after — sequential, but each one actually lands. Each upload also makes just
- * ONE attempt per pass (not 4): a photo that can't go through now is skipped so
- * it can't monopolize the lone worker for minutes — the periodic flush (15s +
- * reconnect/foreground kicks) rotates back to it next pass. Photos are never
- * dropped, so this only changes WHEN each lands, never whether.
+ * ADAPTIVE concurrency (AIMD). Uploads used to run strictly ONE AT A TIME so a
+ * weak signal gave each photo the full uplink. But on GOOD service that serial
+ * pace can't keep up with a fast shutter — a photo-heavy Scope out-shoots a lone
+ * uploader and a backlog snowballs (the "209 stacked up on good service even
+ * though they should've been syncing all along" report, on iOS). iOS WebKit
+ * exposes NO Network Information API, so we can't read signal strength to choose a
+ * width — instead we LEARN it from outcomes: the pool runs several uploads at once
+ * on a healthy link (queue keeps pace, no backlog) and each timeout/failure (the
+ * weak-signal signature) multiplicatively backs the live target toward 1 — the
+ * full-pipe-per-photo single-flight behavior the original tuning needed. A clean
+ * upload additively ramps it back up. Each upload still makes just ONE attempt per
+ * pass (a photo that can't go through now is skipped, not retried in place, so it
+ * can't monopolize a worker for minutes) and is NEVER dropped — so this only
+ * changes HOW MANY upload at once and WHEN each lands, never whether.
  */
-const FLUSH_CONCURRENCY = 1; // single-flight: full bandwidth per photo on weak signal
+const MAX_FLUSH_CONCURRENCY = 4;  // healthy-link ceiling — keeps the pipe full on a fast Scope
+const MIN_FLUSH_CONCURRENCY = 1;  // weak-signal floor — full bandwidth per photo (the old behavior)
+// Live target, shared across passes AND adjusted within a pass so a mid-Scope
+// signal change is reacted to immediately. Starts mid-range, not at the ceiling,
+// so a genuinely weak link converges DOWN within the first couple of photos
+// before it can split the pipe N ways.
+let _adaptiveConcurrency = 2;
+function noteUploadOutcome(ok: boolean): void {
+  if (ok) _adaptiveConcurrency = Math.min(MAX_FLUSH_CONCURRENCY, _adaptiveConcurrency + 1);
+  else _adaptiveConcurrency = Math.max(MIN_FLUSH_CONCURRENCY, Math.floor(_adaptiveConcurrency / 2));
+}
 
 /**
  * Reconcile drafts the iOS native background uploader already uploaded + attached
@@ -792,16 +807,15 @@ export async function flushQueuedPhotos(
   const existing = flushInFlight.get(inspectionRecordId);
   if (existing) return existing;
   // iOS uploads DURING the camera session too — photos save as they're taken, not
-  // piled up until Done. Drain at the SAME bounded concurrency whether or not the
+  // piled up until Done. Drain at the adaptive concurrency whether or not the
   // camera is open, so a long continuous Scope keeps pace with the shutter instead
   // of building a big backlog that only fully drains after the camera closes (what
-  // let 180+ photos queue on good service). This is safe now because: every IDB op
-  // is timeout-guarded (see tx/openDb); the per-shot full-res thumbnail decode is
-  // still skipped while the camera is open (makeThumbBlob guard); and the flush
-  // loads each photo's bytes just-in-time, so only ~concurrency compressed images
-  // are ever resident — never the whole queue.
-  const concurrency = FLUSH_CONCURRENCY;
-  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, concurrency);
+  // let 180+ photos queue on good service). This is safe even when several upload
+  // at once because: every IDB op is timeout-guarded (see tx/openDb); the per-shot
+  // full-res thumbnail decode is still skipped while the camera is open
+  // (makeThumbBlob guard); and the flush loads each photo's bytes just-in-time, so
+  // only ~concurrency compressed images are ever resident — never the whole queue.
+  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced);
   flushInFlight.set(inspectionRecordId, run);
   try { return await run; }
   finally { flushInFlight.delete(inspectionRecordId); }
@@ -810,7 +824,6 @@ export async function flushQueuedPhotos(
 async function doFlushQueuedPhotos(
   inspectionRecordId: string,
   onSynced: FlushOnSynced,
-  concurrency: number = FLUSH_CONCURRENCY,
 ): Promise<FlushResult> {
   let lastError: string | undefined;
   // Only flush THIS inspection's photos — the mounted form is what persists the
@@ -923,7 +936,12 @@ async function doFlushQueuedPhotos(
     } catch (e: any) {
       lastError = `Photo upload failed (${String(e?.message || e).slice(0, 90)}).`;
       // Genuinely offline → keep everything and stop taking new work this pass.
+      // (Not a signal-quality outcome — don't let it move the adaptive target.)
       if (typeof navigator !== 'undefined' && navigator.onLine === false) { lastError = 'Device is offline — photos will upload when back online.'; stop = true; return; }
+      // Online but THIS upload failed/timed out — the weak-signal signature. Back
+      // the concurrency target off toward single-flight so we stop splitting a thin
+      // pipe N ways and give the next photo more of it.
+      noteUploadOutcome(false);
       // Online but THIS upload failed (HubSpot hiccup, rate limit, oversized,
       // transient 4xx/5xx, etc.). NEVER delete an evidence photo — it's the
       // inspector's only copy. Keep it queued, count the attempt for telemetry,
@@ -953,21 +971,37 @@ async function doFlushQueuedPhotos(
       // the others go through now.
       return;
     }
+    // Clean upload — ramp the concurrency target back up (additive) so a healthy
+    // link converges toward MAX and a photo-heavy Scope keeps pace with the shutter.
+    noteUploadOutcome(true);
     await finishSynced(rec, newUrl);
   };
 
-  // Worker pool: each worker pulls the next record until the list is exhausted
-  // or a worker signals stop (offline/backoff). Records are independent, so
-  // parallelism is safe; ordering doesn't matter for attach.
+  // Adaptive worker pool: up to MAX_FLUSH_CONCURRENCY workers exist, but only
+  // _adaptiveConcurrency of them upload AT ONCE — a worker parks (cheap poll)
+  // rather than claim work whenever the live count is at/over the target, so a
+  // mid-Scope drop in signal (which halves the target via noteUploadOutcome)
+  // immediately narrows the pool, and a clean stretch (which ramps it up) widens
+  // it. Records are independent, so parallelism is safe; ordering doesn't matter
+  // for attach.
   let idx = 0;
+  let active = 0;
   const worker = async () => {
     while (!stop) {
+      if (active >= _adaptiveConcurrency) {
+        // Over the live target — yield briefly and re-check instead of claiming
+        // work (keeps the effective width == target without tearing down workers).
+        await new Promise((r) => setTimeout(r, 150));
+        continue;
+      }
       const i = idx++;
       if (i >= all.length) break;
-      await processOne(all[i]);
+      active++;
+      try { await processOne(all[i]); }
+      finally { active--; }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(concurrency, all.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(MAX_FLUSH_CONCURRENCY, all.length) }, worker));
 
   const remaining = (await listQueueMeta()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
   return { synced, remaining, lastError };
