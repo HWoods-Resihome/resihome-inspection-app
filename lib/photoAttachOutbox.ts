@@ -28,6 +28,11 @@ export interface PhotoAttachTarget {
   section?: string;
   location?: string;
   summaryLabel?: string;
+  /** The inspection's external id — stamped on a section_photo answer CREATED by
+   *  the attach endpoint, so it matches the record the form's own save writes.
+   *  Critical for OFFLINE-only section photos, whose answer record is created
+   *  SOLELY by this attach path (their in-form save was a no-op while drafts). */
+  inspectionIdExternal?: string;
   /** FC slot inside the blob: "<qid>:<key>" where key is 'photo' or a sticker id. */
   fcSlot?: string;
 }

@@ -132,6 +132,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // No record yet → CREATE one with this photo (upsertAnswers dedupes by external id).
     const props = buildSectionPhotoAnswerProps({
       answerIdExternal: externalId,
+      // Stamp the inspection's external id (matches the form's own save) so an
+      // offline-only section photo's freshly-created answer is complete.
+      inspectionIdExternal: target.inspectionIdExternal ? String(target.inspectionIdExternal) : undefined,
       section: String(target.section || ''),
       summaryLabel: String(target.summaryLabel || target.section || ''),
       location: target.location != null ? String(target.location) : null,

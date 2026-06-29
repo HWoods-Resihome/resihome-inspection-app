@@ -2234,7 +2234,7 @@ export function RateCardForm(props: RateCardFormProps) {
         (file) => {
           const s = sections.find((x) => x.id === sectionId);
           return uploadPhotoOrQueue(file, props.inspectionRecordId, sectionId, {
-            attach: { kind: 'section', externalId: `SECTIONPHOTO-${props.inspectionRecordId}-${sectionId}`, section: s?.label, location: s?.location, summaryLabel: s?.label },
+            attach: { kind: 'section', externalId: `SECTIONPHOTO-${props.inspectionRecordId}-${sectionId}`, section: s?.label, location: s?.location, summaryLabel: s?.label, inspectionIdExternal: props.inspectionExternalId },
           });
         },
       );

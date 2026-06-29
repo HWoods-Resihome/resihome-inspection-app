@@ -64,7 +64,7 @@ export type QueuedPhoto = {
   // section_photo (QC after-photos use this too); 'line' → a qa/rate_card_line
   // answer's photo_urls (inline per-question photos). Scope line/after photos
   // instead derive their target from lineExternalId + lineField.
-  attach?: { kind: 'section' | 'line'; externalId: string; field?: 'photo_urls' | 'after_photo_urls'; section?: string; location?: string; summaryLabel?: string };
+  attach?: { kind: 'section' | 'line'; externalId: string; field?: 'photo_urls' | 'after_photo_urls'; section?: string; location?: string; summaryLabel?: string; inspectionIdExternal?: string };
   createdAt: number;
   attempts?: number;     // failed upload attempts (telemetry only — NEVER dropped)
   // Set by the service worker's Background Sync handler once the blob has been
@@ -116,7 +116,7 @@ function attachTargetForRecord(
     return { kind: 'line', externalId: rec.lineExternalId, field: rec.lineField === 'after' ? 'after_photo_urls' : 'photo_urls' };
   }
   if (rec.attach && rec.attach.externalId) {
-    return { kind: rec.attach.kind, externalId: rec.attach.externalId, field: rec.attach.field || 'photo_urls', section: rec.attach.section, location: rec.attach.location, summaryLabel: rec.attach.summaryLabel };
+    return { kind: rec.attach.kind, externalId: rec.attach.externalId, field: rec.attach.field || 'photo_urls', section: rec.attach.section, location: rec.attach.location, summaryLabel: rec.attach.summaryLabel, inspectionIdExternal: rec.attach.inspectionIdExternal };
   }
   return null;
 }
