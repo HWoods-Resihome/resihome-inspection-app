@@ -104,9 +104,14 @@ export function listPendingInspections(): PendingInspection[] {
   return read().sort((a, b) => b.createdAt - a.createdAt);
 }
 
-/** Those still needing a server create (drained by the deferred-create driver). */
+/** Those still needing a server create (drained by the deferred-create driver).
+ *  Includes 'creating' so an entry left stuck in-flight by an interrupted/aborted
+ *  run is retried (the drain is single-flight, and the server create dedupes by
+ *  external id, so re-running is safe and can't duplicate). */
 export function pendingNeedingCreate(): PendingInspection[] {
-  return read().filter((p) => p.status === 'pending' || p.status === 'error').sort((a, b) => a.createdAt - b.createdAt);
+  return read()
+    .filter((p) => p.status === 'pending' || p.status === 'error' || p.status === 'creating')
+    .sort((a, b) => a.createdAt - b.createdAt);
 }
 
 export function markCreating(tempId: string): void {

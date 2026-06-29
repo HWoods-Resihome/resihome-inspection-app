@@ -105,11 +105,12 @@ export function InspectionCard({ inspection: i, selectMode, selected, selectable
         </div>
         <div className="shrink-0 flex flex-col items-end gap-1.5">
           {i.localPending ? (
-            // Started offline, not yet synced to HubSpot. Amber so it reads as
-            // "in transit", and we suppress the normal status pill (it has no
-            // server status yet).
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[11px] font-heading font-semibold">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden />
+            // Started offline, not yet synced to HubSpot. Light red/pink (rose) —
+            // amber is already the "In Progress" pill, so this needs to read as a
+            // distinct "needs to sync" state. The normal status pill is suppressed
+            // (there's no server status yet).
+            <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-heading font-semibold">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-rose-500" aria-hidden />
               Not synced
             </span>
           ) : (

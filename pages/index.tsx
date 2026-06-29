@@ -17,6 +17,7 @@ import { warmAi } from '@/lib/aiWarm';
 import { templateLabel } from '@/lib/templateLabels';
 import { openOAuthStartNative } from '@/lib/nativeBridge';
 import { listPendingInspections, removePendingInspection, type PendingInspection } from '@/lib/pendingInspections';
+import { drainPendingCreates } from '@/lib/deferredCreate';
 import { syncAllProperties, dropPropertyMemCache } from '@/lib/propertyCache';
 
 interface MeUser { userId: string; email: string; name: string; }
@@ -358,6 +359,15 @@ export default function Home() {
         if (p.status === 'created' && p.realId && serverIds.has(p.realId)) removePendingInspection(p.tempId);
       }
       setPendingLocals(listPendingInspections().filter((p) => p.status !== 'created'));
+      // If anything is still waiting to sync and we're online, kick the deferred
+      // create NOW (don't wait up to 20s for the global tick) so a reconnected
+      // device clears "Not synced" within a second or two. Single-flight, so this
+      // is safe alongside the global driver.
+      if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+        if (all.some((p) => p.status === 'pending' || p.status === 'error' || p.status === 'creating')) {
+          void drainPendingCreates();
+        }
+      }
     };
     refresh();
     const onCreated = () => refresh();

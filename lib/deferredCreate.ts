@@ -25,13 +25,20 @@ async function createOne(p: PendingInspection): Promise<void> {
   markCreating(p.tempId);
   let res: Response;
   try {
+    // HARD TIMEOUT: without it a weak-signal create hangs forever, and because the
+    // global sync driver AWAITS this drain under a single-flight lock, one hung
+    // create wedges ALL syncing (the bug where a reconnected device stayed "Not
+    // synced"). On timeout we abort → markError → retry next tick, loop unblocked.
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 25000); // server create does region/billing lookups
     res = await fetch('/api/inspections/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...p.body }),
-    });
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(to));
   } catch (e: any) {
-    // Offline / network — leave it pending and retry next tick.
+    // Offline / network / aborted timeout — leave it pending and retry next tick.
     markError(p.tempId, `offline: ${String(e?.message || e).slice(0, 80)}`);
     throw e; // signal the caller to stop draining this tick
   }
