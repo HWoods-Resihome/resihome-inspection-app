@@ -912,19 +912,23 @@ export default function Home() {
               sort row) in unison, so the list can show more cards at once. */}
           <div className="flex items-center gap-2 mb-3">
             <div className="relative flex-1 min-w-0">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                   className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
               <input
                 type="text"
                 placeholder="Search address, name, or inspector…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="focus-brand w-full pl-9 pr-9 py-2.5 text-sm border border-gray-300 rounded-lg bg-white"
+                className="focus-brand w-full pl-3 pr-9 py-2.5 text-sm border border-gray-300 rounded-lg bg-white"
               />
+              {/* Search icon — far right, inside the bar. Shown only when empty;
+                  once there's a term the clear (×) takes this same slot. */}
+              {!search && (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              )}
               {/* Clear search — right-aligned; wipes the term and returns the full
                   unfiltered list. Only shown when there's something to clear. */}
               {search && (
