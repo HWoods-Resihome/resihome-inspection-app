@@ -66,6 +66,19 @@ self.addEventListener('install', (event) => {
         try { const r = await fetch(url); if (r && r.status === 200) await cache.put(url, r.clone()); }
         catch { /* one asset failing must not abort the precache */ }
       }));
+      // Cache id-AGNOSTIC route shells so an OFFLINE hard navigation / reload /
+      // deep-link to a dynamic inspection URL (/inspection/<id>) renders the app
+      // instead of the dead "Offline" page. The [id] page has no per-id server
+      // data — the client reads the id from the URL — so ONE shell (fetched for a
+      // throwaway id) serves every inspection, including offline-created local_*
+      // ones. Stored under a stable cache key the navigate handler looks up.
+      await Promise.all([
+        ['/inspection/__id_shell__', '/inspection/_precache_shell_'],
+        ['/inspection/new', '/inspection/new'],
+      ].map(async ([key, url]) => {
+        try { const r = await fetch(url, { cache: 'no-store' }); if (r && r.ok) await cache.put(key, r.clone()); }
+        catch { /* offline at install — non-fatal */ }
+      }));
     } catch { /* cache open failed — non-fatal */ }
   })());
 });
@@ -283,7 +296,20 @@ self.addEventListener('fetch', (event) => {
           return fresh;
         } catch {
           const cache = await caches.open(CACHE);
-          return (await cache.match(req)) || (await cache.match(NAV_FALLBACK)) ||
+          // Exact match first (home, /inspection/new, a previously-visited
+          // inspection URL).
+          const exact = await cache.match(req);
+          if (exact) return exact;
+          // OFFLINE deep-link / reload / hard-nav to a dynamic inspection URL:
+          // serve the id-agnostic [id] shell so the SPA boots and client-renders
+          // the inspection (it reads the id from window.location) — instead of the
+          // dead "Offline" page. This is what made an offline-created inspection
+          // un-openable after a hard navigation.
+          if (url.pathname.startsWith('/inspection/') && url.pathname !== '/inspection/new') {
+            const shell = await cache.match('/inspection/__id_shell__');
+            if (shell) return shell;
+          }
+          return (await cache.match(NAV_FALLBACK)) ||
             new Response('<h1>Offline</h1><p>Reconnect to load this page. Your saved work is safe on this device.</p>', { headers: { 'Content-Type': 'text/html' } });
         }
       })(),
