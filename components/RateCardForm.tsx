@@ -2440,6 +2440,23 @@ export function RateCardForm(props: RateCardFormProps) {
     }
   }
 
+  // Durable section-photo attach descriptor for a section id. CRITICAL for the
+  // camera capture paths: without it an offline section photo has no attach
+  // instruction, so when the background driver (not the open form) flushes it, it
+  // uploads but never lands on the section_photo record → the lost-section-photos
+  // bug. Mirrors the file-input path (handlePhotoFiles).
+  function sectionAttachFor(sectionId: string) {
+    const s = sections.find((x) => x.id === sectionId);
+    return {
+      kind: 'section' as const,
+      externalId: `SECTIONPHOTO-${props.inspectionRecordId}-${sectionId}`,
+      section: s?.label,
+      location: s?.location,
+      summaryLabel: s?.label,
+      inspectionIdExternal: props.inspectionExternalId,
+    };
+  }
+
   function handleCameraComplete(hubspotUrls: string[]) {
     if (!cameraSectionId) return;
     if (hubspotUrls.length) {
@@ -4564,7 +4581,7 @@ export function RateCardForm(props: RateCardFormProps) {
           propertyRecordId={props.propertyRecordId}
           onComplete={(urls) => { void handleAiCameraComplete(urls); }}
           onClose={handleAiCameraClose}
-          uploadPhoto={(file) => uploadPhotoOrQueue(file, props.inspectionRecordId, aiCameraTarget.sectionId)}
+          uploadPhoto={(file) => uploadPhotoOrQueue(file, props.inspectionRecordId, aiCameraTarget.sectionId, { attach: sectionAttachFor(aiCameraTarget.sectionId) })}
           uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, props.inspectionRecordId, aiCameraTarget.sectionId)}
           rooms={(() => { const s = sections.find((x) => x.id === aiCameraTarget.sectionId); return [{ id: aiCameraTarget.sectionId, name: s?.displayName || s?.label || 'Room', photoCount: (photosBySection[aiCameraTarget.sectionId] || []).length, needsPhotos: false }]; })()}
           currentRoomId={aiCameraTarget.sectionId}
@@ -4615,7 +4632,7 @@ export function RateCardForm(props: RateCardFormProps) {
           }}
           // Queue-aware: offline captures become local drafts and sync later.
           // Targets the camera's active room so a queued blob is attributed right.
-          uploadPhoto={(file) => uploadPhotoOrQueue(file, props.inspectionRecordId, cameraSectionId || currentSectionId)}
+          uploadPhoto={(file) => { const sid = cameraSectionId || currentSectionId; return uploadPhotoOrQueue(file, props.inspectionRecordId, sid, { attach: sectionAttachFor(sid) }); }}
           uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, props.inspectionRecordId, cameraSectionId || currentSectionId)}
           rooms={sections.map((s) => {
             const roomPhotos = photosBySection[s.id] || [];

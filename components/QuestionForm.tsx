@@ -2398,7 +2398,16 @@ export function QuestionForm({
         addressSnapshot={propertyName}
         propertyRecordId={propertyRecordId}
         onClose={() => setSectionCameraInstance(null)}
-        uploadPhoto={(file) => uploadPhotoOrQueue(file, inspectionRecordId, sectionCameraInstance || '')}
+        uploadPhoto={(file) => {
+          // Carry the durable section attach descriptor (same as the file-input
+          // path) so a camera-captured section photo isn't lost when the
+          // background driver flushes it offline (it had no attach target before).
+          const instanceKey = sectionCameraInstance || '';
+          const inst = sectionInstances.find((x) => x.instanceKey === instanceKey);
+          return uploadPhotoOrQueue(file, inspectionRecordId, instanceKey, {
+            attach: { kind: 'section', externalId: `${inspectionExternalId}_sp_${instanceKey.replace(/[^a-zA-Z0-9_-]/g, '_')}`, section: inst?.baseSectionName, location: inst?.location, summaryLabel: inst?.displayName },
+          });
+        }}
         uploadVideoEntry={(videoFile, posterFile) => uploadVideoEntryOrQueue(videoFile, posterFile, inspectionRecordId, sectionCameraInstance || '')}
         rooms={sectionInstances.map((inst) => {
           const roomPhotos = sectionPhotos[inst.instanceKey] || [];
