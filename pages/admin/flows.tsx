@@ -82,7 +82,7 @@ export default function AdminFlowsPage() {
 
       <main className="max-w-2xl mx-auto px-4 py-6">
         {/* ---- Admins ---- */}
-        <Section title="Admins" desc="Manage who has admin access to ResiWALK (insights, form builder, these flows, and view-as).">
+        <Section title="Admins" desc="Manage who has admin access to ResiWalk (insights, form builder, these flows, and view-as).">
           <Link href="/admin/admins"
             className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-brand text-white font-heading font-bold text-sm hover:opacity-90">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>

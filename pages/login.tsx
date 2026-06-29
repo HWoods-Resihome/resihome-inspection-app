@@ -164,7 +164,17 @@ export default function LoginPage() {
   return (
     <>
       <Head>
-        <title>Sign in - ResiWalk</title>
+        {/* Authoritative title + description so search engines/link previews show
+            the correct branding ("ResiWalk", proper case — never "ResiHome
+            Inspection" or all-caps "ResiWALK"). The old crawl that shows those was
+            a stale version; these explicit tags replace the auto-generated snippet
+            on the next crawl. */}
+        <title>ResiWalk — Sign in</title>
+        <meta name="description" content="ResiWalk Field Inspections — sign in. Access is for active HubSpot users; verify your email via Google, Microsoft, or an emailed code." />
+        <meta property="og:site_name" content="ResiWalk" />
+        <meta property="og:title" content="ResiWalk — Sign in" />
+        <meta property="og:description" content="ResiWalk Field Inspections — sign in." />
+        <meta name="robots" content="noindex" />
       </Head>
       <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-white">
         <div className="w-full max-w-md">
