@@ -444,7 +444,14 @@ export default function NewInspection() {
     // buildSeedPayload if this LRU-capped cache entry is ever evicted.
     saveCachedInspection(tempId, buildSeedPayload(pending));
 
-    router.replace(`/inspection/${tempId}`);
+    // Navigate into the (now durably-saved) inspection. If the client navigation
+    // FAILS — which happens offline on a build whose inspection-page chunk wasn't
+    // precached (a ChunkLoadError) — DON'T leave the inspector on a dead spinner.
+    // The inspection is already saved; tell them how to make offline fully work.
+    router.replace(`/inspection/${tempId}`).catch(() => {
+      setErrorMsg('Your inspection was saved on this device. To open and edit it offline, reconnect to the internet briefly and reopen the app ONCE — that downloads the offline screens. After that it (and starting inspections offline) works with no signal.');
+      setStage('error');
+    });
     return true;
   }
 
