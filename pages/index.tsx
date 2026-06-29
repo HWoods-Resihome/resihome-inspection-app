@@ -19,6 +19,7 @@ import { openOAuthStartNative } from '@/lib/nativeBridge';
 import { listPendingInspections, removePendingInspection, type PendingInspection } from '@/lib/pendingInspections';
 import { drainPendingCreates } from '@/lib/deferredCreate';
 import { syncAllProperties, dropPropertyMemCache } from '@/lib/propertyCache';
+import { isOfflineReady } from '@/lib/offlineReady';
 
 interface MeUser { userId: string; email: string; name: string; }
 
@@ -85,6 +86,8 @@ export default function Home() {
   // Inspections STARTED OFFLINE that haven't synced to HubSpot yet — merged into
   // the list so they're always re-openable (and visibly "Not synced").
   const [pendingLocals, setPendingLocals] = useState<PendingInspection[]>([]);
+  // null = unknown (don't flash a cue), false = precaching, true = offline-ready.
+  const [offlineReady, setOfflineReady] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Server-computed metadata for the current query (so filtering/counting/paging
@@ -258,6 +261,26 @@ export default function Home() {
   useEffect(() => {
     const t = setTimeout(() => { void syncAllProperties().then((r) => { if (r) dropPropertyMemCache(); }); }, 3000);
     return () => clearTimeout(t);
+  }, []);
+
+  // Poll offline-readiness so the home screen can tell the inspector when the
+  // app has finished caching the screens for offline use. Checks on mount, on
+  // focus/visibility (e.g. just after a deploy auto-update), and on an interval
+  // until ready (then stops).
+  useEffect(() => {
+    let alive = true;
+    let iv: ReturnType<typeof setInterval> | null = null;
+    const check = async () => {
+      const ready = await isOfflineReady();
+      if (!alive) return;
+      setOfflineReady(ready);
+      if (ready && iv) { clearInterval(iv); iv = null; }
+    };
+    void check();
+    iv = setInterval(() => { void check(); }, 4000);
+    const onVis = () => { if (document.visibilityState === 'visible') void check(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { alive = false; if (iv) clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, []);
 
   // Pre-cache active (non-completed) inspections for offline use, so the inspector
@@ -862,6 +885,21 @@ export default function Home() {
               </div>
               <span className="font-heading font-bold text-base text-brand">New Inspection</span>
             </Link>
+            {/* Offline-readiness cue: tells the inspector whether the app has
+                finished caching the screens for offline use BEFORE they head into
+                a dead zone — the recurring "went offline, inspection wouldn't
+                open" was usually going offline before the precache finished. */}
+            {offlineReady === false && (
+              <div className="mt-2 flex items-center gap-2 text-[12px] text-amber-700">
+                <span className="inline-block w-3 h-3 border-2 border-amber-400 border-t-amber-700 rounded-full animate-spin" aria-hidden />
+                Preparing offline use… keep this open a moment before going offline.
+              </div>
+            )}
+            {offlineReady === true && (
+              <div className="mt-2 flex items-center gap-1.5 text-[12px] text-emerald-700">
+                <span aria-hidden>✓</span> Ready for offline use
+              </div>
+            )}
           </div>
         </header>
 
