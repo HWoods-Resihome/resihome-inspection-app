@@ -110,13 +110,21 @@ export async function drainPhotoAttachOutbox(opts?: { skipInspectionIds?: Set<st
     if (skip && skip.has(e.inspectionRecordId)) continue;
     let res: Response;
     try {
+      // HARD TIMEOUT per attach: on a weak/moving connection a request can hang
+      // indefinitely. Without this, one hung attach blocks the whole drain — and
+      // since the open form AWAITS this drain under a single-flight lock, the
+      // entire sync wedges (the "Syncing N items…" that spins forever). On
+      // timeout we abort → stop this pass → retry next tick.
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 20000);
       res = await fetch(`/api/inspections/${e.inspectionRecordId}/attach-photo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: e.url, replacesUrl: e.replacesUrl, target: e.target }),
-      });
+        signal: ctrl.signal,
+      }).finally(() => clearTimeout(to));
     } catch {
-      break; // offline / network — stop, retry next tick (order preserved)
+      break; // offline / network / aborted timeout — stop, retry next tick
     }
     if (res.ok) {
       // The endpoint may DEFER (the parent answer record doesn't exist yet — the
