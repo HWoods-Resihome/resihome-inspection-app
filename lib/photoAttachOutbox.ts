@@ -13,6 +13,8 @@
  * form's live attach + this replay can't double-add.
  */
 
+import { isLocalInspectionId } from '@/lib/pendingInspections';
+
 export interface PhotoAttachTarget {
   // 'section' → a section_photo answer; 'line' → a rate_card_line / qa answer's
   // photo list; 'fc' → a slot inside the Final Checklist JSON blob.
@@ -94,6 +96,10 @@ export async function drainPhotoAttachOutbox(opts?: { skipInspectionIds?: Set<st
   const list = read().sort((a, b) => a.createdAt - b.createdAt);
   let done = 0;
   for (const e of list) {
+    // Skip offline-started ("local_") inspections — there's no server record yet,
+    // so POSTing would 404 and (being a 4xx) the entry would be dropped, losing
+    // the photo. It's re-keyed to the real id by the deferred create, then drains.
+    if (isLocalInspectionId(e.inspectionRecordId)) continue;
     // Skip the currently-open inspection — its form is the sole writer of those
     // records; the entry stays queued and attaches (idempotently) after they leave.
     if (skip && skip.has(e.inspectionRecordId)) continue;

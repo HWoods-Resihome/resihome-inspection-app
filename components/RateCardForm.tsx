@@ -791,6 +791,18 @@ export function RateCardForm(props: RateCardFormProps) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Offline-started ("local_") inspection: there's NO server record to fetch
+      // (it 404s and previously left afterPhotosEnabled=false, which hid the
+      // Internal Resolution after-photo capture + Now/Later toggle offline). Use
+      // local defaults: enable after-photos, restore device-local timing choices,
+      // and unblock autosave. Lines come from the outbox-restore effect; photos
+      // from rehydrateQueuedPhotos. Everything re-keys to the real id on sync.
+      if (isLocalInspectionId(props.inspectionRecordId)) {
+        setAfterPhotosEnabled(true);
+        setResolutionTimings({ ...getResolutionTimings(props.inspectionRecordId) });
+        setLinesHydrated(true);
+        return;
+      }
       try {
         const r = await fetch(`/api/inspections/${props.inspectionRecordId}`);
         if (!r.ok) {

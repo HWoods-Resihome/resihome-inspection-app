@@ -776,6 +776,16 @@ export async function flushQueuedPhotos(
   inspectionRecordId: string,
   onSynced: FlushOnSynced,
 ): Promise<FlushResult> {
+  // NEVER flush photos for an offline-started ("local_") inspection: there's no
+  // server record to attach them to yet. Uploading now would create an attach
+  // instruction keyed to the temp id that the deferred-create re-key can't catch
+  // (it ran already) → it 404s on /api/inspections/local_*/attach-photo and the
+  // photo is dropped (the lost-photos bug). They stay queued until the deferred
+  // create mints the real id + re-keys them, then flush under the real id.
+  if (isLocalInspectionId(inspectionRecordId)) {
+    const remaining = (await listQueueMeta()).filter((r) => r.inspectionRecordId === inspectionRecordId).length;
+    return { synced: 0, remaining };
+  }
   // Still run when IndexedDB is unavailable IF the in-memory fallback holds
   // photos to upload (private mode / a failed durable write).
   if (!idbAvailable() && memQueue.size === 0) return { synced: 0, remaining: 0 };
