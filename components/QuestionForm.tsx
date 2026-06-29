@@ -7,6 +7,7 @@ import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadFilesBatch } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume, countQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { flushOutbox } from '@/lib/offlineOutbox';
+import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
 import { loadCachedAnswers, saveCachedAnswers, clearCachedAnswers } from '@/lib/offlineCache';
 import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
@@ -989,7 +990,7 @@ export function QuestionForm({
   const runPhotoFlush = useCallback(async () => {
     if (readOnly || !photoRehydratedRef.current) return undefined;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return undefined;
-    return await flushQueuedPhotos(inspectionRecordId, ({ sectionId, oldUrl, newUrl, replacesUrl, lineExternalId }) => {
+    const res = await flushQueuedPhotos(inspectionRecordId, ({ sectionId, oldUrl, newUrl, replacesUrl, lineExternalId }) => {
       // Final Checklist photo (HVAC label stickers, etc.): swap the draft/original
       // URL for the real one inside fcAnswers (photoUrls + per-slot stickerPhotos),
       // then persist. MUST run before the lineExternalId guard — FC photos carry
@@ -1076,6 +1077,11 @@ export function QuestionForm({
         return cur;
       });
     }).catch(() => undefined);
+    // Drain this inspection's durable photo-attach backups (the global driver
+    // skips the OPEN inspection, so they'd otherwise linger and keep the sync
+    // badge showing "Syncing N…" while the form is open). Idempotent append.
+    try { await drainPhotoAttachOutbox(); } catch { /* retries via global driver */ }
+    return res;
   }, [readOnly, inspectionRecordId, saveFc]);
   const runPhotoFlushRef = useRef(runPhotoFlush);
   runPhotoFlushRef.current = runPhotoFlush;

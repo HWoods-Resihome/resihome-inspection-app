@@ -41,6 +41,7 @@ import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, 
 import { reportSyncOutcome } from '@/lib/syncTelemetry';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos, onPhotoFlushResume } from '@/lib/offlinePhotoStore';
 import { isLocalInspectionId } from '@/lib/pendingInspections';
+import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
 import { setErrorContext } from '@/lib/clientErrorReporter';
@@ -1151,6 +1152,14 @@ export function RateCardForm(props: RateCardFormProps) {
       });
     }
 
+    // Drain THIS inspection's durable photo-attach BACKUPS now that the flush +
+    // live attaches have settled. The global driver skips the OPEN inspection (to
+    // avoid racing the form), so these redundant backups would otherwise linger
+    // and the app-wide sync badge would show them as "Syncing N items…" the whole
+    // time the form is open — even though the photos are already attached. Safe:
+    // attach-photo is append-if-missing, so re-applying an already-attached url is
+    // a no-op (it can't clobber the form's saved list).
+    try { await drainPhotoAttachOutbox(); } catch { /* retries via global driver */ }
     refreshPending();
     if (outboxRes.synced > 0 || (photoRes && photoRes.synced > 0)) markSaved();
     // Capture the last failure reason for the banner's "Details"; clear it once

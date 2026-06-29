@@ -8,13 +8,16 @@
  * visibility/online). It never triggers sync itself — the global driver does
  * that. Hidden when there's nothing pending (after a brief "Synced ✓").
  *
- * Positioned bottom-center, ABOVE the inspection forms' fixed action bar, and
- * below modals (z-index), so it never blocks controls.
+ * DRAGGABLE: the inspector can drag it anywhere and the spot is remembered
+ * (localStorage) — so it can be parked out of the way. Defaults to bottom-center,
+ * just above the forms' action bar. A small grip handle signals it's movable.
  */
 import { useEffect, useRef, useState } from 'react';
 import { countOutbox } from '@/lib/offlineOutbox';
 import { countPhotoAttach } from '@/lib/photoAttachOutbox';
 import { countAllQueuedPhotos } from '@/lib/offlinePhotoStore';
+
+const POS_KEY = 'resiwalk_syncbadge_pos_v1';
 
 export function SyncStatusBadge() {
   const [pending, setPending] = useState(0);
@@ -22,6 +25,19 @@ export function SyncStatusBadge() {
   const [justSynced, setJustSynced] = useState(false);
   const prevRef = useRef(0);
   const syncedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Dragging: pos === null → default (CSS bottom-center). Once dragged it's a
+  // fixed {x,y} (viewport px), persisted so it stays put across reloads.
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const elRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ dx: number; dy: number; moved: boolean } | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(POS_KEY);
+      if (raw) { const p = JSON.parse(raw); if (p && typeof p.x === 'number' && typeof p.y === 'number') setPos(p); }
+    } catch { /* ignore */ }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,7 +47,6 @@ export function SyncStatusBadge() {
       if (cancelled) return;
       const total = countOutbox() + countPhotoAttach() + photos;
       setOnline(typeof navigator === 'undefined' || navigator.onLine !== false);
-      // Flash "Synced ✓" when the queue drains from >0 to 0.
       if (prevRef.current > 0 && total === 0) {
         setJustSynced(true);
         if (syncedTimer.current) clearTimeout(syncedTimer.current);
@@ -50,6 +65,34 @@ export function SyncStatusBadge() {
     return () => { cancelled = true; clearInterval(iv); if (syncedTimer.current) clearTimeout(syncedTimer.current); document.removeEventListener('visibilitychange', onVis); };
   }, []);
 
+  function clamp(p: { x: number; y: number }) {
+    const w = elRef.current?.offsetWidth || 160;
+    const h = elRef.current?.offsetHeight || 36;
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 360;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 640;
+    return { x: Math.max(6, Math.min(p.x, vw - w - 6)), y: Math.max(6, Math.min(p.y, vh - h - 6)) };
+  }
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    const el = elRef.current; if (!el) return;
+    const rect = el.getBoundingClientRect();
+    dragRef.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, moved: false };
+    setPos({ x: rect.left, y: rect.top }); // switch from CSS-centered to fixed at current spot
+    try { el.setPointerCapture(e.pointerId); } catch { /* noop */ }
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    dragRef.current.moved = true;
+    setPos(clamp({ x: e.clientX - dragRef.current.dx, y: e.clientY - dragRef.current.dy }));
+  };
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    const moved = dragRef.current.moved;
+    dragRef.current = null;
+    try { elRef.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    if (moved) { setPos((p) => { const c = p ? clamp(p) : p; try { if (c) localStorage.setItem(POS_KEY, JSON.stringify(c)); } catch { /* ignore */ } return c; }); }
+  };
+
   if (pending === 0 && !justSynced) return null;
 
   const synced = pending === 0 && justSynced;
@@ -64,21 +107,35 @@ export function SyncStatusBadge() {
       ? `Syncing ${pending} item${pending === 1 ? '' : 's'}…`
       : `${pending} item${pending === 1 ? '' : 's'} saved offline`;
 
+  const positioned: React.CSSProperties = pos
+    ? { left: pos.x, top: pos.y }
+    : { left: '50%', transform: 'translateX(-50%)', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 72px)' };
+
   return (
     <div
+      ref={elRef}
       aria-live="polite"
-      className="fixed left-1/2 -translate-x-1/2 z-[70] pointer-events-none"
-      style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 76px)' }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      className={`fixed z-[70] flex items-center gap-1.5 rounded-full pl-1.5 pr-3 py-1 text-[11px] font-heading font-semibold shadow-lg select-none cursor-grab active:cursor-grabbing ${tone}`}
+      style={{ ...positioned, touchAction: 'none' }}
+      title="Drag to move"
     >
-      <div className={`flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-heading font-semibold shadow-lg ${tone}`}>
-        {!synced && online && (
-          <span className="inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" aria-hidden />
-        )}
-        {!synced && !online && (
-          <span className="inline-block w-2 h-2 rounded-full bg-white" aria-hidden />
-        )}
-        <span>{label}</span>
-      </div>
+      {/* Grip handle — signals the pill is draggable. */}
+      <span className="flex flex-col gap-[2px] px-1 opacity-60" aria-hidden>
+        <span className="flex gap-[2px]"><i className="w-[3px] h-[3px] rounded-full bg-current" /><i className="w-[3px] h-[3px] rounded-full bg-current" /></span>
+        <span className="flex gap-[2px]"><i className="w-[3px] h-[3px] rounded-full bg-current" /><i className="w-[3px] h-[3px] rounded-full bg-current" /></span>
+        <span className="flex gap-[2px]"><i className="w-[3px] h-[3px] rounded-full bg-current" /><i className="w-[3px] h-[3px] rounded-full bg-current" /></span>
+      </span>
+      {!synced && online && (
+        <span className="inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" aria-hidden />
+      )}
+      {!synced && !online && (
+        <span className="inline-block w-2 h-2 rounded-full bg-white" aria-hidden />
+      )}
+      <span>{label}</span>
     </div>
   );
 }

@@ -30,6 +30,7 @@ import { useAppDialog } from '@/components/AppDialog';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
 import { enqueue as outboxEnqueue, isOfflineError } from '@/lib/offlineOutbox';
 import { isLocalInspectionId } from '@/lib/pendingInspections';
+import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 import { UnlockButton, type LockRing } from '@/components/UnlockButton';
 import InspectionPager from '@/components/InspectionPager';
@@ -655,6 +656,10 @@ export function QcReinspectForm(props: Props) {
       });
       if (toSave.length) { setLines(next); for (const t of toSave) void saveLineRef.current(t.id, t.urls); }
     }
+    // Drain this inspection's durable photo-attach backups (the global driver
+    // skips the OPEN inspection, so they'd otherwise keep the sync badge showing
+    // "Syncing N…" while the form is open). Idempotent append.
+    try { await drainPhotoAttachOutbox(); } catch { /* retries via global driver */ }
     return flushResult;
   };
   const runQcFlushRef = useRef(runQcFlush); runQcFlushRef.current = runQcFlush;
