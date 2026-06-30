@@ -4565,6 +4565,14 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   await ensureProp(answer, 'qc_failure_note', {
     name: 'qc_failure_note', label: 'QC Failure Note', type: 'string', fieldType: 'textarea', groupName: 'inspection_answer_info',
   });
+  // Internal Resolution AFTER photos (proof the in-house work was completed),
+  // separate from photo_urls. WITHOUT this property, after-photos silently fail to
+  // save (the line save drops them and the durable attach 502s) — the "completion
+  // photos aren't saving, only scoping photos" report. Once it exists, the app
+  // enables after-photo capture + the finalize requirement.
+  await ensureProp(answer, 'after_photo_urls', {
+    name: 'after_photo_urls', label: 'After Photo URLs', type: 'string', fieldType: 'textarea', groupName: 'inspection_answer_info',
+  });
   // Dependent numeric input (1099 "Evaluate Listing Price" recommended new rent).
   await ensureProp(answer, 'recommended_amount', {
     name: 'recommended_amount', label: 'Recommended Amount', type: 'number', fieldType: 'number', groupName: 'inspection_answer_info',
