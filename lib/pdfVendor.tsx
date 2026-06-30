@@ -21,7 +21,7 @@ import {
   type PdfLineRow,
   type PdfSummaryColumn,
 } from './pdfShared';
-import { vendorGetsOwnPdf } from './vendors';
+import { vendorGetsOwnPdf, vendorDocLabel } from './vendors';
 import { slugifyVendor } from '@/lib/shortLinks';
 
 // Max @react-pdf renders running at once. Each transiently allocates 100+ MB,
@@ -49,7 +49,7 @@ function VendorDoc(props: {
   ensureFontRegistered();
   const { ctx, vendor, vendorSections, vendorTotal, lineCount } = props;
   const generatedAtLabel = isoToHumanDate(ctx.generatedAtIso);
-  const docTitle = `${vendor} ${ctx.templateLabel}`;
+  const docTitle = `${vendorDocLabel(vendor)} ${ctx.templateLabel}`;
   // Scope this vendor's gallery to its own photos (section photos + this
   // vendor's line after-photos). Supplied via context so the render is
   // self-contained and parallel-safe.
@@ -122,7 +122,7 @@ function VendorDoc(props: {
           ))}
         </View>
 
-        <PdfFooter docName={vendor} propertyName={ctx.propertyName} />
+        <PdfFooter docName={vendorDocLabel(vendor)} propertyName={ctx.propertyName} />
       </Page>
       </PdfGalleryBaseProvider>
     </Document>

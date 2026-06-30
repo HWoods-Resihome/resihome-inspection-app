@@ -22,8 +22,49 @@ export const VENDORS: string[] = [
   'GE Appliances',
   'CapEx Vendor',
   'Pest Share',
-  'Eviction Vendor (Past)',
+  'Eviction Vendor',
 ];
+
+// ---- Eviction vendor timing -------------------------------------------------
+// Eviction trash-outs split by WHEN the work happens. The inspector picks the one
+// "Eviction Vendor" option, then an "Eviction Work Timing" sub-control:
+//   • Previously Completed → stored "Eviction Vendor (Past)"   — already done,
+//     historical only: rides the Master/Tenant PDFs, NO standalone packet
+//     (the long-standing behavior, unchanged).
+//   • Needs Completed      → stored "Eviction Vendor (Future)" — work still owed:
+//     gets its OWN per-vendor packet, which the finalize → HBMM ticket flow
+//     attaches so the eviction vendor actually receives the work order.
+// Timing is encoded in the assignedTo string, so the existing per-vendor-PDF and
+// ticket-attach machinery treats the two as separate vendors with NO new field —
+// and no backfill (legacy "Eviction Vendor (Past)" / bare "Eviction Vendor"
+// already read as Past).
+export const EVICTION_VENDOR = 'Eviction Vendor';
+export const EVICTION_VENDOR_PAST = 'Eviction Vendor (Past)';
+export const EVICTION_VENDOR_FUTURE = 'Eviction Vendor (Future)';
+export type EvictionTiming = 'past' | 'future';
+
+export function isEvictionVendor(vendor: string | null | undefined): boolean {
+  return /eviction vendor/i.test(vendor || '');
+}
+/** Future ONLY when explicitly marked; bare / legacy / (Past) all read as past. */
+export function evictionTimingOf(vendor: string | null | undefined): EvictionTiming {
+  return /future/i.test(vendor || '') ? 'future' : 'past';
+}
+export function evictionVendorFor(timing: EvictionTiming): string {
+  return timing === 'future' ? EVICTION_VENDOR_FUTURE : EVICTION_VENDOR_PAST;
+}
+/** Collapse a stored eviction vendor (any timing) to the single dropdown label;
+ *  other vendors pass through unchanged. */
+export function baseVendorLabel(vendor: string | null | undefined): string {
+  return isEvictionVendor(vendor) ? EVICTION_VENDOR : (vendor || '');
+}
+
+/** Label for a vendor's OWN packet/footer — drops the internal timing suffix so
+ *  the eviction work-order packet simply reads "Eviction Vendor" to the recipient
+ *  (only the Future variant gets a packet, so there's nothing to disambiguate). */
+export function vendorDocLabel(vendor: string | null | undefined): string {
+  return baseVendorLabel(vendor) || (vendor || '');
+}
 
 // Pest-control vendor. Lines default here for the pest-treatment code (PESTL1007)
 // ONLY when the property is enrolled in pest control (pest_control_enrolled=Yes);
@@ -115,7 +156,11 @@ export function isInternalResolution(vendor: string | null | undefined): boolean
 // standalone vendor packet. Matched case-insensitively and tolerant of the older
 // "Eviction Vendor" label on historical lines.
 export function vendorGetsOwnPdf(vendor: string): boolean {
-  return !/eviction vendor/i.test(vendor || '');
+  // Eviction "Needs Completed" (Future) DOES get its own packet — it's the work
+  // order the HBMM ticket flow attaches. "Previously Completed" (Past) and the
+  // legacy bare label do NOT (already-done work just rides the Master/Tenant PDFs).
+  if (isEvictionVendor(vendor)) return evictionTimingOf(vendor) === 'future';
+  return true;
 }
 
 /**
@@ -139,8 +184,9 @@ export const VENDOR_COLORS: Record<string, VendorPillStyle> = {
   'GE Appliances':       { bg: 'bg-violet-500',  text: 'text-white' },     // violet
   'CapEx Vendor':        { bg: 'bg-amber-500',   text: 'text-white' },     // amber/gold
   'Pest Share':          { bg: 'bg-orange-500',  text: 'text-white' },     // orange — pest control
-  'Eviction Vendor (Past)': { bg: 'bg-rose-600', text: 'text-white' },       // rose (distinguishable from brand pink)
-  'Eviction Vendor':        { bg: 'bg-rose-600', text: 'text-white' },       // legacy label on historical lines
+  'Eviction Vendor':          { bg: 'bg-rose-600', text: 'text-white' },     // the dropdown label (+ legacy historical lines)
+  'Eviction Vendor (Future)': { bg: 'bg-rose-600', text: 'text-white' },     // strong rose — work still owed
+  'Eviction Vendor (Past)':   { bg: 'bg-rose-300', text: 'text-rose-900' },  // muted rose — already completed
 };
 
 /** Get pill styling for a vendor; falls back to neutral gray if not in the map. */

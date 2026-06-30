@@ -29,7 +29,7 @@ import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { formatMoney, formatQty } from '@/lib/photoUpload';
 import { thumbImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
-import { VENDORS, vendorPillStyle, isInternalResolution, defaultVendorForItem } from '@/lib/vendors';
+import { VENDORS, vendorPillStyle, isInternalResolution, defaultVendorForItem, isEvictionVendor, evictionTimingOf, evictionVendorFor, baseVendorLabel } from '@/lib/vendors';
 import { setNativeKeyboardAccessoryBarVisible } from '@/lib/nativeBridge';
 import { NumberField } from '@/components/NumberPad';
 import type {
@@ -563,8 +563,15 @@ export function EditableLineRow(props: Props) {
   }
 
   function handleVendorChange(v: string) {
-    setVendor(v);
-    if (isInternalResolution(v)) {
+    // The dropdown offers a single "Eviction Vendor"; map it to a timing-suffixed
+    // value so downstream PDF/ticket logic treats Past vs Future as separate
+    // vendors. Keep the line's current timing if it was already eviction,
+    // otherwise default to Previously Completed (today's behavior).
+    const next = isEvictionVendor(v)
+      ? evictionVendorFor(isEvictionVendor(vendor) ? evictionTimingOf(vendor) : 'past')
+      : v;
+    setVendor(next);
+    if (isInternalResolution(next)) {
       // Switching INTO Internal Resolution on desktop forces a fresh Now/Later
       // decision unless one was already stored for this line.
       if (!mobile && !initialHasTiming) setTimingChosen(false);
@@ -944,7 +951,7 @@ export function EditableLineRow(props: Props) {
                     Vendor <span className="text-brand">*</span>
                   </label>
                   <ListPicker
-                    value={vendor}
+                    value={baseVendorLabel(vendor)}
                     options={VENDORS.map((v) => ({ value: v, label: v }))}
                     onChange={handleVendorChange}
                     ariaLabel="Vendor"
@@ -973,6 +980,30 @@ export function EditableLineRow(props: Props) {
                       </div>
                     </div>
                     {editTiming === 'later' && <div className="text-[11px] text-gray-500 mt-1">After photos optional — line marked to complete later.</div>}
+                  </div>
+                )}
+
+                {/* Eviction Vendor: choose whether the trash-out was Previously
+                    Completed (historical, no packet) or Needs Completed (a vendor
+                    packet is generated + sent to the HBMM ticket). */}
+                {isEvictionVendor(vendor) && (
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-heading font-bold text-gray-700 shrink-0">Eviction Work Timing: <span className="text-brand">*</span></span>
+                      <div className="grid grid-cols-2 gap-2 flex-1 select-none">
+                        {(['past', 'future'] as const).map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => setVendor(evictionVendorFor(t))}
+                            className={`h-9 px-2 rounded-lg border text-xs text-center leading-tight font-heading font-semibold ${evictionTimingOf(vendor) === t ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}
+                          >
+                            {t === 'past' ? 'Previously Completed' : 'Needs Completed'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {evictionTimingOf(vendor) === 'future' && <div className="text-[11px] text-gray-500 mt-1">Work still owed — a vendor packet is generated and attached to the maintenance ticket.</div>}
                   </div>
                 )}
 
@@ -1159,13 +1190,34 @@ export function EditableLineRow(props: Props) {
           that toggle appears. */}
       <td className="px-2 py-1.5 align-middle min-w-[150px] max-w-[180px]">
         <select
-          value={vendor}
+          value={baseVendorLabel(vendor)}
           onChange={(e) => handleVendorChange(e.target.value)}
           className="h-9 w-full border border-gray-300 rounded px-1 text-xs bg-white"
           title={vendor}
         >
           {VENDORS.map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
+        {/* Eviction Vendor: Previously Completed (no packet) vs Needs Completed
+            (packet → HBMM ticket). */}
+        {isEvictionVendor(vendor) && (
+          <div className="mt-1.5 flex items-center gap-1">
+            <span className="text-[11px] font-bold shrink-0 text-gray-600">Timing:</span>
+            <div className="grid grid-cols-2 gap-1 flex-1">
+              {(['past', 'future'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}  // don't commit the row
+                  onClick={(e) => { e.stopPropagation(); setVendor(evictionVendorFor(t)); }}
+                  className={`h-7 rounded text-[10px] font-heading font-semibold border leading-tight px-1 ${evictionTimingOf(vendor) === t ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}
+                  title={t === 'past' ? 'Previously Completed' : 'Needs Completed'}
+                >
+                  {t === 'past' ? 'Prev. Done' : 'Needs Done'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {isInternalResolution(vendor) && (
           <div className="mt-1.5 flex items-center gap-1">
             <span className={`text-[11px] font-bold shrink-0 ${timingPrompt && !timingChosen ? 'text-red-600' : 'text-gray-600'}`}>
