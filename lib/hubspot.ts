@@ -3511,23 +3511,17 @@ export interface SavedAnswer {
   };
 }
 
-// Whether the `after_photo_urls` property exists on the Answer object yet.
-// Cached for the life of the server instance. Used to (a) avoid requesting an
-// unknown property in batch reads (HubSpot 400s on those), (b) gate the
-// after-photo requirement so the feature is dormant until the migration that
-// adds the property has run. Returns false on any uncertainty (fail-safe).
-let _afterPhotoPropCache: boolean | null = null;
+// Whether the `after_photo_urls` property exists on the Answer object yet. Gates
+// (a) requesting it in batch reads (HubSpot 400s on unknown props), (b) the
+// after-photo finalize requirement, and (c) PDF rendering. Delegates to
+// answerHasProperty so it uses the SELF-HEALING cache (positive cached forever; a
+// negative re-checked after a short TTL). The old standalone cache poisoned a
+// permanent `false` on ANY error — a single transient 429/timeout on an
+// instance's first check silently disabled the after-photo READ + gate + PDF for
+// that whole serverless instance, so a "Complete Now" Internal Resolution line
+// could be finalized with NO after-photos (and they'd never appear on the report).
 export async function answerHasAfterPhotoProperty(): Promise<boolean> {
-  if (_afterPhotoPropCache !== null) return _afterPhotoPropCache;
-  try {
-    const { answer } = typeIds();
-    await hubspotFetch(`/crm/v3/properties/${answer}/after_photo_urls`);
-    _afterPhotoPropCache = true;
-  } catch {
-    // 404 (not created yet) or any other error → treat as absent.
-    _afterPhotoPropCache = false;
-  }
-  return _afterPhotoPropCache;
+  return answerHasProperty('after_photo_urls');
 }
 
 // Generic, cached "does the Answer object have this property?" guard — same
@@ -4689,9 +4683,9 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
     name: 'serial_number', label: 'Serial Number', type: 'string', fieldType: 'text', groupName: 'inspection_smart_home',
   });
 
-  // Drop the "does this property exist?" caches so the just-provisioned fields
-  // are picked up by this warm instance without waiting for a cold start.
-  _afterPhotoPropCache = null;
+  // Drop the "does this property exist?" cache so the just-provisioned fields
+  // (incl. after_photo_urls, now checked via answerHasProperty) are picked up by
+  // this warm instance without waiting for a cold start.
   _answerPropCache.clear();
 
   return results;
