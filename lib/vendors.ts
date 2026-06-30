@@ -59,6 +59,14 @@ export function baseVendorLabel(vendor: string | null | undefined): string {
   return isEvictionVendor(vendor) ? EVICTION_VENDOR : (vendor || '');
 }
 
+/** Compact label for the vendor PILL in the line table — keeps every option on a
+ *  single line (Vendor 1/2 etc. unchanged) while shortening the long eviction
+ *  labels so they fit without wrapping or truncating. */
+export function vendorPillLabel(vendor: string | null | undefined): string {
+  if (isEvictionVendor(vendor)) return evictionTimingOf(vendor) === 'future' ? 'Eviction (Future)' : 'Eviction (Past)';
+  return vendor || '';
+}
+
 /** Label for a vendor's OWN packet/footer — drops the internal timing suffix so
  *  the eviction work-order packet simply reads "Eviction Vendor" to the recipient
  *  (only the Future variant gets a packet, so there's nothing to disambiguate). */

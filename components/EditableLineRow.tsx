@@ -29,7 +29,7 @@ import { calculateLine, roundMoney } from '@/lib/rateCardMath';
 import { formatMoney, formatQty } from '@/lib/photoUpload';
 import { thumbImageSrc } from '@/lib/photoDisplay';
 import { isVideoEntry } from '@/lib/media';
-import { VENDORS, vendorPillStyle, isInternalResolution, defaultVendorForItem, isEvictionVendor, evictionTimingOf, evictionVendorFor, baseVendorLabel } from '@/lib/vendors';
+import { VENDORS, vendorPillStyle, vendorPillLabel, isInternalResolution, defaultVendorForItem, isEvictionVendor, evictionTimingOf, evictionVendorFor, baseVendorLabel } from '@/lib/vendors';
 import { setNativeKeyboardAccessoryBarVisible } from '@/lib/nativeBridge';
 import { NumberField } from '@/components/NumberPad';
 import type {
@@ -1510,10 +1510,10 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
               <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                 {/* Vendor-only chip */}
                 <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold max-w-full truncate ${pill.bg} ${pill.text} ${pill.border || ''}`}
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap max-w-full truncate ${pill.bg} ${pill.text} ${pill.border || ''}`}
                   title={line.assignedTo}
                 >
-                  {line.assignedTo}
+                  {vendorPillLabel(line.assignedTo)}
                 </span>
                 {line.note && <span className="text-[11px] italic text-gray-600 truncate">📝 {line.note}</span>}
                 {calc?.isCustomPriced && <span className="text-[11px] font-semibold text-yellow-700">⚡ Custom</span>}
@@ -1708,12 +1708,12 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
       </td>
       <td className="px-3 py-2 text-center text-sm text-gray-900 tabular-nums whitespace-nowrap">{formatQty(line.quantity)}</td>
       <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{item.laborMeas}</td>
-      <td className="px-3 py-2 text-center align-middle">
+      <td className="px-3 py-2 text-center align-middle whitespace-nowrap">
         <span
-          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold text-center leading-tight whitespace-normal break-words ${pill.bg} ${pill.text} ${pill.border || ''}`}
+          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${pill.bg} ${pill.text} ${pill.border || ''}`}
           title={line.assignedTo}
         >
-          {line.assignedTo}
+          {vendorPillLabel(line.assignedTo)}
         </span>
       </td>
       <td className="px-3 py-2 text-right text-sm text-gray-900 whitespace-nowrap">
