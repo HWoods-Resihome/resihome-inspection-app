@@ -2190,9 +2190,30 @@ export function CameraCaptureModern({
       return;
     }
 
-    // No ImageCapture (iOS Safari, etc.) → instant live-frame grab.
-    buildAndEnqueue(video, video.videoWidth, video.videoHeight, endCapture);
-  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines, effZoom, showFreezeFrame, endCapture, getImageCapture, takeBestPhoto]);
+    // No ImageCapture (iOS Safari, etc.) → instant live-frame grab. GUARD against
+    // iOS's post-capture pause: in the instant after a prior shot iOS can leave the
+    // <video> paused on an all-black frame, so a rapid next shot grabs pure black —
+    // a useless evidence photo (the reported black tiles). If the frame reads as the
+    // interrupted-camera signature (uniform black, AND we've already seen a lit frame
+    // this session, so a genuinely dark closet isn't mistaken for it), kick the SAME
+    // stream back to life (no getUserMedia → no permission prompt) and re-sample a
+    // few times over ~0.7s before grabbing. We NEVER silently drop: after the budget
+    // we grab anyway, so the worst case is today's behavior (a visible black photo
+    // the inspector can retake), never a lost shot.
+    const grabWhenLit = (attempt = 0) => {
+      const v = videoRef.current;
+      if (!v) { endCapture(); return; }
+      const blackNow = IS_IOS && sawLightRef.current && (() => {
+        const r = sampleLuma(v);
+        return !!r && r.mean < 4 && r.variance < 2;
+      })();
+      if (!blackNow || attempt >= 4) { buildAndEnqueue(v, v.videoWidth, v.videoHeight, endCapture); return; }
+      if (streamRef.current && v.srcObject !== streamRef.current) { try { v.srcObject = streamRef.current; } catch { /* noop */ } }
+      if (v.paused) v.play().catch(() => { /* non-fatal */ });
+      setTimeout(() => grabWhenLit(attempt + 1), 170);
+    };
+    grabWhenLit();
+  }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines, effZoom, showFreezeFrame, endCapture, getImageCapture, takeBestPhoto, sampleLuma]);
 
   // ----- Per-photo retake/delete -----
 
