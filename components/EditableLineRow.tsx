@@ -1104,7 +1104,7 @@ export function EditableLineRow(props: Props) {
     <>
     <tr ref={rowRef} className="border-b border-brand/30 bg-brand/5">
       {/* Cat — with an eraser button to the left that clears the whole line */}
-      <td className="px-2 py-1.5 align-middle min-w-[140px]">
+      <td className="px-2 py-1.5 align-middle min-w-[110px]">
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -1133,7 +1133,7 @@ export function EditableLineRow(props: Props) {
         </div>
       </td>
       {/* Sub */}
-      <td className="px-2 py-1.5 align-middle min-w-[120px]">
+      <td className="px-2 py-1.5 align-middle min-w-[100px]">
         <select
           value={subcategory}
           onChange={(e) => handleSubcategoryChange(e.target.value)}
@@ -1147,7 +1147,7 @@ export function EditableLineRow(props: Props) {
           max-w caps how wide the description textarea can grow; without it, a
           long auto-filled description can stretch the cell beyond min-w and
           push downstream columns (including the ✓ save button) off-screen. */}
-      <td className="px-2 py-1.5 align-middle min-w-[200px] max-w-[280px]">
+      <td className="px-2 py-1.5 align-middle min-w-[150px] max-w-[280px]">
         <Combobox
           compact
           options={lineItemOptions}
@@ -1188,7 +1188,7 @@ export function EditableLineRow(props: Props) {
           the dropdown that must be picked before the row can be saved or left.
           The dropdown stays vertically centered (like the other cells) until
           that toggle appears. */}
-      <td className="px-2 py-1.5 align-middle min-w-[150px] max-w-[180px]">
+      <td className="px-2 py-1.5 align-middle min-w-[120px] max-w-[180px]">
         <select
           value={baseVendorLabel(vendor)}
           onChange={(e) => handleVendorChange(e.target.value)}
@@ -1602,9 +1602,9 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
       onClick={readOnly || editingDesc ? undefined : onEnterEdit}
       className={`border-b border-gray-100 ${readOnly || editingDesc ? '' : 'hover:bg-gray-50 cursor-pointer'}`}
     >
-      <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{item.category}</td>
-      <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{item.subcategory}</td>
-      <td className="px-3 py-2 min-w-[260px]">
+      <td className="px-3 py-2 text-center text-sm text-gray-700">{item.category}</td>
+      <td className="px-3 py-2 text-center text-sm text-gray-700">{item.subcategory}</td>
+      <td className="px-3 py-2 min-w-[150px]">
         <div className="font-medium text-sm text-ink">
           {shortDescription}
           {qtyParen && <span className="font-normal text-gray-400"> ({qtyParen})</span>}
@@ -1708,9 +1708,9 @@ function ViewRow({ line, item, calc, readOnly, mobile, tenantMonths, afterPhotos
       </td>
       <td className="px-3 py-2 text-center text-sm text-gray-900 tabular-nums whitespace-nowrap">{formatQty(line.quantity)}</td>
       <td className="px-3 py-2 text-center text-sm text-gray-700 whitespace-nowrap">{item.laborMeas}</td>
-      <td className="px-3 py-2 text-center align-middle whitespace-nowrap">
+      <td className="px-3 py-2 text-center align-middle">
         <span
-          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold max-w-[140px] truncate ${pill.bg} ${pill.text} ${pill.border || ''}`}
+          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold text-center leading-tight whitespace-normal break-words ${pill.bg} ${pill.text} ${pill.border || ''}`}
           title={line.assignedTo}
         >
           {line.assignedTo}

@@ -4599,6 +4599,18 @@ export async function provisionAppProperties(): Promise<Record<string, string>> 
   await ensureProp(inspection, 'compliance_tickets_created_at', {
     name: 'compliance_tickets_created_at', label: 'Compliance Tickets Created At', type: 'datetime', fieldType: 'date', groupName: 'inspection_results',
   });
+  // HBMM ticket ids created at Scope finalize — stored for visibility, idempotency
+  // (no double-create on retry/re-finalize), and background document-upload
+  // retries. Up to three per Scope: Turnkey, Evictions, CapEx.
+  await ensureProp(inspection, 'hbmm_ticket_id', {
+    name: 'hbmm_ticket_id', label: 'HBMM Maintenance Ticket ID', type: 'string', fieldType: 'text', groupName: 'inspection_results',
+  });
+  await ensureProp(inspection, 'hbmm_eviction_ticket_id', {
+    name: 'hbmm_eviction_ticket_id', label: 'HBMM Eviction Ticket ID', type: 'string', fieldType: 'text', groupName: 'inspection_results',
+  });
+  await ensureProp(inspection, 'hbmm_capex_ticket_id', {
+    name: 'hbmm_capex_ticket_id', label: 'HBMM CapEx Ticket ID', type: 'string', fieldType: 'text', groupName: 'inspection_results',
+  });
 
   // 1099 Leasing Agent report fields — stamped onto the inspection at completion
   // from the inspector's answers, for downstream reporting.

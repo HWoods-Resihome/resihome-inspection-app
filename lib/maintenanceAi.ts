@@ -29,14 +29,13 @@ export const TICKET_TYPE_TURNKEY =
 // Hayden, 2026-06). Overridable via env.
 export const TICKET_TYPE_EVICTION =
   Number(process.env.MAINTENANCE_AI_EVICTION_TICKET_TYPE_ID) || 1833;
-// Category for the Eviction + CapEx tickets = "Trash/Debris Removal". The API
-// takes a numeric category id; set it via env once known. Falls back to Unit
-// Turns (23) so a misconfigured env still creates a VALID ticket rather than
-// failing — but the intent is the Trash/Debris Removal id.
+// Category for the Eviction + CapEx tickets = "Trash/Debris Removal" (id 10062
+// per Hayden, 2026-06). Env-overridable in case the reference data changes.
+export const TICKET_CATEGORY_TRASH_DEBRIS = 10062;
 export const TICKET_CATEGORY_EVICTION =
-  Number(process.env.MAINTENANCE_AI_EVICTION_CATEGORY_ID) || TICKET_CATEGORY_UNIT_TURNS;
+  Number(process.env.MAINTENANCE_AI_EVICTION_CATEGORY_ID) || TICKET_CATEGORY_TRASH_DEBRIS;
 export const TICKET_CATEGORY_CAPEX =
-  Number(process.env.MAINTENANCE_AI_CAPEX_CATEGORY_ID) || TICKET_CATEGORY_UNIT_TURNS;
+  Number(process.env.MAINTENANCE_AI_CAPEX_CATEGORY_ID) || TICKET_CATEGORY_TRASH_DEBRIS;
 const APPOINTMENT_TIMESLOT = 3110;
 // Appointments are required + must be in the future + must differ. We place two
 // placeholder windows 3 and 5 days out from the ticket-creation date.
