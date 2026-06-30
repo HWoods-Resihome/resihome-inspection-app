@@ -10,6 +10,7 @@ import {
   buildListingLine,
   PdfFooter,
   PdfSectionHeader,
+  PdfSectionPhotos,
   PdfFinalChecklist,
   PdfSummaryTable,
   PdfGalleryBaseProvider,
@@ -239,6 +240,22 @@ function MasterSection(props: { section: PdfSectionGroup }) {
             </View>
           )}
         </>
+      )}
+      {/* Internal Resolution AFTER photos (completion proof-of-work) — rendered on
+          the Master too, not just the Internal Resolution vendor packet, so the
+          completion photos sit alongside the section's scoping photos. One labeled
+          block per line that has them. */}
+      {s.lines.some((l) => (l.afterPhotoUrls?.length ?? 0) > 0) && (
+        <View style={{ marginTop: 4 }}>
+          {s.lines.filter((l) => (l.afterPhotoUrls?.length ?? 0) > 0).map((l) => (
+            <View key={`after-${l.externalId}`} style={{ marginTop: 2, marginBottom: 5 }} wrap={false}>
+              <Text style={{ fontSize: 8, color: '#6b7280', marginBottom: 2 }}>
+                After Photos — {l.laborShortDescription}
+              </Text>
+              <PdfSectionPhotos photoUrls={l.afterPhotoUrls!} />
+            </View>
+          ))}
+        </View>
       )}
     </View>
   );
