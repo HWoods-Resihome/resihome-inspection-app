@@ -66,6 +66,26 @@ export function vendorDocLabel(vendor: string | null | undefined): string {
   return baseVendorLabel(vendor) || (vendor || '');
 }
 
+// ---- HBMM ticket routing ----------------------------------------------------
+// A Scope finalize can create up to THREE HoneyBadger tickets, and a vendor's
+// per-vendor PDF is routed to exactly one of them:
+//   • 'turnkey'  → the main Turnkey ticket (Master + the standard trade vendors).
+//   • 'eviction' → its OWN "Evictions"-type ticket (the Eviction Vendor FUTURE
+//                  packet — work still owed).
+//   • 'capex'    → its OWN Maintenance-type ticket (the CapEx Vendor packet).
+// Only vendors that actually get a packet (vendorGetsOwnPdf) are ever routed, so
+// eviction-Past (no packet) never reaches here.
+export const CAPEX_VENDOR = 'CapEx Vendor';
+export function isCapexVendor(vendor: string | null | undefined): boolean {
+  return (vendor || '').trim().toLowerCase() === CAPEX_VENDOR.toLowerCase();
+}
+export type TicketKind = 'turnkey' | 'eviction' | 'capex';
+export function vendorTicketKind(vendor: string | null | undefined): TicketKind {
+  if (isCapexVendor(vendor)) return 'capex';
+  if (isEvictionVendor(vendor) && evictionTimingOf(vendor) === 'future') return 'eviction';
+  return 'turnkey';
+}
+
 // Pest-control vendor. Lines default here for the pest-treatment code (PESTL1007)
 // ONLY when the property is enrolled in pest control (pest_control_enrolled=Yes);
 // gets its own per-vendor PDF at finalize like the others.

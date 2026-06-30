@@ -535,6 +535,8 @@ export function RateCardForm(props: RateCardFormProps) {
       url?: string | null;
       error?: string;
     } | null;
+    maintenanceTicketEviction?: { ok: boolean; configured: boolean; ticketId?: number; url?: string | null; error?: string } | null;
+    maintenanceTicketCapex?: { ok: boolean; configured: boolean; ticketId?: number; url?: string | null; error?: string } | null;
     totals: { vendor: number; client: number; tenant: number; lineCount: number };
   };
   const [finalizing, setFinalizing] = useState(false);
@@ -3488,9 +3490,20 @@ export function RateCardForm(props: RateCardFormProps) {
         // the BACKGROUND (driving the HoneyBadger UI takes ~30-60s). This never
         // blocks the completion screen; a bottom flash toast reports the result
         // even after the user navigates away.
-        const mt = (data as FinalizeResult).maintenanceTicket;
+        // A Scope finalize can create up to THREE tickets — push each one's PDFs
+        // to its own ticket (which=turnkey|eviction|capex selects the right files).
+        const fr = data as FinalizeResult;
+        const mt = fr.maintenanceTicket;
         if (mt && mt.ok && mt.ticketId) {
-          flashApi.runTicketUpload(props.inspectionRecordId, mt.ticketId);
+          flashApi.runTicketUpload(props.inspectionRecordId, mt.ticketId, undefined, 'turnkey');
+        }
+        const ev = fr.maintenanceTicketEviction;
+        if (ev && ev.ok && ev.ticketId) {
+          flashApi.runTicketUpload(props.inspectionRecordId, ev.ticketId, undefined, 'eviction');
+        }
+        const cx = fr.maintenanceTicketCapex;
+        if (cx && cx.ok && cx.ticketId) {
+          flashApi.runTicketUpload(props.inspectionRecordId, cx.ticketId, undefined, 'capex');
         }
       } catch (e: any) {
         // The self-approval lockout (423) is an expected workflow state, not a failure.

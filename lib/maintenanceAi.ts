@@ -13,7 +13,7 @@
 // API doc: "Maintenance AI Workflow - API Document - Version 2.0".
 // Endpoint used: POST /api/external/{apiVersion}/ticket
 
-import { VENDORS, vendorGetsOwnPdf } from '@/lib/vendors';
+import { VENDORS, vendorGetsOwnPdf, vendorTicketKind, vendorDocLabel, type TicketKind } from '@/lib/vendors';
 
 // ---- Defaults (documented reference-data IDs; "subject to change" per the doc) ----
 // 4.3 Priority: 777 = Medium. 4.2 Category: 23 = Unit Turns (Paint/Clean/Minor
@@ -25,6 +25,18 @@ export const TICKET_CATEGORY_UNIT_TURNS = 23;
 export const TICKET_LOCATION_WHOLE_HOUSE = 23;
 export const TICKET_TYPE_TURNKEY =
   Number(process.env.MAINTENANCE_AI_TICKET_TYPE_ID) || 1828;
+// Eviction (Future) work gets its OWN ticket on the "Evictions" type (1833 per
+// Hayden, 2026-06). Overridable via env.
+export const TICKET_TYPE_EVICTION =
+  Number(process.env.MAINTENANCE_AI_EVICTION_TICKET_TYPE_ID) || 1833;
+// Category for the Eviction + CapEx tickets = "Trash/Debris Removal". The API
+// takes a numeric category id; set it via env once known. Falls back to Unit
+// Turns (23) so a misconfigured env still creates a VALID ticket rather than
+// failing — but the intent is the Trash/Debris Removal id.
+export const TICKET_CATEGORY_EVICTION =
+  Number(process.env.MAINTENANCE_AI_EVICTION_CATEGORY_ID) || TICKET_CATEGORY_UNIT_TURNS;
+export const TICKET_CATEGORY_CAPEX =
+  Number(process.env.MAINTENANCE_AI_CAPEX_CATEGORY_ID) || TICKET_CATEGORY_UNIT_TURNS;
 const APPOINTMENT_TIMESLOT = 3110;
 // Appointments are required + must be in the future + must differ. We place two
 // placeholder windows 3 and 5 days out from the ticket-creation date.
@@ -67,23 +79,32 @@ export interface CreateTicketResult {
 }
 
 /**
- * Build the ticket description: the fixed intro, then a list of per-vendor scope
- * document links. Eviction vendors are excluded (same as the email / per-vendor
- * PDF rules). `vendorUrls` is a map of vendorName -> PDF url.
+ * Build a ticket description: the fixed intro, then the per-vendor scope-document
+ * links that belong to THIS ticket (opts.kind). Turnkey leads with the Master
+ * report + the standard trade vendors; Eviction / CapEx carry only their own
+ * vendor link. `vendorUrls` maps vendorName -> (short) PDF url.
  */
-export function buildTicketDescription(vendorUrls: Record<string, string>, masterUrl?: string | null): string {
-  // Order links by the canonical VENDORS list so output is stable, then append
-  // any extra vendors not in the list. Skip eviction vendors.
+export function buildTicketDescription(
+  vendorUrls: Record<string, string>,
+  masterUrl?: string | null,
+  opts?: { kind?: TicketKind },
+): string {
+  // Up to three tickets are created from one Scope finalize; each lists ONLY its
+  // OWN documents (per-ticket links). The Turnkey ticket leads with the Master
+  // report; the Eviction / CapEx tickets carry just their single vendor link.
+  const kind: TicketKind = opts?.kind ?? 'turnkey';
   const present = Object.keys(vendorUrls || {});
   const ordered = [
     ...VENDORS.filter((v) => present.includes(v)),
     ...present.filter((v) => !VENDORS.includes(v)),
   ];
   const links: string[] = [];
-  // Master report goes first.
-  if (masterUrl && masterUrl.trim()) links.push(`Master: ${masterUrl}`);
+  // Master report goes first — on the Turnkey ticket only.
+  if (kind === 'turnkey' && masterUrl && masterUrl.trim()) links.push(`Master: ${masterUrl}`);
   for (const v of ordered) {
-    if (vendorGetsOwnPdf(v) && (vendorUrls[v] || '').trim()) links.push(`${v}: ${vendorUrls[v]}`);
+    if (!vendorGetsOwnPdf(v)) continue;
+    if (vendorTicketKind(v) !== kind) continue; // route each vendor link to its ticket
+    if ((vendorUrls[v] || '').trim()) links.push(`${vendorDocLabel(v)}: ${vendorUrls[v]}`);
   }
 
   const parts = [TICKET_DESCRIPTION_INTRO];

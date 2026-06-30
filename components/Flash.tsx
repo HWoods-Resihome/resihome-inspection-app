@@ -16,7 +16,7 @@ interface FlashApi {
    * inspection and toast the result. Safe to call then navigate away — this
    * runs at the app root, so the toast still appears when it resolves.
    */
-  runTicketUpload: (inspectionId: string, ticketId?: number | null, pdfUrl?: string) => void;
+  runTicketUpload: (inspectionId: string, ticketId?: number | null, pdfUrl?: string, which?: 'turnkey' | 'eviction' | 'capex') => void;
 }
 
 const FlashContext = createContext<FlashApi | null>(null);
@@ -32,25 +32,29 @@ export function FlashProvider({ children }: { children: React.ReactNode }) {
     if (ms > 0) timer.current = setTimeout(() => setToast(null), ms);
   }, []);
 
-  const runTicketUpload = useCallback((inspectionId: string, ticketId?: number | null, pdfUrl?: string) => {
+  const runTicketUpload = useCallback((inspectionId: string, ticketId?: number | null, pdfUrl?: string, which: 'turnkey' | 'eviction' | 'capex' = 'turnkey') => {
+    // Label the toast by ticket kind so up-to-three concurrent uploads (Turnkey +
+    // Eviction + CapEx) read clearly. 'turnkey' keeps the generic "maintenance"
+    // wording (also used by the 1099/vacancy single-ticket flow).
+    const label = which === 'eviction' ? 'Eviction' : which === 'capex' ? 'CapEx' : 'maintenance';
     // Pending toast (no auto-dismiss until the result replaces it).
-    flash('Attaching documents to the maintenance ticket…', 'info', 0);
+    flash(`Attaching documents to the ${label} ticket…`, 'info', 0);
     (async () => {
       try {
         const r = await fetch(`/api/inspections/${inspectionId}/upload-ticket-docs`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...(ticketId ? { ticketId } : {}), ...(pdfUrl ? { pdfUrl } : {}) }),
+          body: JSON.stringify({ ...(ticketId ? { ticketId } : {}), ...(pdfUrl ? { pdfUrl } : {}), which }),
         });
         const data = await r.json().catch(() => ({}));
         if (data?.skipped) { setToast(null); return; } // not configured / nothing to do → silent
         if (r.ok && data?.ok) {
-          flash(`Documents attached to ticket${data.ticketId ? ` #${data.ticketId}` : ''} ✅`, 'success', 8000);
+          flash(`Documents attached to the ${label} ticket${data.ticketId ? ` #${data.ticketId}` : ''} ✅`, 'success', 8000);
         } else {
-          flash(`Couldn't attach documents to the ticket ❌${data?.error ? ` — ${String(data.error).slice(0, 120)}` : ''}`, 'error', 12000);
+          flash(`Couldn't attach documents to the ${label} ticket ❌${data?.error ? ` — ${String(data.error).slice(0, 120)}` : ''}`, 'error', 12000);
         }
       } catch (e: any) {
-        flash(`Couldn't attach documents to the ticket ❌`, 'error', 12000);
+        flash(`Couldn't attach documents to the ${label} ticket ❌`, 'error', 12000);
       }
     })();
   }, [flash]);

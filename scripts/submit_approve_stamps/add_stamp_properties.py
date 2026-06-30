@@ -88,6 +88,16 @@ def main():
         type="string", field_type="text", group_name=GROUP,
         description="The HoneyBadger/Maintenance ticket id created at finalize. Used for visibility + background document-upload retries.",
     )
+    ensure_property(
+        INSPECTION, "hbmm_eviction_ticket_id", "HBMM Eviction Ticket ID",
+        type="string", field_type="text", group_name=GROUP,
+        description="The HoneyBadger Evictions-type ticket id created at finalize when the Scope has an Eviction Vendor (Future) packet. Used for idempotency + background document-upload retries.",
+    )
+    ensure_property(
+        INSPECTION, "hbmm_capex_ticket_id", "HBMM CapEx Ticket ID",
+        type="string", field_type="text", group_name=GROUP,
+        description="The HoneyBadger Maintenance-type ticket id created at finalize when the Scope has a CapEx Vendor packet. Used for idempotency + background document-upload retries.",
+    )
 
     print("\n[done] submit/approve stamps + resolution_timing_json are ready on inspection.")
 

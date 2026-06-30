@@ -54,7 +54,8 @@ import { sendInspectionEmail } from '@/lib/gmail';
 import { uploadToSftp, type SftpUploadResult } from '@/lib/sftp';
 import { enqueueSftpWatch, WATCH_WINDOW_MS } from '@/lib/sftpWatch';
 import { getGmailRefreshToken, encryptToken } from '@/lib/gmailAuth';
-import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, type CreateTicketResult } from '@/lib/maintenanceAi';
+import { createMaintenanceTicket, buildTicketDescription, buildTicketUrl, TICKET_TYPE_EVICTION, TICKET_CATEGORY_EVICTION, TICKET_CATEGORY_CAPEX, type CreateTicketResult } from '@/lib/maintenanceAi';
+import { vendorTicketKind } from '@/lib/vendors';
 import { buildShortLink } from '@/lib/shortLinks';
 import type { PdfBuildContext, PdfSectionGroup, PdfLineRow } from '@/lib/pdfShared';
 import { buildEmbeddedPhotoMap } from '@/lib/pdfImages';
@@ -138,7 +139,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // partial-failure resume stamps — instead of three sequential HubSpot reads.
   // Fail-open: on any read error each gate below behaves as if its property was
   // absent (exactly the prior per-gate try/catch behavior).
-  const preflightProps = ['submitted_by_email', 'submitted_at', 'hbmm_ticket_id', 'finalize_email_sent_at'];
+  const preflightProps = ['submitted_by_email', 'submitted_at', 'hbmm_ticket_id', 'hbmm_eviction_ticket_id', 'hbmm_capex_ticket_id', 'finalize_email_sent_at'];
   if (FINALIZE_LOCK_PROP) preflightProps.push(FINALIZE_LOCK_PROP);
   const preflight: Record<string, any> | null = await readInspectionProps(id, preflightProps).catch((e) => {
     console.warn('[finalize] preflight property read failed (gates fail open):', e);
@@ -956,11 +957,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })()) {
           // handled in the IIFE above (ticketResult set)
         } else {
+          // Vendor PDFs route across up to three tickets: the Turnkey ticket takes
+          // the standard trades; eviction-Future and CapEx are raised on their own
+          // tickets (below). If NO turnkey-routed work remains (scope is only
+          // eviction/CapEx), the Turnkey ticket is still created as the overall
+          // record but CALLED OUT as a $0 Turn.
+          const turnkeyHasWork = Object.entries(vendorUrls).some(([v, u]) => (u || '').trim() && vendorTicketKind(v) === 'turnkey');
           ticketResult = await createMaintenanceTicket({
             propertyId: hbmmId,
-            description: zeroDollarTurn
+            description: (zeroDollarTurn || !turnkeyHasWork)
               ? `Zero Dollar Turn${shareMasterUrl ? `\n\nMaster: ${shareMasterUrl}` : ''}`
-              : buildTicketDescription(shareVendorLinks, shareMasterUrl),
+              : buildTicketDescription(shareVendorLinks, shareMasterUrl, { kind: 'turnkey' }),
           });
           if (ticketResult.ok) {
             const tu = ticketResult.typeUpdate;
@@ -982,6 +989,76 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
     const ticketUrl = ticketResult?.ok ? buildTicketUrl(ticketResult.ticketId) : null;
+
+    // ---- 7b. Routed extra tickets: Eviction (Future) → its own Evictions-type
+    // ticket; CapEx → its own Maintenance-type ticket (NOT forced to Turnkey).
+    // Each is created at most ONCE (idempotent via its own stored id), skipped on
+    // re-finalize, and never blocks finalize. The matching PDF is attached by the
+    // client's per-ticket upload-ticket-docs call (which=eviction|capex).
+    let evictionTicketResult: CreateTicketResult | null = null;
+    let capexTicketResult: CreateTicketResult | null = null;
+    {
+      const hbmmId = Number(inspectionData.propertyHbmmId || '');
+      const canRoute = !isRefinalize && !!inspectionData.propertyHbmmId && Number.isFinite(hbmmId);
+      const hasKind = (k: 'eviction' | 'capex') =>
+        Object.entries(vendorUrls).some(([v, u]) => (u || '').trim() && vendorTicketKind(v) === k);
+      // Eviction (Future) ticket.
+      if (canRoute && hasKind('eviction')) {
+        const existing = Number(String(preflight?.hbmm_eviction_ticket_id || '').trim());
+        if (existing && Number.isFinite(existing)) {
+          evictionTicketResult = { ok: true, configured: true, ticketId: existing } as CreateTicketResult;
+          console.log(`[finalize] eviction ticket already created (#${existing}) — skipping re-create.`);
+        } else {
+          try {
+            evictionTicketResult = await createMaintenanceTicket({
+              propertyId: hbmmId,
+              description: buildTicketDescription(shareVendorLinks, shareMasterUrl, { kind: 'eviction' }),
+              categoryIds: [TICKET_CATEGORY_EVICTION],
+              ticketTypeId: TICKET_TYPE_EVICTION,
+            });
+            if (evictionTicketResult.ok) {
+              console.log(`[finalize] eviction ticket created: #${evictionTicketResult.ticketId} (type ${TICKET_TYPE_EVICTION}) on property ${hbmmId}`);
+              try { await updateInspection(id, { hbmm_eviction_ticket_id: String(evictionTicketResult.ticketId || '') }); }
+              catch (e) { console.warn('[finalize] could not store hbmm_eviction_ticket_id (create the property to enable retries):', e); }
+            } else if (evictionTicketResult.configured) {
+              console.warn(`[finalize] eviction ticket failed: ${evictionTicketResult.error}`);
+            }
+          } catch (e: any) {
+            evictionTicketResult = { ok: false, configured: true, error: String(e?.message || e).slice(0, 300) };
+            console.warn('[finalize] eviction ticket threw (caught, finalize continues):', e);
+          }
+        }
+      }
+      // CapEx ticket — Maintenance (default) type: never force Turnkey.
+      if (canRoute && hasKind('capex')) {
+        const existing = Number(String(preflight?.hbmm_capex_ticket_id || '').trim());
+        if (existing && Number.isFinite(existing)) {
+          capexTicketResult = { ok: true, configured: true, ticketId: existing } as CreateTicketResult;
+          console.log(`[finalize] capex ticket already created (#${existing}) — skipping re-create.`);
+        } else {
+          try {
+            capexTicketResult = await createMaintenanceTicket({
+              propertyId: hbmmId,
+              description: buildTicketDescription(shareVendorLinks, shareMasterUrl, { kind: 'capex' }),
+              categoryIds: [TICKET_CATEGORY_CAPEX],
+              skipTypeUpdate: true, // leave the type as the API default (Maintenance)
+            });
+            if (capexTicketResult.ok) {
+              console.log(`[finalize] capex ticket created: #${capexTicketResult.ticketId} (default/Maintenance type) on property ${hbmmId}`);
+              try { await updateInspection(id, { hbmm_capex_ticket_id: String(capexTicketResult.ticketId || '') }); }
+              catch (e) { console.warn('[finalize] could not store hbmm_capex_ticket_id (create the property to enable retries):', e); }
+            } else if (capexTicketResult.configured) {
+              console.warn(`[finalize] capex ticket failed: ${capexTicketResult.error}`);
+            }
+          } catch (e: any) {
+            capexTicketResult = { ok: false, configured: true, error: String(e?.message || e).slice(0, 300) };
+            console.warn('[finalize] capex ticket threw (caught, finalize continues):', e);
+          }
+        }
+      }
+    }
+    const evictionTicketUrl = evictionTicketResult?.ok ? buildTicketUrl(evictionTicketResult.ticketId) : null;
+    const capexTicketUrl = capexTicketResult?.ok ? buildTicketUrl(capexTicketResult.ticketId) : null;
 
     // ---- 8. Email notification (Gmail send) ----
     // Composed regardless of whether Gmail is connected, so the result
@@ -1160,6 +1237,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       email: emailResult,
       ...(fcMaterializeWarning ? { fcMaterializeWarning } : {}),
       maintenanceTicket: ticketResult ? { ...ticketResult, url: ticketUrl } : null,
+      maintenanceTicketEviction: evictionTicketResult ? { ...evictionTicketResult, url: evictionTicketUrl } : null,
+      maintenanceTicketCapex: capexTicketResult ? { ...capexTicketResult, url: capexTicketUrl } : null,
       totals: {
         vendor: ctx.grandTotals.vendor,
         client: ctx.grandTotals.client,

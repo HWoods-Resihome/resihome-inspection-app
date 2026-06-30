@@ -17,7 +17,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { fetchInspectionWithPropertyRef } from '@/lib/hubspot';
 import { uploadTicketDocuments, type TicketUploadFile } from '@/lib/ticketUpload';
-import { vendorGetsOwnPdf } from '@/lib/vendors';
+import { vendorGetsOwnPdf, vendorTicketKind, type TicketKind } from '@/lib/vendors';
 
 // Browser automation can take a while — allow up to 5 minutes.
 export const config = { maxDuration: 300 };
@@ -27,7 +27,7 @@ export const config = { maxDuration: 300 };
 // and forces Turnkey; other templates (1099 / vacancy) attach their single
 // completed PDF and leave the type alone (ensureTicketType:false). An optional
 // freshly-generated pdfUrl avoids a read race right after /api/pdf.
-async function buildUploadPlan(id: string, bodyPdfUrl?: string): Promise<{ files: TicketUploadFile[]; ensureTicketType: boolean } | null> {
+async function buildUploadPlan(id: string, bodyPdfUrl?: string, which: TicketKind = 'turnkey'): Promise<{ files: TicketUploadFile[]; ensureTicketType: boolean } | null> {
   const data = await fetchInspectionWithPropertyRef(id);
   if (!data) return null;
   const nameFromUrl = (url: string, fallback: string) => {
@@ -37,14 +37,18 @@ async function buildUploadPlan(id: string, bodyPdfUrl?: string): Promise<{ files
   const isScope = (data.inspection.templateType || '').toLowerCase() === 'pm_scope_rate_card';
   const files: TicketUploadFile[] = [];
   if (isScope) {
-    // Master first, then each per-vendor PDF (eviction excluded). Direct HubSpot URLs.
-    const masterUrl = data.inspection.pdfMasterUrl || '';
-    if (masterUrl) files.push({ name: nameFromUrl(masterUrl, 'Master Rate Card.pdf'), url: masterUrl });
+    // A Scope finalize can raise up to THREE tickets; `which` selects the PDFs for
+    // THIS one. Turnkey = Master + the standard trade vendors; Eviction / CapEx =
+    // only their own vendor packet (no Master). Direct HubSpot URLs.
+    if (which === 'turnkey') {
+      const masterUrl = data.inspection.pdfMasterUrl || '';
+      if (masterUrl) files.push({ name: nameFromUrl(masterUrl, 'Master Rate Card.pdf'), url: masterUrl });
+    }
     if (data.inspection.pdfVendorUrlsJson) {
       try {
         const map = JSON.parse(data.inspection.pdfVendorUrlsJson) || {};
         for (const [vendor, url] of Object.entries(map)) {
-          if (vendorGetsOwnPdf(vendor) && typeof url === 'string' && url) {
+          if (vendorGetsOwnPdf(vendor) && vendorTicketKind(vendor) === which && typeof url === 'string' && url) {
             files.push({ name: nameFromUrl(url, `${vendor} Rate Card.pdf`), url });
           }
         }
@@ -55,7 +59,10 @@ async function buildUploadPlan(id: string, bodyPdfUrl?: string): Promise<{ files
     const pdfUrl = (bodyPdfUrl && bodyPdfUrl.trim()) || data.inspection.pdfUrl || '';
     if (pdfUrl) files.push({ name: nameFromUrl(pdfUrl, `${data.inspection.templateType || 'Inspection'}.pdf`), url: pdfUrl });
   }
-  return { files, ensureTicketType: isScope };
+  // Force the ticket TYPE to Turnkey ONLY for the Turnkey ticket. Eviction/CapEx
+  // had their type set at creation (Evictions / default Maintenance) and must NOT
+  // be flipped to Turnkey.
+  return { files, ensureTicketType: isScope && which === 'turnkey' };
 }
 
 const esc = (s: string) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
@@ -76,7 +83,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).send('Add ?ticketId=<HoneyBadger ticket id> (the number in the ticket URL …/EditTicket/<id>).');
     }
     try {
-      const plan = await buildUploadPlan(id, typeof req.query.pdfUrl === 'string' ? req.query.pdfUrl : undefined);
+      const whichQ = (typeof req.query.which === 'string' ? req.query.which : 'turnkey') as TicketKind;
+      const plan = await buildUploadPlan(id, typeof req.query.pdfUrl === 'string' ? req.query.pdfUrl : undefined, whichQ);
       if (!plan) return res.status(404).send('Inspection not found.');
       if (!plan.files.length) return res.status(200).send('No PDFs found on this inspection to upload.');
       const upload = await uploadTicketDocuments({ ticketId, files: plan.files, ensureTicketType: plan.ensureTicketType });
@@ -107,7 +115,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const plan = await buildUploadPlan(id, typeof req.body?.pdfUrl === 'string' ? req.body.pdfUrl : undefined);
+    const which = (typeof req.body?.which === 'string' ? req.body.which : 'turnkey') as TicketKind;
+    const plan = await buildUploadPlan(id, typeof req.body?.pdfUrl === 'string' ? req.body.pdfUrl : undefined, which);
     if (!plan) return res.status(404).json({ error: 'Inspection not found' });
     if (!plan.files.length) return res.status(200).json({ ok: false, skipped: true, reason: 'no files' });
 
