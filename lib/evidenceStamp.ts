@@ -24,7 +24,7 @@ export function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: n
   const rows = lines.filter((l) => l.text);
   if (!rows.length) return;
   const pad = Math.round(w * 0.014);
-  const fontSize = Math.max(16, Math.round(w / 54));
+  const fontSize = Math.max(13, Math.round(w / 72)); // trimmed from w/54 — was oversized in the viewer
   const lineH = Math.round(fontSize * 1.34);
   const barH = lineH * rows.length + pad * 2;
   ctx.save();

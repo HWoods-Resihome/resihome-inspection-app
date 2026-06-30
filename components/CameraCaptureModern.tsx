@@ -127,7 +127,10 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   const rows = lines.filter((l) => l.text);
   if (!rows.length) return;
   const pad = Math.round(w * 0.014);
-  const fontSize = Math.max(16, Math.round(w / 54));
+  // Stamp footprint trimmed (was w/54) so the burned-in evidence bar takes up less
+  // of the photo — it read as oversized/"zoomed" in the full-screen viewer. Still
+  // comfortably legible at w/72.
+  const fontSize = Math.max(13, Math.round(w / 72));
   const lineH = Math.round(fontSize * 1.34);
   const barH = lineH * rows.length + pad * 2;
   // Translucent backdrop for legibility over any photo.
@@ -153,17 +156,21 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.restore();
 }
 
-// Target preview resolution (4:3). Kept LOW (1280×960 ≈ 1.2MP) on purpose: on
-// iOS the standalone PWA's WebKit content process has a tight memory ceiling,
-// and the preview frame IS the saved photo there — so a high res means a big
-// live stream + a big per-shot canvas + big stored blobs, which (across a
-// photo-heavy session) jettisons the content process: the "A problem repeatedly
-// occurred" black screen. 1.2MP is plenty for inspection evidence (the PDF
-// embeds a 520px thumbnail) and keeps memory well under the ceiling. Android
-// still grabs a higher-res still via ImageCapture.takePhoto() (capped by
-// MAX_SAVE_EDGE), independent of this.
-const CAPTURE_WIDTH = 1280;
-const CAPTURE_HEIGHT = 960;
+// Target preview resolution (4:3). Kept MODEST on purpose: on iOS the standalone
+// PWA's WebKit content process has a tight memory ceiling, and the preview frame
+// IS the saved photo there — so a high res means a big live stream + a big
+// per-shot canvas + big stored blobs, which (across a photo-heavy session) can
+// jettison the content process: the "A problem repeatedly occurred" black screen.
+// Raised from 1280×960 (1.2MP) to 1600×1200 (1.9MP): 1.2MP looked soft/pixelated
+// when an inspector pinch-zoomed a saved photo in the viewer. 1.9MP is a clear
+// sharpness gain while staying well under a full-res still; the memory guards
+// added since (just-in-time byte loads, thumbnail-decode skip while the camera is
+// open, canvas zeroing after each shot) keep peak usage bounded. NOTE: this is the
+// iOS OOM lever — validate a long photo-heavy session on a real device before
+// pushing it higher. Android still grabs a higher-res still via
+// ImageCapture.takePhoto() (capped by MAX_SAVE_EDGE), independent of this.
+const CAPTURE_WIDTH = 1600;
+const CAPTURE_HEIGHT = 1200;
 
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.

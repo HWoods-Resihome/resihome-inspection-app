@@ -7,7 +7,7 @@ import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadFilesBatch } from '@/lib/photoUpload';
 import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume, countQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { flushOutbox } from '@/lib/offlineOutbox';
-import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
+import { drainPhotoAttachOutbox, countPhotoAttach } from '@/lib/photoAttachOutbox';
 import { loadCachedAnswers, saveCachedAnswers, clearCachedAnswers } from '@/lib/offlineCache';
 import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { useStorageQuota, formatMB } from '@/lib/storageQuota';
@@ -1437,6 +1437,34 @@ export function QuestionForm({
           `${pendingPhotos} photo${pendingPhotos === 1 ? '' : 's'} keep${pendingPhotos === 1 ? 's' : ''} failing to upload (check your signal). ` +
           `If you submit now ${pendingPhotos === 1 ? 'it' : 'they'} will NOT be attached to the report. Submit without ${pendingPhotos === 1 ? 'it' : 'them'}?`,
           { confirmLabel: 'Submit without photos', cancelLabel: 'Keep trying' },
+        );
+        if (!proceed) return;
+      }
+      // Photos uploaded — now make sure their durable ATTACH instructions actually
+      // LAND before finalizing. A photo can leave the upload queue (pendingPhotos
+      // === 0) while its attach is still pending — notably an HVAC label-sticker,
+      // whose 'fc' attach DEFERS until the Final Checklist blob record is readable.
+      // Finalizing in that window persists the record WITHOUT that photo, so it's
+      // missing on reload (the "13/14 — a Label Sticker photo missing" report).
+      // Attaches are URL-based, durable and idempotent, so this only WAITS for them
+      // to land; it never re-uploads or risks loss.
+      let pendingAttach = 0;
+      for (let i = 0; i < 5; i++) {
+        try { await drainPhotoAttachOutbox(); } catch { /* retried below / by the global driver */ }
+        try { pendingAttach = countPhotoAttach(inspectionRecordId); } catch { pendingAttach = 0; }
+        if (pendingAttach === 0) break;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      if (pendingAttach > 0) {
+        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+        // Offline (or still settling): the attach is durable and WILL land on its
+        // own once back online — so submitting is safe, but make it a conscious
+        // choice rather than a silent maybe-missing.
+        const proceed = await dialog.confirm(
+          offline
+            ? `${pendingAttach} photo${pendingAttach === 1 ? '' : 's'} still need to attach and you're offline. They'll attach automatically once you're back online. Submit anyway?`
+            : `${pendingAttach} photo${pendingAttach === 1 ? '' : 's'} ${pendingAttach === 1 ? 'is' : 'are'} still attaching. Keep this screen open a few more seconds and submit again so ${pendingAttach === 1 ? 'it lands' : 'they land'} on the report.`,
+          { confirmLabel: 'Submit anyway', cancelLabel: 'Keep trying' },
         );
         if (!proceed) return;
       }
