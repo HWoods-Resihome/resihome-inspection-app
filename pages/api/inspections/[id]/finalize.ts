@@ -488,6 +488,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         septicFee: inspectionData.propertySepticFee ?? null,
         poolFee: inspectionData.propertyPoolFee ?? null,
         airQtyPrefill: inspectionData.propertyAirFiltersTotal ?? null,
+        gasProvider: inspectionData.propertyGasProvider ?? null,
         filterOptionsAvailable: true,
         filterPrefills: [
           inspectionData.propertyAirFiltersType1 ?? null,

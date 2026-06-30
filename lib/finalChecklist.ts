@@ -44,6 +44,7 @@ export interface FcAddLineRule {
 
 export type FcQuestionType =
   | 'single_select'   // pill choices (always one line)
+  | 'multi_select'    // "check all that apply" pill choices (e.g. gas appliances)
   | 'device_subform'  // smart-home: pick one device → its sub-fields
   | 'number'          // quantity stepper (prefilled from property)
   | 'filter_sizes'    // N dependent scroll-wheels, N = the quantity answer
@@ -87,7 +88,7 @@ export interface FcQuestion {
   type: FcQuestionType;
   required: boolean;
   help?: string;
-  options?: string[];              // for single_select
+  options?: string[];              // for single_select / multi_select
 
   // --- smart-home device sub-forms ---
   devices?: FcDevice[];
@@ -118,6 +119,13 @@ export interface FcQuestion {
   // Only show when the property is associated to a Community object in HubSpot
   // (e.g. mailbox keys — non-community homes have none, so the question is hidden).
   requiresCommunity?: boolean;
+  // Only show when the property has a REAL gas provider (gas_provider is set and
+  // is NOT "This Home is All Electric") — so the Gas utility question is hidden on
+  // all-electric / unmapped homes.
+  requiresGasProvider?: boolean;
+  // Only show once ANOTHER question (by id) has a non-empty answer — e.g. the
+  // "which appliances are on gas" multi-select appears once Gas is answered.
+  showWhenAnswered?: string;
 
   // --- photo_set ---
   photos?: { id: string; label: string; required: boolean }[];
@@ -142,6 +150,8 @@ export interface FcAnswerState {
   quantity?: number | null;
   count?: number | null;
   device?: Record<string, string>;
+  /** Selected options for a multi_select question (e.g. gas appliances). */
+  multi?: string[];
   filterSizes?: string[];
   /** Free-text size when the matching filterSizes[i] is FC_FILTER_OTHER. */
   filterSizesOther?: string[];
@@ -170,6 +180,16 @@ export interface FcCompletionCtx {
   /** True when the inspection's property is associated to a Community object in
    *  HubSpot — gates community-only questions (e.g. mailbox keys). */
   hasCommunity?: boolean;
+  /** property gas_provider — gates the Gas utility question (shown only when a
+   *  real provider is set, i.e. not blank and not "This Home is All Electric"). */
+  gasProvider?: string | null;
+}
+
+/** True when the property has a real gas provider (set, and not all-electric) —
+ *  i.e. the home actually has gas, so the Gas utility question applies. */
+export function hasRealGasProvider(gasProvider: string | null | undefined): boolean {
+  const g = (gasProvider || '').trim();
+  return g.length > 0 && g.toLowerCase() !== 'this home is all electric';
 }
 
 /** How many filter-size pickers are in play given the answered/prefilled qty. */
@@ -201,10 +221,17 @@ export function fcMissingLineCodes(catalogCodes: Set<string> | string[]): string
   return fcReferencedLineCodes().filter((c) => !present.has(c));
 }
 
-/** Whether a question is currently shown (respects conditional visibility). */
-export function fcQuestionVisible(q: FcQuestion, ctx: FcCompletionCtx): boolean {
+/** Whether a question is currently shown (respects conditional visibility). `a`
+ *  (the answers map) is needed for cross-answer dependencies (showWhenAnswered);
+ *  callers that have the answers should pass them. */
+export function fcQuestionVisible(q: FcQuestion, ctx: FcCompletionCtx, a?: FcAnswers): boolean {
   // Community-only questions (mailbox keys) hide on non-community properties.
   if (q.requiresCommunity && !ctx.hasCommunity) return false;
+  // Gas utility question hides on all-electric / unmapped homes.
+  if (q.requiresGasProvider && !hasRealGasProvider(ctx.gasProvider)) return false;
+  // Cross-answer dependency: hide until the referenced question is answered (e.g.
+  // gas appliances appear once Gas is On/Off).
+  if (q.showWhenAnswered && !((a?.[q.showWhenAnswered]?.value || '').trim())) return false;
   if (q.showWhenProperty) {
     const f = q.showWhenProperty.field;
     const v = (f === 'pool_fee' ? ctx.poolFee : f === 'septic_fee' ? ctx.septicFee : null) ?? 0;
@@ -248,6 +275,9 @@ export function fcRenderValue(
     return (q.photos || [])
       .map((p) => `${p.label}: ${((ans.stickerPhotos?.[p.id] || []).length) ? '✓' : '—'}`)
       .join('  ·  ');
+  } else if (q.type === 'multi_select') {
+    const picked = (ans.multi || []).filter(Boolean);
+    return picked.length ? picked.join(', ') : 'None';
   } else { // single_select
     let value = ans.value || '—';
     const extras: string[] = [];
@@ -278,7 +308,7 @@ export function finalChecklistAnswerRecords(a: FcAnswers, ctx: FcCompletionCtx):
   const out: FcAnswerRecord[] = [];
   for (const section of FINAL_CHECKLIST) {
     for (const q of section.questions) {
-      if (!fcQuestionVisible(q, ctx)) continue;
+      if (!fcQuestionVisible(q, ctx, a)) continue;
       const ans = a[q.id] || {};
       out.push({
         questionId: q.id,
@@ -316,7 +346,7 @@ export function summarizeFinalChecklist(
     if (opts?.excludeSectionIds?.includes(section.id)) continue;
     const rows: FcSummaryRow[] = [];
     for (const q of section.questions) {
-      if (!fcQuestionVisible(q, ctx)) continue;
+      if (!fcQuestionVisible(q, ctx, a)) continue;
       const ans = a[q.id] || {};
       // Photos captured for THIS question — per-question photos first, then any
       // label-sticker photos (same source/order as finalChecklistPhotos).
@@ -388,6 +418,10 @@ function fcQuestionGap(
     }
     return null;
   }
+  if (q.type === 'multi_select') {
+    if (q.required && (ans.multi || []).filter(Boolean).length === 0) return 'select at least one';
+    return null;
+  }
   // single_select
   if (q.required && !ans.value) return 'choose an answer';
   if ((q.photoRequiredOnValues || []).includes(ans.value || '') && !((ans.photoUrls || []).length)) return 'add a photo';
@@ -405,7 +439,7 @@ export function finalChecklistGap(a: FcAnswers, ctx: FcCompletionCtx, opts?: { o
   for (const section of FINAL_CHECKLIST) {
     if (opts?.onlySectionIds && !opts.onlySectionIds.includes(section.id)) continue;
     for (const q of section.questions) {
-      if (!fcQuestionVisible(q, ctx)) continue;
+      if (!fcQuestionVisible(q, ctx, a)) continue;
       const g = fcQuestionGap(q, a[q.id] || {}, ctx, a, opts);
       if (g) return `${section.name} · ${q.label}: ${g}`;
     }
@@ -423,7 +457,7 @@ export function fcSectionCounts(
   if (!section) return { completed: 0, total: 0 };
   let completed = 0, total = 0;
   for (const q of section.questions) {
-    if (!fcQuestionVisible(q, ctx)) continue;
+    if (!fcQuestionVisible(q, ctx, a)) continue;
     total++;
     if (!fcQuestionGap(q, a[q.id] || {}, ctx, a, opts)) completed++;
   }
@@ -614,9 +648,18 @@ export const FINAL_CHECKLIST: FcSection[] = [
       { id: 'fc_water', label: 'Water', type: 'single_select', options: ['On', 'Off'], required: true,
         photoRequiredOnValues: ['Off'], photoHint: 'Photo of the meter (showing the reading).',
         noteRequiredOnValues: ['Off'], notePrompt: 'Meter Number' },
-      { id: 'fc_gas', label: 'Gas', type: 'single_select', options: ['On', 'Off', 'N/A'], required: true,
+      // Gas only applies when the property has a real gas provider (gas_provider
+      // set and not "This Home is All Electric") — otherwise the question is
+      // hidden. With a provider it's simply On / Off (no N/A).
+      { id: 'fc_gas', label: 'Gas', type: 'single_select', options: ['On', 'Off'], required: true,
+        requiresGasProvider: true,
         photoRequiredOnValues: ['Off'], photoHint: 'Photo of the meter (showing the reading).',
         noteRequiredOnValues: ['Off'], notePrompt: 'Meter Number' },
+      // Dependent on Gas: once Gas is answered, capture which appliances run on
+      // gas (check all that apply). Optional — when Gas is Off, none may apply.
+      { id: 'fc_gas_appliances', label: 'Which Appliances Are on Gas? (check all)', type: 'multi_select',
+        options: ['Stove', 'Water Heater', 'HVAC'], required: false,
+        requiresGasProvider: true, showWhenAnswered: 'fc_gas' },
       {
         id: 'fc_trash_bins',
         label: 'Trash Bins',

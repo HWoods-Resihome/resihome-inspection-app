@@ -2817,6 +2817,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
   /** Final Checklist: confirmed air-filter qty/types (write-back enabled) and
    *  the septic fee that gates the conditional septic question. */
   propertyAirFiltersTotal: number | null;
+  propertyGasProvider: string | null;
   propertyAirFiltersType1: string | null;
   propertyAirFiltersType2: string | null;
   propertyAirFiltersType3: string | null;
@@ -2893,6 +2894,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
     let propertyTenantHasPet = false;
     let propertyLastTenantPetCount: number | null = null;
     let propertyAirFiltersTotal: number | null = null;
+    let propertyGasProvider: string | null = null;
     let propertyAirFiltersType1: string | null = null;
     let propertyAirFiltersType2: string | null = null;
     let propertyAirFiltersType3: string | null = null;
@@ -2931,6 +2933,9 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
           'air_filters___type__1', 'air_filters___type__2', 'air_filters___type__3',
           'septic_fee',
           'pool_fee',
+          // Gas provider — gates the Final Checklist Gas question (hidden on
+          // all-electric / unmapped homes).
+          'gas_provider',
           // Preferred email CC for finalize (falls back to team{STATE}@resihome.com).
           'team_group_email',
           // Property lifecycle status (Turnkey / Vacant / Unmarketed / …) — shown
@@ -2970,6 +2975,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
           const n = Number(pp.air_filters___total_quantity);
           if (Number.isFinite(n)) propertyAirFiltersTotal = n;
         }
+        propertyGasProvider = (pp.gas_provider != null && String(pp.gas_provider).trim() !== '') ? String(pp.gas_provider).trim() : null;
         propertyAirFiltersType1 = (pp.air_filters___type__1 || '').toString().trim() || null;
         propertyAirFiltersType2 = (pp.air_filters___type__2 || '').toString().trim() || null;
         propertyAirFiltersType3 = (pp.air_filters___type__3 || '').toString().trim() || null;
@@ -3061,6 +3067,7 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
       propertyLastTenantMonths,
       propertyHbmmId,
       propertyAirFiltersTotal,
+      propertyGasProvider,
       propertyAirFiltersType1,
       propertyAirFiltersType2,
       propertyAirFiltersType3,

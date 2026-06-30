@@ -147,6 +147,7 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
   if (fcBlob) {
     const fcCtx: FcCompletionCtx = {
       septicFee: (data as any).propertySepticFee ?? null,
+      gasProvider: (data as any).propertyGasProvider ?? null,
       airQtyPrefill: (data as any).propertyAirFiltersTotal ?? null,
       filterOptionsAvailable: true,
       filterPrefills: [

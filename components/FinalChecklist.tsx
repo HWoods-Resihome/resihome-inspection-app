@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import {
-  FINAL_CHECKLIST, FC_FILTER_OTHER, fcSectionCounts, fcVisibleDeviceFields,
+  FINAL_CHECKLIST, FC_FILTER_OTHER, fcSectionCounts, fcVisibleDeviceFields, fcQuestionVisible,
   type FcQuestion, type FcAddLineRule,
   type FcAnswerState, type FcAnswers, type FcCompletionCtx,
 } from '@/lib/finalChecklist';
@@ -138,6 +138,7 @@ export function FinalChecklist(props: Props) {
   const countCtx: FcCompletionCtx = {
     septicFee: num(props.propertyValues?.septic_fee),
     poolFee: num(props.propertyValues?.pool_fee),
+    gasProvider: (props.propertyValues?.gas_provider as string) ?? null,
     airQtyPrefill: num(props.propertyValues?.air_filters___total_quantity),
     filterOptionsAvailable: (props.filterSizeOptions?.length || 0) > 0,
     filterPrefills: [
@@ -564,6 +565,34 @@ export function FinalChecklist(props: Props) {
       );
     }
 
+    if (q.type === 'multi_select') {
+      const selected = new Set(a.multi || []);
+      const toggle = (opt: string) => {
+        const next = new Set(selected);
+        if (next.has(opt)) next.delete(opt); else next.add(opt);
+        // Persist in the question's option order so the stored/PDF value is stable.
+        onPatch(q.id, { multi: (q.options || []).filter((o) => next.has(o)) });
+      };
+      return (
+        <div className="flex flex-wrap gap-2 mt-1">
+          {(q.options || []).map((opt) => {
+            const on = selected.has(opt);
+            return (
+              <button
+                key={opt}
+                type="button"
+                disabled={readOnly}
+                onClick={() => toggle(opt)}
+                className={`px-3 h-9 rounded-full border text-sm font-heading font-semibold ${on ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'} ${readOnly ? 'opacity-70' : ''}`}
+              >
+                {on ? '✓ ' : ''}{titleCase(opt)}
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
     // single_select.
     // NOTE: ActionPanel/CountField/Reminder/AddLineArea are invoked as FUNCTIONS,
     // not as <Component/> elements. They're defined inside this component, so a
@@ -582,12 +611,11 @@ export function FinalChecklist(props: Props) {
     );
   }
 
+  // Single source of truth for visibility — delegates to the shared lib so the
+  // renderer, the count pills, the gate, and the PDF all agree (incl. the Gas
+  // gas-provider gate and the gas-appliances "show once Gas answered" dependency).
   function visible(q: FcQuestion): boolean {
-    if (q.requiresCommunity && !props.hasCommunity) return false;
-    if (!q.showWhenProperty) return true;
-    const v = num(props.propertyValues?.[q.showWhenProperty.field]);
-    if (q.showWhenProperty.gt != null) return (v ?? 0) > q.showWhenProperty.gt;
-    return true;
+    return fcQuestionVisible(q, countCtx, answers);
   }
 
   // One subsection's header + questions. In bare mode each is its OWN bubble

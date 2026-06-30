@@ -147,6 +147,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         propertyLastTenantPetCount: data.propertyLastTenantPetCount,
         propertyLastTenantMonths: data.propertyLastTenantMonths,
         propertyAirFiltersTotal: data.propertyAirFiltersTotal,
+        propertyGasProvider: data.propertyGasProvider,
         propertyAirFiltersType1: data.propertyAirFiltersType1,
         propertyAirFiltersType2: data.propertyAirFiltersType2,
         propertyAirFiltersType3: data.propertyAirFiltersType3,

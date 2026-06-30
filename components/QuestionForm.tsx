@@ -89,6 +89,8 @@ type Props = {
   /** Property air-filter fields — prefill the HVAC widget and are written back
    *  to the property as the inspector confirms/corrects them. */
   propertyAirFiltersTotal?: number | null;
+  /** property gas_provider — gates the Final Checklist Gas question (real provider only). */
+  propertyGasProvider?: string | null;
   /** property pool_fee — gates the Final Checklist Pool Condition question. */
   propertyPoolFee?: number | null;
   propertyAirFiltersType1?: string | null;
@@ -210,7 +212,7 @@ export function QuestionForm({
   bedrooms, bathrooms, squareFootage, propertyStatus, moveInReadyDate, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, moveInDate, communityName, onSubmit, onCancel, onNavigateTo,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
-  propertyAirFiltersTotal, propertyPoolFee, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
+  propertyAirFiltersTotal, propertyGasProvider, propertyPoolFee, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
   filterSizeOptions,
 }: Props) {
   const dialog = useAppDialog();
@@ -233,8 +235,9 @@ export function QuestionForm({
     air_filters___type__1: propertyAirFiltersType1 || '',
     air_filters___type__2: propertyAirFiltersType2 || '',
     air_filters___type__3: propertyAirFiltersType3 || '',
+    gas_provider: propertyGasProvider || '',
     pool_fee: propertyPoolFee != null ? String(propertyPoolFee) : '',
-  }), [propertyAirFiltersTotal, propertyPoolFee, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3]);
+  }), [propertyAirFiltersTotal, propertyPoolFee, propertyGasProvider, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3]);
 
   // ── Reused Scope FinalChecklist (HVAC & Air Filters + Smart Home Tech) ──────
   // The Q&A templates render the EXACT Scope widgets and persist them the same
@@ -352,6 +355,7 @@ export function QuestionForm({
     filterOptionsAvailable: (filterSizeOptions?.length || 0) > 0,
     filterPrefills: [propertyAirFiltersType1 || null, propertyAirFiltersType2 || null, propertyAirFiltersType3 || null],
     hasCommunity: !!communityName,  // gates the community-only mailbox-keys question
+    gasProvider: propertyGasProvider ?? null,  // gates the Gas question (real provider only)
   };
 
   // Transform the raw questions:

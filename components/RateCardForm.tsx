@@ -134,6 +134,7 @@ interface RateCardFormProps {
    *  fee (gates the conditional septic question), and the live filter-size
    *  dropdown options pulled from the HubSpot field. All optional. */
   propertyAirFiltersTotal?: number | null;
+  propertyGasProvider?: string | null;
   propertyAirFiltersType1?: string | null;
   propertyAirFiltersType2?: string | null;
   propertyAirFiltersType3?: string | null;
@@ -1621,6 +1622,7 @@ export function RateCardForm(props: RateCardFormProps) {
     air_filters___type__1: props.propertyAirFiltersType1 ?? null,
     air_filters___type__2: props.propertyAirFiltersType2 ?? null,
     air_filters___type__3: props.propertyAirFiltersType3 ?? null,
+    gas_provider: props.propertyGasProvider ?? null,
     septic_fee: props.propertySepticFee ?? null,
     pool_fee: props.propertyPoolFee ?? null,
   };
@@ -2611,6 +2613,7 @@ export function RateCardForm(props: RateCardFormProps) {
       filterOptionsAvailable: (props.filterSizeOptions?.length ?? 0) > 0,
       filterPrefills: [props.propertyAirFiltersType1 ?? null, props.propertyAirFiltersType2 ?? null, props.propertyAirFiltersType3 ?? null],
       hasCommunity: !!props.communityName,
+      gasProvider: props.propertyGasProvider ?? null,
       lineExists: fcLineExists,
     }),
     [fcAnswers, props.propertySepticFee, props.propertyAirFiltersTotal, props.filterSizeOptions,

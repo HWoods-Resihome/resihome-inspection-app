@@ -93,6 +93,7 @@ export default function ExistingInspection() {
   const [lastTenantPetCount, setLastTenantPetCount] = useState<number | null>(null);
   const [propertyLastTenantMonths, setPropertyLastTenantMonths] = useState<number | null>(null);
   const [propertyAirFiltersTotal, setPropertyAirFiltersTotal] = useState<number | null>(null);
+  const [propertyGasProvider, setPropertyGasProvider] = useState<string | null>(null);
   const [propertyAirFiltersType1, setPropertyAirFiltersType1] = useState<string | null>(null);
   const [propertyAirFiltersType2, setPropertyAirFiltersType2] = useState<string | null>(null);
   const [propertyAirFiltersType3, setPropertyAirFiltersType3] = useState<string | null>(null);
@@ -170,6 +171,7 @@ export default function ExistingInspection() {
         setPropertyAirFiltersTotal(
           typeof data.propertyAirFiltersTotal === 'number' ? data.propertyAirFiltersTotal : null
         );
+        setPropertyGasProvider(typeof data.propertyGasProvider === 'string' ? data.propertyGasProvider : null);
         setPropertyAirFiltersType1(typeof data.propertyAirFiltersType1 === 'string' ? data.propertyAirFiltersType1 : null);
         setPropertyAirFiltersType2(typeof data.propertyAirFiltersType2 === 'string' ? data.propertyAirFiltersType2 : null);
         setPropertyAirFiltersType3(typeof data.propertyAirFiltersType3 === 'string' ? data.propertyAirFiltersType3 : null);
@@ -694,6 +696,7 @@ export default function ExistingInspection() {
           tenantHasPet={tenantHasPet}
           lastTenantPetCount={lastTenantPetCount}
           propertyAirFiltersTotal={propertyAirFiltersTotal}
+          propertyGasProvider={propertyGasProvider}
           propertyAirFiltersType1={propertyAirFiltersType1}
           propertyAirFiltersType2={propertyAirFiltersType2}
           propertyAirFiltersType3={propertyAirFiltersType3}
@@ -738,6 +741,7 @@ export default function ExistingInspection() {
           communityName={communityName}
           propertyPoolFee={propertyPoolFee}
           propertyAirFiltersTotal={propertyAirFiltersTotal}
+          propertyGasProvider={propertyGasProvider}
           propertyAirFiltersType1={propertyAirFiltersType1}
           propertyAirFiltersType2={propertyAirFiltersType2}
           propertyAirFiltersType3={propertyAirFiltersType3}
