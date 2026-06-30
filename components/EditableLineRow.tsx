@@ -1003,7 +1003,7 @@ export function EditableLineRow(props: Props) {
                         ))}
                       </div>
                     </div>
-                    {evictionTimingOf(vendor) === 'future' && <div className="text-[11px] text-gray-500 mt-1">Work still owed — a vendor packet is generated and attached to the maintenance ticket.</div>}
+                    {evictionTimingOf(vendor) === 'future' && <div className="text-[11px] text-gray-500 mt-1">Work still owed — a vendor packet is generated and attached to the Turnkey ticket.</div>}
                   </div>
                 )}
 
