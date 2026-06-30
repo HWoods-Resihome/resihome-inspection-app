@@ -127,11 +127,15 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   const rows = lines.filter((l) => l.text);
   if (!rows.length) return;
   const pad = Math.round(w * 0.014);
-  // Stamp footprint trimmed (was w/54) so the burned-in evidence bar takes up less
-  // of the photo — it read as oversized/"zoomed" in the full-screen viewer. Still
-  // comfortably legible at w/72.
-  const fontSize = Math.max(13, Math.round(w / 72));
-  const lineH = Math.round(fontSize * 1.34);
+  // Font scales with WIDTH (trimmed from w/54 → w/72 so the bar is less obtrusive)
+  // but is CAPPED by HEIGHT so a low-res or oddly-cropped capture can't let the
+  // multi-line bar balloon to dominate the photo — the old fixed-px floor did
+  // exactly that on a degraded frame. Budget the whole bar to ≤ ~16% of height.
+  const lf = 1.34;
+  const fontByWidth = Math.round(w / 72);
+  const fontByHeight = Math.floor((h * 0.16 - pad * 2) / (rows.length * lf));
+  const fontSize = Math.max(11, Math.min(fontByWidth, fontByHeight));
+  const lineH = Math.round(fontSize * lf);
   const barH = lineH * rows.length + pad * 2;
   // Translucent backdrop for legibility over any photo.
   ctx.save();
@@ -171,6 +175,13 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
 // ImageCapture.takePhoto() (capped by MAX_SAVE_EDGE), independent of this.
 const CAPTURE_WIDTH = 1600;
 const CAPTURE_HEIGHT = 1200;
+// A live frame narrower than this is a DEGRADED stream (iOS can hand back a tiny
+// frame after a recovery/lens-switch/throttle, or honor `{ideal}` with a much
+// lower res). Saving it yields a low-resolution photo whose evidence stamp
+// balloons (the reported "some photos look terrible" case). At capture we treat a
+// sub-threshold frame like a not-ready frame: try to push the track back up and
+// re-check before grabbing — never losing the shot.
+const MIN_CAPTURE_EDGE = 1000;
 
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
@@ -2155,6 +2166,45 @@ export function CameraCaptureModern({
       }
     };
 
+    // Grab the live <video> frame, but GUARD it first — used by the iOS path AND
+    // the Android live-fallback so EVERY live-frame capture is protected. Two
+    // degraded states are caught:
+    //   • BLACK — after a shot iOS can leave the <video> paused on an all-black
+    //     frame, so a rapid next shot grabs pure black (the reported black tiles).
+    //     Detected via the interrupted-camera signature (uniform black) AND only
+    //     once we've seen a lit frame, so a genuinely dark closet isn't mistaken.
+    //   • LOW-RES — the stream can hand back a tiny frame (recovery / lens-switch /
+    //     throttle, or `{ideal}` honored at a much lower res), which saves a
+    //     low-resolution photo whose evidence stamp balloons (the reported "some
+    //     photos look terrible" case).
+    // For either, kick the SAME stream back to life (no getUserMedia → no
+    // permission prompt) and, for low-res, ask the track to climb back to the
+    // target resolution, then re-check a few times over ~0.7s. We NEVER silently
+    // drop: after the budget we grab anyway, so the worst case is today's behavior
+    // (a visible photo the inspector can retake), never a lost shot.
+    let grabFinished = false;
+    const grabGuardedVideoFrame = (attempt = 0) => {
+      if (grabFinished) return;
+      const v = videoRef.current;
+      if (!v) { grabFinished = true; endCapture(); return; }
+      const litCheck = IS_IOS && sawLightRef.current ? sampleLuma(v) : null;
+      const blackNow = !!litCheck && litCheck.mean < 4 && litCheck.variance < 2;
+      const vw = v.videoWidth || 0;
+      const lowRes = vw > 0 && vw < MIN_CAPTURE_EDGE;
+      if ((!blackNow && !lowRes) || attempt >= 4) {
+        grabFinished = true;
+        buildAndEnqueue(v, v.videoWidth, v.videoHeight, endCapture);
+        return;
+      }
+      if (lowRes) {
+        // Best-effort: ask the track to climb back to the target resolution.
+        try { streamRef.current?.getVideoTracks?.()[0]?.applyConstraints({ width: { ideal: CAPTURE_WIDTH }, height: { ideal: CAPTURE_HEIGHT } }); } catch { /* unsupported — re-check anyway */ }
+      }
+      if (streamRef.current && v.srcObject !== streamRef.current) { try { v.srcObject = streamRef.current; } catch { /* noop */ } }
+      if (v.paused) v.play().catch(() => { /* non-fatal */ });
+      setTimeout(() => grabGuardedVideoFrame(attempt + 1), 170);
+    };
+
     // QUALITY-FIRST: prefer ImageCapture.takePhoto() — the camera's real STILL
     // pipeline (multi-frame denoise + proper exposure/HDR), the fix for grainy
     // low-light shots — over a single noisy preview frame. The cached
@@ -2171,7 +2221,7 @@ export function CameraCaptureModern({
       const liveFallback = () => {
         if (settled) return;
         settled = true;
-        buildAndEnqueue(video, video.videoWidth, video.videoHeight, endCapture);
+        grabGuardedVideoFrame(); // guarded (black / low-res) — not a raw grab
       };
       // Give the full-res still time to finish before falling back to a noisier
       // live-frame grab — the freeze-frame covers the wait, and a clean still is
@@ -2197,29 +2247,8 @@ export function CameraCaptureModern({
       return;
     }
 
-    // No ImageCapture (iOS Safari, etc.) → instant live-frame grab. GUARD against
-    // iOS's post-capture pause: in the instant after a prior shot iOS can leave the
-    // <video> paused on an all-black frame, so a rapid next shot grabs pure black —
-    // a useless evidence photo (the reported black tiles). If the frame reads as the
-    // interrupted-camera signature (uniform black, AND we've already seen a lit frame
-    // this session, so a genuinely dark closet isn't mistaken for it), kick the SAME
-    // stream back to life (no getUserMedia → no permission prompt) and re-sample a
-    // few times over ~0.7s before grabbing. We NEVER silently drop: after the budget
-    // we grab anyway, so the worst case is today's behavior (a visible black photo
-    // the inspector can retake), never a lost shot.
-    const grabWhenLit = (attempt = 0) => {
-      const v = videoRef.current;
-      if (!v) { endCapture(); return; }
-      const blackNow = IS_IOS && sawLightRef.current && (() => {
-        const r = sampleLuma(v);
-        return !!r && r.mean < 4 && r.variance < 2;
-      })();
-      if (!blackNow || attempt >= 4) { buildAndEnqueue(v, v.videoWidth, v.videoHeight, endCapture); return; }
-      if (streamRef.current && v.srcObject !== streamRef.current) { try { v.srcObject = streamRef.current; } catch { /* noop */ } }
-      if (v.paused) v.play().catch(() => { /* non-fatal */ });
-      setTimeout(() => grabWhenLit(attempt + 1), 170);
-    };
-    grabWhenLit();
+    // No ImageCapture (iOS Safari, etc.) → guarded live-frame grab.
+    grabGuardedVideoFrame();
   }, [maxPhotos, dialog, enqueueFile, addressSnapshot, buildGeoStampLines, effZoom, showFreezeFrame, endCapture, getImageCapture, takeBestPhoto, sampleLuma]);
 
   // ----- Per-photo retake/delete -----

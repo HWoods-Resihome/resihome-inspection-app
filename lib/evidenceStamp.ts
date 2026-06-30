@@ -24,8 +24,13 @@ export function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: n
   const rows = lines.filter((l) => l.text);
   if (!rows.length) return;
   const pad = Math.round(w * 0.014);
-  const fontSize = Math.max(13, Math.round(w / 72)); // trimmed from w/54 — was oversized in the viewer
-  const lineH = Math.round(fontSize * 1.34);
+  // Width-scaled (trimmed w/54 → w/72) but CAPPED by height so a low-res capture
+  // can't let the bar balloon to dominate the photo. Budget ≤ ~16% of height.
+  const lf = 1.34;
+  const fontByWidth = Math.round(w / 72);
+  const fontByHeight = Math.floor((h * 0.16 - pad * 2) / (rows.length * lf));
+  const fontSize = Math.max(11, Math.min(fontByWidth, fontByHeight));
+  const lineH = Math.round(fontSize * lf);
   const barH = lineH * rows.length + pad * 2;
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,0.42)';
