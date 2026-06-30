@@ -25,19 +25,36 @@ const IMAGE_FETCH_TIMEOUT_MS = 18000;
  * otherwise that photo renders as a "View photo" link in the PDF instead of the
  * image. A sharp DECODE failure isn't retried (it won't change on a re-fetch).
  */
+// A FRESH inspection's photos are the failure-prone case: HubSpot's CDN can
+// 403/404/5xx a just-uploaded file for several SECONDS before it propagates, and
+// a photo that doesn't embed renders as a "View photo" link instead of the image
+// (the field report). So retry with EXPONENTIAL backoff over a wider window than
+// a flat 600ms gave, but bound the TOTAL time per URL so a genuinely-dead link
+// (or a string of timeouts) can never run long enough to blow the PDF/finalize
+// serverless budget.
+const MAX_ATTEMPTS = 6;
+const RETRY_BUDGET_MS = 35000;   // hard ceiling on total time spent on ONE url
+const BACKOFF_CAP_MS = 5000;
+
 async function fetchAndResize(url: string): Promise<string | null> {
-  const MAX_ATTEMPTS = 4;
+  const start = Date.now();
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    // Time-box each fetch: on timeout we retry (or skip), so the report still
-    // renders rather than hanging the whole PDF on one bad URL.
+    const elapsed = Date.now() - start;
+    if (elapsed >= RETRY_BUDGET_MS) break; // out of budget — give up (renders as link)
+    // Time-box each fetch by the SMALLER of the per-attempt ceiling and the
+    // remaining budget, so the budget guard is honored even mid-fetch.
+    const attemptTimeout = Math.min(IMAGE_FETCH_TIMEOUT_MS, RETRY_BUDGET_MS - elapsed);
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), IMAGE_FETCH_TIMEOUT_MS);
+    const timer = setTimeout(() => ctrl.abort(), attemptTimeout);
+    // Exponential backoff before a RETRY (500ms, 1s, 2s, 4s, capped), bounded by
+    // the remaining budget; only used when this attempt fails and another remains.
+    const backoff = () => Math.min(BACKOFF_CAP_MS, 500 * 2 ** (attempt - 1), Math.max(0, RETRY_BUDGET_MS - (Date.now() - start)));
     try {
       const res = await fetch(url, { signal: ctrl.signal });
       if (!res.ok) {
         // Retry the propagation-lag statuses; give up on a genuine client error.
         const retryable = res.status === 404 || res.status === 403 || res.status === 429 || res.status >= 500;
-        if (retryable && attempt < MAX_ATTEMPTS) { clearTimeout(timer); await new Promise((r) => setTimeout(r, 600)); continue; }
+        if (retryable && attempt < MAX_ATTEMPTS) { clearTimeout(timer); await new Promise((r) => setTimeout(r, backoff())); continue; }
         console.warn(`[pdf-images] Failed to fetch ${url}: ${res.status}`);
         return null;
       }
@@ -51,10 +68,10 @@ async function fetchAndResize(url: string): Promise<string | null> {
       return `data:image/jpeg;base64,${resized.toString('base64')}`;
     } catch (e: any) {
       const isAbort = e?.name === 'AbortError';
-      // A network/timeout error is worth one more try; a decode error isn't.
+      // A network/timeout error is worth another try; a decode error isn't.
       const looksTransient = isAbort || /fetch failed|network|ECONN|ETIMEDOUT|socket/i.test(String(e?.message || e));
-      if (looksTransient && attempt < MAX_ATTEMPTS) { clearTimeout(timer); await new Promise((r) => setTimeout(r, 600)); continue; }
-      const why = isAbort ? `timed out after ${IMAGE_FETCH_TIMEOUT_MS}ms` : (e?.message || e);
+      if (looksTransient && attempt < MAX_ATTEMPTS && Date.now() - start < RETRY_BUDGET_MS) { clearTimeout(timer); await new Promise((r) => setTimeout(r, backoff())); continue; }
+      const why = isAbort ? `timed out after ${attemptTimeout}ms` : (e?.message || e);
       console.warn(`[pdf-images] Error processing ${url}: ${why}`);
       return null;
     } finally {

@@ -104,8 +104,14 @@ const styles = StyleSheet.create({
   },
   noteText: { fontSize: 8.5, color: COLORS.ink, marginBottom: 3 },
   scoreText: { fontSize: 8, color: COLORS.gray, fontFamily: 'Helvetica-Bold' },
-  // Photos
-  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
+  // Photos. The grid is a COLUMN of fixed-width rows (PhotoGrid chunks tiles into
+  // rows of PHOTOS_PER_ROW). It is NOT a single flexWrap row: react-pdf can't
+  // paginate a wrapping flex row — when it crosses a page boundary the overflow
+  // tiles render UNDER the fixed footer and ghost onto the next page (the
+  // "overlay off the page" bug). Discrete wrap={false} rows break cleanly between
+  // rows instead.
+  photoGrid: { marginTop: 6 },
+  photoRow: { flexDirection: 'row' },
   photo: { width: 100, height: 75, margin: 2, objectFit: 'cover' },
   photoFill: { width: '100%', height: '100%', objectFit: 'cover' },
   // Compact link shown when an image couldn't be embedded (so we don't reserve a
@@ -251,6 +257,27 @@ function renderPhotos(entries: string[], embedded?: Record<string, string>, gall
       </Link>
     );
   });
+}
+
+// How many photo tiles per row. 5 × (100 + 2·2 margin) ≈ 520pt fits the content
+// width with margin to spare.
+const PHOTOS_PER_ROW = 5;
+
+// Render a photo grid that PAGINATES CLEANLY. Each row is its own wrap={false}
+// View, so react-pdf moves a whole row to the next page when it won't fit at the
+// bottom — instead of overflowing a single flexWrap row under the footer. Used
+// for both section photos and per-answer photos.
+function PhotoGrid({ entries, embedded, galleryBase }: { entries: string[]; embedded?: Record<string, string>; galleryBase?: string }) {
+  const tiles = renderPhotos(entries, embedded, galleryBase);
+  const rows: React.ReactNode[][] = [];
+  for (let i = 0; i < tiles.length; i += PHOTOS_PER_ROW) rows.push(tiles.slice(i, i + PHOTOS_PER_ROW));
+  return (
+    <View style={styles.photoGrid}>
+      {rows.map((row, r) => (
+        <View key={r} style={styles.photoRow} wrap={false}>{row}</View>
+      ))}
+    </View>
+  );
 }
 
 export function InspectionPdf({ data }: { data: PdfData }) {
@@ -411,9 +438,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
               {sectionPhotos.length > 0 && (
                 <View style={styles.sectionPhotosBlock}>
                   <Text style={styles.sectionPhotosLabel}>Section Photos</Text>
-                  <View style={styles.photoGrid}>
-                    {renderPhotos(sectionPhotos, data.embeddedByUrl, data.photoGalleryBase)}
-                  </View>
+                  <PhotoGrid entries={sectionPhotos} embedded={data.embeddedByUrl} galleryBase={data.photoGalleryBase} />
                 </View>
               )}
               <View style={styles.sectionContent}>
@@ -453,9 +478,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
                         )}
                       </View>
                       {a.photoUrls && a.photoUrls.length > 0 && (
-                        <View style={styles.photoGrid}>
-                          {renderPhotos(a.photoUrls, data.embeddedByUrl, data.photoGalleryBase)}
-                        </View>
+                        <PhotoGrid entries={a.photoUrls} embedded={data.embeddedByUrl} galleryBase={data.photoGalleryBase} />
                       )}
                     </View>
                   );
