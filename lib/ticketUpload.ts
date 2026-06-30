@@ -72,13 +72,15 @@ async function downloadToTmp(file: TicketUploadFile, dir: string, idx: number): 
 /**
  * Upload the given files to a ticket via the HoneyBadger UI. Best-effort.
  */
-export async function uploadTicketDocuments(args: { ticketId: number; files: TicketUploadFile[]; ensureTicketType?: boolean }): Promise<TicketUploadResult> {
+export async function uploadTicketDocuments(args: { ticketId: number; files: TicketUploadFile[]; ticketTypeTarget?: string }): Promise<TicketUploadResult> {
   const steps: string[] = [];
   const log = (s: string) => { steps.push(s); };
-  // Whether to run the "force Ticket Type = Turnkey" UI step. Scope wants it
-  // (default true); the 1099/vacancy flow passes false so it leaves the type
-  // alone. Falls back to the HBMM_ENSURE_TICKET_TYPE env when not specified.
-  const ensureType = args.ensureTicketType ?? (env('HBMM_ENSURE_TICKET_TYPE', '1') !== '0');
+  // The visible ticket-type to ENFORCE via the UI (the API type-set isn't
+  // reliable, so this is the authoritative step). The Turnkey ticket passes
+  // "Turnkey", the Eviction ticket "Evictions"; CapEx (and the 1099/vacancy flow)
+  // pass empty → leave the type alone. Falls back to env when unspecified.
+  const target = ((args.ticketTypeTarget ?? env('HBMM_TICKET_TYPE_TARGET', 'Turnkey')) || '').trim();
+  const ensureType = !!target && (env('HBMM_ENSURE_TICKET_TYPE', '1') !== '0');
 
   const username = (process.env.HBMM_USERNAME || '').trim();
   const password = process.env.HBMM_PASSWORD || '';
@@ -300,7 +302,7 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
     // and if it isn't the target, click Edit → select Turnkey → Save. Entirely
     // best-effort and env-tunable — it NEVER blocks the upload.
     if (ensureType) {
-      const target = env('HBMM_TICKET_TYPE_TARGET', 'Turnkey');
+      // `target` is resolved up top (Turnkey / Evictions / …).
       const targetRe = new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       // Read the value shown next to the "Ticket Type :" label. CRITICAL: only
       // consider VISIBLE labels — the hidden edit form (#formAddTicket, ng-hide)
@@ -439,38 +441,55 @@ export async function uploadTicketDocuments(args: { ticketId: number; files: Tic
       }
     }
 
-    // 5. Click "Upload Document" — the DOCUMENT button is exactly
-    // ng-click="openUploadModal(false)". (The "Upload Photo" button is
-    // openUploadModal(true); a wildcard match would grab it instead since it's
-    // first in the DOM — which is why files were landing in the photo store.)
+    // 5+6. Open the "Upload Document" modal and STAGE the file(s). HoneyBadger's
+    // AngularJS app can fire a route change here that destroys the JS execution
+    // context mid-call ("Execution context was destroyed, most likely because of a
+    // navigation") and abort the whole attach. This is a PRE-POST race — no file
+    // has uploaded yet (the POST is the "Upload" click in step 7) — so on that
+    // specific error we re-load the ticket and retry the open+stage ONCE, which is
+    // safe (it can't double-attach). The Upload Document button is exactly
+    // ng-click="openUploadModal(false)" (the Photo button is openUploadModal(true)).
     const uploadDocCss = env('HBMM_SEL_UPLOAD_DOC_CSS', '[ng-click="openUploadModal(false)"]');
-    let clickedDoc = false;
-    try {
-      await page.waitForSelector(uploadDocCss, { timeout: navTimeout });
-      await page.evaluate((sel: string) => {
-        const el = document.querySelector(sel) as HTMLElement | null;
-        if (el) { el.scrollIntoView({ block: 'center' }); el.click(); }
-      }, uploadDocCss);
-      clickedDoc = true;
-    } catch { /* fall back to text */ }
-    if (!clickedDoc) clickedDoc = await clickByText('upload document');
-    if (!clickedDoc) throw new Error('could not find the "Upload Document" button on the ticket page');
-    log('clicked Upload Document');
+    const isNavRace = (e: any) => /execution context was destroyed|detached|because of a navigation|target closed/i.test(String(e?.message || e));
+    const openModalAndStage = async (): Promise<string> => {
+      let clickedDoc = false;
+      try {
+        await page.waitForSelector(uploadDocCss, { timeout: navTimeout });
+        await page.evaluate((sel: string) => {
+          const el = document.querySelector(sel) as HTMLElement | null;
+          if (el) { el.scrollIntoView({ block: 'center' }); el.click(); }
+        }, uploadDocCss);
+        clickedDoc = true;
+      } catch (e) { if (isNavRace(e)) throw e; /* else fall back to text */ }
+      if (!clickedDoc) clickedDoc = await clickByText('upload document');
+      if (!clickedDoc) throw new Error('could not find the "Upload Document" button on the ticket page');
+      log('clicked Upload Document');
 
-    // 6. Set the Kendo upload file input (id="uploader", name="files"). Setting
-    // files dispatches a change event → Kendo stages them in fileList.
-    await sleep(1500);
-    await page.waitForSelector(selFileInput, { timeout: navTimeout });
-    // Scope to the DOCUMENT modal's uploader (#frmUploadFile) so we don't grab a
-    // stray photo uploader (which routes the file to the image store as .jpg).
-    let input = await page.$('#frmUploadFile input[type="file"]'); let inputVia = '#frmUploadFile';
-    if (!input) { input = await page.$('.modal.in input[type="file"], .modal[style*="display: block"] input[type="file"]'); inputVia = 'open-modal'; }
-    if (!input) { input = await page.$('input#uploader'); inputVia = '#uploader'; }
-    if (!input) { const inputs = await page.$$(selFileInput); input = inputs[inputs.length - 1] || inputs[0]; inputVia = 'fallback-last'; }
-    if (!input) throw new Error(`file input not found (${selFileInput})`);
-    log(`file input via: ${inputVia}`);
-    await input.uploadFile(...localPaths);
-    log(`attached ${localPaths.length} file(s) to the input`);
+      // Set the Kendo upload file input (id="uploader", name="files"). Setting
+      // files dispatches a change event → Kendo stages them in fileList. Scope to
+      // the DOCUMENT modal's uploader (#frmUploadFile) so we don't grab a stray
+      // photo uploader (which routes the file to the image store as .jpg).
+      await sleep(1500);
+      await page.waitForSelector(selFileInput, { timeout: navTimeout });
+      let input = await page.$('#frmUploadFile input[type="file"]'); let inputVia = '#frmUploadFile';
+      if (!input) { input = await page.$('.modal.in input[type="file"], .modal[style*="display: block"] input[type="file"]'); inputVia = 'open-modal'; }
+      if (!input) { input = await page.$('input#uploader'); inputVia = '#uploader'; }
+      if (!input) { const inputs = await page.$$(selFileInput); input = inputs[inputs.length - 1] || inputs[0]; inputVia = 'fallback-last'; }
+      if (!input) throw new Error(`file input not found (${selFileInput})`);
+      await input.uploadFile(...localPaths);
+      return inputVia;
+    };
+    let inputVia: string;
+    try {
+      inputVia = await openModalAndStage();
+    } catch (e) {
+      if (!isNavRace(e)) throw e;
+      log(`open/stage hit a navigation race (${String((e as any)?.message || e).slice(0, 80)}) — reloading ticket and retrying once`);
+      await page.goto(ticketUrl, { waitUntil: 'networkidle2' }).catch(() => {});
+      await sleep(2500);
+      inputVia = await openModalAndStage();
+    }
+    log(`file input via: ${inputVia}; attached ${localPaths.length} file(s) to the input`);
     // Confirm Kendo actually staged the file(s) (fileList row appears).
     await sleep(1200);
     const staged = await page.evaluate(() => document.querySelectorAll('.k-file, .k-upload-files li, [data-uid].k-file').length).catch(() => 0);

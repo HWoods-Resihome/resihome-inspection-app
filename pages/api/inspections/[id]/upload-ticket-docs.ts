@@ -22,12 +22,14 @@ import { vendorGetsOwnPdf, vendorTicketKind, type TicketKind } from '@/lib/vendo
 // Browser automation can take a while — allow up to 5 minutes.
 export const config = { maxDuration: 300 };
 
-// Build the upload plan for an inspection: which PDFs to attach, and whether to
-// force the ticket type to Turnkey. Scope attaches the Master + per-vendor PDFs
-// and forces Turnkey; other templates (1099 / vacancy) attach their single
-// completed PDF and leave the type alone (ensureTicketType:false). An optional
-// freshly-generated pdfUrl avoids a read race right after /api/pdf.
-async function buildUploadPlan(id: string, bodyPdfUrl?: string, which: TicketKind = 'turnkey'): Promise<{ files: TicketUploadFile[]; ensureTicketType: boolean } | null> {
+// Build the upload plan for one of a Scope's tickets (`which`): which PDFs to
+// attach, and which ticket-type to enforce via the UI. Turnkey = Master + the
+// standard trade vendor PDFs, enforce "Turnkey"; Eviction = the eviction-Future
+// PDF, enforce "Evictions"; CapEx = the CapEx PDF, enforce nothing (leave the
+// API's default Maintenance type). Non-scope templates (1099 / vacancy) attach
+// their single completed PDF and enforce nothing. An optional freshly-generated
+// pdfUrl avoids a read race right after /api/pdf.
+async function buildUploadPlan(id: string, bodyPdfUrl?: string, which: TicketKind = 'turnkey'): Promise<{ files: TicketUploadFile[]; ticketTypeTarget: string } | null> {
   const data = await fetchInspectionWithPropertyRef(id);
   if (!data) return null;
   const nameFromUrl = (url: string, fallback: string) => {
@@ -59,10 +61,15 @@ async function buildUploadPlan(id: string, bodyPdfUrl?: string, which: TicketKin
     const pdfUrl = (bodyPdfUrl && bodyPdfUrl.trim()) || data.inspection.pdfUrl || '';
     if (pdfUrl) files.push({ name: nameFromUrl(pdfUrl, `${data.inspection.templateType || 'Inspection'}.pdf`), url: pdfUrl });
   }
-  // Force the ticket TYPE to Turnkey ONLY for the Turnkey ticket. Eviction/CapEx
-  // had their type set at creation (Evictions / default Maintenance) and must NOT
-  // be flipped to Turnkey.
-  return { files, ensureTicketType: isScope && which === 'turnkey' };
+  // The visible ticket-type to ENFORCE via the HoneyBadger UI for THIS ticket
+  // (the API type-set isn't reliable, so the UI is the authoritative step):
+  // Turnkey ticket → "Turnkey"; Eviction ticket → "Evictions"; CapEx ticket →
+  // none (leave the API's default Maintenance type). Non-scope → none.
+  const ticketTypeTarget = !isScope ? ''
+    : which === 'turnkey' ? (process.env.HBMM_TICKET_TYPE_TARGET || 'Turnkey').trim()
+    : which === 'eviction' ? (process.env.HBMM_TICKET_TYPE_TARGET_EVICTION || 'Evictions').trim()
+    : ''; // capex → leave as Maintenance
+  return { files, ticketTypeTarget };
 }
 
 const esc = (s: string) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
@@ -87,7 +94,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const plan = await buildUploadPlan(id, typeof req.query.pdfUrl === 'string' ? req.query.pdfUrl : undefined, whichQ);
       if (!plan) return res.status(404).send('Inspection not found.');
       if (!plan.files.length) return res.status(200).send('No PDFs found on this inspection to upload.');
-      const upload = await uploadTicketDocuments({ ticketId, files: plan.files, ensureTicketType: plan.ensureTicketType });
+      const upload = await uploadTicketDocuments({ ticketId, files: plan.files, ticketTypeTarget: plan.ticketTypeTarget });
       const shotImg = upload.screenshot ? `<img src="${upload.screenshot}" style="max-width:100%;border:1px solid #ccc"/>` : '<em>no screenshot</em>';
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       return res.status(200).send(
@@ -120,7 +127,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!plan) return res.status(404).json({ error: 'Inspection not found' });
     if (!plan.files.length) return res.status(200).json({ ok: false, skipped: true, reason: 'no files' });
 
-    const upload = await uploadTicketDocuments({ ticketId, files: plan.files, ensureTicketType: plan.ensureTicketType });
+    const upload = await uploadTicketDocuments({ ticketId, files: plan.files, ticketTypeTarget: plan.ticketTypeTarget });
     if (!upload.configured) {
       return res.status(200).json({ ok: false, skipped: true, reason: 'not configured' });
     }
