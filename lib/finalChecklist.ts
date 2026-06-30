@@ -655,10 +655,11 @@ export const FINAL_CHECKLIST: FcSection[] = [
         requiresGasProvider: true,
         photoRequiredOnValues: ['Off'], photoHint: 'Photo of the meter (showing the reading).',
         noteRequiredOnValues: ['Off'], notePrompt: 'Meter Number' },
-      // Dependent on Gas: once Gas is answered, capture which appliances run on
-      // gas (check all that apply). Optional — when Gas is Off, none may apply.
-      { id: 'fc_gas_appliances', label: 'Which Appliances Are on Gas? (check all)', type: 'multi_select',
-        options: ['Stove', 'Water Heater', 'HVAC'], required: false,
+      // Dependent on Gas: once Gas is answered, REQUIRE which appliances run on
+      // gas (check all that apply) — at least one must be selected before submit.
+      { id: 'fc_gas_appliances', label: 'Check All', type: 'multi_select',
+        help: 'Which appliances are on gas? Check all that apply.',
+        options: ['Stove', 'Water Heater', 'HVAC'], required: true,
         requiresGasProvider: true, showWhenAnswered: 'fc_gas' },
       {
         id: 'fc_trash_bins',
