@@ -381,12 +381,18 @@ export function EditableLineRow(props: Props) {
   // row's price — derived from the stale local quantity — stayed put.
   useEffect(() => {
     if (isEditing) return;
+    // Also resync the CODE: an AI-review "edit" or voice change can swap this
+    // line's lineItemCode while keeping the same externalId (so the row re-renders
+    // but doesn't remount). Without this, selectedItem — and thus the view row's
+    // category/sub/unit/description AND its price calc — stayed on the OLD item
+    // while the persisted line was the new one (stale display until reload).
+    setLineItemCode(line?.lineItemCode || '');
     setQuantity(line?.quantity != null ? String(line.quantity) : '1');
     setTenantPct(line?.tenantBillBackPercent ?? DEFAULT_TENANT_PCT);
     setVendor(line?.assignedTo || DEFAULT_VENDOR);
     setCustomVendorCost(line?.customVendorCost != null ? String(line.customVendorCost) : '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [line?.quantity, line?.tenantBillBackPercent, line?.assignedTo, line?.customVendorCost, isEditing]);
+  }, [line?.lineItemCode, line?.quantity, line?.tenantBillBackPercent, line?.assignedTo, line?.customVendorCost, isEditing]);
 
   // -------------------------------------------------------------------
   // Track the row container so we can detect "clicked outside" for autosave

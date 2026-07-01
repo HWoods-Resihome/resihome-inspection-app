@@ -857,6 +857,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               hasWholeHouseRoom: rooms.some((rm) => /whole\s*house/i.test(rm.name)),
             });
             const confirmed = tu.input?.quantityConfirmed === true;
+            // The whole-house measurement exemption ONLY applies to SF items that
+            // will actually be backfilled with the property square footage below.
+            // wholeHouseExempt is unit-agnostic, but the backfill is SF-only — so a
+            // whole-house LF/SY item (e.g. baseboards) would otherwise skip the
+            // "how many linear feet?" bounce AND get no backfill, auto-adding at the
+            // model's placeholder quantity (a silently mispriced line). Require a
+            // real sqft too, so an SF whole-house item with no property sqft still
+            // bounces rather than pricing 1 SF.
+            const willBackfillWholeHouseSf = isWholeHouse && unit === 'SF' && propertySquareFootage > 0;
             // Stair items (carpet/tread/runner on stairs) are priced PER STAIR
             // even though the unit reads EACH, so a defaulted qty of 1 is almost
             // always wrong. Treat them like a measured item: require a confirmed
@@ -864,7 +873,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             const stairCount = isStairCount(item);
             if (!isFinite(qty) || qty < 0) {
               result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: 'Quantity must be a non-negative number. Ask the inspector.' }) };
-            } else if (isMeasured && !isWholeHouse && !confirmed) {
+            } else if (isMeasured && !willBackfillWholeHouseSf && !confirmed) {
               const unitWord = measurementWord(unit);
               result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: `"${item.laborShortDescription}" is measured in ${unitWord}. Do not guess the amount. Ask the inspector to confirm the ${unitWord} (e.g. "How many ${unitWord} for the carpet?"), then call propose_line again with the stated quantity and quantityConfirmed: true.`, needsQuantity: true, unit }) };
             } else if (stairCount && !confirmed) {
@@ -897,7 +906,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               // price). Also flag it so we drop any "how many square feet?" the
               // model still tacks on — it's already filled.
               let effQty = qty;
-              if (isWholeHouse && unit === 'SF' && propertySquareFootage > 0) {
+              if (willBackfillWholeHouseSf) {
                 effQty = propertySquareFootage;
                 filledWholeHouseSf = true;
               }

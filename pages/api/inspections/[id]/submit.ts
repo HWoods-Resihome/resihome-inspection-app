@@ -52,6 +52,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const existing = await fetchInspectionById(id);
     const isRateCard = (existing?.templateType || '').toLowerCase() === 'pm_scope_rate_card';
 
+    // Terminal-state guard: a COMPLETED inspection must not be re-submitted. A
+    // stale tab or a retried/duplicate POST would otherwise regress an approved
+    // Rate Card back to pending_approval (re-stamping submitted_by/at, resetting
+    // confirm_reviewed, re-posting the Slack card) or drift a non-rate-card's
+    // completed_at to a later time. Reopen (→ in_progress) is the supported path
+    // to edit + resubmit; until then, reject.
+    const currentStatus = (existing?.status || '').trim().toLowerCase();
+    if (currentStatus === 'completed' || currentStatus === 'complete') {
+      return res.status(409).json({
+        error: 'This inspection is already completed. Reopen it before submitting again.',
+        alreadyCompleted: true,
+      });
+    }
+
     const nowIso = new Date().toISOString();
     const props: Record<string, any> = {
       confirm_reviewed: 'yes',

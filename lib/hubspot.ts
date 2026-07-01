@@ -1423,6 +1423,7 @@ export async function externalUnlockedView(
   // Scan the user's OWN inspections (matched on inspector_email, any template /
   // status) for their region_snapshot values.
   const ownRegions: string[] = [];
+  let scanFailed = false;
   try {
     let after: string | undefined;
     let pages = 0;
@@ -1446,12 +1447,18 @@ export async function externalUnlockedView(
     } while (after && pages < 20);
   } catch (e) {
     console.warn('[externalUnlockedView] own-inspection scan failed:', e);
+    scanFailed = true;
   }
 
   const states = Array.from(new Set(ownRegions.map((r) => stateOfRegion(r)).filter(Boolean)));
   if (states.length === 0) {
+    // Do NOT cache when the scan errored: "scan failed" must not be frozen as
+    // "user has unlocked nothing" for the full TTL — that would hide every
+    // completed Scope/Re-Inspect this 1099 user is allowed to view for 5 minutes
+    // after a transient HubSpot blip. Return restrictive for THIS request but let
+    // the next one re-attempt.
     const data = { states: [], regions: [] };
-    unlockedViewCache.set(key, { data, at: Date.now() });
+    if (!scanFailed) unlockedViewCache.set(key, { data, at: Date.now() });
     return data;
   }
 

@@ -186,6 +186,25 @@ export async function flushOutbox(
       // session guard surfaces a re-login prompt to the inspector.
       lastError = `Not authorized (HTTP ${res.status}) — your session may have expired. Sign in again to sync.`;
       break;
+    } else if (res.status === 409) {
+      // Conflict — e.g. the section-layout compare-and-swap: another device
+      // changed section_list_json first, so this queued change was built on a
+      // now-stale base. It CANNOT be replayed as-is (retrying with the same stale
+      // base 409s forever = a wedged queue), and there's no server-side merge, so
+      // drop it — but NON-silently: fire a reconcile event so an open form reloads
+      // the server state (the next form mount reloads fresh regardless), and set a
+      // clear message. The lost edit is a layout tweak the inspector can redo, not
+      // a silent data-integrity corruption.
+      const body = await res.text().catch(() => '');
+      lastError = 'A change conflicted with another device and was not applied — the latest version was kept. Please re-check that inspection.';
+      console.warn(`[outbox] 409 conflict on entry ${entry.id} (${entry.kind}) — dropping stale-base change: ${body.slice(0, 200)}`);
+      try {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('resiwalk:outbox-conflict', { detail: { inspectionRecordId: entry.inspectionRecordId, kind: entry.kind } }));
+        }
+      } catch { /* SSR / no window */ }
+      remove(entry.id);
+      failedPermanently++;
     } else if (res.status >= 400 && res.status < 500 && res.status !== 429) {
       // Permanently bad request — dropping it prevents a poison entry from
       // wedging the queue. (Logged so it isn't silent.)

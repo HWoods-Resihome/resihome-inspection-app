@@ -24,18 +24,22 @@ type CachedRegions = {
 
 let CACHE: CachedRegions | null = null;
 let INFLIGHT: Promise<RegionRate[]> | null = null;
+let INFLIGHT_GEN = 0;
 const TTL_MS = 60 * 60 * 1000;
 
 /** Internal: load + cache, coalescing concurrent fetches. */
 async function loadRegions(forceRefresh: boolean): Promise<RegionRate[]> {
   if (!INFLIGHT || forceRefresh) {
+    // Generation tag so an overlapping ?refresh=1 isn't cleared by an earlier
+    // fetch settling (see catalog.ts) — only the latest fetch nulls INFLIGHT.
+    const gen = ++INFLIGHT_GEN;
     INFLIGHT = (async () => {
       try {
         const regions = await fetchRegionRates();
         CACHE = { data: regions, fetchedAt: Date.now() };
         return regions;
       } finally {
-        INFLIGHT = null;
+        if (gen === INFLIGHT_GEN) INFLIGHT = null;
       }
     })();
   }

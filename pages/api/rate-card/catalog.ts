@@ -29,18 +29,25 @@ let CACHE: CachedCatalog | null = null;
 // promise rather than firing parallel paginated fetches. Cleared on success
 // or failure.
 let INFLIGHT: Promise<RateCardLineItem[]> | null = null;
+let INFLIGHT_GEN = 0;
 const TTL_MS = 60 * 60 * 1000;   // 60 minutes
 
 /** Internal: load + cache, coalescing concurrent fetches. */
 async function loadCatalog(forceRefresh: boolean): Promise<RateCardLineItem[]> {
   if (!INFLIGHT || forceRefresh) {
+    // Tag each fetch with a generation. A ?refresh=1 that starts while an earlier
+    // fetch is still running bumps the generation and replaces INFLIGHT; the
+    // earlier fetch's finally then sees a newer generation and must NOT null the
+    // pointer out from under the live refresh (that would let the next request
+    // fire a redundant paginated fetch). Only the latest fetch clears INFLIGHT.
+    const gen = ++INFLIGHT_GEN;
     INFLIGHT = (async () => {
       try {
         const items = await fetchRateCardCatalog();
         CACHE = { data: items, fetchedAt: Date.now() };
         return items;
       } finally {
-        INFLIGHT = null;
+        if (gen === INFLIGHT_GEN) INFLIGHT = null;
       }
     })();
   }

@@ -1362,6 +1362,11 @@ export function RateCardForm(props: RateCardFormProps) {
    * issues a POST. We then poll briefly for saveStatus !== 'saving'.
    */
   const saveInFlightRef = useRef(0);
+  // externalIds deleted WHILE their create POST was still in flight (so no
+  // recordId existed to archive yet). The create's completion checks this set
+  // and archives the just-created record — otherwise the never-archived line
+  // reappears on reload (a resurrected billable line).
+  const pendingDeleteRef = useRef<Set<string>>(new Set());
   // Serializes line-save POSTs. Voice can emit several proposals in one breath
   // ("clean the carpet, paint one wall, fix nail holes" → 3 lines); firing
   // those POSTs concurrently let HubSpot drop/reject some writes (each also
@@ -1579,6 +1584,16 @@ export function RateCardForm(props: RateCardFormProps) {
           throw new Error(lastErr || 'save failed after retries');
         }
         const data = await r.json();
+        // Per-line HubSpot rejection: the endpoint returns HTTP 200 with
+        // { success:false, failures:[…] } (upsertAnswers resolves per-item
+        // rejections internally rather than throwing, and the server excludes a
+        // failed line from `results`). Do NOT markSaved() on this — that would
+        // report the line saved while it silently vanished (missing from scope +
+        // totals → under-billed invoice). Surface it as an error; the line stays
+        // in the UI so the inspector can fix/re-save.
+        if ((Array.isArray(data.failures) && data.failures.length > 0) || data.success === false) {
+          throw new Error(data.failures?.[0]?.error || 'This line was rejected by HubSpot and was not saved.');
+        }
         // Stitch the new record id back if this was a fresh create
         const result = data.results?.[0];
         if (result?.recordId && result?.answerIdExternal) {
@@ -1586,6 +1601,34 @@ export function RateCardForm(props: RateCardFormProps) {
             ...cur,
             [result.answerIdExternal]: result.recordId,
           }));
+          // Deleted while this create was in flight? Archive it NOW — the record
+          // exists on HubSpot but has no UI row, so it would reappear on reload.
+          if (pendingDeleteRef.current.has(result.answerIdExternal)) {
+            pendingDeleteRef.current.delete(result.answerIdExternal);
+            const rid = result.recordId;
+            const ext = result.answerIdExternal;
+            void enqueueSave(async () => {
+              try {
+                const ar = await fetch(`/api/inspections/${props.inspectionRecordId}/rate-card-lines`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ upserts: [], archives: [rid] }),
+                });
+                if (!ar.ok) throw new Error(`HTTP ${ar.status}`);
+                setRecordIdsByExternalId((cur) => { const n = { ...cur }; delete n[ext]; return n; });
+              } catch (e) {
+                if (isOfflineError(e)) {
+                  outboxEnqueue({
+                    inspectionRecordId: props.inspectionRecordId,
+                    endpoint: `/api/inspections/${props.inspectionRecordId}/rate-card-lines`,
+                    method: 'POST', body: { upserts: [], archives: [rid] }, kind: 'lineArchive',
+                  });
+                  setPendingSync(outboxCountFor(props.inspectionRecordId));
+                } else {
+                  console.error('[RateCardForm] deferred archive of in-flight-deleted line failed:', e);
+                }
+              }
+            });
+          }
         }
         markSaved();
         return { ok: true, ...routing, recordId: result?.recordId };
@@ -1813,8 +1856,19 @@ export function RateCardForm(props: RateCardFormProps) {
       const existing = m[sectionId] || [];
       return { ...m, [sectionId]: existing.filter((l) => l.externalId !== externalId) };
     });
+    if (!linesHydrated || props.readOnly) return;
     const recordId = recordIdsByExternalId[externalId];
-    if (!recordId || !linesHydrated || props.readOnly) return;
+    if (!recordId) {
+      // No server record yet — its create may still be IN FLIGHT. Mark the
+      // externalId so the create's completion archives it (below, in
+      // handleSaveLineForSection); otherwise the record lands with no UI row and
+      // reappears on reload. If no create is pending, this is a harmless no-op
+      // (nothing ever stitches this externalId).
+      pendingDeleteRef.current.add(externalId);
+      return;
+    }
+    // Archiving directly — clear any stale pending-delete mark.
+    pendingDeleteRef.current.delete(externalId);
     saveInFlightRef.current++;
     setSaveStatus({ kind: 'saving' });
     await enqueueSave(async () => {
