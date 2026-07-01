@@ -188,8 +188,8 @@ export function resolveMaterialAdjustments(
   const exactRegion = allRegions.find((r) => r.region === requestedRegion);
   if (exactRegion) {
     return {
-      costAdj: exactRegion.materialCostAdjustment ?? 1,
-      taxAdj: exactRegion.materialTaxAdjustment ?? 0,
+      costAdj: safeCostAdj(exactRegion.materialCostAdjustment),
+      taxAdj: safeTaxAdj(exactRegion.materialTaxAdjustment),
       regionUsed: requestedRegion,
     };
   }
@@ -200,10 +200,22 @@ export function resolveMaterialAdjustments(
     );
   }
   return {
-    costAdj: fallback.materialCostAdjustment ?? 1,
-    taxAdj: fallback.materialTaxAdjustment ?? 0,
+    costAdj: safeCostAdj(fallback.materialCostAdjustment),
+    taxAdj: safeTaxAdj(fallback.materialTaxAdjustment),
     regionUsed: FALLBACK_REGION_KEY,
   };
+}
+
+// A material COST multiplier must be a finite, positive number — a stored 0 (or
+// null/NaN) would silently zero ALL material costs in that region (underbill).
+// Fall back to the neutral 1× rather than propagate a corrupting value.
+function safeCostAdj(v: number | null | undefined): number {
+  return typeof v === 'number' && isFinite(v) && v > 0 ? v : 1;
+}
+// A material TAX adjustment is an additive fraction (0.07 = +7%); it must be a
+// finite, non-negative number. Neutral default is 0 (no tax uplift).
+function safeTaxAdj(v: number | null | undefined): number {
+  return typeof v === 'number' && isFinite(v) && v >= 0 ? v : 0;
 }
 
 /**
@@ -225,19 +237,29 @@ export function calculateLine(
     catalogItem.category,
     allRegions
   );
+  // Resolve material adjustments from the SAME region labor resolved to — NOT the
+  // raw requested region. If the requested region EXISTS but lacks this line's
+  // category rate, resolveLaborRate falls back to GA:Atlanta; pricing material off
+  // the requested region here would then mix two regions in one line AND leave the
+  // snapshot (which records one region) unable to re-price to the same number.
+  // Passing laborRegionUsed keeps both halves on one region (a no-op in the common
+  // case where labor didn't fall back, since laborRegionUsed === requestedRegion).
   const { costAdj, taxAdj, regionUsed: matRegionUsed } = resolveMaterialAdjustments(
-    requestedRegion,
+    laborRegionUsed,
     allRegions
   );
-  // For the snapshot we record the labor-rate region. If labor falls back and material
-  // doesn't (or vice versa), prefer labor's region for the snapshot since it's the
-  // primary driver of cost.
+  // Both halves now share a region; record it for the snapshot.
   const regionUsed = laborRegionUsed || matRegionUsed || requestedRegion;
 
   // --- Apply bid-item overrides if provided ---
-  const isCustomLabor = inputs.customLaborRate != null && inputs.customLaborRate >= 0;
-  const isCustomMaterial = inputs.customAdjustedMaterialCost != null && inputs.customAdjustedMaterialCost >= 0;
-  const isCustomVendor = inputs.customVendorCost != null && inputs.customVendorCost >= 0;
+  // Require FINITE overrides: a non-finite value (e.g. Infinity from a bad
+  // payload) would pass `>= 0`, become the effective cost, and — since
+  // roundMoney(Infinity) === 0 — be stored as a silent $0 line (the same
+  // financial-integrity failure the quantity guard prevents). Treat garbage as
+  // "not a custom override" so the line falls back to the computed price.
+  const isCustomLabor = inputs.customLaborRate != null && isFinite(inputs.customLaborRate) && inputs.customLaborRate >= 0;
+  const isCustomMaterial = inputs.customAdjustedMaterialCost != null && isFinite(inputs.customAdjustedMaterialCost) && inputs.customAdjustedMaterialCost >= 0;
+  const isCustomVendor = inputs.customVendorCost != null && isFinite(inputs.customVendorCost) && inputs.customVendorCost >= 0;
   const isCustomPriced = isCustomLabor || isCustomMaterial || isCustomVendor;
 
   const effectiveLaborRate = isCustomLabor ? inputs.customLaborRate! : defaultLaborRate;

@@ -21,6 +21,7 @@ import {
   type PdfLineRow,
   type PdfSummaryColumn,
 } from './pdfShared';
+import { roundMoney } from '@/lib/rateCardMath';
 import { vendorGetsOwnPdf, vendorDocLabel } from './vendors';
 import { slugifyVendor } from '@/lib/shortLinks';
 
@@ -194,9 +195,14 @@ export async function renderVendorPdfs(ctx: PdfBuildContext, opts?: { onlyVendor
     }
 
     for (const [vendor, lines] of sectionLinesByVendor.entries()) {
-      const vendorTotal = lines.reduce((sum, l) => sum + l.vendorCost, 0);
-      const clientTotal = lines.reduce((sum, l) => sum + l.clientCost, 0);
-      const tenantTotal = lines.reduce((sum, l) => sum + l.tenantCost, 0);
+      // Round each line BEFORE summing so a vendor packet's section subtotal +
+      // Vendor Total equal the sum of the per-line amounts printed AND match the
+      // Master's per-section vendor subtotal (finalize sums roundMoney per line).
+      // Summing full precision then rounding drifted by cents, so a vendor
+      // reconciling their packet against the Master saw a mismatch.
+      const vendorTotal = lines.reduce((sum, l) => sum + roundMoney(l.vendorCost), 0);
+      const clientTotal = lines.reduce((sum, l) => sum + roundMoney(l.clientCost), 0);
+      const tenantTotal = lines.reduce((sum, l) => sum + roundMoney(l.tenantCost), 0);
 
       const sectionForVendor: PdfSectionGroup = {
         label: section.label,

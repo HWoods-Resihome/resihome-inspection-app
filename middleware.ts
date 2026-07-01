@@ -72,6 +72,11 @@ function isStaticAsset(pathname: string): boolean {
 async function verifySession(token: string, secret: Uint8Array): Promise<boolean> {
   try {
     const { payload } = await jwtVerify(token, secret);
+    // Reject typed tokens (e.g. the short-lived `oauth_exchange` token) just like
+    // lib/auth.verifySessionToken does — only a real session (no `typ`) gates a
+    // page. Defense-in-depth: the exchange token only ever travels as a ?t= param
+    // and API data-fetches already reject it, but mirror the check here too.
+    if ((payload as { typ?: unknown }).typ) return false;
     return Boolean(payload.userId && payload.email);
   } catch {
     return false;

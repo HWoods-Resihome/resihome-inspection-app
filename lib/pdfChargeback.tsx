@@ -20,6 +20,7 @@ import {
   type PdfLineRow,
   type PdfSummaryColumn,
 } from './pdfShared';
+import { roundMoney } from '@/lib/rateCardMath';
 
 // Chargeback column layout (Client column removed — Tenant Total is the
 // only figure the tenant should see):
@@ -43,11 +44,17 @@ function ChargebackDoc(props: { ctx: PdfBuildContext }) {
   const filteredSections: PdfSectionGroup[] = ctx.sections
     .map((s) => {
       const lines = s.lines.filter((l) => l.tenantBillBackPercent > 0 && l.tenantCost > 0);
-      const tenantTotal = lines.reduce((sum, l) => sum + l.tenantCost, 0);
+      // Round each line BEFORE summing so the section subtotal and grand total
+      // equal the sum of the per-line amounts actually printed (each cell shows
+      // roundMoney), AND match the XLSX importer (rounds per line) + the stored
+      // total_tenant_cost. Summing full precision then rounding once drifts by
+      // fractional cents, so the tenant-facing PDF total disagreed with the
+      // amount actually billed.
+      const tenantTotal = lines.reduce((sum, l) => sum + roundMoney(l.tenantCost), 0);
       // clientTotal / vendorTotal recomputed only for backward-compat with
       // the PdfSectionGroup type; not displayed anywhere on the chargeback.
-      const clientTotal = lines.reduce((sum, l) => sum + l.clientCost, 0);
-      const vendorTotal = lines.reduce((sum, l) => sum + l.vendorCost, 0);
+      const clientTotal = lines.reduce((sum, l) => sum + roundMoney(l.clientCost), 0);
+      const vendorTotal = lines.reduce((sum, l) => sum + roundMoney(l.vendorCost), 0);
       return { ...s, lines, tenantTotal, clientTotal, vendorTotal };
     })
     .filter((s) => s.lines.length > 0);

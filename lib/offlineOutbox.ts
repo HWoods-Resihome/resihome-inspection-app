@@ -140,6 +140,15 @@ export async function flushOutbox(
   list.sort((a, b) => a.createdAt - b.createdAt);
 
   for (const entry of list) {
+    // NEVER replay an entry still keyed to an offline-started ("local_")
+    // inspection: there's no server record yet, so POSTing to
+    // /api/inspections/local_X/... 404s — and rate-card-lines 404s BEFORE any
+    // write, so the 4xx branch below would permanently DROP the inspector's
+    // entered line (silent under-billing). Skip it (don't send, don't remove) so
+    // it stays queued until the deferred create rekeys it to the real id, then
+    // replays. Mirrors the identical guard in flushQueuedPhotos. `continue` (not
+    // `break`): other inspections' entries after this one must still sync.
+    if (isLocalInspectionId(entry.inspectionRecordId)) continue;
     let res: Response;
     try {
       // Hard timeout so a hung replay on weak signal can't block the caller
@@ -219,9 +228,13 @@ export function rekeyInspectionId(tempId: string, realId: string): void {
   const rekeyed: OutboxEntry[] = JSON.parse(JSON.stringify(list).split(tempId).join(realId));
   write(rekeyed);
   // Keep the native mirror consistent: clear the temp-keyed copies and re-mirror
-  // the now-real-keyed entries (no-op off-iOS).
+  // the now-real-keyed entries (no-op off-iOS). Match by inspection id, NOT by
+  // entry id: the consolidated `answers` entry's id embeds the inspection id
+  // (`ob_answers_<id>`), so the token replace rewrites it too and an
+  // `a.id === e.id` guard would never match it (leaving it un-mirrored). realId
+  // is freshly minted + unique, so only the just-rekeyed entries carry it.
   for (const e of rekeyed) {
-    if (e.inspectionRecordId === realId && affected.some((a) => a.id === e.id)) {
+    if (e.inspectionRecordId === realId) {
       clearNativeBgUploadAnswer(e.id);
       mirrorAnswerToNativeBgUpload({ id: e.id, inspectionRecordId: e.inspectionRecordId, endpoint: e.endpoint, method: e.method, body: e.body });
     }

@@ -73,3 +73,35 @@ describe('externalAccessDenial — view state gate', () => {
     })).toBe('You can only view completed Scope Rate Card or Re-Inspect inspections.');
   });
 });
+
+describe('externalAccessDenial — write ownership', () => {
+  const OWN = 'You can only edit or cancel your own inspections.';
+
+  it('allows an external user to write their OWN 1099', () => {
+    expect(externalAccessDenial(EXT, T1099, { write: true, status: 'in_progress', ownerEmail: EXT })).toBeNull();
+  });
+
+  it('denies writing another external user\'s 1099', () => {
+    expect(externalAccessDenial(EXT, T1099, { write: true, status: 'in_progress', ownerEmail: 'other@gmail.com' })).toBe(OWN);
+  });
+
+  it('FAILS CLOSED: denies writing a 1099 with a blank/unassigned owner', () => {
+    expect(externalAccessDenial(EXT, T1099, { write: true, status: 'in_progress', ownerEmail: '' })).toBe(OWN);
+    expect(externalAccessDenial(EXT, T1099, { write: true, status: 'in_progress', ownerEmail: null })).toBe(OWN);
+    expect(externalAccessDenial(EXT, T1099, { write: true, status: 'in_progress' })).toBe(OWN);
+  });
+
+  it('denies writing a completed 1099 even when owned', () => {
+    expect(externalAccessDenial(EXT, T1099, { write: true, status: 'completed', ownerEmail: EXT }))
+      .toBe('Completed inspections are read-only for your account.');
+  });
+
+  it('denies writing a view-only Scope regardless of owner', () => {
+    expect(externalAccessDenial(EXT, SCOPE, { write: true, status: 'in_progress', ownerEmail: EXT }))
+      .toBe('Your account has view-only access to this inspection type.');
+  });
+
+  it('internal users write freely, blank owner included', () => {
+    expect(externalAccessDenial(INT, T1099, { write: true, status: 'in_progress', ownerEmail: '' })).toBeNull();
+  });
+});

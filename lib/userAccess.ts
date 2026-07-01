@@ -195,7 +195,12 @@ export function externalAccessDenial(
       return 'Completed inspections are read-only for your account.';
     }
     // Ownership: external users may only edit/cancel their OWN inspections.
-    if (!ownsInspection(email, opts.ownerEmail)) {
+    // Fail CLOSED on a blank owner for WRITES: an unassigned 1099 (no
+    // inspector_email) must not be writable by any external user who merely has
+    // view access to it. ownsInspection() stays permissive on blank owners for
+    // the read paths (we can't prove non-ownership for viewing), but a write to a
+    // record never assigned to this user is denied.
+    if (!(opts.ownerEmail || '').trim() || !ownsInspection(email, opts.ownerEmail)) {
       return 'You can only edit or cancel your own inspections.';
     }
     return null;
