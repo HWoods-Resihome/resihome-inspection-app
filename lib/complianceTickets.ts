@@ -114,7 +114,15 @@ export async function createComplianceTicketsOnSubmit(
   };
 
   for (const issue of issues) {
-    const subject = `1099-Inspection - ${issue.reason}${address ? ' - ' + address : ''}`;
+    // Include the inspection record id so the subject is UNIQUE PER INSPECTION.
+    // createComplianceTicket dedupes by subject; an address-only subject collapses
+    // ACROSS inspections — a recurring issue at the same property (water OFF in
+    // January, OFF again in July) would match the old ticket and be silently
+    // suppressed, and a blank-address inspection would collapse onto every other
+    // address-less one portfolio-wide. The per-inspection id still lets two
+    // CONCURRENT submits of the SAME inspection dedupe (identical subject), which
+    // is the idempotency the subject-search is actually for.
+    const subject = `1099-Inspection - ${issue.reason}${address ? ' - ' + address : ''} [${inspection.recordId}]`;
     // Plain-text ticket description.
     const description = [
       'Auto-created from a completed 1099 Leasing Agent Inspection.',

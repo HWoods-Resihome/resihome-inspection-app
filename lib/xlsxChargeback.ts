@@ -166,9 +166,11 @@ export async function renderChargebackXlsx(
       input.city,
       input.stateCode,
       // Zip Code is a NUMBER in the template example (35085, not "35085").
-      // Convert if it parses cleanly; else leave the raw string so leading
-      // zeros aren't dropped on east-coast zips like "07030".
-      /^\d+$/.test(input.zipCode) && input.zipCode.length === 5
+      // Convert ONLY when it won't lose information — i.e. a 5-digit numeric zip
+      // that doesn't start with 0. A leading-zero zip ("07030", all of NJ/most of
+      // New England/PR) MUST stay a string, or Number() silently drops the zero
+      // and the import + emailed file bill against a wrong 4-digit zip.
+      /^\d+$/.test(input.zipCode) && input.zipCode.length === 5 && !input.zipCode.startsWith('0')
         ? Number(input.zipCode)
         : input.zipCode,
       CHARGE_TYPE,

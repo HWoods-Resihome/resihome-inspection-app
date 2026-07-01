@@ -20,6 +20,16 @@ import { recordAuditEvent } from '@/lib/auditLog';
 // (regenerate), which can take ~15-20s — give it the same ceiling as finalize.
 export const config = { maxDuration: 300 };
 
+// In-flight guard (mirrors finalize's inFlightFinalize): a double-tap or a
+// slow-network retry fires two concurrent submits that BOTH read status
+// in_progress + empty dedupe stamps before either writes, producing duplicate
+// compliance tickets / listing-price alerts / pending-approval Slack cards
+// (every downstream dedupe is a non-atomic read-then-write). Per-instance, so it
+// catches the common same-device retry; the terminal-state guard below handles
+// the sequential case.
+const inFlightSubmit = new Map<string, number>();
+const SUBMIT_LOCK_MS = 120_000;
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -35,6 +45,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // External (1099) users: only their 1099 inspections, and not once completed.
   const denial = await externalWriteDenial(session.email, id);
   if (denial) return res.status(403).json({ error: denial });
+
+  // Reject a concurrent submit of the same inspection (double-tap / retry) so its
+  // one-shot side-effects (tickets, alerts, Slack card) can't fire twice.
+  const lockNow = Date.now();
+  const prevLock = inFlightSubmit.get(id);
+  if (prevLock && lockNow - prevLock < SUBMIT_LOCK_MS) {
+    return res.status(409).json({ error: 'This inspection is already being submitted. Please wait.' });
+  }
+  inFlightSubmit.set(id, lockNow);
 
   try {
     const body = req.body || {};
@@ -276,5 +295,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch (e: any) {
     console.error(`POST /api/inspections/${id}/submit failed:`, e);
     return res.status(500).json({ error: String(e.message || e) });
+  } finally {
+    inFlightSubmit.delete(id);
   }
 }
