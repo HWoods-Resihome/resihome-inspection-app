@@ -18,7 +18,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
-import { fetchInspectionWithPropertyRef } from '@/lib/hubspot';
+import { fetchInspectionWithPropertyRef, readInspectionProps, updateInspection } from '@/lib/hubspot';
 import { isExternalEmail } from '@/lib/userAccess';
 import { createMaintenanceTicket, buildInspectionTicketDescription, buildTicketUrl } from '@/lib/maintenanceAi';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
@@ -79,6 +79,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
+    // Idempotency: the client fires this after EVERY successful finalize when the
+    // inspector chose "raise a ticket", and 1099/vacancy/QC re-finalize is a
+    // supported operation — so without a guard a re-run creates a DUPLICATE ticket
+    // on the same property. Dedup on hbmm_ticket_id (only ever set by THIS endpoint
+    // for these templates; the Scope turnkey ticket is rate-card-only), reused as
+    // the stamp: if it's already set, return the existing ticket instead of a new one.
+    const existing = await readInspectionProps(id, ['hbmm_ticket_id']).catch(() => null);
+    const existingTicketId = Number(String(existing?.hbmm_ticket_id || '').trim());
+    if (existingTicketId && Number.isFinite(existingTicketId)) {
+      console.log(`[create-inspection-ticket] inspection ${id}: ticket #${existingTicketId} already created — skipping re-create.`);
+      return res.status(200).json({ ok: true, ticketId: existingTicketId, url: buildTicketUrl(existingTicketId), propertyId: hbmmId, deduped: true });
+    }
+
     const templateLabel = templateLabelFor(data.inspection.templateType) || data.inspection.templateType;
     const fullDescription = buildInspectionTicketDescription({
       inspectorDescription: description,
@@ -106,6 +119,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const ticketId = result.ticketId;
     const url = buildTicketUrl(ticketId);
     console.log(`[create-inspection-ticket] inspection ${id}: created ticket #${ticketId} (category ${TICKET_CATEGORY_INSPECTION}) on property ${hbmmId} (req ${result.requestId})`);
+    // Stamp the ticket id so a re-finalize doesn't create a duplicate (the dedup
+    // check above reads this). Best-effort — if the property is unprovisioned the
+    // dedup simply stays inert (the pre-existing behavior).
+    try { await updateInspection(id, { hbmm_ticket_id: String(ticketId) }); }
+    catch (e) { console.warn('[create-inspection-ticket] could not store hbmm_ticket_id (dedup disabled until the property exists):', e); }
 
     // NOTE: the completed PDF is attached SEPARATELY (and in the BACKGROUND) by
     // /api/inspections/[id]/upload-ticket-docs, fired by the client after this

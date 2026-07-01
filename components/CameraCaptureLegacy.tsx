@@ -138,10 +138,19 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.shadowBlur = Math.round(fontSize * 0.3);
   let y = h - barH + pad;
   for (const row of rows) {
+    // Ellipsize to fit the bar width so a long address isn't hard-clipped by the
+    // canvas edge (the text is baked into the saved evidence pixels).
+    const markW = row.mark ? ctx.measureText('  ✓').width : 0;
+    const maxTextW = w - pad * 2 - markW;
+    let text = row.text;
+    if (ctx.measureText(text).width > maxTextW) {
+      while (text.length > 1 && ctx.measureText(text + '…').width > maxTextW) text = text.slice(0, -1);
+      text += '…';
+    }
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(row.text, pad, y);
+    ctx.fillText(text, pad, y);
     if (row.mark) {
-      const x = pad + ctx.measureText(row.text + '  ').width;
+      const x = pad + ctx.measureText(text + '  ').width;
       ctx.fillStyle = row.mark === 'ok' ? '#34d399' : '#f87171';
       ctx.fillText(row.mark === 'ok' ? '✓' : '✗', x, y);
     }
