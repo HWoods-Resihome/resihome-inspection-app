@@ -21,7 +21,7 @@ import { registerSyncedBlob, registerDraftFullRes, clearDraftFullRes } from '@/l
 import { isAnyCameraOpen, subscribeCameraOpen } from '@/lib/cameraOpenState';
 import { enqueuePhotoAttach, type PhotoAttachTarget } from '@/lib/photoAttachOutbox';
 import { isNativeBgUploadAvailable, mirrorPhotoToNativeBgUpload, clearNativeBgUploadPhoto, reconcileNativeBgUpload, scheduleNativeBgProcessing } from '@/lib/nativeBridge';
-import { isLocalInspectionId } from '@/lib/pendingInspections';
+import { isLocalInspectionId, realIdFor } from '@/lib/pendingInspections';
 
 // iOS/iPadOS WebKit (incl. Chrome on iOS, which is WebKit). Several canvas/bitmap
 // paths misbehave here, so we branch on it below.
@@ -139,6 +139,21 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
 // not persisted). For a video the display URL is the composite poster#v=video
 // entry, and revokables holds both underlying object URLs.
 const urlByLocalId = new Map<string, { displayUrl: string; revokables: string[] }>();
+
+// localIds discarded (camera cancel / photo delete) WHILE a background flush may
+// already be mid-upload on them. discardQueuedByUrls deletes the queue record,
+// but a flush that had already loaded the record finishes and would enqueue a
+// durable attach keyed by the photo's REAL (uploaded) url — which the caller
+// can't remove because it only knows the DRAFT url. Recording the localId here
+// lets finishSynced skip the attach for a photo the inspector already discarded,
+// so a cancelled/deleted photo can't silently re-appear on the record.
+const discardedLocalIds = new Set<string>();
+function markLocalIdDiscarded(localId: string): void {
+  discardedLocalIds.add(localId);
+  // The race window is milliseconds; bound the set so a long session with many
+  // retakes can't grow it unbounded (stale ids beyond the window are inert).
+  if (discardedLocalIds.size > 2000) discardedLocalIds.clear();
+}
 
 // In-memory fallback queue: photos whose DURABLE IndexedDB write failed or
 // stalled (private mode, quota, or an iOS/Android IDB chain stall). Volatile —
@@ -531,6 +546,9 @@ export async function discardQueuedByUrls(urls: string[]): Promise<number> {
   let n = 0;
   for (const [localId, entry] of Array.from(urlByLocalId.entries())) {
     if (!wanted.has(entry.displayUrl)) continue;
+    // A background flush may already be mid-upload on this record; record the
+    // localId so finishSynced skips enqueueing its (real-url) attach.
+    markLocalIdDiscarded(localId);
     memQueue.delete(localId);
     try { await deleteRecord(localId); } catch { /* memory-only or IDB gone */ }
     n++;
@@ -603,7 +621,24 @@ export function isInspectionFormActive(id: string): boolean {
   return activeFormInspections.has(id);
 }
 export function getActiveFormInspectionIds(): Set<string> {
-  return new Set(activeFormInspections);
+  const ids = new Set(activeFormInspections);
+  // Also cover the REAL id of any active offline-started ("local_") inspection.
+  // When a deferred create lands, it re-keys the queue temp→real and fires
+  // `resiwalk:inspection-created` in the SAME sync tick — BEFORE router.replace
+  // swaps the route and the form re-registers under the real id. In that window
+  // the form is still registered under the temp id, but queuedInspectionIds()
+  // already returns the real id, so the global driver would flush the real id
+  // (no-op onSynced) behind the still-open form's back and its next full-list
+  // save (which strips blob: drafts) could drop a just-attached photo. Expanding
+  // to the real id keeps the "don't flush the open inspection" guard intact
+  // until the route swap settles (then the form registers the real id directly).
+  for (const id of activeFormInspections) {
+    if (isLocalInspectionId(id)) {
+      const real = realIdFor(id);
+      if (real) ids.add(real);
+    }
+  }
+  return ids;
 }
 
 /** Distinct inspection ids that currently have queued (un-uploaded) photos.
@@ -851,6 +886,19 @@ async function doFlushQueuedPhotos(
   let stop = false; // set when offline/transient — stop taking NEW work, retry next tick
 
   const finishSynced = async (rec: QueuedPhotoMeta, newUrl: string) => {
+    // Discarded mid-upload (camera cancel / photo delete): the inspector removed
+    // this photo while a flush was already uploading it. Do NOT enqueue an attach
+    // or notify — that would re-add the cancelled photo to the record. The bytes
+    // are already in HubSpot Files (harmless, unreferenced); just clean up.
+    if (discardedLocalIds.has(rec.localId)) {
+      discardedLocalIds.delete(rec.localId);
+      clearNativeBgUploadPhoto(rec.localId);
+      memQueue.delete(rec.localId);
+      try { await deleteRecord(rec.localId); } catch { /* already gone */ }
+      const e2 = urlByLocalId.get(rec.localId);
+      if (e2) { for (const u of e2.revokables) { try { URL.revokeObjectURL(u); } catch { /* noop */ } } urlByLocalId.delete(rec.localId); }
+      return;
+    }
     const entry = urlByLocalId.get(rec.localId);
     const oldUrl = entry?.displayUrl || '';
     // Durable, form-independent ATTACH: record the instruction the MOMENT bytes

@@ -922,20 +922,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // Persist a ticket-id STAMP durably. The dedup that stops a re-finalize /
-    // partial-failure resume from creating a DUPLICATE ticket (a real vendor
-    // work order) relies ENTIRELY on this id being stored — since status flips to
-    // 'completed' before this step, a lost stamp makes the next run unable to
-    // tell "already created" from "never created". So retry a few times, and log
-    // LOUDLY if it ultimately fails rather than swallowing it.
-    const storeTicketId = async (prop: string, ticketId: number | undefined): Promise<void> => {
-      const val = String(ticketId || '');
+    // Persist a finalize idempotency STAMP durably. The dedup that stops a
+    // re-finalize / partial-failure resume from repeating an irreversible
+    // side-effect (creating a DUPLICATE vendor work order, or re-sending the
+    // damages email) relies ENTIRELY on the stamp being stored — since status
+    // flips to 'completed' before those steps, a lost stamp makes the next run
+    // unable to tell "already done" from "never done". So retry a few times, and
+    // log LOUDLY if it ultimately fails rather than swallowing it.
+    const storeFinalizeStamp = async (prop: string, value: string | number | undefined, dupConsequence: string): Promise<void> => {
+      const val = String(value || '');
       if (!val) return;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try { await updateInspection(id, { [prop]: val }); return; }
         catch (e) {
           if (attempt === 3) {
-            console.error(`[finalize] FAILED to store ${prop}=${val} after 3 attempts — a re-finalize could create a DUPLICATE ticket. Ensure the ${prop} property exists in HubSpot.`, e);
+            console.error(`[finalize] FAILED to store ${prop}=${val} after 3 attempts — ${dupConsequence}. Ensure the ${prop} property exists in HubSpot.`, e);
           } else {
             console.warn(`[finalize] could not store ${prop} (attempt ${attempt}/3) — retrying:`, e);
             await new Promise((r) => setTimeout(r, 300 * attempt));
@@ -943,6 +944,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       }
     };
+    const storeTicketId = (prop: string, ticketId: number | undefined) =>
+      storeFinalizeStamp(prop, ticketId, 'a re-finalize could create a DUPLICATE ticket');
 
     // ---- 7. Create a maintenance ticket (best-effort, first finalize only) ----
     // Runs BEFORE the email so its pass/fail + ticket link can be reported there.
@@ -1107,20 +1110,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // no-op until OAuth is wired up. Wrapped in try/catch so an email
     // failure never blocks finalize completion.
     let emailResult: Awaited<ReturnType<typeof sendInspectionEmail>> | null = null;
-    if (isRefinalize) {
-      // Re-finalize after a reopen: PDFs are regenerated above, but don't
-      // re-send the damages email (avoids duplicate emails to soda@ + team).
-      emailResult = {
-        sent: false,
-        reason: 'refinalize_skipped',
-        message: 'Email not re-sent because this inspection was already completed.',
-      } as any;
-    } else if (emailAlreadySent) {
-      // A prior (failed) attempt already sent the damages email — don't re-send.
+    if (emailAlreadySent) {
+      // The damages email already went out on a prior finalize (its send stamped
+      // finalize_email_sent_at) — don't re-send. Checked FIRST, and gating on the
+      // STAMP rather than isRefinalize is deliberate: status flips to 'completed'
+      // BEFORE the email step, so a crash/timeout in between would make a retry
+      // look like a re-finalize and skip the email FOREVER (the damages email to
+      // soda@ + team silently never sends). The stamp is the true "already sent"
+      // signal — a genuine reopen has it set (skip here); a post-flip resume does
+      // NOT (falls through and sends). regenerateOnly is an admin PDF refresh, so
+      // it must never send.
       emailResult = {
         sent: false,
         reason: 'already_sent',
         message: 'Email already sent on a previous finalize attempt; not re-sending.',
+      } as any;
+    } else if (regenerateOnly) {
+      emailResult = {
+        sent: false,
+        reason: 'regenerate_skipped',
+        message: 'Email not sent — PDFs-only regeneration.',
       } as any;
     } else {
     try {
@@ -1189,13 +1198,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
 
       emailResult = await sendInspectionEmail(payload, session.email, req);
-      // Stamp that the email actually went out, so a later partial-failure retry
-      // (status not yet flipped) won't re-send it. Best-effort: if the property
-      // isn't on the schema the write is swallowed and we simply lose resume for
-      // email (current behavior) — create `finalize_email_sent_at` to enable it.
+      // Stamp that the email actually went out, so a later resume/reopen won't
+      // re-send it (this stamp is now the sole "already sent" guard). Retried
+      // for reliability — a lost stamp is what would let a resume send a
+      // duplicate. Needs the `finalize_email_sent_at` property to exist.
       if (emailResult?.sent) {
-        try { await updateInspection(id, { finalize_email_sent_at: new Date().toISOString() }); }
-        catch (e) { console.warn('[finalize] could not store finalize_email_sent_at (create the property to enable email resume):', e); }
+        await storeFinalizeStamp('finalize_email_sent_at', new Date().toISOString(), 'a resume/reopen could send a DUPLICATE email');
       }
     } catch (e: any) {
       console.error('[finalize] email send threw (caught, finalize continues):', e);
