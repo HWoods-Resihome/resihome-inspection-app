@@ -349,6 +349,14 @@ export function CameraCaptureLegacy({
     return () => { popCameraOpen(); };
   }, [isOpen]);
 
+  // draft→real URL map (from photo-sync events) so an item that synced before its
+  // hubspotUrl was assigned still resolves to the real URL — prevents duplicates.
+  const syncedUrlMapRef = useRef<Map<string, string>>(new Map());
+  const resolveSyncedUrl = (u?: string): string | undefined => (u ? (syncedUrlMapRef.current.get(u) || u) : u);
+  // True between hold-engaged and release; lets an async startRecording() abort if
+  // the finger lifts mid-setup (prevents the stuck-"recording" freeze).
+  const recordingIntentRef = useRef(false);
+
   // CRITICAL: when a queued photo finishes uploading in the background, swap THIS
   // camera item's draft (blob:) URL for the real HubSpot URL. That clears the
   // "Syncing…" badge AND means Done hands the inspection the REAL url instead of an
@@ -357,7 +365,12 @@ export function CameraCaptureLegacy({
   // never reached the inspection (the root cause of the whole sync hang on iOS).
   useEffect(() => {
     if (!isOpen) return;
+    syncedUrlMapRef.current.clear();
     const unsub = onPhotoSynced(({ oldUrl, newUrl }) => {
+      // Record draft→real so an item that synced before its hubspotUrl was
+      // assigned still resolves to the real URL (prevents the "duplicates after
+      // Done" bug — see the Modern camera for the full explanation).
+      syncedUrlMapRef.current.set(oldUrl, newUrl);
       setItems((prev) => prev.map((it) => {
         if (it.hubspotUrl !== oldUrl) return it;
         // Synced → swap to the real URL and free the full-res object URL + File
@@ -1049,7 +1062,10 @@ export function CameraCaptureLegacy({
     setItems((prev) => [...prev, item]);
     uploadPhoto(file).then((hubspotUrl) => {
       if (abortController.signal.aborted) return;
-      setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'uploaded', hubspotUrl } : it)));
+      // Resolve through the sync map in case it already synced (draft→real) before
+      // this resolved — else the stale draft would be handed back as a duplicate.
+      const resolved = resolveSyncedUrl(hubspotUrl)!;
+      setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'uploaded', hubspotUrl: resolved } : it)));
     }).catch((err) => {
       if (abortController.signal.aborted) return;
       setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'failed', error: err?.message || String(err) } : it)));
@@ -1174,6 +1190,13 @@ export function CameraCaptureLegacy({
       audioTracks = audio.getAudioTracks();
     } catch { /* video-only */ }
 
+    // Finger lifted while the mic prompt was pending → abort, don't start a
+    // recording nobody is holding (the stuck-"recording" freeze).
+    if (!recordingIntentRef.current) {
+      if (recordAudioStreamRef.current) { recordAudioStreamRef.current.getTracks().forEach((t) => t.stop()); recordAudioStreamRef.current = null; }
+      return;
+    }
+
     // Render the camera into a canvas, center-cropped by the live zoom factor,
     // and record the canvas stream. This gives smooth digital zoom on every
     // platform (incl. iOS) and keeps the recording in sync with the preview.
@@ -1215,6 +1238,8 @@ export function CameraCaptureLegacy({
     try { recorder.start(); } catch { teardownCanvasPipeline(); return; }
     recordingRef.current = true;
     setRecording(true);
+    // Released during setup → stop now so the UI never sticks in "recording".
+    if (!recordingIntentRef.current) { stopRecording(); return; }
     setRecordSecs(0);
     const startedAt = Date.now();
     elapsedTimerRef.current = setInterval(() => setRecordSecs(Math.floor((Date.now() - startedAt) / 1000)), 200);
@@ -1238,6 +1263,7 @@ export function CameraCaptureLegacy({
       // Longer buzz to signal "hold engaged — now recording" (distinct from the
       // short photo-capture tick). No-op on iOS Safari.
       try { navigator.vibrate?.(35); } catch { /* unsupported */ }
+      recordingIntentRef.current = true; // held → intend to record
       void startRecording();
     }, HOLD_MS);
   }
@@ -1263,6 +1289,8 @@ export function CameraCaptureLegacy({
   }
   function onShutterUp() {
     shutterStartYRef.current = null;
+    // Signal release first so a startRecording() still in async setup aborts.
+    recordingIntentRef.current = false;
     // Flush any pending zoom frame and push the final value to the sensor now.
     if (zoomDragRafRef.current != null) { cancelAnimationFrame(zoomDragRafRef.current); zoomDragRafRef.current = null; }
     if (zoomTargetRef.current != null) { applyZoom(zoomTargetRef.current, { immediateHw: true }); zoomTargetRef.current = null; }
@@ -1481,9 +1509,11 @@ export function CameraCaptureLegacy({
       await new Promise((r) => setTimeout(r, 200));
     }
     const finalItems = itemsRef.current;
-    const urls = finalItems
+    const urls = Array.from(new Set(finalItems
       .filter((it) => it.status === 'uploaded' && it.hubspotUrl)
-      .map((it) => it.hubspotUrl!) as string[];
+      // Resolve draft→real so Done returns the REAL url (matching the flush's copy
+      // → the form's Set-dedup collapses them instead of duplicating).
+      .map((it) => resolveSyncedUrl(it.hubspotUrl)!)));
     const failures = finalItems.filter((it) => it.status !== 'uploaded').length;
     for (const it of finalItems) {
       try { URL.revokeObjectURL(it.blobUrl); } catch { /* harmless */ }

@@ -341,6 +341,17 @@ export function CameraCaptureModern({
 
   // ----- Video clip recording (press-and-hold the shutter) -----
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  // draft-URL → real-URL, from photo-sync events, so an item that synced before
+  // its hubspotUrl was assigned still resolves to the real URL (see the
+  // onPhotoSynced effect) — prevents the "duplicates after Done" bug.
+  const syncedUrlMapRef = useRef<Map<string, string>>(new Map());
+  const resolveSyncedUrl = (u?: string): string | undefined => (u ? (syncedUrlMapRef.current.get(u) || u) : u);
+  // True between "hold engaged" and shutter release. startRecording() is async
+  // (awaits the mic), so if the finger lifts DURING setup, recordingRef isn't true
+  // yet and onShutterUp can't stop it — recording would then run unattended until
+  // the max-clip timeout with the UI stuck "recording" (the reported video freeze).
+  // This lets startRecording abort/stop the instant it sees the release.
+  const recordingIntentRef = useRef(false);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordAudioStreamRef = useRef<MediaStream | null>(null);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -950,7 +961,15 @@ export function CameraCaptureModern({
 
   useEffect(() => {
     if (!isOpen) return;
+    syncedUrlMapRef.current.clear();
     const unsub = onPhotoSynced(({ oldUrl, newUrl }) => {
+      // Record the draft→real mapping so an item whose hubspotUrl hadn't been
+      // ASSIGNED yet when this fired (the upload can finish before uploadPhoto's
+      // promise resolves, now that we upload during the session) still resolves to
+      // the real URL at assign-time + at Done. Without this the camera returned a
+      // STALE DRAFT url while the flush had already re-added the real one → the
+      // "every photo duplicates after Done" bug.
+      syncedUrlMapRef.current.set(oldUrl, newUrl);
       setItems((prev) => prev.map((it) => {
         if (it.hubspotUrl !== oldUrl) return it;
         // Synced → swap to the real URL AND free the device memory this photo
@@ -1613,7 +1632,11 @@ export function CameraCaptureModern({
     setItems((prev) => [...prev, item]);
     uploadPhoto(file).then((hubspotUrl) => {
       if (abortController.signal.aborted) return;
-      setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'uploaded', hubspotUrl } : it)));
+      // The photo may have ALREADY synced (draft→real) before this promise
+      // resolved — resolve through the sync map so we store the real URL, not a
+      // stale draft the camera would then hand back as a duplicate at Done.
+      const resolved = resolveSyncedUrl(hubspotUrl)!;
+      setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'uploaded', hubspotUrl: resolved } : it)));
     }).catch((err) => {
       if (abortController.signal.aborted) return;
       setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'failed', error: err?.message || String(err) } : it)));
@@ -1661,7 +1684,8 @@ export function CameraCaptureModern({
     entryPromise
       .then((entry) => {
         if (abortController.signal.aborted) return;
-        setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'uploaded', hubspotUrl: entry } : it)));
+        const resolved = resolveSyncedUrl(entry)!;
+        setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'uploaded', hubspotUrl: resolved } : it)));
       })
       .catch((err) => {
         if (abortController.signal.aborted) return;
@@ -1738,6 +1762,13 @@ export function CameraCaptureModern({
       audioTracks = audio.getAudioTracks();
     } catch { /* video-only */ }
 
+    // Finger already lifted while the mic prompt/await was pending? Abort — never
+    // begin a recording nobody is holding (the stuck-"recording" freeze).
+    if (!recordingIntentRef.current) {
+      if (recordAudioStreamRef.current) { recordAudioStreamRef.current.getTracks().forEach((t) => t.stop()); recordAudioStreamRef.current = null; }
+      return;
+    }
+
     // Render the camera into a canvas and record the canvas stream. CRITICAL for
     // quality: cap the canvas to 1080p (long edge ≤ CLIP_MAX_EDGE) instead of the
     // full sensor resolution. A 4K canvas at our bitrate looked blocky/grainy;
@@ -1787,6 +1818,9 @@ export function CameraCaptureModern({
     try { recorder.start(); } catch { teardownCanvasPipeline(); return; }
     recordingRef.current = true;
     setRecording(true);
+    // Released during the (post-mic) recorder setup → stop immediately so the UI
+    // never sticks in "recording". onstop → finalizeClip discards the empty clip.
+    if (!recordingIntentRef.current) { stopRecording(); return; }
     setRecordSecs(0);
     const startedAt = Date.now();
     elapsedTimerRef.current = setInterval(() => setRecordSecs(Math.floor((Date.now() - startedAt) / 1000)), 200);
@@ -1810,6 +1844,7 @@ export function CameraCaptureModern({
       // Longer buzz to signal "hold engaged — now recording" (distinct from the
       // short photo-capture tick). No-op on iOS Safari.
       try { navigator.vibrate?.(35); } catch { /* unsupported */ }
+      recordingIntentRef.current = true; // finger is down + held → intend to record
       void startRecording();
     }, HOLD_MS);
   }
@@ -1831,6 +1866,9 @@ export function CameraCaptureModern({
   }
   function onShutterUp() {
     shutterStartYRef.current = null;
+    // Signal release FIRST — a startRecording() still in async setup checks this
+    // and won't leave a runaway recording running with the UI stuck.
+    recordingIntentRef.current = false;
     // Flush any pending zoom frame so the final target is applied before stop.
     if (zoomDragRafRef.current != null) { cancelAnimationFrame(zoomDragRafRef.current); zoomDragRafRef.current = null; }
     if (zoomTargetRef.current != null) { applyZoom(zoomTargetRef.current); zoomTargetRef.current = null; }
@@ -2345,9 +2383,12 @@ export function CameraCaptureModern({
     const finalItems = itemsRef.current;
     // Preexisting (seeded) photos are already saved on the room — exclude them
     // from the flush-back urls and the failure count so they're never re-counted.
-    const urls = finalItems
+    const urls = Array.from(new Set(finalItems
       .filter((it) => !it.preexisting && it.status === 'uploaded' && it.hubspotUrl)
-      .map((it) => it.hubspotUrl!) as string[];
+      // Resolve any draft→real swap that raced this session so Done returns the
+      // REAL url (matching what the background flush already added → the form's
+      // Set-dedup collapses them instead of showing a duplicate).
+      .map((it) => resolveSyncedUrl(it.hubspotUrl)!)));
     const failures = finalItems.filter((it) => !it.preexisting && it.status !== 'uploaded').length;
     for (const it of finalItems) {
       if (it.preexisting) continue; // its blobUrl is a real URL, not an object URL
