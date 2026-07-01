@@ -2,11 +2,10 @@
  * Photo upload helpers shared between QuestionForm and RateCardForm.
  *
  * The pattern:
- *   1. Compress with browser-image-compression (≤2MB target, 3024px max edge, q0.9).
- *      Inspectors zoom into these photos to check fine defects (cracks, scuffs),
- *      so we keep near-native ~9MP detail rather than crushing to a screen size.
- *      The /api/upload body limit is 48MB, so there's ample headroom even after
- *      base64 inflation. The library iterates quality DOWN to hit the size cap,
+ *   1. Compress with browser-image-compression (≤0.9MB target, 1200px max edge, q0.7).
+ *      Sized for FAST field sync on weak cell uplinks (upload time ≈ bytes ÷ uplink)
+ *      while staying clearly legible for inspection evidence; the PDF embeds a 520px
+ *      thumbnail regardless. The library iterates quality DOWN to hit the size cap,
  *      so files self-limit (clean shots land well under it).
  *   2. If the library fails (silent web worker OOM on big phone photos is the usual
  *      cause), fall back to a manual canvas-based downscale.
@@ -24,8 +23,8 @@ const RETRY_BASE_DELAY_MS = 800;
 // Per-attempt network timeout. A stalled upload on a weak signal aborts here so
 // the caller can fall back to the offline cache instead of spinning forever.
 const UPLOAD_TIMEOUT_MS = 20000;
-const TARGET_MAX_SIZE_MB = 2.0;     // ceiling; the lib drops quality only if over this — 2MB keeps field sync fast on weak signal while staying detailed
-const TARGET_MAX_DIMENSION = 3024;  // ~9MP long edge — near native still res, so zoomed-in detail survives
+const TARGET_MAX_SIZE_MB = 0.9;     // ceiling; the lib drops quality only if over this — small files keep field sync fast on weak cell uplinks
+const TARGET_MAX_DIMENSION = 1200;  // long edge — sized for fast sync + clear evidence (matches the camera's MAX_SAVE_EDGE); PDF embeds a 520px thumb regardless
 
 /**
  * Compress any image File to a screen-sized JPEG Blob (client-side; works
@@ -52,7 +51,7 @@ export async function compressToJpeg(file: File): Promise<Blob> {
       maxSizeMB: TARGET_MAX_SIZE_MB,
       maxWidthOrHeight: TARGET_MAX_DIMENSION,
       useWebWorker: false,  // web worker is faster but silently OOMs on big files
-      initialQuality: 0.92, // near-native fidelity — preserves fine detail on zoomed-in shots
+      initialQuality: 0.7,  // sized for fast field sync; still clear for inspection evidence
       fileType: 'image/jpeg',
     });
     if (result && result.type === 'image/jpeg') compressed = result;
@@ -65,7 +64,7 @@ export async function compressToJpeg(file: File): Promise<Blob> {
   // high-quality results that legitimately sit near the target ceiling.
   if (!compressed || compressed.size > (TARGET_MAX_SIZE_MB + 1) * 1024 * 1024) {
     try {
-      compressed = await canvasDownscale(file, TARGET_MAX_DIMENSION, 0.88);
+      compressed = await canvasDownscale(file, TARGET_MAX_DIMENSION, 0.7);
     } catch (e: any) {
       if (isHeic) {
         throw new Error('This HEIC photo couldn’t be converted in this browser. On iPhone, set Settings → Camera → Formats to "Most Compatible", or use the in-app camera, then re-upload.');

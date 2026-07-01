@@ -165,16 +165,14 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
 // IS the saved photo there — so a high res means a big live stream + a big
 // per-shot canvas + big stored blobs, which (across a photo-heavy session) can
 // jettison the content process: the "A problem repeatedly occurred" black screen.
-// Raised from 1280×960 (1.2MP) to 1600×1200 (1.9MP): 1.2MP looked soft/pixelated
-// when an inspector pinch-zoomed a saved photo in the viewer. 1.9MP is a clear
-// sharpness gain while staying well under a full-res still; the memory guards
-// added since (just-in-time byte loads, thumbnail-decode skip while the camera is
-// open, canvas zeroing after each shot) keep peak usage bounded. NOTE: this is the
-// iOS OOM lever — validate a long photo-heavy session on a real device before
-// pushing it higher. Android still grabs a higher-res still via
-// ImageCapture.takePhoto() (capped by MAX_SAVE_EDGE), independent of this.
-const CAPTURE_WIDTH = 1600;
-const CAPTURE_HEIGHT = 1200;
+// 1280×960 preview. The SAVED photo is downscaled to MAX_SAVE_EDGE (below), so
+// the preview only needs to be a bit larger than that. (It was briefly 1600×1200
+// for zoom sharpness, but since saved photos are now capped at ~1200px for faster
+// field sync, the extra preview resolution just cost iOS memory for detail that's
+// discarded on save — so it's back to 1280.) Android grabs a higher-res still via
+// ImageCapture.takePhoto(), also capped by MAX_SAVE_EDGE.
+const CAPTURE_WIDTH = 1280;
+const CAPTURE_HEIGHT = 960;
 // A live frame narrower than this is a DEGRADED stream (iOS can hand back a tiny
 // frame after a recovery/lens-switch/throttle, or honor `{ideal}` with a much
 // lower res). Saving it yields a low-resolution photo whose evidence stamp
@@ -186,16 +184,16 @@ const MIN_CAPTURE_EDGE = 1000;
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
 const JPEG_QUALITY = 0.92;
-// Saved-photo ceiling (long edge). Matches the upload target (TARGET_MAX_DIMENSION
-// in photoUpload), so the captured JPEG is ALREADY upload-ready — the upload path
-// skips its second compression pass (see compressToJpeg's fast path). ~9MP keeps
-// zoomed-in defect detail; the PDF is unaffected (it embeds a 520px thumbnail).
-// Capturing at the final size (rather than 4096 + recompress) is what keeps rapid
-// fire responsive on phones — there's no heavy main-thread re-encode between shots.
-const MAX_SAVE_EDGE = 2048;
+// Saved-photo ceiling (long edge) — this IS the uploaded size (the upload path's
+// fast path skips a second compression), so it directly sets field-sync speed.
+// Lowered to 1200px @ q0.68 (was 2048 @ 0.9) to cut upload bytes ~55-65% for MUCH
+// faster sync on weak cell uplinks — the "scope took 14 min to sync" report. Still
+// clearly legible for evidence; the PDF is unaffected (it embeds a 520px thumb).
+const MAX_SAVE_EDGE = 1200;
 // Final upload quality — no second compression downstream, so this IS the stored
-// quality. 0.9 is visually lossless for inspection photos at a small file size.
-const PHOTO_SAVE_QUALITY = 0.9;
+// quality. 0.68 roughly halves bytes vs 0.9 with acceptable detail for inspection
+// evidence (fine detail on deep zoom softens slightly).
+const PHOTO_SAVE_QUALITY = 0.68;
 
 // iOS (incl. iPadOS) WebKit. On iPhone we run a PURE DIGITAL live-frame camera:
 // the live <video> is NEVER covered by a freeze-frame still — every capture and
