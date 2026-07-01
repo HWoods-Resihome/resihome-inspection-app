@@ -170,6 +170,23 @@ export function useRateCardAutosave(args: Args): AutosaveHandle {
         if (myGen === saveGenerationRef.current) {
           setRecordIdsByExternalId(updates);
         }
+        // Per-line failures: the endpoint returns 200 with a `failures` list when
+        // HubSpot rejected specific lines (upsertAnswers resolves per-item
+        // rejections internally rather than throwing). Those lines were NOT saved
+        // — keep them dirty so they retry, and surface the error, instead of
+        // silently dropping them (which loses billable scope). Good lines above
+        // are already committed.
+        const failed: Array<{ answerIdExternal?: string; error?: string }> = data.failures || [];
+        if (failed.length > 0) {
+          for (const f of failed) {
+            if (f.answerIdExternal) dirtyLinesRef.current.add(f.answerIdExternal);
+          }
+          if (myGen === saveGenerationRef.current) {
+            setStatus('error');
+            setErrorMessage(`${failed.length} line${failed.length === 1 ? '' : 's'} could not be saved: ${String(failed[0]?.error || '').slice(0, 160)}`);
+          }
+          return; // skip the "saved" status below — some lines are still dirty
+        }
       }
 
       // Save section photos (if any) in ONE batched /answers call instead of a

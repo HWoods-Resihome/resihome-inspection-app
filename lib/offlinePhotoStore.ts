@@ -790,6 +790,7 @@ const flushInFlight = new Map<string, Promise<FlushResult>>();
 export async function flushQueuedPhotos(
   inspectionRecordId: string,
   onSynced: FlushOnSynced,
+  opts?: { skipVideos?: boolean },
 ): Promise<FlushResult> {
   // NEVER flush photos for an offline-started ("local_") inspection: there's no
   // server record to attach them to yet. Uploading now would create an attach
@@ -815,7 +816,7 @@ export async function flushQueuedPhotos(
   // full-res thumbnail decode is still skipped while the camera is open
   // (makeThumbBlob guard); and the flush loads each photo's bytes just-in-time, so
   // only ~concurrency compressed images are ever resident — never the whole queue.
-  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced);
+  const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, opts);
   flushInFlight.set(inspectionRecordId, run);
   try { return await run; }
   finally { flushInFlight.delete(inspectionRecordId); }
@@ -824,6 +825,7 @@ export async function flushQueuedPhotos(
 async function doFlushQueuedPhotos(
   inspectionRecordId: string,
   onSynced: FlushOnSynced,
+  opts?: { skipVideos?: boolean },
 ): Promise<FlushResult> {
   let lastError: string | undefined;
   // Only flush THIS inspection's photos — the mounted form is what persists the
@@ -831,8 +833,19 @@ async function doFlushQueuedPhotos(
   // until that inspection is open (otherwise they'd upload but never attach).
   // Worklist is METADATA ONLY (no bytes); each photo's bytes are loaded
   // just-in-time in processOne so the whole backlog is never resident at once.
+  //
+  // skipVideos: the GLOBAL background driver (no-op onSynced) sets this. Unlike
+  // photos, a video has NO durable attach-outbox entry (finishSynced only queues
+  // an attach for non-video records — a video carries just a sectionId, not a
+  // full attach descriptor), so its ONLY attach path is the open form's live
+  // onSynced (section swap). Uploading a video here would DELETE the queue record
+  // with nothing to attach it → the clip uploads to HubSpot Files orphaned and is
+  // permanently lost. So leave videos QUEUED for the background driver; they
+  // upload + attach when the inspection's form is next open (which includes the
+  // submit flush), never silently dropped.
   const all = (await listQueueMeta())
     .filter((r) => r.inspectionRecordId === inspectionRecordId)
+    .filter((r) => !(opts?.skipVideos && r.kind === 'video'))
     .sort((a, b) => a.createdAt - b.createdAt);
   let synced = 0;
   let stop = false; // set when offline/transient — stop taking NEW work, retry next tick

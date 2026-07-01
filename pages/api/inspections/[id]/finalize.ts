@@ -922,6 +922,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // Persist a ticket-id STAMP durably. The dedup that stops a re-finalize /
+    // partial-failure resume from creating a DUPLICATE ticket (a real vendor
+    // work order) relies ENTIRELY on this id being stored — since status flips to
+    // 'completed' before this step, a lost stamp makes the next run unable to
+    // tell "already created" from "never created". So retry a few times, and log
+    // LOUDLY if it ultimately fails rather than swallowing it.
+    const storeTicketId = async (prop: string, ticketId: number | undefined): Promise<void> => {
+      const val = String(ticketId || '');
+      if (!val) return;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try { await updateInspection(id, { [prop]: val }); return; }
+        catch (e) {
+          if (attempt === 3) {
+            console.error(`[finalize] FAILED to store ${prop}=${val} after 3 attempts — a re-finalize could create a DUPLICATE ticket. Ensure the ${prop} property exists in HubSpot.`, e);
+          } else {
+            console.warn(`[finalize] could not store ${prop} (attempt ${attempt}/3) — retrying:`, e);
+            await new Promise((r) => setTimeout(r, 300 * attempt));
+          }
+        }
+      }
+    };
+
     // ---- 7. Create a maintenance ticket (best-effort, first finalize only) ----
     // Runs BEFORE the email so its pass/fail + ticket link can be reported there.
     // Posts to the Maintenance AI API on the SAME property (hbmm_property_id),
@@ -980,10 +1002,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             const tu = ticketResult.typeUpdate;
             console.log(`[finalize] maintenance ticket created: #${ticketResult.ticketId} on property ${hbmmId}`
               + (tu ? ` · type update ${tu.ok ? 'OK' : `FAILED (status ${tu.status ?? '-'}) ${tu.error || tu.body || ''}`}` : ''));
-            // Persist the ticket id (best-effort) for visibility + background
-            // doc-upload retries. Swallow if the property doesn't exist yet.
-            try { await updateInspection(id, { hbmm_ticket_id: String(ticketResult.ticketId || '') }); }
-            catch (e) { console.warn('[finalize] could not store hbmm_ticket_id (create the property to enable retries):', e); }
+            // Persist the ticket id (durably — the re-finalize/resume dedup
+            // depends on it) for visibility + background doc-upload retries.
+            await storeTicketId('hbmm_ticket_id', ticketResult.ticketId);
           } else if (ticketResult.configured) {
             console.warn(`[finalize] maintenance ticket failed: ${ticketResult.error}`);
           } else {
@@ -1013,9 +1034,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const canRoute = !regenerateOnly && !!inspectionData.propertyHbmmId && Number.isFinite(hbmmId);
       const hasKind = (k: 'eviction' | 'capex') =>
         Object.entries(vendorUrls).some(([v, u]) => (u || '').trim() && vendorTicketKind(v) === k);
+      // Tight re-read of BOTH routed ticket ids RIGHT before the irreversible
+      // creates (mirrors the Turnkey re-read above): the preflight markers were
+      // read before the ~30s PDF pipeline, so a CONCURRENT finalize on another
+      // serverless instance (the in-flight Map is per-instance; the durable lock
+      // is best-effort) could have created these in the meantime. Re-reading here
+      // shrinks the double-create window from the pipeline duration to ~ms.
+      const routedFresh = (canRoute && (hasKind('eviction') || hasKind('capex')))
+        ? await readInspectionProps(id, ['hbmm_eviction_ticket_id', 'hbmm_capex_ticket_id']).catch(() => null)
+        : null;
+      const freshEvictionId = String(routedFresh?.hbmm_eviction_ticket_id ?? preflight?.hbmm_eviction_ticket_id ?? '').trim();
+      const freshCapexId = String(routedFresh?.hbmm_capex_ticket_id ?? preflight?.hbmm_capex_ticket_id ?? '').trim();
       // Eviction (Future) ticket.
       if (canRoute && hasKind('eviction')) {
-        const existing = Number(String(preflight?.hbmm_eviction_ticket_id || '').trim());
+        const existing = Number(freshEvictionId);
         if (existing && Number.isFinite(existing)) {
           evictionTicketResult = { ok: true, configured: true, ticketId: existing } as CreateTicketResult;
           console.log(`[finalize] eviction ticket already created (#${existing}) — skipping re-create.`);
@@ -1029,8 +1061,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             });
             if (evictionTicketResult.ok) {
               console.log(`[finalize] eviction ticket created: #${evictionTicketResult.ticketId} (type ${TICKET_TYPE_EVICTION}) on property ${hbmmId}`);
-              try { await updateInspection(id, { hbmm_eviction_ticket_id: String(evictionTicketResult.ticketId || '') }); }
-              catch (e) { console.warn('[finalize] could not store hbmm_eviction_ticket_id (create the property to enable retries):', e); }
+              await storeTicketId('hbmm_eviction_ticket_id', evictionTicketResult.ticketId);
             } else if (evictionTicketResult.configured) {
               console.warn(`[finalize] eviction ticket failed: ${evictionTicketResult.error}`);
             }
@@ -1042,7 +1073,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       // CapEx ticket — Maintenance (default) type: never force Turnkey.
       if (canRoute && hasKind('capex')) {
-        const existing = Number(String(preflight?.hbmm_capex_ticket_id || '').trim());
+        const existing = Number(freshCapexId);
         if (existing && Number.isFinite(existing)) {
           capexTicketResult = { ok: true, configured: true, ticketId: existing } as CreateTicketResult;
           console.log(`[finalize] capex ticket already created (#${existing}) — skipping re-create.`);
@@ -1056,8 +1087,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             });
             if (capexTicketResult.ok) {
               console.log(`[finalize] capex ticket created: #${capexTicketResult.ticketId} (default/Maintenance type) on property ${hbmmId}`);
-              try { await updateInspection(id, { hbmm_capex_ticket_id: String(capexTicketResult.ticketId || '') }); }
-              catch (e) { console.warn('[finalize] could not store hbmm_capex_ticket_id (create the property to enable retries):', e); }
+              await storeTicketId('hbmm_capex_ticket_id', capexTicketResult.ticketId);
             } else if (capexTicketResult.configured) {
               console.warn(`[finalize] capex ticket failed: ${capexTicketResult.error}`);
             }

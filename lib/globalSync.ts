@@ -61,7 +61,10 @@ async function tick(): Promise<void> {
       for (const inspId of ids) {
         if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
         if (activeIds.has(inspId)) continue;
-        await flushQueuedPhotos(inspId, () => { /* attach handled durably via the outbox */ }).catch(() => {});
+        // skipVideos: a video has no durable attach-outbox entry (only the open
+        // form's live onSynced attaches it), so uploading one here would orphan
+        // the clip. Leave videos queued for when the form is next open.
+        await flushQueuedPhotos(inspId, () => { /* attach handled durably via the outbox */ }, { skipVideos: true }).catch(() => {});
       }
       // Attach uploaded photos (section/line) server-side, from any page, so they
       // land on the record without reopening. Idempotent; skips the open inspection.

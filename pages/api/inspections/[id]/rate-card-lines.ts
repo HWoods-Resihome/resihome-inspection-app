@@ -283,12 +283,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // (e.g. one bad line 400s the whole batch), fall back to per-item so the
     // good lines still save and we can name + surface the one that failed,
     // instead of failing the entire apply with a 500.
-    let upsertResults: Array<{ recordId: string; answerIdExternal: string }> = [];
-    const failures: { code: string; error: string }[] = [];
+    let upsertResults: Array<{ recordId: string; answerIdExternal: string; failed?: boolean; reason?: string }> = [];
+    const failures: { code: string; answerIdExternal?: string; error: string }[] = [];
     if (answerUpserts.length > 0) {
       try {
         upsertResults = await upsertAnswers(inspectionRecordId, answerUpserts);
       } catch (batchErr: any) {
+        // upsertAnswers resolves PER-ITEM rejections internally (returns
+        // {failed:true} markers, handled below) — it only throws on a whole-call
+        // failure (e.g. association-type resolution). Retry per-item so any lines
+        // that CAN save still do.
         console.warn(`[rate-card-lines] batch upsert failed (${answerUpserts.length} items) — retrying per-item:`, (batchErr?.detail || batchErr?.message || batchErr));
         for (const u of answerUpserts) {
           try {
@@ -297,10 +301,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           } catch (itemErr: any) {
             failures.push({
               code: String(u.answerProps?.rate_card_line_item_code || u.answerProps?.answer_id_external || 'line'),
+              answerIdExternal: String(u.answerProps?.answer_id_external || ''),
               error: String(itemErr?.detail || itemErr?.message || itemErr).slice(0, 200),
             });
           }
         }
+      }
+    }
+    // CRITICAL: upsertAnswers does NOT throw when HubSpot rejects an individual
+    // line — it returns a {recordId:'', failed:true, reason} MARKER and keeps
+    // going (so one bad line can't block the rest). Surface those markers as
+    // `failures` (and drop them from the success `results`), otherwise a rejected
+    // line would be reported as saved, the client would clear it from its dirty
+    // set, and the line would silently vanish → an under-billed invoice.
+    const okResults = upsertResults.filter((r) => !r.failed);
+    for (const r of upsertResults) {
+      if (r.failed) {
+        failures.push({
+          code: String(r.answerIdExternal || 'line'),
+          answerIdExternal: String(r.answerIdExternal || ''),
+          error: String(r.reason || 'HubSpot rejected this line').slice(0, 200),
+        });
       }
     }
 

@@ -1310,9 +1310,12 @@ export function QuestionForm({
             instanceKey: inst.instanceKey,
           };
         }
-        // Require a photo on this question when flagged — but N/A answers are
-        // exempt (a not-applicable item needs no evidence).
-        if (q.requiresPhoto && !isNA(a?.answerValue || '') && (!a || (a.photoUrls?.length || 0) === 0)) {
+        // Require a photo on this question when flagged — but only once it's been
+        // ANSWERED (an untouched OPTIONAL question with requiresPhoto must not
+        // block submit; requiresPhoto/isRequired are independent HubSpot flags),
+        // and N/A answers are exempt (a not-applicable item needs no evidence).
+        // Mirrors the note check below, which is likewise gated on answerValue.
+        if (q.requiresPhoto && a?.answerValue && !isNA(a.answerValue) && (a.photoUrls?.length || 0) === 0) {
           return {
             message: `Photo required: ${locTag}${q.questionText}`,
             scrollToDomId: `q-${inst.instanceKey}-${q.questionIdExternal}`,
@@ -1847,8 +1850,16 @@ export function QuestionForm({
         return { completed: acc.completed + c.completed, total: acc.total + c.total };
       }, { completed: 0, total: 0 })
     : { completed: 0, total: 0 };
-  const totalCompleted = Object.values(sectionProgress).reduce((acc, s) => acc + s.completed, 0) + fcTotals.completed;
-  const totalQuestions = Object.values(sectionProgress).reduce((acc, s) => acc + s.total, 0) + fcTotals.total;
+  // The maintenance-ticket widget (failed 1099/vacancy only) is a required
+  // decision the submit gate enforces (a Yes/No choice, plus a description when
+  // "Yes") but that lives outside the question/FC answer sets. Count it as one
+  // item so the header "X/Y" can't read complete while Submit is still blocked
+  // on "Choose whether to submit a maintenance ticket."
+  const maintTicketDone = !maintTicketEligible
+    || (!!maintTicketWanted && (maintTicketWanted !== 'Yes' || !!maintTicketDescription.trim()));
+  const maintTicketExtra = maintTicketEligible ? 1 : 0;
+  const totalCompleted = Object.values(sectionProgress).reduce((acc, s) => acc + s.completed, 0) + fcTotals.completed + (maintTicketEligible && maintTicketDone ? 1 : 0);
+  const totalQuestions = Object.values(sectionProgress).reduce((acc, s) => acc + s.total, 0) + fcTotals.total + maintTicketExtra;
   // The failed sign-off question's id — the maintenance-ticket widget renders
   // directly under it (above Additional Comments), in line with the Fail tap.
   const summaryFailQuestionId: string | null = useMemo(() => {

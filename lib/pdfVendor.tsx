@@ -231,24 +231,35 @@ export async function renderVendorPdfs(ctx: PdfBuildContext, opts?: { onlyVendor
   // render is self-contained (gallery base flows through context), so there's
   // no shared mutable state to race.
   const result = new Map<string, Buffer>();
-  let cursor = 0;
+  if (vendors.length === 0) return result;
+  const renderOne = async (idx: number) => {
+    const [vendor, sections] = vendors[idx];
+    const buf = await renderToBuffer(
+      <VendorDoc
+        ctx={ctx}
+        vendor={vendor}
+        vendorSections={sections}
+        vendorTotal={vendorTotals.get(vendor) || 0}
+        lineCount={lineCountByVendor.get(vendor) || 0}
+      />
+    );
+    result.set(vendor, buf);
+  };
+  // Render the FIRST vendor ALONE before overlapping the rest. @react-pdf's
+  // yoga-layout WASM has a one-time async-init race: two renderToBuffer calls
+  // fired before it initializes throw ("Expected … Config"). Callers that render
+  // a PDF before this (full finalize warms via the Master) are already safe, but
+  // a vendor-ONLY path (e.g. selective regen of just the vendor PDFs on a cold
+  // lambda with ≥2 vendors) has no prior render — so warm yoga here rather than
+  // rely on the caller. After one render completes, the pool can safely overlap.
+  await renderOne(0);
+  let cursor = 1;
   const worker = async () => {
     while (cursor < vendors.length) {
-      const idx = cursor++;
-      const [vendor, sections] = vendors[idx];
-      const buf = await renderToBuffer(
-        <VendorDoc
-          ctx={ctx}
-          vendor={vendor}
-          vendorSections={sections}
-          vendorTotal={vendorTotals.get(vendor) || 0}
-          lineCount={lineCountByVendor.get(vendor) || 0}
-        />
-      );
-      result.set(vendor, buf);
+      await renderOne(cursor++);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(VENDOR_RENDER_CONCURRENCY, vendors.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(VENDOR_RENDER_CONCURRENCY, vendors.length - 1) }, worker));
 
   return result;
 }
