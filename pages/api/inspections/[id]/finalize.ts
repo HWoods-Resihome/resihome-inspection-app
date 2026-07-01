@@ -935,7 +935,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const existingTicketId = Number(String(preflight?.hbmm_ticket_id || '').trim());
       console.log(`[finalize] maintenance ticket already created (#${existingTicketId}) — skipping re-create.`);
       ticketResult = { ok: true, configured: true, ticketId: Number.isFinite(existingTicketId) ? existingTicketId : undefined } as CreateTicketResult;
-    } else if (!isRefinalize) {
+    } else if (!regenerateOnly) {
+      // Gate on the idempotency STAMP (ticketAlreadyCreated above), NOT on
+      // isRefinalize: the status flips to 'completed' BEFORE this ticket step,
+      // so a crash/timeout in between would make a retry look like a re-finalize
+      // and skip the ticket FOREVER. Using !regenerateOnly lets a partial-failure
+      // resume re-create the ticket (deduped by the stamp + the tight re-read
+      // below), while still never creating one on an admin PDFs-only regenerate.
       try {
         const hbmmId = Number(inspectionData.propertyHbmmId || '');
         if (!inspectionData.propertyHbmmId || !Number.isFinite(hbmmId)) {
@@ -1000,7 +1006,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let capexTicketResult: CreateTicketResult | null = null;
     {
       const hbmmId = Number(inspectionData.propertyHbmmId || '');
-      const canRoute = !isRefinalize && !!inspectionData.propertyHbmmId && Number.isFinite(hbmmId);
+      // Gate on !regenerateOnly (not !isRefinalize) for the same reason as the
+      // Turnkey ticket above: status is already 'completed' by now, so a resumed
+      // partial finalize must still be allowed to create these — each is deduped
+      // by its own stored id (`existing`) checked below.
+      const canRoute = !regenerateOnly && !!inspectionData.propertyHbmmId && Number.isFinite(hbmmId);
       const hasKind = (k: 'eviction' | 'capex') =>
         Object.entries(vendorUrls).some(([v, u]) => (u || '').trim() && vendorTicketKind(v) === k);
       // Eviction (Future) ticket.

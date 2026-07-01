@@ -1803,11 +1803,34 @@ export function QuestionForm({
         // STANDS IN FOR "Additional Comments" — so that slot still counts toward
         // the total, and reads ANSWERED once the description is filled (→ 20/20,
         // not 19/19). The submit gate likewise requires the description.
+        // Count "done" the SAME way validate() gates submit, so the header
+        // "X/Y" can't read complete while submit is still blocked (or vice
+        // versa). Beyond a chosen answerValue that also means: a required photo
+        // (requiresPhoto, N/A exempt), a required note (requiresNote or a
+        // note-triggering value, N/A exempt), and the recommended new rent on a
+        // listing-price increase/reduce. Assigned-To auto-defaults (backstop in
+        // validate), so it's intentionally not counted here.
+        const answerComplete = (): boolean => {
+          if (!a?.answerValue) return false;
+          const val = a.answerValue;
+          const na = isNA(val);
+          if (isListingPriceQuestion(q) && wantsRecommendedPrice(val) && a.recommendedAmount == null) return false;
+          if (q.requiresPhoto && !na && (a.photoUrls?.length || 0) === 0) return false;
+          if (!na) {
+            const failSel = answerTone(val) === 'fail';
+            const triggeredNote = q.noteRequiredOnValues.length > 0 && (
+              q.noteRequiredOnValues.includes(val)
+              || (failSel && q.noteRequiredOnValues.some((v) => answerTone(v) === 'fail'))
+            );
+            if ((triggeredNote || q.requiresNote) && !a.note?.trim()) return false;
+          }
+          return true;
+        };
         const done = isCommentExemptByTicket(q)
           ? !!maintTicketDescription.trim()
           : (q.responseType === 'photo_only'
               ? (a?.photoUrls?.length || 0) > 0
-              : !!a?.answerValue);
+              : answerComplete());
         if (done) completed++;
       }
       out[inst.instanceKey] = { completed, total };

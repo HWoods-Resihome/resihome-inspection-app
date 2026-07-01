@@ -191,7 +191,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         answer_summary: `${line.section || 'Rate Card'} / ${catalog.laborShortDescription}`.slice(0, 250),
         note: line.note || '',
         assigned_to: line.assignedTo || '',
-        photo_urls: (line.photoUrls || []).join(','),
         quantity: roundMoney(line.quantity),
 
         // Rate card line metadata
@@ -234,6 +233,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       if (line.customVendorCost != null) {
         props.custom_vendor_cost = line.customVendorCost;
+      }
+      // Before-photos: only write when the client actually provided the field.
+      // A stale/truncated payload that omits photoUrls must NOT overwrite the
+      // stored list with an empty string (which would strip before-photos that
+      // the durable attach-outbox appended out-of-band). An explicit [] is still
+      // honored so the inspector can legitimately clear all before-photos.
+      if (line.photoUrls !== undefined) {
+        props.photo_urls = (line.photoUrls || []).join(',');
       }
       // After photos (Internal Resolution proof-of-work). Only include when the
       // line actually has some, so saves stay resilient if the after_photo_urls

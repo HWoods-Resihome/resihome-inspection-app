@@ -542,14 +542,15 @@ export function PdfGalleryBaseProvider(props: { base?: string; embedded?: Record
 let _photoGalleryBase: string | undefined;
 export function setPdfPhotoGalleryBase(base: string | undefined) { _photoGalleryBase = base; }
 
+// How many section-photo cells fit across the content width (90pt cell + 4pt gap).
+const SECTION_PHOTOS_PER_ROW = 5;
+
 export function PdfSectionPhotos(props: { photoUrls: string[] }) {
   // Prefer the per-render context base; fall back to the legacy global.
   const { galleryBase: ctxBase, embedded } = React.useContext(PdfGalleryBaseContext);
   const galleryBase = ctxBase ?? _photoGalleryBase;
   if (props.photoUrls.length === 0) return null;
-  return (
-    <View style={pdfStyles.photoGrid}>
-      {props.photoUrls.map((entry, i) => {
+  const renderCell = (entry: string, i: number) => {
         // Video clips embed the poster image and link to the playable file.
         const poster = getPosterUrl(entry);
         const video = isVideoEntry(entry) ? getVideoUrl(entry) : '';
@@ -569,34 +570,50 @@ export function PdfSectionPhotos(props: { photoUrls: string[] }) {
             {video ? <Text style={pdfStyles.videoBadge}>VIDEO</Text> : null}
           </Link>
         );
-      })}
+  };
+  // Chunk into fixed rows, each its own wrap={false} View, so a large section
+  // photo set PAGINATES CLEANLY (react-pdf moves a whole row to the next page
+  // when it won't fit) instead of overflowing/clipping as one flexWrap block.
+  const rows: string[][] = [];
+  for (let i = 0; i < props.photoUrls.length; i += SECTION_PHOTOS_PER_ROW) {
+    rows.push(props.photoUrls.slice(i, i + SECTION_PHOTOS_PER_ROW));
+  }
+  return (
+    <View style={{ marginTop: 6, marginBottom: 6 }}>
+      {rows.map((row, r) => (
+        <View key={r} style={{ flexDirection: 'row', gap: 4, marginBottom: 4 }} wrap={false}>
+          {row.map((entry, i) => renderCell(entry, r * SECTION_PHOTOS_PER_ROW + i))}
+        </View>
+      ))}
     </View>
   );
 }
 
 /**
- * Section title + section photos as ONE non-splittable block.
+ * Section title followed by its section photos.
  *
- * Why: react-pdf's auto page-break can land the title at the bottom of a
- * page and put the photos (or the first table row) at the top of the next.
- * Worse, the title can land where the fixed footer renders, so the title
- * disappears entirely under the footer strip.
+ * Why the title alone is wrap={false} (NOT the photos too): react-pdf's auto
+ * page-break can land the title at the bottom of a page — worse, right where
+ * the fixed footer renders, so the title vanishes under the footer strip.
+ * Keeping the TITLE atomic (with minPresenceAhead reserving space after it)
+ * stops it stranding at the bottom and keeps it attached to what follows.
  *
- * Wrapping them together with wrap={false} means the layout engine treats
- * this as one atomic block — if it doesn't fit at the bottom of a page, the
- * whole block bumps to the next page. The table that follows can still wrap
- * normally (rows are individually wrap={false} but the table itself isn't).
+ * The PHOTOS must NOT share the title's wrap={false}: a section with many
+ * photos would then form one atomic block taller than a page, which react-pdf
+ * CLIPS. PdfSectionPhotos paginates itself (per-row wrap={false}), so left to
+ * flow it breaks cleanly across pages.
  */
 export function PdfSectionHeader(props: { title: string; photoUrls: string[]; minPresenceAhead?: number }) {
-  // minPresenceAhead reserves space AFTER this block on the page; if there isn't
-  // enough room for the table that follows to start, the whole header (title +
-  // photos) breaks to the next page WITH its table — instead of the title/photos
-  // stranding at the bottom and the table flowing to the next page on its own.
+  // minPresenceAhead reserves space AFTER the title; if there isn't room for the
+  // photos/table that follow to START, the title breaks to the next page WITH
+  // them — instead of stranding at the bottom on its own.
   return (
-    <View wrap={false} minPresenceAhead={props.minPresenceAhead ?? 90} style={{ marginTop: 8 }}>
-      <Text style={pdfStyles.sectionTitle}>{props.title}</Text>
+    <>
+      <View wrap={false} minPresenceAhead={props.minPresenceAhead ?? 90} style={{ marginTop: 8 }}>
+        <Text style={pdfStyles.sectionTitle}>{props.title}</Text>
+      </View>
       <PdfSectionPhotos photoUrls={props.photoUrls} />
-    </View>
+    </>
   );
 }
 
