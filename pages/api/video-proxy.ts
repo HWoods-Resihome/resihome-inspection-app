@@ -21,6 +21,12 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { ensureFaststart } from '@/lib/videoFaststart';
+import { safeProxyFetch, readBodyCapped, ProxyFetchError } from '@/lib/safeProxyFetch';
+
+// Ceiling on a proxied clip: HubSpot-hosted clips here are small (≤3MB; larger
+// clips live on Vercel Blob and are served DIRECT, never routed here). This caps
+// the whole-buffer read + faststart so a large URL can't OOM the function.
+const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 
 // Same HubSpot host family as photo-proxy (region/CDN/TLD variants).
 // resihome.com / resiwalk.com = HubSpot file CDN via the connected custom domain
@@ -74,20 +80,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const to = setTimeout(() => ctrl.abort(), 20000);
     let upstream: Response;
     try {
-      upstream = await fetch(u.toString(), { redirect: 'follow', signal: ctrl.signal });
+      // safeProxyFetch follows redirects manually and re-validates every hop by
+      // resolved IP (blocks an allowlisted open-redirect aimed at internal/metadata
+      // addresses) — the host allowlist above can't cover the signed-CDN hop.
+      upstream = await safeProxyFetch(u.toString(), { signal: ctrl.signal });
       // A just-uploaded clip may not have propagated to the CDN yet — retry a few
       // times so playback right after capture doesn't permanently fail.
       for (let i = 0; i < 3 && !upstream.ok
         && (upstream.status === 404 || upstream.status === 403 || upstream.status >= 500); i++) {
         await new Promise((r) => setTimeout(r, 600));
-        upstream = await fetch(u.toString(), { redirect: 'follow', signal: ctrl.signal });
+        upstream = await safeProxyFetch(u.toString(), { signal: ctrl.signal });
       }
     } finally {
       clearTimeout(to);
     }
     if (!upstream.ok) return res.status(upstream.status).json({ error: `Upstream ${upstream.status}` });
 
-    let buf = Buffer.from(await upstream.arrayBuffer());
+    let buf = await readBodyCapped(upstream, MAX_VIDEO_BYTES);
     // Prefer the container detected from the actual bytes; fall back to the
     // extension only when the bytes are inconclusive. This rescues mislabeled
     // clips (the real cause of iOS's "can't play / slashed play button").
@@ -131,7 +140,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.setHeader('Content-Length', String(total));
     if (req.method === 'HEAD') return res.status(200).end();
     return res.status(200).send(buf);
-  } catch {
+  } catch (e) {
+    if (e instanceof ProxyFetchError) return res.status(e.status).json({ error: e.message });
     return res.status(502).json({ error: 'Fetch failed' });
   }
 }

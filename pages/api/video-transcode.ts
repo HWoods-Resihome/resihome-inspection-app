@@ -16,6 +16,9 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { put, del } from '@vercel/blob';
 import { transcodeToH264Mp4 } from '@/lib/videoFaststart';
+import { safeProxyFetch, readBodyCapped, ProxyFetchError } from '@/lib/safeProxyFetch';
+
+const MAX_TRANSCODE_BYTES = 200 * 1024 * 1024; // large clips route here (streamed to Blob)
 
 // Only our own storage hosts (HubSpot files + Vercel Blob) — same family as the
 // proxies. The SSRF guard: we only ever fetch a URL our own upload produced.
@@ -36,9 +39,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const resp = await fetch(u.toString(), { redirect: 'follow' });
+    // Follow redirects manually + re-validate each hop by resolved IP (blocks SSRF
+    // to internal/metadata addresses via an allowlisted open-redirect).
+    const resp = await safeProxyFetch(u.toString());
     if (!resp.ok) return res.status(502).json({ error: `Fetch failed ${resp.status}` });
-    const input = Buffer.from(await resp.arrayBuffer());
+    const input = await readBodyCapped(resp, MAX_TRANSCODE_BYTES);
     if (input.length === 0) return res.status(502).json({ error: 'Empty source' });
 
     const out = await transcodeToH264Mp4(input);
@@ -56,6 +61,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     return res.status(200).json({ url: blob.url });
   } catch (e: any) {
+    if (e instanceof ProxyFetchError) return res.status(e.status).json({ error: e.message });
     console.error('[video-transcode] failed:', e);
     return res.status(500).json({ error: String(e?.message || e).slice(0, 200) });
   }

@@ -7,6 +7,10 @@
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import sharp from 'sharp';
+import { safeProxyFetch, readBodyCapped, ProxyFetchError } from '@/lib/safeProxyFetch';
+
+// Hard ceiling on a proxied image so a huge upstream can't OOM the function.
+const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
 
 // HubSpot serves uploaded files from a whole family of hosts that vary by portal
 // region and CDN — and crucially across BOTH .net AND .com TLDs:
@@ -54,12 +58,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(403).json({ error: `Host not allowed: ${u.hostname}` });
   }
   try {
-    // The INITIAL host check above is the SSRF guard — we only ever fetch a URL
-    // HubSpot itself produced. HubSpot file URLs commonly 302 to a signed CDN
-    // (CloudFront/Akamai/cdn2) whose host ISN'T a hubspot.* domain; re-rejecting
-    // that final host (the old behavior) 403'd legitimate photos. So we follow
-    // the redirect and TRUST it — a validated HubSpot URL redirecting to its own
-    // CDN is not an SSRF vector. Cap the fetch so a slow origin can't tie up the
+    // The initial host check above restricts WHAT can be proxied to the HubSpot
+    // file family. HubSpot file URLs commonly 302 to a signed CDN whose host
+    // ISN'T a hubspot.* domain, so we must follow the redirect — but safeProxyFetch
+    // follows it MANUALLY and re-validates every hop by RESOLVED IP, refusing any
+    // private/internal address (blocks an allowlisted open-redirect aimed at
+    // cloud metadata / localhost). Cap the fetch so a slow origin can't tie up the
     // function.
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 15000);
@@ -72,18 +76,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // capture). A few quick retries INSIDE the proxy let the SAME image request
       // succeed once the file goes live, fixing the broken thumbnails server-side
       // with zero client OOM risk (no falling back to full-res images).
-      upstream = await fetch(u.toString(), { redirect: 'follow', signal: ctrl.signal });
+      upstream = await safeProxyFetch(u.toString(), { signal: ctrl.signal });
       for (let i = 0; i < 3 && !upstream.ok
         && (upstream.status === 404 || upstream.status === 403 || upstream.status >= 500); i++) {
         await new Promise((r) => setTimeout(r, 600));
-        upstream = await fetch(u.toString(), { redirect: 'follow', signal: ctrl.signal });
+        upstream = await safeProxyFetch(u.toString(), { signal: ctrl.signal });
       }
     } finally {
       clearTimeout(to);
     }
     if (!upstream.ok) return res.status(upstream.status).json({ error: `Upstream ${upstream.status}` });
     const ct = (upstream.headers.get('content-type') || '').toLowerCase();
-    const buf = Buffer.from(await upstream.arrayBuffer());
+    const buf = await readBodyCapped(upstream, MAX_IMAGE_BYTES);
 
     // Optional thumbnail resize (?w=). Inspection forms render dozens of photos
     // as small tiles; without this the browser decodes the FULL-RES bitmap of
@@ -122,7 +126,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.setHeader('Content-Type', ct || 'image/jpeg');
     res.setHeader('Cache-Control', 'private, max-age=300');
     return res.status(200).send(buf);
-  } catch {
+  } catch (e) {
+    if (e instanceof ProxyFetchError) return res.status(e.status).json({ error: e.message });
     return res.status(502).json({ error: 'Fetch failed' });
   }
 }
