@@ -4,6 +4,7 @@ import { PhotoAnnotator } from '@/components/PhotoAnnotator';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadVideo } from '@/lib/photoUpload';
 import { onPhotoSynced, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
+import { removePhotoAttachByUrl } from '@/lib/photoAttachOutbox';
 import { pushCameraOpen, popCameraOpen } from '@/lib/cameraOpenState';
 import { makeVideoEntry } from '@/lib/media';
 import { SyncingBadge } from '@/components/SyncingBadge';
@@ -2312,6 +2313,11 @@ export function CameraCaptureModern({
         // Cancel in-flight upload if any. The .then() above checks aborted before
         // updating state, so this prevents stale state writes.
         found.abortController?.abort();
+        // RECALL the durable records too — aborting only gates the in-camera state
+        // write, NOT the offline queue/attach. Without this a deleted/retaken photo
+        // still uploads in the background and re-attaches to the inspection (it
+        // "reappears"). Drop its queued record and any pending attach instruction.
+        if (found.hubspotUrl) { void discardQueuedByUrls([found.hubspotUrl]); removePhotoAttachByUrl([found.hubspotUrl]); }
         // Free the blob URLs to avoid memory leaks (poster + the clip's video URL).
         try { URL.revokeObjectURL(found.blobUrl); } catch { /* harmless */ }
         if (found.videoUrl) { try { URL.revokeObjectURL(found.videoUrl); } catch { /* harmless */ } }
@@ -2491,7 +2497,7 @@ export function CameraCaptureModern({
     // the durable store on the fly, so also remove THIS session's queued drafts
     // (by their draft URL) — otherwise cancelled photos would still sync.
     const draftUrls = items.map((it) => it.hubspotUrl).filter(Boolean) as string[];
-    if (draftUrls.length) void discardQueuedByUrls(draftUrls);
+    if (draftUrls.length) { void discardQueuedByUrls(draftUrls); removePhotoAttachByUrl(draftUrls); }
     for (const it of items) {
       it.abortController?.abort();
       try { URL.revokeObjectURL(it.blobUrl); } catch { /* harmless */ }

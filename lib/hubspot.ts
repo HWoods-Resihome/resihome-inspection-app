@@ -2967,7 +2967,10 @@ export async function fetchInspectionWithPropertyRef(recordId: string): Promise<
         propertyHbmmId = (pp.hbmm_property_id || '').toString().trim() || null;
         propertyPestControlEnrolled = /^y/i.test((pp.pest_control_enrolled || '').toString().trim());
         {
-          const petN = Number((pp.last_tenant_pet_count ?? '').toString().trim());
+          // Guard empty/unset FIRST — Number('') === 0 would report a definite
+          // "0 pets" for an UNKNOWN value (the other numeric fields all guard this).
+          const petRaw = (pp.last_tenant_pet_count ?? '').toString().trim();
+          const petN = petRaw === '' ? NaN : Number(petRaw);
           propertyTenantHasPet = Number.isFinite(petN) && petN >= 1;
           propertyLastTenantPetCount = Number.isFinite(petN) ? petN : null;
         }
@@ -3544,14 +3547,23 @@ const ANSWER_PROP_NEG_TTL_MS = 5 * 60 * 1000;
 export async function answerHasProperty(name: string): Promise<boolean> {
   const cached = _answerPropCache.get(name);
   if (cached && (cached.exists || Date.now() - cached.at < ANSWER_PROP_NEG_TTL_MS)) return cached.exists;
-  let exists = false;
   try {
     const { answer } = typeIds();
     await hubspotFetch(`/crm/v3/properties/${answer}/${encodeURIComponent(name)}`);
-    exists = true;
-  } catch { exists = false; }
-  _answerPropCache.set(name, { exists, at: Date.now() });
-  return exists;
+    _answerPropCache.set(name, { exists: true, at: Date.now() });
+    return true;
+  } catch (e: any) {
+    // Only cache a NEGATIVE for a GENUINE "property does not exist" (404). A
+    // transient 429/timeout/5xx must NOT be cached — otherwise it disables the
+    // property's read/gate/PDF for the whole negative TTL (the poison-cache class
+    // that hid after_photo_urls). On a transient error, return the last-known
+    // value and leave the cache untouched so the next call re-checks.
+    if (isMissingPropertyError(e, name)) {
+      _answerPropCache.set(name, { exists: false, at: Date.now() });
+      return false;
+    }
+    return cached?.exists ?? false;
+  }
 }
 
 export async function fetchAnswersForInspection(inspectionRecordId: string): Promise<SavedAnswer[]> {
@@ -5822,13 +5834,19 @@ export async function upsertAnswers(
     // Associate each new Answer to its source Question (batch)
     const qToAnswer = await getAssociationTypeId(tids.question, tids.answer, 'Answer to');
     if (qToAnswer != null) {
+      // Match each created Answer to its source Question by answer_id_external —
+      // NOT by array index. newAnswers only collects SUCCESSFUL creates, so a
+      // per-item create failure shortens/misaligns it and index-matching would
+      // link a question to the WRONG answer (and drop another's link).
+      const recordIdByExternal = new Map(newAnswers.map((a) => [a.externalId, a.recordId]));
       const qaPairs: Array<{ fromId: string; toId: string }> = [];
-      for (let j = 0; j < toCreate.length; j++) {
-        const qid = toCreate[j].questionHubspotRecordId;
-        if (!qid) continue;
-        const matchingNewAnswer = newAnswers[j];
-        if (!matchingNewAnswer) continue;
-        qaPairs.push({ fromId: qid, toId: matchingNewAnswer.recordId });
+      for (const u of toCreate) {
+        const qid = u.questionHubspotRecordId;
+        const ext = String(u.answerProps?.answer_id_external || '');
+        if (!qid || !ext) continue;
+        const toId = recordIdByExternal.get(ext);
+        if (!toId) continue; // this answer's create failed — no link to make
+        qaPairs.push({ fromId: qid, toId });
       }
       if (qaPairs.length > 0) {
         // Idempotent retry on partial failure (same rationale as the

@@ -8,7 +8,8 @@ import { CameraAILayer } from '@/components/CameraAILayer';
 import { SyncingBadge } from '@/components/SyncingBadge';
 import { SelfHealingImg } from '@/components/PhotoThumb';
 import { displayImageSrc } from '@/lib/photoDisplay';
-import { onPhotoSynced } from '@/lib/offlinePhotoStore';
+import { onPhotoSynced, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
+import { removePhotoAttachByUrl } from '@/lib/photoAttachOutbox';
 import { pushCameraOpen, popCameraOpen } from '@/lib/cameraOpenState';
 import { KnowledgeTrainerModal } from '@/components/KnowledgeTrainerModal';
 import { useBackToClose } from '@/lib/useBackToClose';
@@ -1447,6 +1448,10 @@ export function CameraCaptureLegacy({
         // Cancel in-flight upload if any. The .then() above checks aborted before
         // updating state, so this prevents stale state writes.
         found.abortController?.abort();
+        // RECALL the durable records — aborting only gates the in-camera state
+        // write; the offline queue/attach would otherwise still upload + re-attach
+        // the deleted photo (it "reappears").
+        if (found.hubspotUrl) { void discardQueuedByUrls([found.hubspotUrl]); removePhotoAttachByUrl([found.hubspotUrl]); }
         // Free the blob URL to avoid memory leaks
         try { URL.revokeObjectURL(found.blobUrl); } catch { /* harmless */ }
       }
@@ -1570,7 +1575,12 @@ export function CameraCaptureLegacy({
   }, [flushUploads, onComplete, stopStream, dialog]);
 
   const handleCancel = useCallback(() => {
-    // Abort all in-flight uploads and discard all photos
+    // Abort all in-flight uploads and discard all photos. Captures are queued to
+    // the durable store on the fly, so ALSO recall this session's queued drafts +
+    // pending attaches — otherwise "Cancel" doesn't cancel and every photo still
+    // syncs and attaches to the inspection.
+    const draftUrls = items.map((it) => it.hubspotUrl).filter(Boolean) as string[];
+    if (draftUrls.length) { void discardQueuedByUrls(draftUrls); removePhotoAttachByUrl(draftUrls); }
     for (const it of items) {
       it.abortController?.abort();
       try { URL.revokeObjectURL(it.blobUrl); } catch { /* harmless */ }

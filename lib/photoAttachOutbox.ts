@@ -71,6 +71,18 @@ export function enqueuePhotoAttach(e: Omit<PhotoAttachEntry, 'id' | 'createdAt'>
   write(list);
 }
 
+/** Drop any queued attach instructions for the given photo URL(s) — used when a
+ *  photo is DELETED/retaken or a camera session is CANCELLED, so a photo that
+ *  already uploaded (its attach was queued) doesn't still land on the record. */
+export function removePhotoAttachByUrl(urls: string[]): void {
+  if (!urls || urls.length === 0) return;
+  const drop = new Set(urls.filter(Boolean));
+  if (drop.size === 0) return;
+  const list = read();
+  const next = list.filter((e) => !drop.has(e.url));
+  if (next.length !== list.length) write(next);
+}
+
 export function countPhotoAttach(inspectionRecordId?: string): number {
   const list = read();
   return inspectionRecordId ? list.filter((e) => e.inspectionRecordId === inspectionRecordId).length : list.length;
@@ -124,7 +136,13 @@ export async function drainPhotoAttachOutbox(opts?: { skipInspectionIds?: Set<st
         signal: ctrl.signal,
       }).finally(() => clearTimeout(to));
     } catch {
-      break; // offline / network / aborted timeout — stop, retry next tick
+      // If we've actually gone offline, stop the pass (nothing will succeed).
+      // Otherwise this was a per-entry transient (hung request / aborted timeout)
+      // — SKIP it and keep draining the rest, so one stuck entry can't starve
+      // every later inspection's attach (head-of-line blocking = the "stuck sync"
+      // symptom). It stays queued and retries next tick.
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
+      continue;
     }
     if (res.ok) {
       // The endpoint may DEFER (the parent answer record doesn't exist yet — the
@@ -140,7 +158,7 @@ export async function drainPhotoAttachOutbox(opts?: { skipInspectionIds?: Set<st
       write(read().filter((x) => x.id !== e.id));
       continue;
     }
-    break; // 429 / 5xx — transient, retry next tick
+    continue; // 429 / 5xx — transient for THIS entry; skip it, keep draining others, retry next tick
   }
   return { done, remaining: read().length };
 }

@@ -139,6 +139,11 @@ export function FinalChecklist(props: Props) {
     septicFee: num(props.propertyValues?.septic_fee),
     poolFee: num(props.propertyValues?.pool_fee),
     gasProvider: (props.propertyValues?.gas_provider as string) ?? null,
+    // Without lineExists the count pill's gap check hits the add-line branch and
+    // marks an add-line question incomplete even when its line already exists in
+    // the scope — diverging from the submit gate (which passes lineExists) and
+    // leaving a section stuck at e.g. "1/2". Pass the same resolver.
+    lineExists: props.lineExists,
     airQtyPrefill: num(props.propertyValues?.air_filters___total_quantity),
     filterOptionsAvailable: (props.filterSizeOptions?.length || 0) > 0,
     filterPrefills: [
