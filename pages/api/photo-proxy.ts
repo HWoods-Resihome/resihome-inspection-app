@@ -16,16 +16,18 @@ const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
 // region and CDN — and crucially across BOTH .net AND .com TLDs:
 // hubspotusercontent-na1.net / -na2 / -eu1 / numbered variants, the bare
 // hubspotusercontent.net, AND the newer hubspotusercontent*.COM hosts, plus the
-// hubspot.net / hubspot.com CDNs, hubfs.com, hs-sites.com and hubapi.com. The
-// previous regex only allowed the .NET variants, so photos served from a .COM
-// file host 403'd in the proxy — the thumbnail broke while the direct URL (which
-// bypasses this allowlist) still opened on click. Match `hubspot<anything>.net|
-// .com` to cover every region/CDN/TLD HubSpot uses. (This is the SSRF guard on the
-// INITIAL url; the proxy then follows HubSpot's own CDN redirect and trusts it.)
+// hubspot.net / hubspot.com CDNs, hubfs.com, hs-sites.com and hubapi.com. Match
+// the `hubspotusercontent*` file family across BOTH .net and .com to cover every
+// region/CDN variant. (This is the SSRF guard on the INITIAL url; the proxy then
+// follows HubSpot's own CDN redirect and trusts it.)
 // resihome.com = HubSpot's file CDN served via the connected custom domain (this
 // portal's uploaded photos come back as https://resihome.com/hubfs/…). Without
 // it the proxy 403'd every photo → markup couldn't open the image on iOS.
-const ALLOWED_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
+// SECURITY: keep this pinned to `hubspotusercontent*` + hubspot.(com|net) — do
+// NOT loosen to `hubspot[a-z0-9-]*`, which also matches attacker-registerable
+// domains like hubspotx.com / hubspot-evil.com and would turn this UNAUTHENTICATED
+// proxy into an open proxy serving attacker content from our own origin.
+const ALLOWED_HOST_RE = /(^|\.)(hubspotusercontent[a-z0-9-]*\.(net|com)|hubspot\.(com|net)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
 
 export const config = { api: { responseLimit: false } };
 

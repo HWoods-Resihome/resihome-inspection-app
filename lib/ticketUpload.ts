@@ -29,6 +29,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { buildTicketUrl } from '@/lib/maintenanceAi';
+import { safeProxyFetch, readBodyCapped, ProxyFetchError } from '@/lib/safeProxyFetch';
+
+// A ticket document is a finalized PDF; cap the download so a body-supplied URL
+// can't stream something huge to disk.
+const MAX_DOC_BYTES = 60 * 1024 * 1024;
 
 export interface TicketUploadFile { name: string; url: string }
 export interface TicketUploadResult {
@@ -59,9 +64,18 @@ function env(name: string, fallback: string): string {
 }
 
 async function downloadToTmp(file: TicketUploadFile, dir: string, idx: number): Promise<string> {
-  const resp = await fetch(file.url);
+  // SSRF guard: file.url can be a client-supplied `pdfUrl` (non-scope templates),
+  // so route through safeProxyFetch — it follows redirects manually and refuses
+  // any hop resolving to a private/internal IP; readBodyCapped bounds the read.
+  let resp: Response;
+  try {
+    resp = await safeProxyFetch(file.url);
+  } catch (e) {
+    if (e instanceof ProxyFetchError) throw new Error(`download ${file.name} blocked: ${e.message}`);
+    throw e;
+  }
   if (!resp.ok) throw new Error(`download ${file.name} failed: HTTP ${resp.status}`);
-  const buf = Buffer.from(await resp.arrayBuffer());
+  const buf = await readBodyCapped(resp, MAX_DOC_BYTES);
   // Keep a clean, real filename (the UI shows it on the ticket).
   const safe = (file.name || `document-${idx}.pdf`).replace(/[\\/:*?"<>|]+/g, '_');
   const p = path.join(dir, safe);

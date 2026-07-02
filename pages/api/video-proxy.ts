@@ -31,7 +31,9 @@ const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 // Same HubSpot host family as photo-proxy (region/CDN/TLD variants).
 // resihome.com / resiwalk.com = HubSpot file CDN via the connected custom domain
 // (this portal's uploads resolve there), so clips stored there are proxied too.
-const ALLOWED_HOST_RE = /(^|\.)(hubspot[a-z0-9-]*\.(net|com)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
+// SECURITY: pinned to `hubspotusercontent*` + hubspot.(com|net); do NOT loosen to
+// `hubspot[a-z0-9-]*` (matches attacker-registerable hubspotx.com → open proxy).
+const ALLOWED_HOST_RE = /(^|\.)(hubspotusercontent[a-z0-9-]*\.(net|com)|hubspot\.(com|net)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
 
 export const config = { api: { responseLimit: false }, maxDuration: 60 };
 

@@ -13,12 +13,16 @@
  */
 import sharp from 'sharp';
 import { getPosterUrl } from '@/lib/media';
+import { safeProxyFetch, readBodyCapped, ProxyFetchError } from '@/lib/safeProxyFetch';
 
 const EMBED_EDGE = 520;     // long-edge px — plenty for a 90×65pt cell, even zoomed
 const EMBED_QUALITY = 70;
 const CONCURRENCY = 6;      // bounded parallel fetch+resize (caps memory/time + CDN throttling)
 const FETCH_TIMEOUT_MS = 18000;
 const MAX_ATTEMPTS = 4;
+// Hard ceiling on a fetched source image so a huge/attacker-supplied URL can't
+// OOM the PDF render (mirrors lib/pdf-images.ts).
+const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
 
 /**
  * Fetch + downscale ONE photo to a JPEG data URI, robustly: time-boxed, and
@@ -32,13 +36,19 @@ async function fetchAndEmbed(url: string): Promise<string | null> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
     try {
-      const r = await fetch(url, { signal: ctrl.signal });
+      // SSRF guard: poster URLs are client-influenced (the app stores whatever URL
+      // the client writes into an answer's photoUrls), so a caller could point one
+      // at an internal/metadata address and, if it returns a sharp-decodable image
+      // (incl. SVG), exfiltrate it into the finalized PDF. safeProxyFetch follows
+      // redirects manually and refuses any hop resolving to a private/internal IP;
+      // readBodyCapped bounds the read. Mirrors the guarded lib/pdf-images.ts.
+      const r = await safeProxyFetch(url, { signal: ctrl.signal });
       if (!r.ok) {
         const retryable = r.status === 404 || r.status === 403 || r.status === 429 || r.status >= 500;
         if (retryable && attempt < MAX_ATTEMPTS) { clearTimeout(timer); await new Promise((res) => setTimeout(res, 600 * attempt)); continue; }
         return null;
       }
-      const buf = Buffer.from(await r.arrayBuffer());
+      const buf = await readBodyCapped(r, MAX_IMAGE_BYTES);
       const jpeg = await sharp(buf)
         .rotate()
         .resize(EMBED_EDGE, EMBED_EDGE, { fit: 'inside', withoutEnlargement: true })
@@ -46,6 +56,8 @@ async function fetchAndEmbed(url: string): Promise<string | null> {
         .toBuffer();
       return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
     } catch (e: any) {
+      // SSRF-blocked / oversized / unresolvable host: not transient — don't retry.
+      if (e instanceof ProxyFetchError) return null;
       const isAbort = e?.name === 'AbortError';
       const transient = isAbort || /fetch failed|network|ECONN|ETIMEDOUT|socket/i.test(String(e?.message || e));
       if (transient && attempt < MAX_ATTEMPTS) { clearTimeout(timer); await new Promise((res) => setTimeout(res, 600 * attempt)); continue; }
