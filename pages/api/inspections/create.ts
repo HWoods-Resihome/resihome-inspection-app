@@ -268,7 +268,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    bustInspectionsCache(); // show the new inspection in the list immediately
+    await bustInspectionsCache(); // show the new inspection in the list immediately
     // Starting an inspection can unlock a new state's view-only Scope/QC for an
     // external creator — drop their cached unlock so it recomputes next load.
     if (isExternalEmail(session.email)) bustExternalUnlockedView(session.email);

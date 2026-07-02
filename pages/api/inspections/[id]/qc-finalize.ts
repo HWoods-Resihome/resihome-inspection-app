@@ -359,7 +359,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Guarantee a non-null vendor cost on the completed record ($0, or the
     // matched agent's value). Best-effort — never blocks the completion.
     try { await populateBillingFields(id); } catch (e) { console.warn('[qc-finalize] billing populate failed (continuing):', e); }
-    bustInspectionsCache(); // status → completed; reflect in the list at once
+    await bustInspectionsCache(); // status → completed; reflect in the list at once
     res.status(200).json({
       success: true,
       elapsedMs: Date.now() - t0,

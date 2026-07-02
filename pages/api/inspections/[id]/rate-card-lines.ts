@@ -342,7 +342,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
     // Drop the cached home list/counts so the updated Client $ total shows on the
     // card the moment the inspector returns to the list (no 15s cache lag).
-    bustInspectionsCache();
+    await bustInspectionsCache();
 
     // Stitch the math result back to each saved record so the client can update
     // its UI without re-fetching.

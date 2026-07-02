@@ -75,6 +75,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ids.length) }, () => worker()));
 
-  if (cancelled.length) bustInspectionsCache(); // reflect cancellations in the list at once
+  if (cancelled.length) await bustInspectionsCache(); // reflect cancellations in the list at once
   res.status(200).json({ success: true, cancelled, skipped });
 }

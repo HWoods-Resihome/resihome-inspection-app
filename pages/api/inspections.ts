@@ -13,6 +13,7 @@ import type {
   InspectionCounts,
 } from '@/lib/hubspot';
 import { isExternalEmail } from '@/lib/userAccess';
+import { getSharedGen, sharedGet, sharedSet, bumpSharedGen } from '@/lib/sharedCache';
 import type { InspectionSummary } from '@/lib/types';
 
 /**
@@ -78,12 +79,19 @@ let bustGeneration = 0;
 const REFRESH_MIN_INTERVAL_MS = 10 * 1000;
 const lastRefreshAt = new Map<string, number>();
 
-/** Invalidate cached lists/counts after a create/cancel so the change shows at once. */
-export function bustInspectionsCache(): void {
+/**
+ * Invalidate cached lists/counts after a create/cancel so the change shows at
+ * once. Returns a promise that resolves once the SHARED (cross-instance)
+ * generation has been bumped — mutation handlers should `await` it so other
+ * instances stop serving pre-mutation data. The local clear is synchronous; the
+ * shared bump is best-effort and fail-open (no-op when no KV store is connected).
+ */
+export function bustInspectionsCache(): Promise<void> {
   lists.cache.clear();
   counts.cache.clear();
   bustGeneration++; // in-flight fetches started before now won't write their (stale) result
   // Facets (inspector/template options) don't change on create/cancel — leave them.
+  return bumpSharedGen();
 }
 
 async function withCache<T>(
@@ -102,6 +110,21 @@ async function withCache<T>(
   const startedGen = bustGeneration;
   const p = (async () => {
     try {
+      // Capture the shared generation up front so a mutation racing this fetch
+      // won't let us write stale data back to the shared cache under a new gen.
+      const sharedGen = await getSharedGen();
+      // Cross-instance hit: a cold instance can serve another instance's recent
+      // result instead of re-hitting HubSpot. Skipped on a forced refresh.
+      if (!force) {
+        const shared = await sharedGet<T>(key, sharedGen);
+        if (shared != null) {
+          if (bustGeneration === startedGen) {
+            if (store.cache.size >= MAX_KEYS) store.cache.clear();
+            store.cache.set(key, { data: shared, at: Date.now() });
+          }
+          return shared;
+        }
+      }
       const data = await fn();
       // If a create/cancel busted the cache while we were fetching, this result
       // predates the mutation — don't write it back (it would serve stale data
@@ -109,6 +132,9 @@ async function withCache<T>(
       if (bustGeneration === startedGen) {
         if (store.cache.size >= MAX_KEYS) store.cache.clear();
         store.cache.set(key, { data, at: Date.now() });
+        // Populate the shared cache too (fire-and-forget; sharedSet re-checks the
+        // generation and no-ops when no KV store is connected).
+        void sharedSet(key, sharedGen, data, Math.ceil(ttl / 1000));
       }
       return data;
     } finally {

@@ -1323,7 +1323,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.warn('[finalize] could not enqueue SFTP watch (non-fatal):', e);
     }
 
-    bustInspectionsCache(); // status → completed; reflect in the list at once
+    await bustInspectionsCache(); // status → completed; reflect in the list at once
     const elapsed = Date.now() - t0;
     void completeFinalizeJob(finalizeJobId, { inspectionId: id, mode: finalizeMode, status: 'succeeded', phase: 'completed', elapsedMs: elapsed, actorEmail: session.email });
     return res.status(200).json({
