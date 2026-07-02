@@ -40,7 +40,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // so the webhook's 200 isn't held on HubSpot searches (HubSpot wants a fast
     // ack and will retry a slow/failed delivery).
     await bumpSharedGen();
-    void warmInspectionsCache();
+    // Fire-and-forget, but attach a catch: warmInspectionsCache() can reject when
+    // KV is connected AND HubSpot is failing (exactly a 429 storm), and it settles
+    // AFTER this handler's try block returns the 200 — an un-caught rejection would
+    // escape to Node's unhandledRejection. Mirrors the SWR background-refresh guard.
+    void warmInspectionsCache().catch(() => {});
   } catch {
     /* never fail a webhook loudly */
   }
