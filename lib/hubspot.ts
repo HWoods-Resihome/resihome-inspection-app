@@ -5,7 +5,7 @@ import type { Question, Property, HubSpotUser, InspectionSummary } from './types
 import { isInternalResolution } from './vendors';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from './answerProps';
 import { extractLeasingAgent1099Fields } from './leasingAgent1099';
-import { calculateLine } from './rateCardMath';
+import { calculateLine, roundMoney } from './rateCardMath';
 import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion, isExternalEmail } from './userAccess';
 import { normalizeApprovalRouting, type ApprovalRoutingConfig } from './approvalRouting';
 
@@ -5122,7 +5122,12 @@ export async function recomputeInspectionTotals(
     region?: string; // inspection region; fetched from the record if omitted
   } = {},
 ): Promise<{ vendor: number; client: number; tenant: number; lineCount: number; wrote: boolean }> {
-  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  // Use the SAME rounding as every per-line stored value and every billing
+  // document (rate-card-lines save, chargeback PDF/XLSX, vendor/master PDFs all
+  // use roundMoney). A local EPSILON-nudged round2 here rounded exactly-half
+  // values UP where roundMoney rounds down, so the stored/headline rollup could
+  // read a cent-per-line HIGHER than the amount actually billed.
+  const round2 = roundMoney;
   const answers = await fetchAnswersForInspection(inspectionId);
   const lineAnswers = answers.filter((a) => a.answerType === 'rate_card_line' && a.rateCardLine);
 

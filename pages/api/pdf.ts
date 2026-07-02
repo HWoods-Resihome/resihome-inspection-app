@@ -5,7 +5,7 @@ import React from 'react';
 import { InspectionPdf, PdfData, PdfAnswer } from '@/lib/pdf';
 import { uploadFileWithId, attachPdfUrlToInspection, attachFilesToInspectionRecord, updateInspection } from '@/lib/hubspot';
 import { buildShortLink } from '@/lib/shortLinks';
-import { externalViewDenial } from '@/lib/inspectionGuard';
+import { externalOwnedWriteDenial } from '@/lib/inspectionGuard';
 import { resolveImagesInParallel } from '@/lib/pdf-images';
 import { getPosterUrl } from '@/lib/media';
 import type { AnswerInput } from '@/lib/types';
@@ -58,11 +58,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const body = req.body as GeneratePdfBody;
 
-    // External (1099) users may only generate/view PDFs for inspections they're
-    // allowed to see (any 1099, plus COMPLETED Scope/Re-Inspect). No-op + no
-    // extra read for internal users.
+    // This endpoint WRITES to the record (pdf_attachment_url, link_report, an
+    // attached note), so external users must OWN the inspection — the read guard
+    // allows viewing ANY 1099, which would let an external user overwrite another
+    // user's report (IDOR). Ownership (fail-closed on blank owner), not the
+    // completed-status block, is the right gate: regenerating your own completed
+    // 1099's report is legitimate. No-op + no extra read for internal users.
     if (body.inspectionRecordId) {
-      const denial = await externalViewDenial(session.email, body.inspectionRecordId);
+      const denial = await externalOwnedWriteDenial(session.email, body.inspectionRecordId);
       if (denial) return res.status(403).json({ error: denial });
     }
 

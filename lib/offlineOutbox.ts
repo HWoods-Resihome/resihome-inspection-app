@@ -81,24 +81,75 @@ export function enqueue(entry: Omit<OutboxEntry, 'id' | 'createdAt'>): void {
  * current dirty set — so repeated offline ticks don't pile up. Replays
  * idempotently (the server upserts by answer_id_external) when service returns.
  */
+const answerUpsertExternalId = (u: any): string =>
+  String(u?.answerProps?.answer_id_external || '');
+
+/** MERGE a new answers snapshot into any existing one by answer_id_external
+ *  (newest-wins), unioning archives. The caller sends only its CURRENT dirty set,
+ *  which after a reopen is NOT a superset of what's already queued (offline
+ *  answers entered before the reopen aren't re-hydrated as dirty), so a blind
+ *  replace would silently DROP those queued answers. */
+function mergeAnswerBodies(prev: any, cur: any): any {
+  if (!prev || !Array.isArray(prev.upserts) || !Array.isArray(cur?.upserts)) return cur;
+  const byExt = new Map<string, any>();
+  const keyless: any[] = [];
+  const add = (u: any) => { const k = answerUpsertExternalId(u); if (k) byExt.set(k, u); else keyless.push(u); };
+  for (const u of prev.upserts) add(u);
+  for (const u of cur.upserts) add(u); // current wins for a shared external id
+  const archives = Array.from(new Set([...(prev.archives || []), ...(cur.archives || [])]));
+  return { ...cur, upserts: [...byExt.values(), ...keyless], archives };
+}
+
 export function enqueueAnswers(inspectionRecordId: string, endpoint: string, body: any): void {
-  // DETERMINISTIC id (one per inspection) so the replace-on-write here AND the
+  // DETERMINISTIC id (one per inspection) so the merge-on-write here AND the
   // native mirror replace both key on the same id — the native copy can never
   // accumulate stale snapshots of an inspection's answers.
   const id = `ob_answers_${inspectionRecordId}`;
-  const list = read().filter((e) => !(e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId));
-  list.push({ id, inspectionRecordId, endpoint, method: 'POST', body, kind: 'answers', createdAt: Date.now() });
-  write(list);
+  const list = read();
+  const prev = list.find((e) => e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId);
+  const merged = mergeAnswerBodies(prev?.body, body);
+  const next = list.filter((e) => !(e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId));
+  next.push({ id, inspectionRecordId, endpoint, method: 'POST', body: merged, kind: 'answers', createdAt: Date.now() });
+  write(next);
   if (!isLocalInspectionId(inspectionRecordId)) {
-    mirrorAnswerToNativeBgUpload({ id, inspectionRecordId, endpoint, method: 'POST', body });
+    mirrorAnswerToNativeBgUpload({ id, inspectionRecordId, endpoint, method: 'POST', body: merged });
   }
 }
 
-/** Drop the consolidated answers entry once an online save has persisted them. */
-export function clearAnswersEntry(inspectionRecordId: string): void {
-  write(read().filter((e) => !(e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId)));
-  // Keep the native mirror in lockstep — the web has the authoritative latest.
-  clearNativeBgUploadAnswer(`ob_answers_${inspectionRecordId}`);
+/**
+ * Drop CONFIRMED answers from the consolidated entry once an online save has
+ * persisted them. Pass the answer_id_externals the server actually confirmed:
+ * only those are removed, so answers still queued (e.g. offline answers entered
+ * before a reopen, which autosave's dirty set no longer tracks) SURVIVE and get
+ * replayed rather than being wiped by a partial online save. Omit the ids to drop
+ * the whole entry (legacy behavior).
+ */
+export function clearAnswersEntry(inspectionRecordId: string, confirmedExternalIds?: string[]): void {
+  const list = read();
+  const entry = list.find((e) => e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId);
+  const id = `ob_answers_${inspectionRecordId}`;
+  if (!entry || !confirmedExternalIds || !Array.isArray((entry.body as any)?.upserts)) {
+    // No id list (or nothing to prune) → drop the whole entry.
+    write(list.filter((e) => !(e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId)));
+    clearNativeBgUploadAnswer(id);
+    return;
+  }
+  const confirmed = new Set(confirmedExternalIds.filter(Boolean));
+  const remaining = (entry.body as any).upserts.filter((u: any) => !confirmed.has(answerUpsertExternalId(u)));
+  const remArchives = (entry.body as any).archives || [];
+  if (remaining.length === 0 && (!Array.isArray(remArchives) || remArchives.length === 0)) {
+    // Everything queued is now confirmed — drop the entry entirely.
+    write(list.filter((e) => !(e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId)));
+    clearNativeBgUploadAnswer(id);
+    return;
+  }
+  // Some answers remain unsynced — keep a pruned entry so they still replay.
+  const prunedBody = { ...(entry.body as any), upserts: remaining };
+  const next = list.map((e) => (e === entry ? { ...e, body: prunedBody } : e));
+  write(next);
+  if (!isLocalInspectionId(inspectionRecordId)) {
+    mirrorAnswerToNativeBgUpload({ id, inspectionRecordId, endpoint: entry.endpoint, method: 'POST', body: prunedBody });
+  }
 }
 
 export function entriesFor(inspectionRecordId: string): OutboxEntry[] {

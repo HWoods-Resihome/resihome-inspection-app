@@ -314,7 +314,14 @@ export function useAutosave(opts: Options) {
       // (these answers are now persisted server-side, so it mustn't double-replay).
       consecutiveErrorsRef.current = 0;
       errorBackoffUntilRef.current = 0;
-      try { clearAnswersEntry(inspectionRecordId); } catch { /* non-fatal */ }
+      // Drop ONLY the answers the server confirmed from the durable stash — NOT
+      // the whole entry. A partial flush (autosave's current dirty subset) must
+      // not wipe answers still queued from a prior offline session that this
+      // reopen didn't re-hydrate as dirty; those stay and get replayed.
+      try {
+        const confirmedExternalIds = results.filter((r) => !r.failed && r.answerIdExternal).map((r) => r.answerIdExternal);
+        clearAnswersEntry(inspectionRecordId, confirmedExternalIds);
+      } catch { /* non-fatal */ }
 
       onSaveSuccess?.(updatedKeys);
       // First successful save of this session → record an "edited" audit event.

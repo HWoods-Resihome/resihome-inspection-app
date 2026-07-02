@@ -19,7 +19,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { fetchInspectionWithPropertyRef, readInspectionProps, updateInspection } from '@/lib/hubspot';
-import { isExternalEmail } from '@/lib/userAccess';
+import { isExternalEmail, externalCanEditTemplate } from '@/lib/userAccess';
 import { createMaintenanceTicket, buildInspectionTicketDescription, buildTicketUrl } from '@/lib/maintenanceAi';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 
@@ -62,9 +62,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Completed at this point (raising a ticket isn't editing it), and that guard
     // blocks writes to completed records. Internal users are unrestricted.
     if (isExternalEmail(session.email)) {
+      // Confine external callers to the 1099 template (the only type they can
+      // act on) so they can't raise a company maintenance ticket off a vacancy/
+      // scope/QC record they merely have view access to.
+      if (!externalCanEditTemplate(data.inspection.templateType)) {
+        return res.status(403).json({ error: 'Your account cannot raise tickets for this inspection type.' });
+      }
       const owner = (data.inspection.inspectorEmail || '').trim().toLowerCase();
       const me = (session.email || '').trim().toLowerCase();
-      if (owner && owner !== me) {
+      // Fail CLOSED on a blank owner (mirrors the externalAccessDenial write path):
+      // an unassigned inspection must not be ticketable by any external user.
+      if (!owner || owner !== me) {
         return res.status(403).json({ error: 'You can only raise tickets for your own inspections.' });
       }
     }
