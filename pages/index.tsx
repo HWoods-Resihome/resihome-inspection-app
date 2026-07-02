@@ -10,7 +10,7 @@ import { ListPicker } from '@/components/ListPicker';
 import { ViewAsPicker } from '@/components/ViewAsPicker';
 import {
   loadCachedRateCard, saveCachedRateCard,
-  loadCachedMe, saveCachedMe,
+  loadCachedMe, saveCachedMe, clearCachedMe,
 } from '@/lib/offlineCache';
 import { precacheActiveInspections } from '@/lib/precache';
 import { warmAi } from '@/lib/aiWarm';
@@ -553,6 +553,10 @@ export default function Home() {
 
   async function handleLogout() {
     try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
+    // Clear the cached identity so an OFFLINE reload after logout doesn't keep
+    // rendering the app as the (now signed-out) user — the cookie is gone
+    // server-side, but /api/auth/me can't be reached offline to confirm it.
+    clearCachedMe();
     router.replace('/login');
   }
 
@@ -562,7 +566,12 @@ export default function Home() {
 
   // Snap back to page 1 whenever the result set's shape changes (new filter,
   // search, sort, or page size) so the user isn't stranded past the last page.
+  // SKIP the first run (mount): it would otherwise immediately clobber the page
+  // number restored from the saved view (savedView.page), so "land where you left
+  // off" never actually restored the page.
+  const pageResetMountRef = useRef(true);
   useEffect(() => {
+    if (pageResetMountRef.current) { pageResetMountRef.current = false; return; }
     setPage(1);
   }, [search, statusFilter, inspectorFilter, templateFilter, regionFilter, sortField, sortDir, pageSize]);
 

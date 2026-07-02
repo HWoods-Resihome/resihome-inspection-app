@@ -301,8 +301,14 @@ self.addEventListener('fetch', (event) => {
           // no-store: bypass the HTTP cache so a reload after a deploy ALWAYS gets
           // the fresh HTML (which references the new hashed chunks) in one go.
           const fresh = await fetch(req, { cache: 'no-store' });
-          const cache = await caches.open(CACHE);
-          cache.put(req, fresh.clone());
+          // Only cache a real, non-redirected page. A session-expiry 302→/login or
+          // a 5xx error page (fetch follows redirects) must NOT be cached under the
+          // requested route URL, or an offline reload would serve the login/error
+          // page instead of the inspection shell until a later online nav overwrites it.
+          if (fresh.ok && !fresh.redirected) {
+            const cache = await caches.open(CACHE);
+            cache.put(req, fresh.clone());
+          }
           return fresh;
         } catch {
           const cache = await caches.open(CACHE);

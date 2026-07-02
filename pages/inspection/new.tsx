@@ -8,7 +8,7 @@ import type {
 } from '@/lib/types';
 import { Combobox } from '@/components/Combobox';
 import { NumberField } from '@/components/NumberPad';
-import { saveCachedProperties, loadCachedMe, saveCachedMe, saveCachedInspection, loadCachedQuestions, loadCachedRateCard } from '@/lib/offlineCache';
+import { saveCachedProperties, loadCachedMe, saveCachedMe, clearCachedMe, saveCachedInspection, loadCachedQuestions, loadCachedRateCard } from '@/lib/offlineCache';
 import { EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
 import { newLocalIds, addPendingInspection, buildSeedPayload } from '@/lib/pendingInspections';
 import { syncAllProperties, searchCachedProperties, dropPropertyMemCache } from '@/lib/propertyCache';
@@ -787,6 +787,7 @@ export default function NewInspection() {
                     <p className="text-xs text-gray-500 mt-1">
                       Signed in as the inspector. <button type="button" onClick={async () => {
                         try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
+                        clearCachedMe(); // don't keep the signed-out user cached for offline reloads
                         router.replace('/login');
                       }} className="text-brand underline">Sign out</button> to change.
                     </p>

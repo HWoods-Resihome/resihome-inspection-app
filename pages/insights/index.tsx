@@ -15,6 +15,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { InsightsDashboard } from '@/components/insights/Dashboard';
 import { InsightsUsersManager } from '@/components/insights/InsightsUsersManager';
+import { clearCachedMe } from '@/lib/offlineCache';
 
 interface Access {
   authenticated: boolean;
@@ -105,6 +106,7 @@ function AccountMenu({ name, email }: { name: string; email: string }) {
   async function signOut() {
     setBusy(true);
     try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* clear anyway */ }
+    clearCachedMe(); // drop the cached identity so an offline reload doesn't show the signed-out user
     window.location.href = '/login';
   }
 

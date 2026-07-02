@@ -24,6 +24,7 @@
  * (never substitutes 0), so averages and rates are honest.
  */
 import type { InsightsRow, InsightsDailyRollup, StatusBucket, AiOverrideRow } from '@/lib/insightsSnapshot';
+import { hubspotToMs } from '@/lib/hubspotDate';
 
 // ---- Template-type sets the pass/fail rules key off --------------------------
 export const TEMPLATE_1099 = 'leasing_agent_1099_property_inspection';
@@ -377,8 +378,15 @@ export function templateTypeOptions(rows: InsightsRow[]): string[] {
 
 function diffMs(end: string | null, start: string | null): number | null {
   if (!end || !start) return null;
-  const ms = Date.parse(end) - Date.parse(start);
-  return Number.isFinite(ms) && ms >= 0 ? ms : null;
+  // Route through hubspotToMs: approvedAt/submittedAt arrive as epoch-ms strings
+  // (Date.parse → NaN), which previously excluded every finalized Scope/Rate-Card
+  // inspection from turnaround metrics. completedAt/scheduledDate are ISO — also
+  // handled.
+  const e = hubspotToMs(end);
+  const s = hubspotToMs(start);
+  if (e == null || s == null) return null;
+  const ms = e - s;
+  return ms >= 0 ? ms : null;
 }
 
 /** Total turnaround for one row, or null if not a completed row with both dates. */
@@ -681,8 +689,9 @@ export function fmtCurrency(n: number | null): string {
 
 /** Localized date for table cells; "—" for null/unparseable. */
 export function fmtDate(iso: string | null): string {
-  if (!iso) return '—';
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return '—';
+  // hubspotToMs handles both epoch-ms (approvedAt/submittedAt) and ISO
+  // (completedAt); Date.parse alone rendered every epoch-ms date as "—".
+  const t = hubspotToMs(iso);
+  if (t == null) return '—';
   return new Date(t).toLocaleDateString();
 }

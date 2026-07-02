@@ -22,6 +22,8 @@ import { searchInspectionsPage, countInspectionsCancelled, fetchQuestionsForTemp
 import { readAiFeedback } from '@/lib/aiFeedback';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import type { InspectionSummary } from '@/lib/types';
+import { hubspotToMs } from '@/lib/hubspotDate';
+import { rowVerdict } from '@/lib/insightsMetrics';
 
 export const SNAPSHOT_BLOB_PATH = 'insights/snapshot.json';
 export const HISTORY_BLOB_PREFIX = 'insights/history/';
@@ -326,9 +328,12 @@ async function buildAiOverrides(rows: InsightsRow[]): Promise<AiOverrideRow[]> {
       editorEmail = actorEmail;
       editorName = e.actorName || e.actorEmail || actorEmail;
     } else if (row.approverName) {
-      const submittedMs = row.submittedAt ? Date.parse(row.submittedAt) : NaN;
-      const eventMs = e.ts ? Date.parse(e.ts) : NaN;
-      if (isFinite(submittedMs) && isFinite(eventMs) && eventMs >= submittedMs) {
+      // submittedAt is an epoch-ms string (Date.parse → NaN) — normalize both so
+      // the "edited after submit ⇒ credit the approver" branch actually fires,
+      // instead of always mis-crediting the inspector.
+      const submittedMs = hubspotToMs(row.submittedAt);
+      const eventMs = hubspotToMs(e.ts);
+      if (submittedMs != null && eventMs != null && eventMs >= submittedMs) {
         editorName = row.approverName;
         editorEmail = emailByName.get(row.approverName.trim().toLowerCase()) || '';
       }
@@ -487,13 +492,22 @@ export function buildDailyRollup(snap: InsightsSnapshot): InsightsDailyRollup {
     if (r.status === 'completed') {
       completed++;
       const end = r.approvedAt || r.completedAt;
-      if (end && r.scheduledDate) {
-        const ms = Date.parse(end) - Date.parse(r.scheduledDate);
-        if (Number.isFinite(ms) && ms >= 0) { turnSum += ms; turnN++; }
+      // approvedAt is epoch-ms (Date.parse → NaN) and wins the ||, so the daily
+      // turnaround rollup dropped every finalized inspection with an approver.
+      const endMs = hubspotToMs(end);
+      const startMs = hubspotToMs(r.scheduledDate);
+      if (endMs != null && startMs != null) {
+        const ms = endMs - startMs;
+        if (ms >= 0) { turnSum += ms; turnN++; }
       }
     }
-    // Pass/fail: 1099/Vacancy via inspection_result, QC via qcVerdict (Scope excluded).
-    const verdict = r.inspectionResult || r.qcVerdict;
+    // Pass/fail via the SAME template-gated rule the live metrics use (rowVerdict):
+    // inspection_result only for 1099/Vacancy, qcVerdict only for QC, everything
+    // else (Scope, RRQC new-construction, Community) excluded. The previous
+    // `r.inspectionResult || r.qcVerdict` had no template gate, so it banked
+    // verdicts for excluded templates (e.g. an RRQC inspection_result) and used a
+    // different population than the headline pass rate.
+    const verdict = rowVerdict(r);
     if (verdict === 'pass') passCount++;
     else if (verdict === 'fail') failCount++;
   }
