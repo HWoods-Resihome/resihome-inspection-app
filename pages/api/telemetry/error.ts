@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { getSessionFromRequest } from '@/lib/auth';
 
 /**
  * Sink for client-side error reports (see lib/clientErrorReporter.ts). Logs a
@@ -7,18 +8,23 @@ import type { NextApiRequest, NextApiResponse } from 'next';
  * is set, the report is also forwarded there (Slack/Sentry/any HTTP collector).
  *
  * This endpoint deliberately does NOT require the data to be well-formed and
- * never errors loudly — telemetry should never break the app.
+ * never errors loudly — telemetry should never break the app. It stays open to
+ * unauthenticated callers ON PURPOSE so pre-login crashes (login/install pages)
+ * are still captured; the session email is attached only for attribution.
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
     const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
+    const session = await getSessionFromRequest(req).catch(() => null);
     const record = {
+      ...body,
+      // Server-authoritative fields — placed AFTER the spread so a caller can't
+      // override level/source (log/alert-channel poisoning) or spoof context.
       level: 'error',
       source: 'client',
-      ...body,
-      // Server-observed context (don't trust the client for these).
+      reporterEmail: session?.email || undefined,
       receivedAt: new Date().toISOString(),
       ip: (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress || undefined,
     };

@@ -149,6 +149,17 @@ export default function ExistingInspection() {
   // Load inspection + answers
   useEffect(() => {
     if (!inspectionId) return;
+    // The prev/next InspectionPager swaps only `inspectionId` while this page
+    // stays mounted. If we're switching to a DIFFERENT record than the one
+    // currently loaded, drop to the loading screen and clear the stale record so
+    // we never render the new inspection under the previous one's still-loaded
+    // property context (square footage, air filters, pricing inputs, and even the
+    // form component chosen off templateType). The temp→real id swap re-keys the
+    // SAME record, so it also resets briefly — acceptable, its data is identical.
+    if (inspection && inspection.recordId !== inspectionId) {
+      setStage('loading');
+      setInspection(null);
+    }
     let cancelled = false;
     (async () => {
       // Apply a GET /api/inspections/[id] payload to state. Shared by the live

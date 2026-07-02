@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { put } from '@vercel/blob';
+import { getSessionFromRequest } from '@/lib/auth';
 
 /**
  * Sink for offline-sync telemetry (see lib/syncTelemetry.ts). Logs a structured
@@ -13,9 +14,18 @@ import { put } from '@vercel/blob';
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  // Require a session: this writes a PUBLIC blob whose key is derived from the
+  // request. Unauthenticated it was a public write sink with an attacker-chosen
+  // key and unbounded content. Sync telemetry only fires for signed-in inspectors,
+  // so drop anything else silently (telemetry must never error loudly).
+  const session = await getSessionFromRequest(req);
+  if (!session) return res.status(204).end();
+
   try {
     const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {});
-    const inspectionId = String(body?.inspectionId || '').slice(0, 64);
+    // Sanitize hard: the id becomes a blob PATH segment, so strip anything that
+    // could traverse into another namespace (`/`, `.`) or collide by charset.
+    const inspectionId = String(body?.inspectionId || '').slice(0, 64).replace(/[^A-Za-z0-9_-]/g, '');
     if (inspectionId) {
       const record = {
         inspectionId,

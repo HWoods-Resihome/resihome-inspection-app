@@ -28,6 +28,11 @@ export interface StoredPushTarget {
   createdAt: string;
 }
 
+// Cap distinct push targets per user. The same device overwrites (stable
+// targetId), so growth only comes from a client rotating fake endpoints/tokens;
+// this bounds that and keeps fan-out cheap. Oldest beyond the cap are evicted.
+const MAX_TARGETS_PER_USER = 20;
+
 function emailKey(email: string): string {
   return createHash('sha256').update(String(email).trim().toLowerCase()).digest('hex').slice(0, 24);
 }
@@ -59,11 +64,22 @@ export async function savePushTarget(t: {
   try {
     await put(blobPath(record.userEmail, targetId(t)), JSON.stringify(record),
       { access: 'public', contentType: 'application/json', allowOverwrite: true, addRandomSuffix: false });
-    return true;
   } catch (e: any) {
     console.warn('[push] save target failed:', String(e?.message || e).slice(0, 120));
     return false;
   }
+  // Enforce the per-user cap (best-effort): evict the oldest targets beyond it so
+  // a client can't mint unbounded push blobs by rotating fake endpoints/tokens.
+  try {
+    const targets = await getPushTargets(record.userEmail);
+    if (targets.length > MAX_TARGETS_PER_USER) {
+      const oldestFirst = targets.slice().sort((a, b) =>
+        String(a.target.createdAt || '').localeCompare(String(b.target.createdAt || '')));
+      const excess = oldestFirst.slice(0, targets.length - MAX_TARGETS_PER_USER);
+      await Promise.all(excess.map((x) => deletePushTargetByPath(x.pathname)));
+    }
+  } catch { /* best-effort cap — never fail the subscribe on eviction trouble */ }
+  return true;
 }
 
 /** All push targets for a user (across devices). */

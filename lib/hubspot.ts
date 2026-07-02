@@ -2397,6 +2397,7 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
       templateType: p.template_type || '',
       status: p.status || '',
       propertyAddressSnapshot: p.property_address_snapshot || '',
+      propertyRecordId: p.property_id_ref || null,
       inspectorName: p.inspector_name || '',
       inspectorEmail: p.inspector_email || '',
       bedroomsAtInspection: p.bedrooms_at_inspection != null && p.bedrooms_at_inspection !== ''

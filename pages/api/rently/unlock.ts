@@ -10,6 +10,8 @@
 // status codes), so callers MUST branch on the JSON `status` field, not res.status.
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { isExternalEmail, externalAccessDenial } from '@/lib/userAccess';
+import { fetchInspectionById } from '@/lib/hubspot';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -39,6 +41,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
+  // Authorization. Internal field staff may unlock any property they're working.
+  // But an EXTERNAL (1099) user must be unlocking a property tied to an inspection
+  // they OWN — otherwise any signed-in 1099 could POST an arbitrary propertyId/
+  // address and receive a real physical door code for ANY property (IDOR). For
+  // external users we IGNORE the raw client propertyId/address and forward the
+  // server-verified values off the owned inspection record.
+  const denied = () => res.status(200).json({
+    status: 'FAILED', errorClass: 'forbidden', error: 'Not authorized to unlock this property.',
+  });
+  let targetPropertyId = propertyId || '';
+  let targetAddress = address || '';
+  if (isExternalEmail(session.email)) {
+    const inspId = String(inspectionId || '').trim();
+    if (!inspId) { denied(); return; }
+    let insp = null;
+    try { insp = await fetchInspectionById(inspId); } catch { insp = null; }
+    if (!insp) { denied(); return; }
+    // Must be the user's OWN 1099 walk, and not yet completed. externalAccessDenial
+    // with write:true fails CLOSED on a blank owner — an unassigned inspection is
+    // not unlockable by any external user who merely has view access to it.
+    const denial = externalAccessDenial(session.email, insp.templateType, {
+      write: true, status: insp.status, ownerEmail: insp.inspectorEmail,
+    });
+    if (denial) { denied(); return; }
+    // The requested property must match the inspection's linked property, and we
+    // forward the SERVER-verified property id/address — never raw client input.
+    const inspPropId = (insp.propertyRecordId || '').trim();
+    if (!inspPropId || (propertyId && String(propertyId).trim() !== inspPropId)) { denied(); return; }
+    targetPropertyId = inspPropId;
+    targetAddress = insp.propertyAddressSnapshot || '';
+  }
+
   // Don't hang the inspector forever on a slow door call.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 25000);
@@ -50,8 +84,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         token,
-        propertyId: propertyId || '',
-        address: address || '',
+        propertyId: targetPropertyId,
+        address: targetAddress,
         // The Rently access-log label is the signed-in ResiWalk inspector's name
         // (authoritative, from the session) — no vendor name/email is required of
         // the inspector. The endpoint pulls the lock details from the Property.

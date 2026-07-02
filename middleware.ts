@@ -45,6 +45,7 @@ const PUBLIC_PATHS = new Set<string>([
   '/api/cron/sftp-watch',
   '/api/cron/blob-cleanup',
   '/api/cron/auto-cancel-stale',
+  '/api/cron/training-guide-sync',
   // Insights snapshot rebuild: reached by Vercel Cron (no session cookie) and by
   // admins. Self-enforces CRON_SECRET bearer / app-admin session in the handler.
   '/api/insights/rebuild',
