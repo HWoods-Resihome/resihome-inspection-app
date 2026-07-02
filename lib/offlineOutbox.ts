@@ -228,7 +228,17 @@ export async function flushOutbox(
     if (res.ok) {
       let data: any = null;
       try { data = await res.json(); } catch { /* no body */ }
-      remove(entry.id);
+      if (entry.kind === 'answers' && Array.isArray((entry.body as any)?.upserts)) {
+        // The consolidated answers entry has a STABLE id and is merge-on-write, so
+        // an answer entered during this replay's await may have merged into the
+        // same entry. A blanket remove(entry.id) would WIPE it (lost update).
+        // Prune only the external ids we actually SENT — anything merged in stays
+        // queued for the next tick (mirrors clearAnswersEntry on the autosave path).
+        const sentIds = (entry.body as any).upserts.map((u: any) => answerUpsertExternalId(u)).filter(Boolean);
+        clearAnswersEntry(entry.inspectionRecordId, sentIds);
+      } else {
+        remove(entry.id);
+      }
       synced++;
       try { onSynced?.(entry, data); } catch { /* non-fatal */ }
     } else if (res.status === 401 || res.status === 403) {
