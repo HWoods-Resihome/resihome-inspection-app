@@ -81,6 +81,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return;
     }
     const inspection = data.inspection;
+    // Terminal-state guard (mirrors submit.ts): a stale tab / queued retry / a
+    // concurrent request on another instance must not re-finalize an already
+    // completed QC — that would FLIP the verdict from the request body, attach a
+    // DUPLICATE report note, and drift completed_at. The supported reopen path
+    // sets status back to in_progress first, so a legitimate re-finalize is never
+    // in the completed state here.
+    const curStatus = (inspection.status || '').trim().toLowerCase();
+    if (curStatus === 'completed' || curStatus === 'complete') {
+      res.status(409).json({ error: 'This inspection is already completed. Reopen it before finalizing again.', alreadyCompleted: true });
+      return;
+    }
     const answers = await fetchAnswersForInspection(id);
 
     // Group lines + after-photos by section instance (location), preserving

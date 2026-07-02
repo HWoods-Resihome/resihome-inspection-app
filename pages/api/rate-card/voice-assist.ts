@@ -28,7 +28,7 @@ import { aliasFor } from '@/lib/voiceAliases';
 import {
   correctCleanLevel, correctBlinds, wholeHouseExempt,
   measuredUnitOf, measurementWord, isStairCount, resolveTenantPct,
-  roomFromUtterance, countItemPhrases,
+  roomFromUtterance, countItemPhrases, normalizeVendor,
 } from '@/lib/rateCardAiCore';
 import { calculateLine } from '@/lib/rateCardMath';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
@@ -790,8 +790,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             if (!bid) {
               result = { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ error: 'No bid-item line exists in the catalog, so a bid item cannot be added by voice.' }) };
             } else {
-              let bidVendor = tu.input?.vendor ? String(tu.input.vendor) : 'Vendor 1';
-              if (!VENDORS.includes(bidVendor)) bidVendor = 'Vendor 1';
+              // Case/whitespace-insensitive vendor match (see propose_line).
+              const bidVendor = normalizeVendor(tu.input?.vendor ? String(tu.input.vendor) : '');
               let bidPct = 100;
               if (tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent))) {
                 bidPct = Math.max(0, Math.min(100, Math.round(Number(tu.input.tenantBillBackPercent) / 5) * 5));
@@ -833,11 +833,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             // Shared guards (identical to the camera AI, via lib/rateCardAiCore):
             // an explicit "level 1/2" clean → that exact tier; a bare "blind" →
             // faux-wood blind replacement.
-            item = correctCleanLevel(item, allUserText, catalog);
+            // Use the CURRENT utterance, NOT the accumulated session transcript
+            // (allUserText): a "level 2" spoken on an earlier turn must not swap a
+            // later, unrelated clean up to its L2 (higher-priced) sibling. Matches
+            // correctBlinds below and the room-scan surfaces.
+            item = correctCleanLevel(item, lastUtterance, catalog);
             item = correctBlinds(item, lastUtterance, catalog);
             const qty = Number(tu.input?.quantity);
-            let vendor = tu.input?.vendor ? String(tu.input.vendor) : 'Vendor 1';
-            if (!VENDORS.includes(vendor)) vendor = 'Vendor 1';
+            // Case/whitespace-insensitive vendor match (normalizeVendor) so a
+            // variant like "ppw" isn't silently reassigned to Vendor 1 and the
+            // work misrouted; matches room-scan-live's resolution.
+            const vendor = normalizeVendor(tu.input?.vendor ? String(tu.input.vendor) : '') || 'Vendor 1';
             let pct: number;
             if (tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent))) {
               pct = Math.max(0, Math.min(100, Math.round(Number(tu.input.tenantBillBackPercent) / 5) * 5));
@@ -898,7 +904,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   lineSection = named.name; lineLocation = named.name; lineSectionId = named.id;
                 }
               }
-              const vendorStated = tu.input?.vendor != null && VENDORS.includes(String(tu.input.vendor));
+              // Show the vendor on the confirmation when the model stated one that
+              // resolved to a real (non-default) vendor — derived from the
+              // NORMALIZED result so a cased variant ("ppw"→"PPW") still shows.
+              const vendorStated = tu.input?.vendor != null && vendor !== 'Vendor 1';
               const pctStated = tu.input?.tenantBillBackPercent != null && isFinite(Number(tu.input.tenantBillBackPercent));
               // Whole-house SF line: fill it with the property square footage so
               // the confirmation price reflects what the app actually saves

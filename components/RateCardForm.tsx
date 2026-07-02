@@ -1522,13 +1522,30 @@ export function RateCardForm(props: RateCardFormProps) {
     // Make sure the room the line landed in is expanded so it's actually visible.
     setExpanded((e) => (e[effSectionId] ? e : { ...e, [effSectionId]: true }));
 
-    // Skip the network call if we're not yet ready to save (still hydrating).
-    // The line is now in linesBySection; once linesHydrated flips true the
-    // useEffect below will catch up any pending dirty lines.
-    // Not ready to persist yet (still hydrating) or read-only: the line is in
-    // local state; treat as a non-failure so the assistant doesn't cry wolf.
-    if (!linesHydrated || props.readOnly) {
+    // Read-only: keep the line in local state but never persist.
+    if (props.readOnly) {
       return { ok: true, requested: sectionId, routedTo: effSectionId, reRouted: effSectionId !== sectionId, skippedSave: true };
+    }
+    // Not yet hydrated: we don't know existing recordIds, so a direct save could
+    // race the hydration fetch. Previously this SKIPPED the save entirely — and
+    // the hydration replace (setLinesBySection) then clobbered the optimistic
+    // insert, so a line added during the load window (e.g. a voice add on field
+    // LTE) was silently never saved AND vanished from view. Instead enqueue it
+    // durably: the outbox replays it after hydration, and the post-hydration
+    // catch-up effect re-shows it (both keyed by externalId, so no duplicate).
+    if (!linesHydrated) {
+      const noBlobDraft = (a?: string[]) => (a || []).filter((u) => !u.startsWith('blob:'));
+      const durableLine: RateCardLineInput = { ...line, photoUrls: noBlobDraft(line.photoUrls), afterPhotoUrls: noBlobDraft(line.afterPhotoUrls) };
+      outboxEnqueue({
+        inspectionRecordId: props.inspectionRecordId,
+        endpoint: `/api/inspections/${props.inspectionRecordId}/rate-card-lines`,
+        method: 'POST',
+        body: { upserts: [{ recordId: recordIdsByExternalId[line.externalId], line: durableLine }], archives: [], bumpStatusToInProgress: true },
+        kind: 'line',
+        meta: { sectionId: effSectionId, line: durableLine, externalId: line.externalId },
+      });
+      setPendingSync(outboxCountFor(props.inspectionRecordId));
+      return { ok: true, requested: sectionId, routedTo: effSectionId, reRouted: effSectionId !== sectionId };
     }
 
     const routing = { requested: sectionId, routedTo: effSectionId, reRouted: effSectionId !== sectionId };
@@ -1929,6 +1946,12 @@ export function RateCardForm(props: RateCardFormProps) {
 
   async function persistSectionList(next: SectionInstance[]): Promise<void> {
     const json = serializeSectionList(next);
+    // Serialize through the shared save chain so two rapid section edits (e.g.
+    // rename then delete in the Manage Sections modal) don't BOTH send the same
+    // stale CAS base and 409 the second — dropping it with a bogus "changed on
+    // another device" alert. Running one-at-a-time means the base is read at
+    // EXECUTION time, AFTER the prior write advanced lastSavedSectionJsonRef.
+    return enqueueSave(async () => {
     try {
       const r = await fetch(`/api/inspections/${props.inspectionRecordId}`, {
         method: 'PATCH',
@@ -1964,6 +1987,7 @@ export function RateCardForm(props: RateCardFormProps) {
         setPendingSync(outboxCountFor(props.inspectionRecordId));
       }
     }
+    });
   }
 
   function handleRenameSection(sectionId: string, newLabel: string) {

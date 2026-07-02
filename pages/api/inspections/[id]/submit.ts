@@ -84,6 +84,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         alreadyCompleted: true,
       });
     }
+    // A Rate Card already in pending_approval must not be re-submitted either — a
+    // second submit re-stamps submitted_by_email/submitted_at (re-arming the
+    // self-approval lockout against whoever pressed it, and re-attributing the
+    // "submitter"). Reopen (→ in_progress) is the path to legitimately resubmit.
+    if (isRateCard && currentStatus === 'pending_approval') {
+      return res.status(409).json({
+        error: 'This inspection is already submitted for approval. Reopen it before submitting again.',
+        alreadyCompleted: true,
+      });
+    }
 
     const nowIso = new Date().toISOString();
     const props: Record<string, any> = {

@@ -95,10 +95,17 @@ export function externalCanViewTemplate(
   return false;
 }
 
-/** Normalize a HubSpot status string to lowercase for completed checks. */
+/** Normalize a HubSpot status string to lowercase for completed checks.
+ *  Includes 'submitted' — a legacy completed-equivalent that the rest of the app
+ *  already folds into completed (STATUS_VARIANTS.completed, the list "Completed"
+ *  filter, insights, bulk-cancel). Keeping this in lockstep closes a hole where
+ *  the single-cancel route (and the external-write gate) treated a 'submitted'
+ *  record as still-editable while bulk-cancel refused it. (1099s complete to
+ *  'completed' and rate cards to 'pending_approval', so no active external-edit
+ *  flow legitimately sits in 'submitted'.) */
 export function isCompletedStatus(status: string | null | undefined): boolean {
   const s = (status || '').trim().toLowerCase();
-  return s === 'completed' || s === 'complete';
+  return s === 'completed' || s === 'complete' || s === 'submitted';
 }
 
 // Property statuses at which an EXTERNAL (1099) user may START a 1099 walk. The

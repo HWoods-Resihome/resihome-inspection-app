@@ -215,11 +215,18 @@ async function hubspotFetchInner(url: string, method: string, path: string, init
     });
     if (res.status === 429 && attempt < BACKOFFS_MS.length) {
       const retryAfterHeader = res.headers.get('retry-after');
-      // Honor an explicit Retry-After exactly (it's the API's instruction); only
-      // jitter our own default backoff.
-      const retryAfterMs = retryAfterHeader
-        ? Math.max(BACKOFFS_MS[attempt], Number(retryAfterHeader) * 1000)
-        : jitter(BACKOFFS_MS[attempt]);
+      // Honor an explicit Retry-After (the API's instruction); only jitter our own
+      // default backoff. Retry-After is RFC-legal as delta-SECONDS or an
+      // HTTP-DATE — parse both. An unparseable value must NOT become NaN, which
+      // Math.max propagates and setTimeout coerces to 0ms → all retries fire
+      // back-to-back with no delay, hammering an API that just said slow down.
+      const retryAfterMs = (() => {
+        if (!retryAfterHeader) return jitter(BACKOFFS_MS[attempt]);
+        const secs = Number(retryAfterHeader);
+        let ms = Number.isFinite(secs) ? secs * 1000 : (Date.parse(retryAfterHeader) - Date.now());
+        if (!Number.isFinite(ms) || ms < 0) return jitter(BACKOFFS_MS[attempt]);
+        return Math.min(Math.max(BACKOFFS_MS[attempt], ms), 60_000); // never below our backoff; cap at 60s
+      })();
       // Consume body so the socket can be reused
       await res.text().catch(() => '');
       console.warn(`[hubspotFetch] 429 on ${method} ${path}, retrying in ${retryAfterMs}ms (attempt ${attempt + 1}/${BACKOFFS_MS.length})`);
@@ -1470,6 +1477,7 @@ export async function externalUnlockedView(
     regionUniverse = (await fetchRegionRates()).map((r) => r.region).filter(Boolean);
   } catch (e) {
     console.warn('[externalUnlockedView] region matrix load failed:', e);
+    scanFailed = true; // don't cache a region set missing the sibling regions (below)
   }
   const stateSet = new Set(states);
   const regions = Array.from(new Set(
@@ -1477,7 +1485,12 @@ export async function externalUnlockedView(
   ));
 
   const data = { states, regions };
-  unlockedViewCache.set(key, { data, at: Date.now() });
+  // Do NOT cache a DEGRADED result: if the region-matrix load failed, `regions`
+  // is missing the sibling regions in the unlocked states, which would
+  // over-restrict the completed Scope/Re-Inspect view for the full TTL. Return
+  // it for THIS request but let the next one re-attempt (mirrors the own-scan
+  // failure guard above).
+  if (!scanFailed) unlockedViewCache.set(key, { data, at: Date.now() });
   return data;
 }
 
