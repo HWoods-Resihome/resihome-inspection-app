@@ -658,16 +658,21 @@ export default function Home() {
       const removed = inspections.filter((i) => cancelledIds.includes(i.recordId));
       if (cancelledIds.length) {
         const nextCounts: StatusCounts = { ...counts };
+        // `all` + `total` decrement by the FULL server-confirmed cancelled set —
+        // a bulk selection can span pages, so `removed` (current page only) would
+        // undercount. Per-status buckets can only be adjusted for the rows we can
+        // see (their status isn't known for off-page ids); the reconcile refresh
+        // below fixes the buckets a moment later.
+        nextCounts.all = Math.max(0, nextCounts.all - cancelledIds.length);
         for (const i of removed) {
-          nextCounts.all = Math.max(0, nextCounts.all - 1);
           const b = statusBucket(i.status);
           if (b) nextCounts[b] = Math.max(0, nextCounts[b] - 1);
         }
         for (const cid of cancelledIds) cancelledIdsRef.current.add(cid);
         optimisticCountsRef.current = nextCounts;
-        optimisticTotalRef.current = Math.max(0, total - removed.length);
+        optimisticTotalRef.current = Math.max(0, total - cancelledIds.length);
         setCounts(nextCounts);
-        setTotal((t) => Math.max(0, t - removed.length));
+        setTotal((t) => Math.max(0, t - cancelledIds.length));
         setInspections((prev) => prev.filter((i) => !cancelledIds.includes(i.recordId)));
       }
       // Reconcile against the server (it serves authoritative counts once the

@@ -52,7 +52,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const done = i >= targets.length;
-    const nextAfter = done ? null : i;
+    // In APPLY mode the filter (`!regionSnapshot`) shrinks as we stamp, because
+    // stamping writes the very field it filters on. So the STAMPED rows drop out
+    // of `targets` on the next call and their successors slide down into range —
+    // advancing the positional cursor past them (the old `nextAfter = i`) skipped
+    // an equal block of unprocessed records and reported a false "done". Advance
+    // only past the records that STAY in the filter this batch (the un-stampable
+    // no-property / no-region / errored ones); the stamped ones vanish on their
+    // own. Dry-run doesn't write, so the filter is stable → page by position.
+    const nextAfter = done ? null : (apply ? startIdx + (processed - stamped) : i);
     return res.status(200).json({
       ok: true,
       mode: apply ? 'apply' : 'dry-run (add ?apply=1 to write)',

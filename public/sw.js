@@ -53,7 +53,12 @@ self.addEventListener('install', (event) => {
       await Promise.all(PRECACHE_ASSETS.map(async (url) => {
         try {
           const res = await fetch(url, { cache: 'no-store' });
-          if (res && res.status === 200) await cache.put(url, res.clone());
+          // !redirected: the SW installs while on /login (first-ever install, or a
+          // session-expiry bounce), where these authed routes 302→/login. Without
+          // this guard the LOGIN page HTML gets cached under the offline shell keys
+          // ('/', etc.), so an offline reload later shows login despite a valid
+          // session. Mirrors the navigation handler's guard.
+          if (res && res.status === 200 && !res.redirected) await cache.put(url, res.clone());
         } catch { /* offline at install / missing asset — non-fatal */ }
       }));
       // Precache the FULL JS/CSS bundle for this build (PRECACHE_CHUNKS, loaded
@@ -86,7 +91,7 @@ self.addEventListener('install', (event) => {
         ['/inspection/__id_shell__', '/inspection/_precache_shell_'],
         ['/inspection/new', '/inspection/new'],
       ].map(async ([key, url]) => {
-        try { const r = await fetch(url, { cache: 'no-store' }); if (r && r.ok) await cache.put(key, r.clone()); }
+        try { const r = await fetch(url, { cache: 'no-store' }); if (r && r.ok && !r.redirected) await cache.put(key, r.clone()); }
         catch { /* offline at install — non-fatal */ }
       }));
     } catch { /* cache open failed — non-fatal */ }

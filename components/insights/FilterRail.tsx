@@ -81,7 +81,10 @@ export function FilterRail({
   const activeCount =
     (filters.dateFrom || filters.dateTo ? 1 : 0) +
     filters.inspectorEmails.length + filters.properties.length +
-    filters.regions.length + filters.templateTypes.length + (filters.propertyStatuses?.length || 0);
+    filters.regions.length + filters.templateTypes.length + (filters.propertyStatuses?.length || 0) +
+    // Include the AI-overrides toggle so this header badge matches the collapsed-
+    // rail badge (which uses countActiveFilters); otherwise they drift by 1.
+    (filters.onlyAiOverrides ? 1 : 0);
 
   return (
     <aside className="bg-[#18181c] rounded-xl border border-white/10 p-3.5 self-start lg:sticky lg:top-4">
