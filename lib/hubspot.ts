@@ -1333,8 +1333,22 @@ export async function countInspectionsByStatus(q: InspectionQuery): Promise<Insp
     });
     return typeof resp.total === 'number' ? resp.total : (resp.results || []).length;
   };
-  const [all, scheduled, in_progress, pending_approval, completed] = await Promise.all(keys.map(countOne));
-  return { all, scheduled, in_progress, pending_approval, completed };
+  // Run the 5 status counts in 2 small waves (≤3 concurrent) instead of all at
+  // once. A single cold list load already costs 1 list search + these 5; firing
+  // all 5 simultaneously slammed HubSpot's per-second search bucket and was the
+  // main driver of the 429 spikes on /api/inspections. Bounding the burst spreads
+  // them out. Order-independent — each writes its own slot.
+  const out: Record<InspectionStatusKey, number> = { all: 0, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0 };
+  const COUNT_CONCURRENCY = 3;
+  let idx = 0;
+  const worker = async () => {
+    while (idx < keys.length) {
+      const k = keys[idx++];
+      out[k] = await countOne(k);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(COUNT_CONCURRENCY, keys.length) }, () => worker()));
+  return out;
 }
 
 /** Count of CANCELLED inspections (excluded from the analytics snapshot, but

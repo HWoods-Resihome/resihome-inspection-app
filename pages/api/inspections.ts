@@ -38,6 +38,11 @@ import type { InspectionSummary } from '@/lib/types';
 // via bustInspectionsCache(), so a longer TTL doesn't make a real change feel
 // stale — it just stops repeated reads from re-searching and tripping 429s.
 const TTL_MS = 45 * 1000;
+// Status-chip counts change less visibly than the list and are busted immediately
+// on create/cancel via bustInspectionsCache(), so they can cache far longer than
+// the list. This is the biggest lever on the HubSpot 429s: each cold counts miss
+// costs FIVE searches, so caching them longer directly cuts the search rate.
+const COUNTS_TTL_MS = 3 * 60 * 1000;
 const FACET_TTL_MS = 10 * 60 * 1000; // inspector/template options change rarely
 const MAX_KEYS = 80;                 // bound memory across query variants
 
@@ -61,6 +66,17 @@ const facets = makeCache<Facets>();
 // pre-mutation data (stale-after-write for a full TTL). withCache captures this
 // at fetch start and refuses to write a result whose generation is stale.
 let bustGeneration = 0;
+
+// Per-user manual-refresh throttle. ?refresh=1 (pull-to-refresh) fully BYPASSES
+// the cache → ~6 fresh HubSpot searches (1 list + 5 counts). A user re-pulling
+// rapidly — or a wave of near-simultaneous pulls during a busy period — stampedes
+// HubSpot's per-second search limit (the 429 spike). Collapse a user's repeat
+// refreshes within a short window back to a normal cached/single-flight read;
+// mutations still bust the cache instantly, so freshness after a real change is
+// unaffected. Per-instance like the caches — good enough (a user's repeat pulls
+// tend to hit the same warm lambda).
+const REFRESH_MIN_INTERVAL_MS = 10 * 1000;
+const lastRefreshAt = new Map<string, number>();
 
 /** Invalidate cached lists/counts after a create/cancel so the change shows at once. */
 export function bustInspectionsCache(): void {
@@ -133,6 +149,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const pageSize = Math.min(100, Math.max(1, parseInt(str(req.query.pageSize), 10) || 20));
   const page = Math.max(1, parseInt(str(req.query.page), 10) || 1);
   const refresh = str(req.query.refresh) === '1';
+  // Throttle manual refreshes per user so a rapid re-pull can't stampede HubSpot.
+  let force = refresh;
+  if (refresh) {
+    const now = Date.now();
+    const prev = lastRefreshAt.get(session.email) || 0;
+    if (now - prev < REFRESH_MIN_INTERVAL_MS) {
+      force = false; // too soon since this user's last refresh — serve cache/single-flight
+    } else {
+      if (lastRefreshAt.size > 500) lastRefreshAt.clear(); // bound memory across users
+      lastRefreshAt.set(session.email, now);
+    }
+  }
 
   // External (1099) users get a restricted visibility rule applied SERVER-SIDE:
   // only the 1099 inspections assigned to THEM, plus COMPLETED Scope/Re-Inspect
@@ -180,13 +208,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     if (only === 'facets') {
-      const facetData = await withCache(facets, facetKey, FACET_TTL_MS, refresh, () => inspectionFacets(baseQuery));
+      const facetData = await withCache(facets, facetKey, FACET_TTL_MS, force, () => inspectionFacets(baseQuery));
       return res.status(200).json({ facets: facetData });
     }
     const [list, statusCounts, facetData] = await Promise.all([
-      withCache(lists, listKey, TTL_MS, refresh, () =>
+      withCache(lists, listKey, TTL_MS, force, () =>
         searchInspectionsPage({ ...baseQuery, sortField, sortDir, page, pageSize })),
-      withCache(counts, countKey, TTL_MS, refresh, () =>
+      withCache(counts, countKey, COUNTS_TTL_MS, force, () =>
         countInspectionsByStatus(baseQuery)),
       // Only compute facets inline when asked (back-compat for any caller that
       // doesn't split them out). The home screen passes facets=0.
