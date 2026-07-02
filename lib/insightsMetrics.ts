@@ -607,8 +607,12 @@ export function completedRows(rows: InsightsRow[]): CompletedRow[] {
     });
   }
   return out.sort((a, b) => {
-    const da = a.date ? Date.parse(a.date) : 0;
-    const db = b.date ? Date.parse(b.date) : 0;
+    // hubspotToMs (not Date.parse): a.date is approvedAt||completedAt||submittedAt,
+    // and approvedAt/submittedAt are epoch-ms strings that Date.parse returns NaN
+    // for → a NaN comparator scrambles the "newest first" order. (fmtDate was
+    // fixed; this sort key was overlooked.)
+    const da = hubspotToMs(a.date) ?? 0;
+    const db = hubspotToMs(b.date) ?? 0;
     return db - da;
   });
 }
