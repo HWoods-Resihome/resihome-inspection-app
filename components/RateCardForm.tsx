@@ -39,7 +39,8 @@ import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 const FC_PHOTO_SECTION = '__final_checklist__';
 import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
 import { reportSyncOutcome } from '@/lib/syncTelemetry';
-import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos, onPhotoFlushResume } from '@/lib/offlinePhotoStore';
+import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos, onPhotoFlushResume, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
+import { removePhotoAttachByUrl } from '@/lib/photoAttachOutbox';
 import { isLocalInspectionId } from '@/lib/pendingInspections';
 import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
 import { loadCachedRateCard, saveCachedRateCard } from '@/lib/offlineCache';
@@ -2355,6 +2356,11 @@ export function RateCardForm(props: RateCardFormProps) {
     const current = [...(photosBySection[sectionId] || [])];
     if (idx < 0 || idx >= current.length) return;
     const oldUrl = current[idx];
+    // Annotating a photo that's STILL an un-synced local draft: discard the
+    // original queued draft first, so it and the annotated copy don't BOTH
+    // upload+attach (the annotated copy's replacesUrl=blob: can't match the
+    // server's real URL, so both would land = a duplicate photo).
+    if (oldUrl && oldUrl.startsWith('blob:')) { try { await discardQueuedByUrls([oldUrl]); removePhotoAttachByUrl([oldUrl]); } catch { /* best-effort */ } }
     try {
       // Queue-aware: offline, this returns a local-draft blob URL (the annotated
       // image queued with replacesUrl=oldUrl) and syncs later.
@@ -2454,6 +2460,8 @@ export function RateCardForm(props: RateCardFormProps) {
     const arr = [...(line.photoUrls || [])];
     if (index < 0 || index >= arr.length) return;
     const oldUrl = arr[index];
+    // Discard the original draft when annotating an un-synced photo (avoid dup).
+    if (oldUrl && oldUrl.startsWith('blob:')) { try { await discardQueuedByUrls([oldUrl]); removePhotoAttachByUrl([oldUrl]); } catch { /* best-effort */ } }
     try {
       const url = await uploadPhotoOrQueue(file, props.inspectionRecordId, sectionId, { replacesUrl: oldUrl, lineExternalId: externalId });
       arr[index] = url;
@@ -2490,6 +2498,8 @@ export function RateCardForm(props: RateCardFormProps) {
     const arr = [...(line.afterPhotoUrls || [])];
     if (index < 0 || index >= arr.length) return;
     const oldUrl = arr[index];
+    // Discard the original draft when annotating an un-synced photo (avoid dup).
+    if (oldUrl && oldUrl.startsWith('blob:')) { try { await discardQueuedByUrls([oldUrl]); removePhotoAttachByUrl([oldUrl]); } catch { /* best-effort */ } }
     try {
       const url = await uploadPhotoOrQueue(file, props.inspectionRecordId, sectionId, { replacesUrl: oldUrl, lineExternalId: externalId });
       arr[index] = url;

@@ -18,7 +18,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatMoney, formatQty } from '@/lib/photoUpload';
-import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, countQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, countQueuedPhotos, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
 import { loadCachedQcData, saveCachedQcData } from '@/lib/offlineCache';
 import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { CameraCapture } from '@/components/CameraCapture';
@@ -30,7 +30,7 @@ import { useAppDialog } from '@/components/AppDialog';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from '@/lib/answerProps';
 import { enqueue as outboxEnqueue, isOfflineError } from '@/lib/offlineOutbox';
 import { isLocalInspectionId } from '@/lib/pendingInspections';
-import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
+import { drainPhotoAttachOutbox, removePhotoAttachByUrl } from '@/lib/photoAttachOutbox';
 import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 import { UnlockButton, type LockRing } from '@/components/UnlockButton';
 import InspectionPager from '@/components/InspectionPager';
@@ -556,6 +556,9 @@ export function QcReinspectForm(props: Props) {
   async function replaceAfterPhoto(key: string, section: string, location: string, index: number, file: File) {
     try {
       const oldForReplace = (afterPhotos[key] || [])[index];
+      // Annotating an un-synced draft: discard the original queued draft so it and
+      // the annotated copy don't BOTH upload+attach (duplicate photo).
+      if (oldForReplace && oldForReplace.startsWith('blob:')) { try { await discardQueuedByUrls([oldForReplace]); removePhotoAttachByUrl([oldForReplace]); } catch { /* best-effort */ } }
       const url = await uploadPhotoOrQueue(file, props.inspectionRecordId, key, { replacesUrl: oldForReplace });
       const arr = [...(afterPhotos[key] || [])];
       if (index < 0 || index >= arr.length) return;

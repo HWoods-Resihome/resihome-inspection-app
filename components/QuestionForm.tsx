@@ -5,7 +5,8 @@ import { QuestionItem, answerTone, isNA, isListingPriceQuestion, wantsRecommende
 import { CameraCapture } from './CameraCapture';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { uploadFilesBatch } from '@/lib/photoUpload';
-import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume, countQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume, countQueuedPhotos, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
+import { removePhotoAttachByUrl } from '@/lib/photoAttachOutbox';
 import { flushOutbox } from '@/lib/offlineOutbox';
 import { drainPhotoAttachOutbox, countPhotoAttach } from '@/lib/photoAttachOutbox';
 import { loadCachedAnswers, saveCachedAnswers, clearCachedAnswers } from '@/lib/offlineCache';
@@ -867,6 +868,9 @@ export function QuestionForm({
     if (readOnly) return;
     try {
       const oldForReplace = (sectionPhotos[instanceKey] || [])[idx];
+      // Annotating an un-synced draft: discard the original queued draft so it and
+      // the annotated copy don't BOTH upload+attach (duplicate photo).
+      if (oldForReplace && oldForReplace.startsWith('blob:')) { try { await discardQueuedByUrls([oldForReplace]); removePhotoAttachByUrl([oldForReplace]); } catch { /* best-effort */ } }
       const url = await uploadPhotoOrQueue(file, inspectionRecordId, instanceKey, { replacesUrl: oldForReplace });
       setSectionPhotos((prev) => {
         const arr = [...(prev[instanceKey] || [])];
