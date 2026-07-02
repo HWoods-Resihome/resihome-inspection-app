@@ -7,6 +7,7 @@ import { postScopePendingApproval } from '@/lib/scopeApprovalSlack';
 import { fcSmartHomeStamps, fcPoolStamps, parseFcAnswers } from '@/lib/finalChecklist';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
+import { isCompletedStatus } from '@/lib/userAccess';
 import { recordAuditEvent } from '@/lib/auditLog';
 
 /**
@@ -78,7 +79,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // completed_at to a later time. Reopen (→ in_progress) is the supported path
     // to edit + resubmit; until then, reject.
     const currentStatus = (existing?.status || '').trim().toLowerCase();
-    if (currentStatus === 'completed' || currentStatus === 'complete') {
+    // Use the shared isCompletedStatus (covers 'submitted' too) so submit is in
+    // lockstep with cancel/reopen/bulk-cancel/finalize. Re-submitting a
+    // completed-equivalent otherwise re-stamps the as-of-inspection property/
+    // listing snapshots (which overwrite unconditionally) to TODAY's values and
+    // drifts completed_at.
+    if (isCompletedStatus(currentStatus)) {
       return res.status(409).json({
         error: 'This inspection is already completed. Reopen it before submitting again.',
         alreadyCompleted: true,

@@ -2059,13 +2059,22 @@ export function RateCardForm(props: RateCardFormProps) {
     if (lineArchives.length > 0 && linesHydrated && !props.readOnly) {
       saveInFlightRef.current++;
       try {
-        await fetch(`/api/inspections/${props.inspectionRecordId}/rate-card-lines`, {
+        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/rate-card-lines`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ upserts: [], archives: lineArchives }),
         });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
       } catch (e) {
-        console.error('[RateCardForm] section delete: line archive failed', e);
+        // Offline: queue the archive so the delete isn't silently lost — otherwise
+        // the line records survive server-side and the "deleted" lines RESURRECT
+        // on reload. Every other mutation queues offline; these two didn't.
+        if (isOfflineError(e)) {
+          outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint: `/api/inspections/${props.inspectionRecordId}/rate-card-lines`, method: 'POST', body: { upserts: [], archives: lineArchives }, kind: 'lineArchive' });
+          setPendingSync(outboxCountFor(props.inspectionRecordId));
+        } else {
+          console.error('[RateCardForm] section delete: line archive failed', e);
+        }
       } finally {
         saveInFlightRef.current--;
       }
@@ -2073,18 +2082,25 @@ export function RateCardForm(props: RateCardFormProps) {
     if (photoRecordId && linesHydrated && !props.readOnly) {
       saveInFlightRef.current++;
       try {
-        await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
+        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/answers`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ upserts: [], archives: [photoRecordId] }),
         });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         setSectionPhotoRecordIds((m) => {
           const next = { ...m };
           delete next[sectionId];
           return next;
         });
       } catch (e) {
-        console.error('[RateCardForm] section delete: photo archive failed', e);
+        if (isOfflineError(e)) {
+          outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint: `/api/inspections/${props.inspectionRecordId}/answers`, method: 'POST', body: { upserts: [], archives: [photoRecordId] }, kind: 'sectionPhoto' });
+          setPendingSync(outboxCountFor(props.inspectionRecordId));
+          setSectionPhotoRecordIds((m) => { const next = { ...m }; delete next[sectionId]; return next; });
+        } else {
+          console.error('[RateCardForm] section delete: photo archive failed', e);
+        }
       } finally {
         saveInFlightRef.current--;
       }
@@ -2171,8 +2187,18 @@ export function RateCardForm(props: RateCardFormProps) {
         });
         markSaved();
       } catch (e: any) {
-        console.error('[RateCardForm] clear sections: line archive failed', e);
-        setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+        // Offline: queue the archive so the clear isn't lost (else the lines
+        // survive server-side and RESURRECT on reload). Also drop their recordIds
+        // locally so a later re-save doesn't resurrect them either.
+        if (isOfflineError(e)) {
+          outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint: `/api/inspections/${props.inspectionRecordId}/rate-card-lines`, method: 'POST', body: { upserts: [], archives: lineArchives }, kind: 'lineArchive' });
+          setPendingSync(outboxCountFor(props.inspectionRecordId));
+          setRecordIdsByExternalId((cur) => { const next = { ...cur }; for (const ext of clearedExternalIds) delete next[ext]; return next; });
+          markSaved();
+        } else {
+          console.error('[RateCardForm] clear sections: line archive failed', e);
+          setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+        }
       } finally {
         saveInFlightRef.current--;
       }
@@ -2195,8 +2221,15 @@ export function RateCardForm(props: RateCardFormProps) {
         });
         markSaved();
       } catch (e: any) {
-        console.error('[RateCardForm] clear sections: photo archive failed', e);
-        setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+        if (isOfflineError(e)) {
+          outboxEnqueue({ inspectionRecordId: props.inspectionRecordId, endpoint: `/api/inspections/${props.inspectionRecordId}/answers`, method: 'POST', body: { upserts: [], archives: photoArchives }, kind: 'sectionPhoto' });
+          setPendingSync(outboxCountFor(props.inspectionRecordId));
+          setSectionPhotoRecordIds((cur) => { const next = { ...cur }; for (const id of sectionIds) delete next[id]; return next; });
+          markSaved();
+        } else {
+          console.error('[RateCardForm] clear sections: photo archive failed', e);
+          setSaveStatus({ kind: 'error', message: String(e?.message || e) });
+        }
       } finally {
         saveInFlightRef.current--;
       }

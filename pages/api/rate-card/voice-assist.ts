@@ -1119,12 +1119,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           let qty = existing.quantity;
           if (tu.input?.quantity != null) {
             const q = Number(tu.input.quantity);
-            if (isFinite(q) && q >= 0) qty = q;
+            // Same runaway clamp the propose_line path uses: a mis-transcribed
+            // number ("fifteen hundred thousand") must not auto-commit a hugely
+            // mispriced edit. Cap at 100000.
+            if (isFinite(q) && q >= 0) qty = Math.min(q, 100000);
           }
           let vendor = existing.assignedTo || 'Vendor 1';
           if (tu.input?.vendor != null) {
-            const v = String(tu.input.vendor);
-            vendor = VENDORS.includes(v) ? v : vendor;
+            // Case/whitespace-insensitive match (see propose_line) so a variant
+            // like "ppw" reassigns instead of silently keeping the old vendor.
+            vendor = normalizeVendor(String(tu.input.vendor));
           }
           let pct = existing.tenantBillBackPercent;
           if (tu.input?.tenantBillBackPercent != null) {

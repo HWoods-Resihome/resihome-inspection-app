@@ -44,7 +44,12 @@ async function loadCatalog(forceRefresh: boolean): Promise<RateCardLineItem[]> {
     INFLIGHT = (async () => {
       try {
         const items = await fetchRateCardCatalog();
-        CACHE = { data: items, fetchedAt: Date.now() };
+        // NEVER cache an empty catalog (mirrors offlineCache's guard): a HTTP-200
+        // {results:[]} from a transiently-empty/eventually-consistent HubSpot
+        // search "succeeds" and would otherwise poison the cache for the full TTL
+        // — the line-item picker shows nothing and finalize/QC pricing loses live
+        // catalog lookups. Return it to this caller but don't cache it.
+        if (items.length > 0) CACHE = { data: items, fetchedAt: Date.now() };
         return items;
       } finally {
         if (gen === INFLIGHT_GEN) INFLIGHT = null;

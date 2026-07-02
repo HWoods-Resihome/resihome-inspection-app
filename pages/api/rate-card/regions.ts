@@ -36,7 +36,9 @@ async function loadRegions(forceRefresh: boolean): Promise<RegionRate[]> {
     INFLIGHT = (async () => {
       try {
         const regions = await fetchRegionRates();
-        CACHE = { data: regions, fetchedAt: Date.now() };
+        // Never cache an empty region matrix (see catalog.ts): a transient empty
+        // 200 would poison pricing/region resolution for the full TTL.
+        if (regions.length > 0) CACHE = { data: regions, fetchedAt: Date.now() };
         return regions;
       } finally {
         if (gen === INFLIGHT_GEN) INFLIGHT = null;
