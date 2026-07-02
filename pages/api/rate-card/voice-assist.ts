@@ -1002,7 +1002,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           let t = (textBlocks || '').trim();
           // Drop a spurious "how many square feet?" when a whole-house SF line
           // was auto-filled this turn — the square footage is already applied.
-          if (t && filledWholeHouseSf && /\bsquare\s*f(eet|ootage)\b/i.test(t) && /\?\s*$/.test(t)) t = '';
+          // Suppress at most ONCE (then clear the flag): a LATER sqft question in
+          // the same turn is about a DIFFERENT SF item (e.g. "how many sq ft for
+          // the carpet?") and must survive — blanking it stranded the inspector
+          // with an empty prompt and dropped that item's line.
+          if (t && filledWholeHouseSf && /\bsquare\s*f(eet|ootage)\b/i.test(t) && /\?\s*$/.test(t)) {
+            t = '';
+            filledWholeHouseSf = false;
+          }
           // The app already announces + speaks what changed. Keep the model's text
           // ONLY when it's a genuine follow-up QUESTION about ANOTHER item (no add
           // narration, no price) or a bid-item price callout. Otherwise drop it —

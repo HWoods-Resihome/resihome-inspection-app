@@ -56,10 +56,17 @@ const lists = makeCache<ListResult>();
 const counts = makeCache<InspectionCounts>();
 const facets = makeCache<Facets>();
 
+// Bumped on every bust. An in-flight GET that STARTED before a create/cancel
+// would otherwise resolve AFTER the bust and repopulate the cache with
+// pre-mutation data (stale-after-write for a full TTL). withCache captures this
+// at fetch start and refuses to write a result whose generation is stale.
+let bustGeneration = 0;
+
 /** Invalidate cached lists/counts after a create/cancel so the change shows at once. */
 export function bustInspectionsCache(): void {
   lists.cache.clear();
   counts.cache.clear();
+  bustGeneration++; // in-flight fetches started before now won't write their (stale) result
   // Facets (inspector/template options) don't change on create/cancel — leave them.
 }
 
@@ -76,11 +83,17 @@ async function withCache<T>(
     const inflight = store.inflight.get(key);
     if (inflight) return inflight;
   }
+  const startedGen = bustGeneration;
   const p = (async () => {
     try {
       const data = await fn();
-      if (store.cache.size >= MAX_KEYS) store.cache.clear();
-      store.cache.set(key, { data, at: Date.now() });
+      // If a create/cancel busted the cache while we were fetching, this result
+      // predates the mutation — don't write it back (it would serve stale data
+      // for a full TTL). Return it to THIS caller, just don't cache it.
+      if (bustGeneration === startedGen) {
+        if (store.cache.size >= MAX_KEYS) store.cache.clear();
+        store.cache.set(key, { data, at: Date.now() });
+      }
       return data;
     } finally {
       store.inflight.delete(key);

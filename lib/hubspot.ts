@@ -1173,11 +1173,15 @@ function inspectionFilterGroups(q: InspectionQuery): any[] {
     const search = (q.search || '').trim();
     if (!search) return allow;
     const token = `*${search}*`;
-    // AND the search token into each allow-group. HubSpot caps filterGroups at
-    // 5, so with two allow-groups search fewer fields (address + inspector → 4
-    // groups); with one, search all three (address / name / inspector → 3).
+    // AND the search token into each allow-group (search replicated per field ⇒
+    // groups × fields). HubSpot caps filterGroups at 5 AND total filters at 18.
+    // Each group can already carry up to 6 filters (template + status + owner/
+    // regionGate + selected inspector + selected region + the search token), so
+    // with TWO allow-groups we search a SINGLE field (2 groups × 6 = 12 ≤ 18);
+    // searching 2 fields would be 4 groups × 6 = 24 → a 400 that breaks the whole
+    // list. With one allow-group we can afford all three fields (3 × 6 = 18).
     const fields = allow.length > 1
-      ? ['property_address_snapshot', 'inspector_name']
+      ? ['property_address_snapshot']
       : ['property_address_snapshot', 'inspection_name', 'inspector_name'];
     const out: any[] = [];
     for (const g of allow) {
