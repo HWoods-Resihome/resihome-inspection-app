@@ -18,7 +18,7 @@
  */
 import { fetchInspectionProperties, fetchPropertyRegion, writeInspectionSlackLink, readApprovalRouting } from '@/lib/hubspot';
 import { slackCall, getSlackPermalink } from '@/lib/slack';
-import { resolveSlackTarget, DEFAULT_SANDBOX_CHANNEL } from '@/lib/slackNotifications';
+import { resolveSlackTarget } from '@/lib/slackNotifications';
 import { resolveApprovers, type ApprovalRoutingConfig } from '@/lib/approvalRouting';
 
 // ---- CONFIG (verbatim from the workflow code) -------------------------------
@@ -37,7 +37,6 @@ const POD_APPROVERS: Record<string, string> = {
   [CHANNEL_SE]: 'U0912JGHY1E', // Dori Herrington   (NC, SC, AL, TN, IN)
   [CHANNEL_SW]: 'U0368PN8FS8', // Jo Ann Haynes     (TX, AZ, OK)
   [CHANNEL_FL]: 'U0A867BRLQH', // Andrea McMillian  (FL)
-  [DEFAULT_SANDBOX_CHANNEL]: '',
 };
 
 const COLOR_PENDING = '#ff0060';
@@ -55,7 +54,8 @@ function channelForRegion(regionValue: string | null): string {
   if (r.startsWith('NC:') || r.startsWith('SC:') || r.startsWith('AL:') || r.startsWith('TN:') || r.startsWith('IN:')) return CHANNEL_SE;
   if (r.startsWith('TX:') || r.startsWith('AZ:') || r.startsWith('OK:')) return CHANNEL_SW;
   if (r.startsWith('FL:')) return CHANNEL_FL;
-  return DEFAULT_SANDBOX_CHANNEL; // no region match → safe fallback (matches workflow)
+  return ''; // no region match → no channel; caller SKIPS the post (was the dead
+             // sandbox channel, where the card went unseen).
 }
 
 // ============================ WORKFLOW A — PENDING ===========================
@@ -91,6 +91,13 @@ export async function postScopePendingApproval(inspectionId: string): Promise<{ 
   // Channel: the POD's configured channel when mapped, else the legacy region-
   // prefix routing (so an unmapped region still lands somewhere sensible).
   const intendedChannel = (mapped ? recip!.channelId! : channelForRegion(region));
+  // No channel resolves (region not in the routing table AND matches no prefix):
+  // SKIP rather than post to a dead sandbox channel where nobody sees it. Logged
+  // loudly so the unroutable region is visible and can be added to routing.
+  if (!intendedChannel) {
+    console.warn(`[scope-slack] no Slack channel for region "${region || '(blank)'}" — skipping pending-approval post for ${inspectionId}. Add the region to the Approval Routing table or a channel prefix.`);
+    return { status: 'NO_CHANNEL', error: `Unroutable region: ${region || '(blank)'}` };
+  }
 
   // The approver line: dynamic (total + tier tags / @channel) when the region is
   // mapped; otherwise the original hard-coded line as a safe fallback.

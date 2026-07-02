@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection, populateBillingFields } from '@/lib/hubspot';
+import { updateInspection, fetchInspectionById, stampFirstCompleted, stampPropertyStatusAtCompletion, stampListingSnapshotAtCompletion, fetchAnswersForInspection, populateBillingFields, readInspectionProps } from '@/lib/hubspot';
 import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
 import { createComplianceTicketsOnSubmit } from '@/lib/complianceTickets';
 import { postListingPriceAlertOnSubmit } from '@/lib/listingPriceAlert';
@@ -30,6 +30,13 @@ export const config = { maxDuration: 300 };
 // the sequential case.
 const inFlightSubmit = new Map<string, number>();
 const SUBMIT_LOCK_MS = 120_000;
+// Durable cross-instance lock (mirrors finalize's): serverless instances don't
+// share the Map above, so two concurrent submits on DIFFERENT instances both
+// pass the per-instance + terminal guards and duplicate the one-shot side-effects.
+// We stamp a HubSpot property while submit runs. Fail-safe: if the property is
+// missing the durable check is skipped (per-instance guard still applies).
+// Override the name via SUBMIT_LOCK_PROPERTY; defaults to submit_in_progress.
+const SUBMIT_LOCK_PROP = process.env.SUBMIT_LOCK_PROPERTY || 'submit_in_progress';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -55,6 +62,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(409).json({ error: 'This inspection is already being submitted. Please wait.' });
   }
   inFlightSubmit.set(id, lockNow);
+
+  // Durable cross-instance lock: reject a concurrent submit landing on another
+  // serverless instance. Best-effort (HubSpot has no conditional write) but it
+  // closes the common double-fire window the per-instance Map can't see.
+  let submitDurableLockHeld = false;
+  if (SUBMIT_LOCK_PROP) {
+    try {
+      const lockProps = await readInspectionProps(id, [SUBMIT_LOCK_PROP]).catch(() => null);
+      const prev = lockProps?.[SUBMIT_LOCK_PROP];
+      const prevMs = prev ? (Date.parse(String(prev)) || Number(prev) || 0) : 0;
+      if (prevMs && lockNow - prevMs < SUBMIT_LOCK_MS) {
+        inFlightSubmit.delete(id);
+        return res.status(409).json({ error: 'This inspection is already being submitted on another device. Please wait.' });
+      }
+      await updateInspection(id, { [SUBMIT_LOCK_PROP]: String(lockNow) });
+      submitDurableLockHeld = true;
+    } catch (e) {
+      console.warn('[submit] durable lock unavailable (continuing without it):', e);
+    }
+  }
 
   try {
     const body = req.body || {};
@@ -313,5 +340,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(500).json({ error: String(e.message || e) });
   } finally {
     inFlightSubmit.delete(id);
+    // Release the durable lock so a legitimate later submit (after a reopen) isn't
+    // blocked for the whole window.
+    if (submitDurableLockHeld) {
+      try { await updateInspection(id, { [SUBMIT_LOCK_PROP]: '' }); } catch { /* non-fatal */ }
+    }
   }
 }

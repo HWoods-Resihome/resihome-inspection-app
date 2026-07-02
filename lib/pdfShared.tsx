@@ -825,7 +825,10 @@ export function formatQtyPdf(n: number): string {
 export function isoToHumanDate(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
+  // Eastern (company/Atlanta) zone — PDFs render server-side in UTC, which would
+  // shift the calendar day for evening timestamps.
   return d.toLocaleString('en-US', {
+    timeZone: 'America/New_York',
     year: 'numeric', month: 'short', day: 'numeric',
   });
 }

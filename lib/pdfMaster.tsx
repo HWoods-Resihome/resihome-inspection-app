@@ -39,12 +39,17 @@ const COL = {
 };
 
 // "M/DD/YYYY" stamp. Handles ISO strings and epoch-ms strings (HubSpot datetime).
+// Formatted in Eastern time (company/Atlanta zone) — PDFs render on the Vercel
+// serverless runtime (UTC), so getDate()/getMonth() would show the UTC calendar
+// day and read a day AHEAD for anything submitted/approved in the US evening.
 function stampDate(iso?: string | null): string | null {
   if (!iso) return null;
   const s = String(iso).trim();
   const d = /^\d+$/.test(s) ? new Date(Number(s)) : new Date(s);
   if (isNaN(d.getTime())) return null;
-  return `${d.getMonth() + 1}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+  return d.toLocaleDateString('en-US', {
+    timeZone: 'America/New_York', month: 'numeric', day: '2-digit', year: 'numeric',
+  });
 }
 
 function MasterDoc(props: { ctx: PdfBuildContext }) {

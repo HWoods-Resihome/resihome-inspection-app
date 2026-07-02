@@ -195,7 +195,10 @@ export interface PdfData {
 function formatDate(iso: string): string {
   try {
     const d = /^\d+$/.test(iso) ? new Date(Number(iso)) : new Date(iso);
+    // Eastern (company/Atlanta) zone — rendered server-side in UTC otherwise,
+    // which shifts the day for evening timestamps.
     return d.toLocaleDateString('en-US', {
+      timeZone: 'America/New_York',
       year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
     });
   } catch {

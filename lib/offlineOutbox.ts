@@ -349,7 +349,18 @@ export async function reconcileNativeBackgroundAnswers(): Promise<number> {
   if (ids.length === 0) return 0;
   const set = new Set(ids);
   const list = read();
-  const remaining = list.filter((e) => !set.has(e.id));
+  const remaining = list.filter((e) => {
+    if (!set.has(e.id)) return true; // native didn't report this id — keep it
+    // Native reported this id done. NEVER drop the consolidated ANSWERS entry on
+    // that basis: its id is REUSED (ob_answers_<inspId>) and it's merge-on-write,
+    // so a native "done" for an OLDER snapshot would wipe a NEWER entry that has
+    // since had another answer merged in (data loss). The answers entry is instead
+    // cleared by the web's OWN flushOutbox (which prunes only confirmed ids), and a
+    // redundant re-send is idempotent (server upserts by answer_id_external). Line/
+    // other entries have unique per-write ids, so dropping those on native-done is
+    // safe (and avoids a redundant re-upload).
+    return e.kind === 'answers';
+  });
   if (remaining.length !== list.length) write(remaining);
   return list.length - remaining.length;
 }
