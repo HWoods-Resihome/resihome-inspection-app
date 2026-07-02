@@ -4599,13 +4599,16 @@ export function RateCardForm(props: RateCardFormProps) {
           cushion) so there's no wasted white space; grows to ~a viewport only
           while we're scrolling to the last section, so a line added there can
           still rise to the top. Collapses back when we navigate elsewhere. */}
-      <div style={{ height: expandTailSpace ? '85vh' : footerH + 16 }} />
+      <div style={{ height: expandTailSpace ? '85vh' : `calc(${footerH + 16}px + var(--sync-footer-h, 0px))` }} />
 
       {/* Floating footer — visible on all screen sizes, pinned to the bottom of
           the viewport so the inspector can save/submit/cancel from anywhere.
           The voice assistant lives in the CENTER of this footer: a mic icon that
-          expands upward into the conversation panel when pressed. */}
-      <div ref={footerRef} className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
+          expands upward into the conversation panel when pressed.
+          `bottom` tracks the app-wide sync footer's height (--sync-footer-h) so the
+          two never overlap: when sync is active this bar slides up above it, then
+          slides back down when it resolves. */}
+      <div ref={footerRef} className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30" style={{ bottom: 'var(--sync-footer-h, 0px)', transition: 'bottom .25s ease' }}>
         <div ref={actionRowRef} className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-2">
           <div className="flex-1 min-w-0">
             <TerminalActions

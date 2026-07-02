@@ -2405,7 +2405,7 @@ export function QuestionForm({
           on the right. Save & Close gets a green hover/active style for
           visual reassurance that it's saving work. Matches the same layout
           used in RateCardForm so behavior is consistent across templates. */}
-      <div className="lz-foot fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand px-3 sm:px-4 py-1.5 shadow-lg">
+      <div className="lz-foot fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand px-3 sm:px-4 py-1.5 shadow-lg" style={{ bottom: 'var(--sync-footer-h, 0px)', transition: 'bottom .25s ease' }}>
         <div className={`max-w-3xl mx-auto flex items-center gap-2 ${readOnly ? 'justify-center' : 'justify-between'}`}>
           {/* scopeStyle templates drop the destructive Cancel button and move
               Save & Close to the LEFT (Submit stays on the right). Completed /

@@ -1,23 +1,28 @@
 /**
- * App-wide sync status pill (mounted once in _app). Makes the background sync
+ * App-wide sync status FOOTER (mounted once in _app). Makes the background sync
  * OBSERVABLE in the field: it shows how much work is still queued on the device
  * — answer/line/section edits (outbox), queued photo bytes, and pending photo
- * attaches — and flashes "Synced" when it drains to zero.
+ * attaches — and flashes "Synced ✓" when it drains to zero.
+ *
+ * Presentation: a slim bar pinned to the VERY BOTTOM of the viewport — never an
+ * overlay. (It used to be a draggable pill that floated over form values, e.g. the
+ * rate-card Client $ figure.) While visible it publishes its own height as the CSS
+ * variable `--sync-footer-h`; the forms' action bars read that var to slide UP by
+ * exactly that much, and their content spacers grow by it so nothing hides behind
+ * the raised bar. When sync resolves, the footer slides away, the var returns to
+ * 0, and the action bars slide back down to their normal height.
  *
  * Read-only: it just polls the durable queues every few seconds (and on
- * visibility/online). It never triggers sync itself — the global driver does
- * that. Hidden when there's nothing pending (after a brief "Synced ✓").
- *
- * DRAGGABLE: the inspector can drag it anywhere and the spot is remembered
- * (localStorage) — so it can be parked out of the way. Defaults to bottom-center,
- * just above the forms' action bar. A small grip handle signals it's movable.
+ * visibility/online). It never triggers sync itself — the global driver does that.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { countOutbox } from '@/lib/offlineOutbox';
 import { countPhotoAttach } from '@/lib/photoAttachOutbox';
 import { countAllQueuedPhotos } from '@/lib/offlinePhotoStore';
 
-const POS_KEY = 'resiwalk_syncbadge_pos_v1';
+// The height the footer publishes for the action bars to offset by. Kept in sync
+// with the forms (they read `var(--sync-footer-h, 0px)`).
+const FOOTER_VAR = '--sync-footer-h';
 
 export function SyncStatusBadge() {
   const [pending, setPending] = useState(0);
@@ -25,19 +30,7 @@ export function SyncStatusBadge() {
   const [justSynced, setJustSynced] = useState(false);
   const prevRef = useRef(0);
   const syncedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Dragging: pos === null → default (CSS bottom-center). Once dragged it's a
-  // fixed {x,y} (viewport px), persisted so it stays put across reloads.
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  const elRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{ dx: number; dy: number; moved: boolean } | null>(null);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(POS_KEY);
-      if (raw) { const p = JSON.parse(raw); if (p && typeof p.x === 'number' && typeof p.y === 'number') setPos(p); }
-    } catch { /* ignore */ }
-  }, []);
+  const barRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,41 +58,24 @@ export function SyncStatusBadge() {
     return () => { cancelled = true; clearInterval(iv); if (syncedTimer.current) clearTimeout(syncedTimer.current); document.removeEventListener('visibilitychange', onVis); };
   }, []);
 
-  function clamp(p: { x: number; y: number }) {
-    const w = elRef.current?.offsetWidth || 160;
-    const h = elRef.current?.offsetHeight || 36;
-    const vw = typeof window !== 'undefined' ? window.innerWidth : 360;
-    const vh = typeof window !== 'undefined' ? window.innerHeight : 640;
-    return { x: Math.max(6, Math.min(p.x, vw - w - 6)), y: Math.max(6, Math.min(p.y, vh - h - 6)) };
-  }
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    const el = elRef.current; if (!el) return;
-    const rect = el.getBoundingClientRect();
-    dragRef.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, moved: false };
-    setPos({ x: rect.left, y: rect.top }); // switch from CSS-centered to fixed at current spot
-    try { el.setPointerCapture(e.pointerId); } catch { /* noop */ }
-  };
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!dragRef.current) return;
-    dragRef.current.moved = true;
-    setPos(clamp({ x: e.clientX - dragRef.current.dx, y: e.clientY - dragRef.current.dy }));
-  };
-  const onPointerUp = (e: React.PointerEvent) => {
-    if (!dragRef.current) return;
-    const moved = dragRef.current.moved;
-    dragRef.current = null;
-    try { elRef.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
-    if (moved) { setPos((p) => { const c = p ? clamp(p) : p; try { if (c) localStorage.setItem(POS_KEY, JSON.stringify(c)); } catch { /* ignore */ } return c; }); }
-  };
-
-  if (pending === 0 && !justSynced) return null;
-
+  const show = pending > 0 || justSynced;
   const synced = pending === 0 && justSynced;
+
+  // Publish the bar's measured height while visible so the forms' fixed action
+  // bars can offset up by exactly that much; 0 while hidden so they slide back
+  // down. The CSS transitions on both sides animate the two together. Always
+  // cleared on unmount so a stray var can't strand the action bars raised.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (show && barRef.current) root.style.setProperty(FOOTER_VAR, `${barRef.current.offsetHeight}px`);
+    else root.style.setProperty(FOOTER_VAR, '0px');
+    return () => { root.style.setProperty(FOOTER_VAR, '0px'); };
+  }, [show, synced, online, pending]);
+
   const tone = synced
     ? 'bg-emerald-600 text-white'
     : online
-      ? 'bg-ink/85 text-white'
+      ? 'bg-ink/90 text-white'
       : 'bg-amber-500 text-white';
   const label = synced
     ? 'Synced ✓'
@@ -107,28 +83,20 @@ export function SyncStatusBadge() {
       ? `Syncing ${pending} item${pending === 1 ? '' : 's'}…`
       : `${pending} item${pending === 1 ? '' : 's'} saved offline`;
 
-  const positioned: React.CSSProperties = pos
-    ? { left: pos.x, top: pos.y }
-    : { left: '50%', transform: 'translateX(-50%)', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 72px)' };
-
+  // Always mounted so it can animate in/out; translated fully off-screen (and
+  // publishing height 0) when there's nothing to show.
   return (
     <div
-      ref={elRef}
+      ref={barRef}
       aria-live="polite"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      className={`fixed z-[70] flex items-center gap-1.5 rounded-full pl-1.5 pr-3 py-1 text-[11px] font-heading font-semibold shadow-lg select-none cursor-grab active:cursor-grabbing ${tone}`}
-      style={{ ...positioned, touchAction: 'none' }}
-      title="Drag to move"
+      className={`fixed inset-x-0 bottom-0 z-20 flex items-center justify-center gap-2 px-3 py-1.5 text-[11px] font-heading font-semibold shadow-[0_-2px_8px_rgba(0,0,0,0.12)] ${tone}`}
+      style={{
+        paddingBottom: 'calc(0.375rem + env(safe-area-inset-bottom))',
+        transform: show ? 'translateY(0)' : 'translateY(100%)',
+        transition: 'transform .25s ease',
+        pointerEvents: show ? 'auto' : 'none',
+      }}
     >
-      {/* Grip handle — signals the pill is draggable. */}
-      <span className="flex flex-col gap-[2px] px-1 opacity-60" aria-hidden>
-        <span className="flex gap-[2px]"><i className="w-[3px] h-[3px] rounded-full bg-current" /><i className="w-[3px] h-[3px] rounded-full bg-current" /></span>
-        <span className="flex gap-[2px]"><i className="w-[3px] h-[3px] rounded-full bg-current" /><i className="w-[3px] h-[3px] rounded-full bg-current" /></span>
-        <span className="flex gap-[2px]"><i className="w-[3px] h-[3px] rounded-full bg-current" /><i className="w-[3px] h-[3px] rounded-full bg-current" /></span>
-      </span>
       {!synced && online && (
         <span className="inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" aria-hidden />
       )}

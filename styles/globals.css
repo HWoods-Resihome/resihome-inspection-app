@@ -187,8 +187,10 @@ button, input, select, textarea {
   .lz-head { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; }
   .lz-head-top { padding-top: calc(0.3rem + env(safe-area-inset-top)) !important; }
   .lz-foot { padding-top: 0.35rem !important; padding-bottom: calc(0.35rem + env(safe-area-inset-bottom)) !important; }
-  /* Content region: less top padding, just enough bottom to clear the slim footer. */
-  .lz-content { padding-top: 0.5rem !important; padding-bottom: 4rem !important; }
+  /* Content region: less top padding, just enough bottom to clear the slim footer
+     (plus the app-wide sync footer's height when it's showing, so the footer
+     rising can't hide the last row in this compact landscape mode). */
+  .lz-content { padding-top: 0.5rem !important; padding-bottom: calc(4rem + var(--sync-footer-h, 0px)) !important; }
   .lz-gap { margin-bottom: 0.75rem !important; }
   /* Non-essential rows hidden only when vertical space is scarce. */
   .lz-hide { display: none !important; }

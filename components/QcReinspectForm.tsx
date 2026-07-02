@@ -1531,14 +1531,15 @@ export function QcReinspectForm(props: Props) {
         </div>
       )}
 
-      {/* Spacer so the fixed footer doesn't cover the last content */}
-      {!props.readOnly && <div className="h-20" />}
+      {/* Spacer so the fixed footer doesn't cover the last content (grows by the
+          app-wide sync footer's height when it's showing). */}
+      {!props.readOnly && <div style={{ height: 'calc(5rem + var(--sync-footer-h, 0px))' }} />}
 
       {/* Floating footer — mirrors the Scope Rate Card: Save & Close on the LEFT
           (with the live save-status chip), Submit on the right. No Cancel button.
           Shown for editable inspections. */}
       {!props.readOnly && (
-        <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30">
+        <div className="fixed bottom-0 inset-x-0 bg-white border-t-2 border-gray-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-30" style={{ bottom: 'var(--sync-footer-h, 0px)', transition: 'bottom .25s ease' }}>
           <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <button
