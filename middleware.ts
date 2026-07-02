@@ -49,6 +49,9 @@ const PUBLIC_PATHS = new Set<string>([
   '/api/cron/auto-cancel-stale',
   '/api/cron/training-guide-sync',
   '/api/cron/warm-inspections',
+  // HubSpot change webhook → cache invalidation. Called with no session cookie;
+  // self-enforces HUBSPOT_WEBHOOK_SECRET (Bearer / ?key=) inside the handler.
+  '/api/webhooks/hubspot',
   // Insights snapshot rebuild: reached by Vercel Cron (no session cookie) and by
   // admins. Self-enforces CRON_SECRET bearer / app-admin session in the handler.
   '/api/insights/rebuild',
