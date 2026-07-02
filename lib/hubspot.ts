@@ -5558,9 +5558,11 @@ export async function copyRateCardLinesToQc(args: {
   // photos rather than re-shooting them).
   const afterBySection = new Map<string, { section: string; location: string; urls: string[] }>();
 
+  const lineExternalIds: string[] = [];
   for (const a of lineAnswers) {
     const rc = a.rateCardLine!;
     const externalId = genId('QCLINE');
+    lineExternalIds.push(externalId);
     const carriedAfter = isInternalResolution(a.assignedTo) ? (a.afterPhotoUrls || []) : [];
     const props: Record<string, any> = {
       answer_id_external: externalId,
@@ -5576,15 +5578,20 @@ export async function copyRateCardLinesToQc(args: {
       quantity_decimal: rc.quantityDecimal != null ? rc.quantityDecimal : '',
       tenant_bill_back_percent: rc.tenantBillBackPercent != null ? rc.tenantBillBackPercent : '',
       is_custom_priced: rc.isCustomPriced ? 'true' : 'false',
-      custom_labor_rate: rc.customLaborRate != null ? rc.customLaborRate : '',
-      custom_adjusted_material_cost: rc.customAdjustedMaterialCost != null ? rc.customAdjustedMaterialCost : '',
-      custom_vendor_cost: rc.customVendorCost != null ? rc.customVendorCost : '',
       vendor_cost: rc.vendorCost != null ? rc.vendorCost : '',
       client_cost: rc.clientCost != null ? rc.clientCost : '',
       tenant_cost: rc.tenantCost != null ? rc.tenantCost : '',
       // QC-specific: starts unmarked
       pass_fail: '',
     };
+    // Override fields: ONLY include when set. These come from the phase3c
+    // migration and are NOT provisioned by provisionAppProperties — sending them
+    // (even as '') makes HubSpot reject the ENTIRE record as "unknown property" on
+    // an org where the migration hasn't run, which would silently drop the whole
+    // QC line copy. Mirrors rate-card-lines.ts's guarded writes.
+    if (rc.customLaborRate != null) props.custom_labor_rate = rc.customLaborRate;
+    if (rc.customAdjustedMaterialCost != null) props.custom_adjusted_material_cost = rc.customAdjustedMaterialCost;
+    if (rc.customVendorCost != null) props.custom_vendor_cost = rc.customVendorCost;
     // Pre-tag the carried-over after-photos onto this QC line.
     if (carriedAfter.length > 0) props.photo_urls = joinPhotoUrls(carriedAfter);
     upserts.push({ answerProps: props, questionHubspotRecordId: null });
@@ -5597,9 +5604,6 @@ export async function copyRateCardLinesToQc(args: {
     }
   }
 
-  // Number of lines copied (reported to the caller — excludes the seeded
-  // section-photo records appended below).
-  const lineCount = upserts.length;
 
   // Seed the QC's per-section "after" photo pools from the carried-over photos.
   for (const entry of afterBySection.values()) {
@@ -5616,8 +5620,22 @@ export async function copyRateCardLinesToQc(args: {
     });
   }
 
-  await upsertAnswers(args.qcInspectionId, upserts);
-  return lineCount;
+  // upsertAnswers resolves per-item HubSpot rejections INTERNALLY (returns
+  // {failed:true} markers) rather than throwing — so inspect them instead of
+  // reporting the queued count as saved. Otherwise a fully-rejected copy returned
+  // the full lineCount, and create.ts then stamped a nonzero Client $ on a QC that
+  // is actually EMPTY of lines (no error surfaced anywhere).
+  const results = await upsertAnswers(args.qcInspectionId, upserts) as Array<{ answerIdExternal: string; failed?: boolean; reason?: string }>;
+  const failed = results.filter((r) => r.failed);
+  if (failed.length > 0) {
+    console.error(`[copyRateCardLinesToQc] ${failed.length}/${upserts.length} QC record(s) rejected by HubSpot for inspection ${args.qcInspectionId} — copied QC will be short. First reason: ${String(failed[0]?.reason || '').slice(0, 200)}`);
+  }
+  const failedExternal = new Set(failed.map((r) => r.answerIdExternal));
+  // Report the count of LINE records that ACTUALLY saved (exclude failures + the
+  // seeded section-photo records) so the caller doesn't treat a failed copy as
+  // populated.
+  const savedLineCount = lineExternalIds.filter((eid) => !failedExternal.has(eid)).length;
+  return savedLineCount;
 }
 
 /**

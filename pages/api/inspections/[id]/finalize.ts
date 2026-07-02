@@ -139,7 +139,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // partial-failure resume stamps — instead of three sequential HubSpot reads.
   // Fail-open: on any read error each gate below behaves as if its property was
   // absent (exactly the prior per-gate try/catch behavior).
-  const preflightProps = ['submitted_by_email', 'submitted_at', 'hbmm_ticket_id', 'hbmm_eviction_ticket_id', 'hbmm_capex_ticket_id', 'finalize_email_sent_at'];
+  const preflightProps = ['submitted_by_email', 'submitted_at', 'hbmm_ticket_id', 'hbmm_eviction_ticket_id', 'hbmm_capex_ticket_id', 'finalize_email_sent_at', 'chargeback_import_sent_at'];
   if (FINALIZE_LOCK_PROP) preflightProps.push(FINALIZE_LOCK_PROP);
   const preflight: Record<string, any> | null = await readInspectionProps(id, preflightProps).catch((e) => {
     console.warn('[finalize] preflight property read failed (gates fail open):', e);
@@ -232,6 +232,40 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // the single preflight read above (no extra round-trip).
     const ticketAlreadyCreated = !!String(preflight?.hbmm_ticket_id || '').trim();
     const emailAlreadySent = !!String(preflight?.finalize_email_sent_at || '').trim();
+    // Durable "the tenant-charge import already went to SFTP" stamp. MUST be a
+    // stamp, NOT isRefinalize: the supported reopen→resubmit→finalize path lands
+    // on priorStatus 'pending_approval' (isRefinalize=false, same as a FIRST
+    // finalize), so gating the xlsx regen + SFTP drop on isRefinalize re-dropped
+    // the import and DOUBLE-BILLED the tenant. reopen.ts does not clear this
+    // stamp (like finalize_email_sent_at / hbmm_ticket_id), so it survives a
+    // reopen and the import fires exactly once. Empty until the property exists
+    // (then the guard is inert and we fall back to the prior isRefinalize gate).
+    const chargebackAlreadyImported = !!String(preflight?.chargeback_import_sent_at || '').trim();
+
+    // Persist a finalize idempotency STAMP durably. The dedup that stops a
+    // re-finalize / partial-failure resume from repeating an irreversible
+    // side-effect (a DUPLICATE vendor ticket, a re-sent damages email, or a
+    // re-dropped tenant-charge import) relies ENTIRELY on the stamp being stored,
+    // so retry a few times and log LOUDLY if it ultimately fails. Defined here
+    // (before the render/SFTP section) so the SFTP-import stamp can be written the
+    // instant the drop succeeds, minimizing the crash-before-stamp window.
+    const storeFinalizeStamp = async (prop: string, value: string | number | undefined, dupConsequence: string): Promise<void> => {
+      const val = String(value || '');
+      if (!val) return;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try { await updateInspection(id, { [prop]: val }); return; }
+        catch (e) {
+          if (attempt === 3) {
+            console.error(`[finalize] FAILED to store ${prop}=${val} after 3 attempts — ${dupConsequence}. Ensure the ${prop} property exists in HubSpot.`, e);
+          } else {
+            console.warn(`[finalize] could not store ${prop} (attempt ${attempt}/3) — retrying:`, e);
+            await new Promise((r) => setTimeout(r, 300 * attempt));
+          }
+        }
+      }
+    };
+    const storeTicketId = (prop: string, ticketId: number | undefined) =>
+      storeFinalizeStamp(prop, ticketId, 'a re-finalize could create a DUPLICATE ticket');
 
     const [answers, regions, catalog] = await Promise.all([
       fetchAnswersForInspection(id),
@@ -659,7 +693,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // PDFs latest — nothing outbound fires again.
     // Zero Dollar Turn has no chargeback lines → skip the xlsx render AND the
     // SFTP tenant-charge import entirely (both keyed off this buffer).
-    const chargebackXlsxBuf = (isRefinalize || zeroDollarTurn) ? null : await renderChargebackXlsx(ctx, {
+    // Skip the xlsx regen + SFTP drop when: already imported (durable stamp —
+    // survives reopen, so the corrected re-finalize can't re-bill), a Zero Dollar
+    // Turn (no chargeback), or any isRefinalize (prior guard — still covers a
+    // status=completed re-finalize even before the stamp property is provisioned,
+    // so there's no regression until it exists).
+    const chargebackXlsxBuf = (chargebackAlreadyImported || isRefinalize || zeroDollarTurn) ? null : await renderChargebackXlsx(ctx, {
       entityId: inspectionData.propertyEntityId || '',
       primaryTenantName: inspectionData.propertyLastPrimaryTenant || '',
       addressStreet: inspectionData.propertyAddressStreet || '',
@@ -746,6 +785,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (sftpResult) {
       if (sftpResult.ok) {
         console.log(`[finalize] tenant charge import uploaded to SFTP: ${sftpResult.remotePath}`);
+        // Stamp "imported" the INSTANT the drop succeeds (before the status flip
+        // and the rest of the pipeline), so a reopen→resubmit→finalize — or a
+        // crash-resume — reads chargebackAlreadyImported and does NOT re-drop the
+        // xlsx and double-bill the tenant.
+        await storeFinalizeStamp('chargeback_import_sent_at', new Date().toISOString(), 'a reopen/re-finalize could RE-IMPORT the tenant charge (double-bill)');
       } else if (sftpResult.configured) {
         console.warn(`[finalize] tenant charge import SFTP upload failed: ${sftpResult.error}`);
       } else {
@@ -801,7 +845,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       link_vendors_json: JSON.stringify(shareVendorLinks),
       // xlsx is generated + SFTP-dropped on the FIRST finalize only; a re-finalize
       // leaves the stored xlsx url/link untouched (no regen, no re-drop).
-      ...(!isRefinalize ? { pdf_chargeback_xlsx_url: chargebackXlsxUrl || '', link_xlsx: shareXlsxUrl || '' } : {}),
+      // Write the xlsx URL/link only when we actually generated one this run —
+      // NOT gated on !isRefinalize, which would write '' on a reopen re-finalize
+      // (where the xlsx was intentionally skipped) and BLANK the stored link.
+      ...(chargebackXlsxUrl ? { pdf_chargeback_xlsx_url: chargebackXlsxUrl, link_xlsx: shareXlsxUrl || '' } : {}),
       // Approver stamp (the finalize IS the approval). Set on first finalize so
       // a later regeneration doesn't overwrite the original approver.
       // Approver stamp (the finalize IS the approval). approved_at is a HubSpot
@@ -921,31 +968,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         console.warn('[finalize] Final Checklist structured-answer materialization failed (non-fatal):', e);
       }
     }
-
-    // Persist a finalize idempotency STAMP durably. The dedup that stops a
-    // re-finalize / partial-failure resume from repeating an irreversible
-    // side-effect (creating a DUPLICATE vendor work order, or re-sending the
-    // damages email) relies ENTIRELY on the stamp being stored — since status
-    // flips to 'completed' before those steps, a lost stamp makes the next run
-    // unable to tell "already done" from "never done". So retry a few times, and
-    // log LOUDLY if it ultimately fails rather than swallowing it.
-    const storeFinalizeStamp = async (prop: string, value: string | number | undefined, dupConsequence: string): Promise<void> => {
-      const val = String(value || '');
-      if (!val) return;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try { await updateInspection(id, { [prop]: val }); return; }
-        catch (e) {
-          if (attempt === 3) {
-            console.error(`[finalize] FAILED to store ${prop}=${val} after 3 attempts — ${dupConsequence}. Ensure the ${prop} property exists in HubSpot.`, e);
-          } else {
-            console.warn(`[finalize] could not store ${prop} (attempt ${attempt}/3) — retrying:`, e);
-            await new Promise((r) => setTimeout(r, 300 * attempt));
-          }
-        }
-      }
-    };
-    const storeTicketId = (prop: string, ticketId: number | undefined) =>
-      storeFinalizeStamp(prop, ticketId, 'a re-finalize could create a DUPLICATE ticket');
 
     // ---- 7. Create a maintenance ticket (best-effort, first finalize only) ----
     // Runs BEFORE the email so its pass/fail + ticket link can be reported there.

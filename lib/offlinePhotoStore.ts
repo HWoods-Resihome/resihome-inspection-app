@@ -840,7 +840,17 @@ export async function flushQueuedPhotos(
   // Still run when IndexedDB is unavailable IF the in-memory fallback holds
   // photos to upload (private mode / a failed durable write).
   if (!idbAvailable() && memQueue.size === 0) return { synced: 0, remaining: 0 };
-  const existing = flushInFlight.get(inspectionRecordId);
+  // Coalesce per inspection AND per flush KIND. The background driver flushes with
+  // a no-op onSynced (+ skipVideos); the open form flushes with a real onSynced
+  // that swaps draft→real in its state. If both coalesced on the id alone, a form
+  // flush that arrived while a background run was in-flight would ADOPT the no-op
+  // run — its onSynced never fires, the form keeps blob: drafts, and its next
+  // full-list save (which strips blob:) overwrites the just-attached photo on the
+  // server (data loss). Separate keys let the form run its OWN pass (concurrent
+  // runs are safe: uploadJpegBlob dedupes by localId, and a record already taken
+  // by the other run is skipped).
+  const flushKey = `${inspectionRecordId}|${opts?.skipVideos ? 'bg' : 'fg'}`;
+  const existing = flushInFlight.get(flushKey);
   if (existing) return existing;
   // iOS uploads DURING the camera session too — photos save as they're taken, not
   // piled up until Done. Drain at the adaptive concurrency whether or not the
@@ -852,9 +862,9 @@ export async function flushQueuedPhotos(
   // (makeThumbBlob guard); and the flush loads each photo's bytes just-in-time, so
   // only ~concurrency compressed images are ever resident — never the whole queue.
   const run = doFlushQueuedPhotos(inspectionRecordId, onSynced, opts);
-  flushInFlight.set(inspectionRecordId, run);
+  flushInFlight.set(flushKey, run);
   try { return await run; }
-  finally { flushInFlight.delete(inspectionRecordId); }
+  finally { flushInFlight.delete(flushKey); }
 }
 
 async function doFlushQueuedPhotos(
@@ -1049,6 +1059,12 @@ async function doFlushQueuedPhotos(
   let active = 0;
   const worker = async () => {
     while (!stop) {
+      // Background run yields the moment the form for THIS inspection becomes
+      // active: the open form is the sole writer of its records, so the remaining
+      // photos should be drained by the form's own flush (with its real onSynced),
+      // not uploaded behind its back here. Shrinks the inactive→active race window
+      // to whatever's already in flight.
+      if (opts?.skipVideos && isInspectionFormActive(inspectionRecordId)) break;
       if (active >= _adaptiveConcurrency) {
         // Over the live target — yield briefly and re-check instead of claiming
         // work (keeps the effective width == target without tearing down workers).

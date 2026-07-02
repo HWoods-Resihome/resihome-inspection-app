@@ -1797,15 +1797,7 @@ export function QuestionForm({
       for (const q of inst.questions) {
         if (!isWidgetVisible(q.questionIdExternal, inst.instanceKey)) continue;
         if (isHiddenWhenOccupied(q)) continue;
-        // Optional questions don't count toward the progress total — e.g. the
-        // all-optional Review / Sign-Off section should not show "0/1".
-        if (!q.isRequired) continue;
-        total++;
         const a = answers[answerKey(q.questionIdExternal, inst.instanceKey)];
-        // When a maintenance ticket is raised, the (required) ticket description
-        // STANDS IN FOR "Additional Comments" — so that slot still counts toward
-        // the total, and reads ANSWERED once the description is filled (→ 20/20,
-        // not 19/19). The submit gate likewise requires the description.
         // Count "done" the SAME way validate() gates submit, so the header
         // "X/Y" can't read complete while submit is still blocked (or vice
         // versa). Beyond a chosen answerValue that also means: a required photo
@@ -1829,6 +1821,35 @@ export function QuestionForm({
           }
           return true;
         };
+        // Optional questions are normally excluded from "X/Y" (e.g. the all-optional
+        // Review / Sign-Off section shouldn't show "0/1"). BUT validate() enforces
+        // photo/note/recommended-rent on ANY answered question regardless of
+        // isRequired — so an ANSWERED optional question that carries such an
+        // obligation CAN block submit. Include it in the count (stably, whether or
+        // not the obligation is met yet) so the header can't read complete while
+        // submit is blocked on it.
+        const optionalHasGateObligation = (): boolean => {
+          if (!a?.answerValue) return false;
+          const val = a.answerValue;
+          const na = isNA(val);
+          if (isListingPriceQuestion(q) && wantsRecommendedPrice(val)) return true;
+          if (q.requiresPhoto && !na) return true;
+          if (!na) {
+            const failSel = answerTone(val) === 'fail';
+            const triggeredNote = q.noteRequiredOnValues.length > 0 && (
+              q.noteRequiredOnValues.includes(val)
+              || (failSel && q.noteRequiredOnValues.some((v) => answerTone(v) === 'fail'))
+            );
+            if (triggeredNote || q.requiresNote) return true;
+          }
+          return false;
+        };
+        if (!q.isRequired && !isCommentExemptByTicket(q) && !optionalHasGateObligation()) continue;
+        total++;
+        // When a maintenance ticket is raised, the (required) ticket description
+        // STANDS IN FOR "Additional Comments" — so that slot still counts toward
+        // the total, and reads ANSWERED once the description is filled (→ 20/20,
+        // not 19/19). The submit gate likewise requires the description.
         const done = isCommentExemptByTicket(q)
           ? !!maintTicketDescription.trim()
           : (q.responseType === 'photo_only'
