@@ -83,6 +83,26 @@ function fullKey(gen: number, key: string): string {
   return `insp:v${gen}:${key}`;
 }
 
+/** Which backend the env vars point at (for the admin health check). */
+export function sharedCacheBackend(): 'disabled' | 'vercel-kv' | 'upstash' {
+  if (!sharedCacheEnabled) return 'disabled';
+  if (process.env.KV_REST_API_URL) return 'vercel-kv';
+  return 'upstash';
+}
+
+/**
+ * Live end-to-end probe: SET a short-lived key and read it back, proving the
+ * running function can actually reach the store. For the admin health check.
+ */
+export async function sharedCachePing(): Promise<{ ok: boolean; latencyMs: number | null }> {
+  if (!sharedCacheEnabled) return { ok: false, latencyMs: null };
+  const started = Date.now();
+  const set = await redis(['SET', 'insp:__ping__', 'ok', 'EX', '30']);
+  if (set !== 'OK') return { ok: false, latencyMs: Date.now() - started };
+  const got = await redis(['GET', 'insp:__ping__']);
+  return { ok: got === 'ok', latencyMs: Date.now() - started };
+}
+
 /** Read a JSON value from the shared cache for a captured generation. */
 export async function sharedGet<T>(key: string, gen: number): Promise<T | null> {
   if (!sharedCacheEnabled) return null;
