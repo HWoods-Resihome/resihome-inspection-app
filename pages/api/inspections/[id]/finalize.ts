@@ -328,6 +328,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         tenantTotal: 0,
       });
     }
+    // Safety net for a line whose section was RENAMED after it was saved. A static
+    // section (Yard/Kitchen/Whole House…) has location "" so resolveSection's
+    // location-only fallback can't recover it once the label changes — and
+    // DROPPING the line silently UNDER-BILLS (missing from PDFs + every total).
+    // Instead, group unresolved lines under a synthetic section keyed by their
+    // stored label so they still render and count toward the grand totals (under
+    // the old label — finalize has no old→new rename mapping). Logged separately.
+    let recoveredNoSection = 0;
+    const getOrCreateUnresolvedGroup = (section: string, location: string): PdfSectionGroup => {
+      const key = `__unresolved__:${section}||${location}`;
+      let g = sectionGroups.get(key);
+      if (!g) {
+        g = { label: section || location || 'Other', displayName: section || location || 'Other', lines: [], photoUrls: [], vendorTotal: 0, clientTotal: 0, tenantTotal: 0 };
+        sectionGroups.set(key, g);
+      }
+      return g;
+    };
 
     // Grouping/integrity guard: count how many rate-card lines we couldn't place
     // (no matching section, or catalog miss). A non-trivial drop rate means a
@@ -341,13 +358,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (ans.answerType === 'rate_card_line' && ans.rateCardLine) {
         totalLineAnswers++;
         const s = resolveSection(ans.section, ans.location);
-        if (!s) {
-          droppedNoSection++;
-          if (droppedDetail.length < 20) droppedDetail.push(`no-section: ${ans.rateCardLine.lineItemCode} (section="${ans.section}" location="${ans.location}")`);
-          console.warn(`[finalize] no section for answer ${ans.answerIdExternal} (section="${ans.section}" location="${ans.location}")`);
-          continue;
+        let group: PdfSectionGroup | undefined;
+        if (s) {
+          group = sectionGroups.get(s.id);
+        } else {
+          // Renamed static section (or stale label): recover under the stored
+          // label rather than drop → the line still bills. (Was a silent drop.)
+          recoveredNoSection++;
+          if (droppedDetail.length < 20) droppedDetail.push(`recovered-no-section: ${ans.rateCardLine.lineItemCode} (section="${ans.section}" location="${ans.location}")`);
+          console.warn(`[finalize] no matching section for answer ${ans.answerIdExternal} (section="${ans.section}" location="${ans.location}") — recovering under the stored label (likely a renamed section).`);
+          group = getOrCreateUnresolvedGroup(ans.section, ans.location);
         }
-        const group = sectionGroups.get(s.id);
         if (!group) continue;
 
         const rc = ans.rateCardLine;
@@ -414,8 +435,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         group.tenantTotal += roundMoney(calc.tenantCost);
       } else if (ans.answerType === 'section_photo') {
         const s = resolveSection(ans.section, ans.location);
-        if (!s) continue;
-        const group = sectionGroups.get(s.id);
+        // Recover a renamed section's photos too (same rationale as lines above),
+        // so a renamed section's evidence photos aren't dropped from the report.
+        const group = s ? sectionGroups.get(s.id) : getOrCreateUnresolvedGroup(ans.section, ans.location);
         if (!group) continue;
         group.photoUrls = ans.photoUrls || [];
       }
@@ -444,18 +466,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Early-warning guard: if a meaningful share of lines couldn't be placed, a
     // grouping/catalog regression likely shipped. Log loudly (and we attach the
     // summary to the response below). Threshold kept low so it can't go unnoticed.
+    // NOTE: no-section lines are now RECOVERED (grouped under their stored label),
+    // not dropped — so only a catalog miss is a genuine drop. recoveredNoSection
+    // is surfaced separately so a spike (e.g. many renamed sections) is visible.
     const droppedTotal = droppedNoSection + droppedCatalogMiss;
     const dropRate = totalLineAnswers > 0 ? droppedTotal / totalLineAnswers : 0;
-    let groupingWarning: { totalLines: number; dropped: number; droppedNoSection: number; droppedCatalogMiss: number; dropRate: number; sample: string[] } | null = null;
-    if (droppedTotal > 0) {
+    let groupingWarning: { totalLines: number; dropped: number; droppedNoSection: number; droppedCatalogMiss: number; recoveredNoSection: number; dropRate: number; sample: string[] } | null = null;
+    if (droppedTotal > 0 || recoveredNoSection > 0) {
       groupingWarning = {
         totalLines: totalLineAnswers, dropped: droppedTotal,
-        droppedNoSection, droppedCatalogMiss,
+        droppedNoSection, droppedCatalogMiss, recoveredNoSection,
         dropRate: Math.round(dropRate * 1000) / 1000,
         sample: droppedDetail,
       };
       const sev = dropRate >= 0.1 ? 'ERROR' : 'warn';
-      console.warn(`[finalize] ${sev}: ${droppedTotal}/${totalLineAnswers} lines dropped (${Math.round(dropRate * 100)}%) — ${droppedNoSection} no-section, ${droppedCatalogMiss} catalog-miss. Sample: ${droppedDetail.join(' | ')}`);
+      console.warn(`[finalize] ${sev}: ${droppedTotal}/${totalLineAnswers} lines dropped (${Math.round(dropRate * 100)}%) — ${droppedNoSection} no-section, ${droppedCatalogMiss} catalog-miss, ${recoveredNoSection} recovered-under-stored-label. Sample: ${droppedDetail.join(' | ')}`);
     }
 
     // Per-line Internal Resolution timing: "Complete Later" lines are exempt
