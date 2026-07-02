@@ -108,10 +108,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (width > 0 && (isHeic || ct.startsWith('image/') || !ct)) {
       try {
-        const jpeg = await sharp(buf).rotate().resize({ width, withoutEnlargement: true }).jpeg({ quality: 78 }).toBuffer();
-        res.setHeader('Content-Type', 'image/jpeg');
+        const pipeline = sharp(buf).rotate().resize({ width, withoutEnlargement: true });
+        // Serve WebP to clients that accept it (~25-35% smaller than JPEG at equal
+        // quality → less cell bandwidth + faster decode), else JPEG. WebP not AVIF:
+        // AVIF's encode is far slower and a photo-heavy inspection requests dozens
+        // of tiles at once. `Vary: Accept` so a cache never hands a WebP to a
+        // JPEG-only client. Both are cached hard (a photo's thumb is immutable).
+        const accept = String(req.headers.accept || '');
+        const useWebp = accept.includes('image/webp');
+        const out = useWebp
+          ? await pipeline.webp({ quality: 72 }).toBuffer()
+          : await pipeline.jpeg({ quality: 78 }).toBuffer();
+        res.setHeader('Content-Type', useWebp ? 'image/webp' : 'image/jpeg');
+        res.setHeader('Vary', 'Accept');
         res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-        return res.status(200).send(jpeg);
+        return res.status(200).send(out);
       } catch { /* fall through to full-size handling below */ }
     }
 

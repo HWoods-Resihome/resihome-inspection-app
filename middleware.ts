@@ -37,6 +37,8 @@ const PUBLIC_PATHS = new Set<string>([
   // Client error telemetry must accept reports even before/without a session
   // (e.g. a crash on the login page) — it stores no sensitive data.
   '/api/telemetry/error',
+  // Real-user Web Vitals beacon — same rationale (may fire pre-auth / on unload).
+  '/api/telemetry/vitals',
   // Version check for the update prompt — must work even when the session has
   // gone stale (so we can still tell the inspector to reload).
   '/api/version',

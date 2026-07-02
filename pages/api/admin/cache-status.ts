@@ -11,7 +11,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { sharedCacheEnabled, sharedCacheBackend, sharedCachePing, getSharedGen } from '@/lib/sharedCache';
+import { sharedCacheEnabled, sharedCacheBackend, sharedCachePing, getSharedGen, getSharedCacheStats } from '@/lib/sharedCache';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -24,6 +24,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     backend: sharedCacheBackend(),      // 'vercel-kv' | 'upstash' | 'disabled'
     ping,                               // { ok, latencyMs } — a live SET+GET round trip
     generation,                         // current shared invalidation counter
+    stats: getSharedCacheStats(),       // this instance's hit/miss/hitRate since start
     hint: sharedCacheEnabled
       ? (ping.ok ? 'Shared cache is LIVE.' : 'Env vars present but the store did not respond — check the token/URL.')
       : 'No KV env vars in this deployment — connect the store and REDEPLOY so functions pick them up.',

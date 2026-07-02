@@ -29,6 +29,26 @@ const raleway = Raleway({
   fallback: ['Arial', 'sans-serif'],
 });
 
+// Real-user Web Vitals (LCP / INP / CLS / FCP / TTFB) from actual field devices,
+// beaconed to a lightweight sink. Next calls this automatically. Fire-and-forget
+// — it must never affect the page.
+export function reportWebVitals(metric: { name: string; value: number; id: string; rating?: string }): void {
+  try {
+    if (typeof navigator === 'undefined') return;
+    const body = JSON.stringify({
+      name: metric.name,
+      value: Math.round(metric.value),
+      rating: metric.rating,
+      url: typeof window !== 'undefined' ? window.location?.pathname : undefined,
+    });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/api/telemetry/vitals', new Blob([body], { type: 'application/json' }));
+    } else {
+      void fetch('/api/telemetry/vitals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+    }
+  } catch { /* never throw */ }
+}
+
 export default function App({ Component, pageProps }: AppProps) {
   useEffect(() => {
     // Field reliability: capture crashes/silent failures, catch session

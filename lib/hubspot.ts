@@ -8,6 +8,7 @@ import { extractLeasingAgent1099Fields } from './leasingAgent1099';
 import { calculateLine, roundMoney } from './rateCardMath';
 import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion, isExternalEmail } from './userAccess';
 import { normalizeApprovalRouting, type ApprovalRoutingConfig } from './approvalRouting';
+import { reportServerError } from './serverErrorReporter';
 
 const API_BASE = 'https://api.hubapi.com';
 
@@ -186,6 +187,14 @@ function hsNoteFailure(): void {
   if (hsConsecutiveFailures >= HS_BREAKER_THRESHOLD) {
     hsBreakerOpenUntil = Date.now() + HS_BREAKER_COOLDOWN_MS;
     console.warn(`[hubspotFetch] circuit OPEN after ${hsConsecutiveFailures} consecutive failures — failing fast for ${HS_BREAKER_COOLDOWN_MS}ms`);
+    // Alert once per open episode (dedup + throttle handled downstream). The
+    // breaker opening means HubSpot has hard-failed repeatedly — high-signal.
+    if (hsConsecutiveFailures === HS_BREAKER_THRESHOLD) {
+      reportServerError(
+        new Error(`HubSpot circuit breaker OPEN after ${hsConsecutiveFailures} consecutive hard failures`),
+        { route: 'lib/hubspot:hubspotFetch', phase: 'circuit-breaker-open' },
+      );
+    }
   }
 }
 

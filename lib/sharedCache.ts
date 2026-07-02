@@ -58,6 +58,14 @@ async function redis(cmd: (string | number)[]): Promise<any> {
   }
 }
 
+// Lightweight per-instance hit/miss counters so the admin health check can report
+// the cross-instance cache's effectiveness (does not persist across cold starts).
+const stats = { hits: 0, misses: 0 };
+export function getSharedCacheStats(): { hits: number; misses: number; hitRate: number } {
+  const total = stats.hits + stats.misses;
+  return { hits: stats.hits, misses: stats.misses, hitRate: total ? stats.hits / total : 0 };
+}
+
 let genCache: { val: number; at: number } | null = null;
 
 /** Current shared generation (0 when disabled). Locally cached for a few seconds. */
@@ -127,8 +135,8 @@ export async function sharedCachePing(): Promise<{ ok: boolean; latencyMs: numbe
 export async function sharedGet<T>(key: string, gen: number): Promise<T | null> {
   if (!sharedCacheEnabled) return null;
   const raw = await redis(['GET', fullKey(gen, key)]);
-  if (typeof raw !== 'string') return null;
-  try { return JSON.parse(raw) as T; } catch { return null; }
+  if (typeof raw !== 'string') { stats.misses++; return null; }
+  try { const v = JSON.parse(raw) as T; stats.hits++; return v; } catch { stats.misses++; return null; }
 }
 
 /**
