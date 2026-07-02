@@ -444,7 +444,9 @@ export function composeInspectionEmail(args: {
   // Prefer the property's team_group_email; fall back to team{STATE}@resihome.com.
   const groupEmail = (prop.teamGroupEmail || '').trim();
   const teamEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(groupEmail) ? groupEmail : buildTeamEmail(prop.stateCode);
-  if (teamEmail) cc.push(teamEmail);
+  // Dedupe against the To recipient (soda@) too — if the team email IS soda@,
+  // don't CC a duplicate.
+  if (teamEmail && !to.some((e) => e.toLowerCase() === teamEmail.toLowerCase())) cc.push(teamEmail);
 
   // CC the inspector (from HubSpot) so they receive a copy of their own
   // completed scope. Validate + dedupe (case-insensitive) against existing

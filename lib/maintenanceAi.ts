@@ -268,21 +268,29 @@ export async function createMaintenanceTicket(input: CreateTicketInput): Promise
     let json: any = null;
     try { json = await resp.json(); } catch { /* non-JSON body */ }
 
-    if (resp.ok) {
-      const ticketId = json?.data?.ticketId;
-      const tid = typeof ticketId === 'number' ? ticketId : undefined;
+    // A 200/201 with a usable ticket id is the only true success. resp.ok is also
+    // true for 202 (async "accepted"/idempotency replay), which carries NO
+    // ticketId — reporting THAT as ok:true returned ticketId:undefined, which
+    // logged "created #undefined", skipped the hbmm_ticket_id stamp (so the PDF
+    // never attached), and let a resume/re-finalize create a DUPLICATE ticket.
+    // Require a numeric (or numeric-string) id and exclude 202.
+    const rawTicketId = json?.data?.ticketId;
+    const nTicketId = rawTicketId != null && rawTicketId !== '' ? Number(rawTicketId) : NaN;
+    const tid = Number.isFinite(nTicketId) ? nTicketId : undefined;
+    if (resp.ok && status !== 202 && tid !== undefined) {
       // The API does NOT set the type on CREATE — it must be applied via a
       // SEPARATE update, so we run it here as the authoritative step. Observable
       // (the result is returned + logged); never fatal to finalize. Skipped
       // entirely for the 1099/vacancy flow (skipTypeUpdate), which keeps the
       // type the API assigned.
-      const typeUpdate = (tid && !input.skipTypeUpdate)
+      const typeUpdate = (!input.skipTypeUpdate)
         ? await updateTicketType(baseUrl, version, apiKey, tid, body.ticketTypeId)
         : undefined;
       return { ok: true, configured: true, status, requestId, ticketId: tid, typeUpdate };
     }
 
-    // 202 = idempotency replay/in-progress; treat as non-fatal but not "ok".
+    // 202 (async accept / idempotency replay) OR a 2xx with no usable id OR a
+    // non-2xx: non-fatal, but NOT "ok" — the caller must not stamp a missing id.
     const msg = json?.errorMessage
       || (Array.isArray(json?.validationErrors) ? json.validationErrors.join('; ') : '')
       || `HTTP ${status}`;

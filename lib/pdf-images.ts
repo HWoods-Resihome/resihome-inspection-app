@@ -4,6 +4,11 @@
 // so React-PDF embeds them directly without doing any I/O of its own.
 
 import sharp from 'sharp';
+import { safeProxyFetch, readBodyCapped, ProxyFetchError } from '@/lib/safeProxyFetch';
+
+// Hard ceiling on a fetched source image so a huge/attacker-supplied URL can't
+// OOM the PDF render.
+const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
 
 // Embedded photos are sized/compressed for documentation legibility while
 // keeping the PDF small — photo-heavy scopes were pushing the finalize email
@@ -50,7 +55,14 @@ async function fetchAndResize(url: string): Promise<string | null> {
     // the remaining budget; only used when this attempt fails and another remains.
     const backoff = () => Math.min(BACKOFF_CAP_MS, 500 * 2 ** (attempt - 1), Math.max(0, RETRY_BUDGET_MS - (Date.now() - start)));
     try {
-      const res = await fetch(url, { signal: ctrl.signal });
+      // SSRF guard: these URLs come from the (authenticated) /api/pdf request
+      // body, so a caller could point one at an internal/metadata address and,
+      // if it returns a decodable image (incl. SVG via sharp), exfiltrate it into
+      // the generated PDF. safeProxyFetch follows redirects manually and refuses
+      // any hop resolving to a private/internal IP; readBodyCapped bounds the
+      // read. A blocked/oversized fetch throws → caught below → renders as a
+      // "View photo" link (same as any other fetch failure).
+      const res = await safeProxyFetch(url, { signal: ctrl.signal });
       if (!res.ok) {
         // Retry the propagation-lag statuses; give up on a genuine client error.
         const retryable = res.status === 404 || res.status === 403 || res.status === 429 || res.status >= 500;
@@ -58,7 +70,7 @@ async function fetchAndResize(url: string): Promise<string | null> {
         console.warn(`[pdf-images] Failed to fetch ${url}: ${res.status}`);
         return null;
       }
-      const buf = Buffer.from(await res.arrayBuffer());
+      const buf = await readBodyCapped(res, MAX_IMAGE_BYTES);
       // auto-orient (rotate) so EXIF-rotated phone photos embed upright.
       const resized = await sharp(buf)
         .rotate()
@@ -67,6 +79,9 @@ async function fetchAndResize(url: string): Promise<string | null> {
         .toBuffer();
       return `data:image/jpeg;base64,${resized.toString('base64')}`;
     } catch (e: any) {
+      // SSRF-blocked / oversized / unresolvable host: not transient — don't retry,
+      // render as a link.
+      if (e instanceof ProxyFetchError) { console.warn(`[pdf-images] blocked/failed fetch ${url}: ${e.message}`); return null; }
       const isAbort = e?.name === 'AbortError';
       // A network/timeout error is worth another try; a decode error isn't.
       const looksTransient = isAbort || /fetch failed|network|ECONN|ETIMEDOUT|socket/i.test(String(e?.message || e));

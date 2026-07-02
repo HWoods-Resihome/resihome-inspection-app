@@ -114,8 +114,12 @@ export async function enqueueSftpWatch(watch: SftpWatch): Promise<void> {
 function buildErrorEmail(watch: SftpWatch, errorNames: string[], threaded = true) {
   const base = watch.reply.subject || `Tenant Chargeback Import error`;
   const subject = threaded ? (/^re:/i.test(base) ? base : `Re: ${base}`) : base;
+  // Escape SFTP-supplied file names before interpolating into the HTML body — the
+  // importer names the error files, so a name with an HTML-special char would
+  // otherwise inject/break markup (every other HTML body in the app escapes).
+  const esc = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const list = errorNames.map((n) => `• ${n}`).join('\n');
-  const listHtml = errorNames.map((n) => `<li>${n}</li>`).join('');
+  const listHtml = errorNames.map((n) => `<li>${esc(n)}</li>`).join('');
   const textBody =
     `Heads up — the Tenant Chargeback Import for this inspection did NOT process successfully.\n\n` +
     `The file was dropped to the SFTP but the importer moved it to the Errors folder.\n\n` +
@@ -126,7 +130,7 @@ function buildErrorEmail(watch: SftpWatch, errorNames: string[], threaded = true
   const htmlBody =
     `<p>Heads up — the <strong>Tenant Chargeback Import</strong> for this inspection did <strong>not</strong> process successfully.</p>` +
     `<p>The file was dropped to the SFTP but the importer moved it to the <strong>Errors</strong> folder.</p>` +
-    `<p><strong>Dropped file:</strong> ${watch.droppedFilename}<br/><strong>Error file(s) attached:</strong></p>` +
+    `<p><strong>Dropped file:</strong> ${esc(watch.droppedFilename)}<br/><strong>Error file(s) attached:</strong></p>` +
     `<ul>${listHtml}</ul>` +
     `<p>Please review the attached error file(s) and re-submit the corrected import.</p>` +
     `<p style="color:#888;font-size:12px">— ResiWalk automated SFTP monitor</p>`;

@@ -5631,7 +5631,12 @@ export async function copyRateCardLinesToQc(args: {
   for (const entry of afterBySection.values()) {
     upserts.push({
       answerProps: buildSectionPhotoAnswerProps({
-        answerIdExternal: genId('QCAFTER'),
+        // Use the SAME deterministic external id the form's persistAfterPhotos and
+        // the durable photo-attach path use (QCAFTER-<qc>-<section||location>) so
+        // all three writers converge on ONE record. A random genId() here made the
+        // attach path miss the seeded record and CREATE a duplicate section_photo,
+        // and qc-finalize's last-write-wins then dropped one record's After photos.
+        answerIdExternal: `QCAFTER-${args.qcInspectionId}-${`${entry.section || ''}||${entry.location || ''}`.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
         summaryLabel: entry.location || entry.section || 'Section',
         section: entry.section,
         location: entry.location,
