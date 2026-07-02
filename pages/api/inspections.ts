@@ -13,7 +13,7 @@ import type {
   InspectionCounts,
 } from '@/lib/hubspot';
 import { isExternalEmail } from '@/lib/userAccess';
-import { getSharedGen, sharedGet, sharedSet, bumpSharedGen } from '@/lib/sharedCache';
+import { getSharedGen, sharedGet, sharedSet, bumpSharedGen, sharedCacheEnabled } from '@/lib/sharedCache';
 import type { InspectionSummary } from '@/lib/types';
 
 /**
@@ -45,6 +45,11 @@ const TTL_MS = 45 * 1000;
 // costs FIVE searches, so caching them longer directly cuts the search rate.
 const COUNTS_TTL_MS = 3 * 60 * 1000;
 const FACET_TTL_MS = 10 * 60 * 1000; // inspector/template options change rarely
+// Stale-while-revalidate window for the list/counts: once past TTL, keep serving
+// the cached copy for this long while a background refresh runs, so a "just
+// expired" entry never blocks the user on HubSpot. Bounded so post-mutation
+// staleness stays small (mutations also bust the cache + bump the shared gen).
+const STALE_MS = 60 * 1000;
 const MAX_KEYS = 80;                 // bound memory across query variants
 
 type ListResult = { items: InspectionSummary[]; total: number };
@@ -94,55 +99,108 @@ export function bustInspectionsCache(): Promise<void> {
   return bumpSharedGen();
 }
 
+/**
+ * Warm the SHARED cache for the DEFAULT home view (internal, unfiltered, page 1,
+ * sort date desc) — by far the most-hit query. Run by the warm-inspections cron
+ * so a cold serverless instance serves this from KV instead of paying the
+ * cold-path cost (1 list + 5 count searches) against HubSpot. Keys MUST match
+ * exactly what the handler builds for that query. No-op unless a KV store is
+ * connected (warming only a cron instance's local cache would be useless).
+ */
+export async function warmInspectionsCache(): Promise<boolean> {
+  if (!sharedCacheEnabled) return false;
+  const empty: string[] = [];
+  const baseQuery: InspectionQuery = {
+    search: '', status: 'all', inspectors: [], templates: [], regions: [],
+    externalEmail: null, externalViewRegions: undefined,
+  };
+  const sortField: InspectionSortField = 'date';
+  const sortDir: 'asc' | 'desc' = 'desc';
+  const page = 1;
+  const pageSize = 20;
+  const viewKey = null;
+  // Byte-for-byte identical to the handler's countKey / listKey for this query.
+  const countKey = JSON.stringify({ search: '', inspectors: empty, templates: empty, regions: empty, externalEmail: null, viewKey });
+  const listKey = JSON.stringify({ search: '', status: 'all', inspectors: empty, templates: empty, regions: empty, externalEmail: null, viewKey, sortField, sortDir, page, pageSize });
+  await Promise.all([
+    withCache(lists, listKey, TTL_MS, true, () =>
+      searchInspectionsPage({ ...baseQuery, sortField, sortDir, page, pageSize }), STALE_MS),
+    withCache(counts, countKey, COUNTS_TTL_MS, true, () =>
+      countInspectionsByStatus(baseQuery), STALE_MS),
+  ]);
+  return true;
+}
+
 async function withCache<T>(
   store: { cache: Map<string, CacheEntry<T>>; inflight: Map<string, Promise<T>> },
   key: string,
   ttl: number,
   force: boolean,
   fn: () => Promise<T>,
+  staleMs = 0,
 ): Promise<T> {
+  // The blocking fetch (also reused for background revalidation). Deduped via the
+  // inflight map, so a burst — or many stale-serving requests kicking a refresh —
+  // awaits ONE fetch. Checks the shared (cross-instance) cache before HubSpot.
+  const fetchFresh = (): Promise<T> => {
+    const existing = store.inflight.get(key);
+    if (existing) return existing;
+    const startedGen = bustGeneration;
+    const p = (async () => {
+      try {
+        // Capture the shared generation up front so a mutation racing this fetch
+        // won't let us write stale data back to the shared cache under a new gen.
+        const sharedGen = await getSharedGen();
+        // Cross-instance hit: a cold instance can serve another instance's recent
+        // result instead of re-hitting HubSpot. Skipped on a forced refresh.
+        if (!force) {
+          const shared = await sharedGet<T>(key, sharedGen);
+          if (shared != null) {
+            if (bustGeneration === startedGen) {
+              if (store.cache.size >= MAX_KEYS) store.cache.clear();
+              store.cache.set(key, { data: shared, at: Date.now() });
+            }
+            return shared;
+          }
+        }
+        const data = await fn();
+        // If a create/cancel busted the cache while we were fetching, this result
+        // predates the mutation — don't write it back (it would serve stale data
+        // for a full TTL). Return it to THIS caller, just don't cache it.
+        if (bustGeneration === startedGen) {
+          if (store.cache.size >= MAX_KEYS) store.cache.clear();
+          store.cache.set(key, { data, at: Date.now() });
+          // Populate the shared cache too (fire-and-forget; sharedSet re-checks the
+          // generation and no-ops when no KV store is connected).
+          void sharedSet(key, sharedGen, data, Math.ceil(ttl / 1000));
+        }
+        return data;
+      } finally {
+        store.inflight.delete(key);
+      }
+    })();
+    store.inflight.set(key, p);
+    return p;
+  };
+
   if (!force) {
     const hit = store.cache.get(key);
-    if (hit && Date.now() - hit.at < ttl) return hit.data;
+    if (hit) {
+      const age = Date.now() - hit.at;
+      if (age < ttl) return hit.data; // fresh
+      // Stale-while-revalidate: within the stale window, return the cached copy
+      // INSTANTLY (no HubSpot / KV round-trip on the request path) and refresh in
+      // the background so the next reader gets fresh data. The cache warmer cron
+      // keeps the hot default view fresh so this stays a perceived-latency win.
+      if (staleMs > 0 && age < ttl + staleMs) {
+        void fetchFresh().catch(() => {}); // best-effort background revalidation
+        return hit.data;
+      }
+    }
     const inflight = store.inflight.get(key);
     if (inflight) return inflight;
   }
-  const startedGen = bustGeneration;
-  const p = (async () => {
-    try {
-      // Capture the shared generation up front so a mutation racing this fetch
-      // won't let us write stale data back to the shared cache under a new gen.
-      const sharedGen = await getSharedGen();
-      // Cross-instance hit: a cold instance can serve another instance's recent
-      // result instead of re-hitting HubSpot. Skipped on a forced refresh.
-      if (!force) {
-        const shared = await sharedGet<T>(key, sharedGen);
-        if (shared != null) {
-          if (bustGeneration === startedGen) {
-            if (store.cache.size >= MAX_KEYS) store.cache.clear();
-            store.cache.set(key, { data: shared, at: Date.now() });
-          }
-          return shared;
-        }
-      }
-      const data = await fn();
-      // If a create/cancel busted the cache while we were fetching, this result
-      // predates the mutation — don't write it back (it would serve stale data
-      // for a full TTL). Return it to THIS caller, just don't cache it.
-      if (bustGeneration === startedGen) {
-        if (store.cache.size >= MAX_KEYS) store.cache.clear();
-        store.cache.set(key, { data, at: Date.now() });
-        // Populate the shared cache too (fire-and-forget; sharedSet re-checks the
-        // generation and no-ops when no KV store is connected).
-        void sharedSet(key, sharedGen, data, Math.ceil(ttl / 1000));
-      }
-      return data;
-    } finally {
-      store.inflight.delete(key);
-    }
-  })();
-  store.inflight.set(key, p);
-  return p;
+  return fetchFresh();
 }
 
 const STATUS_KEYS: InspectionStatusKey[] = ['all', 'scheduled', 'in_progress', 'pending_approval', 'completed'];
@@ -239,9 +297,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     const [list, statusCounts, facetData] = await Promise.all([
       withCache(lists, listKey, TTL_MS, force, () =>
-        searchInspectionsPage({ ...baseQuery, sortField, sortDir, page, pageSize })),
+        searchInspectionsPage({ ...baseQuery, sortField, sortDir, page, pageSize }), STALE_MS),
       withCache(counts, countKey, COUNTS_TTL_MS, force, () =>
-        countInspectionsByStatus(baseQuery)),
+        countInspectionsByStatus(baseQuery), STALE_MS),
       // Only compute facets inline when asked (back-compat for any caller that
       // doesn't split them out). The home screen passes facets=0.
       wantFacets
