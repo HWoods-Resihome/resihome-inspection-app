@@ -24,7 +24,7 @@ const MAX_TRANSCODE_BYTES = 200 * 1024 * 1024; // large clips route here (stream
 // proxies. The SSRF guard: we only ever fetch a URL our own upload produced.
 // SECURITY: pinned to `hubspotusercontent*` + hubspot.(com|net); do NOT loosen to
 // `hubspot[a-z0-9-]*` (matches attacker-registerable hubspotx.com).
-const ALLOWED_HOST_RE = /(^|\.)(hubspotusercontent[a-z0-9-]*\.(net|com)|hubspot\.(com|net)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
+const ALLOWED_HOST_RE = /(^|\.)(hubspotusercontent([0-9]+|-[a-z0-9-]+)?\.(net|com)|hubspot\.(com|net)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
 
 export const config = { api: { bodyParser: { sizeLimit: '1mb' }, responseLimit: false }, maxDuration: 120 };
 

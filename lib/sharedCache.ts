@@ -82,8 +82,15 @@ export async function getSharedGen(): Promise<number> {
 export async function bumpSharedGen(): Promise<void> {
   if (!sharedCacheEnabled) return;
   const res = await redis(['INCR', GEN_KEY]);
-  const val = Number(res);
-  if (Number.isFinite(val)) genCache = { val, at: Date.now() };
+  // redis() returns null on a timeout/error (the 500ms fail-open path). Number(null)
+  // is 0 — which is finite — so a naive isFinite check would silently pin this
+  // instance's generation to 0 for GEN_LOCAL_TTL_MS, reading/writing an orphaned
+  // `v0` namespace (defeating the cross-instance cache, and serving pre-mutation
+  // data in the bootstrap case). A real INCR always returns an integer ≥ 1, so
+  // require a confirmed positive number; otherwise clear the local cache to force
+  // a fresh read next time.
+  const val = typeof res === 'number' ? res : Number(res);
+  if (res != null && Number.isFinite(val) && val > 0) genCache = { val, at: Date.now() };
   else genCache = null; // couldn't confirm — force a refresh on the next read
 }
 

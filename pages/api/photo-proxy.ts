@@ -27,7 +27,7 @@ const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
 // NOT loosen to `hubspot[a-z0-9-]*`, which also matches attacker-registerable
 // domains like hubspotx.com / hubspot-evil.com and would turn this UNAUTHENTICATED
 // proxy into an open proxy serving attacker content from our own origin.
-const ALLOWED_HOST_RE = /(^|\.)(hubspotusercontent[a-z0-9-]*\.(net|com)|hubspot\.(com|net)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
+const ALLOWED_HOST_RE = /(^|\.)(hubspotusercontent([0-9]+|-[a-z0-9-]+)?\.(net|com)|hubspot\.(com|net)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
 
 export const config = { api: { responseLimit: false } };
 

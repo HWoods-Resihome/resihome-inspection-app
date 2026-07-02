@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppDialog } from '@/components/AppDialog';
 import { useRouter } from 'next/router';
 import type { InspectionSummary } from '@/lib/types';
-import { prefetchInspectionsForOffline } from '@/lib/offlinePrefetch';
 import { InspectionCard } from '@/components/InspectionCard';
 import { INSPECTION_NAV_KEY } from '@/components/InspectionPager';
 import { ListPicker } from '@/components/ListPicker';
@@ -462,18 +461,6 @@ export default function Home() {
     const t = setTimeout(() => { void load(); }, cached ? 250 : 0);
     return () => clearTimeout(t);
   }, [listCacheKey, load, applyListData]);
-
-  // Proactively warm the OFFLINE cache for the walks at the top of the current
-  // list, so an inspector who drives straight to a dead-zone property can open a
-  // walk they've never opened before (instead of the "not downloaded for offline
-  // use" wall). Unlike the removed status-view prefetch below, this is safe under
-  // load: it fetches each inspection's detail AT MOST ONCE per session, only when
-  // online on a non-metered link, skips anything already cached, is capped at a
-  // handful, and spaces requests out — so it can't burst HubSpot's search API.
-  useEffect(() => {
-    if (!inspections.length) return;
-    prefetchInspectionsForOffline(inspections.map((i) => i.recordId));
-  }, [inspections]);
 
   // NOTE: a background prefetch of the OTHER status views was REMOVED — it fired
   // ~4 extra inspection searches per home load on top of the list + 5 count

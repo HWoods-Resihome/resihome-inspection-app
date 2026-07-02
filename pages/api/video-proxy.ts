@@ -33,7 +33,7 @@ const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 // (this portal's uploads resolve there), so clips stored there are proxied too.
 // SECURITY: pinned to `hubspotusercontent*` + hubspot.(com|net); do NOT loosen to
 // `hubspot[a-z0-9-]*` (matches attacker-registerable hubspotx.com → open proxy).
-const ALLOWED_HOST_RE = /(^|\.)(hubspotusercontent[a-z0-9-]*\.(net|com)|hubspot\.(com|net)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
+const ALLOWED_HOST_RE = /(^|\.)(hubspotusercontent([0-9]+|-[a-z0-9-]+)?\.(net|com)|hubspot\.(com|net)|hubfs\.com|hs-sites\.com|hubapi\.com|vercel-storage\.com|resihome\.com|resiwalk\.com)$/i;
 
 export const config = { api: { responseLimit: false }, maxDuration: 60 };
 
