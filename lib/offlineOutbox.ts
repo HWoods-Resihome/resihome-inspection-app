@@ -124,27 +124,32 @@ export function enqueueAnswers(inspectionRecordId: string, endpoint: string, bod
  * replayed rather than being wiped by a partial online save. Omit the ids to drop
  * the whole entry (legacy behavior).
  */
-export function clearAnswersEntry(inspectionRecordId: string, confirmedExternalIds?: string[]): void {
+export function clearAnswersEntry(inspectionRecordId: string, confirmedExternalIds?: string[], confirmedArchives?: string[]): void {
   const list = read();
   const entry = list.find((e) => e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId);
   const id = `ob_answers_${inspectionRecordId}`;
-  if (!entry || !confirmedExternalIds || !Array.isArray((entry.body as any)?.upserts)) {
-    // No id list (or nothing to prune) → drop the whole entry.
+  if (!entry || (!confirmedExternalIds && !confirmedArchives) || !Array.isArray((entry.body as any)?.upserts)) {
+    // No prune lists → drop the whole entry (legacy behavior).
     write(list.filter((e) => !(e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId)));
     clearNativeBgUploadAnswer(id);
     return;
   }
-  const confirmed = new Set(confirmedExternalIds.filter(Boolean));
+  const confirmed = new Set((confirmedExternalIds || []).filter(Boolean));
   const remaining = (entry.body as any).upserts.filter((u: any) => !confirmed.has(answerUpsertExternalId(u)));
-  const remArchives = (entry.body as any).archives || [];
-  if (remaining.length === 0 && (!Array.isArray(remArchives) || remArchives.length === 0)) {
+  // Prune confirmed archives SYMMETRICALLY with upserts. Without this an entry
+  // reduced to { upserts:[], archives:[R] } never hit the drop condition below —
+  // it lingered and re-POSTed archive(R) every sync tick (perpetual "not synced",
+  // and if R's answer was later re-answered it got re-archived → data loss).
+  const confirmedArch = new Set((confirmedArchives || []).filter(Boolean));
+  const remArchives = ((entry.body as any).archives || []).filter((a: string) => !confirmedArch.has(a));
+  if (remaining.length === 0 && remArchives.length === 0) {
     // Everything queued is now confirmed — drop the entry entirely.
     write(list.filter((e) => !(e.kind === 'answers' && e.inspectionRecordId === inspectionRecordId)));
     clearNativeBgUploadAnswer(id);
     return;
   }
-  // Some answers remain unsynced — keep a pruned entry so they still replay.
-  const prunedBody = { ...(entry.body as any), upserts: remaining };
+  // Some answers/archives remain unsynced — keep a pruned entry so they still replay.
+  const prunedBody = { ...(entry.body as any), upserts: remaining, archives: remArchives };
   const next = list.map((e) => (e === entry ? { ...e, body: prunedBody } : e));
   write(next);
   if (!isLocalInspectionId(inspectionRecordId)) {
@@ -235,7 +240,10 @@ export async function flushOutbox(
         // Prune only the external ids we actually SENT — anything merged in stays
         // queued for the next tick (mirrors clearAnswersEntry on the autosave path).
         const sentIds = (entry.body as any).upserts.map((u: any) => answerUpsertExternalId(u)).filter(Boolean);
-        clearAnswersEntry(entry.inspectionRecordId, sentIds);
+        // A successful POST confirmed everything it carried — prune the sent
+        // upserts AND the sent archives (else an archives-only remnant lingers).
+        const sentArchives = Array.isArray((entry.body as any).archives) ? (entry.body as any).archives : [];
+        clearAnswersEntry(entry.inspectionRecordId, sentIds, sentArchives);
       } else {
         remove(entry.id);
       }

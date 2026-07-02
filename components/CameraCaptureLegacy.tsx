@@ -1441,6 +1441,10 @@ export function CameraCaptureLegacy({
     const newBlobUrl = URL.createObjectURL(file);
     setItems((prev) => prev.map((it) => {
       if (it.id !== id) return it;
+      // Annotating an un-synced DRAFT is a replace — recall the original draft's
+      // queued record + pending attach so it and the annotated copy don't both
+      // upload+attach (duplicate). Same fix as the form annotate handlers.
+      if (it.hubspotUrl && it.hubspotUrl.startsWith('blob:')) { void discardQueuedByUrls([it.hubspotUrl]); removePhotoAttachByUrl([it.hubspotUrl]); }
       try { URL.revokeObjectURL(it.blobUrl); } catch { /* harmless */ }
       return { ...it, file, blobUrl: newBlobUrl, status: 'uploading', hubspotUrl: undefined };
     }));

@@ -2306,6 +2306,11 @@ export function CameraCaptureModern({
     const newBlobUrl = URL.createObjectURL(file);
     setItems((prev) => prev.map((it) => {
       if (it.id !== id) return it;
+      // Annotating an un-synced DRAFT is a replace — recall the original draft's
+      // queued record + pending attach, or it and the annotated copy BOTH
+      // upload+attach (duplicate evidence photo). Same fix as the form annotate
+      // handlers + deletePhoto; this in-camera path was the one it missed.
+      if (it.hubspotUrl && it.hubspotUrl.startsWith('blob:')) { void discardQueuedByUrls([it.hubspotUrl]); removePhotoAttachByUrl([it.hubspotUrl]); }
       try { URL.revokeObjectURL(it.blobUrl); } catch { /* harmless */ }
       return { ...it, file, blobUrl: newBlobUrl, status: 'uploading', hubspotUrl: undefined };
     }));

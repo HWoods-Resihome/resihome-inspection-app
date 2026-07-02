@@ -320,7 +320,9 @@ export function useAutosave(opts: Options) {
       // reopen didn't re-hydrate as dirty; those stay and get replayed.
       try {
         const confirmedExternalIds = results.filter((r) => !r.failed && r.answerIdExternal).map((r) => r.answerIdExternal);
-        clearAnswersEntry(inspectionRecordId, confirmedExternalIds);
+        // Also confirm the archives sent this flush, so an archives-only remnant
+        // of the stash doesn't linger and re-archive on every tick.
+        clearAnswersEntry(inspectionRecordId, confirmedExternalIds, toArchive);
       } catch { /* non-fatal */ }
 
       onSaveSuccess?.(updatedKeys);
