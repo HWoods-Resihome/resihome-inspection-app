@@ -1,7 +1,11 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { fetchRegionRates } from '@/lib/hubspot';
+import { sharedGetRaw, sharedSetRaw } from '@/lib/sharedCache';
 import type { RegionRate } from '@/lib/types';
+
+const REGIONS_SHARED_KEY = 'rc:regions:v1';
+const REGIONS_SHARED_TTL_S = 600; // 10-min cross-instance TTL (rarely changes)
 
 /**
  * GET /api/rate-card/regions
@@ -35,10 +39,22 @@ async function loadRegions(forceRefresh: boolean): Promise<RegionRate[]> {
     const gen = ++INFLIGHT_GEN;
     INFLIGHT = (async () => {
       try {
+        // Cross-instance: serve another instance's region matrix from KV rather
+        // than re-fetching on every cold start. Skipped on ?refresh=1.
+        if (!forceRefresh) {
+          const shared = await sharedGetRaw<RegionRate[]>(REGIONS_SHARED_KEY);
+          if (Array.isArray(shared) && shared.length > 0) {
+            CACHE = { data: shared, fetchedAt: Date.now() };
+            return shared;
+          }
+        }
         const regions = await fetchRegionRates();
         // Never cache an empty region matrix (see catalog.ts): a transient empty
         // 200 would poison pricing/region resolution for the full TTL.
-        if (regions.length > 0) CACHE = { data: regions, fetchedAt: Date.now() };
+        if (regions.length > 0) {
+          CACHE = { data: regions, fetchedAt: Date.now() };
+          void sharedSetRaw(REGIONS_SHARED_KEY, regions, REGIONS_SHARED_TTL_S);
+        }
         return regions;
       } finally {
         if (gen === INFLIGHT_GEN) INFLIGHT = null;

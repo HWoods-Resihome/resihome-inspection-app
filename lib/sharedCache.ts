@@ -83,6 +83,26 @@ function fullKey(gen: number, key: string): string {
   return `insp:v${gen}:${key}`;
 }
 
+// --- Generic entries (own TTL-based invalidation, NOT tied to the inspection
+// generation) — for reference data like the rate-card catalog / region matrix.
+
+/** Read a JSON value stored under a plain key (own TTL). */
+export async function sharedGetRaw<T>(key: string): Promise<T | null> {
+  if (!sharedCacheEnabled) return null;
+  const raw = await redis(['GET', `raw:${key}`]);
+  if (typeof raw !== 'string') return null;
+  try { return JSON.parse(raw) as T; } catch { return null; }
+}
+
+/** Write a JSON value under a plain key with a TTL (seconds). */
+export async function sharedSetRaw<T>(key: string, value: T, ttlSec: number): Promise<void> {
+  if (!sharedCacheEnabled) return;
+  let payload: string;
+  try { payload = JSON.stringify(value); } catch { return; }
+  if (payload.length > MAX_PAYLOAD_BYTES) return;
+  await redis(['SET', `raw:${key}`, payload, 'EX', String(Math.max(1, Math.round(ttlSec)))]);
+}
+
 /** Which backend the env vars point at (for the admin health check). */
 export function sharedCacheBackend(): 'disabled' | 'vercel-kv' | 'upstash' {
   if (!sharedCacheEnabled) return 'disabled';

@@ -1,7 +1,14 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { fetchRateCardCatalog } from '@/lib/hubspot';
+import { sharedGetRaw, sharedSetRaw } from '@/lib/sharedCache';
 import type { RateCardLineItem } from '@/lib/types';
+
+// Cross-instance cache key + TTL. The catalog rarely changes; a 10-minute KV TTL
+// keeps cold instances (and post-deploy scale-ups) from re-paginating ~1,000 rows
+// while still self-healing well within the 60-minute local window.
+const CATALOG_SHARED_KEY = 'rc:catalog:v1';
+const CATALOG_SHARED_TTL_S = 600;
 
 /**
  * GET /api/rate-card/catalog
@@ -43,13 +50,26 @@ async function loadCatalog(forceRefresh: boolean): Promise<RateCardLineItem[]> {
     const gen = ++INFLIGHT_GEN;
     INFLIGHT = (async () => {
       try {
+        // Cross-instance: a cold instance (or a fresh deploy's fleet) serves
+        // another instance's catalog from KV instead of re-paginating ~1,000 rows
+        // — avoids a HubSpot pagination storm on scale-up. Skipped on ?refresh=1.
+        if (!forceRefresh) {
+          const shared = await sharedGetRaw<RateCardLineItem[]>(CATALOG_SHARED_KEY);
+          if (Array.isArray(shared) && shared.length > 0) {
+            CACHE = { data: shared, fetchedAt: Date.now() };
+            return shared;
+          }
+        }
         const items = await fetchRateCardCatalog();
         // NEVER cache an empty catalog (mirrors offlineCache's guard): a HTTP-200
         // {results:[]} from a transiently-empty/eventually-consistent HubSpot
         // search "succeeds" and would otherwise poison the cache for the full TTL
         // — the line-item picker shows nothing and finalize/QC pricing loses live
         // catalog lookups. Return it to this caller but don't cache it.
-        if (items.length > 0) CACHE = { data: items, fetchedAt: Date.now() };
+        if (items.length > 0) {
+          CACHE = { data: items, fetchedAt: Date.now() };
+          void sharedSetRaw(CATALOG_SHARED_KEY, items, CATALOG_SHARED_TTL_S);
+        }
         return items;
       } finally {
         if (gen === INFLIGHT_GEN) INFLIGHT = null;
