@@ -37,7 +37,10 @@ export function reportWebVitals(metric: { name: string; value: number; id: strin
     if (typeof navigator === 'undefined') return;
     const body = JSON.stringify({
       name: metric.name,
-      value: Math.round(metric.value),
+      // CLS is a unitless fractional score (~0–0.3); rounding it to an integer
+      // collapses every acceptable value to 0. Keep 3 decimals for CLS; the
+      // millisecond metrics (LCP/FCP/TTFB/INP) round to whole ms.
+      value: metric.name === 'CLS' ? Math.round(metric.value * 1000) / 1000 : Math.round(metric.value),
       rating: metric.rating,
       url: typeof window !== 'undefined' ? window.location?.pathname : undefined,
     });
