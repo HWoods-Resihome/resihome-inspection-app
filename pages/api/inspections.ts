@@ -122,9 +122,14 @@ export async function warmInspectionsCache(): Promise<boolean> {
   // Byte-for-byte identical to the handler's countKey / listKey for this query.
   const countKey = JSON.stringify({ search: '', inspectors: empty, templates: empty, regions: empty, externalEmail: null, viewKey });
   const listKey = JSON.stringify({ search: '', status: 'all', inspectors: empty, templates: empty, regions: empty, externalEmail: null, viewKey, sortField, sortDir, page, pageSize });
+  // Also warm the approvers' hot view (pending_approval) — same query, different
+  // status chip. Counts are status-independent, so one counts warm covers both.
+  const pendingListKey = JSON.stringify({ search: '', status: 'pending_approval', inspectors: empty, templates: empty, regions: empty, externalEmail: null, viewKey, sortField, sortDir, page, pageSize });
   await Promise.all([
     withCache(lists, listKey, TTL_MS, true, () =>
       searchInspectionsPage({ ...baseQuery, sortField, sortDir, page, pageSize }), STALE_MS),
+    withCache(lists, pendingListKey, TTL_MS, true, () =>
+      searchInspectionsPage({ ...baseQuery, status: 'pending_approval', sortField, sortDir, page, pageSize }), STALE_MS),
     withCache(counts, countKey, COUNTS_TTL_MS, true, () =>
       countInspectionsByStatus(baseQuery), STALE_MS),
   ]);

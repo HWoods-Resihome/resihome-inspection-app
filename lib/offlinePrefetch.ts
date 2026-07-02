@@ -16,6 +16,8 @@
 import {
   loadCachedInspection, saveCachedInspection,
   loadCachedQuestions, saveCachedQuestions,
+  loadCachedRateCard, saveCachedRateCard,
+  loadCachedQcData, saveCachedQcData,
 } from '@/lib/offlineCache';
 
 const attempted = new Set<string>(); // ids tried this page session (dedupe)
@@ -63,6 +65,23 @@ export function prefetchInspectionsForOffline(ids: string[]): void {
 
   const run = async () => {
     const cachedTemplates = new Set<string>();
+    // The rate-card catalog + region matrix are global and large; fetch them at
+    // most once per run, and only if we actually hit a scope/QC walk that needs
+    // them for offline pricing.
+    let rateCardEnsured = false;
+    const ensureRateCardCached = async () => {
+      if (rateCardEnsured) return;
+      rateCardEnsured = true;
+      if (loadCachedRateCard()) return; // already have catalog + regions
+      const [cat, reg] = await Promise.all([
+        fetchJson('/api/rate-card/catalog'),
+        fetchJson('/api/rate-card/regions'),
+      ]);
+      const items = cat && Array.isArray(cat.items) ? cat.items : null;
+      const regions = reg && Array.isArray(reg.regions) ? reg.regions : [];
+      if (items && items.length) saveCachedRateCard(items, regions);
+    };
+
     for (const id of todo) {
       if (!connectionOk()) break; // dropped offline / metered mid-run — stop
       const data = await fetchJson(`/api/inspections/${id}`);
@@ -70,11 +89,20 @@ export function prefetchInspectionsForOffline(ids: string[]): void {
         // Store the full payload exactly as the detail page does, so an offline
         // open renders identically.
         saveCachedInspection(id, data);
-        // Questionnaire templates also need their questions cached to open fully
-        // offline (rate-card / QC load catalog/qc-data, cached on first open).
         const tmpl: string = data.inspection.templateType || '';
-        if (tmpl && tmpl !== 'pm_scope_rate_card' && tmpl !== 'pm_turn_reinspect_qc'
-            && !cachedTemplates.has(tmpl) && !loadCachedQuestions(tmpl)) {
+        if (tmpl === 'pm_scope_rate_card') {
+          // Scope walks price against the catalog/regions offline.
+          await ensureRateCardCached();
+        } else if (tmpl === 'pm_turn_reinspect_qc') {
+          // QC re-inspect needs its qc-data payload cached to open offline, plus
+          // the catalog for any pricing it surfaces.
+          if (!loadCachedQcData(id)) {
+            const qc = await fetchJson(`/api/inspections/${id}/qc-data`);
+            if (qc) saveCachedQcData(id, qc);
+          }
+          await ensureRateCardCached();
+        } else if (tmpl && !cachedTemplates.has(tmpl) && !loadCachedQuestions(tmpl)) {
+          // Questionnaire templates need their questions cached.
           const q = await fetchJson(`/api/questions?template=${encodeURIComponent(tmpl)}`);
           if (q && Array.isArray(q.questions)) {
             saveCachedQuestions(tmpl, q.questions);
