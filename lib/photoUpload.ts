@@ -153,17 +153,21 @@ export async function uploadPhoto(file: File): Promise<string> {
  * small clips (≤ ~3MB) still upload via the base64 /api/upload path so nothing
  * breaks before the store is set up. Larger clips throw an actionable error.
  */
-export async function uploadVideo(file: File): Promise<string> {
+export async function uploadVideo(file: File, opts?: { dedupeKey?: string }): Promise<string> {
   const contentType = (file.type || 'video/mp4').split(';')[0].trim();
   const ext = /webm/i.test(contentType) ? 'webm' : /quicktime|mov/i.test(contentType) ? 'mov' : 'mp4';
-  const filename = `clip_${Date.now()}.${ext}`;
+  // Stable filename when a dedupeKey (the queued clip's localId) is given, so a
+  // re-upload after a failed IDB delete resolves to the SAME file instead of
+  // minting a second, duplicate/orphaned clip. Photos already dedupe this way;
+  // videos didn't, which is why only videos could double-upload.
+  const filename = `clip_${opts?.dedupeKey || Date.now()}.${ext}`;
 
   // DEFAULT: HubSpot Files (base64 → /api/upload) for clips that fit under
   // Vercel's ~4.5MB request-body limit (~3MB of raw video). Keeps videos
   // alongside the photos in HubSpot.
   if (file.size <= 3 * 1024 * 1024) {
     try {
-      return await uploadVideoBase64(file, filename, contentType);
+      return await uploadVideoBase64(file, filename, contentType, opts?.dedupeKey);
     } catch (e) {
       console.warn('[uploadVideo] HubSpot path failed, trying Blob:', e);
       // fall through to Blob as a last resort
@@ -206,12 +210,14 @@ export async function uploadVideo(file: File): Promise<string> {
 }
 
 /** Legacy base64 → /api/upload path (used as a fallback for short clips). */
-async function uploadVideoBase64(file: File, filename: string, contentType: string): Promise<string> {
+async function uploadVideoBase64(file: File, filename: string, contentType: string, dedupeKey?: string): Promise<string> {
   if (file.size > 4 * 1024 * 1024) {
     throw new Error(`Video too large for fallback upload (${formatBytes(file.size)}). Enable Vercel Blob storage.`);
   }
   const base64 = await fileToBase64(file);
-  const payload = JSON.stringify({ filename, contentType, base64 });
+  // dedupeKey (the clip's localId): the server RETURN_EXISTINGs on it, so a
+  // re-upload returns the same URL rather than a duplicate clip (mirrors photos).
+  const payload = JSON.stringify({ filename, contentType, base64, dedupeKey });
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
     const controller = new AbortController();

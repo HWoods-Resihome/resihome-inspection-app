@@ -601,8 +601,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       submittedAtIso: inspection.submittedAt || null,
       approverName: (isRefinalize ? inspection.approvedByName : (session.name || session.email)) || null,
       approvedAtIso: (isRefinalize ? inspection.approvedAt : new Date().toISOString()) || null,
-      // Preserve the section instance ordering
-      sections: sectionInstances.map((s) => sectionGroups.get(s.id)!).filter(Boolean),
+      // Preserve the section instance ordering, THEN append any synthetic
+      // "recovered" groups (renamed static sections whose lines/photos didn't
+      // resolve to a current section). They're already in sectionGroups (so they
+      // count in grandTotals), but ctx.sections is what every PDF renders and what
+      // renderVendorPdfs re-groups from — so without appending them here the
+      // recovered lines would count in the total yet render in NO PDF and reach no
+      // vendor packet/ticket (client billed, vendor never gets the work, Master
+      // total doesn't reconcile). Appending makes rendering match the totals.
+      sections: [
+        ...sectionInstances.map((s) => sectionGroups.get(s.id)!).filter(Boolean),
+        ...Array.from(sectionGroups.entries())
+          .filter(([k]) => k.startsWith('__unresolved__:'))
+          .map(([, g]) => g),
+      ],
       grandTotals: { vendor: grandVendor, client: grandClient, tenant: grandTenant, lineCount: grandLineCount },
       finalChecklist: finalChecklistGroups,
       finalChecklistPhotos: finalChecklistPhotoUrls,

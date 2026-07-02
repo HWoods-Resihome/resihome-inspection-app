@@ -5926,14 +5926,26 @@ export async function upsertAnswers(
 export async function archiveAnswers(answerRecordIds: string[]): Promise<void> {
   if (answerRecordIds.length === 0) return;
   const { answer: typeId } = typeIds();
+  const runBatch = (ids: string[]) => hubspotFetch(`/crm/v3/objects/${typeId}/batch/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ inputs: ids.map((id) => ({ id })) }),
+  });
   for (let i = 0; i < answerRecordIds.length; i += HUBSPOT_BATCH_LIMIT) {
     const chunk = answerRecordIds.slice(i, i + HUBSPOT_BATCH_LIMIT);
-    await hubspotFetch(`/crm/v3/objects/${typeId}/batch/archive`, {
-      method: 'POST',
-      body: JSON.stringify({
-        inputs: chunk.map((id) => ({ id })),
-      }),
-    });
+    try {
+      await runBatch(chunk);
+    } catch (batchErr: any) {
+      // HubSpot 400s the ENTIRE batch if ANY id is stale/already-archived. Retry
+      // per-id so one bad id can't fail the archive of the others — and can't fail
+      // an otherwise-successful autosave (answers.ts awaits this after upserting),
+      // which would leave a "deleted" answer un-archived so it reappears on reopen.
+      // An already-gone id is effectively success (it's archived either way).
+      console.warn(`[archiveAnswers] batch archive of ${chunk.length} failed — retrying per id:`, String(batchErr?.detail || batchErr?.message || batchErr).slice(0, 200));
+      for (const id of chunk) {
+        try { await runBatch([id]); }
+        catch (e: any) { console.warn(`[archiveAnswers] could not archive ${id} (already archived/stale?):`, String(e?.message || e).slice(0, 160)); }
+      }
+    }
   }
 }
 
