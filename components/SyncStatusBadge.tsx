@@ -19,7 +19,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { countOutbox } from '@/lib/offlineOutbox';
 import { countPhotoAttach } from '@/lib/photoAttachOutbox';
 import { countAllQueuedPhotos } from '@/lib/offlinePhotoStore';
-import { kickGlobalSync } from '@/lib/globalSync';
 import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { useRouter } from 'next/router';
 
@@ -32,20 +31,13 @@ const FOOTER_ROUTES = new Set(['/', '/inspection/[id]']);
 // The height the footer publishes for the action bars to offset by. Kept in sync
 // with the forms (they read `var(--sync-footer-h, 0px)`).
 const FOOTER_VAR = '--sync-footer-h';
-// If the queue makes NO progress for this long while online, treat it as stalled
-// and surface Retry. The global driver retries every ~20s on its own, so this is
-// > one driver cycle — a queue that isn't draining across cycles, not a slow tick.
-const STALL_MS = 30000;
 
 export function SyncStatusBadge() {
   const [pending, setPending] = useState(0);
   const [online, setOnline] = useState(true);
   const [justSynced, setJustSynced] = useState(false);
-  const [stalled, setStalled] = useState(false);
-  const [retrying, setRetrying] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const prevRef = useRef(0);
-  const lastProgressRef = useRef(Date.now()); // last time the queue shrank or was empty
   const syncedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
@@ -66,10 +58,6 @@ export function SyncStatusBadge() {
         syncedTimer.current = setTimeout(() => { if (!cancelled) setJustSynced(false); }, 2500);
       }
       if (total > 0) setJustSynced(false);
-      // Stall tracking: any shrink (progress) or an empty queue resets the clock;
-      // otherwise a queue that sits unchanged for STALL_MS while online is stalled.
-      if (total === 0 || total < prevRef.current) { lastProgressRef.current = Date.now(); setStalled(false); }
-      else if (total > 0 && isOnline && Date.now() - lastProgressRef.current > STALL_MS) { setStalled(true); }
       prevRef.current = total;
       setPending(total);
     };
@@ -81,19 +69,6 @@ export function SyncStatusBadge() {
     window.addEventListener('offline', () => void tick());
     return () => { cancelled = true; clearInterval(iv); if (syncedTimer.current) clearTimeout(syncedTimer.current); document.removeEventListener('visibilitychange', onVis); };
   }, []);
-
-  // Manual retry: signal the open form (which owns its records' photos) AND kick
-  // the global driver, then give it a fresh STALL_MS window before offering Retry
-  // again. Best-effort — the poll above reflects whether it actually drained.
-  const onRetry = async () => {
-    if (retrying) return;
-    setRetrying(true);
-    setStalled(false);
-    lastProgressRef.current = Date.now();
-    try { window.dispatchEvent(new Event('resiwalk:sync-retry')); } catch { /* noop */ }
-    try { await kickGlobalSync(); } catch { /* driver is best-effort */ }
-    setTimeout(() => setRetrying(false), 2000);
-  };
 
   // Step aside while a modal SHEET is open. Sheets across the app mark their
   // scroll container with `data-modal-scroll`; a fixed footer at the bottom would
@@ -113,7 +88,6 @@ export function SyncStatusBadge() {
 
   const show = (pending > 0 || justSynced) && !overlayOpen && !cameraOpen && FOOTER_ROUTES.has(router.pathname);
   const synced = pending === 0 && justSynced;
-  const showRetry = show && online && !synced && stalled;
 
   // Publish the bar's measured height while visible so the forms' fixed action
   // bars can offset up by exactly that much; 0 while hidden so they slide back
@@ -124,24 +98,20 @@ export function SyncStatusBadge() {
     if (show && barRef.current) root.style.setProperty(FOOTER_VAR, `${barRef.current.offsetHeight}px`);
     else root.style.setProperty(FOOTER_VAR, '0px');
     return () => { root.style.setProperty(FOOTER_VAR, '0px'); };
-  }, [show, synced, online, pending, stalled, retrying, showRetry]);
+  }, [show, synced, online, pending]);
 
+  // Three calm states only — no error/Retry. If a queue is genuinely wedged it
+  // just keeps showing "Syncing…"; the global driver retries on its own.
   const tone = synced
     ? 'bg-emerald-600 text-white'
     : !online
       ? 'bg-amber-500 text-white'
-      : (stalled && !retrying)
-        ? 'bg-red-600 text-white'   // stuck: not draining — offer Retry
-        : 'bg-ink/90 text-white';
+      : 'bg-ink/90 text-white';
   const label = synced
     ? 'Synced ✓'
     : !online
       ? `${pending} item${pending === 1 ? '' : 's'} saved offline`
-      : retrying
-        ? 'Retrying…'
-        : stalled
-          ? `${pending} item${pending === 1 ? '' : 's'} haven’t synced`
-          : `Syncing ${pending} item${pending === 1 ? '' : 's'}…`;
+      : `Syncing ${pending} item${pending === 1 ? '' : 's'}…`;
 
   // Always mounted so it can animate in/out; translated fully off-screen (and
   // publishing height 0) when there's nothing to show.
@@ -157,25 +127,13 @@ export function SyncStatusBadge() {
         pointerEvents: show ? 'auto' : 'none',
       }}
     >
-      {!synced && online && (retrying || !stalled) && (
+      {!synced && online && (
         <span className="inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" aria-hidden />
-      )}
-      {!synced && online && stalled && !retrying && (
-        <span className="inline-block w-2 h-2 rounded-full bg-white" aria-hidden />
       )}
       {!synced && !online && (
         <span className="inline-block w-2 h-2 rounded-full bg-white" aria-hidden />
       )}
       <span>{label}</span>
-      {showRetry && (
-        <button
-          type="button"
-          onClick={() => void onRetry()}
-          className="ml-1 inline-flex items-center rounded-full bg-white/20 px-2.5 py-0.5 font-heading font-semibold hover:bg-white/30 active:bg-white/40"
-        >
-          Retry
-        </button>
-      )}
     </div>
   );
 }
