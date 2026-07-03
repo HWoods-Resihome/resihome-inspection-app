@@ -4410,7 +4410,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               <button
                                 type="button"
                                 onClick={() => removePhoto(s.id, idx)}
-                                className="absolute top-0.5 right-0.5 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand"
+                                className="absolute top-0 right-0 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand"
                               >&times;</button>
                             )}
                           </div>

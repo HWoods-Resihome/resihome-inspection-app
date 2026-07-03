@@ -226,7 +226,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                   <SyncingBadge />
                 )}
                 <button type="button" onClick={() => removePhoto(idx)}
-                  className="absolute top-0.5 right-0.5 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand transition">&times;</button>
+                  className="absolute top-0 right-0 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand transition">&times;</button>
               </div>
             ))}
           </div>
@@ -405,7 +405,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                     type="button"
                     onClick={() => removePhoto(idx)}
                     aria-label="Delete photo"
-                    className="absolute top-0.5 right-0.5 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand transition"
+                    className="absolute top-0 right-0 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand transition"
                   >&times;</button>
                 </div>
               ))}

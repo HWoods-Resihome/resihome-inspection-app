@@ -393,6 +393,28 @@ export function useAutosave(opts: Options) {
   const beaconFlushRef = useRef(beaconFlush);
   beaconFlushRef.current = beaconFlush;
 
+  // Durably stash the current unsaved edits (+ pending archives) to the offline
+  // outbox REGARDLESS of connectivity, so "Save & Close" / navigation can leave
+  // INSTANTLY without waiting on the network. The regular flush only stashes when
+  // navigator.onLine === false; in LOW signal onLine is true but the request
+  // stalls, which hung Save & Close. This guarantees durability for that case too
+  // — the outbox replays idempotently via global sync (upsert by
+  // answer_id_external, so HubSpot dedupes and clearAnswersEntry prunes confirmed).
+  const stashDurable = useCallback((): void => {
+    if (disabled) return;
+    try {
+      const dirty = Array.from(answerStatesRef.current.values()).filter((s) => s.dirtySince != null);
+      const toArchive = Array.from(archiveQueueRef.current);
+      if (dirty.length > 0 || toArchive.length > 0) {
+        enqueueAnswers(inspectionRecordId, `/api/inspections/${inspectionRecordId}/answers`, {
+          upserts: dirty.map((state) => buildUpsertFromState(state)),
+          archives: toArchive,
+          bumpStatusToInProgress: !hasEverSaved,
+        });
+      }
+    } catch { /* best-effort durability */ }
+  }, [disabled, inspectionRecordId, hasEverSaved, buildUpsertFromState]);
+
   // Tick: periodically check if any dirty answers have been stable long enough
   // to flush. Hold `flush` in a ref so the interval is created ONCE and isn't
   // torn down / recreated every time saveState changes (which would otherwise
@@ -462,6 +484,7 @@ export function useAutosave(opts: Options) {
     noteEdit,
     hydrate,
     flush,
+    stashDurable,
     queueArchive,
     /** Returns the recordId for a given key, if known */
     getRecordId: useCallback((key: string) => answerStatesRef.current.get(key)?.recordId ?? null, []),

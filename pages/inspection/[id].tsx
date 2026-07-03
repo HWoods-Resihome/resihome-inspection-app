@@ -674,7 +674,7 @@ export default function ExistingInspection() {
           pdfUrl={isCompleted ? (shareLinks?.report || inspection.pdfUrl || undefined) : undefined}
           readOnly={readOnly}
           onSubmit={() => router.replace('/')}
-          onCancel={() => router.replace('/')}
+          onCancel={() => { window.location.assign('/'); }}
           onNavigateTo={(navId) => router.replace(`/inspection/${navId}`)}
           onCancelInspection={readOnly ? undefined : handleCancelInspection}
         />
@@ -718,7 +718,7 @@ export default function ExistingInspection() {
           inspectionRegion={inspection.regionSnapshot || ''}
           sectionListJson={inspection.sectionListJson}
           onSubmit={() => router.replace('/')}
-          onCancel={() => router.replace('/')}
+          onCancel={() => { window.location.assign('/'); }}
           onNavigateTo={(navId) => router.replace(`/inspection/${navId}`)}
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}
@@ -758,7 +758,7 @@ export default function ExistingInspection() {
           propertyAirFiltersType3={propertyAirFiltersType3}
           filterSizeOptions={filterSizeOptions}
           onSubmit={handleSubmit}
-          onCancel={() => router.replace('/')}
+          onCancel={() => { window.location.assign('/'); }}
           onNavigateTo={(navId) => router.replace(`/inspection/${navId}`)}
           inspectionRecordId={inspectionId}
           inspectionExternalId={inspection.inspectionIdExternal}

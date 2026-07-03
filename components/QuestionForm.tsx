@@ -1725,22 +1725,15 @@ export function QuestionForm({
   // "I took 20 photos, hit Save & Close, came back on my computer and they were
   // gone" data loss. Let the inspector stay until uploads finish.
   async function handleSaveAndClose() {
-    try { await autosave.flush(true); } catch (e) { console.error('Save & Close: flush failed', e); }
+    // OFFLINE-FIRST exit (matches Scope / QC): durably stash any pending answer
+    // edits to the outbox so they replay via global sync regardless of signal, kick
+    // photo uploads in the background (they're durable in the photo queue + attach
+    // outbox and upload from any page), and leave for the home screen IMMEDIATELY —
+    // never block on the network. In low signal navigator.onLine is true but a
+    // request stalls, which is what hung Save & Close here.
     if (!readOnly) {
-      try { void runPhotoFlushRef.current(); } catch { /* kick uploads in the background */ }
-      let pending = 0;
-      try { pending = await countQueuedPhotos(inspectionRecordId); } catch { pending = 0; }
-      if (pending > 0) {
-        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-        const proceed = await dialog.confirm(
-          `${pending} photo${pending === 1 ? '' : 's'} ${pending === 1 ? "hasn't" : "haven't"} finished uploading and ${pending === 1 ? 'is' : 'are'} saved only on THIS device. ` +
-          (offline ? `You're offline. ` : '') +
-          `If you close now ${pending === 1 ? 'it' : 'they'} won't be on the report or visible on another device.\n\n` +
-          `Stay on this screen ${offline ? 'until you have signal' : 'a few more seconds'} to let ${pending === 1 ? 'it' : 'them'} finish uploading.`,
-          { confirmLabel: 'Close anyway', cancelLabel: 'Keep waiting' },
-        );
-        if (!proceed) return; // stay mounted so the queued photos can finish uploading
-      }
+      autosave.stashDurable();
+      try { void runPhotoFlushRef.current(); } catch { /* background */ }
     }
     onCancel();
   }
@@ -1992,9 +1985,10 @@ export function QuestionForm({
           <div className="shrink-0 flex flex-row items-center gap-1.5">
           <InspectionPager
             currentId={inspectionRecordId}
-            onNavigate={async (id) => {
-              // Force-save (like Back) before leaving an editable inspection.
-              if (!readOnly) { try { await autosave.flush(true); } catch (e) { console.error('Pager: flush failed', e); } }
+            onNavigate={(id) => {
+              // Offline-first (like Save & Close): durably stash edits, then go —
+              // never block on the network; work replays via global sync.
+              if (!readOnly) autosave.stashDurable();
               onNavigateTo?.(id);
             }}
           />
@@ -2049,7 +2043,7 @@ export function QuestionForm({
           <div className="flex items-center gap-2.5">
             <button
               type="button"
-              onClick={async () => { if (!readOnly) { try { await autosave.flush(true); } catch { /* leave anyway */ } } onCancel(); }}
+              onClick={() => { if (!readOnly) autosave.stashDurable(); onCancel(); }}
               aria-label="Back to inspections"
               title="Back to inspections"
               className="shrink-0"
@@ -2300,7 +2294,7 @@ export function QuestionForm({
                               <button
                                 type="button"
                                 onClick={() => removeSectionPhoto(inst.instanceKey, idx)}
-                                className="absolute top-0.5 right-0.5 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand"
+                                className="absolute top-0 right-0 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand"
                               >&times;</button>
                             )}
                           </div>
