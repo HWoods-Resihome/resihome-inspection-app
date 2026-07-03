@@ -4803,7 +4803,10 @@ export function RateCardForm(props: RateCardFormProps) {
             style={{
               // In the form, center the 44px mic on the footer button row; in the
               // camera, sit ON the shutter-control line at the bottom-LEFT.
-              bottom: cameraOpen ? 34 : Math.max(6, Math.round(actionRowH / 2 - 22)),
+              // Track the app-wide sync footer's height so the mic rises with the
+              // action bar (which is offset by the same var) instead of overlapping
+              // the sync footer.
+              bottom: cameraOpen ? 34 : `calc(${Math.max(6, Math.round(actionRowH / 2 - 22))}px + var(--sync-footer-h, 0px))`,
               display: hidden ? 'none' : undefined,
             }}
           >

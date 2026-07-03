@@ -35,6 +35,7 @@ export function SyncStatusBadge() {
   const [justSynced, setJustSynced] = useState(false);
   const [stalled, setStalled] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [overlayOpen, setOverlayOpen] = useState(false);
   const prevRef = useRef(0);
   const lastProgressRef = useRef(Date.now()); // last time the queue shrank or was empty
   const syncedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -84,7 +85,23 @@ export function SyncStatusBadge() {
     setTimeout(() => setRetrying(false), 2000);
   };
 
-  const show = pending > 0 || justSynced;
+  // Step aside while a modal SHEET is open. Sheets across the app mark their
+  // scroll container with `data-modal-scroll`; a fixed footer at the bottom would
+  // otherwise paint over a sheet's own bottom action row (e.g. the Add Line Item
+  // "Save Line" button, whose footer is `sticky` with no z-index). Generic — no
+  // per-modal wiring — via a debounced MutationObserver for that marker.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    let raf = 0;
+    const check = () => { setOverlayOpen(!!document.querySelector('[data-modal-scroll]')); };
+    const schedule = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; check(); }); };
+    check();
+    const mo = new MutationObserver(schedule);
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => { mo.disconnect(); if (raf) cancelAnimationFrame(raf); };
+  }, []);
+
+  const show = (pending > 0 || justSynced) && !overlayOpen;
   const synced = pending === 0 && justSynced;
   const showRetry = show && online && !synced && stalled;
 
