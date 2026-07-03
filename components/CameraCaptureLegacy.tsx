@@ -174,8 +174,8 @@ const JPEG_QUALITY = 0.92;
 // than the previous 1200 @ 0.68 while staying well under the old 4096 @ 0.9 that
 // bogged down field sync. Kept in step with the Modern camera. The PDF is
 // unaffected (it embeds a 520px thumbnail).
-const MAX_SAVE_EDGE = 1600;
-const PHOTO_SAVE_QUALITY = 0.8;
+const MAX_SAVE_EDGE = 1920;
+const PHOTO_SAVE_QUALITY = 0.82;
 
 // Photo geostamp proximity check: how close (meters) the device GPS must be to
 // the property's reference location to stamp a ✓ rather than a ✗. Generous by

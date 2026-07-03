@@ -23,8 +23,8 @@ const RETRY_BASE_DELAY_MS = 800;
 // Per-attempt network timeout. A stalled upload on a weak signal aborts here so
 // the caller can fall back to the offline cache instead of spinning forever.
 const UPLOAD_TIMEOUT_MS = 20000;
-const TARGET_MAX_SIZE_MB = 1.8;     // ceiling; kept ABOVE the camera's ~1600px@0.80 output so the fast path doesn't RE-compress (and blur) an already-good evidence photo — only truly oversized gallery picks get downscaled
-const TARGET_MAX_DIMENSION = 1600;  // long edge — matches the camera's MAX_SAVE_EDGE; balances clear evidence vs weak-cell sync speed; PDF embeds a 520px thumb regardless
+const TARGET_MAX_SIZE_MB = 2.5;     // ceiling; kept ABOVE the camera's ~1920px@0.82 output so the fast path doesn't RE-compress (and blur) an already-good evidence photo — only truly oversized gallery picks get downscaled
+const TARGET_MAX_DIMENSION = 1920;  // long edge — matches the camera's MAX_SAVE_EDGE; PDF embeds a 520px thumb regardless
 
 /**
  * Compress any image File to a screen-sized JPEG Blob (client-side; works

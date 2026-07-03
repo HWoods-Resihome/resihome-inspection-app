@@ -201,11 +201,11 @@ const JPEG_QUALITY = 0.92;
 // frame) while staying well under the old 2048 @ 0.9 that caused the "14 min to
 // sync" scopes — roughly 2x the 1200/0.68 bytes, not the 3-4x of 2048/0.9. The
 // PDF is unaffected (it embeds a 520px thumb).
-const MAX_SAVE_EDGE = 1600;
+const MAX_SAVE_EDGE = 1920;
 // Final upload quality — no second compression downstream, so this IS the stored
-// quality. 0.80 removes the visible JPEG softening/artifacts of 0.68 at a modest
-// size increase.
-const PHOTO_SAVE_QUALITY = 0.8;
+// quality. 0.82 keeps evidence crisp (incl. on zoom); with the 1920 edge the frame
+// saves ~1:1 from the 1920×1440 capture (no detail lost to downscale).
+const PHOTO_SAVE_QUALITY = 0.82;
 
 // iOS (incl. iPadOS) WebKit. On iPhone we run a PURE DIGITAL live-frame camera:
 // the live <video> is NEVER covered by a freeze-frame still — every capture and
