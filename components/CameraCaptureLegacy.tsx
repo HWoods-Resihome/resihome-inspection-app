@@ -2169,7 +2169,7 @@ export function CameraCaptureLegacy({
                 <button
                   type="button"
                   onClick={() => deletePhoto(it.id)}
-                  className="absolute -top-1 -right-1 w-5 h-5 bg-white text-black rounded-full flex items-center justify-center text-xs font-bold shadow"
+                  className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-white text-black rounded-full flex items-center justify-center text-sm font-bold shadow"
                   aria-label="Delete photo"
                   title="Delete this photo"
                 >

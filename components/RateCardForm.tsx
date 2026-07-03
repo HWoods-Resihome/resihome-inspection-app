@@ -3433,7 +3433,7 @@ export function RateCardForm(props: RateCardFormProps) {
     // Queued LINE saves still pending → wait (they carry scope data; never drop).
     if (pendingSync > 0) {
       await dialog.alert(
-        `Your latest changes are still saving (${pendingSync} pending). Please wait for "Synced" before submitting.\n\nIf it stays stuck, tap Retry on the sync bar at the bottom of the screen.`
+        `Your latest changes are still saving (${pendingSync} pending). Please wait for "Synced" before submitting.\n\nIf it stays stuck, check your signal — it finishes syncing automatically once you're back on a good connection.`
       );
       return;
     }
@@ -4420,7 +4420,7 @@ export function RateCardForm(props: RateCardFormProps) {
                               <button
                                 type="button"
                                 onClick={() => removePhoto(s.id, idx)}
-                                className="absolute -top-1 -right-1 bg-ink text-white text-xs w-4 h-4 rounded-full leading-none flex items-center justify-center hover:bg-brand"
+                                className="absolute -top-1.5 -right-1.5 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand"
                               >&times;</button>
                             )}
                           </div>

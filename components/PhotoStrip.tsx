@@ -104,7 +104,7 @@ export function PhotoStrip({
                     <button
                       type="button"
                       onClick={() => onRemove(u)}
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-white border border-gray-300 rounded-full text-gray-600 text-xs leading-none shadow"
+                      className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-white border border-gray-300 rounded-full text-gray-600 text-sm leading-none flex items-center justify-center shadow"
                       title="Remove photo"
                     >&times;</button>
                   )}

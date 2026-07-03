@@ -1205,7 +1205,9 @@ export default function Home() {
             // shell's contentInset (app) / Safari's chrome (browser), so lz-foot's
             // full env(safe-area-inset-bottom) just doubled it into a big white
             // gap. Cap it to a small buffer (a hair left to guard a standalone PWA).
-            style={{ paddingBottom: 'min(env(safe-area-inset-bottom), 0.5rem)' }}
+            // Also reserve the sync footer's height (var is 0 when it's hidden) so
+            // the pagination controls are never covered by it on the home list.
+            style={{ paddingBottom: 'calc(min(env(safe-area-inset-bottom), 0.5rem) + var(--sync-footer-h, 0px))' }}
           >
             <div className="max-w-3xl mx-auto px-4 py-1.5 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 shrink-0">
