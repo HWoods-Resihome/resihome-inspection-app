@@ -1387,14 +1387,18 @@ export function RateCardForm(props: RateCardFormProps) {
     saveChainRef.current = next.then(() => { /* drop value */ }, () => { /* keep chain alive */ });
     return next;
   }
-  async function commitAndWait(): Promise<void> {
+  async function commitAndWait(maxWaitMs = 30000): Promise<void> {
     window.dispatchEvent(new CustomEvent('ratecard:commit-all'));
     // Wait two animation frames so the commit events have triggered the
     // setState calls and the corresponding fetches.
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-    // Poll up to 30s for the latest save to finish.
+    // Poll for the latest save to finish, bounded by maxWaitMs. Save & Close /
+    // pager navigation pass a SHORT bound: each line save is time-boxed and, on a
+    // low-signal stall, queues itself to the durable outbox (replayed by global
+    // sync), so navigating without waiting for the network round-trip can't lose
+    // work — no reason to hang the inspector on a slow uplink.
     const start = Date.now();
-    while (saveInFlightRef.current > 0 && Date.now() - start < 30000) {
+    while (saveInFlightRef.current > 0 && Date.now() - start < maxWaitMs) {
       await new Promise((r) => setTimeout(r, 100));
     }
   }
@@ -1572,16 +1576,24 @@ export function RateCardForm(props: RateCardFormProps) {
         let lastErr = '';
         for (let attempt = 0; attempt < 3; attempt++) {
           if (attempt > 0) await new Promise((res) => setTimeout(res, 600 * attempt));
+          // Time-box each attempt: on LOW signal a fetch can hang for minutes
+          // without erroring, which would wedge this save (and Save & Close) —
+          // abort at 8s so it's treated as a network failure and retried/queued.
+          const ctrl = new AbortController();
+          const to = setTimeout(() => ctrl.abort(), 8000);
           try {
             r = await fetch(`/api/inspections/${props.inspectionRecordId}/rate-card-lines`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body,
+              signal: ctrl.signal,
             });
           } catch (netErr: any) {
             lastErr = String(netErr?.message || netErr);
             r = null;
-            continue; // network blip — retry
+            continue; // network blip / timeout — retry
+          } finally {
+            clearTimeout(to);
           }
           if (r.ok) break;
           if (r.status >= 400 && r.status < 500 && r.status !== 429) {
@@ -1590,7 +1602,25 @@ export function RateCardForm(props: RateCardFormProps) {
           }
           lastErr = `HTTP ${r.status}`;
         }
-        if (!r || !r.ok) {
+        // No HTTP response after retries → offline / low-signal / timeout (the
+        // server never answered). Queue the save durably so the outbox replays it,
+        // and treat it as saved so the line stays and Save & Close can navigate
+        // WITHOUT waiting or losing the edit. (A real HTTP error response falls
+        // through to the throw below and surfaces to the inspector.)
+        if (!r) {
+          outboxEnqueue({
+            inspectionRecordId: props.inspectionRecordId,
+            endpoint: `/api/inspections/${props.inspectionRecordId}/rate-card-lines`,
+            method: 'POST',
+            body: { upserts: [{ recordId, line: persistLine }], archives: [], bumpStatusToInProgress: true },
+            kind: 'line',
+            meta: { sectionId: effSectionId, line: persistLine, externalId: line.externalId },
+          });
+          setPendingSync(outboxCountFor(props.inspectionRecordId));
+          markSaved();
+          return { ok: true, ...routing, recordId: undefined };
+        }
+        if (!r.ok) {
           throw new Error(lastErr || 'save failed after retries');
         }
         const data = await r.json();
@@ -3307,10 +3337,12 @@ export function RateCardForm(props: RateCardFormProps) {
 
   async function handleSaveAndClose() {
     // Commit any open inline edits AND flush any pending autosaves before
-    // navigating. If the save fails, surface it so the user can retry —
-    // silently dropping their work is worse than blocking.
+    // navigating. Bounded wait: a low-signal save time-boxes and queues itself to
+    // the durable outbox, so we never hang the inspector on a slow uplink — the
+    // queued work replays via global sync. If the save fails, surface it so the
+    // user can retry — silently dropping their work is worse than blocking.
     try {
-      await commitAndWait();
+      await commitAndWait(6000);
     } catch (e: any) {
       const msg = e?.message || String(e);
       const proceed = await dialog.confirm(
@@ -3326,7 +3358,7 @@ export function RateCardForm(props: RateCardFormProps) {
   // navigate to the chosen inspection instead of closing.
   async function handleNavigateTo(id: string) {
     try {
-      await commitAndWait();
+      await commitAndWait(6000);
     } catch (e: any) {
       const msg = e?.message || String(e);
       const proceed = await dialog.confirm(
