@@ -37,9 +37,9 @@ import { uploadFilesBatch, formatMoney } from '@/lib/photoUpload';
 // photo store (so they survive offline like room/line photos). The flush + the
 // rehydrate paths special-case this id to swap drafts in the checklist JSON.
 const FC_PHOTO_SECTION = '__final_checklist__';
-import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError, clearFor as outboxClearFor } from '@/lib/offlineOutbox';
+import { enqueue as outboxEnqueue, flushOutbox, entriesFor as outboxEntriesFor, countFor as outboxCountFor, isOfflineError } from '@/lib/offlineOutbox';
 import { reportSyncOutcome } from '@/lib/syncTelemetry';
-import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, clearQueuedPhotos, onPhotoFlushResume, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
+import { uploadPhotoOrQueue, uploadVideoEntryOrQueue, countQueuedPhotos, rehydrateQueuedPhotos, flushQueuedPhotos, onPhotoFlushResume, discardQueuedByUrls } from '@/lib/offlinePhotoStore';
 import { removePhotoAttachByUrl } from '@/lib/photoAttachOutbox';
 import { isLocalInspectionId } from '@/lib/pendingInspections';
 import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
@@ -978,19 +978,6 @@ export function RateCardForm(props: RateCardFormProps) {
 
   // Escape hatch: discard the queued items that can't sync so the inspector
   // isn't stuck behind a wedged entry. Confirmed, since it drops unsynced work.
-  const clearStuckQueue = useCallback(async () => {
-    const ok = await dialog.confirm(
-      'Discard the changes that haven’t synced?\n\nThis removes the queued items stuck on this device that can’t upload. Anything already saved to the server is unaffected. This can’t be undone.',
-      { confirmLabel: 'Discard queued', cancelLabel: 'Keep trying' }
-    );
-    if (!ok) return;
-    try { outboxClearFor(props.inspectionRecordId); } catch { /* noop */ }
-    await clearQueuedPhotos(props.inspectionRecordId).catch(() => {});
-    setSyncStuck(false);
-    lastPendingRef.current = 0;
-    refreshPending();
-  }, [props.inspectionRecordId, refreshPending, dialog]);
-
   // Live handle to savePhotosForSection so the memoized flusher always calls
   // the latest closure (current sectionPhotoRecordIds / sections), not a stale one.
   const savePhotosRef = useRef<(sectionId: string, urls: string[]) => Promise<void>>(async () => {});
@@ -1196,6 +1183,10 @@ export function RateCardForm(props: RateCardFormProps) {
     // upload+attach flow (it has the form context the SW lacks).
     const onSwMessage = (e: MessageEvent) => { if (e.data?.type === 'resiwalk-flush') void runFlush(); };
     navigator.serviceWorker?.addEventListener?.('message', onSwMessage);
+    // The app-wide sync footer's Retry: flush THIS open form's records (which the
+    // global driver deliberately skips while the form is the active writer).
+    const onRetry = () => { void runFlush(); };
+    window.addEventListener('resiwalk:sync-retry', onRetry);
     // Periodic retry + reconcile while anything is queued (covers flaky signal
     // where 'online' never fires, AND queued PHOTOS — not just the outbox — so
     // the "Syncing…" banner can't get stuck after the queue has actually
@@ -1232,6 +1223,7 @@ export function RateCardForm(props: RateCardFormProps) {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
       navigator.serviceWorker?.removeEventListener?.('message', onSwMessage);
+      window.removeEventListener('resiwalk:sync-retry', onRetry);
       clearInterval(iv);
       unsubResume();
       document.removeEventListener('visibilitychange', onVisible);
@@ -3409,7 +3401,7 @@ export function RateCardForm(props: RateCardFormProps) {
     // Queued LINE saves still pending → wait (they carry scope data; never drop).
     if (pendingSync > 0) {
       await dialog.alert(
-        `Your latest changes are still saving (${pendingSync} pending). Please wait for "Synced" before submitting.\n\nIf it stays stuck, use Retry or Clear on the sync banner.`
+        `Your latest changes are still saving (${pendingSync} pending). Please wait for "Synced" before submitting.\n\nIf it stays stuck, tap Retry on the sync bar at the bottom of the screen.`
       );
       return;
     }
@@ -3957,47 +3949,11 @@ export function RateCardForm(props: RateCardFormProps) {
       {/* Sticky header bar — the single home for address + property data
           (the top header no longer repeats it). Five centered boxes:
           Lines + Vendor / Client / Tenant / Net Turn. */}
-      {/* Offline / pending-sync banner. Saves are queued locally and replay
-          automatically when the connection returns, so work is never lost in a
-          dead zone. */}
-      {(() => {
-        const totalPending = pendingSync + pendingPhotos;
-        if (online && totalPending === 0) return null;
-        const noun = totalPending === 1 ? 'change' : 'changes';
-        if (!online) {
-          return (
-            <div className="-mx-4 px-4 py-1.5 mb-2 text-xs font-heading font-semibold flex items-center justify-center gap-2 bg-amber-100 text-amber-800">
-              <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
-              {totalPending > 0
-                ? `Offline — ${totalPending} ${noun}${pendingPhotos > 0 ? ` (incl. ${pendingPhotos} photo/video)` : ''} saved here, will sync when you're back online`
-                : `Offline — your changes are saved on this device and will sync automatically`}
-            </div>
-          );
-        }
-        // Online with a non-empty queue: actively syncing, or stuck (offer Retry/Clear).
-        return (
-          <div className={`-mx-4 px-4 py-1.5 mb-2 text-xs font-heading font-semibold flex items-center justify-center gap-2 ${flushing ? 'bg-blue-50 text-blue-700' : syncStuck ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
-            <span className={`inline-block w-2 h-2 rounded-full ${flushing ? 'bg-blue-500 animate-pulse' : syncStuck ? 'bg-red-500' : 'bg-blue-500 animate-pulse'}`} />
-            <span>{flushing ? `Syncing ${totalPending} ${noun}…` : syncStuck ? `${totalPending} ${noun} haven’t synced` : `Syncing ${totalPending} ${noun}…`}</span>
-            <button type="button" onClick={() => void runFlush()} disabled={flushing} className="inline-flex items-center gap-1 underline hover:no-underline disabled:opacity-60 disabled:no-underline">
-              {flushing && <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />}
-              {flushing ? 'Retrying…' : 'Retry'}
-            </button>
-            {syncStuck && !flushing && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => void dialog.alert(`Last sync error:\n\n${lastSyncError || 'No error captured — the server may be slow. Tap Retry, or Clear to discard the stuck items.'}`)}
-                  className="underline hover:no-underline"
-                >
-                  Details
-                </button>
-                <button type="button" onClick={() => void clearStuckQueue()} className="underline hover:no-underline">Clear</button>
-              </>
-            )}
-          </div>
-        );
-      })()}
+      {/* Sync/offline status is shown app-wide by the bottom sync footer
+          (components/SyncStatusBadge), which also surfaces Retry when a queue
+          stalls — so this form no longer renders its own inline sync banner. The
+          form's sync engine (runFlush + friends) still runs and still gates
+          Submit; it also flushes on the footer's `resiwalk:sync-retry` event. */}
 
       {/* Device-storage warning. Photos/video sit in local storage until they
           sync; if the device fills up, new captures fail. Warn early. */}

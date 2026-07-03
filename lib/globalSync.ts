@@ -84,6 +84,12 @@ async function tick(): Promise<void> {
   }
 }
 
+/** Manually trigger a sync pass right now — e.g. the sync footer's Retry button.
+ *  Single-flight (a no-op if a pass is already running). Returns the pass promise. */
+export function kickGlobalSync(): Promise<void> {
+  return tick();
+}
+
 /** Install the global sync loop once. Safe to call on every mount. */
 export function installGlobalSync(): void {
   if (installed || typeof window === 'undefined') return;
@@ -91,6 +97,9 @@ export function installGlobalSync(): void {
   const kick = () => { void tick(); };
   window.addEventListener('online', kick);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') kick(); });
+  // Manual retry from the sync footer (open forms also listen to this event to
+  // flush THEIR records, which this global pass deliberately skips).
+  window.addEventListener('resiwalk:sync-retry', kick);
   setInterval(kick, INTERVAL_MS);
   // First pass shortly after load so the page's own initial fetches settle first.
   setTimeout(kick, 4000);

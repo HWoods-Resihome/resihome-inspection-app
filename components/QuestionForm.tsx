@@ -1190,6 +1190,8 @@ export function QuestionForm({
     // entered offline that were stashed so they survive closing the app).
     const kick = () => { void runPhotoFlushRef.current(); void flushOutbox(); };
     window.addEventListener('online', kick);
+    // App-wide sync footer's Retry → flush this open form's photos + outbox.
+    window.addEventListener('resiwalk:sync-retry', kick);
     // Batch every 10s in the background (photo uploads are suspended while a
     // camera overlay is open — see flushQueuedPhotos — so this tick only does
     // work once the camera is closed).
@@ -1205,7 +1207,7 @@ export function QuestionForm({
     window.addEventListener('pageshow', onVisible);
     void flushOutbox(); // sync anything queued from a prior offline session on mount
     return () => {
-      window.removeEventListener('online', kick); clearInterval(iv); unsub();
+      window.removeEventListener('online', kick); window.removeEventListener('resiwalk:sync-retry', kick); clearInterval(iv); unsub();
       document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('pageshow', onVisible);
     };
   }, [readOnly]);

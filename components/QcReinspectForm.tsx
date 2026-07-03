@@ -689,8 +689,10 @@ export function QcReinspectForm(props: Props) {
   useEffect(() => {
     const onOnline = () => { void runQcFlushRef.current(); };
     window.addEventListener('online', onOnline);
+    // App-wide sync footer's Retry → flush this open QC form's records.
+    window.addEventListener('resiwalk:sync-retry', onOnline);
     const iv = setInterval(() => { void runQcFlushRef.current(); }, 15000);
-    return () => { window.removeEventListener('online', onOnline); clearInterval(iv); };
+    return () => { window.removeEventListener('online', onOnline); window.removeEventListener('resiwalk:sync-retry', onOnline); clearInterval(iv); };
   }, []);
   // Which of a section's lines the After photo at `index` is tagged to.
   function currentTagsForAfter(key: string, index: number): { externalId: string; label: string }[] {
