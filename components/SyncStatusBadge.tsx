@@ -20,6 +20,14 @@ import { countOutbox } from '@/lib/offlineOutbox';
 import { countPhotoAttach } from '@/lib/photoAttachOutbox';
 import { countAllQueuedPhotos } from '@/lib/offlinePhotoStore';
 import { kickGlobalSync } from '@/lib/globalSync';
+import { useAnyCameraOpen } from '@/lib/cameraOpenState';
+import { useRouter } from 'next/router';
+
+// Only surface the footer on the two screens where sync context matters: the home
+// list and an open inspection. Everywhere else (and inside the full-screen camera /
+// photo editor / gallery, which open on top of an inspection) it just gets in the
+// way, so it stays hidden.
+const FOOTER_ROUTES = new Set(['/', '/inspection/[id]']);
 
 // The height the footer publishes for the action bars to offset by. Kept in sync
 // with the forms (they read `var(--sync-footer-h, 0px)`).
@@ -40,6 +48,8 @@ export function SyncStatusBadge() {
   const lastProgressRef = useRef(Date.now()); // last time the queue shrank or was empty
   const syncedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
+  const router = useRouter();
+  const cameraOpen = useAnyCameraOpen(); // in-app camera / gallery is full-screen — step aside
 
   useEffect(() => {
     let cancelled = false;
@@ -101,7 +111,7 @@ export function SyncStatusBadge() {
     return () => { mo.disconnect(); if (raf) cancelAnimationFrame(raf); };
   }, []);
 
-  const show = (pending > 0 || justSynced) && !overlayOpen;
+  const show = (pending > 0 || justSynced) && !overlayOpen && !cameraOpen && FOOTER_ROUTES.has(router.pathname);
   const synced = pending === 0 && justSynced;
   const showRetry = show && online && !synced && stalled;
 
