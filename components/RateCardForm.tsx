@@ -3335,38 +3335,28 @@ export function RateCardForm(props: RateCardFormProps) {
     props.onCancelInspection();
   }
 
+  // Commit any OPEN inline edit (so the just-typed row is captured) without waiting
+  // on the network. The commit fires the row's save, which — on a slow/absent
+  // uplink — time-boxes and queues itself to the durable outbox; two animation
+  // frames let that fire before we unmount.
+  async function commitOpenEdits(): Promise<void> {
+    window.dispatchEvent(new CustomEvent('ratecard:commit-all'));
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+  }
+
   async function handleSaveAndClose() {
-    // Commit any open inline edits AND flush any pending autosaves before
-    // navigating. Bounded wait: a low-signal save time-boxes and queues itself to
-    // the durable outbox, so we never hang the inspector on a slow uplink — the
-    // queued work replays via global sync. If the save fails, surface it so the
-    // user can retry — silently dropping their work is worse than blocking.
-    try {
-      await commitAndWait(6000);
-    } catch (e: any) {
-      const msg = e?.message || String(e);
-      const proceed = await dialog.confirm(
-        `Save failed: ${msg}\n\nLeave anyway? Your unsaved changes will be lost.`,
-        { confirmLabel: 'Leave anyway', cancelLabel: 'Stay' }
-      );
-      if (!proceed) return;
-    }
+    // OFFLINE-FIRST exit: commit open edits, then leave for the home screen
+    // IMMEDIATELY — never block on the network. Line edits are durable in the
+    // outbox and photos in the photo queue; the app-wide global sync driver
+    // replays both when service returns. (Waiting here for in-flight saves was
+    // trapping the inspector on a slow/absent uplink — the reported bug.)
+    await commitOpenEdits();
     props.onCancel();
   }
 
-  // Prev/next pager: same save-before-leave behavior as handleSaveAndClose, but
-  // navigate to the chosen inspection instead of closing.
+  // Prev/next pager: same offline-first behavior as Save & Close — commit, then go.
   async function handleNavigateTo(id: string) {
-    try {
-      await commitAndWait(6000);
-    } catch (e: any) {
-      const msg = e?.message || String(e);
-      const proceed = await dialog.confirm(
-        `Save failed: ${msg}\n\nLeave anyway? Your unsaved changes will be lost.`,
-        { confirmLabel: 'Leave anyway', cancelLabel: 'Stay' }
-      );
-      if (!proceed) return;
-    }
+    await commitOpenEdits();
     props.onNavigateTo?.(id);
   }
 
