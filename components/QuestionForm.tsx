@@ -2300,7 +2300,7 @@ export function QuestionForm({
                               <button
                                 type="button"
                                 onClick={() => removeSectionPhoto(inst.instanceKey, idx)}
-                                className="absolute -top-1.5 -right-1.5 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand"
+                                className="absolute top-0.5 right-0.5 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand"
                               >&times;</button>
                             )}
                           </div>
