@@ -181,8 +181,8 @@ function drawEvidenceStamp(ctx: CanvasRenderingContext2D, w: number, h: number, 
 // field sync, the extra preview resolution just cost iOS memory for detail that's
 // discarded on save — so it's back to 1280.) Android grabs a higher-res still via
 // ImageCapture.takePhoto(), also capped by MAX_SAVE_EDGE.
-const CAPTURE_WIDTH = 1280;
-const CAPTURE_HEIGHT = 960;
+const CAPTURE_WIDTH = 1920;
+const CAPTURE_HEIGHT = 1440;
 // A live frame narrower than this is a DEGRADED stream (iOS can hand back a tiny
 // frame after a recovery/lens-switch/throttle, or honor `{ideal}` with a much
 // lower res). Saving it yields a low-resolution photo whose evidence stamp
@@ -196,14 +196,16 @@ const MIN_CAPTURE_EDGE = 1000;
 const JPEG_QUALITY = 0.92;
 // Saved-photo ceiling (long edge) — this IS the uploaded size (the upload path's
 // fast path skips a second compression), so it directly sets field-sync speed.
-// Lowered to 1200px @ q0.68 (was 2048 @ 0.9) to cut upload bytes ~55-65% for MUCH
-// faster sync on weak cell uplinks — the "scope took 14 min to sync" report. Still
-// clearly legible for evidence; the PDF is unaffected (it embeds a 520px thumb).
-const MAX_SAVE_EDGE = 1200;
+// Balanced at 1600px @ q0.80: markedly sharper than the previous 1200 @ 0.68
+// (which read blurry, and made the evidence stamp look oversized on the smaller
+// frame) while staying well under the old 2048 @ 0.9 that caused the "14 min to
+// sync" scopes — roughly 2x the 1200/0.68 bytes, not the 3-4x of 2048/0.9. The
+// PDF is unaffected (it embeds a 520px thumb).
+const MAX_SAVE_EDGE = 1600;
 // Final upload quality — no second compression downstream, so this IS the stored
-// quality. 0.68 roughly halves bytes vs 0.9 with acceptable detail for inspection
-// evidence (fine detail on deep zoom softens slightly).
-const PHOTO_SAVE_QUALITY = 0.68;
+// quality. 0.80 removes the visible JPEG softening/artifacts of 0.68 at a modest
+// size increase.
+const PHOTO_SAVE_QUALITY = 0.8;
 
 // iOS (incl. iPadOS) WebKit. On iPhone we run a PURE DIGITAL live-frame camera:
 // the live <video> is NEVER covered by a freeze-frame still — every capture and

@@ -170,12 +170,12 @@ const CAPTURE_HEIGHT = 2880;
 // JPEG quality (0..1). 0.92 keeps evidence photos crisp (esp. when digitally
 // zoomed/cropped) at a still-reasonable file size.
 const JPEG_QUALITY = 0.92;
-// Saved-photo ceiling (long edge) = the uploaded size. Lowered to 1200px @ q0.68
-// (was 4096 @ 0.9) to cut upload bytes for much faster field sync on weak uplinks
-// (kept in step with the Modern camera). Still legible for evidence; the PDF is
+// Saved-photo ceiling (long edge) = the uploaded size. 1600px @ q0.80 — sharper
+// than the previous 1200 @ 0.68 while staying well under the old 4096 @ 0.9 that
+// bogged down field sync. Kept in step with the Modern camera. The PDF is
 // unaffected (it embeds a 520px thumbnail).
-const MAX_SAVE_EDGE = 1200;
-const PHOTO_SAVE_QUALITY = 0.68;
+const MAX_SAVE_EDGE = 1600;
+const PHOTO_SAVE_QUALITY = 0.8;
 
 // Photo geostamp proximity check: how close (meters) the device GPS must be to
 // the property's reference location to stamp a ✓ rather than a ✗. Generous by
