@@ -1855,6 +1855,45 @@ export async function syncInspectorFromOwner(
 }
 
 /**
+ * One-shot repair: re-stamp an inspection's inspector_email / inspector_name back
+ * to a specific (usually 1099-agent) email. Used to recover walks whose inspector
+ * was silently reassigned to an internal HubSpot owner by the old owner-sync (see
+ * syncInspectorFromOwner). The display name is resolved from the active-users list
+ * (same logic as create) so we never persist an email-username fallback.
+ *
+ * Returns { ok, before, after } — `before` is the current stored inspector_email
+ * so the caller can preview / audit the change. `dryRun` reads only, writes nothing.
+ */
+export async function repairInspectorEmail(
+  recordId: string,
+  inspectorEmail: string,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ ok: boolean; before: string; after: string; name: string; note?: string }> {
+  const want = (inspectorEmail || '').trim();
+  if (!recordId || !want) return { ok: false, before: '', after: '', name: '', note: 'missing recordId or email' };
+
+  const cur = await readInspectionProps(recordId, ['inspector_email', 'inspector_name', 'template_type']);
+  if (!cur) return { ok: false, before: '', after: '', name: '', note: 'inspection not found' };
+  const before = (cur.inspector_email || '').toString().trim();
+
+  // Resolve a real display name for the target email (falls back to the current
+  // stored name, then the email username) — mirrors create's name resolution.
+  let name = (cur.inspector_name || '').toString().trim();
+  try {
+    const match = (await fetchActiveUsers()).find((u) => (u.email || '').trim().toLowerCase() === want.toLowerCase());
+    if (match?.fullName && !match.fullName.includes('@')) name = match.fullName;
+  } catch { /* best-effort */ }
+  if (!name || name.includes('@')) name = want.split('@')[0];
+
+  if (opts.dryRun) return { ok: true, before, after: want, name, note: 'dry-run (no write)' };
+
+  await updateInspection(recordId, { inspector_email: want, inspector_name: name });
+  // The walk re-enters the agent's scoped home list + may re-unlock a state's view.
+  if (isExternalEmail(want)) bustExternalUnlockedView(want);
+  return { ok: true, before, after: want, name };
+}
+
+/**
  * Active HubSpot users — fetchUsers() filtered to those whose owner is NOT
  * archived (i.e. the account hasn't been deactivated/removed). This is the gate
  * sign-in must use so a deactivated user can't authenticate. It also REPAIRS the

@@ -67,6 +67,8 @@ export function ErrorLogManager() {
   const [kindFilter, setKindFilter] = useState('');
   const [q, setQ] = useState('');
   const [lastLoadedAt, setLastLoadedAt] = useState<string>('');
+  // Per-row repair state: inspectionId -> 'busy' | 'done' | error string.
+  const [repair, setRepair] = useState<Record<string, string>>({});
   const qRef = useRef(q);
   qRef.current = q;
 
@@ -86,6 +88,28 @@ export function ErrorLogManager() {
     } catch (e: any) { setError(String(e?.message || e)); }
     finally { setLoading(false); }
   }, [kindFilter]);
+
+  // Reassign a walk's inspector back to the denied agent (recovers a walk whose
+  // inspector was clobbered by the old owner-sync). Only offered on write_denied
+  // rows where we know both the intended agent (row email) and the inspection id.
+  const repairRow = useCallback(async (inspectionId: string, inspectorEmail: string) => {
+    if (!inspectionId || !inspectorEmail) return;
+    if (!window.confirm(`Reassign inspection ${inspectionId} back to ${inspectorEmail}?`)) return;
+    setRepair((s) => ({ ...s, [inspectionId]: 'busy' }));
+    try {
+      const r = await fetch('/api/admin/repair-inspector', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ inspectionId, inspectorEmail }] }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setRepair((s) => ({ ...s, [inspectionId]: d.error || 'failed' })); return; }
+      const ok = Array.isArray(d.results) && d.results[0]?.ok;
+      setRepair((s) => ({ ...s, [inspectionId]: ok ? 'done' : (d.results?.[0]?.note || 'failed') }));
+      void load();
+    } catch (e: any) {
+      setRepair((s) => ({ ...s, [inspectionId]: String(e?.message || e) }));
+    }
+  }, [load]);
 
   // Initial load on open + when the kind filter changes.
   useEffect(() => { if (sectionOpen) void load(); }, [sectionOpen, load]);
@@ -177,6 +201,25 @@ export function ErrorLogManager() {
                             <div className="mt-0.5 text-[11px] text-gray-500">
                               {e.inspectionId && <a href={`/inspection/${e.inspectionId}`} className="text-brand underline break-all" target="_blank" rel="noreferrer">{e.inspectionId}</a>}
                               {stored && <span className="ml-2">stored inspector: <span className="font-mono">{stored}</span></span>}
+                            </div>
+                          )}
+                          {/* One-click recovery for a walk whose inspector was clobbered: reassign
+                              it back to the denied agent (this row's email). */}
+                          {e.kind === 'write_denied' && e.inspectionId && e.email && (
+                            <div className="mt-1">
+                              {repair[e.inspectionId] === 'done' ? (
+                                <span className="text-[11px] text-emerald-600 font-semibold">✓ Reassigned to {e.email}</span>
+                              ) : repair[e.inspectionId] === 'busy' ? (
+                                <span className="text-[11px] text-gray-400">Reassigning…</span>
+                              ) : (
+                                <button type="button" onClick={() => void repairRow(e.inspectionId!, e.email!)}
+                                  className="text-[11px] font-heading font-semibold text-brand underline hover:opacity-80">
+                                  Reassign to {e.email}
+                                </button>
+                              )}
+                              {repair[e.inspectionId] && !['done', 'busy'].includes(repair[e.inspectionId]) && (
+                                <span className="ml-2 text-[11px] text-rose-600">{repair[e.inspectionId]}</span>
+                              )}
                             </div>
                           )}
                         </td>
