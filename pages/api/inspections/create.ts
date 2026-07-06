@@ -59,8 +59,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // External (1099) users may only create the 1099 template.
-    const denial = externalAccessDenial(session.email, body.templateType, { write: true });
+    // External (1099) users may only create the 1099 template. This is a NEW
+    // record with no owner yet — the creator WILL own it (inspector_email is
+    // stamped to session.email below), so pass ownerEmail: session.email. Without
+    // it the write gate's fail-closed-on-blank-owner rule (which correctly blocks
+    // an external user from editing an UNASSIGNED existing inspection) would also
+    // block them from starting their own — the "can only edit your own" error.
+    const denial = externalAccessDenial(session.email, body.templateType, { write: true, ownerEmail: session.email });
     if (denial) return res.status(403).json({ error: denial });
 
     // External 1099 walks are only allowed once the property is in a leasing
