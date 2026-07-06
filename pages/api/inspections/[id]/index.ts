@@ -16,6 +16,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { buildShortLink } from '@/lib/shortLinks';
 import { externalAccessDenial, isExternalEmail } from '@/lib/userAccess';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
+import { recordErrorEvent } from '@/lib/errorLog';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req);
@@ -36,7 +37,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // can't become an unhandled rejection.
       const answersPromise = fetchAnswersForInspection(id);
       const data = await fetchInspectionWithPropertyRef(id);
-      if (!data) { answersPromise.catch(() => {}); return res.status(404).json({ error: 'Inspection not found' }); }
+      if (!data) {
+        answersPromise.catch(() => {});
+        void recordErrorEvent({ kind: 'inspection_load', message: 'Inspection not found', email: session.email, inspectionId: id, source: 'server' });
+        return res.status(404).json({ error: 'Inspection not found' });
+      }
       // External (1099) users can open any 1099, plus COMPLETED Scope Rate Card
       // / Re-Inspect inspections (view-only) — but the latter only in states they
       // have unlocked (an inspection of their own there). Pass status + region +
@@ -49,7 +54,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         region: data.inspection.regionSnapshot,
         unlockedStates,
       });
-      if (denial) { answersPromise.catch(() => {}); return res.status(403).json({ error: denial }); }
+      if (denial) {
+        answersPromise.catch(() => {});
+        void recordErrorEvent({ kind: 'inspection_load', message: denial, email: session.email, inspectionId: id, template: data.inspection.templateType, status: data.inspection.status || undefined, source: 'server' });
+        return res.status(403).json({ error: denial });
+      }
       // Answers + the property's active listing + (Community/Visit only) the
       // associated community's name — all best-effort, in parallel.
       // Keep the inspector in sync with the HubSpot record Owner: if the owner
@@ -173,6 +182,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     } catch (e: any) {
       console.error(`GET /api/inspections/${id} failed:`, e);
+      void recordErrorEvent({ kind: 'inspection_load', message: String(e?.message || e), email: session.email, inspectionId: id, source: 'server' });
       return res.status(500).json({ error: String(e.message || e) });
     }
   }

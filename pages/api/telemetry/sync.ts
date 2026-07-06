@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { put } from '@vercel/blob';
 import { getSessionFromRequest } from '@/lib/auth';
+import { recordErrorEvent } from '@/lib/errorLog';
 
 /**
  * Sink for offline-sync telemetry (see lib/syncTelemetry.ts). Logs a structured
@@ -39,6 +40,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         updatedAt: new Date().toISOString(),
       };
       console.log('[sync-telemetry]', JSON.stringify(record));
+      // Surface genuine sync trouble in the Admin Error Log: work that failed
+      // permanently (dropped) or a reported lastError. A clean flush (no error,
+      // nothing dropped) is normal telemetry — don't log it as an error.
+      if (record.failedPermanently > 0 || record.lastError) {
+        void recordErrorEvent({
+          kind: 'sync',
+          message: record.lastError || `${record.failedPermanently} queued item(s) failed to sync`,
+          email: session.email,
+          inspectionId,
+          online: record.online,
+          source: 'client',
+          meta: { synced: record.synced, remaining: record.remaining, failedPermanently: record.failedPermanently },
+        });
+      }
       if (process.env.BLOB_READ_WRITE_TOKEN) {
         await put(`sync-health/${inspectionId}.json`, JSON.stringify(record),
           { access: 'public', contentType: 'application/json', allowOverwrite: true, addRandomSuffix: false })

@@ -5,6 +5,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { fetchActiveUsers } from '@/lib/hubspot';
+import { recordErrorEvent } from '@/lib/errorLog';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -30,6 +31,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const match = users.find((u) => u.email.toLowerCase() === normalized);
     if (!match) {
+      // Capture for the Admin Error Log — a valid inspector who "can't log in"
+      // is usually an email that isn't an active HubSpot user (not provisioned,
+      // deactivated, or a typo/alias mismatch vs. their Google account).
+      void recordErrorEvent({ kind: 'login', message: 'Email not recognized (not an active HubSpot user)', email: normalized, source: 'server' });
       // Generic error to avoid leaking whether an email exists in our portal.
       return res.status(401).json({ error: 'Email not recognized' });
     }

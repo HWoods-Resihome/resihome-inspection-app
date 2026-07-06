@@ -12,6 +12,7 @@ import { saveCachedProperties, loadCachedMe, saveCachedMe, clearCachedMe, saveCa
 import { EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
 import { newLocalIds, addPendingInspection, buildSeedPayload } from '@/lib/pendingInspections';
 import { syncAllProperties, searchCachedProperties, dropPropertyMemCache } from '@/lib/propertyCache';
+import { reportError } from '@/lib/clientErrorReporter';
 
 type Stage = 'setup' | 'loading_questions' | 'error';
 
@@ -385,6 +386,12 @@ export default function NewInspection() {
     if (r.status >= 400 && r.status < 500 && r.status !== 429) {
       setErrorMsg(data?.error || `HTTP ${r.status}`);
       setStage('error');
+      // Report the surfaced start failure with the property/template context.
+      // (Server also logs it; this adds the client's-eye view + property id.)
+      reportError(data?.error || `HTTP ${r.status}`, {
+        kind: 'inspection_start', template: String(selectedTemplate || ''),
+        propertyId: String(selectedPropertyId || ''), httpStatus: r.status,
+      });
       return;
     }
     // 5xx / 429 / malformed-success → the SERVER is the problem, not the request.

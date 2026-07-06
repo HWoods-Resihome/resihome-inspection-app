@@ -53,6 +53,7 @@ export function reportError(error: unknown, context?: ErrorContext): void {
       url: window.location?.href,
       online: typeof navigator !== 'undefined' ? navigator.onLine : undefined,
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+      appVersion: process.env.NEXT_PUBLIC_APP_VERSION || undefined,
       ts: new Date().toISOString(),
       ...ambient,
       ...context,

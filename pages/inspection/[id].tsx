@@ -18,6 +18,7 @@ import { openPdf } from '@/lib/pdfViewerBus';
 import { lockRingFromProperty } from '@/components/UnlockButton';
 import { setInspectionFormActive } from '@/lib/offlinePhotoStore';
 import { isLocalInspectionId, realIdFor, getPendingInspection, buildSeedPayload } from '@/lib/pendingInspections';
+import { reportError } from '@/lib/clientErrorReporter';
 import type { QuestionFormSubmitMeta } from '@/components/QuestionForm';
 
 
@@ -292,10 +293,17 @@ export default function ExistingInspection() {
           // connection, so there's nothing to show. Make the reason actionable
           // instead of a generic abort/error string.
           const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-          setErrorMsg(offline || /abort/i.test(String(e?.message || e))
+          const isOfflineOrAbort = offline || /abort/i.test(String(e?.message || e));
+          setErrorMsg(isOfflineOrAbort
             ? 'Can’t load this inspection — you appear to be offline or on a weak signal, and it hasn’t been downloaded for offline use yet. Open it once on a good connection, then it’ll work offline.'
             : String(e?.message || e));
           setStage('error');
+          // Report genuine (non-offline) load failures to the Admin Error Log.
+          // Server-side 404/403/500 are already captured; this catches
+          // client-observed failures (e.g. a bad payload) with the inspection id.
+          if (!isOfflineOrAbort) {
+            reportError(e, { kind: 'inspection_load', inspectionId });
+          }
         }
       }
     })();

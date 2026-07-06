@@ -6,6 +6,7 @@ import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
 import { externalAccessDenial, isExternalEmail, EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
 import { getCachedRegions } from '@/pages/api/rate-card/regions';
+import { recordErrorEvent } from '@/lib/errorLog';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -66,13 +67,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // an external user from editing an UNASSIGNED existing inspection) would also
     // block them from starting their own — the "can only edit your own" error.
     const denial = externalAccessDenial(session.email, body.templateType, { write: true, ownerEmail: session.email });
-    if (denial) return res.status(403).json({ error: denial });
+    if (denial) {
+      void recordErrorEvent({ kind: 'inspection_start', message: denial, email: session.email, template: body.templateType, source: 'server' });
+      return res.status(403).json({ error: denial });
+    }
 
     // External 1099 walks are only allowed once the property is in a leasing
     // status (Vacant - Pre-Leasing / On Market) — the Turn must be done first.
     if (isExternalEmail(session.email) && body.templateType === EXTERNAL_TEMPLATE) {
       const status = await fetchPropertyStatus(body.propertyRecordId);
       if (!externalCanCreate1099ForStatus(status)) {
+        void recordErrorEvent({ kind: 'inspection_start', message: EXTERNAL_1099_STATUS_BLOCK_MSG, email: session.email, template: body.templateType, source: 'server', meta: { propertyStatus: status || '(blank)', propertyId: body.propertyRecordId } });
         return res.status(403).json({ error: EXTERNAL_1099_STATUS_BLOCK_MSG });
       }
     }
@@ -292,6 +297,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({ success: true, inspectionId, externalId, inspectionName, copiedLines });
   } catch (e: any) {
     console.error('POST /api/inspections/create failed:', e);
+    void recordErrorEvent({ kind: 'inspection_start', message: String(e?.message || e), email: session.email, template: (req.body as CreateBody)?.templateType, source: 'server' });
     return res.status(500).json({ error: String(e.message || e) });
   }
 }

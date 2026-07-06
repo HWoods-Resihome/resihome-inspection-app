@@ -1829,6 +1829,16 @@ export async function syncInspectorFromOwner(
       const read = await readInspectionProps(recordId, ['hubspot_owner_id', 'inspector_email', 'inspector_name']);
       p = read || {};
     }
+    // A 1099 (external) agent OWNS their walk via inspector_email — never via the
+    // HubSpot record owner. HubSpot can auto-assign a default/internal owner on
+    // create (the private-app user, or a property-inherited PM), and syncing that
+    // back over an external inspector would silently reassign the walk away from
+    // the agent: their own inspection then drops out of their scoped home list AND
+    // every subsequent write is denied with "You can only edit or cancel your own
+    // inspections." Internal users never feel this (they aren't ownership-gated),
+    // so it hit 1099 agents specifically. Owner→inspector sync is an INTERNAL-staff
+    // reassignment convenience only; leave external inspectors untouched.
+    if (isExternalEmail((p.inspector_email || '').toString().trim())) return null;
     const ownerId = (p.hubspot_owner_id || '').toString().trim();
     if (!ownerId) return null;
     const resolved = await resolveOwnerInspector(ownerId);

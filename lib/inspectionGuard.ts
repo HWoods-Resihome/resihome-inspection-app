@@ -8,6 +8,7 @@
 
 import { fetchInspectionById, externalUnlockedView } from '@/lib/hubspot';
 import { isExternalEmail, externalAccessDenial, externalCanEditTemplate, ownsInspection } from '@/lib/userAccess';
+import { recordErrorEvent } from '@/lib/errorLog';
 
 export async function externalWriteDenial(
   email: string | null | undefined,
@@ -16,7 +17,23 @@ export async function externalWriteDenial(
   if (!isExternalEmail(email)) return null; // internal users: unrestricted, no fetch
   const insp = await fetchInspectionById(inspectionId);
   if (!insp) return null; // not found → let the endpoint return its own 404
-  return externalAccessDenial(email, insp.templateType, { write: true, status: insp.status, ownerEmail: insp.inspectorEmail });
+  const denial = externalAccessDenial(email, insp.templateType, { write: true, status: insp.status, ownerEmail: insp.inspectorEmail });
+  if (denial) {
+    // Capture the exact mismatch for the Admin Error Log — this is what turns an
+    // "I can't edit my own inspection" report into a one-look diagnosis: the
+    // signed-in email vs. the inspection's stored inspector_email.
+    void recordErrorEvent({
+      kind: 'write_denied',
+      message: denial,
+      email: email || undefined,
+      inspectionId,
+      template: insp.templateType,
+      status: insp.status || undefined,
+      source: 'server',
+      meta: { storedInspectorEmail: insp.inspectorEmail || '(blank)' },
+    });
+  }
+  return denial;
 }
 
 /**

@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
+import { recordErrorEvent } from '@/lib/errorLog';
 
 /**
  * Sink for client-side error reports (see lib/clientErrorReporter.ts). Logs a
@@ -31,6 +32,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Structured log line — greppable in Vercel/CloudWatch.
     console.error('[client-error]', JSON.stringify(record));
+
+    // Persist for the Admin ▸ ResiWalk Insights Error Log (fire-and-forget; never
+    // blocks the 204). Email is server-attributed (reporterEmail), not trusted
+    // from the client.
+    void recordErrorEvent({
+      kind: typeof body.kind === 'string' ? body.kind : 'client',
+      message: String(body.message || body.reason || 'Client error'),
+      email: record.reporterEmail || (typeof body.email === 'string' ? body.email : undefined),
+      inspectionId: typeof body.inspectionId === 'string' ? body.inspectionId : undefined,
+      template: typeof body.template === 'string' ? body.template : undefined,
+      status: typeof body.status === 'string' ? body.status : undefined,
+      appVersion: typeof body.appVersion === 'string' ? body.appVersion : undefined,
+      url: typeof body.url === 'string' ? body.url : undefined,
+      online: typeof body.online === 'boolean' ? body.online : undefined,
+      userAgent: typeof body.userAgent === 'string' ? body.userAgent : undefined,
+      source: 'client',
+    });
 
     const webhook = process.env.ERROR_WEBHOOK_URL;
     if (webhook) {
