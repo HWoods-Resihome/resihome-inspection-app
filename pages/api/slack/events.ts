@@ -50,24 +50,28 @@ function readRawBody(req: NextApiRequest): Promise<string> {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
-  if (!process.env.SLACK_SIGNING_SECRET) return res.status(503).json({ error: 'Slack events not configured' });
 
   const rawBody = await readRawBody(req);
+  let body: any = {};
+  try { body = JSON.parse(rawBody); } catch { return res.status(400).json({ error: 'bad json' }); }
+
+  // 1) URL verification handshake FIRST — before any signature/secret gate.
+  //    It's a one-time, non-sensitive echo, and answering it here lets the Slack
+  //    "Request URL" verify even before SLACK_SIGNING_SECRET has propagated. Real
+  //    events (below) still require a valid signature.
+  if (body.type === 'url_verification') {
+    return res.status(200).json({ challenge: body.challenge });
+  }
+
+  // 2) Everything else must be a signed Slack request.
+  if (!process.env.SLACK_SIGNING_SECRET) return res.status(503).json({ error: 'Slack events not configured' });
   const sig = req.headers['x-slack-signature'] as string | undefined;
   const ts = req.headers['x-slack-request-timestamp'] as string | undefined;
   if (!verifySlackSignature(rawBody, sig, ts)) {
     return res.status(401).json({ error: 'bad signature' });
   }
 
-  let body: any = {};
-  try { body = JSON.parse(rawBody); } catch { return res.status(400).json({ error: 'bad json' }); }
-
-  // 1) URL verification handshake (fired when you set the Request URL in Slack).
-  if (body.type === 'url_verification') {
-    return res.status(200).json({ challenge: body.challenge });
-  }
-
-  // 2) Event callback: dedupe retries, then ACK immediately and process async.
+  // 3) Event callback: dedupe retries, then ACK immediately and process async.
   if (body.type === 'event_callback') {
     if (alreadyHandled(body.event_id)) return res.status(200).json({ ok: true, deduped: true });
     // Snapshot only serializable fields the worker needs (req is not usable after ack).
