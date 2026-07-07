@@ -34,6 +34,17 @@ import {
   type FcAnswers, type FcAnswerState, type FcCompletionCtx,
 } from '@/lib/finalChecklist';
 
+// A device-local draft photo (blob:/data:) is NOT durable evidence — it lives
+// only on this device until it uploads. Count only REAL (uploaded) photo URLs
+// toward "has a photo", so the header count, the completeness check, and the
+// submit gate all agree with the durable upload/attach gate: an unsynced photo
+// never reads as complete or submittable, and flips to complete the instant its
+// real URL lands. (Persisted answers already strip blob: — this closes the gap
+// where the UI/count trusted a draft as satisfied evidence and it could be lost.)
+function countRealPhotos(urls?: string[]): number {
+  return (urls || []).filter((u) => !!u && !u.startsWith('blob:') && !u.startsWith('data:')).length;
+}
+
 // Extra outcome data passed up at submit (beyond answers/photos): the overall
 // Review & Sign-Off verdict (→ inspection_result) and, for 1099/vacancy fails,
 // whether the inspector asked to raise a maintenance ticket + its description.
@@ -871,7 +882,15 @@ export function QuestionForm({
       // Annotating an un-synced draft: discard the original queued draft so it and
       // the annotated copy don't BOTH upload+attach (duplicate photo).
       if (oldForReplace && oldForReplace.startsWith('blob:')) { try { await discardQueuedByUrls([oldForReplace]); removePhotoAttachByUrl([oldForReplace]); } catch { /* best-effort */ } }
-      const url = await uploadPhotoOrQueue(file, inspectionRecordId, instanceKey, { replacesUrl: oldForReplace });
+      // Carry the SAME attach descriptor as the add path (line ~844) so a
+      // replacement/markup queued offline still re-attaches to its section record
+      // via the durable outbox — even when the background driver (form closed)
+      // uploads it. Without it the annotated photo uploaded orphaned (no attach).
+      const inst = sectionInstances.find((x) => x.instanceKey === instanceKey);
+      const url = await uploadPhotoOrQueue(file, inspectionRecordId, instanceKey, {
+        replacesUrl: oldForReplace,
+        attach: { kind: 'section', externalId: `${inspectionExternalId}_sp_${instanceKey.replace(/[^a-zA-Z0-9_-]/g, '_')}`, section: inst?.baseSectionName, location: inst?.location, summaryLabel: inst?.displayName },
+      });
       setSectionPhotos((prev) => {
         const arr = [...(prev[instanceKey] || [])];
         if (idx < 0 || idx >= arr.length) return prev;
@@ -1321,6 +1340,11 @@ export function QuestionForm({
         // block submit; requiresPhoto/isRequired are independent HubSpot flags),
         // and N/A answers are exempt (a not-applicable item needs no evidence).
         // Mirrors the note check below, which is likewise gated on answerValue.
+        // A just-taken photo (blob:) counts as "present" here on purpose: the
+        // durability is enforced right after validate() by the flush +
+        // countQueuedPhotos gate (which blocks until it uploads, with a
+        // genuinely-stuck override). Requiring a REAL url here would block before
+        // the flush runs and strand an inspector whose photo can't upload.
         if (q.requiresPhoto && a?.answerValue && !isNA(a.answerValue) && (a.photoUrls?.length || 0) === 0) {
           return {
             message: `Photo required: ${locTag}${q.questionText}`,
@@ -1809,7 +1833,7 @@ export function QuestionForm({
           const val = a.answerValue;
           const na = isNA(val);
           if (isListingPriceQuestion(q) && wantsRecommendedPrice(val) && a.recommendedAmount == null) return false;
-          if (q.requiresPhoto && !na && (a.photoUrls?.length || 0) === 0) return false;
+          if (q.requiresPhoto && !na && countRealPhotos(a.photoUrls) === 0) return false;
           if (!na) {
             const failSel = answerTone(val) === 'fail';
             const triggeredNote = q.noteRequiredOnValues.length > 0 && (
@@ -1852,7 +1876,7 @@ export function QuestionForm({
         const done = isCommentExemptByTicket(q)
           ? !!maintTicketDescription.trim()
           : (q.responseType === 'photo_only'
-              ? (a?.photoUrls?.length || 0) > 0
+              ? countRealPhotos(a?.photoUrls) > 0
               : answerComplete());
         if (done) completed++;
       }
