@@ -52,6 +52,11 @@ const PUBLIC_PATHS = new Set<string>([
   // HubSpot change webhook → cache invalidation. Called with no session cookie;
   // self-enforces HUBSPOT_WEBHOOK_SECRET (Bearer / ?key=) inside the handler.
   '/api/webhooks/hubspot',
+  // Slack Events API (conversational Resiwalk bot). Slack POSTs with no session
+  // cookie; the handler self-enforces the Slack request signature (HMAC v0 +
+  // replay window) and answers the url_verification handshake. Must be public or
+  // Slack's requests get redirected to /login and never reach the endpoint.
+  '/api/slack/events',
   // Insights snapshot rebuild: reached by Vercel Cron (no session cookie) and by
   // admins. Self-enforces CRON_SECRET bearer / app-admin session in the handler.
   '/api/insights/rebuild',
