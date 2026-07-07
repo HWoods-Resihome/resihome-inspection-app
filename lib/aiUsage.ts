@@ -17,7 +17,8 @@
 import { put, list, del } from '@vercel/blob';
 
 export type AiUsageSource =
-  | 'ai_review' | 'room_scan_live' | 'room_scan' | 'voice_assist' | 'transcribe' | 'embeddings';
+  | 'ai_review' | 'room_scan_live' | 'room_scan' | 'voice_assist' | 'transcribe' | 'embeddings'
+  | 'slack_bot';
 
 // Estimated $ per 1M tokens (input / output). Update if pricing changes — these
 // drive the dashboard's cost estimate only. Whisper is priced per minute.

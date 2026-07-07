@@ -123,6 +123,19 @@ export function stripBotMention(text: string | undefined, botUserId: string): st
   return t;
 }
 
+/** Add an emoji reaction (e.g. 'eyes') to a message — instant "on it" feedback. */
+export async function addReaction(channel: string, ts: string, name: string): Promise<void> {
+  const token = BOT_TOKEN();
+  if (!token || !channel || !ts) return;
+  try {
+    await fetch('https://slack.com/api/reactions.add', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ channel, timestamp: ts, name }),
+    });
+  } catch { /* best-effort — never blocks the answer */ }
+}
+
 /** Reply in the same thread. New top-level messages start their own thread. */
 export async function postThreadReply(
   channel: string,

@@ -19,8 +19,9 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { waitUntil } from '@vercel/functions';
 import {
   verifySlackSignature, getBotUserId, getSlackUserEmail, isAllowedEmail,
-  isActionableEvent, stripBotMention, postThreadReply, type SlackEvent,
+  isActionableEvent, stripBotMention, postThreadReply, addReaction, type SlackEvent,
 } from '@/lib/slackBot';
+import { answerQuestion } from '@/lib/slackBotBrain';
 
 export const config = { api: { bodyParser: false }, maxDuration: 60 };
 
@@ -110,14 +111,19 @@ async function handleEvent(event: SlackEvent): Promise<void> {
   const question = stripBotMention(event.text, botUserId);
   if (!question) {
     await postThreadReply(channel, threadTs, {
-      text: '👋 Hi! Ask me things like “when was the last scope completed at <address>”, “how many inspections did <name> complete this month”, or “how much to replace carpet and pad in a 3br in Nashville”.',
+      text: '👋 Hi! Ask me things like “when was the last scope completed at <address>”, “how many inspections did <name> complete this month”, or “how many were completed in Florida this month”.',
     });
     return;
   }
 
-  // Phase 1 echo — confirms signing, gating, and threading end-to-end. Phase 2
-  // swaps this for the intent router + real answers.
-  await postThreadReply(channel, threadTs, {
-    text: `👋 Got your question — answering these is coming online shortly:\n\n> ${question}`,
-  });
+  // Instant feedback while the answer is computed (HubSpot + Claude ≈ 5–15s).
+  // The real answer is PUSHED via chat.postMessage when ready — Slack isn't
+  // waiting on the HTTP response (we already acked), so no polling is needed.
+  if (event.ts) await addReaction(channel, event.ts, 'eyes');
+
+  const answer = await answerQuestion(question);
+  await postThreadReply(channel, threadTs, { text: answer.text, blocks: answer.blocks });
+  for (const s of answer.supplements || []) {
+    await postThreadReply(channel, threadTs, { text: s.text, blocks: s.blocks });
+  }
 }
