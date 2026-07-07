@@ -346,6 +346,20 @@ export function EditableLineRow(props: Props) {
   // Set true when the user tries to leave/save an Internal Resolution line on
   // desktop without picking Now/Later — turns the toggle red to nudge them.
   const [timingPrompt, setTimingPrompt] = useState(false);
+  // Keep the editor's timing copy aligned with the authoritative parent value
+  // whenever the row is NOT being edited. `editTiming` is otherwise a mount-time
+  // snapshot, so a "Later" chosen via the VIEW-mode toggle (which updates the
+  // parent map directly, not this state) stays invisible here — and the next
+  // line save / global commit-all would then write the STALE "now" back over it,
+  // re-arming the after-photo requirement. That's the "I set every line to
+  // Complete Later but finalize still says After photos are required" bug: the
+  // choice was silently reverted before the finalize gate ran. Syncing while not
+  // editing (and marking a choice as made) makes the view-mode toggle stick.
+  useEffect(() => {
+    if (isEditing) return;
+    setEditTiming(props.resolutionTiming || 'now');
+    if (props.resolutionTiming === 'now' || props.resolutionTiming === 'later') setTimingChosen(true);
+  }, [props.resolutionTiming, isEditing]);
   const [customVendorCost, setCustomVendorCost] = useState<string>(
     line?.customVendorCost != null ? String(line.customVendorCost) : ''
   );
