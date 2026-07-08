@@ -784,6 +784,21 @@ export default function Home() {
                 </div>
               </div>
               <div className="flex items-center gap-3 whitespace-nowrap">
+                {/* App switcher — hamburger → Inspections / Services. Only on the
+                    Services preview (SERVICES_FLAG_ON off in production + for
+                    non-admins), so it never shows on resiwalk.com. A native
+                    <details> so it needs no extra page state. */}
+                {SERVICES_FLAG_ON && (
+                  <details className="relative group">
+                    <summary className="list-none [&::-webkit-details-marker]:hidden cursor-pointer inline-flex items-center justify-center w-8 h-8 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors" aria-label="Switch app">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="4" y1="8" x2="20" y2="8" /><line x1="4" y1="16" x2="20" y2="16" /></svg>
+                    </summary>
+                    <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-lg border border-gray-200 z-40 overflow-hidden text-ink">
+                      <div className="px-4 py-2.5 text-sm font-semibold text-brand bg-brand/5">Inspections ✓</div>
+                      <Link href="/services" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Services</Link>
+                    </div>
+                  </details>
+                )}
                 {/* Settings — a single gear shown to EVERY user. Account actions
                     (Gmail connect/disconnect, Sign Out) live in the popover for
                     all users; the admin tools only render for admins. Keeps the
@@ -878,16 +893,6 @@ export default function Home() {
               <span className="font-heading font-bold text-base text-brand">New Inspection</span>
             </Link>
 
-            {/* Inspections ↔ Services switch. Only on the Services preview
-                (SERVICES_FLAG_ON is off in production + for non-admins), so this
-                never shows on resiwalk.com. Lets the owner track the new
-                recurring-services build alongside the live inspections app. */}
-            {SERVICES_FLAG_ON && (
-              <div className="mt-2 inline-flex w-full rounded-xl bg-white/15 p-0.5 text-sm font-heading font-bold">
-                <span className="flex-1 text-center px-3 py-1.5 rounded-lg bg-white text-brand">Inspections</span>
-                <Link href="/services" className="flex-1 text-center px-3 py-1.5 rounded-lg text-white/90 hover:text-white">Services</Link>
-              </div>
-            )}
           </div>
         </header>
 
