@@ -579,7 +579,11 @@ export function FinalChecklist(props: Props) {
         onPatch(q.id, { multi: (q.options || []).filter((o) => next.has(o)) });
       };
       return (
-        <div className="flex flex-wrap gap-2 mt-1">
+        // Match the single_select Pills sizing (text-xs / px-3.5 py-1.5 /
+        // border-2) so "check all" chips are the same size as every other answer
+        // pill — they were previously oversized (text-sm + fixed h-9 + thin
+        // border), which stood out against the rest of the form.
+        <div className="flex flex-wrap gap-1.5 mt-1">
           {(q.options || []).map((opt) => {
             const on = selected.has(opt);
             return (
@@ -588,7 +592,8 @@ export function FinalChecklist(props: Props) {
                 type="button"
                 disabled={readOnly}
                 onClick={() => toggle(opt)}
-                className={`px-3 h-9 rounded-full border text-sm font-heading font-semibold ${on ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'} ${readOnly ? 'opacity-70' : ''}`}
+                className={`shrink-0 whitespace-nowrap font-heading font-semibold rounded-full border-2 transition text-xs px-3.5 py-1.5
+                  ${on ? 'bg-brand text-white border-brand shadow-sm' : 'bg-white text-ink border-gray-300 hover:border-brand/50'} ${readOnly ? 'opacity-70' : ''}`}
               >
                 {on ? '✓ ' : ''}{titleCase(opt)}
               </button>

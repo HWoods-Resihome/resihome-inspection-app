@@ -253,10 +253,16 @@ function MasterSection(props: { section: PdfSectionGroup }) {
       {s.lines.some((l) => (l.afterPhotoUrls?.length ?? 0) > 0) && (
         <View style={{ marginTop: 4 }}>
           {s.lines.filter((l) => (l.afterPhotoUrls?.length ?? 0) > 0).map((l) => (
-            <View key={`after-${l.externalId}`} style={{ marginTop: 2, marginBottom: 5 }} wrap={false}>
-              <Text style={{ fontSize: 8, color: '#6b7280', marginBottom: 2 }}>
-                After Photos — {l.laborShortDescription}
-              </Text>
+            <View key={`after-${l.externalId}`} style={{ marginTop: 2, marginBottom: 5 }}>
+              {/* Only the label is atomic (kept with its first photo row via
+                  minPresenceAhead). The grid flows OUTSIDE it so a line with many
+                  after-photos can't form one atomic block taller than a page,
+                  which react-pdf would CLIP (half-images into the footer). */}
+              <View wrap={false} minPresenceAhead={80}>
+                <Text style={{ fontSize: 8, color: '#6b7280', marginBottom: 2 }}>
+                  After Photos — {l.laborShortDescription}
+                </Text>
+              </View>
               <PdfSectionPhotos photoUrls={l.afterPhotoUrls!} />
             </View>
           ))}

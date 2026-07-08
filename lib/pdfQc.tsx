@@ -222,9 +222,16 @@ function QcDoc({ ctx }: { ctx: QcPdfContext }) {
 function QcSection({ section: s }: { section: QcPdfSection }) {
   return (
     <View>
-      {/* Section header (title + counts) kept with the first content as an
-          atomic block so it doesn't strand at a page bottom. */}
-      <View wrap={false} style={{ marginTop: 10 }}>
+      {/* Section header bar (title + pass/fail counts) is the ONLY atomic block:
+          wrap={false} keeps it from splitting, and minPresenceAhead reserves room
+          after it so it can't strand at a page bottom / slide under the fixed
+          footer. The Before/After photo grids MUST flow OUTSIDE this block — if
+          they were inside it, a section with many before+after photos would form
+          one atomic block taller than a page, which react-pdf CLIPS (the reported
+          disaster: half-images bleeding into the footer and the next page). Each
+          PdfSectionPhotos paginates itself per row, so left to flow it breaks
+          cleanly across pages. */}
+      <View wrap={false} minPresenceAhead={80} style={{ marginTop: 10 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
                        borderBottomWidth: 1, borderBottomColor: PDF_COLORS.brand, paddingBottom: 2, marginBottom: 4 }}>
           <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 10, color: PDF_COLORS.ink }}>{s.displayName}</Text>
@@ -234,35 +241,42 @@ function QcSection({ section: s }: { section: QcPdfSection }) {
             <Text style={{ color: PDF_COLORS.brand }}>{s.failCount} fail</Text>
           </Text>
         </View>
-
-        {/* Before photos — full-width labeled block (same grid as Rate Card) */}
-        {s.beforePhotos.length > 0 && (
-          <View style={{ marginBottom: 2 }}>
-            <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 8, color: PDF_COLORS.gray, textTransform: 'uppercase', letterSpacing: 0.5 }}>Before</Text>
-            <PdfSectionPhotos photoUrls={s.beforePhotos} />
-          </View>
-        )}
-
-        {/* After photos — full-width labeled block, teal label to distinguish */}
-        {s.afterPhotos.length > 0 && (
-          <View style={{ marginBottom: 2 }}>
-            <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 8, color: PDF_COLORS.teal, textTransform: 'uppercase', letterSpacing: 0.5 }}>After</Text>
-            <PdfSectionPhotos photoUrls={s.afterPhotos} />
-          </View>
-        )}
-
-        {/* Standalone-QC room verdict + note (no line items). */}
-        {s.lines.length === 0 && s.roomVerdict ? (
-          <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 9, marginTop: 2, color: s.roomVerdict === 'fail' ? PDF_COLORS.brand : PDF_COLORS.emerald }}>
-            Room result: {s.roomVerdict === 'fail' ? 'FAIL' : 'PASS'}
-          </Text>
-        ) : null}
-        {s.lines.length === 0 && s.roomNote ? (
-          <Text style={{ fontSize: 8, color: PDF_COLORS.ink, marginTop: 1 }}>
-            <Text style={{ fontFamily: 'Helvetica-Bold' }}>Notes: </Text>{s.roomNote}
-          </Text>
-        ) : null}
       </View>
+
+      {/* Before photos — full-width labeled block (same grid as Rate Card). The
+          label is kept with at least its first photo row (wrap={false} +
+          minPresenceAhead) so it can't strand alone at a page bottom, while the
+          grid itself flows/paginates. */}
+      {s.beforePhotos.length > 0 && (
+        <View style={{ marginBottom: 2 }}>
+          <View wrap={false} minPresenceAhead={80}>
+            <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 8, color: PDF_COLORS.gray, textTransform: 'uppercase', letterSpacing: 0.5 }}>Before</Text>
+          </View>
+          <PdfSectionPhotos photoUrls={s.beforePhotos} />
+        </View>
+      )}
+
+      {/* After photos — full-width labeled block, teal label to distinguish */}
+      {s.afterPhotos.length > 0 && (
+        <View style={{ marginBottom: 2 }}>
+          <View wrap={false} minPresenceAhead={80}>
+            <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 8, color: PDF_COLORS.teal, textTransform: 'uppercase', letterSpacing: 0.5 }}>After</Text>
+          </View>
+          <PdfSectionPhotos photoUrls={s.afterPhotos} />
+        </View>
+      )}
+
+      {/* Standalone-QC room verdict + note (no line items). */}
+      {s.lines.length === 0 && s.roomVerdict ? (
+        <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 9, marginTop: 2, color: s.roomVerdict === 'fail' ? PDF_COLORS.brand : PDF_COLORS.emerald }}>
+          Room result: {s.roomVerdict === 'fail' ? 'FAIL' : 'PASS'}
+        </Text>
+      ) : null}
+      {s.lines.length === 0 && s.roomNote ? (
+        <Text style={{ fontSize: 8, color: PDF_COLORS.ink, marginTop: 1 }}>
+          <Text style={{ fontFamily: 'Helvetica-Bold' }}>Notes: </Text>{s.roomNote}
+        </Text>
+      ) : null}
 
       {s.lines.length > 0 && (
         <>

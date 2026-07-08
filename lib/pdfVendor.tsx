@@ -161,10 +161,15 @@ function VendorSection(props: { section: PdfSectionGroup }) {
             <Text style={[pdfStyles.tableCellNumeric, { width: COL.vendorCost }]}>${formatMoneyPdf(line.vendorCost)}</Text>
           </View>
           {(line.afterPhotoUrls?.length ?? 0) > 0 && (
-            <View style={{ marginTop: 2, marginBottom: 5, paddingLeft: 8 }} wrap={false}>
-              <Text style={{ fontSize: 8, color: '#6b7280', marginBottom: 2 }}>
-                After Photos — {line.laborShortDescription}
-              </Text>
+            <View style={{ marginTop: 2, marginBottom: 5, paddingLeft: 8 }}>
+              {/* Label atomic (kept with its first photo row); grid flows outside
+                  so a line with many after-photos paginates instead of forming an
+                  over-tall atomic block that react-pdf CLIPS. */}
+              <View wrap={false} minPresenceAhead={80}>
+                <Text style={{ fontSize: 8, color: '#6b7280', marginBottom: 2 }}>
+                  After Photos — {line.laborShortDescription}
+                </Text>
+              </View>
               <PdfSectionPhotos photoUrls={line.afterPhotoUrls!} />
             </View>
           )}
