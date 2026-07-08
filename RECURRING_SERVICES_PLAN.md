@@ -1,9 +1,14 @@
-# ResiWALK → Recurring Services — Planning Doc
+# ResiWalk - Services — Planning Doc
 
-> **Codename / reference: "PPW Replacement."** This is the in-house recurring-services
-> initiative meant to replace the external PPW vendor (the current default for grass
-> cuts / cleans / pools — see `lib/vendors.ts`) by bringing those recurring services
-> in-house with our own scheduling, dispatch, evidence, and invoicing.
+> **Project name: "ResiWalk - Services."** In-house recurring field services
+> (grass cuts, pool service, cleans, community contracts) with our own scheduling,
+> dispatch, evidence, and invoicing.
+>
+> **Naming rule (hard):** "PPW" is ONLY informal shorthand for the incumbent
+> external vendor this initiative replaces (the current grass/clean/pool default in
+> `lib/vendors.ts`). It must **NEVER** appear in any artifact we create — code
+> identifiers, env vars, routes, or HubSpot fields/objects. Everything is
+> "Services" / `service_*` / `SERVICES_*`.
 >
 > **Status: PLANNING (living doc). No code yet.** This captures the vision, what we
 > can reuse from the existing inspection app, and what's net-new, so we can keep
@@ -601,6 +606,82 @@ cron — so what you preview is exactly what generates.
 4. **Zones** — is whole-community enough for v1, or are parts needed day one?
 5. **Assignment engine** — auto (capacity/OTD) vs. coordinator-assigns in v1.
 
+## 10.8 Architecture v3 — LATEST decisions (owner) + naming
+
+Refines §10.7. Where they differ, THIS wins.
+
+### Naming — project is "ResiWalk - Services"
+"PPW" is only shorthand for the incumbent vendor being replaced. **Nothing we build
+carries that name** — not code, env vars, routes, or HubSpot fields/objects. Code
+artifacts already renamed: `SERVICES_FLAG_ON`, `servicesEnabled` (`lib/
+servicesAccess.ts`), `ServicesEnvBadge`, `NEXT_PUBLIC_SERVICES_ENABLED`,
+`SERVICES_TEST_MARKER = 'services_preview_test'`, preview tab "ResiWalk - Services".
+All new HubSpot fields use a **`service_*`** prefix; routes are `/services/*`,
+`/admin/services/*`, `/vendor`, `/api/services/*`, cron `/api/cron/services-generate`.
+
+### 1. Scope level — CONFIRMED
+`scope_level` (`property` | `community`) on `Services`, orthogonal to `worktype`, as
+in §10.7. Good.
+
+### 2. Rates — individual NUMERIC FIELDS, not JSON
+Reversed from §10.7's `*_rate_json`. Each rate is its **own numeric HubSpot
+property** (reportable, filterable, override-able in the UI without JSON editing):
+- **Worktype default rate** → a numeric field per worktype on the **singleton
+  Services config record** (e.g. `service_default_rate_grass_cut`,
+  `service_default_rate_pool_service`, …). Not its own object.
+- **Vendor override** → a numeric field per worktype on the **Company** object
+  (e.g. `service_rate_grass_cut` …). Only for worktypes that vendor is priced on.
+- **Community rate** → a numeric field per worktype on the **Community** object
+  (same field names).
+- **Resolution (stamp `rate_source` on the Service):**
+  - **property scope:** worktype default → **overridden by the Company (vendor)
+    field** when set.
+  - **community scope:** **ALWAYS the Community field** (falls back to worktype
+    default only if the community field is blank).
+- Field naming grows with the worktype list; keep the set in `lib/services/
+  worktypes.ts` and mirror to HubSpot so code + fields stay in lockstep.
+
+### 3. Vendor login — ONE per Company
+Single `service_login_email` on the Company (not a list). Email-OTP vendor session
+bound to that Company, as in §10.7 §4.
+
+### 4. Coverage areas & ZONES — needed day one (Region ▸ County)
+Vendors (and community zones) are scoped by an **area = a checklist of Regions and
+Counties**, where **counties nest under a region**:
+- **Regions** = the existing unique region set on the Property object
+  (`region_snapshot` / `region_rate`, e.g. "GA: Atlanta") — reused, not reinvented.
+- **Counties** = unique county values on the Property object, **grouped under their
+  region** (e.g. GA: Atlanta ▸ {Fulton, DeKalb, Cobb, Gwinnett, Clayton…}).
+- Build a cached **coverage taxonomy** `Region → Counties[]` derived from Property
+  data (refreshed on a schedule), presented as a nested checklist.
+- **Vendor coverage** = the selected regions/counties, stored on the Company as
+  `service_coverage_json` (the ONE place a JSON list is justified — it's a
+  selection set, not a queried numeric). Used by auto-assignment (match a Service's
+  property/community region+county to covering vendors) and to define community
+  **zones** (a contract can target a region/county subset of a community).
+
+### 5. Assignment — auto, editable in the rules engine (which is ALL-encompassing)
+The **rules engine governs everything**: generation conditions, cadence, scope,
+worktype, **rate resolution, AND assignment** — not just "who to generate."
+- **Assignment is auto by default:** match Service (region+county, worktype) → the
+  set of vendors whose `service_coverage_json` covers it and whose `service_worktypes`
+  include it → rank by capacity/OTD/quality → assign. The rule can **override**
+  (pin a vendor, restrict the candidate pool, or set a manual assignment) right in
+  the engine. One engine, one place to reason about all logic.
+
+### 6. ⚠️ MOCKUP FIRST — before any build
+Owner wants to **see a rules-engine mockup** before we build. Deliverable: an
+interactive design mockup of the all-encompassing rules engine (rule list/coverage
+board, the rule editor with condition builder + cadence + rate resolution preview +
+assignment + live "matches N / which targets" + conflict analyzer). Build starts
+only after mockup sign-off.
+
+### Still-open (post-mockup)
+- Worktype **subcategory** depth (per §10.7) — finalize once the mockup shows how
+  rules branch on them.
+- County source field name on Property (confirm the exact HubSpot property).
+- Capacity/OTD inputs for auto-assignment ranking (which metrics, from where).
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
@@ -608,7 +689,14 @@ cron — so what you preview is exactly what generates.
   Vendors = Companies; new Services + Service Rule; worktype enum; hybrid rule
   evaluator with app URL editor + HubSpot store; rate precedence; nightly generate
   cron). Open decisions listed in §10.6.
-- _architecture-v2_ (§10.7, LATEST) — owner input: two work models (scattered SFR
+- _architecture-v3_ (§10.8, LATEST) — project named **ResiWalk - Services** (PPW =
+  incumbent vendor only, never used in artifacts; code renamed); scope_level
+  confirmed; rates as individual NUMERIC fields (worktype default on config record,
+  Company + Community overrides) not JSON, with property→vendor / community→Community
+  resolution; ONE vendor login; coverage areas & zones day-one as Region▸County
+  checklists sourced from Property data; assignment auto + editable in the
+  all-encompassing rules engine; MOCKUP required before build.
+- _architecture-v2_ (§10.7) — owner input: two work models (scattered SFR
   single-WO vs community contracts) → `scope_level` on Services; scope made
   orthogonal to worktype (recommended); 3-tier rate resolution with worktype
   default in a HubSpot config record (no new object) + Company/Community overrides;
