@@ -5,6 +5,7 @@ import { useAppDialog } from '@/components/AppDialog';
 import { useRouter } from 'next/router';
 import type { InspectionSummary } from '@/lib/types';
 import { InspectionCard } from '@/components/InspectionCard';
+import { SERVICES_FLAG_ON } from '@/lib/featureFlags';
 import { INSPECTION_NAV_KEY } from '@/components/InspectionPager';
 import { ListPicker } from '@/components/ListPicker';
 import { ViewAsPicker } from '@/components/ViewAsPicker';
@@ -876,6 +877,17 @@ export default function Home() {
               </div>
               <span className="font-heading font-bold text-base text-brand">New Inspection</span>
             </Link>
+
+            {/* Inspections ↔ Services switch. Only on the Services preview
+                (SERVICES_FLAG_ON is off in production + for non-admins), so this
+                never shows on resiwalk.com. Lets the owner track the new
+                recurring-services build alongside the live inspections app. */}
+            {SERVICES_FLAG_ON && (
+              <div className="mt-2 inline-flex w-full rounded-xl bg-white/15 p-0.5 text-sm font-heading font-bold">
+                <span className="flex-1 text-center px-3 py-1.5 rounded-lg bg-white text-brand">Inspections</span>
+                <Link href="/services" className="flex-1 text-center px-3 py-1.5 rounded-lg text-white/90 hover:text-white">Services</Link>
+              </div>
+            )}
           </div>
         </header>
 
