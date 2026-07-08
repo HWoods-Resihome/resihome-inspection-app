@@ -682,6 +682,84 @@ only after mockup sign-off.
 - County source field name on Property (confirm the exact HubSpot property).
 - Capacity/OTD inputs for auto-assignment ranking (which metrics, from where).
 
+## 10.9 Architecture v4 — rules-engine refinements (owner feedback on the v1 mockup)
+
+### Branding
+Match the live app: reuse the current ResiWalk mark (`public/favicon.svg`, the pink
+house) + wordmark **"ResiWalk Services"**. Same look as production, not a bespoke
+console skin.
+
+### Targeting — portfolio/community FIRST, field-conditions optional
+This changes the rule's primary shape. The everyday way to aim a rule is a list
+pick, not field predicates:
+- **Scope = Property → labeled "SFR".** Primary target = **Portfolio** (multi-select).
+  Options are a **dynamic unique list of portfolios pulled from the Property object.**
+- **Scope = Community.** Primary target = **Community name** (multi-select), options
+  = the **unique community names from the Community object.**
+- Either selection shows the **exact property impact count** ("these portfolios /
+  communities = N properties").
+- The nested **AND/OR field-condition builder stays but is OPTIONAL** — collapsed by
+  default, used only to narrow further (home type, lot size, has-lawn, etc.).
+
+→ Implies a **Portfolio** concept (see New objects). Portfolios group properties and
+carry pricing markup.
+
+### Cadence — relative to LAST COMPLETION (not a calendar tick)
+"Every 14 days" means **14 days after the last completed** service of that worktype
+on that property — not a fixed calendar cadence. The generator reads the last
+completed Service date per (property, worktype) and schedules the next accordingly.
+
+### Cease / stop conditions (NEW rule component)
+A rule must also say **when to STOP.** e.g. a home becomes tenant-occupied/leased →
+stop generating grass cuts AND auto-cancel any open (scheduled, not-yet-done) work
+orders for it. Modeled as a stop-predicate over property/community fields; on match,
+halt future generation + cancel open WOs for that target+worktype.
+
+### Coverage area — keep; multi-region confirmed
+Region ▸ County checklist stays. Multi-region selection is expected.
+
+### Assignment
+- Multi-region select.
+- **Vendor capacity is a field on the vendor (Company) object** — used in ranking.
+- Keep **on-time %**. Auto-assign by **vendor coverage (regions/counties) + capacity
+  + OTD**.
+
+### Vendor Management — a SEPARATE Services section (NEW)
+A dedicated area (nav tab) to manage each **recurring-service-eligible** vendor:
+- `service_is_vendor_eligible` toggle,
+- **coverage**: pick serviced **regions + counties** (the checklist lives HERE on the
+  vendor, not inside each rule),
+- `service_weekly_capacity`, `service_otd_rate`, quality.
+Coverage/capacity are owned by the vendor record; rules and auto-assign read them.
+
+### Rates — vendor amount + client amount, markup % by PORTFOLIO per worktype
+Reworks §10.8's single number:
+- Every Service resolves **both a vendor amount and a client amount.**
+- Both can **vary by portfolio.**
+- **Markup % is defined per (portfolio, worktype):** `client = vendor × (1 + markup%)`.
+- **Vendor amount** source: worktype default → assigned-vendor's rate (Company).
+- **Client amount** = resolved vendor amount × the (portfolio, worktype) markup %.
+- Stamp both + `rate_source` on the Service.
+
+### New objects (owner is open to adding for clean organization)
+Recommended minimal set:
+- **`Portfolio`** (NEW object) — the dynamic groupings properties already carry;
+  promote to a real object so it can hold **per-worktype markup %** and associate to
+  Properties (and Communities). This is where client pricing lives.
+- **`Rate Book`** — a small object of rows `(scope: default|portfolio, portfolio,
+  worktype) → vendor_amount, markup_pct`. Alternative to putting markup fields
+  directly on Portfolio; pick one (recommend markup on **Portfolio**, base vendor
+  amounts in a tiny default Rate Book, to avoid a 2nd object).
+- Everything else as prior: `Services`, `Service Rule` (+ cease + cadence-from-
+  completion + portfolio/community targeting), Companies (vendors), Community.
+- **Open:** for community-scope work, does the client markup come from a
+  Portfolio the community maps to, or a Community-level rate? (Flag — decide when we
+  wire pricing.)
+
+### Mockup v2 (this session)
+Rebuilt with ResiWalk branding + a 3-tab console — **Rules Engine / Vendors / Rate
+Book** — reflecting all of the above.
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
@@ -689,7 +767,14 @@ only after mockup sign-off.
   Vendors = Companies; new Services + Service Rule; worktype enum; hybrid rule
   evaluator with app URL editor + HubSpot store; rate precedence; nightly generate
   cron). Open decisions listed in §10.6.
-- _architecture-v3_ (§10.8, LATEST) — project named **ResiWalk - Services** (PPW =
+- _architecture-v4_ (§10.9, LATEST) — rules-engine refinements from mockup feedback:
+  ResiWalk branding; portfolio/community list-targeting first (dynamic unique lists)
+  with exact property impact counts, field-conditions optional; cadence relative to
+  last completion; cease/stop conditions; vendor capacity on the Company + a separate
+  Vendor Management section owning coverage; rates split into vendor + client amounts
+  with markup % by portfolio per worktype; new `Portfolio` object (+ optional Rate
+  Book). Mockup v2 = Rules Engine / Vendors / Rate Book console.
+- _architecture-v3_ (§10.8) — project named **ResiWalk - Services** (PPW =
   incumbent vendor only, never used in artifacts; code renamed); scope_level
   confirmed; rates as individual NUMERIC fields (worktype default on config record,
   Company + Community overrides) not JSON, with property→vendor / community→Community
