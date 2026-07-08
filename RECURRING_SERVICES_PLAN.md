@@ -760,6 +760,28 @@ Recommended minimal set:
 Rebuilt with ResiWalk branding + a 3-tab console — **Rules Engine / Vendors / Rate
 Book** — reflecting all of the above.
 
+## 10.10 Mockup sign-off tweaks + build protocol
+
+### Final rule-model tweaks (mockup approved after these)
+- **No `subcategory`, no `priority`.** Drop both fields. Overlap resolution is now by
+  **specificity** (a rule targeting specific portfolios/communities beats an
+  all-portfolios base rule); the conflict analyzer still surfaces genuine ties for
+  the author to resolve — no silent clobber.
+- **Cadence = any interval.** "Repeat every **N** days from the last completed"
+  (free numeric, not presets).
+- **Work-order due date = issue date + N** (the repeat interval).
+- **Active window = start month → stop month** (explicit months, replaces "season").
+
+### Build protocol (owner directive)
+- **Step-by-step, announce-before-build.** Before writing code for any step, state
+  exactly what that step builds and wait for the go-ahead. One increment at a time.
+- **Branch-only.** ALL Services work stays on `recurring-services` (Vercel preview,
+  prod-HubSpot, flag+admin gated) until the owner says otherwise.
+- **Home toggle on deploy.** The ResiWalk home page gets an **Inspections (current)
+  ↔ Services (new)** switch so the owner can track every Services item as it lands.
+  This is the first build increment (the container the rest lands in). Flag+admin
+  gated → invisible on production `resiwalk.com`.
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
