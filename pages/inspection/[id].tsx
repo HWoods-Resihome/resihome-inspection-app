@@ -150,6 +150,12 @@ export default function ExistingInspection() {
   // Load inspection + answers
   useEffect(() => {
     if (!inspectionId) return;
+    // `_precache_shell_` is the SW cache-warmer's placeholder route (see
+    // pages/_app.tsx warm() — it fetches this URL only to stash the id-agnostic
+    // shell HTML for offline hard-navs). There is NO inspection behind it, so
+    // don't fetch it (guaranteed 404) or report a bogus "Inspection not found"
+    // to the Admin Error Log. Just hold the shell; a real id renders on nav.
+    if (inspectionId === '_precache_shell_') { setStage('loading'); return; }
     // The prev/next InspectionPager swaps only `inspectionId` while this page
     // stays mounted. If we're switching to a DIFFERENT record than the one
     // currently loaded, drop to the loading screen and clear the stale record so

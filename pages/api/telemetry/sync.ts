@@ -40,10 +40,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         updatedAt: new Date().toISOString(),
       };
       console.log('[sync-telemetry]', JSON.stringify(record));
-      // Surface genuine sync trouble in the Admin Error Log: work that failed
-      // permanently (dropped) or a reported lastError. A clean flush (no error,
-      // nothing dropped) is normal telemetry — don't log it as an error.
-      if (record.failedPermanently > 0 || record.lastError) {
+      // Surface genuine sync trouble in the Admin Error Log — but NOT the
+      // expected weak-signal churn. A field inspector on a thin uplink produces a
+      // steady stream of "Photo upload failed (Load failed)" / "Upload timed out"
+      // / "Device is offline" on EVERY flush; the item is safely queued and
+      // retries until it lands (never dropped), so logging each attempt just
+      // floods the log and buries real crashes. Only escalate when something is
+      // actually actionable: work that was permanently dropped, or a hard error
+      // that isn't a transient network/offline condition.
+      const transientNetwork = !!record.lastError && /load failed|failed to fetch|networkerror|network error|timed out|timeout|offline|connection|aborted|the operation was aborted/i.test(record.lastError);
+      const actionable = record.failedPermanently > 0 || (!!record.lastError && !transientNetwork);
+      if (actionable) {
         void recordErrorEvent({
           kind: 'sync',
           message: record.lastError || `${record.failedPermanently} queued item(s) failed to sync`,

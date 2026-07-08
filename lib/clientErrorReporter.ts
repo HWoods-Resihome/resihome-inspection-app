@@ -36,12 +36,29 @@ function shouldSend(signature: string): boolean {
   return true;
 }
 
+/**
+ * Non-actionable noise we must NOT report. These bury real field crashes in the
+ * Admin Error Log and can never be acted on:
+ *  - "Script error." — the opaque cross-origin window.onerror with no stack/detail.
+ *  - GPU/WebView-internal terminations — Chromium recovers on its own; not our code.
+ *  - the `_precache_shell_` sentinel — the SW cache-warmer's placeholder route,
+ *    which by design has no inspection to load (see pages/_app.tsx warm()).
+ */
+function isNoise(message: string, context?: ErrorContext): boolean {
+  if (/^\s*script error\.?\s*$/i.test(message)) return true;
+  if (/GPU process (was )?(terminated|lost|crashed)|WebGL context/i.test(message)) return true;
+  if (context && String((context as any).inspectionId || '') === '_precache_shell_') return true;
+  return false;
+}
+
 /** Report a handled or unhandled error. Never throws. */
 export function reportError(error: unknown, context?: ErrorContext): void {
   try {
     if (typeof window === 'undefined') return;
     const err = error as any;
     const message = String(err?.message || err || 'Unknown error');
+    // Drop known non-actionable noise before it floods the Admin Error Log.
+    if (isNoise(message, context)) return;
     const stack = typeof err?.stack === 'string' ? err.stack.slice(0, 4000) : undefined;
     const signature = `${message}::${(stack || '').split('\n')[1] || ''}`;
     if (!shouldSend(signature)) return;
