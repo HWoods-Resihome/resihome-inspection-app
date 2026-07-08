@@ -443,6 +443,164 @@ Service→Service Rule (source), Property→Community (existing, reused).
 
 ---
 
+## 10.7 Architecture v2 — LATEST (supersedes v1 where they differ)
+
+Owner input added three things that reshape v1: **two work models**, **vendor
+logins (non-HubSpot)**, and a **conflict-clean rules engine**. This section is the
+authoritative picture; §10.6 stands for anything not restated here.
+
+### 0. The organizing insight: TWO work models
+Everything below flows from this. We run two very different kinds of work and must
+handle both in one system:
+
+| | **A. Scattered SFR** | **B. Community contract** |
+|---|---|---|
+| Unit of work | one **property** | a **community** (whole or a zone/part) |
+| Dispatch | single Work Order per property | recurring occurrences per contract cadence |
+| Billing | per job (per property) | per cadence occurrence (flat/contract rate) |
+| Rate authority | worktype default → **vendor (Company)** override | worktype default → **Community** override |
+| Rule targets | properties (field predicates) | communities (field predicates) + optional zone |
+
+→ A single `Services` object serves both, distinguished by a **`scope_level`**
+field (`property` | `community`). A rule declares which level it generates.
+
+### 1. Worktype taxonomy — RECOMMENDATION: scope is orthogonal to worktype
+You listed "Community Work" as a category (community grass cut / pool clean / pet
+station / model clean…). I recommend we **NOT** make "Community Work" its own
+worktype. Instead:
+
+- **`worktype`** = *what* the work is: `grass_cut`, `pool_service`, `house_cleaning`,
+  `pet_station`, `trash_pickup`, `model_clean`, … (+ optional `subcategory` per
+  worktype).
+- **`scope_level`** = *where* it applies: `property` | `community` (the separate
+  field above).
+
+So "Community Grass Cut" = `worktype=grass_cut` + `scope_level=community` — NOT a
+separate worktype. Why: a grass cut's question set, evidence rules, and AI check are
+the same whether scattered or community; duplicating "grass cut" into two worktypes
+would fork rates, forms, and rules. Each worktype declares `allowed_scopes`
+(some, like `pet_station`/`trash_pickup`, are community-only). The UI still groups
+`scope_level=community` items under a **"Community Work"** heading so it matches how
+you think about it. Canonical taxonomy in `lib/ppw/worktypes.ts`, mirrored to the
+HubSpot enums. *(Owner: confirm this vs. a literal "Community Work" worktype.)*
+
+### 2. Rates — three tiers, no new object (per owner)
+Default is the **worktype rate**; Company or Community override it by worktype.
+- **Worktype default** → JSON on a **singleton HubSpot config record** (the same
+  admin/config record the app already uses for `app_admins_json`), key
+  `ppw_worktype_rates_json` = `{ "<worktype>[:<sub>]": amount }`. Editable at an
+  admin URL. This is the "where does it live" answer: **not its own object** — a
+  config blob in HubSpot.
+- **Company override** → `ppw_rate_json` on the Company (vendor-negotiated).
+- **Community override** → `ppw_rate_json` on the Community (contract rate).
+
+**Resolution ladder (most-specific wins), stamped as `rate_source` on the Service:**
+1. Manual override on the Service.
+2. **community-scoped** job → **Community** `ppw_rate_json[worktype]`.
+   **property-scoped** job → **Company (assigned vendor)** `ppw_rate_json[worktype]`,
+   then the property's **Community** `ppw_rate_json[worktype]`.
+3. **Worktype default** (config JSON).
+*(Owner: confirm the property-scoped order — vendor override before community.)*
+
+### 3. `Services` object — additions for two models
+On top of §10.6 fields, add:
+- `scope_level` (`property` | `community`), `subcategory` (enum, worktype-scoped),
+  `billing_model` (`per_job` | `contract`), `contract_cadence` (for community),
+  `zone_key` (optional — names a sub-part of a community; see §5).
+- Association is `→ Property (1)` when property-scoped, `→ Community (1)` when
+  community-scoped. Answers, vendor(Company), source_rule assoc unchanged.
+
+### 4. Vendor login — non-HubSpot users (NEW surface)
+Vendors log in to the app, see only their assigned jobs, and upload evidence. They
+are **not** HubSpot users and **not** internal/1099 staff — a new, more-restricted
+user class.
+- **Identity** = a designated login email on the Company: add **`ppw_login_email`**
+  (or a JSON list for multi-user vendors). We authorize ONLY that email — never an
+  arbitrary Company contact.
+- **Auth** = reuse the existing **email OTP** flow (`otp-request`/`otp-verify`) as
+  the password solution (passwordless code by email — fine as the "temp" that can
+  stay). `otp-request` for a vendor email → verify it matches a Company with
+  `ppw_is_vendor=true` and a matching `ppw_login_email` → mint a **vendor session**.
+- **Vendor session** carries `role: 'vendor'` + `vendorCompanyId`. New hard gate
+  `vendorScopeDenial(session, serviceId)`: a vendor can reach ONLY `/vendor/*` and
+  APIs for Services assigned to their `vendorCompanyId` — everything else 403
+  (middleware + per-endpoint). This is stricter than `isExternalEmail`; keep it
+  separate.
+- **Vendor UI** = a minimal `/vendor` surface: "my jobs" list → open a Service →
+  reuse the same **Answers capture** (in-app camera, before/after, evidence stamp,
+  offline photo store, durable sync) → submit. No scope/rate/admin visibility.
+- Requires a **security review** (new external auth + prod-data exposure). OTP
+  rate-limits already exist; add per-vendor scoping tests. Ships as its own phase.
+
+### 5. Community "parts/zones"
+A community contract can cover the whole community or a **part**. v1: `zone_key` on
+the Service + an optional property-predicate on the rule that selects a subset of
+the community's properties (reusing the §10.6 condition engine, scoped to that
+community's members). If unset → whole community. Full polygon/zone management is a
+later extension.
+
+### 6. Rules engine — CONFLICT-CLEAN engineering (the "advanced" ask)
+The requirement: as rules pile up, adding one must never silently clobber another,
+and the outcome must be predictable and explainable. Rules are **independent
+configs — they never mutate each other**; "overwriting" is really "which rule WINS
+for a target." We make winning **deterministic and visible**:
+
+- **Deterministic resolution.** For each `(target, worktype)` the winner is the
+  first rule under a **total order**: `priority` (desc) → **specificity** (desc,
+  a documented score = # predicate leaves + exact-match weighting + scope
+  narrowness) → `effective_from` (desc) → id. No ambiguity, ever.
+- **Save-time conflict analyzer.** On create/edit of rule R (worktype W): compute
+  R's population, intersect with every other active W-rule, and show a report —
+  *"R overlaps Rule X on 42 targets; R (priority 20) would take over 30 that X
+  currently wins; R is fully shadowed by Y (never wins → likely a mistake)."* You
+  resolve it **before** activating.
+- **Dry-run / simulation.** "Activating R would create X new services tonight,
+  reassign Y, change Z rates" — zero writes.
+- **Coverage board.** Per worktype: targets with **no** rule (gaps) and targets with
+  **>1** (overlaps), so the whole portfolio is legible.
+- **Explain view.** For any property/community: every matching rule per worktype,
+  the winner, and *why* (priority/specificity). This is the "which rules touch this
+  / which properties this rule touches" navigation you asked for, both directions.
+- **Generation invariants.** Exactly **one winner** per (target, worktype, cadence
+  window); dedup against existing open Services; never double-generate/​double-bill.
+- **Guardrails on save:** warn on empty-population rules (match nothing),
+  fully-shadowed rules (dead), and overlapping cadences that would double-bill.
+- **Immutable audit + effective-dating** on every activate/edit/deactivate.
+
+One evaluator (the §10.6 hybrid: HubSpot Search for property predicates + app-side
+for community/cross-object) powers preview, conflict analysis, dry-run, AND the
+cron — so what you preview is exactly what generates.
+
+### 7. Generation cron — both models
+`/api/cron/ppw-generate` nightly:
+- **SFR (scope_level=property):** for each active property-rule by the resolution
+  order, evaluate → winning properties → create per-property Services (dedup on
+  (property, worktype, window)).
+- **Community (scope_level=community):** for each active community-rule, evaluate →
+  winning communities (+ zone) → create one **contract-occurrence** Service per
+  cadence hit (dedup on (community, worktype, zone, occurrence-date)).
+- Both stamp `source_rule_id`, resolved rate + `rate_source`, preview marker if
+  non-prod; assignment (vendor by worktype/coverage/capacity) runs after.
+
+### 8. Suggested build phases
+1. **Foundation:** worktype taxonomy (`lib/ppw/worktypes.ts`) + `Services` object +
+   `scope_level`; Company/Community `ppw_*` fields + rate config record.
+2. **Capture slice (end-to-end):** manually create a Service → reuse Answers capture
+   → coordinator review/approve → PDF. Proves the reuse spine before the engine.
+3. **Vendor login + `/vendor` UI** (OTP vendor session + scope gate + security
+   review).
+4. **Rules engine:** condition builder URL + hybrid evaluator + conflict
+   analyzer/dry-run/explain; then the **generate cron** (SFR then community).
+5. **Assignment, billing/export-to-pay, AI before/after** — later pillars.
+
+### 9. Still-open decisions
+1. **Worktype vs scope** — adopt orthogonal `scope_level` (recommended) or a literal
+   "Community Work" worktype?
+2. **Property-scoped rate order** — vendor(Company) before community, or reverse?
+3. **Vendor multi-user** — one `ppw_login_email` per Company or a list?
+4. **Zones** — is whole-community enough for v1, or are parts needed day one?
+5. **Assignment engine** — auto (capacity/OTD) vs. coordinator-assigns in v1.
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
@@ -450,6 +608,14 @@ Service→Service Rule (source), Property→Community (existing, reused).
   Vendors = Companies; new Services + Service Rule; worktype enum; hybrid rule
   evaluator with app URL editor + HubSpot store; rate precedence; nightly generate
   cron). Open decisions listed in §10.6.
+- _architecture-v2_ (§10.7, LATEST) — owner input: two work models (scattered SFR
+  single-WO vs community contracts) → `scope_level` on Services; scope made
+  orthogonal to worktype (recommended); 3-tier rate resolution with worktype
+  default in a HubSpot config record (no new object) + Company/Community overrides;
+  non-HubSpot **vendor logins** via email-OTP vendor sessions + `/vendor` UI + hard
+  scope gate; **conflict-clean rules engine** (deterministic resolution, save-time
+  conflict analyzer, dry-run, coverage board, explain view, generation invariants);
+  build phases. Still PLANNING — no product code yet.
 - _dev-harness_ — added the `recurring-services` branch + Vercel Preview workflow,
   `lib/featureFlags.ts` (pure client-safe flags: PPW_FLAG_ON / ppwWritesAreTest /
   PPW_TEST_MARKER), `lib/ppwAccess.ts` (server `ppwEnabled` admin gate) and the
