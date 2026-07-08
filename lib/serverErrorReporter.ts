@@ -52,6 +52,28 @@ export function reportServerError(error: unknown, context: ServerErrorContext = 
   try {
     const err = error as any;
     const message = String(err?.message || err || 'Unknown error').slice(0, 500);
+
+    // Rate-limit backpressure (HTTP 429) is NOT an actionable server error: it's
+    // HubSpot telling us to slow down during a burst (e.g. many inspectors'
+    // photo-attach outboxes draining on reconnect). hubspotFetch already retries
+    // it with honored Retry-After backoff, and any request that still exhausts
+    // that window is retried again by the client's durable outbox — nothing is
+    // lost. Logging each one as `level:error` (and paging the webhook) produced
+    // the reported error spike. Emit a lighter, still-greppable line for capacity
+    // monitoring and DON'T alert. (Applies to every route, not just attach-photo.)
+    const status = typeof err?.status === 'number' ? err.status : undefined;
+    if (status === 429) {
+      try {
+        console.warn('[server-ratelimit]', JSON.stringify({
+          level: 'warn', source: 'server', message,
+          route: context.route, method: context.method,
+          userEmail: context.userEmail, inspectionId: context.inspectionId,
+          at: new Date().toISOString(),
+        }));
+      } catch { /* noop */ }
+      return;
+    }
+
     const record = {
       level: 'error',
       source: 'server',

@@ -145,9 +145,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (failed) return res.status(502).json({ ok: false, error: failed.reason || 'attach failed' });
     return res.status(200).json({ ok: true, created: true });
   } catch (e: any) {
-    reportServerError(e, { route: 'POST /api/inspections/[id]/attach-photo', method: 'POST', userEmail: session.email, inspectionId: id });
     const upstream = (e as any)?.status;
-    const status = (typeof upstream === 'number' && upstream >= 400 && upstream < 500 && upstream !== 429) ? upstream : 500;
+    // Rate-limit backpressure: HubSpot is throttling a burst (many outboxes
+    // draining at once) even after our retry/backoff. This is transient and the
+    // durable attach outbox retries it next tick, so surface it as a real 429
+    // (with a short Retry-After) instead of masking it as a 500. reportServerError
+    // already downgrades 429 to a warn, so this doesn't spam the error stream.
+    if (upstream === 429) {
+      reportServerError(e, { route: 'POST /api/inspections/[id]/attach-photo', method: 'POST', userEmail: session.email, inspectionId: id });
+      res.setHeader('Retry-After', '5');
+      return res.status(429).json({ ok: false, error: 'Rate limited — will retry.', retryable: true });
+    }
+    reportServerError(e, { route: 'POST /api/inspections/[id]/attach-photo', method: 'POST', userEmail: session.email, inspectionId: id });
+    const status = (typeof upstream === 'number' && upstream >= 400 && upstream < 500) ? upstream : 500;
     return res.status(status).json({ ok: false, error: String(e?.message || e).slice(0, 300) });
   }
 }
