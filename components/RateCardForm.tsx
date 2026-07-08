@@ -2901,6 +2901,24 @@ export function RateCardForm(props: RateCardFormProps) {
         });
         if (!res.ok || !res.body) {
           const txt = await res.text().catch(() => '');
+          // Our API only ever answers with JSON or an SSE stream. An HTML body
+          // (a <!doctype>/<html> page) means the request was intercepted at the
+          // EDGE — a CDN/WAF/firewall block page or an auth wall — BEFORE it
+          // reached our function. Dumping that raw markup into the modal (the
+          // "Review failed (403). <!DOCTYPE html>…" the inspector saw) is useless
+          // and looks like an app crash. Show a clean, actionable message and
+          // keep the real status for support.
+          const looksHtml = /^\s*<(?:!doctype|html)\b/i.test(txt);
+          const contentType = res.headers.get('content-type') || '';
+          if (looksHtml || contentType.includes('text/html')) {
+            const err: any = new Error(
+              `AI review was blocked before it reached the server (HTTP ${res.status}). ` +
+              `This is a network/hosting block — not a problem with your scope. Tap "Try again" in a moment; ` +
+              `if it keeps failing on this property, an admin needs to check the site’s firewall/CDN rules for this request.`
+            );
+            err.edgeBlocked = true; err.status = res.status;
+            throw err;
+          }
           throw new Error(`Review failed (${res.status}). ${txt.slice(0, 160)}`);
         }
         // Stream the SSE response, appending each suggestion as it arrives.
