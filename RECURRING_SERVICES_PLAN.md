@@ -307,9 +307,149 @@ Decided setup — **isolated deploy, shared (production) HubSpot data:**
   flag+admin gated and dark in prod. Flip `NEXT_PUBLIC_PPW_ENABLED` in Production
   (and later drop the gates) only when a phase is ready to go live.
 
+## 10.6 Architecture v1 — LOCKED decisions (owner, this session)
+
+> Where this conflicts with the earlier exploratory §2/§4/§6, THIS wins. Source of
+> truth for properties/eligibility is **HubSpot** (not Snowflake) for v1.
+
+### Object map (v1)
+- **Reuse as-is:** `Questions` + `Answers` (field capture), `Properties`, `Communities`.
+- **Vendors = the existing `Companies` object** (`0-2`, portal 22536354). Add PPW
+  fields there; **no new vendor object** (retires the §4 `service_vendor` idea).
+- **New object `Services`** — the job instance; carries all job details.
+- **New object `Service Rule`** — the rules engine config.
+- **Worktype** = one **dropdown (enum)** property, canonical option set, used on
+  Services (and mirrored on Rule + Company capabilities).
+- **Vendor rate** resolves from the **Service Rule** (by worktype) **or** the
+  **Company** (vendor-specific) — precedence in the Rate section below.
+
+### `Services` object — fields (draft)
+Association-first; scalars only for what we filter/report/bill on.
+- **Assoc/identity:** `service_id_external` (idempotency key), → Property (1),
+  → Company/vendor (1), → Community (via Property), → Answers (N, field data),
+  `source_rule_id`, `generated_by` (rules_engine | manual).
+- **Classification:** `worktype` (enum), `region_snapshot`, `season_snapshot`.
+- **Lifecycle `status`:** scheduled → dispatched → in_progress → submitted →
+  in_review → approved → export_to_pay → paid (+ fix_item, cancelled);
+  `scheduled_date`, `completed_at`, `approved_by`, `approved_at`.
+- **Evidence roll-up** (detail lives on Answers): `before_photo_urls`,
+  `after_photo_urls`, `geofence_state`, `ai_verification_state`,
+  `ai_verification_score`.
+- **Money:** `vendor_cost`, `client_charge`, `rate_source` (rule|company|manual),
+  `export_to_pay_date`, `paid_at`, `payment_locked`, `invoice_number`.
+- **Test:** `ppw_preview_test` (stamped when created from a non-prod deploy — see
+  `PPW_TEST_MARKER`).
+
+### Vendors on `Companies` — fields to ADD
+- `ppw_is_vendor` (bool), `ppw_worktypes` (multi-enum capabilities),
+  `ppw_coverage` (regions/markets), `ppw_weekly_capacity`, `ppw_active_allocation`,
+  `ppw_otd_rate`, `ppw_quality_score`, `ppw_payout_method`, and vendor rate as
+  **`ppw_rate_json`** ({ "<worktype>[:<region>]": amount }). JSON prop over a child
+  object for v1 (matches the `section_list_json` pattern; revisit if rates need
+  effective-dating / per-client tiers).
+
+### Worktype — single source of truth
+- Canonical list in code (`lib/ppw/worktypes.ts`), mirrored to the HubSpot enum on
+  Services/Rule/Company and kept in lockstep like `lib/vendors.ts`. v1 options TBD
+  (grass cut, cleaning, pool service, …).
+
+### Field capture — REUSE Questions + Answers
+- Each worktype → a **question set** (reuse `Questions`, tagged by worktype) = the
+  vendor's before/after + condition form.
+- Answers are **keyed to the Service** (association + `service_id_external` on the
+  answer, exactly how answers key to an inspection today) → we reuse
+  `CameraCapture`, `offlinePhotoStore`, the evidence stamp, durable photo sync, and
+  the answer-render/PDF pipeline **unchanged**.
+
+### Rate resolution (precedence — top wins)
+1. **Manual override** on the Service (coordinator-set).
+2. **Company (vendor) rate** for (worktype[, region]) from `ppw_rate_json`.
+3. **Service Rule** default rate for the worktype/scope.
+- Stamp `rate_source` so the invoice-mismatch guard knows what it compared against.
+- ⚠️ **Owner decision:** is #2 (vendor-specific) above #3 (rule default) — my draft —
+  or should the rule be authoritative? 
+
+### `Service Rule` object — the customizable engine (the hard part)
+A rule = **who it applies to** (condition tree) + **what it generates**
+(worktype / cadence / rate) + **precedence**.
+- **HubSpot fields:** `rule_name`, `worktype` (enum), `active` (bool),
+  `priority` (int → precedence), `scope_label` (community|client|state|property,
+  for humans), `frequency_days`/cadence, `season`, `effective_from/to`,
+  `default_vendor_cost`/`default_client_charge` (optional), `created_by`/
+  `updated_by`, and the core **`conditions_json`** (long-text prop, same
+  store-JSON-in-a-property pattern as `section_list_json`).
+- **`conditions_json` — nested predicate tree over ANY associated field:**
+  ```json
+  {
+    "op": "AND",
+    "rules": [
+      { "object": "property",  "field": "property_status", "operator": "in", "value": ["Vacant","Pending MOI"] },
+      { "op": "OR", "rules": [
+        { "object": "community", "field": "region",   "operator": "eq", "value": "GA: Atlanta" },
+        { "object": "property",  "field": "has_pool", "operator": "eq", "value": true }
+      ]}
+    ]
+  }
+  ```
+  - `object` = which associated object the field is from (`property` | `community`,
+    extensible). Operators: eq, neq, in, not_in, gt, gte, lt, lte, between,
+    contains, exists, not_exists. Arbitrary AND/OR nesting = "logic on ANY field
+    from ANY associated object."
+
+### Rule builder (the URL) + "which properties does this touch?"
+- **Editing surface `/admin/ppw/rules/[id]`** (admin-gated app page):
+  1. loads the **field schema** for Property + Community from HubSpot's properties
+     API (cached) → a searchable field picker with type-aware operator/value inputs;
+  2. compose the nested AND/OR tree;
+  3. **live preview: "matches N properties" + a browsable list** so you see exactly
+     which properties a rule touches *before* saving — plus a per-property "which
+     rules hit me?" reverse view;
+  4. save `conditions_json` + metadata to the `Service Rule` HubSpot object.
+     **The URL is the editor; HubSpot is the store.**
+- **Evaluation engine (HYBRID — this is the key technical call):**
+  - Push **property-level** predicates down to the **HubSpot CRM Search API**
+    (`filterGroups` = AND-of-OR; operators map to EQ/IN/GT/BETWEEN/HAS_PROPERTY/…)
+    → HubSpot returns the matching property set (scales; gives the list for free).
+  - Evaluate **community-level / cross-object** predicates **app-side** on that
+    narrowed set (resolve Property→Community, fetch community fields, apply). HubSpot
+    search can't filter a Property by an *associated* Community's field in one query
+    — that constraint is what forces the hybrid.
+  - **One evaluator** powers both the live preview and the nightly generator, so
+    "preview == what actually generates."
+
+### Generation flow (nightly cron) + precedence + dedup
+- New Vercel cron → `/api/cron/ppw-generate` (pattern: `sftp-watch`):
+  1. for each active rule by `priority`, evaluate → matching properties;
+  2. **precedence** Community > Client > State: when rules collide on the same
+     (property, worktype), only the highest-priority/most-specific wins;
+  3. **dedup:** skip if an open/active Service already exists for (property,
+     worktype) within the cadence window (kills the double-billing bug);
+  4. create `Services` (status `scheduled`, `source_rule_id`, resolved rate) +
+     associations; stamp the preview marker when non-prod.
+- Immutable audit (`lib/auditLog`) on every rule edit.
+
+### Associations (crm/v4)
+Service→Property (1), Service→Company/vendor (1), Service→Answers (N),
+Service→Service Rule (source), Property→Community (existing, reused).
+
+### Open decisions needing owner input
+1. **Rate precedence** — vendor Company rate above rule default (draft) or rule wins?
+2. **Vendor rate storage** — `ppw_rate_json` on Company (draft) vs a child object.
+3. **Worktype v1 list** — confirm the starting options.
+4. **Vendor portal** — do vendors log in and upload evidence in v1 (new external
+   auth surface), or do coordinators enter results first? Big scope lever.
+5. **Live-preview scale** — cap/paginate the "matches N properties" list for very
+   broad rules? (Nightly cron evaluates fully regardless.)
+
+---
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
+- _architecture-v1_ — locked object model (reuse Q&A + Properties + Communities;
+  Vendors = Companies; new Services + Service Rule; worktype enum; hybrid rule
+  evaluator with app URL editor + HubSpot store; rate precedence; nightly generate
+  cron). Open decisions listed in §10.6.
 - _dev-harness_ — added the `recurring-services` branch + Vercel Preview workflow,
   `lib/featureFlags.ts` (pure client-safe flags: PPW_FLAG_ON / ppwWritesAreTest /
   PPW_TEST_MARKER), `lib/ppwAccess.ts` (server `ppwEnabled` admin gate) and the
