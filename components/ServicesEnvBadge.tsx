@@ -1,16 +1,16 @@
-import { PPW_FLAG_ON } from '@/lib/featureFlags';
+import { SERVICES_FLAG_ON } from '@/lib/featureFlags';
 
 /**
- * A small always-visible marker shown ONLY where the PPW flag is on (the
+ * A small always-visible marker shown ONLY where the Services flag is on (the
  * `recurring-services` preview deployment and local dev). It renders null on
  * production (the flag is off there), so it can never appear on resiwalk.com.
  *
  * Its job is to make the risky part obvious: this preview talks to the LIVE
- * HubSpot portal, so anything PPW writes lands in production data. The badge
+ * HubSpot portal, so anything Services writes lands in production data. The badge
  * keeps that fact in front of whoever's testing.
  */
-export default function PpwEnvBadge() {
-  if (!PPW_FLAG_ON) return null;
+export default function ServicesEnvBadge() {
+  if (!SERVICES_FLAG_ON) return null;
   return (
     <div
       aria-hidden
@@ -31,7 +31,7 @@ export default function PpwEnvBadge() {
         fontFamily: 'system-ui, sans-serif',
       }}
     >
-      PPW PREVIEW · writes to PROD HubSpot
+      SERVICES PREVIEW · writes to PROD HubSpot
     </div>
   );
 }
