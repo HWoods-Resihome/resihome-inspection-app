@@ -155,7 +155,15 @@ export default function ExistingInspection() {
     // shell HTML for offline hard-navs). There is NO inspection behind it, so
     // don't fetch it (guaranteed 404) or report a bogus "Inspection not found"
     // to the Admin Error Log. Just hold the shell; a real id renders on nav.
-    if (inspectionId === '_precache_shell_') { setStage('loading'); return; }
+    // A real navigation should NEVER sit on the warmer's placeholder route — it's
+    // fetched in the background (see _app.tsx warm()), never navigated to. But a
+    // stale service worker serving the cached shell, a bookmark, or a bad redirect
+    // can land a person here; hanging on "Loading inspection…" (the old behavior)
+    // strands them. Bounce to home instead. Still no fetch, no bogus error report.
+    if (inspectionId === '_precache_shell_') {
+      if (typeof window !== 'undefined') window.location.replace('/');
+      return;
+    }
     // The prev/next InspectionPager swaps only `inspectionId` while this page
     // stays mounted. If we're switching to a DIFFERENT record than the one
     // currently loaded, drop to the loading screen and clear the stale record so
