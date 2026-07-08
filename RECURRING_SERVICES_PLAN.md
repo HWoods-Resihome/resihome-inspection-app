@@ -272,6 +272,46 @@ with branches: `Fix Item / Vendor Revision`, `Geofence Failure`, `Cancelled`,
 
 ---
 
+## 10.5 Dev / test workflow (how we build PPW without touching resiwalk.com)
+
+Decided setup — **isolated deploy, shared (production) HubSpot data:**
+
+- **Branch, not main.** All PPW work lands on the **`recurring-services`** branch.
+  Only `main` auto-deploys to `resiwalk.com`, so production stays pristine while we
+  iterate. Every push to the branch builds its own **Vercel Preview URL**
+  (`…-git-recurring-services-<team>.vercel.app`), gated behind Vercel's login.
+- **Production HubSpot, on purpose.** The preview inherits prod env vars —
+  including the live `HUBSPOT_TOKEN` — so PPW is developed against the **real
+  portal** (no sandbox). Nothing to configure on the HubSpot side.
+- **⚠️ Preview writes hit LIVE data.** Because there's no sandbox, any HubSpot
+  object PPW creates from the preview lands in production. Two rules follow:
+  - Stamp every PPW-created object with **`PPW_TEST_MARKER`** whenever
+    `ppwWritesAreTest` is true (see `lib/featureFlags.ts`) so preview/test records
+    are trivially findable and bulk-removable in prod.
+  - Keep object-creating flows behind the admin gate below until they're trusted.
+- **Feature gate (`lib/featureFlags.ts`):**
+  - `PPW_FLAG_ON` — inlined client flag. ON when `NEXT_PUBLIC_PPW_ENABLED === '1'`
+    (set it **Preview-scoped** in Vercel) or in local `next dev`. UNSET in
+    Production → PPW is invisible on `resiwalk.com` **even after code merges to
+    main**, until that var is deliberately flipped.
+  - `ppwEnabled(email)` (in `lib/ppwAccess.ts` — kept separate so the admin/HubSpot
+    server code never reaches the client bundle) — server/API gate: flag on **and**
+    caller is an app admin. Put it at the top of every `/api/ppw/*` handler so a
+    normal inspector can never reach PPW even where the flag is on.
+  - `PpwEnvBadge` (mounted in `_app.tsx`) shows a "PPW PREVIEW · writes to PROD
+    HubSpot" marker wherever the flag is on; renders null in production.
+- **One-time Vercel step:** add `NEXT_PUBLIC_PPW_ENABLED=1` as a **Preview**-scoped
+  env var (Production left unset). No other env changes — the HubSpot token is
+  shared from Production as-is.
+- **Merge path:** phases can merge to `main` early because everything is
+  flag+admin gated and dark in prod. Flip `NEXT_PUBLIC_PPW_ENABLED` in Production
+  (and later drop the gates) only when a phase is ready to go live.
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
+- _dev-harness_ — added the `recurring-services` branch + Vercel Preview workflow,
+  `lib/featureFlags.ts` (pure client-safe flags: PPW_FLAG_ON / ppwWritesAreTest /
+  PPW_TEST_MARKER), `lib/ppwAccess.ts` (server `ppwEnabled` admin gate) and the
+  `PpwEnvBadge`. Deploy isolated from resiwalk.com; HubSpot kept on production per
+  owner. Still PLANNING — no product code yet.
