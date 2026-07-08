@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
+import Router from 'next/router';
+import { PPW_FLAG_ON } from '@/lib/featureFlags';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AppDialogProvider } from '@/components/AppDialog';
 import { FlashProvider } from '@/components/Flash';
@@ -128,6 +130,22 @@ export default function App({ Component, pageProps }: AppProps) {
     const onOnline = () => { void warm(); };
     window.addEventListener('online', onOnline);
     return () => { clearTimeout(t); window.removeEventListener('online', onOnline); };
+  }, []);
+
+  // On the PPW preview only (PPW_FLAG_ON is off in production), stamp the browser
+  // tab as "Resiwalk - PPW" so it's obvious at a glance which deployment a tab is —
+  // the preview points at PROD HubSpot, so telling it apart from the real app
+  // matters. Re-applied after every route change because individual pages set
+  // their own <title> (e.g. the home page → "ResiWalk"), which would otherwise
+  // overwrite it on navigation. Inert on resiwalk.com.
+  useEffect(() => {
+    if (!PPW_FLAG_ON) return;
+    const apply = () => { document.title = 'Resiwalk - PPW'; };
+    apply();
+    // rAF wins any late <title> commit from the newly-rendered page's <Head>.
+    const applySoon = () => { apply(); requestAnimationFrame(apply); };
+    Router.events.on('routeChangeComplete', applySoon);
+    return () => { Router.events.off('routeChangeComplete', applySoon); };
   }, []);
 
   return (
