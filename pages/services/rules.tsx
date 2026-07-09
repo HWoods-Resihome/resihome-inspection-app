@@ -37,11 +37,18 @@ interface Cadence { id: number; unit: Unit; interval: number; dow: number; dom: 
 interface Rule {
   id: number; name: string; active: boolean; worktype: Worktype;
   scope: 'property' | 'community'; portfolios: string[]; communities: string[];
-  vendorCost: number; markupPct: number;
+  vendorCost: string; markupPct: string;   // strings so decimals can be typed freely
   cadences: Cadence[];
+  skipMonths: number[];                     // months explicitly set to NO service
   enrollField: string; enrollOp: string; enrollVal: string;
   stopEnabled: boolean; stopField: string; stopOp: string; stopVal: string;
 }
+// Keep digits + one dot + up to 2 decimals as the user types.
+const sanitizeNum = (v: string): string => {
+  const parts = v.replace(/[^\d.]/g, '').split('.');
+  const int = parts.shift() ?? '';
+  return parts.length ? `${int}.${parts.join('').slice(0, 2)}` : int;
+};
 
 let _cid = 100;
 const newCadence = (months: number[] = []): Cadence => ({ id: ++_cid, unit: 'weeks', interval: 2, dow: 0, dom: 1, months });
@@ -92,18 +99,20 @@ function CoveragePicker({ noun, options, selected, onToggle }: {
 const SEED: Rule[] = [
   {
     id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'grass_cut', scope: 'property',
-    portfolios: ['Amherst Sunbelt'], communities: [], vendorCost: 42, markupPct: 35,
+    portfolios: ['Amherst Sunbelt'], communities: [], vendorCost: '42', markupPct: '35',
     cadences: [
       { id: 11, unit: 'weeks', interval: 2, dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
-      { id: 12, unit: 'months', interval: 1, dow: 0, dom: 15, months: [0, 1, 10, 11] },
+      { id: 12, unit: 'months', interval: 1, dow: 0, dom: 15, months: [10, 11] },
     ],
+    skipMonths: [0, 1],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
     stopEnabled: true, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied',
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'grass_cut', scope: 'community',
-    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], vendorCost: 40, markupPct: 30,
+    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], vendorCost: '40', markupPct: '30',
     cadences: [{ id: 21, unit: 'weeks', interval: 1, dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
+    skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
     stopEnabled: false, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied',
   },
@@ -118,9 +127,19 @@ export default function RulesEngine() {
   const patchCadence = (cid: number, p: Partial<Cadence>) =>
     patch({ cadences: rule.cadences.map((c) => (c.id === cid ? { ...c, ...p } : c)) });
   const toggleMonth = (cid: number, m: number) =>
-    patch({ cadences: rule.cadences.map((c) => c.id === cid
-      ? { ...c, months: c.months.includes(m) ? c.months.filter((x) => x !== m) : [...c.months, m] }
-      : { ...c, months: c.months.filter((x) => x !== m) }) }); // a month belongs to ONE cadence
+    patch({
+      // a month belongs to ONE cadence — and is pulled out of the no-service set.
+      cadences: rule.cadences.map((c) => c.id === cid
+        ? { ...c, months: c.months.includes(m) ? c.months.filter((x) => x !== m) : [...c.months, m] }
+        : { ...c, months: c.months.filter((x) => x !== m) }),
+      skipMonths: rule.skipMonths.filter((x) => x !== m),
+    });
+  // Mark/unmark a month as NO service — removes it from every cadence.
+  const toggleSkipMonth = (m: number) =>
+    patch({
+      skipMonths: rule.skipMonths.includes(m) ? rule.skipMonths.filter((x) => x !== m) : [...rule.skipMonths, m],
+      cadences: rule.cadences.map((c) => ({ ...c, months: c.months.filter((x) => x !== m) })),
+    });
   const toggleCoverage = (key: string) => {
     if (rule.scope === 'property') patch({ portfolios: rule.portfolios.includes(key) ? rule.portfolios.filter((x) => x !== key) : [...rule.portfolios, key] });
     else patch({ communities: rule.communities.includes(key) ? rule.communities.filter((x) => x !== key) : [...rule.communities, key] });
@@ -128,7 +147,7 @@ export default function RulesEngine() {
 
   const addRule = () => {
     const id = Math.max(...rules.map((r) => r.id)) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], cadences: [newCadence([...Array(12).keys()])], enrollVal: '' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], cadences: [newCadence([...Array(12).keys()])], skipMonths: [], enrollVal: '' }]);
     setSelId(id);
   };
   const duplicateRule = () => {
@@ -147,7 +166,8 @@ export default function RulesEngine() {
   };
   const coveredCount = useMemo(() => countFor(rule), [rule]);
 
-  const coveredMonths = useMemo(() => new Set(rule.cadences.flatMap((c) => c.months)), [rule]);
+  // A month is "accounted for" if it's in a cadence OR explicitly set to no service.
+  const coveredMonths = useMemo(() => new Set([...rule.cadences.flatMap((c) => c.months), ...rule.skipMonths]), [rule]);
   const missingMonths = MONTHS.map((_, i) => i).filter((i) => !coveredMonths.has(i));
 
   // One property → one rule per worktype: block save if this rule shares any
@@ -162,10 +182,10 @@ export default function RulesEngine() {
     return null;
   }, [rules, rule]);
 
-  const clientCost = (rule.vendorCost * (1 + rule.markupPct / 100));
+  const clientCost = (parseFloat(rule.vendorCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100));
   const saveErrors: string[] = [];
   if (overlap) saveErrors.push(`Overlaps “${overlap.rule.name}” on: ${overlap.shared.join(', ')}. A property can only belong to one rule per worktype.`);
-  if (missingMonths.length) saveErrors.push(`Every month must be tied to a cadence. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
+  if (missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
   if (!rule.enrollVal.trim()) saveErrors.push('Set an enrollment trigger.');
   const canSave = saveErrors.length === 0;
 
@@ -273,10 +293,10 @@ export default function RulesEngine() {
               </div>
             )}
             {(rule.scope === 'property' ? rule.portfolios : rule.communities).length === 0 && <div className="mb-4" />}
-            <div className="flex flex-nowrap items-end justify-center gap-4 border-t border-gray-100 pt-4">
-              <div className="flex flex-col items-center shrink-0"><label className={`${lbl} text-center`}>Vendor Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><input value={rule.vendorCost} onChange={(e) => patch({ vendorCost: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-20 text-center tabular-nums`} /></div></div>
-              <div className="flex flex-col items-center shrink-0"><label className={`${lbl} text-center`}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} onChange={(e) => patch({ markupPct: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-20 text-center tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
-              <div className="flex flex-col items-center shrink-0"><label className={`${lbl} text-center`}>Client Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><div className="text-[13px] font-bold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg w-20 text-center">{clientCost.toFixed(2)}</div></div></div>
+            <div className="flex flex-nowrap items-end gap-4 border-t border-gray-100 pt-4">
+              <div className="flex flex-col shrink-0"><label className={lbl}>Vendor Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><input value={rule.vendorCost} inputMode="decimal" onChange={(e) => patch({ vendorCost: sanitizeNum(e.target.value) })} className={`${ctl} w-20 text-center tabular-nums`} /></div></div>
+              <div className="flex flex-col shrink-0"><label className={lbl}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} inputMode="decimal" onChange={(e) => patch({ markupPct: sanitizeNum(e.target.value) })} className={`${ctl} w-20 text-center tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
+              <div className="flex flex-col shrink-0"><label className={lbl}>Client Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><div className="text-[13px] font-bold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg w-20 text-center">{clientCost.toFixed(2)}</div></div></div>
             </div>
           </section>
 
@@ -316,9 +336,20 @@ export default function RulesEngine() {
                 </div>
               ))}
             </div>
+            {/* No-service months — a month set here gets NO cuts and still counts
+                toward the "every month accounted for" rule. */}
+            <div className="mt-3 border border-dashed border-gray-300 rounded-xl p-3 bg-white">
+              <div className="text-[12px] font-semibold text-gray-600 mb-2">No Service — Skip These Months</div>
+              <div className="flex flex-wrap gap-1.5">
+                {MONTHS.map((m, mi) => {
+                  const on = rule.skipMonths.includes(mi);
+                  return <button key={m} onClick={() => toggleSkipMonth(mi)} className={`text-[11.5px] font-heading font-semibold px-2.5 py-1 rounded-md border ${on ? 'bg-gray-700 text-white border-gray-700' : 'bg-white text-gray-600 border-gray-300'}`}>{m}</button>;
+                })}
+              </div>
+            </div>
             <button onClick={() => patch({ cadences: [...rule.cadences, newCadence(missingMonths)] })} className="mt-3 text-[12px] font-semibold text-gray-600 border border-gray-300 rounded-lg px-2.5 py-1 bg-white hover:border-brand/40">+ Add Cadence</button>
             <div className={`mt-3 text-[12.5px] font-semibold ${missingMonths.length ? 'text-red-600' : 'text-emerald-600'}`}>
-              {missingMonths.length ? `Not all months covered — missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}` : 'All 12 months covered ✓'}
+              {missingMonths.length ? `Not all months accounted for — missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}` : 'All 12 months accounted for ✓'}
             </div>
           </section>
 
