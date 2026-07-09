@@ -83,6 +83,12 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       const ok = (u: any) => typeof u === 'string' && u && !u.startsWith('blob:');
       const bySection = new Map<string, string[]>();
       const afterBySection = new Map<string, string[]>();
+      // Section keys that are actually ON the QC report. Mirrors qc-finalize's
+      // inclusion rule (a room is on the report if it has a verdict OR photos),
+      // so we can pull "Before" photos only for reported rooms — otherwise every
+      // source room with before photos becomes a phantom room in the gallery
+      // (shows in the room selector / Before-After toggle but isn't on the PDF).
+      const reportKeys = new Set<string>();
       // Answers whose section isn't in the resolved room list — e.g. "Review /
       // Sign-Off" or "Final Checklist" section photos — must STILL be in the
       // gallery (the PDF links them). Group them under a raw-name key and append
@@ -117,6 +123,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
           const arr = bySection.get(key) || [];
           for (const u of [...(a.photoUrls || []), ...(a.afterPhotoUrls || [])]) if (ok(u)) arr.push(u);
           bySection.set(key, arr);
+          // On the report if it carries a verdict or any after photos.
+          if (a.passFail === 'pass' || a.passFail === 'fail' || (a.photoUrls || []).some(ok)) reportKeys.add(key);
         } else if (a.answerType === 'qa') {
           // Q&A answers carry their own photos on 1099 / vacancy / community
           // reports (e.g. the per-question PHOTO REQUIRED tiles). Include them so
@@ -145,6 +153,9 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         try {
           const beforeByLoc = await fetchSourceSectionPhotos(insp.sourceRateCardId);
           for (const s of sections) {
+            // Only rooms on the report get Before photos — skip source rooms the
+            // QC never documented (they'd otherwise show as phantom gallery rooms).
+            if (!reportKeys.has(s.id)) continue;
             const b = beforeByLoc[`${s.label}||${s.location}`] || (s.location ? beforeByLoc[s.location] : undefined) || beforeByLoc[s.label] || [];
             const clean = b.filter(ok);
             if (clean.length) beforeBySection.set(s.id, clean);
