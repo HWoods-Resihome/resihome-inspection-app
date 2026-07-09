@@ -2457,6 +2457,7 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
     'started_at', 'completed_at', 'scheduled_date',
     'total_questions_answered', 'pdf_attachment_url', 'hs_createdate',
     'region_snapshot', 'section_list_json',
+    'source_rate_card_id', 'source_rate_card_name',
   ];
   try {
     const qs = properties.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
@@ -2491,8 +2492,8 @@ export async function fetchInspectionById(recordId: string): Promise<InspectionS
       pdfChargebackXlsxUrl: null,
       pdfVendorUrlsJson: null,
       pdfGeneratedAt: null,
-      sourceRateCardId: null,
-      sourceRateCardName: null,
+      sourceRateCardId: p.source_rate_card_id || null,
+      sourceRateCardName: p.source_rate_card_name || null,
       qcVerdict: null,
       qcOverallNote: null,
       qcPassCount: null,
