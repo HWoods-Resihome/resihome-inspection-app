@@ -262,10 +262,10 @@ export default function RulesEngine() {
               </div>
             )}
             {(rule.scope === 'property' ? rule.portfolios : rule.communities).length === 0 && <div className="mb-4" />}
-            <div className="flex flex-wrap gap-5 border-t border-gray-100 pt-4">
-              <div className="flex flex-col items-center"><label className={`${lbl} text-center`}>Vendor Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><input value={rule.vendorCost} onChange={(e) => patch({ vendorCost: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-24 text-center tabular-nums`} /></div></div>
-              <div className="flex flex-col items-center"><label className={`${lbl} text-center`}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} onChange={(e) => patch({ markupPct: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-20 text-center tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
-              <div className="flex flex-col items-center"><label className={`${lbl} text-center`}>Client Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><div className="text-[13px] font-bold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg w-24 text-center">{clientCost.toFixed(2)}</div></div></div>
+            <div className="flex flex-nowrap items-end gap-3 border-t border-gray-100 pt-4">
+              <div className="flex flex-col items-center shrink-0"><label className={`${lbl} text-center`}>Vendor Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><input value={rule.vendorCost} onChange={(e) => patch({ vendorCost: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-20 text-center tabular-nums`} /></div></div>
+              <div className="flex flex-col items-center shrink-0"><label className={`${lbl} text-center`}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} onChange={(e) => patch({ markupPct: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-16 text-center tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
+              <div className="flex flex-col items-center shrink-0"><label className={`${lbl} text-center`}>Client Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><div className="text-[13px] font-bold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg w-20 text-center">{clientCost.toFixed(2)}</div></div></div>
             </div>
           </section>
 
@@ -281,19 +281,19 @@ export default function RulesEngine() {
                       aria-label="Delete cadence" title="Delete cadence"
                       className="absolute top-2 right-2 w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 text-lg leading-none">×</button>
                   )}
-                  <div className="flex flex-wrap items-center gap-2 mb-2.5">
-                    <span className="text-[13px] text-gray-600">Every</span>
-                    <input value={c.interval} onChange={(e) => patchCadence(c.id, { interval: Number(e.target.value.replace(/\D/g, '')) || 1 })} className={`${ctl} w-14 tabular-nums`} />
-                    <select value={c.unit} onChange={(e) => patchCadence(c.id, { unit: e.target.value as Unit })} className={ctl}>
+                  <div className="flex flex-nowrap items-center gap-2 mb-2.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+                    <span className="text-[13px] text-gray-600 shrink-0">Every</span>
+                    <input value={c.interval} onChange={(e) => patchCadence(c.id, { interval: Number(e.target.value.replace(/\D/g, '')) || 1 })} className={`${ctl} w-14 shrink-0 tabular-nums`} />
+                    <select value={c.unit} onChange={(e) => patchCadence(c.id, { unit: e.target.value as Unit })} className={`${ctl} shrink-0`}>
                       <option value="days">days</option><option value="weeks">weeks</option><option value="months">months</option>
                     </select>
                     {c.unit === 'weeks' && (
-                      <><span className="text-[13px] text-gray-600">on</span>
-                      <select value={c.dow} onChange={(e) => patchCadence(c.id, { dow: Number(e.target.value) })} className={ctl}>{DOW.map((d, di) => <option key={d} value={di}>{d}</option>)}</select></>
+                      <><span className="text-[13px] text-gray-600 shrink-0">on</span>
+                      <select value={c.dow} onChange={(e) => patchCadence(c.id, { dow: Number(e.target.value) })} className={`${ctl} shrink-0`}>{DOW.map((d, di) => <option key={d} value={di}>{d}</option>)}</select></>
                     )}
                     {c.unit === 'months' && (
-                      <><span className="text-[13px] text-gray-600">on day</span>
-                      <select value={c.dom} onChange={(e) => patchCadence(c.id, { dom: Number(e.target.value) })} className={ctl}>{Array.from({ length: 28 }, (_, di) => di + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select></>
+                      <><span className="text-[13px] text-gray-600 shrink-0 whitespace-nowrap">on day</span>
+                      <select value={c.dom} onChange={(e) => patchCadence(c.id, { dom: Number(e.target.value) })} className={`${ctl} shrink-0`}>{Array.from({ length: 28 }, (_, di) => di + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select></>
                     )}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
