@@ -177,7 +177,10 @@ export default function RulesEngine() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-brand text-white sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 py-2.5 flex items-center gap-3">
-          <Link href="/services" className="text-white/90 hover:text-white text-sm shrink-0">← Services</Link>
+          <Link href="/services" className="inline-flex items-center gap-1 text-white/90 hover:text-white text-sm font-semibold shrink-0">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
+            Services
+          </Link>
           <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
           <div className="font-heading font-extrabold">Rules Engine</div>
           <span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">Admin · Sample</span>

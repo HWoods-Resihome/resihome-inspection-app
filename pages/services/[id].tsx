@@ -52,7 +52,10 @@ export default function ServiceComplete({ svc }: { svc: SampleService }) {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-brand text-white sticky top-0 z-20 shrink-0" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
         <div className="max-w-2xl mx-auto px-4 pt-2 pb-2.5 flex items-center gap-3">
-          <Link href="/services" className="text-white/90 hover:text-white text-sm shrink-0">← Services</Link>
+          <Link href="/services" className="inline-flex items-center gap-1 text-white/90 hover:text-white text-sm font-semibold shrink-0">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
+            Services
+          </Link>
           <div className="min-w-0">
             <h1 className="font-heading font-extrabold text-base tracking-tight truncate">{svc.address}</h1>
             <div className="text-xs text-white/80 truncate">{worktypeLabel(svc.worktype)} · {svc.locality}</div>
