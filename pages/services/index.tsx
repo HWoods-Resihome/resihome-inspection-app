@@ -243,7 +243,7 @@ export default function ServicesHome({ userName }: { userName: string }) {
           {rows.map((s) => {
             const overdue = OPEN_STATUSES.includes(s.status) && s.dueDate < REFERENCE_TODAY;
             return (
-              <div key={s.id} className="block bg-white border border-gray-200 rounded-xl px-4 py-3 hover:border-brand/40 transition-colors">
+              <Link key={s.id} href={`/services/${s.id}`} className="block bg-white border border-gray-200 rounded-xl px-4 py-3 hover:border-brand/40 active:scale-[0.998] transition">
                 <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -255,12 +255,11 @@ export default function ServicesHome({ userName }: { userName: string }) {
                       <span className="font-semibold text-ink">{worktypeLabel(s.worktype)}</span>
                       <span>{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
                       <span className={overdue ? 'text-red-600 font-semibold' : ''}>Due {fmtDue(s.dueDate)}{overdue ? ' · Past due' : ''}</span>
-                      <span className="text-gray-400">{s.region}</span>
                     </div>
                   </div>
                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-heading font-semibold border shrink-0 ${STATUS_STYLE[s.status]}`}>{STATUS_LABEL[s.status]}</span>
                 </div>
-              </div>
+              </Link>
             );
           })}
           {rows.length === 0 && (

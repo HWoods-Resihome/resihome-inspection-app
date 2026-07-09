@@ -782,6 +782,38 @@ Book** — reflecting all of the above.
   This is the first build increment (the container the rest lands in). Flag+admin
   gated → invisible on production `resiwalk.com`.
 
+## 10.11 Preview feedback round 2 — rules-engine restructure + completion flow
+
+### Services list / card
+- Card no longer shows region; the card is **clickable → a service completion
+  flow** (`/services/[id]`): a short question checklist, before + after photos, and
+  Submit Completion (moves it to Submitted). This is the vendor's execution surface
+  (reuses the Answers/photo pattern for real in a later step).
+
+### Rules engine — hard rule + restructure
+- **One property → one rule per worktype.** Overlapping coverage (same worktype +
+  scope, shared portfolio/community with another ACTIVE rule) **blocks save**. This
+  replaces the "overlap hint / live-impact conflict" panel — that's removed; a rule
+  that would overlap simply can't be saved.
+- **Rule list actions:** active/inactive toggle, **duplicate** (clone all settings,
+  then just change the community/portfolio), and **delete**.
+- **Three sections (assignment removed):**
+  1. **Work type → coverage (Property/Community + portfolio/community pick) →
+     pricing:** vendor cost, **markup % (editable)**, client cost (= vendor ×
+     (1+markup), shown).
+  2. **Cadence:** every **X days / weeks / months**; weeks → pick day-of-week,
+     months → pick day-of-month. **Per-month cadence blocks** — assign each month to
+     a cadence (e.g. every 2 wks Jun–Jul, every 10 days elsewhere). A month belongs
+     to exactly one block. **All 12 months must be covered to save** (a property has
+     one rule per worktype, so the rule owns the whole year).
+  3. **Enrollment & stop (one section):** an **enrollment trigger** (property status
+     or any field criteria) **creates** the services; each service **auto-recreates
+     when the last is submitted** until the **optional stop criteria** is met.
+- **Live impact removed** → just a **"properties covered"** count.
+- **Vendor assignment is NOT in the engine.** The engine only *creates* services;
+  assignment happens separately in **Vendor Management** (driven by Properties /
+  Communities coverage). To be built as its own area later.
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
