@@ -172,6 +172,14 @@ export default function RulesEngine() {
   const sec = 'bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 shadow-sm';
   const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
   const ctl = 'text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg bg-white text-ink';
+  // Compact select: hides the wide native arrow and draws a small chevron, so the
+  // cadence controls fit on one line without the day/day-of-week select clipping.
+  const arrowStyle: React.CSSProperties = {
+    appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
+    backgroundImage: 'linear-gradient(45deg,transparent 50%,#9ca3af 50%),linear-gradient(135deg,#9ca3af 50%,transparent 50%)',
+    backgroundPosition: 'calc(100% - 12px) center, calc(100% - 7px) center',
+    backgroundSize: '5px 5px, 5px 5px', backgroundRepeat: 'no-repeat',
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -265,9 +273,9 @@ export default function RulesEngine() {
               </div>
             )}
             {(rule.scope === 'property' ? rule.portfolios : rule.communities).length === 0 && <div className="mb-4" />}
-            <div className="flex flex-nowrap items-end gap-3 border-t border-gray-100 pt-4">
+            <div className="flex flex-nowrap items-end justify-center gap-4 border-t border-gray-100 pt-4">
               <div className="flex flex-col items-center shrink-0"><label className={`${lbl} text-center`}>Vendor Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><input value={rule.vendorCost} onChange={(e) => patch({ vendorCost: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-20 text-center tabular-nums`} /></div></div>
-              <div className="flex flex-col items-center shrink-0"><label className={`${lbl} text-center`}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} onChange={(e) => patch({ markupPct: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-16 text-center tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
+              <div className="flex flex-col items-center shrink-0"><label className={`${lbl} text-center`}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} onChange={(e) => patch({ markupPct: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-20 text-center tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
               <div className="flex flex-col items-center shrink-0"><label className={`${lbl} text-center`}>Client Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><div className="text-[13px] font-bold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg w-20 text-center">{clientCost.toFixed(2)}</div></div></div>
             </div>
           </section>
@@ -278,25 +286,25 @@ export default function RulesEngine() {
             <p className="text-[12px] text-gray-500 mb-3">Recurs relative to the last completed service. Assign <b>every month</b> to a cadence — different months can use different intervals.</p>
             <div className="space-y-3">
               {rule.cadences.map((c) => (
-                <div key={c.id} className="relative border border-gray-200 rounded-xl p-3 pr-9 bg-gray-50">
+                <div key={c.id} className="relative border border-gray-200 rounded-xl p-3 pr-8 bg-gray-50">
                   {rule.cadences.length > 1 && (
                     <button onClick={() => patch({ cadences: rule.cadences.filter((x) => x.id !== c.id) })}
                       aria-label="Delete cadence" title="Delete cadence"
                       className="absolute top-2 right-2 w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 text-lg leading-none">×</button>
                   )}
-                  <div className="flex flex-nowrap items-center gap-2 mb-2.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+                  <div className="flex flex-nowrap items-center gap-1.5 mb-2.5">
                     <span className="text-[13px] text-gray-600 shrink-0">Every</span>
-                    <input value={c.interval} onChange={(e) => patchCadence(c.id, { interval: Number(e.target.value.replace(/\D/g, '')) || 1 })} className={`${ctl} w-14 shrink-0 tabular-nums`} />
-                    <select value={c.unit} onChange={(e) => patchCadence(c.id, { unit: e.target.value as Unit })} className={`${ctl} shrink-0`}>
+                    <input value={c.interval} onChange={(e) => patchCadence(c.id, { interval: Number(e.target.value.replace(/\D/g, '')) || 1 })} className={`${ctl} w-11 shrink-0 text-center tabular-nums`} />
+                    <select value={c.unit} onChange={(e) => patchCadence(c.id, { unit: e.target.value as Unit })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}>
                       <option value="days">days</option><option value="weeks">weeks</option><option value="months">months</option>
                     </select>
                     {c.unit === 'weeks' && (
                       <><span className="text-[13px] text-gray-600 shrink-0">on</span>
-                      <select value={c.dow} onChange={(e) => patchCadence(c.id, { dow: Number(e.target.value) })} className={`${ctl} shrink-0`}>{DOW.map((d, di) => <option key={d} value={di}>{d}</option>)}</select></>
+                      <select value={c.dow} onChange={(e) => patchCadence(c.id, { dow: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}>{DOW.map((d, di) => <option key={d} value={di}>{d}</option>)}</select></>
                     )}
                     {c.unit === 'months' && (
                       <><span className="text-[13px] text-gray-600 shrink-0 whitespace-nowrap">on day</span>
-                      <select value={c.dom} onChange={(e) => patchCadence(c.id, { dom: Number(e.target.value) })} className={`${ctl} shrink-0`}>{Array.from({ length: 28 }, (_, di) => di + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select></>
+                      <select value={c.dom} onChange={(e) => patchCadence(c.id, { dom: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}>{Array.from({ length: 28 }, (_, di) => di + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select></>
                     )}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
