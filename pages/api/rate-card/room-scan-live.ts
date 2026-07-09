@@ -321,7 +321,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* client gone */ }
       };
 
-      let usageIn = 0, usageOut = 0;
+      let usageIn = 0, usageOut = 0, usageCacheRead = 0, usageCacheCreate = 0;
       const pending: Promise<void>[] = [];
       const blocks: Record<number, { name: string; json: string }> = {};
 
@@ -397,7 +397,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             try { ev = JSON.parse(json); } catch { continue; }
             if (ev.type === 'message_start') {
               const u = ev.message?.usage;
-              if (u) { usageIn += (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0); usageOut += u.output_tokens || 0; }
+              if (u) { usageIn += u.input_tokens || 0; usageCacheRead += u.cache_read_input_tokens || 0; usageCacheCreate += u.cache_creation_input_tokens || 0; usageOut += u.output_tokens || 0; }
             } else if (ev.type === 'content_block_start') {
               if (ev.content_block?.type === 'tool_use') blocks[ev.index] = { name: ev.content_block.name, json: '' };
             } else if (ev.type === 'content_block_delta') {
@@ -412,7 +412,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       } catch { send('error', { error: 'stream interrupted' }); }
       // Let any in-flight catalog resolutions finish emitting before we close.
       await Promise.allSettled(pending);
-      recordAiUsage({ source: 'room_scan_live', model: MODEL_FAST, inputTokens: usageIn, outputTokens: usageOut });
+      recordAiUsage({ source: 'room_scan_live', model: MODEL_FAST, inputTokens: usageIn, outputTokens: usageOut, cacheReadTokens: usageCacheRead, cacheCreationTokens: usageCacheCreate });
       send('done', {});
       res.end();
       return;
@@ -420,7 +420,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // ---------------- NON-STREAMING JSON PATH (fallback) ----------------
     const data = await resp.json();
-    recordAiUsage({ source: 'room_scan_live', model: MODEL_FAST, inputTokens: data?.usage?.input_tokens, outputTokens: data?.usage?.output_tokens });
+    recordAiUsage({ source: 'room_scan_live', model: MODEL_FAST, inputTokens: data?.usage?.input_tokens, outputTokens: data?.usage?.output_tokens, cacheReadTokens: data?.usage?.cache_read_input_tokens, cacheCreationTokens: data?.usage?.cache_creation_input_tokens });
     const content: any[] = data.content || [];
     const suggestUses = content.filter((c: any) => c.type === 'tool_use' && c.name === 'suggest_line');
     const editUses = content.filter((c: any) => c.type === 'tool_use' && c.name === 'edit_line');

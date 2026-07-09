@@ -21,7 +21,10 @@ import { stateOfRegion } from '@/lib/userAccess';
 import { recordAiUsage } from '@/lib/aiUsage';
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-sonnet-4-6';
+// Intent parsing is a small, well-scoped JSON-routing task — the fast model
+// handles it reliably at ~1/3 the cost of Sonnet. (temperature:0 is still
+// accepted on Haiku 4.5.)
+const MODEL = 'claude-haiku-4-5-20251001';
 const APP_BASE = (process.env.APP_BASE_URL || 'https://resiwalk.com').replace(/\/$/, '');
 
 const TEMPLATE_TYPE: Record<string, string> = {

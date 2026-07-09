@@ -24,15 +24,32 @@ export type AiUsageSource =
 // drive the dashboard's cost estimate only. Whisper is priced per minute.
 const RATES: Record<string, { in: number; out: number }> = {
   'claude-sonnet-4-6': { in: 3, out: 15 },
+  'claude-sonnet-5': { in: 3, out: 15 },
   'claude-haiku-4-5-20251001': { in: 1, out: 5 },
-  'claude-opus-4-8': { in: 15, out: 75 },
+  'claude-opus-4-8': { in: 5, out: 25 },
   'voyage': { in: 0.02, out: 0 },        // voyage-3-lite embeddings (input-only)
   'whisper': { in: 0, out: 0 },          // priced per-minute; see estimateWhisperCost
 };
 
-export function estimateCostUSD(model: string, inputTokens: number, outputTokens: number): number {
+// Prompt-cache multipliers on the input rate: reads are ~0.1x, writes ~1.25x.
+const CACHE_READ_MULT = 0.1;
+const CACHE_WRITE_MULT = 1.25;
+
+/**
+ * Cost estimate. `inputTokens` is the UNCACHED input; pass cache read/creation
+ * tokens separately so cached prefixes are priced correctly (reads ~0.1x, writes
+ * ~1.25x) instead of at full rate. Callers that don't split cache tokens just
+ * pass inputTokens (cache args default 0) and get the old full-rate estimate.
+ */
+export function estimateCostUSD(
+  model: string, inputTokens: number, outputTokens: number,
+  cacheReadTokens = 0, cacheCreationTokens = 0,
+): number {
   const r = RATES[model] || RATES[Object.keys(RATES).find((k) => model.startsWith(k.split('-').slice(0, 2).join('-'))) || ''] || { in: 0, out: 0 };
-  return (inputTokens / 1e6) * r.in + (outputTokens / 1e6) * r.out;
+  return (inputTokens / 1e6) * r.in
+    + (cacheReadTokens / 1e6) * r.in * CACHE_READ_MULT
+    + (cacheCreationTokens / 1e6) * r.in * CACHE_WRITE_MULT
+    + (outputTokens / 1e6) * r.out;
 }
 
 /** Whisper transcription: ~$0.006 / minute of audio. */
@@ -62,13 +79,20 @@ function today(): string { return new Date().toISOString().slice(0, 10); }
 
 export function recordAiUsage(args: {
   source: AiUsageSource; model: string; inputTokens?: number; outputTokens?: number; costUSD?: number;
+  cacheReadTokens?: number; cacheCreationTokens?: number;
 }): void {
   const inputTokens = args.inputTokens || 0;
   const outputTokens = args.outputTokens || 0;
-  const costUSD = args.costUSD != null ? args.costUSD : estimateCostUSD(args.model, inputTokens, outputTokens);
+  const cacheReadTokens = args.cacheReadTokens || 0;
+  const cacheCreationTokens = args.cacheCreationTokens || 0;
+  const costUSD = args.costUSD != null ? args.costUSD
+    : estimateCostUSD(args.model, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens);
 
-  // 1) Structured log — authoritative, never lost.
-  try { console.log(`[ai-usage] ${JSON.stringify({ source: args.source, model: args.model, inputTokens, outputTokens, costUSD: Math.round(costUSD * 1e6) / 1e6 })}`); } catch { /* noop */ }
+  // 1) Structured log — authoritative, never lost. cacheRead/cacheCreation make
+  // it possible to confirm prompt caching is actually landing (grep [ai-usage]):
+  // cacheRead≈0 with a high cacheCreation every call means the cache is missing
+  // (e.g. a prefix below the model's minimum cacheable size, or an invalidator).
+  try { console.log(`[ai-usage] ${JSON.stringify({ source: args.source, model: args.model, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUSD: Math.round(costUSD * 1e6) / 1e6 })}`); } catch { /* noop */ }
 
   // 2) Roll into the per-instance daily aggregate.
   const d = today();

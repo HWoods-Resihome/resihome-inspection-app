@@ -139,7 +139,7 @@ async function streamAnthropic(
   const toolJsonByIndex: Record<number, string> = {};
   // Usage accrues across SSE events: message_start carries input_tokens, the
   // final message_delta carries the cumulative output_tokens.
-  let usageIn = 0, usageOut = 0;
+  let usageIn = 0, usageOut = 0, usageCacheRead = 0, usageCacheCreate = 0;
 
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
@@ -162,7 +162,7 @@ async function streamAnthropic(
 
       if (ev.type === 'message_start') {
         const u = ev.message?.usage;
-        if (u) { usageIn += (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0); usageOut += u.output_tokens || 0; }
+        if (u) { usageIn += u.input_tokens || 0; usageCacheRead += u.cache_read_input_tokens || 0; usageCacheCreate += u.cache_creation_input_tokens || 0; usageOut += u.output_tokens || 0; }
       } else if (ev.type === 'content_block_start') {
         const cb = ev.content_block;
         if (cb?.type === 'text') blocks[ev.index] = { type: 'text', text: '' };
@@ -190,7 +190,7 @@ async function streamAnthropic(
       }
     }
   }
-  recordAiUsage({ source: 'voice_assist', model: String(payload?.model || MODEL_SMART), inputTokens: usageIn, outputTokens: usageOut });
+  recordAiUsage({ source: 'voice_assist', model: String(payload?.model || MODEL_SMART), inputTokens: usageIn, outputTokens: usageOut, cacheReadTokens: usageCacheRead, cacheCreationTokens: usageCacheCreate });
   // Compact any holes left by index gaps.
   return { content: blocks.filter(Boolean), stopReason };
 }

@@ -29,6 +29,8 @@ const INFER_INTERVAL_MS = 2500;   // keyframe → vision cadence
 const STILL_INTERVAL_MS = 5000;   // full-res stamped still cadence
 const KEYFRAME_EDGE = 640;        // downscale before sending (speed)
 const MAX_STILLS = 10;
+const SIG_EDGE = 16;              // tiny grayscale grid for silent-tick change detection
+const FRAME_SAME_DELTA = 6;       // mean abs grayscale diff below this = "same scene" → skip
 
 interface LiveSuggestion {
   id: string;
@@ -92,6 +94,7 @@ export function LiveRoomScan(props: Props) {
   const stillTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const inFlight = useRef(false);
   const openRef = useRef(true);
+  const lastFrameSigRef = useRef<Uint8ClampedArray | null>(null);  // last analyzed silent-tick frame
   const audioRecRef = useRef<MediaRecorder | null>(null);
   const audioLoopRef = useRef(false);
 
@@ -298,6 +301,31 @@ export function LiveRoomScan(props: Props) {
     return c.toDataURL('image/jpeg', 0.6).split(',')[1] || null;
   }
 
+  // Coarse 16x16 grayscale fingerprint of the current frame — cheap (tiny canvas
+  // + one getImageData). Used to skip silent vision ticks when the camera is held
+  // still: a near-duplicate frame only yields already-deduped suggestions.
+  function frameSignature(): Uint8ClampedArray | null {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return null;
+    const c = document.createElement('canvas');
+    c.width = SIG_EDGE; c.height = SIG_EDGE;
+    const ctx = c.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(v, 0, 0, SIG_EDGE, SIG_EDGE);
+    let data: Uint8ClampedArray;
+    try { data = ctx.getImageData(0, 0, SIG_EDGE, SIG_EDGE).data; } catch { return null; }
+    const gray = new Uint8ClampedArray(SIG_EDGE * SIG_EDGE);
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) gray[p] = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
+    return gray;
+  }
+  function frameChangedEnough(sig: Uint8ClampedArray): boolean {
+    const last = lastFrameSigRef.current;
+    if (!last || last.length !== sig.length) return true;
+    let sum = 0;
+    for (let i = 0; i < sig.length; i++) sum += Math.abs(sig[i] - last[i]);
+    return sum / sig.length >= FRAME_SAME_DELTA;
+  }
+
   // Capture a full-res, evidence-stamped still → upload → room photos. Returns
   // the uploaded URL. `force` bypasses the periodic cap (used for per-suggestion
   // stills and the manual shutter, so each item gets its OWN photo).
@@ -327,11 +355,21 @@ export function LiveRoomScan(props: Props) {
   // ---- inference ----
   async function runInference() {
     if (inFlight.current || !openRef.current) return;
+    const delta = transcriptBufRef.current.trim();
+    // Silent vision tick: skip the call when the scene hasn't materially changed
+    // since the last analyzed frame (camera held still). A duplicate frame only
+    // produces already-deduped suggestions, so this cuts the highest-frequency
+    // vision call with no loss. Voice ticks always run — voice is the primary
+    // signal and is analyzed text-only server-side.
+    if (!delta) {
+      const sig = frameSignature();
+      if (sig && !frameChangedEnough(sig)) return;
+      if (sig) lastFrameSigRef.current = sig;
+    }
     const b64 = grabKeyframeB64(KEYFRAME_EDGE);
     if (!b64) return;
     inFlight.current = true;
     setScanning(true);
-    const delta = transcriptBufRef.current.trim();
     transcriptBufRef.current = '';
     try {
       const r = await fetch('/api/rate-card/room-scan-live', {
