@@ -425,6 +425,20 @@ function QcPhotoGallery({ rooms, start, embed }: { rooms: RoomGroup[]; start: st
   });
   const { mode, i } = nav;
   const seq = mode === 'before' ? beforeSeq : afterSeq;
+  const curRoom = seq[i]?.roomIdx ?? 0;
+
+  // Keep the active room pill centered in the scroller as navigation moves
+  // between rooms, so the next/previous room is visible approaching the centre
+  // and the highlight tracks the photo you're on.
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const activePillRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const el = activePillRef.current, sc = scrollerRef.current;
+    if (!el || !sc || typeof el.getBoundingClientRect !== 'function') return;
+    const er = el.getBoundingClientRect(), cr = sc.getBoundingClientRect();
+    const delta = (er.left + er.width / 2) - (cr.left + cr.width / 2);
+    if (Math.abs(delta) > 1) sc.scrollBy({ left: delta, behavior: 'smooth' });
+  }, [curRoom, mode]);
 
   if (seq.length === 0) {
     return <div style={{ minHeight: '100vh', background: '#000', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', font: '14px sans-serif' }}>No photos for this inspection.</div>;
@@ -452,7 +466,6 @@ function QcPhotoGallery({ rooms, start, embed }: { rooms: RoomGroup[]; start: st
     if (oidx >= 0) setNav({ mode: other, i: oidx });
   };
 
-  const curRoom = seq[i]?.roomIdx ?? 0;
   const roomName = rooms[curRoom]?.name || 'Room';
   const roomStart = seq.findIndex((it) => it.roomIdx === curRoom);
   const roomCount = seq.reduce((n, it) => n + (it.roomIdx === curRoom ? 1 : 0), 0);
@@ -466,6 +479,9 @@ function QcPhotoGallery({ rooms, start, embed }: { rooms: RoomGroup[]; start: st
       canPrev={i > 0} canNext={i < seq.length - 1}
       onPrev={() => go(i - 1)} onNext={() => go(i + 1)}
     >
+      {/* Hide the native horizontal scrollbar on the room pills (it otherwise
+          renders over the pill text). Auto-centering + swipe cover discovery. */}
+      <style>{`.qc-rooms::-webkit-scrollbar{display:none}`}</style>
       {/* Top controls: label, Before/After toggle, room pills. */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '10px 8px 14px', background: 'linear-gradient(to bottom, rgba(0,0,0,0.6), rgba(0,0,0,0))', pointerEvents: 'none', zIndex: 2 }}>
         <div style={{ color: '#fff', font: '600 13px sans-serif', opacity: 0.9, textAlign: 'center', paddingLeft: embed ? 0 : 44, paddingRight: embed ? 0 : 44 }}>
@@ -482,10 +498,10 @@ function QcPhotoGallery({ rooms, start, embed }: { rooms: RoomGroup[]; start: st
             ))}
           </div>
         )}
-        <div onTouchStart={stop} onTouchMove={stop} onTouchEnd={stop}
-          style={{ display: 'flex', gap: 6, overflowX: 'auto', maxWidth: '100%', padding: '2px 4px', pointerEvents: 'auto', touchAction: 'pan-x', WebkitOverflowScrolling: 'touch' }}>
+        <div ref={scrollerRef} className="qc-rooms" onTouchStart={stop} onTouchMove={stop} onTouchEnd={stop}
+          style={{ display: 'flex', gap: 6, overflowX: 'auto', maxWidth: '100%', padding: '4px', pointerEvents: 'auto', touchAction: 'pan-x', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' } as CSSProperties}>
           {rooms.map((r, ri) => (
-            <button key={ri} onClick={() => selectRoom(ri)}
+            <button key={ri} ref={ri === curRoom ? activePillRef : undefined} onClick={() => selectRoom(ri)}
               style={{ whiteSpace: 'nowrap', flex: '0 0 auto', border: 'none', cursor: 'pointer', borderRadius: 999, padding: '6px 12px', font: '600 12px sans-serif', color: ri === curRoom ? '#fff' : 'rgba(255,255,255,0.8)', background: ri === curRoom ? '#ff0060' : 'rgba(255,255,255,0.15)' }}>
               {r.name}
             </button>
