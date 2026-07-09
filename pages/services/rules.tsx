@@ -18,7 +18,18 @@ const PORTFOLIOS: Record<string, number> = { 'Amherst Sunbelt': 612, 'Tricon GA'
 const COMMUNITIES: Record<string, number> = { 'Woodbine Crossing': 96, 'River Glen': 124, 'Camden Pointe': 88, 'Harlow Trace': 78, 'Stonecreek': 142, 'Maple Run': 64 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const FIELDS = ['Property Status', 'Home Type', 'Recurring Services', 'Occupancy'];
+// Curated Property-object fields for enrollment / stop criteria, each with its own
+// value options so the value picker "flows" from the chosen field. (Short list for
+// now; expands as we wire real Property properties.)
+const PROPERTY_FIELDS: { field: string; options: string[] }[] = [
+  { field: 'Property Status', options: ['Vacant', 'Pending MOI/Rekey', 'Occupied', 'Under Turnkey', 'Eviction'] },
+  { field: 'Home Type', options: ['Single-Family', 'Townhome', 'Condo', 'Duplex'] },
+  { field: 'Recurring Services', options: ['Enrolled', 'Paused', 'Not Enrolled'] },
+  { field: 'Has Pool', options: ['Yes', 'No'] },
+  { field: 'Occupancy', options: ['Vacant', 'Occupied'] },
+];
+const FIELD_NAMES = PROPERTY_FIELDS.map((f) => f.field);
+const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field)?.options ?? [];
 const OPS = ['is', 'is any of', 'is not', 'changes to'];
 
 type Unit = 'days' | 'weeks' | 'months';
@@ -55,7 +66,7 @@ function CoveragePicker({ noun, options, selected, onToggle }: {
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div className="absolute left-0 right-0 z-40 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
             <div className="p-2 border-b border-gray-100">
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${noun}…`} autoFocus
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${noun}…`}
                 className="w-full text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:border-brand" />
             </div>
             <div className="max-h-56 overflow-y-auto py-1">
@@ -86,15 +97,15 @@ const SEED: Rule[] = [
       { id: 11, unit: 'weeks', interval: 2, dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
       { id: 12, unit: 'months', interval: 1, dow: 0, dom: 15, months: [0, 1, 10, 11] },
     ],
-    enrollField: 'Property Status', enrollOp: 'is any of', enrollVal: 'Vacant, Pending MOI',
-    stopEnabled: true, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied / Leased',
+    enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
+    stopEnabled: true, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied',
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'grass_cut', scope: 'community',
     portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], vendorCost: 40, markupPct: 30,
     cadences: [{ id: 21, unit: 'weeks', interval: 1, dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
-    enrollField: 'Occupancy', enrollOp: 'is', enrollVal: 'Active community contract',
-    stopEnabled: false, stopField: 'Property Status', stopOp: 'changes to', stopVal: '',
+    enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
+    stopEnabled: false, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied',
   },
 ];
 
@@ -176,7 +187,7 @@ export default function RulesEngine() {
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-[250px_minmax(0,1fr)] gap-4 p-4">
         {/* rule list */}
         <aside className="space-y-2">
-          <button onClick={addRule} className="w-full text-brand bg-brand/5 border border-dashed border-brand/40 rounded-xl py-2 text-[13px] font-heading font-bold">+ New rule</button>
+          <button onClick={addRule} className="w-full text-brand bg-brand/5 border border-dashed border-brand/40 rounded-xl py-2 text-[13px] font-heading font-bold">+ New Rule</button>
           {rules.map((r) => (
             <div key={r.id} className={`bg-white border rounded-xl p-3 cursor-pointer ${r.id === selId ? 'border-brand ring-1 ring-brand' : 'border-gray-200 hover:border-gray-300'} ${r.active ? '' : 'opacity-60'}`} onClick={() => setSelId(r.id)}>
               <div className="font-heading font-bold text-[12.5px] text-ink leading-tight">
@@ -206,22 +217,22 @@ export default function RulesEngine() {
         <main className="space-y-4">
           <div className="flex items-end gap-3">
             <div className="flex-1 min-w-0">
-              <label className={lbl}>Rule name</label>
+              <label className={lbl}>Rule Name</label>
               <input value={rule.name} onChange={(e) => patch({ name: e.target.value })} placeholder="Name this rule"
                 className="w-full font-heading font-extrabold text-xl text-ink bg-white border border-gray-300 rounded-lg px-3 py-1.5 focus:border-brand focus:outline-none" />
             </div>
             <div className="text-right shrink-0">
               <div className="text-2xl font-heading font-extrabold text-ink tabular-nums leading-none">{coveredCount.toLocaleString()}</div>
-              <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">properties covered</div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Properties Covered</div>
             </div>
           </div>
 
           {/* SECTION 1 — scope & pricing */}
           <section className={sec}>
-            <h3 className="font-heading font-bold text-[15px] text-ink mb-3"><span className="text-brand">1.</span> Work type, coverage &amp; pricing</h3>
+            <h3 className="font-heading font-bold text-[15px] text-ink mb-3"><span className="text-brand">1.</span> Work Type, Coverage &amp; Pricing</h3>
             <div className="flex flex-wrap items-center gap-3 mb-4">
               <div>
-                <label className={lbl}>Work type</label>
+                <label className={lbl}>Work Type</label>
                 <select value={rule.worktype} onChange={(e) => patch({ worktype: e.target.value as Worktype })} className={ctl}>
                   {WORKTYPES.filter((w) => w.scopes.includes(rule.scope)).map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
                 </select>
@@ -251,10 +262,10 @@ export default function RulesEngine() {
               </div>
             )}
             {(rule.scope === 'property' ? rule.portfolios : rule.communities).length === 0 && <div className="mb-4" />}
-            <div className="flex flex-wrap items-end gap-4 border-t border-gray-100 pt-4">
-              <div><label className={lbl}>Vendor cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><input value={rule.vendorCost} onChange={(e) => patch({ vendorCost: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-24 tabular-nums`} /></div></div>
-              <div><label className={lbl}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} onChange={(e) => patch({ markupPct: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-20 tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
-              <div><label className={lbl}>Client cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><div className="text-[13px] font-bold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg w-24">{clientCost.toFixed(2)}</div></div></div>
+            <div className="flex flex-wrap gap-5 border-t border-gray-100 pt-4">
+              <div className="flex flex-col items-center"><label className={`${lbl} text-center`}>Vendor Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><input value={rule.vendorCost} onChange={(e) => patch({ vendorCost: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-24 text-center tabular-nums`} /></div></div>
+              <div className="flex flex-col items-center"><label className={`${lbl} text-center`}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} onChange={(e) => patch({ markupPct: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-20 text-center tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
+              <div className="flex flex-col items-center"><label className={`${lbl} text-center`}>Client Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><div className="text-[13px] font-bold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg w-24 text-center">{clientCost.toFixed(2)}</div></div></div>
             </div>
           </section>
 
@@ -263,8 +274,13 @@ export default function RulesEngine() {
             <h3 className="font-heading font-bold text-[15px] text-ink"><span className="text-brand">2.</span> Cadence</h3>
             <p className="text-[12px] text-gray-500 mb-3">Recurs relative to the last completed service. Assign <b>every month</b> to a cadence — different months can use different intervals.</p>
             <div className="space-y-3">
-              {rule.cadences.map((c, i) => (
-                <div key={c.id} className="border border-gray-200 rounded-xl p-3 bg-gray-50">
+              {rule.cadences.map((c) => (
+                <div key={c.id} className="relative border border-gray-200 rounded-xl p-3 pr-9 bg-gray-50">
+                  {rule.cadences.length > 1 && (
+                    <button onClick={() => patch({ cadences: rule.cadences.filter((x) => x.id !== c.id) })}
+                      aria-label="Delete cadence" title="Delete cadence"
+                      className="absolute top-2 right-2 w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 text-lg leading-none">×</button>
+                  )}
                   <div className="flex flex-wrap items-center gap-2 mb-2.5">
                     <span className="text-[13px] text-gray-600">Every</span>
                     <input value={c.interval} onChange={(e) => patchCadence(c.id, { interval: Number(e.target.value.replace(/\D/g, '')) || 1 })} className={`${ctl} w-14 tabular-nums`} />
@@ -279,7 +295,6 @@ export default function RulesEngine() {
                       <><span className="text-[13px] text-gray-600">on day</span>
                       <select value={c.dom} onChange={(e) => patchCadence(c.id, { dom: Number(e.target.value) })} className={ctl}>{Array.from({ length: 28 }, (_, di) => di + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select></>
                     )}
-                    {rule.cadences.length > 1 && <button onClick={() => patch({ cadences: rule.cadences.filter((x) => x.id !== c.id) })} className="ml-auto text-gray-400 hover:text-red-600 text-sm">Remove</button>}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {MONTHS.map((m, mi) => {
@@ -290,7 +305,7 @@ export default function RulesEngine() {
                 </div>
               ))}
             </div>
-            <button onClick={() => patch({ cadences: [...rule.cadences, newCadence(missingMonths)] })} className="mt-3 text-[12px] font-semibold text-gray-600 border border-gray-300 rounded-lg px-2.5 py-1 bg-white hover:border-brand/40">+ Add cadence</button>
+            <button onClick={() => patch({ cadences: [...rule.cadences, newCadence(missingMonths)] })} className="mt-3 text-[12px] font-semibold text-gray-600 border border-gray-300 rounded-lg px-2.5 py-1 bg-white hover:border-brand/40">+ Add Cadence</button>
             <div className={`mt-3 text-[12.5px] font-semibold ${missingMonths.length ? 'text-red-600' : 'text-emerald-600'}`}>
               {missingMonths.length ? `Not all months covered — missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}` : 'All 12 months covered ✓'}
             </div>
@@ -298,23 +313,23 @@ export default function RulesEngine() {
 
           {/* SECTION 3 — enrollment & stop */}
           <section className={sec}>
-            <h3 className="font-heading font-bold text-[15px] text-ink"><span className="text-brand">3.</span> Enrollment &amp; stop</h3>
+            <h3 className="font-heading font-bold text-[15px] text-ink"><span className="text-brand">3.</span> Enrollment &amp; Stop</h3>
             <p className="text-[12px] text-gray-500 mb-3">Enrollment creates the first service; each service auto-recreates when the last is submitted, until the (optional) stop criteria is met. Vendor assignment is handled separately in Vendor Management.</p>
-            <label className={lbl}>Enroll (create services) when</label>
+            <label className={lbl}>Enroll (Create Services) When</label>
             <div className="flex flex-wrap items-center gap-2 mb-4">
-              <select value={rule.enrollField} onChange={(e) => patch({ enrollField: e.target.value })} className={ctl}>{FIELDS.map((f) => <option key={f}>{f}</option>)}</select>
+              <select value={rule.enrollField} onChange={(e) => patch({ enrollField: e.target.value, enrollVal: optsFor(e.target.value)[0] || '' })} className={ctl}>{FIELD_NAMES.map((f) => <option key={f}>{f}</option>)}</select>
               <select value={rule.enrollOp} onChange={(e) => patch({ enrollOp: e.target.value })} className={ctl}>{OPS.map((o) => <option key={o}>{o}</option>)}</select>
-              <input value={rule.enrollVal} onChange={(e) => patch({ enrollVal: e.target.value })} placeholder="value" className={`${ctl} flex-1 min-w-[140px]`} />
+              <select value={rule.enrollVal} onChange={(e) => patch({ enrollVal: e.target.value })} className={`${ctl} flex-1 min-w-[140px]`}>{optsFor(rule.enrollField).map((o) => <option key={o}>{o}</option>)}</select>
             </div>
             <label className="flex items-center gap-2 text-[13px] font-semibold text-ink mb-2">
-              <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked })} /> Add stop criteria (optional)
+              <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked, ...(e.target.checked && !rule.stopVal ? { stopVal: optsFor(rule.stopField)[0] || '' } : {}) })} /> Add Stop Criteria (Optional)
             </label>
             {rule.stopEnabled && (
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[13px] text-gray-600">Stop when</span>
-                <select value={rule.stopField} onChange={(e) => patch({ stopField: e.target.value })} className={ctl}>{FIELDS.map((f) => <option key={f}>{f}</option>)}</select>
+                <span className="text-[13px] text-gray-600">Stop When</span>
+                <select value={rule.stopField} onChange={(e) => patch({ stopField: e.target.value, stopVal: optsFor(e.target.value)[0] || '' })} className={ctl}>{FIELD_NAMES.map((f) => <option key={f}>{f}</option>)}</select>
                 <select value={rule.stopOp} onChange={(e) => patch({ stopOp: e.target.value })} className={ctl}>{OPS.map((o) => <option key={o}>{o}</option>)}</select>
-                <input value={rule.stopVal} onChange={(e) => patch({ stopVal: e.target.value })} placeholder="value" className={`${ctl} flex-1 min-w-[140px]`} />
+                <select value={rule.stopVal} onChange={(e) => patch({ stopVal: e.target.value })} className={`${ctl} flex-1 min-w-[140px]`}>{optsFor(rule.stopField).map((o) => <option key={o}>{o}</option>)}</select>
               </div>
             )}
           </section>
@@ -325,7 +340,7 @@ export default function RulesEngine() {
               <div key={i} className="mb-2 text-[12.5px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {e}</div>
             ))}
             <button disabled={!canSave} className={`w-full rounded-2xl py-3 font-heading font-bold text-sm ${canSave ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
-              {canSave ? 'Save & activate' : 'Resolve the above to save'}
+              {canSave ? 'Save & Activate' : 'Resolve the Issues Above to Save'}
             </button>
           </div>
         </main>
