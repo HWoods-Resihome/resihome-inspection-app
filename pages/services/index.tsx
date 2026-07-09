@@ -245,16 +245,18 @@ export default function ServicesHome({ userName }: { userName: string }) {
             return (
               <Link key={s.id} href={`/services/${s.id}`} className="block bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 hover:border-brand/40 active:scale-[0.998] transition">
                 <div className="flex items-center gap-2">
-                  <span className="font-heading font-bold text-ink truncate flex-1 min-w-0">{s.address}</span>
-                  <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${s.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{s.scope === 'community' ? 'Community' : 'SFR'}</span>
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="font-heading font-bold text-ink truncate">{s.address}</span>
+                    <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${s.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{s.scope === 'community' ? 'Community' : 'SFR'}</span>
+                  </div>
                   <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>{STATUS_LABEL[s.status]}</span>
                 </div>
+                <div className="text-[12px] text-gray-500 truncate mt-0.5">{s.locality}{s.community ? ` · ${s.community}` : ''}</div>
                 <div className="mt-1 flex items-end justify-between gap-2">
                   <div className="text-[12px] text-gray-600 flex flex-wrap gap-x-3 gap-y-0.5 min-w-0">
                     <span className="font-semibold text-ink">{worktypeLabel(s.worktype)}</span>
                     {s.scope !== 'community' && s.propertyStatus && <span>{s.propertyStatus}</span>}
-                    <span className={overdue ? 'text-red-600 font-semibold' : ''}>Due {fmtDue(s.dueDate)}{overdue ? ' · Past due' : ''}</span>
-                    <span className="text-gray-400 truncate">{s.locality}{s.community ? ` · ${s.community}` : ''}</span>
+                    <span className={overdue ? 'text-red-600 font-semibold' : ''}>Due {fmtDue(s.dueDate)}</span>
                   </div>
                   <span className="text-[12px] shrink-0 text-right">{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
                 </div>

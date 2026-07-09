@@ -35,9 +35,52 @@ interface Rule {
 let _cid = 100;
 const newCadence = (months: number[] = []): Cadence => ({ id: ++_cid, unit: 'weeks', interval: 2, dow: 0, dom: 1, months });
 
+// Searchable, multi-select, scrollable dropdown for portfolio/community coverage.
+function CoveragePicker({ noun, options, selected, onToggle }: {
+  noun: string; options: { key: string; count: number }[]; selected: string[]; onToggle: (k: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const filtered = options.filter((o) => o.key.toLowerCase().includes(q.trim().toLowerCase()));
+  const summary = selected.length === 0 ? `Select ${noun}…` : selected.length === 1 ? selected[0] : `${selected.length} ${noun} selected`;
+  return (
+    <div className="relative max-w-md">
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className={`w-full flex items-center justify-between gap-2 text-[13px] font-semibold px-3 py-2 border rounded-lg bg-white ${selected.length ? 'border-brand/50 text-ink' : 'border-gray-300 text-gray-500'}`}>
+        <span className="truncate">{summary}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 right-0 z-40 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+            <div className="p-2 border-b border-gray-100">
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${noun}…`} autoFocus
+                className="w-full text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:border-brand" />
+            </div>
+            <div className="max-h-56 overflow-y-auto py-1">
+              {filtered.map((o) => {
+                const on = selected.includes(o.key);
+                return (
+                  <button key={o.key} type="button" onClick={() => onToggle(o.key)} className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] hover:bg-gray-50 text-left">
+                    <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] font-bold shrink-0 ${on ? 'bg-brand border-brand text-white' : 'border-gray-300'}`}>{on ? '✓' : ''}</span>
+                    <span className="flex-1 truncate text-ink">{o.key}</span>
+                    <span className="text-[11px] text-gray-400 tabular-nums">{o.count.toLocaleString()}</span>
+                  </button>
+                );
+              })}
+              {filtered.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-gray-400">No matches</div>}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 const SEED: Rule[] = [
   {
-    id: 1, name: 'Amherst — Grass Cut', active: true, worktype: 'grass_cut', scope: 'property',
+    id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'grass_cut', scope: 'property',
     portfolios: ['Amherst Sunbelt'], communities: [], vendorCost: 42, markupPct: 35,
     cadences: [
       { id: 11, unit: 'weeks', interval: 2, dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
@@ -47,7 +90,7 @@ const SEED: Rule[] = [
     stopEnabled: true, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied / Leased',
   },
   {
-    id: 2, name: 'Atlanta Communities — Grass', active: true, worktype: 'grass_cut', scope: 'community',
+    id: 2, name: 'ATL Community Grass', active: true, worktype: 'grass_cut', scope: 'community',
     portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], vendorCost: 40, markupPct: 30,
     cadences: [{ id: 21, unit: 'weeks', interval: 1, dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     enrollField: 'Occupancy', enrollOp: 'is', enrollVal: 'Active community contract',
@@ -58,7 +101,6 @@ const SEED: Rule[] = [
 export default function RulesEngine() {
   const [rules, setRules] = useState<Rule[]>(SEED);
   const [selId, setSelId] = useState(1);
-  const [gearOpen, setGearOpen] = useState(false);
   const rule = rules.find((r) => r.id === selId) || rules[0];
 
   const patch = (p: Partial<Rule>) => setRules((rs) => rs.map((r) => (r.id === selId ? { ...r, ...p } : r)));
@@ -88,11 +130,11 @@ export default function RulesEngine() {
     if (id === selId) { const rest = rules.filter((r) => r.id !== id); if (rest[0]) setSelId(rest[0].id); }
   };
 
-  const coveredCount = useMemo(() => {
-    const src = rule.scope === 'property' ? PORTFOLIOS : COMMUNITIES;
-    const keys = rule.scope === 'property' ? rule.portfolios : rule.communities;
-    return keys.reduce((n, k) => n + (src[k] || 0), 0);
-  }, [rule]);
+  const countFor = (r: Rule) => {
+    const src = r.scope === 'property' ? PORTFOLIOS : COMMUNITIES;
+    return (r.scope === 'property' ? r.portfolios : r.communities).reduce((n, k) => n + (src[k] || 0), 0);
+  };
+  const coveredCount = useMemo(() => countFor(rule), [rule]);
 
   const coveredMonths = useMemo(() => new Set(rule.cadences.flatMap((c) => c.months)), [rule]);
   const missingMonths = MONTHS.map((_, i) => i).filter((i) => !coveredMonths.has(i));
@@ -119,7 +161,6 @@ export default function RulesEngine() {
   const sec = 'bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 shadow-sm';
   const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
   const ctl = 'text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg bg-white text-ink';
-  const chip = (on: boolean) => `text-[12.5px] font-heading font-semibold px-3 py-1.5 rounded-full border ${on ? 'bg-brand/10 text-brand border-brand/40' : 'bg-white text-gray-600 border-gray-300 hover:border-brand/40'}`;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -138,18 +179,18 @@ export default function RulesEngine() {
           <button onClick={addRule} className="w-full text-brand bg-brand/5 border border-dashed border-brand/40 rounded-xl py-2 text-[13px] font-heading font-bold">+ New rule</button>
           {rules.map((r) => (
             <div key={r.id} className={`bg-white border rounded-xl p-3 cursor-pointer ${r.id === selId ? 'border-brand ring-1 ring-brand' : 'border-gray-200 hover:border-gray-300'} ${r.active ? '' : 'opacity-60'}`} onClick={() => setSelId(r.id)}>
-              <div className="flex items-center gap-2">
-                <div className="font-heading font-bold text-[13px] text-ink flex-1 truncate">{r.name}</div>
-                <button onClick={(e) => { e.stopPropagation(); setRules((rs) => rs.map((x) => x.id === r.id ? { ...x, active: !x.active } : x)); }}
-                  title={r.active ? 'Active — click to pause' : 'Inactive — click to activate'}
-                  className={`relative w-8 h-4.5 rounded-full transition ${r.active ? 'bg-brand' : 'bg-gray-300'}`} style={{ height: 18, width: 32 }}>
-                  <span className="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white transition" style={{ transform: r.active ? 'translateX(14px)' : 'none' }} />
-                </button>
+              <div className="font-heading font-bold text-[12.5px] text-ink leading-tight">
+                {r.name} <span className="text-brand font-extrabold whitespace-nowrap">({countFor(r).toLocaleString()})</span>
               </div>
               <div className="flex items-center gap-1.5 mt-1.5">
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${r.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{r.scope === 'community' ? 'Community' : 'SFR'}</span>
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{worktypeLabel(r.worktype)}</span>
                 {!r.active && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">Paused</span>}
+                <button onClick={(e) => { e.stopPropagation(); setRules((rs) => rs.map((x) => x.id === r.id ? { ...x, active: !x.active } : x)); }}
+                  title={r.active ? 'Active — click to pause' : 'Inactive — click to activate'}
+                  className={`ml-auto relative rounded-full transition shrink-0 ${r.active ? 'bg-brand' : 'bg-gray-300'}`} style={{ height: 18, width: 32 }}>
+                  <span className="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white transition" style={{ transform: r.active ? 'translateX(14px)' : 'none' }} />
+                </button>
               </div>
               {r.id === selId && (
                 <div className="flex gap-3 mt-2 text-[11px] font-semibold">
@@ -163,9 +204,12 @@ export default function RulesEngine() {
 
         {/* editor */}
         <main className="space-y-4">
-          <div className="flex items-center gap-3">
-            <input value={rule.name} onChange={(e) => patch({ name: e.target.value })}
-              className="font-heading font-extrabold text-xl text-ink bg-transparent border-b-2 border-dashed border-gray-300 focus:border-brand focus:outline-none flex-1 min-w-0" />
+          <div className="flex items-end gap-3">
+            <div className="flex-1 min-w-0">
+              <label className={lbl}>Rule name</label>
+              <input value={rule.name} onChange={(e) => patch({ name: e.target.value })} placeholder="Name this rule"
+                className="w-full font-heading font-extrabold text-xl text-ink bg-white border border-gray-300 rounded-lg px-3 py-1.5 focus:border-brand focus:outline-none" />
+            </div>
             <div className="text-right shrink-0">
               <div className="text-2xl font-heading font-extrabold text-ink tabular-nums leading-none">{coveredCount.toLocaleString()}</div>
               <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">properties covered</div>
@@ -191,16 +235,26 @@ export default function RulesEngine() {
               </div>
             </div>
             <label className={lbl}>{rule.scope === 'property' ? 'Portfolios' : 'Communities'}</label>
-            <div className="flex flex-wrap gap-2 mb-4">
-              {Object.entries(rule.scope === 'property' ? PORTFOLIOS : COMMUNITIES).map(([k, homes]) => {
-                const on = (rule.scope === 'property' ? rule.portfolios : rule.communities).includes(k);
-                return <button key={k} onClick={() => toggleCoverage(k)} className={chip(on)}>{k} <span className={`text-[11px] tabular-nums ${on ? 'text-brand' : 'text-gray-400'}`}>{homes}</span></button>;
-              })}
-            </div>
+            <CoveragePicker
+              noun={rule.scope === 'property' ? 'portfolios' : 'communities'}
+              options={Object.entries(rule.scope === 'property' ? PORTFOLIOS : COMMUNITIES).map(([key, count]) => ({ key, count }))}
+              selected={rule.scope === 'property' ? rule.portfolios : rule.communities}
+              onToggle={toggleCoverage}
+            />
+            {(rule.scope === 'property' ? rule.portfolios : rule.communities).length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2 mb-4">
+                {(rule.scope === 'property' ? rule.portfolios : rule.communities).map((k) => (
+                  <span key={k} className="inline-flex items-center gap-1.5 text-[12px] font-semibold bg-brand/10 text-brand border border-brand/30 rounded-full pl-2.5 pr-1.5 py-0.5">
+                    {k}<button onClick={() => toggleCoverage(k)} className="hover:text-red-600" aria-label={`Remove ${k}`}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {(rule.scope === 'property' ? rule.portfolios : rule.communities).length === 0 && <div className="mb-4" />}
             <div className="flex flex-wrap items-end gap-4 border-t border-gray-100 pt-4">
               <div><label className={lbl}>Vendor cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><input value={rule.vendorCost} onChange={(e) => patch({ vendorCost: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-24 tabular-nums`} /></div></div>
               <div><label className={lbl}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} onChange={(e) => patch({ markupPct: Number(e.target.value.replace(/[^\d.]/g, '')) || 0 })} className={`${ctl} w-20 tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
-              <div><label className={lbl}>Client cost</label><div className="text-lg font-extrabold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg">${clientCost.toFixed(2)}</div></div>
+              <div><label className={lbl}>Client cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><div className="text-[13px] font-bold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg w-24">{clientCost.toFixed(2)}</div></div></div>
             </div>
           </section>
 
