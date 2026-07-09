@@ -28,6 +28,7 @@ import {
   populateBillingFields,
 } from '@/lib/hubspot';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
+import { resolveSections } from '@/lib/sections';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
@@ -213,6 +214,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         else { sec.failCount++; failCount++; }
       }
     }
+
+    // Order sections to MIRROR THE ACTUAL INSPECTION layout (Yard/Exterior first,
+    // bedrooms in order, …) — the summary table and detail pages both follow this.
+    // `sectionOrder` is otherwise answer/record order, which can start mid-list
+    // (e.g. "Bedroom 2" first). resolveSections is the canonical order the app
+    // renders the inspection in; sort by it, keeping any unmatched rooms
+    // (Review/Sign-Off, custom) after the known ones in first-seen order.
+    const canonical = resolveSections(
+      inspection.sectionListJson,
+      inspection.bedroomsAtInspection || 0,
+      inspection.bathroomsAtInspection || 0,
+    );
+    const orderIndex = new Map<string, number>();
+    canonical.forEach((s, i) => {
+      const put = (k: string) => { if (k && !orderIndex.has(k)) orderIndex.set(k, i); };
+      put(`${s.label}||${s.location}`);
+      if (s.location) put(s.location);
+      put(s.label);
+    });
+    const indexForKey = (key: string): number => {
+      const at = key.indexOf('||');
+      const label = at >= 0 ? key.slice(0, at) : key;
+      const loc = at >= 0 ? key.slice(at + 2) : '';
+      const composite = orderIndex.get(`${label}||${loc}`);
+      if (composite != null) return composite;
+      if (loc && orderIndex.has(loc)) return orderIndex.get(loc)!;
+      if (orderIndex.has(label)) return orderIndex.get(label)!;
+      return Number.MAX_SAFE_INTEGER; // unknown → after the canonical rooms
+    };
+    // Stable sort (Node ≥ 11): equal keys keep their first-seen relative order.
+    sectionOrder.sort((a, b) => indexForKey(a) - indexForKey(b));
 
     const sections: QcPdfSection[] = sectionOrder.map((k) => sectionMap.get(k)!);
 

@@ -33,6 +33,7 @@ import {
   updateInspection,
 } from '@/lib/hubspot';
 import { getCachedCatalog } from '@/pages/api/rate-card/catalog';
+import { resolveSections } from '@/lib/sections';
 import { templateLabel as templateLabelFor } from '@/lib/templateLabels';
 import { renderQcPdf, type QcPdfContext, type QcPdfSection, type QcPdfLine } from '@/lib/pdfQc';
 import { buildShortLink } from '@/lib/shortLinks';
@@ -152,6 +153,32 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
       else { sec.failCount++; failCount++; }
     }
   }
+
+  // Order sections to mirror the actual inspection layout (Yard/Exterior first,
+  // bedrooms in order, …), not answer/record order — same as qc-finalize.
+  const canonical = resolveSections(
+    inspection.sectionListJson,
+    inspection.bedroomsAtInspection || 0,
+    inspection.bathroomsAtInspection || 0,
+  );
+  const orderIndex = new Map<string, number>();
+  canonical.forEach((s, i) => {
+    const put = (k: string) => { if (k && !orderIndex.has(k)) orderIndex.set(k, i); };
+    put(`${s.label}||${s.location}`);
+    if (s.location) put(s.location);
+    put(s.label);
+  });
+  const indexForKey = (key: string): number => {
+    const at = key.indexOf('||');
+    const label = at >= 0 ? key.slice(0, at) : key;
+    const loc = at >= 0 ? key.slice(at + 2) : '';
+    const composite = orderIndex.get(`${label}||${loc}`);
+    if (composite != null) return composite;
+    if (loc && orderIndex.has(loc)) return orderIndex.get(loc)!;
+    if (orderIndex.has(label)) return orderIndex.get(label)!;
+    return Number.MAX_SAFE_INTEGER;
+  };
+  sectionOrder.sort((a, b) => indexForKey(a) - indexForKey(b));
 
   const sections: QcPdfSection[] = sectionOrder.map((k) => sectionMap.get(k)!);
 
