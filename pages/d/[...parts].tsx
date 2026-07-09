@@ -10,17 +10,22 @@
 
 import type { GetServerSideProps } from 'next';
 import { Readable } from 'stream';
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { readInspectionProps, fetchAnswersForInspection, fetchInspectionById, fetchSourceSectionPhotos } from '@/lib/hubspot';
 import { resolveSections } from '@/lib/sections';
 import { finalChecklistPhotos } from '@/lib/finalChecklist';
 import { verifyShareSig, slugifyVendor, SHARE_TYPE_TO_PROP, type ShareDocType } from '@/lib/shortLinks';
 import { displayImageSrc } from '@/lib/photoDisplay';
 
+// Room grouping for the QC gallery: each room carries its Before + After photo
+// sets so the viewer can offer a room selector + a Before/After toggle. Only
+// populated for reinspect QC (the only template with a Before/After split).
+type RoomGroup = { name: string; before: string[]; after: string[] };
+
 // Short-lived in-memory cache of resolved gallery photo lists (per lambda
 // instance) so repeated opens of the same gallery don't re-query HubSpot.
 const GALLERY_TTL_MS = 60_000;
-const galleryCache = new Map<string, { photos: string[]; at: number }>();
+const galleryCache = new Map<string, { photos: string[]; rooms: RoomGroup[] | null; at: number }>();
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const parts = (ctx.params?.parts as string[]) || [];
@@ -62,7 +67,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       const embed = ctx.query.embed === '1';
       const cacheKey = `${id}:${kind}:${vSlug}`;
       const hit = galleryCache.get(cacheKey);
-      if (hit && Date.now() - hit.at < GALLERY_TTL_MS) return { props: { photos: hit.photos, start, embed } };
+      if (hit && Date.now() - hit.at < GALLERY_TTL_MS) return { props: { photos: hit.photos, rooms: hit.rooms, start, embed } };
 
       const [insp, answers] = await Promise.all([
         fetchInspectionById(id).catch(() => null),
@@ -84,11 +89,12 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       // after the resolved sections, in first-seen order, so EVERY photo the PDF
       // shows is clickable and reachable by swiping.
       const extraOrder: string[] = [];
+      const extraNames = new Map<string, string>();
       const keyFor = (a: any): string => {
         const s = resolve(a.section, a.location);
         if (s) return s.id;
         const k = `__extra__${a.section || ''}||${a.location || ''}`;
-        if (!extraOrder.includes(k)) extraOrder.push(k);
+        if (!extraOrder.includes(k)) { extraOrder.push(k); extraNames.set(k, a.location || a.section || 'Other'); }
         return k;
       };
       // Final Checklist (HVAC & Air Filters, Smart Home Tech, …) persists as ONE
@@ -155,8 +161,29 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       for (const s of sections) pushKey(s.id);     // resolved rooms, in section order
       for (const k of extraOrder) pushKey(k);       // Review/Sign-Off, etc.
       for (const u of fcPhotos) if (!seen.has(u)) { seen.add(u); photos.push(u); } // Final Checklist photos last (matches the PDF)
-      galleryCache.set(cacheKey, { photos, at: Date.now() });
-      return { props: { photos, start, embed } };
+
+      // Reinspect QC: expose the per-room Before/After grouping so the gallery
+      // can render a room selector + a Before/After toggle (left/right then
+      // navigates within the active grouping across rooms). Other templates keep
+      // the flat list — they have no Before/After split.
+      let rooms: RoomGroup[] | null = null;
+      if (insp?.templateType === 'pm_turn_reinspect_qc') {
+        rooms = [];
+        for (const s of sections) {
+          const before = (beforeBySection.get(s.id) || []).filter(ok);
+          const after = (bySection.get(s.id) || []).filter(ok);
+          if (before.length || after.length) rooms.push({ name: s.displayName || s.label || 'Room', before, after });
+        }
+        for (const k of extraOrder) {
+          const after = (bySection.get(k) || []).filter(ok);
+          if (after.length) rooms.push({ name: extraNames.get(k) || 'Other', before: [], after });
+        }
+        const fc = fcPhotos.filter(ok);
+        if (fc.length) rooms.push({ name: 'Final Checklist', before: [], after: fc });
+      }
+
+      galleryCache.set(cacheKey, { photos, rooms, at: Date.now() });
+      return { props: { photos, rooms, start, embed } };
     }
 
     const props = await readInspectionProps(id, [
@@ -223,48 +250,62 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   }
 };
 
-export default function ShareProxy(props: { photos?: string[]; start?: string; embed?: boolean }) {
+export default function ShareProxy(props: { photos?: string[]; rooms?: RoomGroup[] | null; start?: string; embed?: boolean }) {
   // File links stream in getServerSideProps and never render. The photo gallery
   // returns props and renders this browsable viewer.
   if (!props.photos) return null;
+  // Reinspect QC: room selector + Before/After toggle over the grouped photos.
+  if (props.rooms && props.rooms.length) {
+    return <QcPhotoGallery rooms={props.rooms} start={props.start || ''} embed={!!props.embed} />;
+  }
   return <PhotoGallery photos={props.photos} start={props.start || ''} embed={!!props.embed} />;
 }
 
-// Public, dependency-free photo gallery: full-screen image with left/right
-// (arrows, keyboard ←/→, swipe), pinch / double-tap zoom + pan, and neighbor
-// preloading. Continuous across all photos; arrows hide only at first/last.
-function PhotoGallery({ photos, start, embed }: { photos: string[]; start: string; embed?: boolean }) {
-  const foundIdx = photos.indexOf(start);
-  const [i, setI] = useState(foundIdx >= 0 ? foundIdx : 0);
+// Close → back to the PDF (the page the photo link came from). Hidden in embed
+// mode: the in-app PDF viewer overlay provides its own close.
+function CloseButton() {
+  return (
+    <button
+      onClick={() => { if (typeof window !== 'undefined') { if (window.history.length > 1) window.history.back(); else window.close(); } }}
+      aria-label="Back to PDF" title="Back to PDF"
+      style={{ position: 'absolute', top: 10, right: 12, width: 40, height: 40, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 24, lineHeight: '38px', zIndex: 3 }}
+    >×</button>
+  );
+}
+
+// Shared full-screen photo stage: one image with pinch / double-tap zoom + pan,
+// left/right (arrows, keyboard ←/→, swipe) delegated to onPrev/onNext, and
+// neighbor preloading. `children` render as an overlay above the image (counter,
+// close, room controls). Nav is driven by the parent so both the flat gallery
+// and the QC room/before-after gallery can reuse it.
+function PhotoStage({ src, preloadSrcs, canPrev, canNext, onPrev, onNext, children }: {
+  src: string; preloadSrcs: string[]; canPrev: boolean; canNext: boolean;
+  onPrev: () => void; onNext: () => void; children?: ReactNode;
+}) {
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  // Gesture bookkeeping.
   const g = useRef({ swipeX: 0, pinchDist: 0, pinchScale: 1, panX: 0, panY: 0, sx: 0, sy: 0, lastTap: 0, moved: false });
-
   const resetZoom = () => { setScale(1); setPan({ x: 0, y: 0 }); };
-  const go = (n: number) => { setI(Math.max(0, Math.min(photos.length - 1, n))); resetZoom(); };
+
+  // Reset zoom/pan whenever the displayed photo changes.
+  useEffect(() => { resetZoom(); }, [src]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') go(i - 1);
-      else if (e.key === 'ArrowRight') go(i + 1);
+      if (e.key === 'ArrowLeft') onPrev();
+      else if (e.key === 'ArrowRight') onNext();
       else if (e.key === 'Escape') resetZoom();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [i, photos.length]);
+  }, [onPrev, onNext]);
 
   // Preload the neighbours so left/right is instant.
+  const preloadKey = preloadSrcs.join('|');
   useEffect(() => {
-    [i - 1, i + 1].forEach((n) => {
-      if (n >= 0 && n < photos.length && typeof Image !== 'undefined') { const im = new Image(); im.src = displayImageSrc(photos[n]); }
-    });
-  }, [i, photos]);
-
-  if (photos.length === 0) {
-    return <div style={{ minHeight: '100vh', background: '#000', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', font: '14px sans-serif' }}>No photos for this inspection.</div>;
-  }
+    preloadSrcs.forEach((u) => { if (u && typeof Image !== 'undefined') { const im = new Image(); im.src = displayImageSrc(u); } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preloadKey]);
 
   const dist = (t: { [k: number]: { clientX: number; clientY: number } }) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
 
@@ -302,7 +343,7 @@ function PhotoGallery({ photos, start, embed }: { photos: string[]; start: strin
     // Swipe nav only when not zoomed.
     if (scale <= 1.02 && e.changedTouches.length) {
       const d = e.changedTouches[0].clientX - g.current.swipeX;
-      if (d < -50) go(i + 1); else if (d > 50) go(i - 1);
+      if (d < -50) onNext(); else if (d > 50) onPrev();
     }
   };
 
@@ -313,25 +354,146 @@ function PhotoGallery({ photos, start, embed }: { photos: string[]; start: strin
       onDoubleClick={() => { setScale((s) => (s > 1 ? 1 : 2.5)); setPan({ x: 0, y: 0 }); }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={displayImageSrc(photos[i])} alt="" draggable={false}
+      <img src={displayImageSrc(src)} alt="" draggable={false}
         style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transition: g.current.moved ? 'none' : 'transform 150ms ease-out', cursor: scale > 1 ? 'grab' : 'default' }} />
-      <div style={{ position: 'absolute', top: 12, left: 0, right: 0, textAlign: 'center', color: '#fff', font: '600 13px sans-serif', opacity: 0.85 }}>{i + 1} / {photos.length}</div>
-      {/* Close → back to the PDF (the page the photo link came from). Hidden in
-          embed mode: the in-app PDF viewer overlay provides its own close. */}
-      {!embed && (
-        <button
-          onClick={() => { if (typeof window !== 'undefined') { if (window.history.length > 1) window.history.back(); else window.close(); } }}
-          aria-label="Back to PDF" title="Back to PDF"
-          style={{ position: 'absolute', top: 10, right: 12, width: 40, height: 40, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 24, lineHeight: '38px' }}
-        >×</button>
+      {children}
+      {canPrev && scale <= 1.02 && (
+        <button onClick={onPrev} aria-label="Previous" style={navBtn('left')}>‹</button>
       )}
-      {i > 0 && scale <= 1.02 && (
-        <button onClick={() => go(i - 1)} aria-label="Previous" style={navBtn('left')}>‹</button>
-      )}
-      {i < photos.length - 1 && scale <= 1.02 && (
-        <button onClick={() => go(i + 1)} aria-label="Next" style={navBtn('right')}>›</button>
+      {canNext && scale <= 1.02 && (
+        <button onClick={onNext} aria-label="Next" style={navBtn('right')}>›</button>
       )}
     </div>
+  );
+}
+
+// Public, dependency-free photo gallery: continuous across all photos; arrows
+// hide only at first/last. Used for every doc type except reinspect QC.
+function PhotoGallery({ photos, start, embed }: { photos: string[]; start: string; embed?: boolean }) {
+  const foundIdx = photos.indexOf(start);
+  const [i, setI] = useState(foundIdx >= 0 ? foundIdx : 0);
+  const go = (n: number) => setI(Math.max(0, Math.min(photos.length - 1, n)));
+
+  if (photos.length === 0) {
+    return <div style={{ minHeight: '100vh', background: '#000', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', font: '14px sans-serif' }}>No photos for this inspection.</div>;
+  }
+
+  return (
+    <PhotoStage
+      src={photos[i]}
+      preloadSrcs={[photos[i - 1], photos[i + 1]].filter(Boolean) as string[]}
+      canPrev={i > 0} canNext={i < photos.length - 1}
+      onPrev={() => go(i - 1)} onNext={() => go(i + 1)}
+    >
+      <div style={{ position: 'absolute', top: 12, left: 0, right: 0, textAlign: 'center', color: '#fff', font: '600 13px sans-serif', opacity: 0.85, zIndex: 2 }}>{i + 1} / {photos.length}</div>
+      {!embed && <CloseButton />}
+    </PhotoStage>
+  );
+}
+
+type SeqItem = { url: string; roomIdx: number };
+
+// Reinspect QC gallery: a room selector + a Before/After toggle sit on top, and
+// left/right navigates within the ACTIVE grouping (all Before photos across
+// rooms, or all After photos across rooms) — crossing room boundaries just like
+// the flat gallery, but never mixing Before with After. Toggling keeps you on
+// the same room when it has photos in the other grouping; picking a room jumps
+// there (auto-switching grouping if that room only has photos in the other one).
+function QcPhotoGallery({ rooms, start, embed }: { rooms: RoomGroup[]; start: string; embed?: boolean }) {
+  const beforeSeq = useMemo<SeqItem[]>(() => {
+    const out: SeqItem[] = [];
+    rooms.forEach((r, ri) => r.before.forEach((url) => out.push({ url, roomIdx: ri })));
+    return out;
+  }, [rooms]);
+  const afterSeq = useMemo<SeqItem[]>(() => {
+    const out: SeqItem[] = [];
+    rooms.forEach((r, ri) => r.after.forEach((url) => out.push({ url, roomIdx: ri })));
+    return out;
+  }, [rooms]);
+  const hasBefore = beforeSeq.length > 0;
+  const hasAfter = afterSeq.length > 0;
+
+  // Initial grouping + index from the clicked photo (`start`); fall back to the
+  // first After photo, else the first Before photo.
+  const [nav, setNav] = useState<{ mode: 'before' | 'after'; i: number }>(() => {
+    const b = beforeSeq.findIndex((it) => it.url === start);
+    if (b >= 0) return { mode: 'before', i: b };
+    const a = afterSeq.findIndex((it) => it.url === start);
+    if (a >= 0) return { mode: 'after', i: a };
+    if (hasAfter) return { mode: 'after', i: 0 };
+    return { mode: 'before', i: 0 };
+  });
+  const { mode, i } = nav;
+  const seq = mode === 'before' ? beforeSeq : afterSeq;
+
+  if (seq.length === 0) {
+    return <div style={{ minHeight: '100vh', background: '#000', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', font: '14px sans-serif' }}>No photos for this inspection.</div>;
+  }
+
+  const clamp = (n: number, len: number) => Math.max(0, Math.min(len - 1, n));
+  const go = (n: number) => setNav((v) => ({ mode: v.mode, i: clamp(n, (v.mode === 'before' ? beforeSeq : afterSeq).length) }));
+
+  const switchMode = (m: 'before' | 'after') => {
+    if (m === mode) return;
+    const target = m === 'before' ? beforeSeq : afterSeq;
+    if (!target.length) return;
+    const curRoom = seq[i]?.roomIdx ?? 0;
+    const idx = target.findIndex((it) => it.roomIdx === curRoom);
+    setNav({ mode: m, i: idx >= 0 ? idx : 0 });
+  };
+
+  const selectRoom = (ri: number) => {
+    const idx = seq.findIndex((it) => it.roomIdx === ri);
+    if (idx >= 0) { setNav((v) => ({ mode: v.mode, i: idx })); return; }
+    // Room has nothing in the current grouping — switch to the other one.
+    const other: 'before' | 'after' = mode === 'before' ? 'after' : 'before';
+    const otherSeq = other === 'before' ? beforeSeq : afterSeq;
+    const oidx = otherSeq.findIndex((it) => it.roomIdx === ri);
+    if (oidx >= 0) setNav({ mode: other, i: oidx });
+  };
+
+  const curRoom = seq[i]?.roomIdx ?? 0;
+  const roomName = rooms[curRoom]?.name || 'Room';
+  const roomStart = seq.findIndex((it) => it.roomIdx === curRoom);
+  const roomCount = seq.reduce((n, it) => n + (it.roomIdx === curRoom ? 1 : 0), 0);
+  const posInRoom = i - roomStart + 1;
+  const stop = (e: React.TouchEvent) => e.stopPropagation();
+
+  return (
+    <PhotoStage
+      src={seq[i].url}
+      preloadSrcs={[seq[i - 1]?.url, seq[i + 1]?.url].filter(Boolean) as string[]}
+      canPrev={i > 0} canNext={i < seq.length - 1}
+      onPrev={() => go(i - 1)} onNext={() => go(i + 1)}
+    >
+      {/* Top controls: label, Before/After toggle, room pills. */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '10px 8px 14px', background: 'linear-gradient(to bottom, rgba(0,0,0,0.6), rgba(0,0,0,0))', pointerEvents: 'none', zIndex: 2 }}>
+        <div style={{ color: '#fff', font: '600 13px sans-serif', opacity: 0.9, textAlign: 'center', paddingLeft: embed ? 0 : 44, paddingRight: embed ? 0 : 44 }}>
+          {roomName}{roomCount > 1 ? ` · ${posInRoom} / ${roomCount}` : ''}
+        </div>
+        {hasBefore && hasAfter && (
+          <div onTouchStart={stop} onTouchMove={stop} onTouchEnd={stop}
+            style={{ display: 'flex', background: 'rgba(255,255,255,0.15)', borderRadius: 999, padding: 3, pointerEvents: 'auto' }}>
+            {(['before', 'after'] as const).map((m) => (
+              <button key={m} onClick={() => switchMode(m)}
+                style={{ border: 'none', cursor: 'pointer', borderRadius: 999, padding: '6px 18px', font: '600 13px sans-serif', color: mode === m ? '#fff' : 'rgba(255,255,255,0.75)', background: mode === m ? '#ff0060' : 'transparent' }}>
+                {m === 'before' ? 'Before' : 'After'}
+              </button>
+            ))}
+          </div>
+        )}
+        <div onTouchStart={stop} onTouchMove={stop} onTouchEnd={stop}
+          style={{ display: 'flex', gap: 6, overflowX: 'auto', maxWidth: '100%', padding: '2px 4px', pointerEvents: 'auto', touchAction: 'pan-x', WebkitOverflowScrolling: 'touch' }}>
+          {rooms.map((r, ri) => (
+            <button key={ri} onClick={() => selectRoom(ri)}
+              style={{ whiteSpace: 'nowrap', flex: '0 0 auto', border: 'none', cursor: 'pointer', borderRadius: 999, padding: '6px 12px', font: '600 12px sans-serif', color: ri === curRoom ? '#fff' : 'rgba(255,255,255,0.8)', background: ri === curRoom ? '#ff0060' : 'rgba(255,255,255,0.15)' }}>
+              {r.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      {!embed && <CloseButton />}
+    </PhotoStage>
   );
 }
 
