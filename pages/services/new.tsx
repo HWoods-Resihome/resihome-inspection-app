@@ -6,7 +6,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { ListPicker } from '@/components/ListPicker';
-import { WORKTYPES, worktypeDescription, subtypesFor } from '@/lib/services/worktypes';
+import { WORKTYPES, descriptionFor, subtypesFor } from '@/lib/services/worktypes';
 import { SAMPLE_PROPERTIES, SAMPLE_COMMUNITIES, SAMPLE_VENDORS } from '@/lib/services/sampleData';
 
 // Internal users (@resihome / @resicap / …) only; also flag+admin gated.
@@ -27,8 +27,8 @@ export default function NewService() {
   const [vendor, setVendor] = useState('');
   const [created, setCreated] = useState(false);
 
-  // Prefill the editable description from the worktype default when it changes.
-  useEffect(() => { setDescription(worktype ? worktypeDescription(worktype) : ''); }, [worktype]);
+  // Prefill the editable description from the worktype+subtype default when either changes.
+  useEffect(() => { setDescription(worktype ? descriptionFor(worktype, subtype) : ''); }, [worktype, subtype]);
 
   const worktypeOptions = useMemo(() => WORKTYPES.filter((w) => w.scopes.includes(scope)).map((w) => ({ value: w.id, label: w.label })), [scope]);
   const subtypeOptions = useMemo(() => subtypesFor(worktype).map((s) => ({ value: s.id, label: s.label })), [worktype]);

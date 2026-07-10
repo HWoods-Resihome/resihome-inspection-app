@@ -4,7 +4,7 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
-import { WORKTYPES, worktypeLabel, worktypeDescription, subtypesFor, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
+import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_PROPERTIES } from '@/lib/services/sampleData';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -121,7 +121,7 @@ function CoveragePicker({ noun, options, selected, onToggle, onSetMany }: {
 const SEED: Rule[] = [
   {
     id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'landscaping', subtype: 'cut', petStations: false, scope: 'property',
-    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', description: worktypeDescription('landscaping'),
+    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', description: descriptionFor('landscaping', 'cut'),
     cadences: [
       { id: 11, unit: 'weeks', interval: '2', dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
       { id: 12, unit: 'months', interval: '1', dow: 0, dom: 15, months: [10, 11] },
@@ -132,7 +132,7 @@ const SEED: Rule[] = [
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'landscaping', subtype: 'cut', petStations: true, scope: 'community',
-    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', description: worktypeDescription('landscaping'),
+    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', description: descriptionFor('landscaping', 'cut'),
     cadences: [{ id: 21, unit: 'weeks', interval: '1', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
@@ -205,7 +205,7 @@ export default function RulesEngine() {
 
   const addRule = () => {
     const id = Math.max(...rules.map((r) => r.id)) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, description: worktypeDescription('landscaping'), cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, description: descriptionFor('landscaping', 'cut'), cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
     setSelId(id);
   };
   const duplicateRule = () => {
@@ -230,11 +230,13 @@ export default function RulesEngine() {
   const coveredMonths = useMemo(() => new Set([...rule.cadences.flatMap((c) => c.months), ...rule.skipMonths]), [rule]);
   const missingMonths = MONTHS.map((_, i) => i).filter((i) => !coveredMonths.has(i));
 
-  // One property → one rule per worktype: block save if this rule shares any
-  // portfolio/community with ANOTHER active rule of the same worktype.
+  // One property → one rule per worktype + subtype: block save if this rule shares
+  // any portfolio/community with ANOTHER active rule of the same worktype AND
+  // subtype. Different subtypes of the same worktype (e.g. Grass Cut vs. Tree
+  // Trimming) may cover the same property, so they never conflict.
   const overlap = useMemo(() => {
     for (const other of rules) {
-      if (other.id === rule.id || !other.active || other.worktype !== rule.worktype || other.scope !== rule.scope) continue;
+      if (other.id === rule.id || !other.active || other.worktype !== rule.worktype || other.subtype !== rule.subtype || other.scope !== rule.scope) continue;
       const a = new Set(rule.scope === 'property' ? rule.portfolios : rule.communities);
       const shared = (other.scope === 'property' ? other.portfolios : other.communities).filter((k) => a.has(k));
       if (shared.length) return { rule: other, shared };
@@ -244,7 +246,7 @@ export default function RulesEngine() {
 
   const clientCost = (parseFloat(rule.vendorCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100));
   const saveErrors: string[] = [];
-  if (overlap) saveErrors.push(`Overlaps “${overlap.rule.name}” on: ${overlap.shared.join(', ')}. A property can only belong to one rule per worktype.`);
+  if (overlap) saveErrors.push(`Overlaps “${overlap.rule.name}” on: ${overlap.shared.join(', ')}. A property can only belong to one rule per work type + subtype (here: ${worktypeLabel(rule.worktype)} · ${subtypeLabel(rule.worktype, rule.subtype)}).`);
   if (missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
   if (!rule.enrollVal.trim()) saveErrors.push('Set an enrollment trigger.');
   const canSave = saveErrors.length === 0;
@@ -324,13 +326,13 @@ export default function RulesEngine() {
             <div className="flex flex-wrap items-center gap-3 mb-4">
               <div>
                 <label className={lbl}>Work Type</label>
-                <select value={rule.worktype} onChange={(e) => { const wt = e.target.value as Worktype; const sub = firstSubtype(wt); patch({ worktype: wt, subtype: sub, vendorCost: baseRate(wt, sub), description: worktypeDescription(wt) }); }} className={ctl}>
+                <select value={rule.worktype} onChange={(e) => { const wt = e.target.value as Worktype; const sub = firstSubtype(wt); patch({ worktype: wt, subtype: sub, vendorCost: baseRate(wt, sub), description: descriptionFor(wt, sub) }); }} className={ctl}>
                   {WORKTYPES.filter((w) => w.scopes.includes(rule.scope)).map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
                 </select>
               </div>
               <div>
                 <label className={lbl}>Subtype</label>
-                <select value={rule.subtype} onChange={(e) => patch({ subtype: e.target.value, vendorCost: baseRate(rule.worktype, e.target.value) })} className={ctl}>
+                <select value={rule.subtype} onChange={(e) => patch({ subtype: e.target.value, vendorCost: baseRate(rule.worktype, e.target.value), description: descriptionFor(rule.worktype, e.target.value) })} className={ctl}>
                   {subtypesFor(rule.worktype).map((st) => <option key={st.id} value={st.id}>{st.label}</option>)}
                 </select>
               </div>
@@ -353,7 +355,7 @@ export default function RulesEngine() {
               </div>
             )}
             <div className="mb-4">
-              <label className={lbl}>Service Description <span className="text-gray-400 normal-case font-normal">— default for this worktype; editable</span></label>
+              <label className={lbl}>Service Description <span className="text-gray-400 normal-case font-normal">— default for this work type &amp; subtype; editable</span></label>
               <textarea value={rule.description} onChange={(e) => patch({ description: e.target.value })} rows={3}
                 className="w-full text-[13px] border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand" />
             </div>
@@ -382,7 +384,7 @@ export default function RulesEngine() {
 
                 <div className="mt-3 border border-gray-200 rounded-xl max-w-md">
                   <button type="button" onClick={() => setPropsOpen((o) => !o)} className="w-full flex items-center justify-between px-3 py-2.5 text-[13px] font-semibold text-ink">
-                    <span>Applicable properties <span className="text-brand">({coveredCount})</span></span>
+                    <span>Applicable Properties <span className="text-brand">({coveredCount})</span></span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${propsOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
                   </button>
                   {propsOpen && (
