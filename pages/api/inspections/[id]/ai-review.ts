@@ -25,16 +25,20 @@ import { getKnowledgeBasePromptText } from '@/lib/hubspot';
 import { depreciationRates } from '@/lib/depreciation';
 import type { RegionRate } from '@/lib/types';
 
-export const config = { maxDuration: 120, api: { bodyParser: { sizeLimit: '2mb' } } };
+export const config = { maxDuration: 300, api: { bodyParser: { sizeLimit: '2mb' } } };
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-6';
 const MAX_TOOL_ROUNDS = 4;
-// Photo budget — keep token cost (and latency) bounded. The newest few per room
-// are the most relevant to the current scope. Smaller + fewer = faster review.
+// Photo budget — keep token cost (and latency) bounded. Photos live in the
+// cached per-review block (written once, re-read across the tool rounds at
+// ~0.1x), so the budget is a one-time write cost. Selection is coverage-first
+// (see below): every room gets a photo before any room gets a second one, so
+// a large house isn't left with its back half unreviewed. A slightly smaller
+// edge (384 vs 448) buys ~30% more photos for the same tokens.
 const MAX_PHOTOS_PER_ROOM = 2;
-const MAX_PHOTOS_TOTAL = 12;
-const PHOTO_EDGE = 448; // px, long edge after downscale
+const MAX_PHOTOS_TOTAL = 30;
+const PHOTO_EDGE = 384; // px, long edge after downscale
 
 interface InLine {
   sectionId: string;
@@ -207,6 +211,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
+  // Flush headers + an immediate keep-alive so the client's 30s stall watchdog
+  // is fed BEFORE the (potentially long) prep below: fetching inspection data
+  // and downscaling up to MAX_PHOTOS_TOTAL images can take many seconds, and the
+  // first real SSE event doesn't fire until the first tool round completes. A
+  // periodic heartbeat then covers EVERY gap (prep, model prefill, waits between
+  // rounds), so a slow turn on a large house is never mistaken for a dropped
+  // connection. Cleared at both exits.
+  (res as any).flushHeaders?.();
+  sseHeartbeat(res);
+  const heartbeat = setInterval(() => sseHeartbeat(res), 10000);
 
   try {
     const body = req.body as BodyShape;
@@ -276,12 +290,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ].join('\n');
 
     // ---- Photos (downsized), all fetched in parallel, grouped by room ----
+    // COVERAGE-FIRST selection: the newest up-to-N photos per room are the
+    // candidates, then we allocate ROUND-ROBIN — one photo to every room before
+    // any room gets a second — so a large house has every room represented
+    // instead of the first ~6 rooms eating the whole budget (and the rest getting
+    // none). Allocation is capped at MAX_PHOTOS_TOTAL; photos are then emitted in
+    // room order (contiguous per room) so the grouping headers below stay clean.
     const photosBySection = body?.photosBySection || {};
+    const perRoom = sections.map((s) => ({
+      sectionId: s.id,
+      sectionName: s.name,
+      // newest first, capped at the per-room max
+      urls: (photosBySection[s.id] || [])
+        .filter((u: string) => /^https?:\/\//i.test(u.split('#')[0]))
+        .slice(-MAX_PHOTOS_PER_ROOM)
+        .reverse(),
+    }));
+    const alloc = new Map<string, number>();
+    let allocated = 0;
+    for (let rank = 0; rank < MAX_PHOTOS_PER_ROOM && allocated < MAX_PHOTOS_TOTAL; rank++) {
+      for (const r of perRoom) {
+        if (allocated >= MAX_PHOTOS_TOTAL) break;
+        if (r.urls.length > rank) { alloc.set(r.sectionId, (alloc.get(r.sectionId) || 0) + 1); allocated++; }
+      }
+    }
     const picks: { sectionId: string; sectionName: string; url: string }[] = [];
-    for (const s of sections) {
-      if (picks.length >= MAX_PHOTOS_TOTAL) break;
-      const urls = (photosBySection[s.id] || []).filter((u) => /^https?:\/\//i.test(u.split('#')[0]));
-      for (const url of urls.slice(-MAX_PHOTOS_PER_ROOM)) { if (picks.length >= MAX_PHOTOS_TOTAL) break; picks.push({ sectionId: s.id, sectionName: s.name, url }); }
+    for (const r of perRoom) {
+      const n = alloc.get(r.sectionId) || 0;
+      for (let i = 0; i < n; i++) picks.push({ sectionId: r.sectionId, sectionName: r.sectionName, url: r.urls[i] });
     }
     const fetched = await Promise.all(picks.map((p) => fetchPhotoBlock(p.url)));
     const photoContent: any[] = [];
@@ -477,9 +513,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       messages.push({ role: 'user', content: toolResults });
     }
 
+    clearInterval(heartbeat);
     sse(res, 'done', {});
     return res.end();
   } catch (e: any) {
+    clearInterval(heartbeat);
     console.error('POST /api/inspections/[id]/ai-review failed:', e);
     try { sse(res, 'error', { error: String(e?.message || e) }); sse(res, 'done', {}); return res.end(); }
     catch { return res.status(500).json({ error: String(e?.message || e) }); }
