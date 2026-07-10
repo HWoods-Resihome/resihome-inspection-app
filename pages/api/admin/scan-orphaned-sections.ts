@@ -15,8 +15,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { fetchInspections, fetchAnswersForInspection } from '@/lib/hubspot';
-import { resolveSections } from '@/lib/sections';
+import { fetchInspections, fetchAnswersForInspection, updateInspection } from '@/lib/hubspot';
+import { resolveSections, serializeSectionList, makeCustomSectionId, type SectionInstance } from '@/lib/sections';
 
 export const config = { maxDuration: 300 };
 
@@ -29,6 +29,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!(await isAppAdmin(session.email))) return res.status(403).json({ error: 'Admin only.' });
 
   const includeCompleted = String(req.query.includeCompleted || '') === '1';
+  const apply = String(req.query.apply || '') === '1';
   const startIdx = Math.max(0, Number(req.query.after) || 0);
   const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 150));
   const deadline = Date.now() + 250_000;
@@ -39,10 +40,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       i.templateType === TEMPLATE
       && (includeCompleted || ACTIVE_STATUSES.has((i.status || '').trim().toLowerCase())));
 
-    let processed = 0, scanned = 0, withOrphans = 0, errors = 0;
+    let processed = 0, scanned = 0, withOrphans = 0, fixed = 0, errors = 0;
     const affected: Array<{
       id: string; address: string; status: string;
       orphanedSections: string[]; orphanedLineCount: number; orphanedPhotoCount: number;
+      recovered?: string[];
     }> = [];
     const errorSamples: string[] = [];
 
@@ -69,23 +71,48 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const answers = await fetchAnswersForInspection(insp.recordId);
         scanned++;
         const orphanSections = new Set<string>();
+        // Distinct (section, location) pairs → one recovered section each, so a
+        // repeating room ("Bathroom 2") with a location still matches exactly.
+        const orphanPairs = new Map<string, { section: string; location: string }>();
         let orphanLines = 0, orphanPhotos = 0;
         for (const a of answers) {
           if (a.answerType !== 'rate_card_line' && a.answerType !== 'section_photo') continue;
-          if (isMatched(a.section || '', a.location || '')) continue;
-          orphanSections.add(a.section || a.location || '(blank)');
+          const section = a.section || '';
+          const location = a.location || '';
+          if (isMatched(section, location)) continue;
+          orphanSections.add(section || location || '(blank)');
+          orphanPairs.set(`${section}||${location}`, { section, location });
           if (a.answerType === 'rate_card_line') orphanLines++; else orphanPhotos++;
         }
         if (orphanSections.size > 0) {
           withOrphans++;
-          affected.push({
+          const entry = {
             id: insp.recordId,
             address: insp.propertyAddressSnapshot || '',
             status: insp.status || '',
             orphanedSections: Array.from(orphanSections),
             orphanedLineCount: orphanLines,
             orphanedPhotoCount: orphanPhotos,
-          });
+          };
+          if (apply) {
+            // Synthesize a recovered custom section per distinct orphan pair, with
+            // label/location = the stored answer's, so resolveSections matches it
+            // exactly on reload. Merge into the layout and persist. Answers are
+            // untouched — this only makes the existing lines/photos visible.
+            const existingIds = new Set(sections.map((s) => s.id));
+            const additions: SectionInstance[] = [];
+            for (const { section, location } of orphanPairs.values()) {
+              const label = section || location || 'Recovered';
+              const id = makeCustomSectionId(`${label} ${location}`.trim(), existingIds);
+              existingIds.add(id);
+              additions.push({ id, key: 'custom', label, location, displayName: location || label, isCustom: true, photoOptional: true });
+            }
+            const merged = [...sections, ...additions];
+            await updateInspection(insp.recordId, { section_list_json: serializeSectionList(merged) });
+            fixed++;
+            (entry as any).recovered = additions.map((a) => a.displayName);
+          }
+          affected.push(entry);
         }
       } catch (e: any) {
         errors++;
@@ -98,16 +125,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const nextAfter = done ? null : idx;
     return res.status(200).json({
       ok: true,
+      mode: apply ? 'apply (recovered sections persisted)' : 'dry-run (add ?apply=1 to persist the recovery)',
       scope: includeCompleted ? 'all Scope rate cards' : 'active (non-completed) Scope rate cards',
       totalCandidates: targets.length,
       processed,
       scanned,
       withOrphans,
+      ...(apply ? { fixed } : {}),
       errors,
       done,
       nextAfter,
       resume: nextAfter != null
-        ? `/api/admin/scan-orphaned-sections?after=${nextAfter}&limit=${limit}${includeCompleted ? '&includeCompleted=1' : ''}`
+        ? `/api/admin/scan-orphaned-sections?after=${nextAfter}&limit=${limit}${includeCompleted ? '&includeCompleted=1' : ''}${apply ? '&apply=1' : ''}`
         : null,
       // Each affected inspection — open /inspection/<id> (the recovery fix now
       // surfaces the orphaned section so it can be photographed/removed) or use
