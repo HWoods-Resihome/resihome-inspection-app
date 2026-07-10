@@ -833,6 +833,15 @@ Implication to confirm when we build: this likely means the Rules Engine's
 current mockup's "Community" scope moves into the Vendor Management / Community-record
 UI. Flag — decide at Step-2 planning. Vendor Management itself is still a later step.
 
+## 10.13 Service status pipeline (owner-defined)
+
+Each service request moves through exactly these five statuses (the `Services`
+object's status enum, Step 3):
+**Estimated → Assigned → Submitted → Review → Completed.**
+- Open = Estimated / Assigned / Submitted / Review (drives Total Open + Past Due).
+- Completed = closed (feeds On-Time %).
+(Replaces the earlier sample scheduled/dispatched/in_progress/cancelled set.)
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
