@@ -1987,10 +1987,7 @@ export function QuestionForm({
 
       {/* Top block — title + inspector + Back. NOT sticky: scrolls away (Scope style). */}
       <div className="lz-head max-w-3xl mx-auto px-4 pt-3 pb-2">
-        {/* items-end bottom-aligns the (often shrunk) title toward the inspector
-            line just below it, tightening the gap. The control buttons define the
-            row height, so they don't move. */}
-        <div className="flex items-end justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             {/* Title + status on ONE line — the title font auto-shrinks so both
                 the full template name AND the status chip fit without truncating
