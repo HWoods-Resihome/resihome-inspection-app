@@ -11,7 +11,7 @@
 
 import type { Worktype, ServiceScope } from './worktypes';
 
-export type ServiceStatus = 'estimated' | 'assigned' | 'submitted' | 'review' | 'completed';
+export type ServiceStatus = 'estimated' | 'assigned' | 'submitted' | 'review' | 'completed' | 'canceled';
 
 export interface SampleService {
   id: string;
@@ -46,10 +46,10 @@ export const SAMPLE_SERVICES: SampleService[] = [
   { id: 'S-1047', scope: 'community', address: 'River Glen',         locality: 'Riverdale, GA 30296', community: 'River Glen',        portfolio: 'Amherst Sunbelt', region: 'GA: Atlanta', worktype: 'pet_station',  status: 'assigned',  vendor: 'Peachtree Grounds',   dueDate: '2026-07-20' },
   { id: 'S-1048', scope: 'community', address: 'Camden Pointe',      locality: 'Columbus, GA 31904',  community: 'Camden Pointe',     portfolio: 'Tricon GA',       region: 'GA: Columbus', worktype: 'trash_pickup', status: 'submitted', vendor: 'Metro Cut LLC',       dueDate: '2026-07-16' },
   { id: 'S-1049', scope: 'community', address: 'Harlow Trace',       locality: 'Columbus, GA 31909',  community: 'Harlow Trace',      portfolio: 'Progress',        region: 'GA: Columbus', worktype: 'model_clean',  status: 'review',   vendor: null,                  dueDate: '2026-07-16' },
-  { id: 'S-1050', scope: 'property',  address: '19 Maple Run Dr',    locality: 'Decatur, GA 30032',   portfolio: 'Progress',        region: 'GA: Atlanta',  worktype: 'grass_cut',      status: 'estimated',   propertyStatus: 'Vacant',   vendor: null,                  dueDate: '2026-07-26' },
+  { id: 'S-1050', scope: 'property',  address: '19 Maple Run Dr',    locality: 'Decatur, GA 30032',   portfolio: 'Progress',        region: 'GA: Atlanta',  worktype: 'grass_cut',      status: 'canceled',    propertyStatus: 'Occupied', vendor: null,                  dueDate: '2026-07-08' },
   { id: 'S-1051', scope: 'property',  address: '640 Oakvale Rd',     locality: 'Decatur, GA 30032',   portfolio: 'Amherst Sunbelt', region: 'GA: Atlanta',  worktype: 'grass_cut',      status: 'completed',   propertyStatus: 'Occupied', vendor: 'GreenBlade Lawn Co.', dueDate: '2026-07-04', onTime: true },
   { id: 'S-1052', scope: 'property',  address: '77 Pinehurst Way',   locality: 'Columbus, GA 31904',  portfolio: 'Tricon GA',       region: 'GA: Columbus', worktype: 'pool_service',   status: 'completed',   propertyStatus: 'Occupied', vendor: 'AquaPro Pools',       dueDate: '2026-07-02', onTime: false },
 ];
 
 export const SAMPLE_STATUS_ORDER: ServiceStatus[] =
-  ['estimated', 'assigned', 'submitted', 'review', 'completed'];
+  ['estimated', 'assigned', 'submitted', 'review', 'completed', 'canceled'];

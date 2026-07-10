@@ -109,7 +109,7 @@ const SEED: Rule[] = [
       { id: 11, unit: 'weeks', interval: 2, dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
       { id: 12, unit: 'months', interval: 1, dow: 0, dom: 15, months: [10, 11] },
     ],
-    initialDueDays: '3', skipMonths: [0, 1],
+    initialDueDays: '5', skipMonths: [0, 1],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
     stopEnabled: true, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied',
   },
@@ -117,7 +117,7 @@ const SEED: Rule[] = [
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'grass_cut', scope: 'community',
     portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], vendorCost: '45', markupPct: '20',
     cadences: [{ id: 21, unit: 'weeks', interval: 1, dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
-    initialDueDays: '', skipMonths: [],
+    initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
     stopEnabled: false, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied',
   },
@@ -152,7 +152,7 @@ export default function RulesEngine() {
 
   const addRule = () => {
     const id = Math.max(...rules.map((r) => r.id)) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], vendorCost: String(WORKTYPE_BASE.grass_cut), markupPct: DEFAULT_MARKUP, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVal: '' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], vendorCost: String(WORKTYPE_BASE.grass_cut), markupPct: DEFAULT_MARKUP, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
     setSelId(id);
   };
   const duplicateRule = () => {

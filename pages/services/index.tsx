@@ -20,7 +20,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 
 const STATUS_LABEL: Record<ServiceStatus, string> = {
   estimated: 'Estimated', assigned: 'Assigned', submitted: 'Submitted',
-  review: 'Review', completed: 'Completed',
+  review: 'Review', completed: 'Completed', canceled: 'Canceled',
 };
 const STATUS_STYLE: Record<ServiceStatus, string> = {
   estimated: 'bg-gray-100 text-gray-700 border-gray-300',
@@ -28,6 +28,7 @@ const STATUS_STYLE: Record<ServiceStatus, string> = {
   submitted: 'bg-amber-100 text-amber-800 border-amber-300',
   review: 'bg-purple-100 text-purple-800 border-purple-300',
   completed: 'bg-green-100 text-green-800 border-green-300',
+  canceled: 'bg-gray-100 text-gray-500 border-gray-300 line-through',
 };
 
 type SortField = 'due' | 'address' | 'worktype' | 'vendor' | 'status';
@@ -99,7 +100,7 @@ export default function ServicesHome({ userName }: { userName: string }) {
 
   const chip = (val: ServiceStatus | 'all', label: string) => (
     <button type="button" onClick={() => { setStatus(val); setPastDueOnly(false); }}
-      className={`flex-1 text-[11px] font-heading font-semibold px-2 py-1.5 rounded-full border transition whitespace-nowrap ${
+      className={`text-[11px] font-heading font-semibold px-3 py-1.5 rounded-full border transition whitespace-nowrap ${
         status === val && !pastDueOnly ? 'bg-brand text-white border-brand' : 'bg-white text-ink border-gray-300 hover:border-brand/50'}`}>
       {label}{val === 'all' ? ` (${counts.all})` : counts[val] ? ` (${counts[val]})` : ''}
     </button>
@@ -189,8 +190,9 @@ export default function ServicesHome({ userName }: { userName: string }) {
         {/* Collapsible: status chips + one-line Type/Vendor/Region + Sort (no h-scroll). */}
         {filtersOpen && (
           <div className="space-y-1.5 mb-3">
-            <div className="flex gap-1.5">{chip('all', 'All')}{chip('estimated', 'Estimated')}{chip('assigned', 'Assigned')}</div>
-            <div className="flex gap-1.5">{chip('submitted', 'Submitted')}{chip('review', 'Review')}{chip('completed', 'Completed')}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {chip('all', 'All')}{chip('estimated', 'Estimated')}{chip('assigned', 'Assigned')}{chip('submitted', 'Submitted')}{chip('review', 'Review')}{chip('completed', 'Completed')}{chip('canceled', 'Canceled')}
+            </div>
             <div className="flex items-center gap-2 pt-1">
               <div className="flex-1 min-w-0">
                 <ListPicker value={worktype} onChange={setWorktype} ariaLabel="Filter by service type" className={pickerCls(worktype !== 'all')}

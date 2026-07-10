@@ -835,11 +835,11 @@ UI. Flag — decide at Step-2 planning. Vendor Management itself is still a late
 
 ## 10.13 Service status pipeline (owner-defined)
 
-Each service request moves through exactly these five statuses (the `Services`
-object's status enum, Step 3):
-**Estimated → Assigned → Submitted → Review → Completed.**
-- Open = Estimated / Assigned / Submitted / Review (drives Total Open + Past Due).
-- Completed = closed (feeds On-Time %).
+The `Services` status enum (Step 3):
+**Estimated → Assigned → Submitted → Review → Completed**, plus **Canceled**
+(terminal; set when the stop logic cancels a late/open order).
+- Open (for the bubbles) = Estimated / Assigned / Submitted / Review; Completed &
+  Canceled are closed. (Completed feeds On-Time %.)
 - **`Estimated` is only for BID ITEMS** — a bid service starts in Estimated (needs a
   vendor estimate before work). **Every non-bid service starts at `Assigned`**
   (skips Estimated). The generator sets the initial status by whether the line is a
@@ -888,9 +888,10 @@ Added the **Vendor Assignment** link to the Services gear menu → a gated
 Applies to ALL worktypes, both property and community coverage.
 
 ### Optional "initial due" on the rule
-Each rule has an OPTIONAL **initial due** = the first order's due date is **N days
-after enrollment** (usually quicker than the recurring cadence). **Blank → the
-standard cadence applies** to the first order too. (Built into the Cadence section.)
+Each rule has an **initial due** = the first order's due date is **N days after
+enrollment** (usually quicker than the recurring cadence), **defaulting to 5 days**.
+Blank → the standard cadence applies to the first order too. (Built into the
+Cadence section.)
 
 ### Nightly job — what it does
 1. Find every property/community that **meets a rule's enrollment criteria**.
@@ -918,9 +919,11 @@ where completion date = when the vendor submitted.
 When a target hits the stop criteria, **cancel its open orders**, EXCEPT:
 - never touch **Review / Completed** orders,
 - never touch **bid-item services** (they're not part of the recurring lifecycle),
-- **protect imminent ones — due within the next 48 hours** (let them run).
-- Past-due-but-not-completed orders **may be canceled**.
-*(Owner: confirm the 48-hour protection reading — the phrasing was ambiguous.)*
+- **protect imminent ones — due within the next 48 hours** (a vendor may already be
+  dispatched, so let them run). CONFIRMED.
+- Everything else open (not Review/Completed, not a bid, not due in <48h) is
+  canceled — including **past-due, not-yet-completed** orders (they're late).
+- Canceling sets the new **`Canceled`** status (a terminal state).
 
 ### `is_bid_item` — a persistent flag (not a status)
 Bid classification is its **own boolean field on the Services record**, set when the
