@@ -932,6 +932,19 @@ over its life (Estimated → Assigned → …). Generation and stop-cancel both 
 `is_bid_item`, NOT the `Estimated` status. (`Estimated` remains the *initial status*
 for bid items per §10.13, but it is not how we identify a bid afterward.)
 
+## 10.16 Property coverage inclusion: "all" (future-inclusive) vs fixed "list"
+
+A property-scope rule stores coverage as **portfolios + regions + a `propsMode`**:
+- **`all`** (chosen via unfiltered "Select all") — every applicable property in the
+  selected portfolios ∩ regions, and **NEW properties added later auto-include**.
+- **`list`** — a **fixed** set of property ids (`includedProps`). Set whenever the
+  user hand-picks: any individual deselect, or a "Select all" done while searching.
+  **Future-added properties do NOT auto-include.**
+So auto-include-on-add happens **only** when the whole set was selected; a specific
+hand-picked list stays exactly as chosen. (Step-3 generation reads the same rule:
+in `all` mode it re-resolves the applicable set each night; in `list` mode it uses
+the stored ids.)
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
