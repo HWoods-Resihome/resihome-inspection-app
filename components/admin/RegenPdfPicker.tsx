@@ -16,7 +16,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 
 type Route = 'scope' | 'qa' | 'qc';
-type Item = { id: string; templateType: string; label: string; address: string; status: string; route: Route };
+type Item = { id: string; templateType: string; label: string; address: string; status: string; route: Route; date?: string };
+
+// "Last N days" windows for the regen filter (0 = all time).
+const DAY_WINDOWS: { value: number; label: string }[] = [
+  { value: 0, label: 'All time' },
+  { value: 7, label: 'Last 7 days' },
+  { value: 14, label: 'Last 14 days' },
+  { value: 30, label: 'Last 30 days' },
+  { value: 90, label: 'Last 90 days' },
+];
 type LogLine = { id: string; ok: boolean; msg: string };
 
 const CONCURRENCY = 3;
@@ -52,6 +61,7 @@ export function RegenPdfPicker({ embedded = false }: { embedded?: boolean } = {}
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set()); // selected templateTypes
   const [scopeKind, setScopeKind] = useState<string>('all'); // which Scope PDF(s) to regenerate
+  const [days, setDays] = useState<number>(0); // "last N days" window (0 = all time)
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(0);
   const [okCount, setOkCount] = useState(0);
@@ -76,16 +86,23 @@ export function RegenPdfPicker({ embedded = false }: { embedded?: boolean } = {}
     })();
   }, []);
 
-  // Group by template type, preserving first-seen order.
+  // Apply the "last N days" window (by each inspection's completed/created date).
+  const visibleItems = useMemo(() => {
+    if (!days) return items || [];
+    const cutoff = Date.now() - days * 864e5;
+    return (items || []).filter((i) => { const t = Date.parse(i.date || ''); return isFinite(t) && t >= cutoff; });
+  }, [items, days]);
+
+  // Group by template type, preserving first-seen order (within the day window).
   const groups = useMemo(() => {
     const m = new Map<string, { label: string; ids: string[] }>();
-    for (const i of items || []) {
+    for (const i of visibleItems) {
       let g = m.get(i.templateType);
       if (!g) { g = { label: i.label, ids: [] }; m.set(i.templateType, g); }
       g.ids.push(i.id);
     }
     return Array.from(m.entries()).map(([type, g]) => ({ type, ...g }));
-  }, [items]);
+  }, [visibleItems]);
 
   const byId = useMemo(() => {
     const m = new Map<string, Item>();
@@ -101,8 +118,8 @@ export function RegenPdfPicker({ embedded = false }: { embedded?: boolean } = {}
   }, [items]);
 
   const selectedItems = useMemo(
-    () => (items || []).filter((i) => selected.has(i.templateType)),
-    [items, selected],
+    () => visibleItems.filter((i) => selected.has(i.templateType)),
+    [visibleItems, selected],
   );
 
   function toggle(type: string) {
@@ -212,6 +229,16 @@ export function RegenPdfPicker({ embedded = false }: { embedded?: boolean } = {}
                   <button type="button" className="text-gray-500 hover:underline" disabled={running}
                     onClick={() => setSelected(new Set())}>None</button>
                 </div>
+              </div>
+              {/* Date window: only regenerate inspections completed/created in the
+                  last N days (e.g. "fix just the last 7 days"). Counts + run set
+                  below update to match. */}
+              <div className="mt-3 flex items-center gap-2 text-sm">
+                <span className="text-gray-600">Only from:</span>
+                <select value={days} disabled={running} onChange={(e) => setDays(Number(e.target.value))}
+                  className="border border-gray-300 rounded-md px-2 py-1 text-sm bg-white">
+                  {DAY_WINDOWS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+                </select>
               </div>
               {groups.length === 0 ? (
                 <div className="mt-3 text-sm text-gray-500">No regeneratable inspections found.</div>

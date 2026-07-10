@@ -31,7 +31,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const all = await fetchInspections();
-    const items: Array<{ id: string; templateType: string; label: string; address: string; status: string; route: 'scope' | 'qa' | 'qc' }> = [];
+    const items: Array<{ id: string; templateType: string; label: string; address: string; status: string; route: 'scope' | 'qa' | 'qc'; date: string }> = [];
     for (const i of all) {
       const t = i.templateType;
       const st = norm(i.status);
@@ -48,6 +48,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         address: i.propertyAddressSnapshot || '',
         status: i.status || '',
         route,
+        // Most-relevant date for a "last N days" filter on the regen tool.
+        date: i.completedAt || i.createdAt || i.updatedAt || '',
       });
     }
     return res.status(200).json({ ok: true, items, count: items.length });
