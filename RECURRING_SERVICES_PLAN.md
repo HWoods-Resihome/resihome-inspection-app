@@ -895,10 +895,10 @@ standard cadence applies** to the first order too. (Built into the Cadence secti
 ### Nightly job — what it does
 1. Find every property/community that **meets a rule's enrollment criteria**.
 2. Skip any that already have an **OPEN work order** for that worktype, where
-   **open = {Assigned, Submitted}** — i.e. NOT in {Estimated, Review, Completed}.
-   **Bid-item / `Estimated` orders are ignored for generation** (they don't block a
-   new recurring order). One active order at a time; the next generates once the
-   current reaches Review/Completed (or is only an Estimated bid).
+   **open = {Assigned, Submitted}** among **non-bid** services. **Bid-item services
+   are ignored entirely** — they don't block a new recurring order. (See the
+   `is_bid_item` field below — bid classification is a persistent flag, NOT the
+   `Estimated` status.)
 3. If it needs one, create it:
    - **Initial order** (the target just met enrollment / has no prior order for this
      rule) → due date = enrollment date + **initial due** (if set), else standard
@@ -916,10 +916,18 @@ where completion date = when the vendor submitted.
 
 ### Stop criteria → cancel open orders
 When a target hits the stop criteria, **cancel its open orders**, EXCEPT:
-- never touch **Review / Completed** orders, and
+- never touch **Review / Completed** orders,
+- never touch **bid-item services** (they're not part of the recurring lifecycle),
 - **protect imminent ones — due within the next 48 hours** (let them run).
 - Past-due-but-not-completed orders **may be canceled**.
 *(Owner: confirm the 48-hour protection reading — the phrasing was ambiguous.)*
+
+### `is_bid_item` — a persistent flag (not a status)
+Bid classification is its **own boolean field on the Services record**, set when the
+service is created and **independent of status** — because a bid's status changes
+over its life (Estimated → Assigned → …). Generation and stop-cancel both key off
+`is_bid_item`, NOT the `Estimated` status. (`Estimated` remains the *initial status*
+for bid items per §10.13, but it is not how we identify a bid afterward.)
 
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
