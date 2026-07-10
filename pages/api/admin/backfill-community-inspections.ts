@@ -24,7 +24,8 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import {
-  fetchInspections, updateInspection, resolveCommunityDisplay, formatCommunityLocation,
+  fetchInspections, updateInspection, readInspectionProps,
+  resolveCommunityDisplay, formatCommunityLocation,
 } from '@/lib/hubspot';
 
 export const config = { maxDuration: 300 };
@@ -50,6 +51,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const changes: Array<{
       id: string; status: string;
       addressBefore: string; addressAfter: string;
+      fullAddressBefore: string; fullAddressAfter: string;
       regionBefore: string; regionAfter: string;
     }> = [];
     const errorSamples: string[] = [];
@@ -73,9 +75,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         const addressBefore = insp.propertyAddressSnapshot || '';
         const regionBefore = insp.regionSnapshot || '';
+        // full_address is a SEPARATE inspection field (normally copied from the
+        // property during billing sync); community inspections have none, so it's
+        // set to the same "<Community>, City, St, Zip" string.
+        const fullBefore = ((await readInspectionProps(insp.recordId, ['full_address']))?.full_address || '').toString();
 
         const props: Record<string, any> = {};
         if (addressAfter && addressAfter !== addressBefore) props.property_address_snapshot = addressAfter;
+        if (addressAfter && addressAfter !== fullBefore) props.full_address = addressAfter;
         if (regionAfter && regionAfter !== regionBefore) props.region_snapshot = regionAfter;
 
         if (Object.keys(props).length === 0) { skippedNoChange++; continue; }
@@ -83,6 +90,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         changes.push({
           id: insp.recordId, status: insp.status,
           addressBefore, addressAfter: props.property_address_snapshot ?? addressBefore,
+          fullAddressBefore: fullBefore, fullAddressAfter: props.full_address ?? fullBefore,
           regionBefore, regionAfter: props.region_snapshot ?? regionBefore,
         });
 

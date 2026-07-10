@@ -217,6 +217,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       scheduled_date: scheduledDateValue,
       // Bed/bath only apply to a unit — omit for community.
       ...(isCommunity ? {} : { bedrooms_at_inspection: body.bedrooms, bathrooms_at_inspection: body.bathrooms }),
+      // Community has no property to copy full_address from (billing sync fills it
+      // for property inspections), so set it here to "<Community>, City, St, Zip".
+      ...(isCommunity ? { full_address: addressSnapshot } : {}),
       ...(propertyStatusSnapshot ? { property_status_snapshot: propertyStatusSnapshot } : {}),
     };
 
