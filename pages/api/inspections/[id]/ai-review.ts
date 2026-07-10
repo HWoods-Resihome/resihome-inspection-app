@@ -417,6 +417,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         type, sectionId, sectionName: section?.name, lineExternalId,
         title: String(a?.title || 'Suggested adjustment'),
         rationale: String(a?.rationale || ''),
+        // The inspector's own note on the target line (bid-item description,
+        // etc.) — surfaced so the reviewer can evaluate the AI's suggestion
+        // against what the inspector actually wrote.
+        inspectorNote: (cur?.note || '').trim() || undefined,
         severity: ['high', 'medium', 'low'].includes(a?.severity) ? a.severity : 'medium',
         needsPhoto: a?.needsPhoto === true,
         wrongRoom,

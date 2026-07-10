@@ -312,6 +312,9 @@ export function AiReviewModal({ open, loading, streaming, applying, error, summa
                             </div>
                             <div className="min-w-0">
                               <div className="text-xs text-gray-600 mt-1 leading-snug">{a.rationale}</div>
+                              {a.inspectorNote && (
+                                <div className="text-xs text-gray-500 italic mt-1 leading-snug">(Inspector note: “{a.inspectorNote}”)</div>
+                              )}
 
                               {a.needsVendorCost ? (
                                 /* $0 line — enter a vendor charge (Apply), or confirm none needed. */

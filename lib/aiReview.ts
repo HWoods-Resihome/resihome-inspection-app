@@ -23,6 +23,10 @@ export interface AiAdjustment {
   lineExternalId?: string;
   title: string;        // short headline, e.g. "Reduce tenant % on carpet (depreciation cap)"
   rationale: string;    // why, in the inspector's terms
+  /** The inspector's own note on the target line (e.g. a bid-item description of
+   *  the actual work). Shown verbatim under the rationale so the reviewer can
+   *  judge the AI's suggestion against what the inspector actually wrote. */
+  inspectorNote?: string;
   severity?: 'high' | 'medium' | 'low';
   /** The line's damage/tenant claim isn't supported by a photo. The inspector
    *  should either add a photo of the damage (attaches to the room + line) or
