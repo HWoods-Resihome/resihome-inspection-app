@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals, fetchActiveUsers, fetchPropertyStatus, bustExternalUnlockedView, findInspectionIdByExternalId } from '@/lib/hubspot';
+import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals, fetchActiveUsers, fetchPropertyStatus, bustExternalUnlockedView, findInspectionIdByExternalId, associateCommunityToInspection } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
@@ -30,12 +30,16 @@ function shortId(): string {
 
 interface CreateBody {
   templateType: string;
-  propertyRecordId: string;
-  propertyAddressSnapshot: string;
+  propertyRecordId?: string;
+  propertyAddressSnapshot?: string;
   inspectorName: string;
   inspectorEmail?: string;
-  bedrooms: number;
-  bathrooms: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  // Community / Visit: a Community replaces the property (+ bed/bath). We snapshot
+  // the community NAME as the address and store its record id in property_id_ref.
+  communityRecordId?: string;
+  communityName?: string;
   // Optional: when the user uses "Schedule Inspection", they pick a specific date.
   // ISO date string (YYYY-MM-DD) or full ISO datetime. If absent, defaults to now.
   scheduledDate?: string;
@@ -56,9 +60,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const body = req.body as CreateBody;
-    if (!body || !body.templateType || !body.propertyRecordId) {
+    if (!body || !body.templateType) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
+    // Community / Visit inspections carry a community instead of a property.
+    const isCommunity = body.templateType === 'pm_community_inspection';
+    if (isCommunity ? !body.communityRecordId : !body.propertyRecordId) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    // The subject shown where the address normally is: community name, else the
+    // property address snapshot.
+    const subjectLabel = isCommunity ? (body.communityName || 'Community') : (body.propertyAddressSnapshot || '');
 
     // External (1099) users may only create the 1099 template. This is a NEW
     // record with no owner yet — the creator WILL own it (inspector_email is
@@ -75,7 +87,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // External 1099 walks are only allowed once the property is in a leasing
     // status (Vacant - Pre-Leasing / On Market) — the Turn must be done first.
     if (isExternalEmail(session.email) && body.templateType === EXTERNAL_TEMPLATE) {
-      const status = await fetchPropertyStatus(body.propertyRecordId);
+      const status = await fetchPropertyStatus(body.propertyRecordId || '');
       if (!externalCanCreate1099ForStatus(status)) {
         void recordErrorEvent({ kind: 'inspection_start', message: EXTERNAL_1099_STATUS_BLOCK_MSG, email: session.email, template: body.templateType, source: 'server', meta: { propertyStatus: status || '(blank)', propertyId: body.propertyRecordId } });
         return res.status(403).json({ error: EXTERNAL_1099_STATUS_BLOCK_MSG });
@@ -119,10 +131,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       } catch { /* fall back to prettified id */ }
     }
     const inspectionName = isRateCard
-      ? `Rate Card – ${body.propertyAddressSnapshot} – ${today}`
+      ? `Rate Card – ${subjectLabel} – ${today}`
       : isQc
-        ? `Turn Re-Inspect QC – ${body.propertyAddressSnapshot} – ${today}`
-        : `${TEMPLATE_NAME_PREFIX[body.templateType] || customLabel || properCase(body.templateType)} – ${body.propertyAddressSnapshot} – ${today}`;
+        ? `Turn Re-Inspect QC – ${subjectLabel} – ${today}`
+        : `${TEMPLATE_NAME_PREFIX[body.templateType] || customLabel || properCase(body.templateType)} – ${subjectLabel} – ${today}`;
 
     // HubSpot's scheduled_date is a Date field (not DateTime), so the value MUST be
     // exactly midnight UTC. We send the YYYY-MM-DD string form, which HubSpot interprets
@@ -172,20 +184,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // status so a brand-new inspection is sortable by status immediately (the
     // home list's enrichment keeps it fresh thereafter). Best-effort — null if
     // the property has no status or the read fails.
-    const propertyStatusSnapshot = await fetchPropertyStatus(body.propertyRecordId);
+    const propertyStatusSnapshot = isCommunity ? null : await fetchPropertyStatus(body.propertyRecordId || '');
 
     const inspectionProps: Record<string, any> = {
       inspection_id_external: externalId,
       inspection_name: inspectionName,
       template_type: body.templateType,
       status: 'scheduled',
-      property_address_snapshot: body.propertyAddressSnapshot,
-      bedrooms_at_inspection: body.bedrooms,
-      bathrooms_at_inspection: body.bathrooms,
+      property_address_snapshot: subjectLabel,
       inspector_name: inspectorName,
       inspector_email: inspectorEmail,
-      property_id_ref: body.propertyRecordId,
+      // Community/Visit stores the community record id here (no property);
+      // otherwise the property id.
+      property_id_ref: isCommunity ? body.communityRecordId : body.propertyRecordId,
       scheduled_date: scheduledDateValue,
+      // Bed/bath only apply to a unit — omit for community.
+      ...(isCommunity ? {} : { bedrooms_at_inspection: body.bedrooms, bathrooms_at_inspection: body.bathrooms }),
       ...(propertyStatusSnapshot ? { property_status_snapshot: propertyStatusSnapshot } : {}),
     };
 
@@ -194,14 +208,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Community inspections need it too (otherwise they're invisible under the
     // region filter and their inspectors don't surface when filtering by region).
     // The math layer falls back to GA:Atlanta if region is missing/unmatched.
-    try {
-      const region = await fetchPropertyRegion(body.propertyRecordId);
-      if (region) {
-        inspectionProps.region_snapshot = region;
+    if (!isCommunity) {
+      try {
+        const region = await fetchPropertyRegion(body.propertyRecordId || '');
+        if (region) {
+          inspectionProps.region_snapshot = region;
+        }
+      } catch (e) {
+        // Don't block inspection creation if region lookup fails; log and continue.
+        console.warn(`Region lookup failed for property ${body.propertyRecordId}; using fallback.`, e);
       }
-    } catch (e) {
-      // Don't block inspection creation if region lookup fails; log and continue.
-      console.warn(`Region lookup failed for property ${body.propertyRecordId}; using fallback.`, e);
     }
 
     // QC Turn Re-Inspect: stamp the source inspection ref + carry its region
@@ -223,8 +239,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const { inspectionId } = await createScheduledInspection({
       inspectionProps,
-      propertyRecordId: body.propertyRecordId,
+      // No property for a community inspection — the property association is
+      // simply skipped (fail-open); the Community association is created below.
+      propertyRecordId: body.propertyRecordId || '',
     });
+
+    // Community / Visit: associate the chosen Community object to this inspection
+    // (best-effort — the inspection is already created).
+    if (isCommunity && body.communityRecordId) {
+      await associateCommunityToInspection(inspectionId, body.communityRecordId);
+    }
 
     // Seed the combined-date sort key: initialize last_edited_at to the scheduled
     // date so a brand-new (unedited) scheduled inspection sorts by its scheduled

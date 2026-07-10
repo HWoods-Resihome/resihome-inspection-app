@@ -110,6 +110,7 @@ export default function ExistingInspection() {
   const [moveInReadyDate, setMoveInReadyDate] = useState<string | null>(null);
   const [moveInDate, setMoveInDate] = useState<string | null>(null);
   const [communityName, setCommunityName] = useState<string | null>(null);
+  const [communityLocation, setCommunityLocation] = useState<string | null>(null);
   const [filterSizeOptions, setFilterSizeOptions] = useState<string[]>([]);
   const [existingAnswers, setExistingAnswers] = useState<SavedAnswer[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -214,6 +215,7 @@ export default function ExistingInspection() {
         setMoveInReadyDate(typeof data.moveInReadyDate === 'string' ? data.moveInReadyDate : null);
         setMoveInDate(typeof data.moveInDate === 'string' ? data.moveInDate : null);
         setCommunityName(typeof data.communityName === 'string' ? data.communityName : null);
+        setCommunityLocation(typeof data.communityLocation === 'string' ? data.communityLocation : null);
         setFilterSizeOptions(Array.isArray(data.filterSizeOptions) ? data.filterSizeOptions : []);
         setExistingAnswers(data.answers || []);
       };
@@ -374,6 +376,7 @@ export default function ExistingInspection() {
           finalChecklist: meta?.finalChecklist,
           finalChecklistPhotos: meta?.finalChecklistPhotos,
           communityName,
+          communityLocation,
         };
         const pdfResp = await fetch('/api/pdf', {
           method: 'POST',

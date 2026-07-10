@@ -9,6 +9,8 @@ import {
   fetchActiveListingForProperty,
   parseListingSnapshot,
   fetchPropertyCommunityName,
+  fetchCommunityById,
+  formatCommunityLocation,
   syncInspectorFromOwner,
   externalUnlockedView,
 } from '@/lib/hubspot';
@@ -86,17 +88,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // inspection shows the listing as it was at the time of inspection; fall
       // back to a live lookup while it's still in progress (no snapshot yet).
       const listingSnapshot = parseListingSnapshot(data.listingSnapshotJson);
-      const [answers, listing, communityName] = await Promise.all([
+      // Community / Visit inspections store the Community record id directly in
+      // property_id_ref (no property). Resolve the Community object for its name
+      // + City/State/ZIP line. Other templates keep the old associated-community
+      // name lookup (property → community) and have no location line.
+      const isCommunityInspection = data.inspection.templateType === 'pm_community_inspection';
+      const [answers, listing, communityRec, communityNameLegacy] = await Promise.all([
         answersPromise,
         listingSnapshot
           ? Promise.resolve(listingSnapshot)
-          : (data.propertyIdRef
+          : (!isCommunityInspection && data.propertyIdRef
             ? fetchActiveListingForProperty(data.propertyIdRef).catch(() => null)
             : Promise.resolve(null)),
-        (wantCommunity && data.propertyIdRef)
+        (isCommunityInspection && data.propertyIdRef)
+          ? fetchCommunityById(data.propertyIdRef).catch(() => null)
+          : Promise.resolve(null),
+        (wantCommunity && !isCommunityInspection && data.propertyIdRef)
           ? fetchPropertyCommunityName(data.propertyIdRef).catch(() => null)
           : Promise.resolve(null),
       ]);
+      const communityName = isCommunityInspection
+        ? (communityRec?.name || data.inspection.propertyAddressSnapshot || null)
+        : communityNameLegacy;
+      const communityLocation = isCommunityInspection ? (formatCommunityLocation(communityRec) || null) : null;
 
       // Clean short links (resolve to the real files via /d/...) for whatever
       // PDFs this inspection has — works for ALL templates: Rate Card
@@ -172,6 +186,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         moveInReadyDate: listing?.moveInReadyDate ?? null,
         moveInDate: listing?.moveInDate ?? null,
         communityName: communityName ?? null,
+        communityLocation: communityLocation ?? null,
         filterSizeOptions,
         shareLinks,
         answers,

@@ -190,6 +190,9 @@ export interface PdfData {
   /** Community/Visit inspection: name of the property's associated Community
    *  object (e.g. "Southport"). Appended to the doc title on community PDFs. */
   communityName?: string | null;
+  /** Community/Visit inspection: "City, State ZIP" of the Community object,
+   *  shown under the title in place of a property address line. */
+  communityLocation?: string | null;
 }
 
 function formatDate(iso: string): string {
@@ -349,6 +352,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
           bedrooms={data.bedrooms}
           bathrooms={data.bathrooms}
           generatedAtLabel={isoToHumanDate(data.completedAt)}
+          locationLine={isCommunity ? (data.communityLocation || null) : null}
           listingLine={isCommunity ? null : listingLine}
           detailsFirst
           inspectorTopRight

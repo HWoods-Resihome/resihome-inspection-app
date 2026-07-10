@@ -778,6 +778,91 @@ export async function fetchPropertyCommunityName(propertyRecordId: string): Prom
   }
 }
 
+export interface CommunityOption { id: string; name: string; city: string; state: string; zip: string; }
+
+/** List Community objects as a de-duplicated (by name) picker list for the
+ *  Community / Visit inspection. Fail-open → [] if the object isn't present.
+ *  Location fields are the Community object's own (community_city / state /
+ *  community_zipcode). */
+export async function listCommunities(): Promise<CommunityOption[]> {
+  const meta = await resolveCommunityMeta();
+  if (!meta) return [];
+  const props = [meta.nameProp, 'community_city', 'state', 'community_zipcode'];
+  const qs = props.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
+  const out: CommunityOption[] = [];
+  const seen = new Set<string>();
+  let after: string | undefined;
+  let pages = 0;
+  try {
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${meta.typeId}?limit=100&${qs}${after ? `&after=${after}` : ''}`);
+      for (const r of (resp.results || [])) {
+        const p = r.properties || {};
+        const name = String(p[meta.nameProp] || '').trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        if (seen.has(key)) continue; // unique by name
+        seen.add(key);
+        out.push({
+          id: String(r.id), name,
+          city: String(p.community_city || '').trim(),
+          state: String(p.state || '').trim(),
+          zip: String(p.community_zipcode || '').trim(),
+        });
+      }
+      after = resp.paging?.next?.after;
+      pages++;
+    } while (after && pages < 25);
+  } catch (e) {
+    console.warn('[community] list failed:', e);
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+/** One Community's display name + location (city/state/zip). Fail-open → null. */
+export async function fetchCommunityById(communityId: string): Promise<CommunityOption | null> {
+  const meta = await resolveCommunityMeta();
+  if (!meta || !communityId) return null;
+  try {
+    const props = [meta.nameProp, 'community_city', 'state', 'community_zipcode'];
+    const qs = props.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
+    const r = await hubspotFetch(`/crm/v3/objects/${meta.typeId}/${communityId}?${qs}`);
+    const p = r?.properties || {};
+    return {
+      id: String(r.id),
+      name: String(p[meta.nameProp] || '').trim(),
+      city: String(p.community_city || '').trim(),
+      state: String(p.state || '').trim(),
+      zip: String(p.community_zipcode || '').trim(),
+    };
+  } catch (e) {
+    console.warn('[community] fetchById failed:', e);
+    return null;
+  }
+}
+
+/** "City, State ZIP" location line for a Community (from its own city/state/zip
+ *  fields). Returns '' if none are set. Shared by the picker and the PDF header. */
+export function formatCommunityLocation(c: { city?: string; state?: string; zip?: string } | null | undefined): string {
+  if (!c) return '';
+  return [c.city, [c.state, c.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+}
+
+/** Associate a Community object to an Inspection (default/unlabeled v4 assoc),
+ *  so Community/Visit inspections are linked on the Community record too.
+ *  Best-effort — never throws. */
+export async function associateCommunityToInspection(inspectionId: string, communityId: string): Promise<void> {
+  const meta = await resolveCommunityMeta();
+  if (!meta || !communityId || !inspectionId) return;
+  const { inspection } = typeIds();
+  try {
+    await hubspotFetch(`/crm/v4/objects/${inspection}/${inspectionId}/associations/default/${meta.typeId}/${communityId}`, { method: 'PUT' });
+  } catch (e) {
+    console.warn('[community] associate to inspection failed:', e);
+  }
+}
+
 /**
  * Fetch all Inspection records for the list view (Round A).
  * Returns lightweight summary records sorted by most-recent-first.

@@ -425,6 +425,10 @@ export function PdfHeaderStrip(props: {
   approvedLabel?: string | null;
   /** Optional listing line (e.g. "Active · Listing $1,995 · Listed 5/8/2026"). */
   listingLine?: string | null;
+  /** Optional location line (e.g. "Atlanta, GA 30301") rendered right under the
+   *  property/community name — used for Community/Visit PDFs in place of an
+   *  address. */
+  locationLine?: string | null;
   /** When true, render the property details line BEFORE the inspector line
    *  (1099 layout). Default false (inspector first — Scope/QC layout). */
   detailsFirst?: boolean;
@@ -493,6 +497,7 @@ export function PdfHeaderStrip(props: {
         ) : (
           <Text style={pdfStyles.headerProperty}>{props.propertyName}</Text>
         )}
+        {props.locationLine ? <Text style={pdfStyles.headerMeta}>{props.locationLine}</Text> : null}
         {props.detailsFirst ? (
           <>
             {detailsEl}

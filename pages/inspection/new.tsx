@@ -39,6 +39,11 @@ const TEMPLATE_OPTIONS: { value: TemplateType; label: string; sublabel: string; 
   { value: 'qc_new_construction_rrqc',                  group: 'QC',   label: 'New Construction RRQC',           sublabel: 'Rent-ready QC for new construction' },
 ];
 
+// Shape returned by GET /api/communities (kept local to avoid importing the
+// server-only hubspot lib into the client bundle).
+type CommunityOpt = { id: string; name: string; city: string; state: string; zip: string };
+const COMMUNITY_TEMPLATE = 'pm_community_inspection';
+
 export default function NewInspection() {
   const dialog = useAppDialog();
   const router = useRouter();
@@ -69,6 +74,11 @@ export default function NewInspection() {
   const [selectedPropertyId, setSelectedPropertyId] = useState('');
   const [bedrooms, setBedrooms] = useState<number | null>(null);
   const [bathrooms, setBathrooms] = useState<number | null>(null);
+  // Community / Visit inspection: pick a Community (not a property). Local type
+  // so we don't pull the server hubspot lib into the client bundle.
+  const [communities, setCommunities] = useState<CommunityOpt[]>([]);
+  const [communitiesLoading, setCommunitiesLoading] = useState(false);
+  const [selectedCommunityId, setSelectedCommunityId] = useState('');
 
   // QC Turn Re-Inspect: the source Scope Rate Card inspection being validated.
   // Only relevant when selectedTemplate === 'pm_turn_reinspect_qc'.
@@ -79,6 +89,29 @@ export default function NewInspection() {
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [selectedSourceId, setSelectedSourceId] = useState('');
   const isQcTemplate = selectedTemplate === 'pm_turn_reinspect_qc';
+  const isCommunityTemplate = selectedTemplate === COMMUNITY_TEMPLATE;
+  const selectedCommunity = useMemo(
+    () => communities.find((c) => c.id === selectedCommunityId) || null,
+    [communities, selectedCommunityId],
+  );
+  // City, State ZIP line for the chosen community (from the Community object).
+  const communityLocationLine = useMemo(() => {
+    const c = selectedCommunity;
+    if (!c) return '';
+    return [c.city, [c.state, c.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  }, [selectedCommunity]);
+
+  // Load communities once the Community / Visit template is chosen.
+  useEffect(() => {
+    if (!isCommunityTemplate || communities.length || communitiesLoading) return;
+    setCommunitiesLoading(true);
+    fetch('/api/communities')
+      .then((r) => r.json())
+      .then((d) => { if (!d.error) setCommunities(d.communities || []); })
+      .catch((e) => console.error('Failed to load communities:', e))
+      .finally(() => setCommunitiesLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCommunityTemplate]);
 
   // Scheduling state. The "Scheduled Date" field is always visible and defaults
   // to today. Picking a future date turns the form into a scheduled (assignable)
@@ -316,11 +349,12 @@ export default function NewInspection() {
     && !externalCanCreate1099ForStatus(selectedProp.status);
 
   const setupReady = !!selectedTemplate
-    && !!selectedPropertyId
     && !!sessionUser
-    && bedrooms != null
-    && bathrooms != null
-    && !blockedByPropertyStatus;
+    && !blockedByPropertyStatus
+    && (isCommunityTemplate
+      // Community / Visit: a community replaces property + bed/bath.
+      ? !!selectedCommunityId
+      : (!!selectedPropertyId && bedrooms != null && bathrooms != null));
     // QC's source Scope is OPTIONAL — when none is selected the QC starts
     // standalone (empty rooms for after-photos + a final pass/fail verdict).
 
@@ -328,6 +362,21 @@ export default function NewInspection() {
   // Scheduled inspection and assign it, rather than starting it now.
   const todayStr = todayLocalStr();
   const isFuture = !!scheduledDate && scheduledDate > todayStr;
+
+  // The subject fields of a create body: a property (+ bed/bath) for normal
+  // inspections, or a community for Community / Visit. create.ts branches on the
+  // template and snapshots the community name as the address.
+  function subjectBody() {
+    if (isCommunityTemplate) {
+      return { communityRecordId: selectedCommunityId, communityName: selectedCommunity?.name || '' };
+    }
+    return {
+      propertyRecordId: selectedPropertyId,
+      propertyAddressSnapshot: addressSnapshot,
+      bedrooms,
+      bathrooms,
+    };
+  }
 
   async function handleBegin() {
     if (!setupReady) {
@@ -342,12 +391,9 @@ export default function NewInspection() {
     }
     const body = {
       templateType: selectedTemplate,
-      propertyRecordId: selectedPropertyId,
-      propertyAddressSnapshot: addressSnapshot,
+      ...subjectBody(),
       inspectorName: sessionUser?.name || '',
       inspectorEmail: sessionUser?.email,
-      bedrooms,
-      bathrooms,
       ...(isQcTemplate ? { sourceRateCardId: selectedSourceId } : {}),
     };
     let r: Response;
@@ -414,6 +460,9 @@ export default function NewInspection() {
   // isn't cached for offline use yet — without it the form can't render offline.
   function startLocalInspection(): boolean {
     const tmpl = selectedTemplate;
+    // Community / Visit creation resolves the community server-side, so it needs
+    // a connection — don't start it locally/offline.
+    if (isCommunityTemplate) return false;
     const contentCached = tmpl === 'pm_scope_rate_card'
       ? !!loadCachedRateCard()
       : tmpl === 'pm_turn_reinspect_qc'
@@ -501,12 +550,9 @@ export default function NewInspection() {
     try {
       const body = {
         templateType: selectedTemplate,
-        propertyRecordId: selectedPropertyId,
-        propertyAddressSnapshot: addressSnapshot,
+        ...subjectBody(),
         inspectorName,
         inspectorEmail,
-        bedrooms,
-        bathrooms,
         scheduledDate,
         ...(isQcTemplate ? { sourceRateCardId: selectedSourceId } : {}),
       };
@@ -606,25 +652,52 @@ export default function NewInspection() {
                 />
               </div>
 
-              {/* Property */}
-              <div>
-                <label htmlFor="property-cb" className="block text-sm font-heading font-semibold text-ink mb-1.5">
-                  Property
-                </label>
-                <Combobox
-                  id="property-cb"
-                  options={propertyOptions}
-                  value={selectedPropertyId}
-                  onChange={setSelectedPropertyId}
-                  onQueryChange={setPropertyQuery}
-                  placeholder={propertiesLoading ? 'Loading properties...' : 'Search by address, name, or zip'}
-                  loading={propertiesLoading}
-                  error={propertiesError}
-                  emptyLabel={propertyQuery ? 'No matching properties' : 'Type to search properties'}
-                  filled
-                  deferKeyboard
-                />
-              </div>
+              {/* Community / Visit: pick a Community (no property, no bed/bath). */}
+              {isCommunityTemplate ? (
+                <div>
+                  <label htmlFor="community-cb" className="block text-sm font-heading font-semibold text-ink mb-1.5">
+                    Community
+                  </label>
+                  <Combobox
+                    id="community-cb"
+                    options={communities.map((c) => ({
+                      value: c.id,
+                      label: c.name,
+                      sublabel: [c.city, [c.state, c.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ') || undefined,
+                    }))}
+                    value={selectedCommunityId}
+                    onChange={setSelectedCommunityId}
+                    placeholder={communitiesLoading ? 'Loading communities…' : 'Select a community'}
+                    loading={communitiesLoading}
+                    emptyLabel={communitiesLoading ? 'Loading…' : 'No communities found'}
+                    filled
+                    deferKeyboard
+                  />
+                  {!!communityLocationLine && (
+                    <p className="text-xs text-gray-500 mt-1">{communityLocationLine}</p>
+                  )}
+                </div>
+              ) : (
+                /* Property */
+                <div>
+                  <label htmlFor="property-cb" className="block text-sm font-heading font-semibold text-ink mb-1.5">
+                    Property
+                  </label>
+                  <Combobox
+                    id="property-cb"
+                    options={propertyOptions}
+                    value={selectedPropertyId}
+                    onChange={setSelectedPropertyId}
+                    onQueryChange={setPropertyQuery}
+                    placeholder={propertiesLoading ? 'Loading properties...' : 'Search by address, name, or zip'}
+                    loading={propertiesLoading}
+                    error={propertiesError}
+                    emptyLabel={propertyQuery ? 'No matching properties' : 'Type to search properties'}
+                    filled
+                    deferKeyboard
+                  />
+                </div>
+              )}
 
               {/* QC Turn Re-Inspect: dependent source-inspection picker.
                   Only shows when the QC template is selected. Lists the
@@ -683,7 +756,8 @@ export default function NewInspection() {
                   read-only (greyed) for everyone; bed/bath is no longer an
                   inspector-entered field. Stays editable only as a fallback when
                   the property record has no count, so a missing value can't block
-                  starting the inspection. */}
+                  starting the inspection. Hidden for Community / Visit (no unit). */}
+              {!isCommunityTemplate && (<>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-heading font-semibold text-ink mb-1.5">Bedrooms</label>
@@ -714,6 +788,7 @@ export default function NewInspection() {
                   Bedroom/bathroom counts weren&apos;t found on the property record. Please enter them manually.
                 </p>
               )}
+              </>)}
 
               {/* Scheduled Date \u2014 always visible, defaults to today. Picking a
                   future date turns this into a scheduled (assignable) inspection. */}

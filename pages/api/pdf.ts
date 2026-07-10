@@ -41,6 +41,7 @@ interface GeneratePdfBody {
   finalChecklist?: { name: string; rows: { label: string; value: string; photos?: string[] }[] }[];
   finalChecklistPhotos?: string[];
   communityName?: string | null;
+  communityLocation?: string | null;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -161,6 +162,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       finalChecklist: body.finalChecklist,
       finalChecklistPhotos: body.finalChecklistPhotos,
       communityName: body.communityName ?? null,
+      communityLocation: body.communityLocation ?? null,
       completedAt: body.completedAt,
       totalAnswered: body.answers.length,
       totalPhotos,

@@ -25,7 +25,8 @@ import { isAppAdmin } from '@/lib/adminAccess';
 import { InspectionPdf, type PdfData, type PdfAnswer } from '@/lib/pdf';
 import {
   fetchInspections, fetchInspectionWithPropertyRef, fetchAnswersForInspection,
-  fetchQuestionsForTemplate, fetchActiveListingForProperty, fetchPropertyCommunityName,
+  fetchQuestionsForTemplate, fetchActiveListingForProperty,
+  fetchCommunityById, formatCommunityLocation,
   uploadFileWithId, attachPdfUrlToInspection, parseListingSnapshot,
   updateInspection,
 } from '@/lib/hubspot';
@@ -167,11 +168,17 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
     parseListingSnapshot(data.listingSnapshotJson);
   if (!listing) { try { listing = await fetchActiveListingForProperty(data.propertyIdRef); } catch { /* optional */ } }
 
-  // Community/Visit only: the property's associated Community object name, used
-  // in the PDF title row ("Community Visit Inspection - Southport"). Fail-open.
+  // Community/Visit only: the Community object's name (title row) + City/State/ZIP
+  // (header line). property_id_ref holds the Community record id directly for
+  // these inspections. Fail-open.
   let communityName: string | null = null;
+  let communityLocation: string | null = null;
   if (tmpl === 'pm_community_inspection') {
-    try { communityName = await fetchPropertyCommunityName(data.propertyIdRef); } catch { /* optional */ }
+    try {
+      const c = await fetchCommunityById(data.propertyIdRef);
+      communityName = c?.name || insp.propertyAddressSnapshot || null;
+      communityLocation = formatCommunityLocation(c) || null;
+    } catch { /* optional */ }
   }
 
   // Resolve + embed thumbnails (small file), keep original URLs for clickable links.
@@ -214,6 +221,7 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
     finalChecklist,
     finalChecklistPhotos: fcPhotos,
     communityName,
+    communityLocation,
   };
 
   const buf = await renderToBuffer(React.createElement(InspectionPdf, { data: pdfData }) as any);
