@@ -26,6 +26,11 @@ const REJECT = new Set(['decline', 'remove', 'dismiss']);
 const MIN_SAMPLES = 2;       // learn fast from sparse early usage (was 3)
 const MAJORITY = 0.6;        // how lopsided accept/reject must be to be "consistent" (was 0.7)
 const MAX_EXAMPLES = 3;      // example phrases shown per rule
+// Distinct submitted inspections a code must be REMOVED from (by a reviewer,
+// post-submission) before we teach the review it's "commonly removed". Higher
+// than MIN_SAMPLES because a removal suggestion is more consequential than a
+// suggestion-suppression, and we only ever want this from a real pattern.
+const MIN_REMOVALS = 3;
 
 function cleanPhrase(q?: string): string | null {
   const s = (q || '').replace(/\s+/g, ' ').trim();
@@ -146,6 +151,30 @@ async function candidatesFromEvents(events: AiFeedbackEvent[]): Promise<AutoKnow
       signature: `tenantpct:${cat.toLowerCase()}`,
       text: `Inspectors consistently set tenant responsibility to ${mode}% on ${cat} lines. Default to ${mode}% there unless the depreciation schedule or the inspector says otherwise.`,
       meta: { category: cat, tenantPct: mode, samples: vals.length, agree: modeN },
+    });
+  }
+
+  // ── Reviewer removals (REAL post-submission deletions) ──────────────────────
+  // A reviewer deleting a line after submission is genuine evidence the line
+  // shouldn't be there — unlike declining an AI suggestion. Aggregate these
+  // 'reviewer_line_delete' events into "commonly removed" guidance the review
+  // MAY act on. Count DISTINCT inspections per code so one inspection (or a
+  // repeated save) can't inflate a pattern.
+  const removalInspByCode = new Map<string, Set<string>>();
+  for (const e of events) {
+    if (e.suggestion?.type !== 'reviewer_line_delete') continue;
+    const code = e.suggestion?.catalogCode;
+    if (!code) continue;
+    const set = removalInspByCode.get(code) || (removalInspByCode.set(code, new Set()), removalInspByCode.get(code)!);
+    set.add(e.inspectionId || `anon:${e.ts || Math.random()}`);
+  }
+  for (const [code, insps] of removalInspByCode) {
+    const n = insps.size;
+    if (n < MIN_REMOVALS) continue;
+    candidates.push({
+      signature: `remove:${code}`,
+      text: `Reviewers have removed ${label(code)} during approval on ${n} different submitted inspections — a real pattern of this line being cut in review. When it appears on a scope you MAY flag it for removal (type "remove"), UNLESS the inspector's note or a photo justifies the work (then keep it). This is based on ACTUAL removals, not declined suggestions.`,
+      meta: { code, removals: n, samples: n },
     });
   }
 

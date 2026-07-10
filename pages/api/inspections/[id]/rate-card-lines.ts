@@ -10,6 +10,7 @@ import {
   type AnswerUpsert,
 } from '@/lib/hubspot';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
+import { recordAiFeedback } from '@/lib/aiFeedback';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { getSessionFromRequest } from '@/lib/auth';
 import { calculateLine, roundMoney } from '@/lib/rateCardMath';
@@ -325,12 +326,51 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // Learning signal: a REVIEWER deleting a line AFTER the inspection has been
+    // submitted (pending_approval) is real evidence the line shouldn't be there
+    // — unlike an inspector trimming their own draft before first submission,
+    // which is normal editing and must NOT count. When we're in that state,
+    // resolve the archived record ids → catalog codes BEFORE archiving (records
+    // still exist), so we can teach the KB which lines get cut in review.
+    const postSubmission = (inspection.status || '').toLowerCase() === 'pending_approval';
+    const codeByArchiveId = new Map<string, string>();
+    if (postSubmission && archives.length) {
+      try {
+        const existing = await fetchAnswersForInspection(inspectionRecordId);
+        for (const a of existing) {
+          if (a.answerType === 'rate_card_line' && a.recordId && a.rateCardLine?.lineItemCode) {
+            codeByArchiveId.set(String(a.recordId), a.rateCardLine.lineItemCode);
+          }
+        }
+      } catch { /* best-effort — no learning signal if codes can't be resolved */ }
+    }
+
     // Archives one-at-a-time so a single stale/already-archived id can't fail
     // the batch (HubSpot 400s the whole batch otherwise).
+    const feedbackWrites: Promise<void>[] = [];
     for (const rid of archives) {
-      try { await archiveAnswers([rid]); }
+      try {
+        await archiveAnswers([rid]);
+        const code = postSubmission ? codeByArchiveId.get(String(rid)) : undefined;
+        if (code) {
+          // Distinct marker: an ACTUAL reviewer deletion post-submission (NOT a
+          // response to an AI suggestion). aiKnowledgeLearning aggregates these
+          // into "commonly removed" guidance the review may act on.
+          feedbackWrites.push(recordAiFeedback({
+            source: 'ai_review',
+            decision: 'remove',
+            inspectionId: inspectionRecordId,
+            actorEmail: session.email,
+            region,
+            suggestion: { type: 'reviewer_line_delete', catalogCode: code },
+          }));
+        }
+      }
       catch (e: any) { failures.push({ code: `archive ${rid}`, error: String(e?.detail || e?.message || e).slice(0, 160) }); }
     }
+    // Persist the removal signals before responding so a serverless freeze can't
+    // drop the blob writes the learning loop reads (rare post-submission path).
+    if (feedbackWrites.length) await Promise.allSettled(feedbackWrites);
     // Stamp "last edited" so the list can sort by most-recently-touched.
     await touchInspection(inspectionRecordId).catch(() => { /* non-fatal */ });
 
