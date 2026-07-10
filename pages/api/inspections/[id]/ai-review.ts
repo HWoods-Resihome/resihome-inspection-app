@@ -423,7 +423,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           // breakpoint on the system block caches both together). Re-read at
           // ~0.1x on rounds 2-4 of this loop and across reviews within the TTL.
           model: MODEL, max_tokens: 4000,
-          system: [{ type: 'text', text: reviewSystemText, cache_control: { type: 'ephemeral' } }],
+          // 1h TTL on the STATIC system+KB prompt (GA — no beta header). It's the
+          // same bytes across every review, but reviews are sporadic; a 5m TTL
+          // expires between them, so each review re-wrote this large prompt at
+          // 1.25x. 1h keeps it warm across clustered reviews → re-read at ~0.1x.
+          // (The per-review scope+photos block stays on the default 5m TTL — it's
+          // unique per review, so a longer TTL there would never be reused.)
+          system: [{ type: 'text', text: reviewSystemText, cache_control: { type: 'ephemeral', ttl: '1h' } }],
           tools: reviewTools,
           tool_choice: round === MAX_TOOL_ROUNDS - 1 ? { type: 'tool', name: 'finish_review' } : { type: 'auto' },
           messages,
