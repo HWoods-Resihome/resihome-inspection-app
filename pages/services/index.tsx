@@ -152,19 +152,20 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
               </div>
             </div>
           </div>
+          {/* New Service lives INSIDE the pink header (like "+ New Inspection"),
+              so the banner extends down past it instead of ending at a white gap. */}
+          {canCreate && (
+            <Link href="/services/new" className="mt-2.5 flex items-center gap-3 bg-pink-100 hover:bg-pink-200 rounded-xl px-4 py-2.5 transition active:scale-[0.99] shadow-md">
+              <span className="w-9 h-9 bg-brand rounded-lg flex items-center justify-center shrink-0">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+              </span>
+              <span className="font-heading font-bold text-base text-brand">New Service</span>
+            </Link>
+          )}
         </div>
       </header>
 
       <main className="max-w-3xl mx-auto w-full px-4 py-3 flex-1">
-        {/* Internal users can create a manual service (like "+ New Inspection"). */}
-        {canCreate && (
-          <Link href="/services/new" className="flex items-center gap-3 bg-pink-100 hover:bg-pink-200 rounded-xl px-4 py-2.5 mb-3 transition active:scale-[0.99] shadow-sm">
-            <span className="w-8 h-8 bg-brand rounded-lg flex items-center justify-center shrink-0">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-            </span>
-            <span className="font-heading font-bold text-[15px] text-brand">New Service</span>
-          </Link>
-        )}
         {/* Summary bubbles — dynamic; Past Due is a clickable filter. */}
         <div className="grid grid-cols-3 gap-2 mb-3">
           <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-center">

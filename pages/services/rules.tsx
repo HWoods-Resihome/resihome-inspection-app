@@ -334,6 +334,11 @@ export default function RulesEngine() {
                 </div>
               </div>
             </div>
+            <div className="mb-4">
+              <label className={lbl}>Service Description <span className="text-gray-400 normal-case font-normal">— default for this worktype; editable</span></label>
+              <textarea value={rule.description} onChange={(e) => patch({ description: e.target.value })} rows={3}
+                className="w-full text-[13px] border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand" />
+            </div>
             <label className={lbl}>{rule.scope === 'property' ? 'Portfolios' : 'Communities'}</label>
             <CoveragePicker
               noun={rule.scope === 'property' ? 'portfolios' : 'communities'}
@@ -395,11 +400,6 @@ export default function RulesEngine() {
               <div className="flex flex-col shrink-0"><label className={lbl}>Vendor Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><input value={rule.vendorCost} inputMode="decimal" onChange={(e) => patch({ vendorCost: sanitizeNum(e.target.value) })} className={`${ctl} w-20 text-center tabular-nums`} /></div></div>
               <div className="flex flex-col shrink-0"><label className={lbl}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} inputMode="decimal" onChange={(e) => patch({ markupPct: sanitizeNum(e.target.value) })} className={`${ctl} w-20 text-center tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
               <div className="flex flex-col shrink-0"><label className={lbl}>Client Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><div className="text-[13px] font-bold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg w-20 text-center">{clientCost.toFixed(2)}</div></div></div>
-            </div>
-            <div className="mt-4">
-              <label className={lbl}>Service Description <span className="text-gray-400 normal-case font-normal">— default for this worktype; editable</span></label>
-              <textarea value={rule.description} onChange={(e) => patch({ description: e.target.value })} rows={3}
-                className="w-full text-[13px] border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand" />
             </div>
           </section>
 
