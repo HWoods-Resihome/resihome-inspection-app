@@ -24,7 +24,7 @@ export const WORKTYPES: WorktypeDef[] = [
     id: 'landscaping', label: 'Landscaping', scopes: ['property', 'community'],
     defaultDescription: 'Complete the landscaping scope for this visit — leave the property clean, edged, and blown off with all debris removed.',
     subtypes: [
-      { id: 'cut', label: 'Cut', defaultRate: 45 },
+      { id: 'cut', label: 'Grass Cut', defaultRate: 45 },
       { id: 'flowers', label: 'Flowers' },
       { id: 'tree_trimming', label: 'Tree Trimming' },
       { id: 'mulch_pine_straw', label: 'Mulch / Pine Straw' },
