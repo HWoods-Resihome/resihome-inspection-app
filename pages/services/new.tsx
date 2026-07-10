@@ -6,8 +6,18 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { ListPicker } from '@/components/ListPicker';
-import { WORKTYPES, descriptionFor, subtypesFor } from '@/lib/services/worktypes';
+import { WORKTYPES, descriptionFor, subtypesFor, defaultRateFor } from '@/lib/services/worktypes';
 import { SAMPLE_PROPERTIES, SAMPLE_COMMUNITIES, SAMPLE_VENDORS } from '@/lib/services/sampleData';
+
+const DEFAULT_MARKUP = '20';
+// Keep digits + one dot + up to 2 decimals as the user types.
+const sanitizeNum = (v: string): string => {
+  const parts = v.replace(/[^\d.]/g, '').split('.');
+  const int = parts.shift() ?? '';
+  return parts.length ? `${int}.${parts.join('').slice(0, 2)}` : int;
+};
+const clientFrom = (vc: string, mk: string): string =>
+  vc === '' ? '' : (parseFloat(vc || '0') * (1 + parseFloat(mk || '0') / 100)).toFixed(2);
 
 // Internal users (@resihome / @resicap / …) only; also flag+admin gated.
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -21,14 +31,34 @@ export default function NewService() {
   const [worktype, setWorktype] = useState('');
   const [subtype, setSubtype] = useState('');
   const [description, setDescription] = useState('');
+  const [vendorCost, setVendorCost] = useState('');
+  const [markupPct, setMarkupPct] = useState(DEFAULT_MARKUP);
+  const [clientCost, setClientCost] = useState('');
   const [scope, setScope] = useState<'property' | 'community'>('property');
   const [target, setTarget] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [vendor, setVendor] = useState('');
   const [created, setCreated] = useState(false);
 
-  // Prefill the editable description from the worktype+subtype default when either changes.
-  useEffect(() => { setDescription(worktype ? descriptionFor(worktype, subtype) : ''); }, [worktype, subtype]);
+  // Prefill the editable description + pricing defaults from the worktype+subtype
+  // whenever either changes (mirrors Section 1 of the Rules Engine).
+  useEffect(() => {
+    if (!worktype) { setDescription(''); setVendorCost(''); setMarkupPct(DEFAULT_MARKUP); setClientCost(''); return; }
+    setDescription(descriptionFor(worktype, subtype));
+    const rate = defaultRateFor(worktype, subtype);
+    const vc = rate != null ? String(rate) : '';
+    setVendorCost(vc); setMarkupPct(DEFAULT_MARKUP); setClientCost(clientFrom(vc, DEFAULT_MARKUP));
+  }, [worktype, subtype]);
+
+  // Cross-computed pricing: editing vendor cost or markup recomputes client cost;
+  // editing client cost back-solves the markup (so all three stay editable & consistent).
+  const onVendorCost = (v: string) => { const vc = sanitizeNum(v); setVendorCost(vc); setClientCost(clientFrom(vc, markupPct)); };
+  const onMarkup = (v: string) => { const mk = sanitizeNum(v); setMarkupPct(mk); setClientCost(clientFrom(vendorCost, mk)); };
+  const onClientCost = (v: string) => {
+    const cc = sanitizeNum(v); setClientCost(cc);
+    const vc = parseFloat(vendorCost || '0');
+    if (vc > 0) setMarkupPct((((parseFloat(cc || '0') / vc) - 1) * 100).toFixed(2));
+  };
 
   const worktypeOptions = useMemo(() => WORKTYPES.filter((w) => w.scopes.includes(scope)).map((w) => ({ value: w.id, label: w.label })), [scope]);
   const subtypeOptions = useMemo(() => subtypesFor(worktype).map((s) => ({ value: s.id, label: s.label })), [worktype]);
@@ -61,9 +91,9 @@ export default function NewService() {
           <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center">
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
             <div className="font-heading font-extrabold text-lg text-ink">Service created</div>
-            <p className="text-sm text-gray-500 mt-1">Assigned to <b>{vendor}</b>, due {dueDate}. (Preview — nothing saved.)</p>
+            <p className="text-sm text-gray-500 mt-1">Assigned to <b>{vendor}</b>, due {dueDate}{clientCost ? <>, client cost <b>${clientCost}</b></> : null}. (Preview — nothing saved.)</p>
             <div className="flex gap-2 justify-center mt-4">
-              <button onClick={() => { setCreated(false); setWorktype(''); setTarget(''); setDueDate(''); setVendor(''); }} className="border border-gray-300 bg-white rounded-xl px-4 py-2 font-heading font-bold text-sm">Create another</button>
+              <button onClick={() => { setCreated(false); setWorktype(''); setSubtype(''); setTarget(''); setDueDate(''); setVendor(''); }} className="border border-gray-300 bg-white rounded-xl px-4 py-2 font-heading font-bold text-sm">Create another</button>
               <Link href="/services" className="bg-brand text-white rounded-xl px-5 py-2 font-heading font-bold text-sm">Back to Services</Link>
             </div>
           </div>
@@ -85,9 +115,33 @@ export default function NewService() {
               {/* Description — appears once a work type is chosen; editable. */}
               {worktype && (
                 <div>
-                  <label className={lbl}>Service description <span className="text-gray-400 normal-case font-normal">— editable</span></label>
+                  <label className={lbl}>Service description <span className="text-gray-400 normal-case font-normal">— default for this work type &amp; subtype; editable</span></label>
                   <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
                     className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink focus:outline-none focus:border-brand" />
+                </div>
+              )}
+
+              {/* Pricing — defaults from the subtype rate + standard markup; all editable. */}
+              {worktype && (
+                <div className="flex flex-nowrap items-end gap-4 border-t border-gray-100 pt-4">
+                  <div className="flex flex-col shrink-0">
+                    <label className={lbl}>Vendor cost</label>
+                    <div className="flex items-center"><span className="text-gray-400 mr-1">$</span>
+                      <input value={vendorCost} inputMode="decimal" onChange={(e) => onVendorCost(e.target.value)} placeholder="0.00"
+                        className="text-sm px-2.5 py-2 border border-gray-300 rounded-lg bg-white text-ink w-24 text-center tabular-nums focus:outline-none focus:border-brand" /></div>
+                  </div>
+                  <div className="flex flex-col shrink-0">
+                    <label className={lbl}>Markup %</label>
+                    <div className="flex items-center">
+                      <input value={markupPct} inputMode="decimal" onChange={(e) => onMarkup(e.target.value)} placeholder="0"
+                        className="text-sm px-2.5 py-2 border border-gray-300 rounded-lg bg-white text-ink w-24 text-center tabular-nums focus:outline-none focus:border-brand" /><span className="text-gray-400 ml-1">%</span></div>
+                  </div>
+                  <div className="flex flex-col shrink-0">
+                    <label className={lbl}>Client cost</label>
+                    <div className="flex items-center"><span className="text-gray-400 mr-1">$</span>
+                      <input value={clientCost} inputMode="decimal" onChange={(e) => onClientCost(e.target.value)} placeholder="0.00"
+                        className="text-sm px-2.5 py-2 border border-emerald-300 bg-emerald-50 rounded-lg text-emerald-700 font-bold w-24 text-center tabular-nums focus:outline-none focus:border-brand" /></div>
+                  </div>
                 </div>
               )}
 
