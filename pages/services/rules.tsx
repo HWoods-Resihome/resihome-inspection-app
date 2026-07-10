@@ -76,7 +76,8 @@ function CoveragePicker({ noun, options, selected, onToggle, onSetMany }: {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const filtered = options.filter((o) => o.key.toLowerCase().includes(q.trim().toLowerCase()));
-  const summary = selected.length === 0 ? `Select ${noun}…` : selected.length === 1 ? selected[0] : `${selected.length} ${noun} selected`;
+  const nounTitle = noun.charAt(0).toUpperCase() + noun.slice(1);
+  const summary = selected.length === 0 ? `Select ${nounTitle}…` : selected.length === 1 ? selected[0] : `${selected.length} ${noun} selected`;
   return (
     <div className="relative max-w-md">
       <button type="button" onClick={() => setOpen((o) => !o)}
