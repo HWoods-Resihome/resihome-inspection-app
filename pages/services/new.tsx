@@ -105,45 +105,39 @@ export default function NewService() {
                 <label className={lbl}>Work type</label>
                 <ListPicker value={worktype} options={worktypeOptions} onChange={(v) => { setWorktype(v); setSubtype(subtypesFor(v)[0]?.id || ''); }} ariaLabel="Select a work type" placeholder="Select a work type…" className={trig} />
               </div>
-              {worktype && (
-                <div>
-                  <label className={lbl}>Subtype</label>
-                  <ListPicker value={subtype} options={subtypeOptions} onChange={setSubtype} ariaLabel="Select a subtype" placeholder="Select a subtype…" className={trig} />
-                </div>
-              )}
+              <div>
+                <label className={lbl}>Subtype</label>
+                <ListPicker value={subtype} options={subtypeOptions} onChange={setSubtype} ariaLabel="Select a subtype" placeholder="Select a subtype…" className={trig} />
+              </div>
 
-              {/* Description — appears once a work type is chosen; editable. */}
-              {worktype && (
-                <div>
-                  <label className={lbl}>Service description <span className="text-gray-400 normal-case font-normal">— default for this work type &amp; subtype; editable</span></label>
-                  <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
-                    className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink focus:outline-none focus:border-brand" />
-                </div>
-              )}
+              {/* Description — pre-filled from the work type + subtype default; editable (blank until a work type is chosen). */}
+              <div>
+                <label className={lbl}>Service description <span className="text-gray-400 normal-case font-normal">— default for this work type &amp; subtype; editable</span></label>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
+                  className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink focus:outline-none focus:border-brand" />
+              </div>
 
               {/* Pricing — defaults from the subtype rate + standard markup; all editable. */}
-              {worktype && (
-                <div className="flex flex-nowrap items-end gap-4 border-t border-gray-100 pt-4">
-                  <div className="flex flex-col shrink-0">
-                    <label className={lbl}>Vendor cost</label>
-                    <div className="flex items-center"><span className="text-gray-400 mr-1">$</span>
-                      <input value={vendorCost} inputMode="decimal" onChange={(e) => onVendorCost(e.target.value)} placeholder="0.00"
-                        className="text-sm px-2.5 py-2 border border-gray-300 rounded-lg bg-white text-ink w-24 text-center tabular-nums focus:outline-none focus:border-brand" /></div>
-                  </div>
-                  <div className="flex flex-col shrink-0">
-                    <label className={lbl}>Markup %</label>
-                    <div className="flex items-center">
-                      <input value={markupPct} inputMode="decimal" onChange={(e) => onMarkup(e.target.value)} placeholder="0"
-                        className="text-sm px-2.5 py-2 border border-gray-300 rounded-lg bg-white text-ink w-24 text-center tabular-nums focus:outline-none focus:border-brand" /><span className="text-gray-400 ml-1">%</span></div>
-                  </div>
-                  <div className="flex flex-col shrink-0">
-                    <label className={lbl}>Client cost</label>
-                    <div className="flex items-center"><span className="text-gray-400 mr-1">$</span>
-                      <input value={clientCost} inputMode="decimal" onChange={(e) => onClientCost(e.target.value)} placeholder="0.00"
-                        className="text-sm px-2.5 py-2 border border-emerald-300 bg-emerald-50 rounded-lg text-emerald-700 font-bold w-24 text-center tabular-nums focus:outline-none focus:border-brand" /></div>
-                  </div>
+              <div className="flex flex-nowrap items-end gap-4 border-t border-gray-100 pt-4">
+                <div className="flex flex-col shrink-0">
+                  <label className={`${lbl} text-center`}>Vendor cost</label>
+                  <div className="flex items-center"><span className="text-gray-400 mr-1">$</span>
+                    <input value={vendorCost} inputMode="decimal" onChange={(e) => onVendorCost(e.target.value)} placeholder="0.00"
+                      className="text-sm px-2.5 py-2 border border-gray-300 rounded-lg bg-white text-ink w-24 text-center tabular-nums focus:outline-none focus:border-brand" /></div>
                 </div>
-              )}
+                <div className="flex flex-col shrink-0">
+                  <label className={`${lbl} text-center`}>Markup %</label>
+                  <div className="flex items-center">
+                    <input value={markupPct} inputMode="decimal" onChange={(e) => onMarkup(e.target.value)} placeholder="0"
+                      className="text-sm px-2.5 py-2 border border-gray-300 rounded-lg bg-white text-ink w-24 text-center tabular-nums focus:outline-none focus:border-brand" /><span className="text-gray-400 ml-1">%</span></div>
+                </div>
+                <div className="flex flex-col shrink-0">
+                  <label className={`${lbl} text-center`}>Client cost</label>
+                  <div className="flex items-center"><span className="text-gray-400 mr-1">$</span>
+                    <input value={clientCost} inputMode="decimal" onChange={(e) => onClientCost(e.target.value)} placeholder="0.00"
+                      className="text-sm px-2.5 py-2 border border-emerald-300 bg-emerald-50 rounded-lg text-emerald-700 font-bold w-24 text-center tabular-nums focus:outline-none focus:border-brand" /></div>
+                </div>
+              </div>
 
               {/* 2 — Coverage type */}
               <div>
