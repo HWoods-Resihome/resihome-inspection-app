@@ -9,7 +9,7 @@ import {
   fetchActiveListingForProperty,
   parseListingSnapshot,
   fetchPropertyCommunityName,
-  fetchCommunityById,
+  resolveCommunityDisplay,
   formatCommunityLocation,
   syncInspectorFromOwner,
   externalUnlockedView,
@@ -101,7 +101,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             ? fetchActiveListingForProperty(data.propertyIdRef).catch(() => null)
             : Promise.resolve(null)),
         (isCommunityInspection && data.propertyIdRef)
-          ? fetchCommunityById(data.propertyIdRef).catch(() => null)
+          ? resolveCommunityDisplay(data.propertyIdRef).catch(() => null)
           : Promise.resolve(null),
         (wantCommunity && !isCommunityInspection && data.propertyIdRef)
           ? fetchPropertyCommunityName(data.propertyIdRef).catch(() => null)

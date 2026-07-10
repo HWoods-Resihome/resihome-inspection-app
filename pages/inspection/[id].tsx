@@ -775,6 +775,7 @@ export default function ExistingInspection() {
           listingStatus={listingStatus}
           moveInDate={moveInDate}
           communityName={communityName}
+          communityLocation={communityLocation}
           propertyPoolFee={propertyPoolFee}
           propertyAirFiltersTotal={propertyAirFiltersTotal}
           propertyGasProvider={propertyGasProvider}

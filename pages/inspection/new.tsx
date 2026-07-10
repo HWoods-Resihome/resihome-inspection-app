@@ -43,6 +43,8 @@ const TEMPLATE_OPTIONS: { value: TemplateType; label: string; sublabel: string; 
 // server-only hubspot lib into the client bundle).
 type CommunityOpt = { id: string; name: string; city: string; state: string; zip: string };
 const COMMUNITY_TEMPLATE = 'pm_community_inspection';
+// localStorage key for the cached community picker options (offline resilience).
+const COMMUNITIES_CACHE_KEY = 'resiwalk:communities:v1';
 
 export default function NewInspection() {
   const dialog = useAppDialog();
@@ -101,15 +103,31 @@ export default function NewInspection() {
     return [c.city, [c.state, c.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
   }, [selectedCommunity]);
 
-  // Load communities once the Community / Visit template is chosen.
+  // Load communities once the Community / Visit template is chosen. The full
+  // list (<50) is cached in localStorage so it renders INSTANTLY and never
+  // freezes the picker on a weak connection — the cache paints first, then a
+  // background fetch (aborted after 8s) refreshes it so it stays current.
   useEffect(() => {
-    if (!isCommunityTemplate || communities.length || communitiesLoading) return;
+    if (!isCommunityTemplate || communities.length) return;
+    // 1) Paint from cache immediately (offline-safe).
+    try {
+      const cached = JSON.parse(localStorage.getItem(COMMUNITIES_CACHE_KEY) || 'null');
+      if (Array.isArray(cached?.data) && cached.data.length) setCommunities(cached.data);
+    } catch { /* ignore malformed cache */ }
+    // 2) Refresh in the background with a hard timeout.
     setCommunitiesLoading(true);
-    fetch('/api/communities')
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    fetch('/api/communities', { signal: ctrl.signal })
       .then((r) => r.json())
-      .then((d) => { if (!d.error) setCommunities(d.communities || []); })
-      .catch((e) => console.error('Failed to load communities:', e))
-      .finally(() => setCommunitiesLoading(false));
+      .then((d) => {
+        if (d.error || !Array.isArray(d.communities)) return;
+        setCommunities(d.communities);
+        try { localStorage.setItem(COMMUNITIES_CACHE_KEY, JSON.stringify({ at: Date.now(), data: d.communities })); } catch { /* quota — ignore */ }
+      })
+      .catch((e) => { if (e?.name !== 'AbortError') console.error('Failed to load communities:', e); })
+      .finally(() => { clearTimeout(timer); setCommunitiesLoading(false); });
+    return () => { clearTimeout(timer); ctrl.abort(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCommunityTemplate]);
 

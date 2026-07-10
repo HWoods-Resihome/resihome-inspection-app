@@ -820,6 +820,43 @@ export async function listCommunities(): Promise<CommunityOption[]> {
   return out;
 }
 
+// Cached id → "City, State ZIP" map for ALL communities (NOT name-deduped),
+// used to enrich the inspection LIST cards for community/visit inspections
+// created before the address snapshot baked in the locality. Short TTL; the set
+// is small (<50) so one paged scan is cheap. Fail-open → empty map.
+let _commLocCache: { at: number; map: Map<string, string> } | null = null;
+const COMMUNITY_LOC_TTL_MS = 5 * 60 * 1000;
+export async function communityLocationMap(): Promise<Map<string, string>> {
+  if (_commLocCache && Date.now() - _commLocCache.at < COMMUNITY_LOC_TTL_MS) return _commLocCache.map;
+  const meta = await resolveCommunityMeta();
+  const map = new Map<string, string>();
+  if (!meta) { _commLocCache = { at: Date.now(), map }; return map; }
+  const props = ['community_city', 'state', 'community_zipcode'];
+  const qs = props.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
+  let after: string | undefined;
+  let pages = 0;
+  try {
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${meta.typeId}?limit=100&${qs}${after ? `&after=${after}` : ''}`);
+      for (const r of (resp.results || [])) {
+        const p = r.properties || {};
+        const loc = formatCommunityLocation({
+          city: String(p.community_city || '').trim(),
+          state: String(p.state || '').trim(),
+          zip: String(p.community_zipcode || '').trim(),
+        });
+        if (loc) map.set(String(r.id), loc);
+      }
+      after = resp.paging?.next?.after;
+      pages++;
+    } while (after && pages < 25);
+  } catch (e) {
+    console.warn('[community] location map failed:', e);
+  }
+  _commLocCache = { at: Date.now(), map };
+  return map;
+}
+
 /** One Community's display name + location (city/state/zip). Fail-open → null. */
 export async function fetchCommunityById(communityId: string): Promise<CommunityOption | null> {
   const meta = await resolveCommunityMeta();
@@ -840,6 +877,45 @@ export async function fetchCommunityById(communityId: string): Promise<Community
     console.warn('[community] fetchById failed:', e);
     return null;
   }
+}
+
+/** City/State/ZIP of the FIRST property associated to a Community — the
+ *  fallback when the Community object's own location fields are blank. Uses the
+ *  standard property fields (city / state_code / zip_code|zip). Fail-open → null. */
+async function fetchFirstCommunityPropertyLocation(communityId: string): Promise<{ city: string; state: string; zip: string } | null> {
+  const meta = await resolveCommunityMeta();
+  const { property } = typeIds();
+  if (!meta || !communityId) return null;
+  try {
+    const assoc = await hubspotFetch(`/crm/v4/objects/${meta.typeId}/${communityId}/associations/${property}?limit=1`);
+    const first = assoc?.results?.[0];
+    const propId = first?.toObjectId != null ? String(first.toObjectId) : '';
+    if (!propId) return null;
+    const props = ['city', 'state_code', 'state', 'zip_code', 'zip'];
+    const qs = props.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
+    const r = await hubspotFetch(`/crm/v3/objects/${property}/${propId}?${qs}`);
+    const p = r?.properties || {};
+    const city = String(p.city || '').trim();
+    const state = String(p.state_code || p.state || '').trim();
+    const zip = String(p.zip_code || p.zip || '').trim();
+    if (!city && !state && !zip) return null;
+    return { city, state, zip };
+  } catch (e) {
+    console.warn('[community] first-property location fallback failed:', e);
+    return null;
+  }
+}
+
+/** Community display for a specific inspection: the community name + resolved
+ *  City/State/ZIP. Prefers the Community object's own location fields; when
+ *  those are ALL blank, falls back to the first associated property's location.
+ *  Fail-open → null. */
+export async function resolveCommunityDisplay(communityId: string): Promise<CommunityOption | null> {
+  const c = await fetchCommunityById(communityId);
+  if (!c) return null;
+  if (c.city || c.state || c.zip) return c;
+  const loc = await fetchFirstCommunityPropertyLocation(communityId);
+  return loc ? { ...c, ...loc } : c;
 }
 
 /** "City, State ZIP" location line for a Community (from its own city/state/zip

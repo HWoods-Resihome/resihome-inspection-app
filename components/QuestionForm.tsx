@@ -98,6 +98,9 @@ type Props = {
   /** Community/Visit only: the name of the community associated with the
    *  property, shown above the address in the header. */
   communityName?: string | null;
+  /** Community/Visit only: "City, State ZIP" for the community, shown in place
+   *  of the (unit) address + bed/bath line. */
+  communityLocation?: string | null;
   /** Property air-filter fields — prefill the HVAC widget and are written back
    *  to the property as the inspector confirms/corrects them. */
   propertyAirFiltersTotal?: number | null;
@@ -221,7 +224,7 @@ function slugify(s: string): string {
 
 export function QuestionForm({
   questions, templateType, templateLabel, inspectorName, propertyName, lockRing, propertyRecordId,
-  bedrooms, bathrooms, squareFootage, propertyStatus, moveInReadyDate, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, moveInDate, communityName, onSubmit, onCancel, onNavigateTo,
+  bedrooms, bathrooms, squareFootage, propertyStatus, moveInReadyDate, inspectionRegion, status, submittedAt, listingPrice, listingDate, listingStatus, moveInDate, communityName, communityLocation, onSubmit, onCancel, onNavigateTo,
   inspectionRecordId, inspectionExternalId, pdfUrl,
   existingAnswers, readOnly, onFirstEdit, onCancelInspection,
   propertyAirFiltersTotal, propertyGasProvider, propertyPoolFee, propertyAirFiltersType1, propertyAirFiltersType2, propertyAirFiltersType3,
@@ -2076,25 +2079,40 @@ export function QuestionForm({
               <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
             </button>
             <div className="min-w-0 flex-1">
-              {/* Community / Visit: the community name sits ABOVE the address. */}
-              {isCommunity && communityName && (
-                <div className="text-sm font-heading font-bold text-brand truncate" title={communityName}>
-                  {communityName}
-                </div>
+              {/* Community / Visit: the community NAME is the headline and the
+                  City/State/ZIP sits below it — no unit address, no bed/bath. */}
+              {isCommunity ? (
+                <>
+                  {communityName && (
+                    <FitText
+                      text={communityName}
+                      className="font-heading font-semibold text-ink"
+                    />
+                  )}
+                  {communityLocation && (
+                    <div className="text-xs text-gray-500 truncate">
+                      {communityLocation}
+                      {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* Full address on ONE line — never wraps; the font shrinks to fit
+                      the available width. */}
+                  <FitText
+                    text={propertyName}
+                    className="font-heading font-semibold text-ink"
+                  />
+                  <div className="text-xs text-gray-500 truncate">
+                    {bedrooms} Bed / {bathrooms} Bath
+                    {squareFootage != null && squareFootage > 0 && (
+                      <span> &middot; {squareFootage.toLocaleString()} sqft</span>
+                    )}
+                    {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
+                  </div>
+                </>
               )}
-              {/* Full address on ONE line — never wraps; the font shrinks to fit
-                  the available width. */}
-              <FitText
-                text={propertyName}
-                className="font-heading font-semibold text-ink"
-              />
-              <div className="text-xs text-gray-500 truncate">
-                {bedrooms} Bed / {bathrooms} Bath
-                {squareFootage != null && squareFootage > 0 && (
-                  <span> &middot; {squareFootage.toLocaleString()} sqft</span>
-                )}
-                {inspectionRegion && <span> &middot; {inspectionRegion}</span>}
-              </div>
               {/* Property status (Turnkey / Vacant / Unmarketed / …) on its OWN
                   line, with the listing's Move-in Ready date to its right
                   (MIR: M/D/YY). Frozen at completion. */}

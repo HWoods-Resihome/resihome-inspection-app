@@ -313,11 +313,13 @@ export function InspectionPdf({ data }: { data: PdfData }) {
   const isCommunity = /community/i.test(data.templateLabel || '');
   // Community Score = the "Grade the Community" answer (1–10 scale).
   const communityScore = communityGrade ? `${communityGrade} / 10` : '—';
-  // Community PDF title row = "[Template] - [Community name]" (e.g.
-  // "Community Visit Inspection - Southport") when the community is known.
-  const docTitle = isCommunity && data.communityName
-    ? `${data.templateLabel} - ${data.communityName}`
-    : data.templateLabel;
+  // Community PDFs mirror the app header: the template label is the title, the
+  // Community NAME is the property line, and City/State/ZIP sits just below it
+  // (no unit address / bed-bath). Non-community PDFs keep the property address.
+  const docTitle = data.templateLabel;
+  const headerName = isCommunity
+    ? (data.communityName || data.propertyAddress)
+    : data.propertyAddress;
 
   // Listing highlights line for the header (Status · Listing $X · Listed date ·
   // Move-In M/D/YY). Move-In only appears on deposit-taken listings.
@@ -344,7 +346,7 @@ export function InspectionPdf({ data }: { data: PdfData }) {
         {/* Brand header strip — mirrors the Scope report. RESULT (PASS/FAIL) on the right. */}
         <PdfHeaderStrip
           docTitle={docTitle}
-          propertyName={data.propertyAddress}
+          propertyName={headerName}
           inspectorName={data.inspectorName}
           region={data.region ?? null}
           squareFootage={data.squareFootage ?? null}

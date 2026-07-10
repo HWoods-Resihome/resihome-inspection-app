@@ -26,7 +26,7 @@ import { InspectionPdf, type PdfData, type PdfAnswer } from '@/lib/pdf';
 import {
   fetchInspections, fetchInspectionWithPropertyRef, fetchAnswersForInspection,
   fetchQuestionsForTemplate, fetchActiveListingForProperty,
-  fetchCommunityById, formatCommunityLocation,
+  resolveCommunityDisplay, formatCommunityLocation,
   uploadFileWithId, attachPdfUrlToInspection, parseListingSnapshot,
   updateInspection,
 } from '@/lib/hubspot';
@@ -175,7 +175,7 @@ async function regenerateOne(id: string, origin?: string): Promise<{ id: string;
   let communityLocation: string | null = null;
   if (tmpl === 'pm_community_inspection') {
     try {
-      const c = await fetchCommunityById(data.propertyIdRef);
+      const c = await resolveCommunityDisplay(data.propertyIdRef);
       communityName = c?.name || insp.propertyAddressSnapshot || null;
       communityLocation = formatCommunityLocation(c) || null;
     } catch { /* optional */ }

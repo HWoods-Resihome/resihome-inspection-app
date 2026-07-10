@@ -5,6 +5,7 @@ import {
   countInspectionsByStatus,
   inspectionFacets,
   externalUnlockedView,
+  communityLocationMap,
 } from '@/lib/hubspot';
 import type {
   InspectionQuery,
@@ -208,6 +209,30 @@ async function withCache<T>(
   return fetchFresh();
 }
 
+// Community / Visit cards need a "City, State ZIP" line. Newer inspections bake
+// it into the address snapshot at creation ("<Community>, City, State ZIP"), so
+// the card's splitAddress already shows it. For OLDER community inspections whose
+// snapshot is just the bare community name (no comma), append the locality from
+// the cached community-location map. Returns COPIES (never mutates cached items).
+async function enrichCommunityLocalities(items: InspectionSummary[]): Promise<InspectionSummary[]> {
+  const needs = items.some((i) =>
+    i.templateType === 'pm_community_inspection'
+    && i.propertyRecordId
+    && !(i.propertyAddressSnapshot || '').includes(','));
+  if (!needs) return items;
+  let locMap: Map<string, string>;
+  try { locMap = await communityLocationMap(); } catch { return items; }
+  if (!locMap.size) return items;
+  return items.map((i) => {
+    if (i.templateType !== 'pm_community_inspection') return i;
+    const snap = i.propertyAddressSnapshot || '';
+    if (snap.includes(',') || !i.propertyRecordId) return i;
+    const loc = locMap.get(String(i.propertyRecordId));
+    if (!loc) return i;
+    return { ...i, propertyAddressSnapshot: `${snap}, ${loc}` };
+  });
+}
+
 const STATUS_KEYS: InspectionStatusKey[] = ['all', 'scheduled', 'in_progress', 'pending_approval', 'completed'];
 const ZERO_COUNTS: InspectionCounts = { all: 0, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0 };
 
@@ -312,7 +337,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         : Promise.resolve(undefined),
     ]);
     return res.status(200).json({
-      inspections: list.items,
+      inspections: await enrichCommunityLocalities(list.items),
       total: list.total,
       counts: statusCounts,
       ...(facetData ? { facets: facetData } : {}),
@@ -325,7 +350,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const staleList = lists.cache.get(listKey)?.data;
     if (staleList) {
       return res.status(200).json({
-        inspections: staleList.items,
+        inspections: await enrichCommunityLocalities(staleList.items),
         total: staleList.total,
         counts: counts.cache.get(countKey)?.data || ZERO_COUNTS,
         facets: facets.cache.get(facetKey)?.data || { inspectors: [], templates: [], regions: [] },

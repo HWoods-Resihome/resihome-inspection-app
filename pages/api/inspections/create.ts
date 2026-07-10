@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals, fetchActiveUsers, fetchPropertyStatus, bustExternalUnlockedView, findInspectionIdByExternalId, associateCommunityToInspection } from '@/lib/hubspot';
+import { createScheduledInspection, fetchPropertyRegion, copyRateCardLinesToQc, fetchInspectionById, populateBillingFields, updateInspection, recomputeInspectionTotals, fetchActiveUsers, fetchPropertyStatus, bustExternalUnlockedView, findInspectionIdByExternalId, associateCommunityToInspection, resolveCommunityDisplay, formatCommunityLocation } from '@/lib/hubspot';
 import { getSessionFromRequest } from '@/lib/auth';
 import { bustInspectionsCache } from '@/pages/api/inspections';
 import { inspectionUrl, reqOriginOf } from '@/lib/appUrl';
@@ -69,8 +69,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Missing required fields' });
     }
     // The subject shown where the address normally is: community name, else the
-    // property address snapshot.
+    // property address snapshot. The inspection NAME uses the bare community name.
     const subjectLabel = isCommunity ? (body.communityName || 'Community') : (body.propertyAddressSnapshot || '');
+    // Community / Visit: bake "<Community>, City, State ZIP" into the address
+    // snapshot so the list card shows the City/State/ZIP line like a property
+    // does. Location comes from the Community object's own fields, or — when
+    // those are blank — the first associated property's (resolved server-side).
+    let addressSnapshot = subjectLabel;
+    if (isCommunity && body.communityRecordId) {
+      try {
+        const cd = await resolveCommunityDisplay(body.communityRecordId);
+        const cName = cd?.name || body.communityName || 'Community';
+        const cLoc = formatCommunityLocation(cd);
+        addressSnapshot = cLoc ? `${cName}, ${cLoc}` : cName;
+      } catch { /* fall back to the bare name */ }
+    }
 
     // External (1099) users may only create the 1099 template. This is a NEW
     // record with no owner yet — the creator WILL own it (inspector_email is
@@ -191,7 +204,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       inspection_name: inspectionName,
       template_type: body.templateType,
       status: 'scheduled',
-      property_address_snapshot: subjectLabel,
+      property_address_snapshot: addressSnapshot,
       inspector_name: inspectorName,
       inspector_email: inspectorEmail,
       // Community/Visit stores the community record id here (no property);
