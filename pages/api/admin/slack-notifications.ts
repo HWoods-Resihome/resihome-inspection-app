@@ -35,6 +35,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           enabled: row.enabled !== false,
           sandbox: row.sandbox === true,
           sandboxChannel: String(row.sandboxChannel || '').trim() || DEFAULT_SANDBOX_CHANNEL,
+          // Live channel override (blank → the notification's code/env default).
+          channel: String(row.channel || '').trim(),
         };
       }
       await writeSlackNotifConfig(clean);

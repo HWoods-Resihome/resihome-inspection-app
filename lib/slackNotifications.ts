@@ -15,11 +15,16 @@ export const DEFAULT_SANDBOX_CHANNEL = 'C06CW2VMJNR';
 /** The notifications surfaced in the admin table (stable keys + display names).
  *  `defaultSandbox` is the sandbox state used until an admin saves a config for
  *  that key (listing-price stays in the sandbox test channel until go-live). */
-export const SLACK_NOTIFICATIONS: { key: string; name: string; defaultSandbox?: boolean }[] = [
+// `defaultChannel` is shown as the placeholder in the admin "Live channel" field
+// (the code/env fallback used when no override is saved). Omit it for
+// notifications whose live channel is DYNAMIC (scope cards route to a per-region
+// POD channel), so the UI doesn't offer a single override that'd wrongly force
+// them all to one channel.
+export const SLACK_NOTIFICATIONS: { key: string; name: string; defaultSandbox?: boolean; defaultChannel?: string }[] = [
   { key: 'scope_pending', name: 'Scope Review — Pending Approval' },
   { key: 'scope_approved', name: 'Scope Review — Approved' },
-  { key: 'listing_price', name: '1099 Listing Price Recommendation', defaultSandbox: true },
-  { key: 'ppw_grass_fail', name: '1099 Grass Fail — PPW Dispatch' },
+  { key: 'listing_price', name: '1099 Listing Price Recommendation', defaultSandbox: true, defaultChannel: 'C04K24M3UH5' },
+  { key: 'ppw_grass_fail', name: '1099 Grass Fail — PPW Dispatch', defaultChannel: '#1099-agent-ppw-fails' },
 ];
 
 export interface ResolvedSlackTarget {
@@ -43,7 +48,11 @@ export function resolveSlackTargetFromConfig(
   const c = cfg[key];
   const enabled = c ? c.enabled !== false : true; // default ON
   const sandbox = c ? c.sandbox === true : !!def?.defaultSandbox; // saved wins; else registry default
-  const channel = sandbox ? (c?.sandboxChannel?.trim() || DEFAULT_SANDBOX_CHANNEL) : intendedChannel;
+  // Live channel: a saved override wins; otherwise the caller's intended channel
+  // (its code/env default). Sandbox routes to the sandbox channel instead.
+  const channel = sandbox
+    ? (c?.sandboxChannel?.trim() || DEFAULT_SANDBOX_CHANNEL)
+    : (c?.channel?.trim() || intendedChannel);
   return { enabled, channel, sandbox };
 }
 

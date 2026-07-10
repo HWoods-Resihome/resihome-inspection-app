@@ -4817,7 +4817,7 @@ export async function writeInspectionSlackLink(inspectionRecordId: string, perma
 
 // ── Slack-notification admin config (on/off + sandbox), JSON on the Agent record ──
 const APP_SLACK_NOTIFS_PROP = 'app_slack_notifications_json';
-export type SlackNotifConfigMap = Record<string, { enabled?: boolean; sandbox?: boolean; sandboxChannel?: string }>;
+export type SlackNotifConfigMap = Record<string, { enabled?: boolean; sandbox?: boolean; sandboxChannel?: string; channel?: string }>;
 
 export async function readSlackNotifConfig(): Promise<SlackNotifConfigMap> {
   const recId = await resolveKnowledgeAgentRecordId();

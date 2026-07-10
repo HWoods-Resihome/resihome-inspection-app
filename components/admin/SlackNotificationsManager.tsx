@@ -10,8 +10,8 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 
-interface NotifDef { key: string; name: string; defaultSandbox?: boolean }
-interface NotifCfg { enabled: boolean; sandbox: boolean; sandboxChannel: string }
+interface NotifDef { key: string; name: string; defaultSandbox?: boolean; defaultChannel?: string }
+interface NotifCfg { enabled: boolean; sandbox: boolean; sandboxChannel: string; channel: string }
 
 function Chevron({ open }: { open: boolean }) {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform shrink-0 ${open ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>;
@@ -51,6 +51,8 @@ export function SlackNotificationsManager() {
           // No saved config → use the registry default (listing-price → sandbox).
           sandbox: saved ? saved.sandbox === true : !!n.defaultSandbox,
           sandboxChannel: String(saved?.sandboxChannel || '').trim() || (d.defaultSandbox || 'C06CW2VMJNR'),
+          // Live-channel override; blank means "use the code/env default".
+          channel: String(saved?.channel || '').trim(),
         };
       }
       setCfg(next);
@@ -98,7 +100,7 @@ export function SlackNotificationsManager() {
                   the name column to nothing, hiding the label under the toggle. */}
               <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
                 {defs.map((n) => {
-                  const c = cfg[n.key] || { enabled: true, sandbox: false, sandboxChannel: defaultSandbox };
+                  const c = cfg[n.key] || { enabled: true, sandbox: false, sandboxChannel: defaultSandbox, channel: '' };
                   return (
                     <div key={n.key} className="px-3 py-3">
                       <div className="text-sm text-ink font-heading font-semibold">{n.name}</div>
@@ -113,7 +115,7 @@ export function SlackNotificationsManager() {
                           <span>Sandbox</span>
                         </label>
                       </div>
-                      {c.sandbox && (
+                      {c.sandbox ? (
                         <div className="mt-2">
                           <label className="block text-[11px] text-gray-500 mb-1">Sandbox channel</label>
                           <input type="text" value={c.sandboxChannel}
@@ -121,7 +123,18 @@ export function SlackNotificationsManager() {
                             placeholder={defaultSandbox}
                             className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm font-mono focus:outline-none focus:border-brand" />
                         </div>
-                      )}
+                      ) : n.defaultChannel ? (
+                        /* Live-channel override — only for notifications with a fixed
+                           destination (scope cards route per-region, so they're omitted).
+                           Blank = the code/env default (shown as the placeholder). */
+                        <div className="mt-2">
+                          <label className="block text-[11px] text-gray-500 mb-1">Live channel <span className="text-gray-400">(blank = default)</span></label>
+                          <input type="text" value={c.channel}
+                            onChange={(e) => patch(n.key, { channel: e.target.value })}
+                            placeholder={n.defaultChannel}
+                            className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm font-mono focus:outline-none focus:border-brand" />
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
