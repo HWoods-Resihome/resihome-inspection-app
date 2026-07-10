@@ -19,16 +19,15 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 };
 
 const STATUS_LABEL: Record<ServiceStatus, string> = {
-  scheduled: 'Scheduled', dispatched: 'Dispatched', in_progress: 'In Progress',
-  submitted: 'Submitted', completed: 'Completed', cancelled: 'Cancelled',
+  estimated: 'Estimated', assigned: 'Assigned', submitted: 'Submitted',
+  review: 'Review', completed: 'Completed',
 };
 const STATUS_STYLE: Record<ServiceStatus, string> = {
-  scheduled: 'bg-gray-100 text-gray-700 border-gray-300',
-  dispatched: 'bg-sky-100 text-sky-800 border-sky-300',
-  in_progress: 'bg-amber-100 text-amber-800 border-amber-300',
-  submitted: 'bg-purple-100 text-purple-800 border-purple-300',
+  estimated: 'bg-gray-100 text-gray-700 border-gray-300',
+  assigned: 'bg-sky-100 text-sky-800 border-sky-300',
+  submitted: 'bg-amber-100 text-amber-800 border-amber-300',
+  review: 'bg-purple-100 text-purple-800 border-purple-300',
   completed: 'bg-green-100 text-green-800 border-green-300',
-  cancelled: 'bg-gray-100 text-gray-500 border-gray-300 line-through',
 };
 
 type SortField = 'due' | 'address' | 'worktype' | 'vendor' | 'status';
@@ -37,7 +36,7 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: 'worktype', label: 'Service type' }, { value: 'vendor', label: 'Vendor' },
   { value: 'status', label: 'Status' },
 ];
-const OPEN_STATUSES: ServiceStatus[] = ['scheduled', 'dispatched', 'in_progress', 'submitted'];
+const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'review'];
 const fmtDue = (iso: string) => {
   const d = new Date(iso + 'T00:00:00');
   return isNaN(d.getTime()) ? iso : `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${String(d.getUTCFullYear()).slice(-2)}`;
@@ -81,13 +80,13 @@ export default function ServicesHome({ userName }: { userName: string }) {
   }, [scoped]);
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: scoped.filter((s) => s.status !== 'cancelled').length };
+    const c: Record<string, number> = { all: scoped.length };
     for (const st of SAMPLE_STATUS_ORDER) c[st] = scoped.filter((s) => s.status === st).length;
     return c;
   }, [scoped]);
 
   const rows = useMemo(() => {
-    let list = scoped.filter((s) => s.status !== 'cancelled');
+    let list = [...scoped];
     if (pastDueOnly) list = list.filter((s) => OPEN_STATUSES.includes(s.status) && s.dueDate < REFERENCE_TODAY);
     else if (status !== 'all') list = list.filter((s) => s.status === status);
     const dir = sortDir === 'asc' ? 1 : -1;
@@ -189,8 +188,8 @@ export default function ServicesHome({ userName }: { userName: string }) {
         {/* Collapsible: status chips + one-line Type/Vendor/Region + Sort (no h-scroll). */}
         {filtersOpen && (
           <div className="space-y-1.5 mb-3">
-            <div className="flex gap-1.5">{chip('all', 'All')}{chip('scheduled', 'Scheduled')}{chip('dispatched', 'Dispatched')}</div>
-            <div className="flex gap-1.5">{chip('in_progress', 'In Progress')}{chip('submitted', 'Submitted')}{chip('completed', 'Completed')}</div>
+            <div className="flex gap-1.5">{chip('all', 'All')}{chip('estimated', 'Estimated')}{chip('assigned', 'Assigned')}</div>
+            <div className="flex gap-1.5">{chip('submitted', 'Submitted')}{chip('review', 'Review')}{chip('completed', 'Completed')}</div>
             <div className="flex items-center gap-2 pt-1">
               <div className="flex-1 min-w-0">
                 <ListPicker value={worktype} onChange={setWorktype} ariaLabel="Filter by service type" className={pickerCls(worktype !== 'all')}
