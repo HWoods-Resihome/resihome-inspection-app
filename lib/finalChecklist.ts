@@ -334,6 +334,10 @@ export interface FcSummaryGroup { name: string; rows: FcSummaryRow[]; }
  *  each visible question as one label/value row (Title Case, prefilled values
  *  included), with that question's photos attached for inline rendering. Empty
  *  sections are dropped. */
+// Leading indent for a sub-question row in the PDF Final Checklist table, so a
+// device sub-field / photo-slot row reads as a child of its parent question.
+const FC_SUB_INDENT = '    ';
+
 export function summarizeFinalChecklist(
   a: FcAnswers,
   ctx: FcCompletionCtx,
@@ -353,7 +357,26 @@ export function summarizeFinalChecklist(
       const photos: string[] = [];
       for (const u of (ans.photoUrls || [])) if (u) photos.push(u);
       for (const p of (q.photos || [])) for (const u of (ans.stickerPhotos?.[p.id] || [])) if (u) photos.push(u);
-      rows.push({ label: q.label, value: fcRenderValue(q, ans, a, ctx), ...(photos.length ? { photos } : {}) });
+      const photoAttach = photos.length ? { photos } : {};
+      // Multi-part questions render as SEPARATE rows — one per sub-question —
+      // instead of a single crammed line ("Device (a: x, b: y, …)" or
+      // "A: ✓ · B: ✓ · C: ✓"), so the PDF shows one question+answer per line.
+      // Child rows are indented under the parent.
+      if (q.type === 'device_subform' && ans.value) {
+        rows.push({ label: q.label, value: ans.value, ...photoAttach });
+        const dev = (q.devices || []).find((d) => d.value === ans.value);
+        for (const f of fcVisibleDeviceFields(dev, ans)) {
+          rows.push({ label: `${FC_SUB_INDENT}${f.label}`, value: (ans.device?.[f.id] || '').trim() || '—' });
+        }
+      } else if (q.type === 'photo_set') {
+        rows.push({ label: q.label, value: '', ...photoAttach });
+        for (const p of (q.photos || [])) {
+          const has = (ans.stickerPhotos?.[p.id] || []).length > 0;
+          rows.push({ label: `${FC_SUB_INDENT}${p.label}`, value: has ? '✓' : '—' });
+        }
+      } else {
+        rows.push({ label: q.label, value: fcRenderValue(q, ans, a, ctx), ...photoAttach });
+      }
     }
     if (rows.length) out.push({ name: section.name, rows });
   }

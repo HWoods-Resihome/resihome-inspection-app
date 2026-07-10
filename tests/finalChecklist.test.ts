@@ -175,12 +175,23 @@ describe('finalChecklistAnswerRecords (structured HubSpot projection)', () => {
     expect(septic?.sectionName).toBe('Utilities');
   });
 
-  it('stays consistent with the PDF summary (same values, same visibility)', () => {
+  it('stays consistent with the PDF summary (simple values match; multi-part questions expand)', () => {
     const a = complete();
     const recs = finalChecklistAnswerRecords(a, baseCtx);
     const summaryRows = summarizeFinalChecklist(a, baseCtx).flatMap((g) => g.rows);
-    // The PDF summary and the structured records render the SAME value strings.
-    expect(recs.map((r) => r.value).sort()).toEqual(summaryRows.map((r) => r.value).sort());
+    // The summary EXPANDS multi-part questions (device subforms, photo sets) into
+    // a parent row plus one row per sub-item, so it has at least as many rows as
+    // there are structured records.
+    expect(summaryRows.length).toBeGreaterThanOrEqual(recs.length);
+    // Simple single-value answers still render the SAME string in both places.
+    const summaryValues = new Set(summaryRows.map((r) => r.value));
+    for (const v of ['No Smart Devices', 'Yes', '2', 'On', 'N/A']) {
+      expect(summaryValues.has(v)).toBe(true);
+    }
+    // The label-sticker photo set is broken into per-slot rows (each ✓), not one
+    // crammed "Air Handler: ✓ · Outside Condenser: ✓ · Water Heater: ✓" line.
+    expect(summaryRows.filter((r) => r.value === '✓').length).toBe(3);
+    expect(summaryRows.some((r) => r.value.includes(' · '))).toBe(false);
   });
 });
 
