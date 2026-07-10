@@ -917,6 +917,31 @@ export function RateCardForm(props: RateCardFormProps) {
         if (cancelled) return;
         setLinesBySection(linesAcc);
         setPhotosBySection(photosAcc);
+        // Recover ORPHANED sections: a saved line/photo whose section didn't match
+        // any layout section (a custom section whose descriptor was lost, or a
+        // rename) is keyed by its raw stored label. With no matching
+        // SectionInstance the review NEVER renders it — locking the reviewer out
+        // of a line that still bills on the PDF and can't clear the after-photo
+        // gate (the server sees the line; the client, iterating only known
+        // sections, didn't). Synthesize a visible, editable recovered section from
+        // the stored label so it can be reviewed, photographed, or removed.
+        {
+          const knownIds = new Set(sections.map((s) => s.id));
+          const orphanIds = new Set<string>();
+          for (const k of Object.keys(linesAcc)) if (linesAcc[k]?.length && !knownIds.has(k)) orphanIds.add(k);
+          for (const k of Object.keys(photosAcc)) if (photosAcc[k]?.length && !knownIds.has(k)) orphanIds.add(k);
+          if (orphanIds.size > 0) {
+            const recovered: SectionInstance[] = Array.from(orphanIds).map((idKey) => ({
+              id: idKey, key: idKey, label: idKey || 'Recovered Items', location: '',
+              displayName: idKey || 'Recovered Items', isCustom: true, photoOptional: true,
+            }));
+            setSections((prev) => {
+              const have = new Set(prev.map((s) => s.id));
+              const add = recovered.filter((r) => !have.has(r.id));
+              return add.length ? [...prev, ...add] : prev;
+            });
+          }
+        }
         setRecordIdsByExternalId(lineRecordIds);
         setSectionPhotoRecordIds(photoRecordIds);
         if (fcInit) setFcAnswers(fcInit);
