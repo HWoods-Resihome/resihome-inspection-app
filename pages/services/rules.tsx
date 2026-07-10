@@ -386,12 +386,13 @@ export default function RulesEngine() {
           <section className={sec}>
             <h3 className="font-heading font-bold text-[15px] text-ink"><span className="text-brand">2.</span> Cadence</h3>
             <p className="text-[12px] text-gray-500 mb-3">Recurs relative to the last completed service. Assign <b>every month</b> to a cadence — different months can use different intervals.</p>
-            <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 bg-brand/5 border border-brand/20 rounded-lg px-3 py-2">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-brand bg-brand/10 rounded px-1.5 py-0.5">Optional</span>
-              <span className="text-[13px] font-semibold text-ink">First order due</span>
-              <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—" className={`${ctl} w-12 text-center tabular-nums`} />
-              <span className="text-[13px] text-gray-600 whitespace-nowrap">days after enrollment</span>
-              <span className="text-[11px] text-gray-400 whitespace-nowrap">· blank = standard cadence</span>
+            <div className="mb-3 bg-brand/5 border border-brand/20 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-2 whitespace-nowrap text-[13px]">
+                <span className="font-semibold text-ink">First order due</span>
+                <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—" className={`${ctl} w-12 text-center tabular-nums`} />
+                <span className="text-gray-600">days after enrollment</span>
+              </div>
+              <div className="text-[11px] text-gray-400 mt-1">Optional · blank uses the standard cadence.</div>
             </div>
             <div className="space-y-3">
               {rule.cadences.map((c) => (
