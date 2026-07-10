@@ -18,6 +18,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { fetchInspections, fetchAnswersForInspection } from '@/lib/hubspot';
+import { isCompletedStatus } from '@/lib/userAccess';
 import { postGrassFailAlertOnSubmit, findGrassAnswer, isGrassFail } from '@/lib/grassFailAlert';
 
 export const config = { maxDuration: 300 };
@@ -62,7 +63,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     let processed = 0, posted = 0, skippedNoGrassFail = 0, skippedNoAnswers = 0,
       alreadyPosted = 0, errors = 0;
+    // Split the no-answer records by whether they're actually COMPLETED. A
+    // not-completed 1099 (scheduled/in-progress/cancelled) legitimately has no
+    // submitted answers; a COMPLETED one with none would be a real anomaly worth
+    // flagging (grass is required, so it should be there).
+    let noAnswersNotCompleted = 0, noAnswersCompleted = 0;
+    const noAnswerStatusCounts: Record<string, number> = {};
     const willPost: Array<{ id: string; address: string; response: string; when: string }> = [];
+    const completedNoAnswerSamples: Array<{ id: string; status: string; when: string }> = [];
     const skippedSamples: string[] = [];
     const errorSamples: string[] = [];
 
@@ -72,7 +80,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       processed++;
       try {
         const answers = await fetchAnswersForInspection(insp.recordId);
-        if (!answers.length) { skippedNoAnswers++; continue; }
+        if (!answers.length) {
+          skippedNoAnswers++;
+          const status = (insp.status || '(blank)').trim() || '(blank)';
+          noAnswerStatusCounts[status] = (noAnswerStatusCounts[status] || 0) + 1;
+          // "Completed" = a completed status OR a completed_at stamp. Only those
+          // are anomalies (a finished 1099 should carry the required grass answer).
+          const looksCompleted = isCompletedStatus(insp.status) || !!insp.completedAt;
+          if (looksCompleted) {
+            noAnswersCompleted++;
+            if (completedNoAnswerSamples.length < 20) {
+              completedNoAnswerSamples.push({ id: insp.recordId, status, when: insp.completedAt || insp.submittedAt || insp.updatedAt || '' });
+            }
+          } else {
+            noAnswersNotCompleted++;
+          }
+          continue;
+        }
         const grass = findGrassAnswer(answers);
         if (!isGrassFail(grass)) {
           skippedNoGrassFail++;
@@ -123,6 +147,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       alreadyPosted,
       skippedNoGrassFail,
       skippedNoAnswers,
+      // Breakdown of the no-answer records so "so many skipped" is explainable:
+      // not-completed ones are expected (no submitted answers yet); completed
+      // ones with no answers are a real anomaly to investigate.
+      noAnswersNotCompleted,
+      noAnswersCompleted,
+      noAnswerStatusCounts,
+      completedNoAnswerSamples,
       errors,
       done,
       nextAfter,
