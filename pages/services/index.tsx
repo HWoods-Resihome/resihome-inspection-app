@@ -4,6 +4,7 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
+import { isInternalEmail } from '@/lib/userAccess';
 import { ListPicker } from '@/components/ListPicker';
 import { WORKTYPES, worktypeLabel } from '@/lib/services/worktypes';
 import {
@@ -15,7 +16,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
-  return { props: { userName: session?.name || session?.email || '' } };
+  return { props: { userName: session?.name || session?.email || '', canCreate: isInternalEmail(session?.email) } };
 };
 
 const STATUS_LABEL: Record<ServiceStatus, string> = {
@@ -43,7 +44,7 @@ const fmtDue = (iso: string) => {
   return isNaN(d.getTime()) ? iso : `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${String(d.getUTCFullYear()).slice(-2)}`;
 };
 
-export default function ServicesHome({ userName }: { userName: string }) {
+export default function ServicesHome({ userName, canCreate }: { userName: string; canCreate: boolean }) {
   const [status, setStatus] = useState<ServiceStatus | 'all'>('all');
   const [worktype, setWorktype] = useState('all');
   const [vendor, setVendor] = useState('all');
@@ -155,6 +156,15 @@ export default function ServicesHome({ userName }: { userName: string }) {
       </header>
 
       <main className="max-w-3xl mx-auto w-full px-4 py-3 flex-1">
+        {/* Internal users can create a manual service (like "+ New Inspection"). */}
+        {canCreate && (
+          <Link href="/services/new" className="flex items-center gap-3 bg-pink-100 hover:bg-pink-200 rounded-xl px-4 py-2.5 mb-3 transition active:scale-[0.99] shadow-sm">
+            <span className="w-8 h-8 bg-brand rounded-lg flex items-center justify-center shrink-0">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+            </span>
+            <span className="font-heading font-bold text-[15px] text-brand">New Service</span>
+          </Link>
+        )}
         {/* Summary bubbles — dynamic; Past Due is a clickable filter. */}
         <div className="grid grid-cols-3 gap-2 mb-3">
           <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-center">

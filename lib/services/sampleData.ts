@@ -31,6 +31,8 @@ export interface SampleService {
 
 export const SAMPLE_VENDORS = ['GreenBlade Lawn Co.', 'Peachtree Grounds', 'Metro Cut LLC', 'AquaPro Pools'];
 export const SAMPLE_REGIONS = ['GA: Atlanta', 'GA: Columbus'];
+// Unique community names (stand-in for the Community object list).
+export const SAMPLE_COMMUNITIES = ['Woodbine Crossing', 'River Glen', 'Camden Pointe', 'Harlow Trace', 'Stonecreek', 'Maple Run'];
 
 // Fixed "today" for the preview so Past-Due is deterministic against the sample
 // due dates (real code uses the actual date).
