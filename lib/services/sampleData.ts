@@ -53,3 +53,28 @@ export const SAMPLE_SERVICES: SampleService[] = [
 
 export const SAMPLE_STATUS_ORDER: ServiceStatus[] =
   ['estimated', 'assigned', 'submitted', 'review', 'completed', 'canceled'];
+
+// Sample PROPERTY records for the rules-engine coverage drill-down (Portfolio →
+// Region → individual properties). Real data comes from the Property object later.
+export interface SampleProperty { id: string; address: string; locality: string; portfolio: string; region: string; }
+export const SAMPLE_PROPERTIES: SampleProperty[] = (() => {
+  const portfolios = ['Amherst Sunbelt', 'Tricon GA', 'Progress', 'Invitation Homes', 'FirstKey', 'VineBrook'];
+  const streets = ['River Glen Pl', 'Woodbine Pl', 'Camden Loop', 'Harlow Trace', 'Maple Run Dr', 'Oakvale Rd', 'Pinehurst Way', 'Stone Manor Ct', 'Birch Hollow Dr', 'Cedar Bend Ct'];
+  const out: SampleProperty[] = [];
+  let n = 100;
+  portfolios.forEach((pf, pi) => {
+    const count = 5 + (pi % 2); // 5–6 per portfolio
+    for (let i = 0; i < count; i++) {
+      const columbus = (pi + i) % 3 === 0;
+      out.push({
+        id: `P-${n}`,
+        address: `${120 + n} ${streets[(pi + i) % streets.length]}`,
+        locality: columbus ? 'Columbus, GA 31904' : 'Atlanta, GA 30331',
+        portfolio: pf,
+        region: columbus ? 'GA: Columbus' : 'GA: Atlanta',
+      });
+      n++;
+    }
+  });
+  return out;
+})();

@@ -5,6 +5,7 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { WORKTYPES, worktypeLabel, type Worktype } from '@/lib/services/worktypes';
+import { SAMPLE_PROPERTIES } from '@/lib/services/sampleData';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
@@ -14,7 +15,9 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 };
 
 // Sample reference data (real lists come from Property / Community in a later step).
-const PORTFOLIOS: Record<string, number> = { 'Amherst Sunbelt': 612, 'Tricon GA': 418, 'Progress': 174, 'Invitation Homes': 903, 'FirstKey': 551, 'VineBrook': 288 };
+// Portfolio counts are derived from the sample properties so the drill-down list,
+// the region counts, and "Properties Covered" all agree.
+const PORTFOLIOS: Record<string, number> = SAMPLE_PROPERTIES.reduce((m, p) => { m[p.portfolio] = (m[p.portfolio] || 0) + 1; return m; }, {} as Record<string, number>);
 const COMMUNITIES: Record<string, number> = { 'Woodbine Crossing': 96, 'River Glen': 124, 'Camden Pointe': 88, 'Harlow Trace': 78, 'Stonecreek': 142, 'Maple Run': 64 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // Default per-worktype vendor pricing (property coverage). Grass shows its base
@@ -41,6 +44,8 @@ interface Cadence { id: number; unit: Unit; interval: number; dow: number; dom: 
 interface Rule {
   id: number; name: string; active: boolean; worktype: Worktype;
   scope: 'property' | 'community'; portfolios: string[]; communities: string[];
+  regions: string[];                        // property scope: dependent region filter (empty = all)
+  excludedProps: string[];                  // property scope: individually deselected property ids
   vendorCost: string; markupPct: string;   // strings so decimals can be typed freely
   cadences: Cadence[];
   initialDueDays: string;                   // optional: first order due N days after enrollment (blank = standard cadence)
@@ -104,7 +109,7 @@ function CoveragePicker({ noun, options, selected, onToggle }: {
 const SEED: Rule[] = [
   {
     id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'grass_cut', scope: 'property',
-    portfolios: ['Amherst Sunbelt'], communities: [], vendorCost: '45', markupPct: '20',
+    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], excludedProps: [], vendorCost: '45', markupPct: '20',
     cadences: [
       { id: 11, unit: 'weeks', interval: 2, dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
       { id: 12, unit: 'months', interval: 1, dow: 0, dom: 15, months: [10, 11] },
@@ -115,7 +120,7 @@ const SEED: Rule[] = [
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'grass_cut', scope: 'community',
-    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], vendorCost: '45', markupPct: '20',
+    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], excludedProps: [], vendorCost: '45', markupPct: '20',
     cadences: [{ id: 21, unit: 'weeks', interval: 1, dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
@@ -126,6 +131,7 @@ const SEED: Rule[] = [
 export default function RulesEngine() {
   const [rules, setRules] = useState<Rule[]>(SEED);
   const [selId, setSelId] = useState(1);
+  const [propsOpen, setPropsOpen] = useState(false);
   const rule = rules.find((r) => r.id === selId) || rules[0];
 
   const patch = (p: Partial<Rule>) => setRules((rs) => rs.map((r) => (r.id === selId ? { ...r, ...p } : r)));
@@ -149,10 +155,22 @@ export default function RulesEngine() {
     if (rule.scope === 'property') patch({ portfolios: rule.portfolios.includes(key) ? rule.portfolios.filter((x) => x !== key) : [...rule.portfolios, key] });
     else patch({ communities: rule.communities.includes(key) ? rule.communities.filter((x) => x !== key) : [...rule.communities, key] });
   };
+  const toggleRegion = (r: string) =>
+    patch({ regions: rule.regions.includes(r) ? rule.regions.filter((x) => x !== r) : [...rule.regions, r] });
+  const toggleProp = (id: string) =>
+    patch({ excludedProps: rule.excludedProps.includes(id) ? rule.excludedProps.filter((x) => x !== id) : [...rule.excludedProps, id] });
+
+  // Property-scope drill-down: portfolios → regions → individual properties.
+  const propsInPortfolios = SAMPLE_PROPERTIES.filter((p) => rule.portfolios.includes(p.portfolio));
+  const regionOptions = [...new Set(propsInPortfolios.map((p) => p.region))].sort()
+    .map((r) => ({ key: r, count: propsInPortfolios.filter((p) => p.region === r).length }));
+  const applicableProps = propsInPortfolios.filter((p) => rule.regions.length === 0 || rule.regions.includes(p.region));
+  const selectAllProps = () => patch({ excludedProps: rule.excludedProps.filter((id) => !applicableProps.some((p) => p.id === id)) });
+  const deselectAllProps = () => patch({ excludedProps: [...new Set([...rule.excludedProps, ...applicableProps.map((p) => p.id)])] });
 
   const addRule = () => {
     const id = Math.max(...rules.map((r) => r.id)) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], vendorCost: String(WORKTYPE_BASE.grass_cut), markupPct: DEFAULT_MARKUP, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], excludedProps: [], vendorCost: String(WORKTYPE_BASE.grass_cut), markupPct: DEFAULT_MARKUP, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
     setSelId(id);
   };
   const duplicateRule = () => {
@@ -166,8 +184,10 @@ export default function RulesEngine() {
   };
 
   const countFor = (r: Rule) => {
-    const src = r.scope === 'property' ? PORTFOLIOS : COMMUNITIES;
-    return (r.scope === 'property' ? r.portfolios : r.communities).reduce((n, k) => n + (src[k] || 0), 0);
+    if (r.scope === 'community') return r.communities.reduce((n, k) => n + (COMMUNITIES[k] || 0), 0);
+    const inPf = SAMPLE_PROPERTIES.filter((p) => r.portfolios.includes(p.portfolio));
+    const appl = inPf.filter((p) => r.regions.length === 0 || r.regions.includes(p.region));
+    return appl.filter((p) => !r.excludedProps.includes(p.id)).length;
   };
   const coveredCount = useMemo(() => countFor(rule), [rule]);
 
@@ -297,8 +317,43 @@ export default function RulesEngine() {
                 ))}
               </div>
             )}
-            {(rule.scope === 'property' ? rule.portfolios : rule.communities).length === 0 && <div className="mb-4" />}
-            <div className="flex flex-nowrap items-end gap-4 border-t border-gray-100 pt-4">
+            {/* Property scope: dependent Region filter + individual property drill-down. */}
+            {rule.scope === 'property' && rule.portfolios.length > 0 && (
+              <div className="mt-3">
+                <label className={lbl}>Regions <span className="text-gray-400 normal-case font-normal">— from the selected portfolios</span></label>
+                <CoveragePicker noun="regions" options={regionOptions} selected={rule.regions} onToggle={toggleRegion} />
+
+                <div className="mt-3 border border-gray-200 rounded-xl max-w-md">
+                  <button type="button" onClick={() => setPropsOpen((o) => !o)} className="w-full flex items-center justify-between px-3 py-2.5 text-[13px] font-semibold text-ink">
+                    <span>Applicable properties <span className="text-brand">({coveredCount})</span></span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${propsOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+                  </button>
+                  {propsOpen && (
+                    <div className="border-t border-gray-100">
+                      <div className="flex gap-4 px-3 py-2 text-[12px] font-semibold border-b border-gray-100">
+                        <button onClick={selectAllProps} className="text-brand">Select all</button>
+                        <button onClick={deselectAllProps} className="text-gray-500 hover:text-ink">Deselect all</button>
+                        <span className="ml-auto text-gray-400 font-normal">{coveredCount} of {applicableProps.length}</span>
+                      </div>
+                      <div className="max-h-60 overflow-y-auto">
+                        {applicableProps.map((p) => {
+                          const on = !rule.excludedProps.includes(p.id);
+                          return (
+                            <button key={p.id} type="button" onClick={() => toggleProp(p.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] hover:bg-gray-50 text-left">
+                              <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] font-bold shrink-0 ${on ? 'bg-brand border-brand text-white' : 'border-gray-300'}`}>{on ? '✓' : ''}</span>
+                              <span className="flex-1 truncate text-ink">{p.address}</span>
+                              <span className="text-[11px] text-gray-400 shrink-0">{p.region.replace('GA: ', '')}</span>
+                            </button>
+                          );
+                        })}
+                        {applicableProps.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-gray-400">No properties for these portfolios/regions.</div>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            <div className="flex flex-nowrap items-end gap-4 border-t border-gray-100 pt-4 mt-4">
               <div className="flex flex-col shrink-0"><label className={lbl}>Vendor Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><input value={rule.vendorCost} inputMode="decimal" onChange={(e) => patch({ vendorCost: sanitizeNum(e.target.value) })} className={`${ctl} w-20 text-center tabular-nums`} /></div></div>
               <div className="flex flex-col shrink-0"><label className={lbl}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} inputMode="decimal" onChange={(e) => patch({ markupPct: sanitizeNum(e.target.value) })} className={`${ctl} w-20 text-center tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
               <div className="flex flex-col shrink-0"><label className={lbl}>Client Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><div className="text-[13px] font-bold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg w-20 text-center">{clientCost.toFixed(2)}</div></div></div>
@@ -309,10 +364,16 @@ export default function RulesEngine() {
           <section className={sec}>
             <h3 className="font-heading font-bold text-[15px] text-ink"><span className="text-brand">2.</span> Cadence</h3>
             <p className="text-[12px] text-gray-500 mb-3">Recurs relative to the last completed service. Assign <b>every month</b> to a cadence — different months can use different intervals.</p>
-            <div className="mb-3 flex flex-wrap items-center gap-2 bg-brand/5 border border-brand/20 rounded-xl p-3">
-              <span className="text-[13px] font-semibold text-ink">First order after enrollment — due within</span>
-              <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—" className={`${ctl} w-14 text-center tabular-nums`} />
-              <span className="text-[13px] text-gray-600">days <span className="text-gray-400">(optional — blank uses the standard cadence)</span></span>
+            <div className="mb-3 bg-brand/5 border border-brand/20 rounded-xl p-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Optional</span>
+                <span className="text-[13px] font-semibold text-ink">First order after enrollment — due within</span>
+                <span className="inline-flex items-center gap-1.5 shrink-0">
+                  <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—" className={`${ctl} w-14 text-center tabular-nums`} />
+                  <span className="text-[13px] text-gray-600 whitespace-nowrap">days</span>
+                </span>
+              </div>
+              <div className="text-[11px] text-gray-400 mt-1">Blank uses the standard cadence.</div>
             </div>
             <div className="space-y-3">
               {rule.cadences.map((c) => (
