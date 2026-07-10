@@ -840,6 +840,10 @@ object's status enum, Step 3):
 **Estimated → Assigned → Submitted → Review → Completed.**
 - Open = Estimated / Assigned / Submitted / Review (drives Total Open + Past Due).
 - Completed = closed (feeds On-Time %).
+- **`Estimated` is only for BID ITEMS** — a bid service starts in Estimated (needs a
+  vendor estimate before work). **Every non-bid service starts at `Assigned`**
+  (skips Estimated). The generator sets the initial status by whether the line is a
+  bid item.
 (Replaces the earlier sample scheduled/dispatched/in_progress/cancelled set.)
 
 ## 11. Changelog
