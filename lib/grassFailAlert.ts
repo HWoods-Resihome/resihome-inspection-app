@@ -39,7 +39,7 @@ export interface GrassFailInspectionRef {
   inspectorName?: string;
 }
 
-function findGrassAnswer(answers: SavedAnswer[]): SavedAnswer | undefined {
+export function findGrassAnswer(answers: SavedAnswer[]): SavedAnswer | undefined {
   return answers
     .filter((a) => (a.answerType || 'qa') === 'qa')
     .find((a) => GRASS_RE.test(a.answerSummary || ''));
