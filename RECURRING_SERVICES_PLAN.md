@@ -895,9 +895,10 @@ standard cadence applies** to the first order too. (Built into the Cadence secti
 ### Nightly job — what it does
 1. Find every property/community that **meets a rule's enrollment criteria**.
 2. Skip any that already have an **OPEN work order** for that worktype, where
-   **open = status NOT in {Review, Completed}** (i.e. Estimated / Assigned /
-   Submitted). One active order at a time; the next generates once the current one
-   reaches Review or Completed.
+   **open = {Assigned, Submitted}** — i.e. NOT in {Estimated, Review, Completed}.
+   **Bid-item / `Estimated` orders are ignored for generation** (they don't block a
+   new recurring order). One active order at a time; the next generates once the
+   current reaches Review/Completed (or is only an Estimated bid).
 3. If it needs one, create it:
    - **Initial order** (the target just met enrollment / has no prior order for this
      rule) → due date = enrollment date + **initial due** (if set), else standard
