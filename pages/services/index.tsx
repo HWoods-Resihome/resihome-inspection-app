@@ -81,14 +81,17 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
     };
   }, [scoped]);
 
+  // Canceled is excluded from the counts and the list (matches inspections, which
+  // hides cancelled records and doesn't count them).
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: scoped.length };
-    for (const st of SAMPLE_STATUS_ORDER) c[st] = scoped.filter((s) => s.status === st).length;
+    const active = scoped.filter((s) => s.status !== 'canceled');
+    const c: Record<string, number> = { all: active.length };
+    for (const st of SAMPLE_STATUS_ORDER) c[st] = active.filter((s) => s.status === st).length;
     return c;
   }, [scoped]);
 
   const rows = useMemo(() => {
-    let list = [...scoped];
+    let list = scoped.filter((s) => s.status !== 'canceled');
     if (pastDueOnly) list = list.filter((s) => OPEN_STATUSES.includes(s.status) && s.dueDate < REFERENCE_TODAY);
     else if (status !== 'all') list = list.filter((s) => s.status === status);
     const dir = sortDir === 'asc' ? 1 : -1;
@@ -202,7 +205,7 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
         {filtersOpen && (
           <div className="space-y-1.5 mb-3">
             <div className="flex flex-wrap gap-1.5">
-              {chip('all', 'All')}{chip('estimated', 'Estimated')}{chip('assigned', 'Assigned')}{chip('submitted', 'Submitted')}{chip('review', 'Review')}{chip('completed', 'Completed')}{chip('canceled', 'Canceled')}
+              {chip('all', 'All')}{chip('estimated', 'Estimated')}{chip('assigned', 'Assigned')}{chip('submitted', 'Submitted')}{chip('review', 'Review')}{chip('completed', 'Completed')}
             </div>
             <div className="flex items-center gap-2 pt-1">
               <div className="flex-1 min-w-0">
