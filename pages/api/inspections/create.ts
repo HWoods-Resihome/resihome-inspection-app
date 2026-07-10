@@ -76,12 +76,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // does. Location comes from the Community object's own fields, or — when
     // those are blank — the first associated property's (resolved server-side).
     let addressSnapshot = subjectLabel;
+    // Community region for region_snapshot: the Community object's own region, or
+    // the first associated property's region (resolved together with location).
+    let communityRegion = '';
     if (isCommunity && body.communityRecordId) {
       try {
         const cd = await resolveCommunityDisplay(body.communityRecordId);
         const cName = cd?.name || body.communityName || 'Community';
         const cLoc = formatCommunityLocation(cd);
         addressSnapshot = cLoc ? `${cName}, ${cLoc}` : cName;
+        communityRegion = (cd?.region || '').trim();
       } catch { /* fall back to the bare name */ }
     }
 
@@ -221,7 +225,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Community inspections need it too (otherwise they're invisible under the
     // region filter and their inspectors don't surface when filtering by region).
     // The math layer falls back to GA:Atlanta if region is missing/unmatched.
-    if (!isCommunity) {
+    if (isCommunity) {
+      // Community region resolved above (community's own region, else the first
+      // associated property's). Stamp it so community inspections are filterable
+      // by region like every other template.
+      if (communityRegion) inspectionProps.region_snapshot = communityRegion;
+    } else {
       try {
         const region = await fetchPropertyRegion(body.propertyRecordId || '');
         if (region) {

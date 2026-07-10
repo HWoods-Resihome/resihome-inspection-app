@@ -778,7 +778,7 @@ export async function fetchPropertyCommunityName(propertyRecordId: string): Prom
   }
 }
 
-export interface CommunityOption { id: string; name: string; city: string; state: string; zip: string; }
+export interface CommunityOption { id: string; name: string; city: string; state: string; zip: string; region?: string; }
 
 /** List Community objects as a de-duplicated (by name) picker list for the
  *  Community / Visit inspection. Fail-open → [] if the object isn't present.
@@ -879,10 +879,10 @@ export async function fetchCommunityById(communityId: string): Promise<Community
   }
 }
 
-/** City/State/ZIP of the FIRST property associated to a Community — the
- *  fallback when the Community object's own location fields are blank. Uses the
- *  standard property fields (city / state_code / zip_code|zip). Fail-open → null. */
-async function fetchFirstCommunityPropertyLocation(communityId: string): Promise<{ city: string; state: string; zip: string } | null> {
+/** City/State/ZIP + region of the FIRST property associated to a Community — the
+ *  fallback when the Community object's own fields are blank. Uses the standard
+ *  property fields (city / state_code / zip_code|zip / region). Fail-open → null. */
+async function fetchFirstCommunityProperty(communityId: string): Promise<{ city: string; state: string; zip: string; region: string } | null> {
   const meta = await resolveCommunityMeta();
   const { property } = typeIds();
   if (!meta || !communityId) return null;
@@ -891,31 +891,59 @@ async function fetchFirstCommunityPropertyLocation(communityId: string): Promise
     const first = assoc?.results?.[0];
     const propId = first?.toObjectId != null ? String(first.toObjectId) : '';
     if (!propId) return null;
-    const props = ['city', 'state_code', 'state', 'zip_code', 'zip'];
+    const props = ['city', 'state_code', 'state', 'zip_code', 'zip', 'region'];
     const qs = props.map((p) => `properties=${encodeURIComponent(p)}`).join('&');
     const r = await hubspotFetch(`/crm/v3/objects/${property}/${propId}?${qs}`);
     const p = r?.properties || {};
     const city = String(p.city || '').trim();
     const state = String(p.state_code || p.state || '').trim();
     const zip = String(p.zip_code || p.zip || '').trim();
-    if (!city && !state && !zip) return null;
-    return { city, state, zip };
+    const region = String(p.region || '').trim();
+    if (!city && !state && !zip && !region) return null;
+    return { city, state, zip, region };
   } catch (e) {
-    console.warn('[community] first-property location fallback failed:', e);
+    console.warn('[community] first-property fallback failed:', e);
     return null;
   }
 }
 
+/** The Community object's OWN region. The field name isn't universally known, so
+ *  this is a best-effort ISOLATED fetch (configurable via
+ *  HUBSPOT_COMMUNITY_REGION_PROPERTY, default `region`): a 400 for a missing
+ *  property fails open to null (→ the caller falls back to the property region)
+ *  instead of breaking the whole display fetch. */
+async function fetchCommunityOwnRegion(communityId: string): Promise<string | null> {
+  const meta = await resolveCommunityMeta();
+  if (!meta || !communityId) return null;
+  const field = (process.env.HUBSPOT_COMMUNITY_REGION_PROPERTY || 'region').trim();
+  try {
+    const r = await hubspotFetch(`/crm/v3/objects/${meta.typeId}/${communityId}?properties=${encodeURIComponent(field)}`);
+    const v = r?.properties?.[field];
+    return (typeof v === 'string' && v.trim()) ? v.trim() : null;
+  } catch {
+    return null; // field may not exist on the object → fall back to property region
+  }
+}
+
 /** Community display for a specific inspection: the community name + resolved
- *  City/State/ZIP. Prefers the Community object's own location fields; when
- *  those are ALL blank, falls back to the first associated property's location.
- *  Fail-open → null. */
+ *  City/State/ZIP + region. Prefers the Community object's OWN fields; when a
+ *  field is blank, falls back to the FIRST associated property (its city/state/
+ *  zip and/or region). Fail-open → null (only when the community itself can't be
+ *  resolved). */
 export async function resolveCommunityDisplay(communityId: string): Promise<CommunityOption | null> {
   const c = await fetchCommunityById(communityId);
   if (!c) return null;
-  if (c.city || c.state || c.zip) return c;
-  const loc = await fetchFirstCommunityPropertyLocation(communityId);
-  return loc ? { ...c, ...loc } : c;
+  const needLoc = !c.city && !c.state && !c.zip;
+  let region = (await fetchCommunityOwnRegion(communityId)) || '';
+  // One property lookup covers BOTH the location and region fallbacks.
+  if (needLoc || !region) {
+    const fp = await fetchFirstCommunityProperty(communityId);
+    if (fp) {
+      if (needLoc) { c.city = fp.city; c.state = fp.state; c.zip = fp.zip; }
+      if (!region) region = fp.region;
+    }
+  }
+  return { ...c, region: region || undefined };
 }
 
 /** "City, State ZIP" location line for a Community (from its own city/state/zip
