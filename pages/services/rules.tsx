@@ -4,7 +4,7 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
-import { WORKTYPES, worktypeLabel, worktypeDescription, type Worktype } from '@/lib/services/worktypes';
+import { WORKTYPES, worktypeLabel, worktypeDescription, subtypesFor, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_PROPERTIES } from '@/lib/services/sampleData';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -20,10 +20,10 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 const PORTFOLIOS: Record<string, number> = SAMPLE_PROPERTIES.reduce((m, p) => { m[p.portfolio] = (m[p.portfolio] || 0) + 1; return m; }, {} as Record<string, number>);
 const COMMUNITIES: Record<string, number> = { 'Woodbine Crossing': 96, 'River Glen': 124, 'Camden Pointe': 88, 'Harlow Trace': 78, 'Stonecreek': 142, 'Maple Run': 64 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-// Default per-worktype vendor pricing (property coverage). Grass shows its base
-// tier; higher grass tiers ($60 6–12in, $90 >12in) are promoted at completion.
-const WORKTYPE_BASE: Partial<Record<Worktype, number>> = { grass_cut: 45, pool_service: 100, house_cleaning: 75 };
 const DEFAULT_MARKUP = '20';   // default markup % on all services
+// First subtype's default rate for a worktype (used to prefill vendor cost).
+const firstSubtype = (wt: Worktype): string => subtypesFor(wt)[0]?.id || '';
+const baseRate = (wt: Worktype, sub: string): string => { const r = defaultRateFor(wt, sub); return r != null ? String(r) : ''; };
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 // Curated Property-object fields for enrollment / stop criteria, each with its own
 // value options so the value picker "flows" from the chosen field. (Short list for
@@ -40,9 +40,11 @@ const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field
 const OPS = ['is', 'is any of', 'is not', 'changes to'];
 
 type Unit = 'days' | 'weeks' | 'months';
-interface Cadence { id: number; unit: Unit; interval: number; dow: number; dom: number; months: number[]; }
+// interval is a STRING so it can be cleared/retyped; dow -1 and dom 0 mean "Any day".
+interface Cadence { id: number; unit: Unit; interval: string; dow: number; dom: number; months: number[]; }
 interface Rule {
-  id: number; name: string; active: boolean; worktype: Worktype;
+  id: number; name: string; active: boolean; worktype: Worktype; subtype: string;
+  petStations: boolean;                     // community only: capture dedicated pet-station before/after
   scope: 'property' | 'community'; portfolios: string[]; communities: string[];
   regions: string[];                        // property scope: dependent region filter (empty = all)
   propsMode: 'all' | 'list';                // 'all' = every applicable property incl. future adds; 'list' = a fixed subset
@@ -63,7 +65,7 @@ const sanitizeNum = (v: string): string => {
 };
 
 let _cid = 100;
-const newCadence = (months: number[] = []): Cadence => ({ id: ++_cid, unit: 'weeks', interval: 2, dow: 0, dom: 1, months });
+const newCadence = (months: number[] = []): Cadence => ({ id: ++_cid, unit: 'weeks', interval: '2', dow: -1, dom: 0, months });
 
 // Searchable, multi-select, scrollable dropdown for portfolio/community/region
 // coverage, with Select all / Deselect all over the current search results.
@@ -118,20 +120,20 @@ function CoveragePicker({ noun, options, selected, onToggle, onSetMany }: {
 
 const SEED: Rule[] = [
   {
-    id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'grass_cut', scope: 'property',
-    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', description: worktypeDescription('grass_cut'),
+    id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'landscaping', subtype: 'cut', petStations: false, scope: 'property',
+    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', description: worktypeDescription('landscaping'),
     cadences: [
-      { id: 11, unit: 'weeks', interval: 2, dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
-      { id: 12, unit: 'months', interval: 1, dow: 0, dom: 15, months: [10, 11] },
+      { id: 11, unit: 'weeks', interval: '2', dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
+      { id: 12, unit: 'months', interval: '1', dow: 0, dom: 15, months: [10, 11] },
     ],
     initialDueDays: '5', skipMonths: [0, 1],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
     stopEnabled: true, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied',
   },
   {
-    id: 2, name: 'ATL Community Grass', active: true, worktype: 'grass_cut', scope: 'community',
-    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', description: worktypeDescription('grass_cut'),
-    cadences: [{ id: 21, unit: 'weeks', interval: 1, dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
+    id: 2, name: 'ATL Community Grass', active: true, worktype: 'landscaping', subtype: 'cut', petStations: true, scope: 'community',
+    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', description: worktypeDescription('landscaping'),
+    cadences: [{ id: 21, unit: 'weeks', interval: '1', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
     stopEnabled: false, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied',
@@ -203,7 +205,7 @@ export default function RulesEngine() {
 
   const addRule = () => {
     const id = Math.max(...rules.map((r) => r.id)) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: String(WORKTYPE_BASE.grass_cut), markupPct: DEFAULT_MARKUP, description: worktypeDescription('grass_cut'), cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, description: worktypeDescription('landscaping'), cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
     setSelId(id);
   };
   const duplicateRule = () => {
@@ -322,8 +324,14 @@ export default function RulesEngine() {
             <div className="flex flex-wrap items-center gap-3 mb-4">
               <div>
                 <label className={lbl}>Work Type</label>
-                <select value={rule.worktype} onChange={(e) => { const wt = e.target.value as Worktype; patch({ worktype: wt, vendorCost: WORKTYPE_BASE[wt] != null ? String(WORKTYPE_BASE[wt]) : rule.vendorCost, description: worktypeDescription(wt) }); }} className={ctl}>
+                <select value={rule.worktype} onChange={(e) => { const wt = e.target.value as Worktype; const sub = firstSubtype(wt); patch({ worktype: wt, subtype: sub, vendorCost: baseRate(wt, sub), description: worktypeDescription(wt) }); }} className={ctl}>
                   {WORKTYPES.filter((w) => w.scopes.includes(rule.scope)).map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={lbl}>Subtype</label>
+                <select value={rule.subtype} onChange={(e) => patch({ subtype: e.target.value, vendorCost: baseRate(rule.worktype, e.target.value) })} className={ctl}>
+                  {subtypesFor(rule.worktype).map((st) => <option key={st.id} value={st.id}>{st.label}</option>)}
                 </select>
               </div>
               <div>
@@ -334,6 +342,16 @@ export default function RulesEngine() {
                 </div>
               </div>
             </div>
+            {rule.scope === 'community' && (
+              <div className="mb-4 flex flex-wrap items-center gap-3">
+                <span className="text-[13px] font-semibold text-ink">Include pet stations?</span>
+                <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
+                  <button onClick={() => patch({ petStations: true })} className={`px-4 py-1.5 rounded-md ${rule.petStations ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>Yes</button>
+                  <button onClick={() => patch({ petStations: false })} className={`px-4 py-1.5 rounded-md ${!rule.petStations ? 'bg-white text-ink shadow-sm' : 'text-gray-600'}`}>No</button>
+                </div>
+                <span className="text-[11px] text-gray-400">Adds a dedicated pet-station before/after to each work order.</span>
+              </div>
+            )}
             <div className="mb-4">
               <label className={lbl}>Service Description <span className="text-gray-400 normal-case font-normal">— default for this worktype; editable</span></label>
               <textarea value={rule.description} onChange={(e) => patch({ description: e.target.value })} rows={3}
@@ -425,17 +443,17 @@ export default function RulesEngine() {
                   )}
                   <div className="flex flex-nowrap items-center gap-1.5 mb-2.5">
                     <span className="text-[13px] text-gray-600 shrink-0">Every</span>
-                    <input value={c.interval} onChange={(e) => patchCadence(c.id, { interval: Number(e.target.value.replace(/\D/g, '')) || 1 })} className={`${ctl} w-11 shrink-0 text-center tabular-nums`} />
+                    <input value={c.interval} onChange={(e) => patchCadence(c.id, { interval: e.target.value.replace(/\D/g, '') })} className={`${ctl} w-11 shrink-0 text-center tabular-nums`} />
                     <select value={c.unit} onChange={(e) => patchCadence(c.id, { unit: e.target.value as Unit })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}>
                       <option value="days">days</option><option value="weeks">weeks</option><option value="months">months</option>
                     </select>
                     {c.unit === 'weeks' && (
                       <><span className="text-[13px] text-gray-600 shrink-0">on</span>
-                      <select value={c.dow} onChange={(e) => patchCadence(c.id, { dow: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}>{DOW.map((d, di) => <option key={d} value={di}>{d}</option>)}</select></>
+                      <select value={c.dow} onChange={(e) => patchCadence(c.id, { dow: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}><option value={-1}>Any day</option>{DOW.map((d, di) => <option key={d} value={di}>{d}</option>)}</select></>
                     )}
                     {c.unit === 'months' && (
                       <><span className="text-[13px] text-gray-600 shrink-0 whitespace-nowrap">on day</span>
-                      <select value={c.dom} onChange={(e) => patchCadence(c.id, { dom: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}>{Array.from({ length: 28 }, (_, di) => di + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select></>
+                      <select value={c.dom} onChange={(e) => patchCadence(c.id, { dom: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}><option value={0}>Any day</option>{Array.from({ length: 28 }, (_, di) => di + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select></>
                     )}
                   </div>
                   <div className="flex flex-wrap gap-1.5">

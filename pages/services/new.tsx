@@ -6,7 +6,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { ListPicker } from '@/components/ListPicker';
-import { WORKTYPES, worktypeDescription } from '@/lib/services/worktypes';
+import { WORKTYPES, worktypeDescription, subtypesFor } from '@/lib/services/worktypes';
 import { SAMPLE_PROPERTIES, SAMPLE_COMMUNITIES, SAMPLE_VENDORS } from '@/lib/services/sampleData';
 
 // Internal users (@resihome / @resicap / …) only; also flag+admin gated.
@@ -19,6 +19,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 
 export default function NewService() {
   const [worktype, setWorktype] = useState('');
+  const [subtype, setSubtype] = useState('');
   const [description, setDescription] = useState('');
   const [scope, setScope] = useState<'property' | 'community'>('property');
   const [target, setTarget] = useState('');
@@ -30,6 +31,7 @@ export default function NewService() {
   useEffect(() => { setDescription(worktype ? worktypeDescription(worktype) : ''); }, [worktype]);
 
   const worktypeOptions = useMemo(() => WORKTYPES.filter((w) => w.scopes.includes(scope)).map((w) => ({ value: w.id, label: w.label })), [scope]);
+  const subtypeOptions = useMemo(() => subtypesFor(worktype).map((s) => ({ value: s.id, label: s.label })), [worktype]);
   const targetOptions = useMemo(() => scope === 'property'
     ? SAMPLE_PROPERTIES.map((p) => ({ value: p.id, label: p.address, sublabel: p.locality }))
     : SAMPLE_COMMUNITIES.map((c) => ({ value: c.name, label: c.name, sublabel: c.locality })), [scope]);
@@ -37,7 +39,7 @@ export default function NewService() {
 
   const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5';
   const trig = 'w-full flex items-center justify-between gap-2 text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink';
-  const ready = !!worktype && !!target && !!dueDate && !!vendor;
+  const ready = !!worktype && !!subtype && !!target && !!dueDate && !!vendor;
   const targetLabel = scope === 'property' ? (SAMPLE_PROPERTIES.find((p) => p.id === target)?.address || '') : target;
 
   return (
@@ -68,11 +70,17 @@ export default function NewService() {
         ) : (
           <div className="space-y-4">
             <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
-              {/* 1 — Work type */}
+              {/* 1 — Work type + subtype */}
               <div>
                 <label className={lbl}>Work type</label>
-                <ListPicker value={worktype} options={worktypeOptions} onChange={setWorktype} ariaLabel="Select a work type" placeholder="Select a work type…" className={trig} />
+                <ListPicker value={worktype} options={worktypeOptions} onChange={(v) => { setWorktype(v); setSubtype(subtypesFor(v)[0]?.id || ''); }} ariaLabel="Select a work type" placeholder="Select a work type…" className={trig} />
               </div>
+              {worktype && (
+                <div>
+                  <label className={lbl}>Subtype</label>
+                  <ListPicker value={subtype} options={subtypeOptions} onChange={setSubtype} ariaLabel="Select a subtype" placeholder="Select a subtype…" className={trig} />
+                </div>
+              )}
 
               {/* Description — appears once a work type is chosen; editable. */}
               {worktype && (

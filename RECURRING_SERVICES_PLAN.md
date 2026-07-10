@@ -945,6 +945,38 @@ hand-picked list stays exactly as chosen. (Step-3 generation reads the same rule
 in `all` mode it re-resolves the applicable set each night; in `list` mode it uses
 the stored ids.)
 
+## 10.17 Worktype + subtype taxonomy, rates, pet stations, contract cadence
+
+### Worktype + Subtype (every worktype has ≥1 subtype — uniform)
+- **Landscaping** → Cut, Flowers, Tree Trimming, Mulch / Pine Straw
+- **Cleaning** → Common Area, Model Home, Move-In Clean, Vacant Clean, One-Time
+  Clean, On-Market Clean
+- **Pools** → Pool Cleaning
+- **Trash Removal** → Trash Pickup
+- **Trip Fee** → Base Trip Fee
+Both worktype and subtype are selectable everywhere (rules engine, New Service);
+the card/completion show "Worktype · Subtype".
+
+### Default rates (per subtype, before the 20% markup)
+- Cleaning: **Common Area $125/wk · Model Home $100/wk · Move-In / Vacant /
+  One-Time / On-Market $75** each.
+- Pools: Pool Cleaning **$100**. Landscaping: Cut **$45**. Others unset (editable).
+Default rate lives on the subtype; new rules / worktype+subtype changes prefill
+the vendor cost. Description default is per worktype (editable per rule).
+
+### Community "Include pet stations?" (on the RULE)
+For **community**-scope rules, a **Yes/No** toggle. When **Yes**, each generated
+work order gets a **dedicated pet-station Before/After** photo group in the
+completion flow (separate from the main before/after).
+
+### Cadence generation nuance (contracts vs one-offs) — refines §10.15
+- **Weekly / Monthly cadence = a contract:** generate on schedule whenever the
+  enrollment criteria is met, **regardless of open work orders**.
+- **Daily (every N days) = the prior logic:** only generate when nothing is open
+  (Assigned/Submitted, non-bid), next due = MAX(completion, current due) + N.
+- Cadence UI: the interval number is freely editable (clearable), and the weekly
+  day-of-week / monthly day-of-month is **optional** ("Any day").
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).

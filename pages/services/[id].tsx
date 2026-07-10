@@ -4,7 +4,7 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
-import { worktypeLabel } from '@/lib/services/worktypes';
+import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { SAMPLE_SERVICES, type SampleService } from '@/lib/services/sampleData';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -44,6 +44,8 @@ export default function ServiceComplete({ svc }: { svc: SampleService }) {
   const [notes, setNotes] = useState('');
   const [before, setBefore] = useState<string[]>([]);
   const [after, setAfter] = useState<string[]>([]);
+  const [petBefore, setPetBefore] = useState<string[]>([]);
+  const [petAfter, setPetAfter] = useState<string[]>([]);
   const [submitted, setSubmitted] = useState(false);
 
   const canSubmit = done !== '' && after.length > 0;
@@ -58,7 +60,7 @@ export default function ServiceComplete({ svc }: { svc: SampleService }) {
           </Link>
           <div className="min-w-0">
             <h1 className="font-heading font-extrabold text-base tracking-tight truncate">{svc.address}</h1>
-            <div className="text-xs text-white/80 truncate">{worktypeLabel(svc.worktype)} · {svc.locality}</div>
+            <div className="text-xs text-white/80 truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)} · {svc.locality}</div>
           </div>
         </div>
       </header>
@@ -75,7 +77,7 @@ export default function ServiceComplete({ svc }: { svc: SampleService }) {
           <>
             <div className="bg-white border border-gray-200 rounded-2xl p-4">
               <div className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1">Work order</div>
-              <div className="text-sm text-ink"><b>{worktypeLabel(svc.worktype)}</b> · {svc.scope === 'community' ? 'Community' : 'SFR'} · {svc.vendor || 'Unassigned'}</div>
+              <div className="text-sm text-ink"><b>{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}</b> · {svc.scope === 'community' ? 'Community' : 'SFR'} · {svc.vendor || 'Unassigned'}</div>
               <div className="text-xs text-gray-500 mt-0.5">Due {svc.dueDate}</div>
             </div>
 
@@ -106,6 +108,13 @@ export default function ServiceComplete({ svc }: { svc: SampleService }) {
               <div className="font-heading font-bold text-[15px] text-ink">Evidence</div>
               <PhotoTiles label="Before photos" urls={before} onAdd={() => setBefore((u) => [...u, 'x'])} />
               <PhotoTiles label="After photos" required urls={after} onAdd={() => setAfter((u) => [...u, 'x'])} />
+              {svc.petStations && (
+                <div className="border-t border-gray-100 pt-4 space-y-4">
+                  <div className="text-[12px] font-bold uppercase tracking-wide text-brand">Pet Stations</div>
+                  <PhotoTiles label="Pet station — before" urls={petBefore} onAdd={() => setPetBefore((u) => [...u, 'x'])} />
+                  <PhotoTiles label="Pet station — after" urls={petAfter} onAdd={() => setPetAfter((u) => [...u, 'x'])} />
+                </div>
+              )}
             </section>
 
             <button type="button" disabled={!canSubmit} onClick={() => setSubmitted(true)}

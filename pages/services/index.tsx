@@ -6,7 +6,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { ListPicker } from '@/components/ListPicker';
-import { WORKTYPES, worktypeLabel } from '@/lib/services/worktypes';
+import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
   SAMPLE_SERVICES, SAMPLE_VENDORS, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY,
   type ServiceStatus,
@@ -66,7 +66,7 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
       (worktype === 'all' || s.worktype === worktype) &&
       (vendor === 'all' || (s.vendor || '—') === vendor) &&
       (region === 'all' || s.region === region) &&
-      (!q || `${s.address} ${s.locality} ${s.community || ''} ${s.vendor || ''} ${worktypeLabel(s.worktype)} ${s.portfolio}`.toLowerCase().includes(q))
+      (!q || `${s.address} ${s.locality} ${s.community || ''} ${s.vendor || ''} ${worktypeLabel(s.worktype)} ${subtypeLabel(s.worktype, s.subtype)} ${s.portfolio}`.toLowerCase().includes(q))
     );
   }, [worktype, vendor, region, search]);
 
@@ -270,7 +270,7 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
                 <div className="text-[12px] text-gray-500 truncate mt-0.5">{s.locality}{s.community ? ` · ${s.community}` : ''}</div>
                 <div className="mt-1 flex items-end justify-between gap-2">
                   <div className="text-[12px] text-gray-600 flex flex-wrap gap-x-3 gap-y-0.5 min-w-0">
-                    <span className="font-semibold text-ink">{worktypeLabel(s.worktype)}</span>
+                    <span className="font-semibold text-ink">{worktypeLabel(s.worktype)} · {subtypeLabel(s.worktype, s.subtype)}</span>
                     {s.scope !== 'community' && s.propertyStatus && <span>{s.propertyStatus}</span>}
                     <span className={overdue ? 'text-red-600 font-semibold' : ''}>Due {fmtDue(s.dueDate)}</span>
                   </div>
