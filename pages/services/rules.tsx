@@ -45,7 +45,8 @@ interface Rule {
   id: number; name: string; active: boolean; worktype: Worktype;
   scope: 'property' | 'community'; portfolios: string[]; communities: string[];
   regions: string[];                        // property scope: dependent region filter (empty = all)
-  excludedProps: string[];                  // property scope: individually deselected property ids
+  propsMode: 'all' | 'list';                // 'all' = every applicable property incl. future adds; 'list' = a fixed subset
+  includedProps: string[];                  // property scope, 'list' mode only: the specific property ids included
   vendorCost: string; markupPct: string;   // strings so decimals can be typed freely
   cadences: Cadence[];
   initialDueDays: string;                   // optional: first order due N days after enrollment (blank = standard cadence)
@@ -117,7 +118,7 @@ function CoveragePicker({ noun, options, selected, onToggle, onSetMany }: {
 const SEED: Rule[] = [
   {
     id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'grass_cut', scope: 'property',
-    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], excludedProps: [], vendorCost: '45', markupPct: '20',
+    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20',
     cadences: [
       { id: 11, unit: 'weeks', interval: 2, dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
       { id: 12, unit: 'months', interval: 1, dow: 0, dom: 15, months: [10, 11] },
@@ -128,7 +129,7 @@ const SEED: Rule[] = [
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'grass_cut', scope: 'community',
-    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], excludedProps: [], vendorCost: '45', markupPct: '20',
+    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20',
     cadences: [{ id: 21, unit: 'weeks', interval: 1, dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
@@ -172,8 +173,6 @@ export default function RulesEngine() {
     patch({ regions: on ? [...new Set([...rule.regions, ...keys])] : rule.regions.filter((k) => !keys.includes(k)) });
   const toggleRegion = (r: string) =>
     patch({ regions: rule.regions.includes(r) ? rule.regions.filter((x) => x !== r) : [...rule.regions, r] });
-  const toggleProp = (id: string) =>
-    patch({ excludedProps: rule.excludedProps.includes(id) ? rule.excludedProps.filter((x) => x !== id) : [...rule.excludedProps, id] });
 
   // Property-scope drill-down: portfolios → regions → individual properties.
   const propsInPortfolios = SAMPLE_PROPERTIES.filter((p) => rule.portfolios.includes(p.portfolio));
@@ -181,13 +180,29 @@ export default function RulesEngine() {
     .map((r) => ({ key: r, count: propsInPortfolios.filter((p) => p.region === r).length }));
   const applicableProps = propsInPortfolios.filter((p) => rule.regions.length === 0 || rule.regions.includes(p.region));
   const visibleProps = applicableProps.filter((p) => !propSearch.trim() || `${p.address} ${p.region}`.toLowerCase().includes(propSearch.trim().toLowerCase()));
-  // Select all / deselect all act on the CURRENTLY VISIBLE (searched) properties.
-  const selectAllProps = () => patch({ excludedProps: rule.excludedProps.filter((id) => !visibleProps.some((p) => p.id === id)) });
-  const deselectAllProps = () => patch({ excludedProps: [...new Set([...rule.excludedProps, ...visibleProps.map((p) => p.id)])] });
+  const isPropOn = (id: string) => rule.propsMode === 'all' || rule.includedProps.includes(id);
+  // Current included id set: everything applicable in 'all' mode, else the fixed list.
+  const effectiveIncluded = () => new Set(rule.propsMode === 'all' ? applicableProps.map((p) => p.id) : rule.includedProps);
+  // Any manual pick makes it a FIXED list (no future auto-include).
+  const toggleProp = (id: string) => {
+    const cur = effectiveIncluded();
+    cur.has(id) ? cur.delete(id) : cur.add(id);
+    patch({ propsMode: 'list', includedProps: [...cur] });
+  };
+  const selectAllProps = () => {
+    // Unfiltered "Select all" = the WHOLE set → 'all' mode (future adds auto-include).
+    if (!propSearch.trim()) { patch({ propsMode: 'all', includedProps: [] }); return; }
+    const cur = effectiveIncluded(); visibleProps.forEach((p) => cur.add(p.id));
+    patch({ propsMode: 'list', includedProps: [...cur] });
+  };
+  const deselectAllProps = () => {
+    const cur = effectiveIncluded(); visibleProps.forEach((p) => cur.delete(p.id));
+    patch({ propsMode: 'list', includedProps: [...cur] });
+  };
 
   const addRule = () => {
     const id = Math.max(...rules.map((r) => r.id)) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], excludedProps: [], vendorCost: String(WORKTYPE_BASE.grass_cut), markupPct: DEFAULT_MARKUP, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: String(WORKTYPE_BASE.grass_cut), markupPct: DEFAULT_MARKUP, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
     setSelId(id);
   };
   const duplicateRule = () => {
@@ -204,7 +219,7 @@ export default function RulesEngine() {
     if (r.scope === 'community') return r.communities.reduce((n, k) => n + (COMMUNITIES[k] || 0), 0);
     const inPf = SAMPLE_PROPERTIES.filter((p) => r.portfolios.includes(p.portfolio));
     const appl = inPf.filter((p) => r.regions.length === 0 || r.regions.includes(p.region));
-    return appl.filter((p) => !r.excludedProps.includes(p.id)).length;
+    return r.propsMode === 'all' ? appl.length : appl.filter((p) => r.includedProps.includes(p.id)).length;
   };
   const coveredCount = useMemo(() => countFor(rule), [rule]);
 
@@ -355,11 +370,11 @@ export default function RulesEngine() {
                       <div className="flex gap-4 px-3 py-2 text-[12px] font-semibold border-b border-gray-100">
                         <button onClick={selectAllProps} className="text-brand">Select all</button>
                         <button onClick={deselectAllProps} className="text-gray-500 hover:text-ink">Deselect all</button>
-                        <span className="ml-auto text-gray-400 font-normal">{coveredCount} of {applicableProps.length}</span>
+                        <span className="ml-auto text-gray-400 font-normal">{rule.propsMode === 'all' ? 'All · new auto-include' : `${coveredCount} of ${applicableProps.length}`}</span>
                       </div>
                       <div className="max-h-60 overflow-y-auto">
                         {visibleProps.map((p) => {
-                          const on = !rule.excludedProps.includes(p.id);
+                          const on = isPropOn(p.id);
                           return (
                             <button key={p.id} type="button" onClick={() => toggleProp(p.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] hover:bg-gray-50 text-left">
                               <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] font-bold shrink-0 ${on ? 'bg-brand border-brand text-white' : 'border-gray-300'}`}>{on ? '✓' : ''}</span>
