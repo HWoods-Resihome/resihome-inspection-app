@@ -63,9 +63,11 @@ const sanitizeNum = (v: string): string => {
 let _cid = 100;
 const newCadence = (months: number[] = []): Cadence => ({ id: ++_cid, unit: 'weeks', interval: 2, dow: 0, dom: 1, months });
 
-// Searchable, multi-select, scrollable dropdown for portfolio/community coverage.
-function CoveragePicker({ noun, options, selected, onToggle }: {
-  noun: string; options: { key: string; count: number }[]; selected: string[]; onToggle: (k: string) => void;
+// Searchable, multi-select, scrollable dropdown for portfolio/community/region
+// coverage, with Select all / Deselect all over the current search results.
+function CoveragePicker({ noun, options, selected, onToggle, onSetMany }: {
+  noun: string; options: { key: string; count: number }[]; selected: string[];
+  onToggle: (k: string) => void; onSetMany?: (keys: string[], on: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -86,6 +88,12 @@ function CoveragePicker({ noun, options, selected, onToggle }: {
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${noun}…`}
                 className="w-full text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:border-brand" />
             </div>
+            {onSetMany && filtered.length > 0 && (
+              <div className="flex gap-4 px-3 py-2 text-[12px] font-semibold border-b border-gray-100">
+                <button type="button" onClick={() => onSetMany(filtered.map((o) => o.key), true)} className="text-brand">Select all</button>
+                <button type="button" onClick={() => onSetMany(filtered.map((o) => o.key), false)} className="text-gray-500 hover:text-ink">Deselect all</button>
+              </div>
+            )}
             <div className="max-h-56 overflow-y-auto py-1">
               {filtered.map((o) => {
                 const on = selected.includes(o.key);
@@ -132,6 +140,7 @@ export default function RulesEngine() {
   const [rules, setRules] = useState<Rule[]>(SEED);
   const [selId, setSelId] = useState(1);
   const [propsOpen, setPropsOpen] = useState(false);
+  const [propSearch, setPropSearch] = useState('');
   const rule = rules.find((r) => r.id === selId) || rules[0];
 
   const patch = (p: Partial<Rule>) => setRules((rs) => rs.map((r) => (r.id === selId ? { ...r, ...p } : r)));
@@ -155,6 +164,12 @@ export default function RulesEngine() {
     if (rule.scope === 'property') patch({ portfolios: rule.portfolios.includes(key) ? rule.portfolios.filter((x) => x !== key) : [...rule.portfolios, key] });
     else patch({ communities: rule.communities.includes(key) ? rule.communities.filter((x) => x !== key) : [...rule.communities, key] });
   };
+  const setManyCoverage = (keys: string[], on: boolean) => {
+    if (rule.scope === 'property') patch({ portfolios: on ? [...new Set([...rule.portfolios, ...keys])] : rule.portfolios.filter((k) => !keys.includes(k)) });
+    else patch({ communities: on ? [...new Set([...rule.communities, ...keys])] : rule.communities.filter((k) => !keys.includes(k)) });
+  };
+  const setManyRegions = (keys: string[], on: boolean) =>
+    patch({ regions: on ? [...new Set([...rule.regions, ...keys])] : rule.regions.filter((k) => !keys.includes(k)) });
   const toggleRegion = (r: string) =>
     patch({ regions: rule.regions.includes(r) ? rule.regions.filter((x) => x !== r) : [...rule.regions, r] });
   const toggleProp = (id: string) =>
@@ -165,8 +180,10 @@ export default function RulesEngine() {
   const regionOptions = [...new Set(propsInPortfolios.map((p) => p.region))].sort()
     .map((r) => ({ key: r, count: propsInPortfolios.filter((p) => p.region === r).length }));
   const applicableProps = propsInPortfolios.filter((p) => rule.regions.length === 0 || rule.regions.includes(p.region));
-  const selectAllProps = () => patch({ excludedProps: rule.excludedProps.filter((id) => !applicableProps.some((p) => p.id === id)) });
-  const deselectAllProps = () => patch({ excludedProps: [...new Set([...rule.excludedProps, ...applicableProps.map((p) => p.id)])] });
+  const visibleProps = applicableProps.filter((p) => !propSearch.trim() || `${p.address} ${p.region}`.toLowerCase().includes(propSearch.trim().toLowerCase()));
+  // Select all / deselect all act on the CURRENTLY VISIBLE (searched) properties.
+  const selectAllProps = () => patch({ excludedProps: rule.excludedProps.filter((id) => !visibleProps.some((p) => p.id === id)) });
+  const deselectAllProps = () => patch({ excludedProps: [...new Set([...rule.excludedProps, ...visibleProps.map((p) => p.id)])] });
 
   const addRule = () => {
     const id = Math.max(...rules.map((r) => r.id)) + 1;
@@ -307,6 +324,7 @@ export default function RulesEngine() {
               options={Object.entries(rule.scope === 'property' ? PORTFOLIOS : COMMUNITIES).map(([key, count]) => ({ key, count }))}
               selected={rule.scope === 'property' ? rule.portfolios : rule.communities}
               onToggle={toggleCoverage}
+              onSetMany={setManyCoverage}
             />
             {(rule.scope === 'property' ? rule.portfolios : rule.communities).length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2 mb-4">
@@ -321,7 +339,7 @@ export default function RulesEngine() {
             {rule.scope === 'property' && rule.portfolios.length > 0 && (
               <div className="mt-3">
                 <label className={lbl}>Regions <span className="text-gray-400 normal-case font-normal">— from the selected portfolios</span></label>
-                <CoveragePicker noun="regions" options={regionOptions} selected={rule.regions} onToggle={toggleRegion} />
+                <CoveragePicker noun="regions" options={regionOptions} selected={rule.regions} onToggle={toggleRegion} onSetMany={setManyRegions} />
 
                 <div className="mt-3 border border-gray-200 rounded-xl max-w-md">
                   <button type="button" onClick={() => setPropsOpen((o) => !o)} className="w-full flex items-center justify-between px-3 py-2.5 text-[13px] font-semibold text-ink">
@@ -330,13 +348,17 @@ export default function RulesEngine() {
                   </button>
                   {propsOpen && (
                     <div className="border-t border-gray-100">
+                      <div className="p-2 border-b border-gray-100">
+                        <input value={propSearch} onChange={(e) => setPropSearch(e.target.value)} placeholder="Search properties…"
+                          className="w-full text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:border-brand" />
+                      </div>
                       <div className="flex gap-4 px-3 py-2 text-[12px] font-semibold border-b border-gray-100">
                         <button onClick={selectAllProps} className="text-brand">Select all</button>
                         <button onClick={deselectAllProps} className="text-gray-500 hover:text-ink">Deselect all</button>
                         <span className="ml-auto text-gray-400 font-normal">{coveredCount} of {applicableProps.length}</span>
                       </div>
                       <div className="max-h-60 overflow-y-auto">
-                        {applicableProps.map((p) => {
+                        {visibleProps.map((p) => {
                           const on = !rule.excludedProps.includes(p.id);
                           return (
                             <button key={p.id} type="button" onClick={() => toggleProp(p.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] hover:bg-gray-50 text-left">
@@ -346,7 +368,7 @@ export default function RulesEngine() {
                             </button>
                           );
                         })}
-                        {applicableProps.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-gray-400">No properties for these portfolios/regions.</div>}
+                        {visibleProps.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-gray-400">{applicableProps.length === 0 ? 'No properties for these portfolios/regions.' : 'No properties match your search.'}</div>}
                       </div>
                     </div>
                   )}
@@ -364,16 +386,12 @@ export default function RulesEngine() {
           <section className={sec}>
             <h3 className="font-heading font-bold text-[15px] text-ink"><span className="text-brand">2.</span> Cadence</h3>
             <p className="text-[12px] text-gray-500 mb-3">Recurs relative to the last completed service. Assign <b>every month</b> to a cadence — different months can use different intervals.</p>
-            <div className="mb-3 bg-brand/5 border border-brand/20 rounded-xl p-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Optional</span>
-                <span className="text-[13px] font-semibold text-ink">First order after enrollment — due within</span>
-                <span className="inline-flex items-center gap-1.5 shrink-0">
-                  <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—" className={`${ctl} w-14 text-center tabular-nums`} />
-                  <span className="text-[13px] text-gray-600 whitespace-nowrap">days</span>
-                </span>
-              </div>
-              <div className="text-[11px] text-gray-400 mt-1">Blank uses the standard cadence.</div>
+            <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 bg-brand/5 border border-brand/20 rounded-lg px-3 py-2">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-brand bg-brand/10 rounded px-1.5 py-0.5">Optional</span>
+              <span className="text-[13px] font-semibold text-ink">First order due</span>
+              <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—" className={`${ctl} w-12 text-center tabular-nums`} />
+              <span className="text-[13px] text-gray-600 whitespace-nowrap">days after enrollment</span>
+              <span className="text-[11px] text-gray-400 whitespace-nowrap">· blank = standard cadence</span>
             </div>
             <div className="space-y-3">
               {rule.cadences.map((c) => (
