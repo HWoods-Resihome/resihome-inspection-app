@@ -3,8 +3,10 @@
  *
  * Back-posts the 1099 grass-fail → PPW dispatch Slack alert for every 1099
  * Leasing Agent inspection COMPLETED on/after a cutoff (default 2026-07-02) that
- * marked the grass/landscaping question as a Fail. Use this to catch up the
- * "#1099-agent-ppw-fails" channel for the window it went silent.
+ * marked the grass/landscaping question as a Fail. The window is keyed on the
+ * COMPLETION date (completed_at, else submitted_at) — NOT when the inspection
+ * was started or last touched — so only finished inspections are considered.
+ * Use this to catch up the "#1099-agent-ppw-fails" channel for the silent window.
  *
  * SAFE: dry-run by default — open the URL signed in as an app admin to see which
  * inspections WOULD post. Add ?apply=1 to actually post to Slack. Idempotent:
@@ -26,9 +28,11 @@ export const config = { maxDuration: 300 };
 const TEMPLATE = 'leasing_agent_1099_property_inspection';
 const DEFAULT_SINCE = '2026-07-02';
 
-/** Completion-ish timestamp for the window filter (ms), or null if none. */
-function completedMs(i: { completedAt: string | null; submittedAt: string | null; updatedAt: string | null }): number | null {
-  const raw = i.completedAt || i.submittedAt || i.updatedAt;
+/** COMPLETION timestamp for the window filter (ms), or null if none. Only the
+ *  completion/submit stamps count — NOT last-updated — so we window by when the
+ *  inspection was FINISHED, regardless of when it was started or last touched. */
+function completedMs(i: { completedAt: string | null; submittedAt: string | null }): number | null {
+  const raw = i.completedAt || i.submittedAt;
   if (!raw) return null;
   const ms = /^\d+$/.test(raw) ? Number(raw) : Date.parse(raw);
   return Number.isFinite(ms) ? ms : null;
@@ -53,9 +57,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const all = await fetchInspections();
-    // 1099s completed within the window, oldest-first so the channel reads in order.
+    // COMPLETED 1099s whose completion is within the window, oldest-first so the
+    // channel reads in order. Only completed inspections carry answers (grass is
+    // required to submit), so scheduled/in-progress/cancelled are excluded — the
+    // window is purely "finished since <since>", ignoring start/last-touched.
     const targets = all
-      .filter((i) => i.templateType === TEMPLATE)
+      .filter((i) => i.templateType === TEMPLATE && (isCompletedStatus(i.status) || !!i.completedAt))
       .map((i) => ({ i, ms: completedMs(i) }))
       .filter((x) => x.ms != null && (x.ms as number) >= sinceMs)
       .sort((a, b) => (a.ms as number) - (b.ms as number))
@@ -141,7 +148,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ok: true,
       mode: apply ? 'apply' : 'dry-run (add ?apply=1 to post)',
       since: sinceStr,
-      totalWindow1099s: targets.length,
+      completed1099sInWindow: targets.length,
       processed,
       [apply ? 'posted' : 'wouldPost']: posted,
       alreadyPosted,
