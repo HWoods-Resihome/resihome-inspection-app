@@ -114,6 +114,16 @@ export default function Home() {
   }, []);
 
   const [search, setSearch] = useState<string>(savedView.search ?? '');
+  // Debounced copy of `search` used for the actual QUERY (cache key + fetch).
+  // The text input stays instant (`search`), but the query only changes ~300ms
+  // after typing stops — so a fast typist fires ONE search instead of one per
+  // keystroke. That both cuts load (fewer HubSpot searches) and stops the list
+  // from thrashing through partial-term results while typing.
+  const [debouncedSearch, setDebouncedSearch] = useState<string>(savedView.search ?? '');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(savedView.statusFilter ?? 'all');
   // Sort field + direction. Default: the combined Date sort, newest first. The
   // server accepts date | address | inspector | price | property_status (older
@@ -303,7 +313,7 @@ export default function Home() {
     const st = opts?.status ?? statusFilter;
     const pg = opts?.page ?? page;
     const p = new URLSearchParams();
-    const term = search.trim();
+    const term = debouncedSearch.trim();
     if (term) p.set('search', term);
     if (st !== 'all') p.set('status', st);
     for (const name of inspectorFilter) p.append('inspector', name);
@@ -316,10 +326,17 @@ export default function Home() {
     p.set('facets', '0');
     if (opts?.refresh) p.set('refresh', '1');
     return p;
-  }, [search, statusFilter, inspectorFilter, templateFilter, regionFilter, sortField, sortDir, page, pageSize]);
+  }, [debouncedSearch, statusFilter, inspectorFilter, templateFilter, regionFilter, sortField, sortDir, page, pageSize]);
 
   // Cache key = the query WITHOUT the volatile refresh flag.
   const listCacheKey = useMemo(() => buildListParams().toString(), [buildListParams]);
+
+  // The query the UI currently wants to show. Updated synchronously when the
+  // query changes (in the load effect below) so an EARLIER in-flight request
+  // that resolves late (out of order) can tell it's stale and NOT clobber the
+  // newer query's results — the classic "wrong results flash in while the right
+  // ones load" race.
+  const currentKeyRef = useRef(listCacheKey);
 
   const applyListData = useCallback((d: any) => {
     const raw: InspectionSummary[] = d.inspections || [];
@@ -428,23 +445,28 @@ export default function Home() {
         const r = await fetch(`/api/inspections?${buildListParams(opts).toString()}`, { cache: 'no-store', signal: ctrl.signal })
           .finally(() => clearTimeout(to));
         const data = await r.json();
+        // A newer query superseded this one while it was in flight — cache its
+        // result (warms that key) but never paint it over the current query.
+        const isStale = listCacheKey !== currentKeyRef.current;
         if (!data.error) {
-          applyListData(data);
           lsWrite(RESULTS_CACHE, listCacheKey, { inspections: data.inspections || [], total: data.total, counts: data.counts });
-          setError(null);
+          if (!isStale) { applyListData(data); setError(null); }
           break;
         }
         // Server returned an error payload — retry while attempts remain.
-        if (attempt >= maxAttempts) { if (!hasCache) setError(data.error); break; }
+        if (attempt >= maxAttempts) { if (!hasCache && !isStale) setError(data.error); break; }
       } catch (e: any) {
+        const isStale = listCacheKey !== currentKeyRef.current;
         if (attempt >= maxAttempts) {
-          if (!hasCache) setError('Couldn’t reach the server. Check your connection and try again.');
+          if (!hasCache && !isStale) setError('Couldn’t reach the server. Check your connection and try again.');
           break;
         }
       }
       await new Promise((res) => setTimeout(res, 700 * attempt));
     }
-    setLoading(false);
+    // Only the request for the CURRENT query controls the spinner — a stale one
+    // finishing must not clear the "Loading…" state of the query now on screen.
+    if (listCacheKey === currentKeyRef.current) setLoading(false);
   }, [buildListParams, listCacheKey, applyListData]);
 
   // On any query change: paint cached results INSTANTLY (stale-while-revalidate),
@@ -454,6 +476,9 @@ export default function Home() {
   // round-trip blocking the toggle. The cache is busted on mutations
   // (create/cancel) so a stale view can't linger after a real change.
   useEffect(() => {
+    // Mark this as the query the UI now wants, so any earlier in-flight request
+    // that lands after this point knows it's stale (see load()).
+    currentKeyRef.current = listCacheKey;
     const cached = lsRead(RESULTS_CACHE)[listCacheKey];
     if (cached?.d) { applyListData(cached.d); setLoading(false); } else { setLoading(true); }
     // Revalidate quietly behind the cached paint; only the uncached first load
@@ -517,7 +542,7 @@ export default function Home() {
   // Cached + stale-while-revalidate like the list, and fired slightly after it.
   const facetQuery = useMemo(() => {
     const p = new URLSearchParams();
-    const term = search.trim();
+    const term = debouncedSearch.trim();
     if (term) p.set('search', term);
     if (statusFilter !== 'all') p.set('status', statusFilter);
     for (const name of inspectorFilter) p.append('inspector', name);
@@ -525,7 +550,7 @@ export default function Home() {
     for (const r of regionFilter) p.append('region', r);
     p.set('only', 'facets');
     return p.toString();
-  }, [search, statusFilter, inspectorFilter, templateFilter, regionFilter]);
+  }, [debouncedSearch, statusFilter, inspectorFilter, templateFilter, regionFilter]);
 
   useEffect(() => {
     // Normalize: older cached facets (and any malformed payload) may lack a field
@@ -573,7 +598,7 @@ export default function Home() {
   useEffect(() => {
     if (pageResetMountRef.current) { pageResetMountRef.current = false; return; }
     setPage(1);
-  }, [search, statusFilter, inspectorFilter, templateFilter, regionFilter, sortField, sortDir, pageSize]);
+  }, [debouncedSearch, statusFilter, inspectorFilter, templateFilter, regionFilter, sortField, sortDir, pageSize]);
 
   // Page math derives from the server's total match count for this query.
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
