@@ -3070,6 +3070,57 @@ export async function stampListingPriceAlert(inspectionRecordId: string): Promis
   }
 }
 
+// ── 1099 grass-fail (PPW dispatch) Slack alert gate ─────────────────────────
+// Mirrors the listing-price gate: a datetime stamp set once the alert posts so a
+// re-submit doesn't re-post. Self-provisions the property on first write.
+const PPW_FAIL_ALERT_PROP = 'ppw_fail_alert_at';
+
+export async function getPpwFailAlertStamp(inspectionRecordId: string): Promise<string | null> {
+  const { inspection } = typeIds();
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${inspection}/${inspectionRecordId}?properties=${PPW_FAIL_ALERT_PROP}`);
+    const v = resp?.properties?.[PPW_FAIL_ALERT_PROP];
+    return v ? String(v) : null;
+  } catch { return null; }
+}
+
+async function ensurePpwFailAlertProperty(): Promise<void> {
+  const { inspection } = typeIds();
+  try { await hubspotFetch(`/crm/v3/properties/${inspection}/${PPW_FAIL_ALERT_PROP}`); return; } catch { /* create */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${inspection}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: PPW_FAIL_ALERT_PROP, label: 'PPW Grass-Fail Alert Posted At', type: 'datetime', fieldType: 'date',
+        groupName: 'inspection_1099',
+        description: 'Set once the 1099 grass-fail (PPW dispatch) Slack alert has been posted — gates re-posting on re-submit.',
+      }),
+    });
+  } catch (e: any) {
+    const blob = `${String(e?.message || e)} ${String(e?.detail || '')}`;
+    if (!(e?.status === 409 || /already exists|PROPERTY_ALREADY_EXISTS/i.test(blob))) {
+      console.warn('[ppw-fail-alert] could not provision ppw_fail_alert_at:', blob.slice(0, 200));
+    }
+  }
+}
+
+export async function stampPpwFailAlert(inspectionRecordId: string): Promise<void> {
+  const { inspection } = typeIds();
+  const doWrite = () => hubspotFetch(`/crm/v3/objects/${inspection}/${inspectionRecordId}`, {
+    method: 'PATCH', body: JSON.stringify({ properties: { [PPW_FAIL_ALERT_PROP]: Date.now() } }),
+  });
+  try {
+    await doWrite();
+  } catch (e) {
+    if (isMissingPropertyError(e, PPW_FAIL_ALERT_PROP)) {
+      await ensurePpwFailAlertProperty();
+      await doWrite().catch((e2) => console.warn('[ppw-fail-alert] stamp write retry failed:', e2));
+    } else {
+      console.warn('[ppw-fail-alert] stamp write failed:', e);
+    }
+  }
+}
+
 /**
  * Also returns the property_id_ref so we can resolve the property record link.
  */

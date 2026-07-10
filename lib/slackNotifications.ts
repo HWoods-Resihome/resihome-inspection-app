@@ -19,6 +19,7 @@ export const SLACK_NOTIFICATIONS: { key: string; name: string; defaultSandbox?: 
   { key: 'scope_pending', name: 'Scope Review — Pending Approval' },
   { key: 'scope_approved', name: 'Scope Review — Approved' },
   { key: 'listing_price', name: '1099 Listing Price Recommendation', defaultSandbox: true },
+  { key: 'ppw_grass_fail', name: '1099 Grass Fail — PPW Dispatch' },
 ];
 
 export interface ResolvedSlackTarget {

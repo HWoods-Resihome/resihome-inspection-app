@@ -3,6 +3,7 @@ import { updateInspection, fetchInspectionById, stampFirstCompleted, stampProper
 import { extractLeasingAgent1099Fields } from '@/lib/leasingAgent1099';
 import { createComplianceTicketsOnSubmit } from '@/lib/complianceTickets';
 import { postListingPriceAlertOnSubmit } from '@/lib/listingPriceAlert';
+import { postGrassFailAlertOnSubmit } from '@/lib/grassFailAlert';
 import { postScopePendingApproval } from '@/lib/scopeApprovalSlack';
 import { fcSmartHomeStamps, fcPoolStamps, parseFcAnswers } from '@/lib/finalChecklist';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -197,6 +198,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           console.log(`[submit] 1099 listing-price alert for ${id}: ${alert.posted ? `posted to ${alert.channel}` : `skipped (${alert.reason || alert.error})`}`);
         } catch (e) {
           console.warn('[submit] listing-price alert skipped (continuing):', e);
+        }
+
+        // Grass-fail → PPW dispatch Slack alert: when the grass/landscaping
+        // question is marked Fail, post the property + note + photos to the
+        // PPW-dispatch channel so a cut can be scheduled. Best-effort; gated per
+        // inspection (admin table key 'ppw_grass_fail').
+        try {
+          const fwdHost = req.headers['x-forwarded-host'] || req.headers.host;
+          const fwdProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+          const baseUrl = fwdHost ? `${fwdProto}://${fwdHost}` : undefined;
+          const grass = await postGrassFailAlertOnSubmit(
+            {
+              recordId: id,
+              propertyAddressSnapshot: existing?.propertyAddressSnapshot || '',
+              inspectorName: existing?.inspectorName || '',
+            },
+            answers,
+            { baseUrl },
+          );
+          console.log(`[submit] 1099 grass-fail alert for ${id}: ${grass.posted ? `posted to ${grass.channel}` : `skipped (${grass.reason || grass.error})`}`);
+        } catch (e) {
+          console.warn('[submit] grass-fail alert skipped (continuing):', e);
         }
       } catch (e) {
         console.warn('[submit] 1099 field stamp skipped (provision via /admin/setup):', e);
