@@ -1,15 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
-import { WORKTYPES } from '@/lib/services/worktypes';
+import { ListPicker } from '@/components/ListPicker';
+import { WORKTYPES, worktypeDescription } from '@/lib/services/worktypes';
 import { SAMPLE_PROPERTIES, SAMPLE_COMMUNITIES, SAMPLE_VENDORS } from '@/lib/services/sampleData';
 
-// Internal users (@resihome / @resicap / …) only — creating a manual service is an
-// internal action. Also flag+admin gated like the rest of /services.
+// Internal users (@resihome / @resicap / …) only; also flag+admin gated.
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
@@ -19,30 +19,37 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 
 export default function NewService() {
   const [worktype, setWorktype] = useState('');
+  const [description, setDescription] = useState('');
   const [scope, setScope] = useState<'property' | 'community'>('property');
-  const [target, setTarget] = useState('');   // property id or community name
+  const [target, setTarget] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [vendor, setVendor] = useState('');
   const [created, setCreated] = useState(false);
 
-  const worktypeOptions = useMemo(() => WORKTYPES.filter((w) => w.scopes.includes(scope)), [scope]);
-  const ctl = 'w-full text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink focus:outline-none focus:border-brand';
-  const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5';
+  // Prefill the editable description from the worktype default when it changes.
+  useEffect(() => { setDescription(worktype ? worktypeDescription(worktype) : ''); }, [worktype]);
 
+  const worktypeOptions = useMemo(() => WORKTYPES.filter((w) => w.scopes.includes(scope)).map((w) => ({ value: w.id, label: w.label })), [scope]);
+  const targetOptions = useMemo(() => scope === 'property'
+    ? SAMPLE_PROPERTIES.map((p) => ({ value: p.id, label: p.address, sublabel: p.locality }))
+    : SAMPLE_COMMUNITIES.map((c) => ({ value: c.name, label: c.name, sublabel: c.locality })), [scope]);
+  const vendorOptions = SAMPLE_VENDORS.map((v) => ({ value: v, label: v }));
+
+  const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5';
+  const trig = 'w-full flex items-center justify-between gap-2 text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink';
   const ready = !!worktype && !!target && !!dueDate && !!vendor;
-  const targetLabel = scope === 'property'
-    ? (SAMPLE_PROPERTIES.find((p) => p.id === target)?.address || '')
-    : target;
+  const targetLabel = scope === 'property' ? (SAMPLE_PROPERTIES.find((p) => p.id === target)?.address || '') : target;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Header — matches the app's pink header (logo + title). */}
       <header className="bg-brand text-white sticky top-0 z-20" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
         <div className="max-w-2xl mx-auto px-4 pt-2 pb-2.5 flex items-center gap-3">
-          <Link href="/services" className="inline-flex items-center gap-1 text-white/90 hover:text-white text-sm font-semibold shrink-0">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
-            Services
+          <Link href="/services" className="inline-flex items-center text-white/90 hover:text-white shrink-0" aria-label="Back to Services">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
           </Link>
-          <div className="font-heading font-extrabold">New Service</div>
+          <img src="/app-icon.svg" alt="ResiWalk" className="h-9 w-9 object-cover shrink-0" />
+          <h1 className="font-heading font-extrabold text-lg tracking-tight">New Service</h1>
           <span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">Sample</span>
         </div>
       </header>
@@ -61,43 +68,47 @@ export default function NewService() {
         ) : (
           <div className="space-y-4">
             <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
-              <div className="field">
+              {/* 1 — Work type */}
+              <div>
+                <label className={lbl}>Work type</label>
+                <ListPicker value={worktype} options={worktypeOptions} onChange={setWorktype} ariaLabel="Select a work type" placeholder="Select a work type…" className={trig} />
+              </div>
+
+              {/* Description — appears once a work type is chosen; editable. */}
+              {worktype && (
+                <div>
+                  <label className={lbl}>Service description <span className="text-gray-400 normal-case font-normal">— editable</span></label>
+                  <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
+                    className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink focus:outline-none focus:border-brand" />
+                </div>
+              )}
+
+              {/* 2 — Coverage type */}
+              <div>
                 <label className={lbl}>Coverage type</label>
                 <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
-                  <button onClick={() => { setScope('property'); setTarget(''); setWorktype(''); }} className={`px-4 py-1.5 rounded-md ${scope === 'property' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}>Property</button>
-                  <button onClick={() => { setScope('community'); setTarget(''); setWorktype(''); }} className={`px-4 py-1.5 rounded-md ${scope === 'community' ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-600'}`}>Community</button>
+                  <button onClick={() => { setScope('property'); setTarget(''); }} className={`px-4 py-1.5 rounded-md ${scope === 'property' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}>Property</button>
+                  <button onClick={() => { setScope('community'); setTarget(''); }} className={`px-4 py-1.5 rounded-md ${scope === 'community' ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-600'}`}>Community</button>
                 </div>
               </div>
 
-              <div className="field">
-                <label className={lbl}>Work type</label>
-                <select value={worktype} onChange={(e) => setWorktype(e.target.value)} className={ctl}>
-                  <option value="">Select a work type…</option>
-                  {worktypeOptions.map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
-                </select>
+              {/* 3 — Property address / Community (subdivision + city, ST ZIP) */}
+              <div>
+                <label className={lbl}>{scope === 'property' ? 'Property address' : 'Community'}</label>
+                <ListPicker value={target} options={targetOptions} onChange={setTarget}
+                  ariaLabel={scope === 'property' ? 'Select a property' : 'Select a community'}
+                  placeholder={scope === 'property' ? 'Select a property…' : 'Select a community…'} className={trig} />
               </div>
 
-              <div className="field">
-                <label className={lbl}>{scope === 'property' ? 'Property address' : 'Community name'}</label>
-                <select value={target} onChange={(e) => setTarget(e.target.value)} className={ctl}>
-                  <option value="">{scope === 'property' ? 'Select a property…' : 'Select a community…'}</option>
-                  {scope === 'property'
-                    ? SAMPLE_PROPERTIES.map((p) => <option key={p.id} value={p.id}>{p.address} — {p.locality}</option>)
-                    : SAMPLE_COMMUNITIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-
+              {/* 4 — Due date + Vendor */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="field">
+                <div>
                   <label className={lbl}>Due date</label>
-                  <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={ctl} />
+                  <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink focus:outline-none focus:border-brand" />
                 </div>
-                <div className="field">
+                <div>
                   <label className={lbl}>Vendor assignment</label>
-                  <select value={vendor} onChange={(e) => setVendor(e.target.value)} className={ctl}>
-                    <option value="">Select a vendor…</option>
-                    {SAMPLE_VENDORS.map((v) => <option key={v} value={v}>{v}</option>)}
-                  </select>
+                  <ListPicker value={vendor} options={vendorOptions} onChange={setVendor} ariaLabel="Select a vendor" placeholder="Select a vendor…" className={trig} />
                 </div>
               </div>
             </section>

@@ -4,7 +4,7 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
-import { WORKTYPES, worktypeLabel, type Worktype } from '@/lib/services/worktypes';
+import { WORKTYPES, worktypeLabel, worktypeDescription, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_PROPERTIES } from '@/lib/services/sampleData';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -48,6 +48,7 @@ interface Rule {
   propsMode: 'all' | 'list';                // 'all' = every applicable property incl. future adds; 'list' = a fixed subset
   includedProps: string[];                  // property scope, 'list' mode only: the specific property ids included
   vendorCost: string; markupPct: string;   // strings so decimals can be typed freely
+  description: string;                      // scope-of-work language (defaults from the worktype; editable)
   cadences: Cadence[];
   initialDueDays: string;                   // optional: first order due N days after enrollment (blank = standard cadence)
   skipMonths: number[];                     // months explicitly set to NO service
@@ -118,7 +119,7 @@ function CoveragePicker({ noun, options, selected, onToggle, onSetMany }: {
 const SEED: Rule[] = [
   {
     id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'grass_cut', scope: 'property',
-    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20',
+    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', description: worktypeDescription('grass_cut'),
     cadences: [
       { id: 11, unit: 'weeks', interval: 2, dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
       { id: 12, unit: 'months', interval: 1, dow: 0, dom: 15, months: [10, 11] },
@@ -129,7 +130,7 @@ const SEED: Rule[] = [
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'grass_cut', scope: 'community',
-    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20',
+    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', description: worktypeDescription('grass_cut'),
     cadences: [{ id: 21, unit: 'weeks', interval: 1, dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
@@ -202,7 +203,7 @@ export default function RulesEngine() {
 
   const addRule = () => {
     const id = Math.max(...rules.map((r) => r.id)) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: String(WORKTYPE_BASE.grass_cut), markupPct: DEFAULT_MARKUP, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: String(WORKTYPE_BASE.grass_cut), markupPct: DEFAULT_MARKUP, description: worktypeDescription('grass_cut'), cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
     setSelId(id);
   };
   const duplicateRule = () => {
@@ -321,7 +322,7 @@ export default function RulesEngine() {
             <div className="flex flex-wrap items-center gap-3 mb-4">
               <div>
                 <label className={lbl}>Work Type</label>
-                <select value={rule.worktype} onChange={(e) => { const wt = e.target.value as Worktype; patch({ worktype: wt, vendorCost: WORKTYPE_BASE[wt] != null ? String(WORKTYPE_BASE[wt]) : rule.vendorCost }); }} className={ctl}>
+                <select value={rule.worktype} onChange={(e) => { const wt = e.target.value as Worktype; patch({ worktype: wt, vendorCost: WORKTYPE_BASE[wt] != null ? String(WORKTYPE_BASE[wt]) : rule.vendorCost, description: worktypeDescription(wt) }); }} className={ctl}>
                   {WORKTYPES.filter((w) => w.scopes.includes(rule.scope)).map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
                 </select>
               </div>
@@ -394,6 +395,11 @@ export default function RulesEngine() {
               <div className="flex flex-col shrink-0"><label className={lbl}>Vendor Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><input value={rule.vendorCost} inputMode="decimal" onChange={(e) => patch({ vendorCost: sanitizeNum(e.target.value) })} className={`${ctl} w-20 text-center tabular-nums`} /></div></div>
               <div className="flex flex-col shrink-0"><label className={lbl}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} inputMode="decimal" onChange={(e) => patch({ markupPct: sanitizeNum(e.target.value) })} className={`${ctl} w-20 text-center tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
               <div className="flex flex-col shrink-0"><label className={lbl}>Client Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><div className="text-[13px] font-bold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg w-20 text-center">{clientCost.toFixed(2)}</div></div></div>
+            </div>
+            <div className="mt-4">
+              <label className={lbl}>Service Description <span className="text-gray-400 normal-case font-normal">— default for this worktype; editable</span></label>
+              <textarea value={rule.description} onChange={(e) => patch({ description: e.target.value })} rows={3}
+                className="w-full text-[13px] border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand" />
             </div>
           </section>
 

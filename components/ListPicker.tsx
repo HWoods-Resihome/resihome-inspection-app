@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 export interface ListOption {
   value: string;
   label: string;
+  sublabel?: string;   // optional second line (e.g. "City, ST ZIP" under a subdivision)
 }
 
 interface Props {
@@ -185,7 +186,10 @@ function ListSheet({
                       )}
                     </span>
                   )}
-                  <span className="truncate">{o.label}</span>
+                  <span className="min-w-0 flex flex-col">
+                    <span className="truncate">{o.label}</span>
+                    {o.sublabel && <span className="truncate text-[12.5px] text-gray-500 font-normal leading-tight">{o.sublabel}</span>}
+                  </span>
                 </span>
                 {isActive && !showCheckbox && (
                   <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" className="shrink-0 text-brand">
