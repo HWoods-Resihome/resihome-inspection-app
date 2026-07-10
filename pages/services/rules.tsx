@@ -17,6 +17,10 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 const PORTFOLIOS: Record<string, number> = { 'Amherst Sunbelt': 612, 'Tricon GA': 418, 'Progress': 174, 'Invitation Homes': 903, 'FirstKey': 551, 'VineBrook': 288 };
 const COMMUNITIES: Record<string, number> = { 'Woodbine Crossing': 96, 'River Glen': 124, 'Camden Pointe': 88, 'Harlow Trace': 78, 'Stonecreek': 142, 'Maple Run': 64 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// Default per-worktype vendor pricing (property coverage). Grass shows its base
+// tier; higher grass tiers ($60 6–12in, $90 >12in) are promoted at completion.
+const WORKTYPE_BASE: Partial<Record<Worktype, number>> = { grass_cut: 45, pool_service: 100, house_cleaning: 75 };
+const DEFAULT_MARKUP = '20';   // default markup % on all services
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 // Curated Property-object fields for enrollment / stop criteria, each with its own
 // value options so the value picker "flows" from the chosen field. (Short list for
@@ -99,7 +103,7 @@ function CoveragePicker({ noun, options, selected, onToggle }: {
 const SEED: Rule[] = [
   {
     id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'grass_cut', scope: 'property',
-    portfolios: ['Amherst Sunbelt'], communities: [], vendorCost: '42', markupPct: '35',
+    portfolios: ['Amherst Sunbelt'], communities: [], vendorCost: '45', markupPct: '20',
     cadences: [
       { id: 11, unit: 'weeks', interval: 2, dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
       { id: 12, unit: 'months', interval: 1, dow: 0, dom: 15, months: [10, 11] },
@@ -110,7 +114,7 @@ const SEED: Rule[] = [
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'grass_cut', scope: 'community',
-    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], vendorCost: '40', markupPct: '30',
+    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], vendorCost: '45', markupPct: '20',
     cadences: [{ id: 21, unit: 'weeks', interval: 1, dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
@@ -147,7 +151,7 @@ export default function RulesEngine() {
 
   const addRule = () => {
     const id = Math.max(...rules.map((r) => r.id)) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], cadences: [newCadence([...Array(12).keys()])], skipMonths: [], enrollVal: '' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], vendorCost: String(WORKTYPE_BASE.grass_cut), markupPct: DEFAULT_MARKUP, cadences: [newCadence([...Array(12).keys()])], skipMonths: [], enrollVal: '' }]);
     setSelId(id);
   };
   const duplicateRule = () => {
@@ -264,7 +268,7 @@ export default function RulesEngine() {
             <div className="flex flex-wrap items-center gap-3 mb-4">
               <div>
                 <label className={lbl}>Work Type</label>
-                <select value={rule.worktype} onChange={(e) => patch({ worktype: e.target.value as Worktype })} className={ctl}>
+                <select value={rule.worktype} onChange={(e) => { const wt = e.target.value as Worktype; patch({ worktype: wt, vendorCost: WORKTYPE_BASE[wt] != null ? String(WORKTYPE_BASE[wt]) : rule.vendorCost }); }} className={ctl}>
                   {WORKTYPES.filter((w) => w.scopes.includes(rule.scope)).map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
                 </select>
               </div>

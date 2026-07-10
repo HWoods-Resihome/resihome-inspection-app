@@ -145,6 +145,7 @@ export default function ServicesHome({ userName }: { userName: string }) {
                   <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-200 z-40 overflow-hidden text-ink">
                     <div className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Admin</div>
                     <Link href="/services/rules" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Rules Engine</Link>
+                    <Link href="/services/vendors" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Vendor Assignment</Link>
                   </div></>)}
               </div>
             </div>

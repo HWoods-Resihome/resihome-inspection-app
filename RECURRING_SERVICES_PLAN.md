@@ -846,6 +846,43 @@ object's status enum, Step 3):
   bid item.
 (Replaces the earlier sample scheduled/dispatched/in_progress/cancelled set.)
 
+## 10.14 Default pricing, answer-driven price rules, and Q&A storage
+
+### Default vendor pricing (property coverage) + markup
+Per-worktype base vendor cost, with a **default 20% markup** on every service
+(client = vendor × 1.20; markup still editable per rule):
+- **Grass Cut** — base **$45** (< 6 in).
+- **Pool Service** — **$100**.
+- **Clean** — **$75**.
+New rules prefill vendor cost from the worktype and markup to 20%.
+
+### Answer-driven pricing (applied at completion)
+- **Grass length tiers** — the completion checklist asks grass length; the vendor
+  payout **promotes** to the tier: **< 6 in $45 (default) · 6–12 in $60 · > 12 in $90**.
+- **Yard access** — completion asks "had access to the whole yard/backyard?"; if
+  **No**, a **global rule reduces the vendor payout by 25%**.
+→ So some questions carry a **price effect** (set/promote a tier, or apply a
+  payout adjustment). This lives with the question definition (below).
+
+### Q&A storage per service type (design)
+Each worktype has a **small completion question set (≤5)**, **editable in ResiWalk
+Services settings**. Recommended:
+- **Definition** (the questions) → a JSON blob per worktype on the **Services config
+  record** (same config-record pattern as the rate defaults), editable via a
+  Settings screen. Each question: `id, label, type (yesno | select | short | long |
+  photo), options[], required`, plus an optional **`priceEffect`** (e.g.
+  `{ kind:'tier', map:{'6-12in':60,'>12in':90} }` or `{ kind:'payoutAdjustPct',
+  when:'no', value:-25 }`).
+- **Answers** (what the vendor submits) → the existing **Answers object**, keyed to
+  the Service (reusing the inspection Answers pattern + photo pipeline), so the
+  completion flow, evidence photos, and PDF reuse carry over unchanged.
+- The completion screen renders the worktype's question set; price-effect answers
+  recompute the vendor payout at submit. (Editable-settings screen = a later step.)
+
+### Vendor Assignment
+Added the **Vendor Assignment** link to the Services gear menu → a gated
+**"Coming Soon"** page for now (assignment is separate from the Rules Engine).
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
