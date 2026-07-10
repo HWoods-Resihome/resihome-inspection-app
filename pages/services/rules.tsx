@@ -43,6 +43,7 @@ interface Rule {
   scope: 'property' | 'community'; portfolios: string[]; communities: string[];
   vendorCost: string; markupPct: string;   // strings so decimals can be typed freely
   cadences: Cadence[];
+  initialDueDays: string;                   // optional: first order due N days after enrollment (blank = standard cadence)
   skipMonths: number[];                     // months explicitly set to NO service
   enrollField: string; enrollOp: string; enrollVal: string;
   stopEnabled: boolean; stopField: string; stopOp: string; stopVal: string;
@@ -108,7 +109,7 @@ const SEED: Rule[] = [
       { id: 11, unit: 'weeks', interval: 2, dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
       { id: 12, unit: 'months', interval: 1, dow: 0, dom: 15, months: [10, 11] },
     ],
-    skipMonths: [0, 1],
+    initialDueDays: '3', skipMonths: [0, 1],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
     stopEnabled: true, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied',
   },
@@ -116,7 +117,7 @@ const SEED: Rule[] = [
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'grass_cut', scope: 'community',
     portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], vendorCost: '45', markupPct: '20',
     cadences: [{ id: 21, unit: 'weeks', interval: 1, dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
-    skipMonths: [],
+    initialDueDays: '', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
     stopEnabled: false, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied',
   },
@@ -151,7 +152,7 @@ export default function RulesEngine() {
 
   const addRule = () => {
     const id = Math.max(...rules.map((r) => r.id)) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], vendorCost: String(WORKTYPE_BASE.grass_cut), markupPct: DEFAULT_MARKUP, cadences: [newCadence([...Array(12).keys()])], skipMonths: [], enrollVal: '' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], vendorCost: String(WORKTYPE_BASE.grass_cut), markupPct: DEFAULT_MARKUP, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVal: '' }]);
     setSelId(id);
   };
   const duplicateRule = () => {
@@ -308,6 +309,11 @@ export default function RulesEngine() {
           <section className={sec}>
             <h3 className="font-heading font-bold text-[15px] text-ink"><span className="text-brand">2.</span> Cadence</h3>
             <p className="text-[12px] text-gray-500 mb-3">Recurs relative to the last completed service. Assign <b>every month</b> to a cadence — different months can use different intervals.</p>
+            <div className="mb-3 flex flex-wrap items-center gap-2 bg-brand/5 border border-brand/20 rounded-xl p-3">
+              <span className="text-[13px] font-semibold text-ink">First order after enrollment — due within</span>
+              <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—" className={`${ctl} w-14 text-center tabular-nums`} />
+              <span className="text-[13px] text-gray-600">days <span className="text-gray-400">(optional — blank uses the standard cadence)</span></span>
+            </div>
             <div className="space-y-3">
               {rule.cadences.map((c) => (
                 <div key={c.id} className="relative border border-gray-200 rounded-xl p-3 pr-8 bg-gray-50">

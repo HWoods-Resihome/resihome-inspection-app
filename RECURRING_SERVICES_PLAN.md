@@ -883,6 +883,43 @@ Services settings**. Recommended:
 Added the **Vendor Assignment** link to the Services gear menu → a gated
 **"Coming Soon"** page for now (assignment is separate from the Rules Engine).
 
+## 10.15 Generation & scheduling logic (nightly job)
+
+Applies to ALL worktypes, both property and community coverage.
+
+### Optional "initial due" on the rule
+Each rule has an OPTIONAL **initial due** = the first order's due date is **N days
+after enrollment** (usually quicker than the recurring cadence). **Blank → the
+standard cadence applies** to the first order too. (Built into the Cadence section.)
+
+### Nightly job — what it does
+1. Find every property/community that **meets a rule's enrollment criteria**.
+2. Skip any that already have an **OPEN work order** for that worktype, where
+   **open = status NOT in {Review, Completed}** (i.e. Estimated / Assigned /
+   Submitted). One active order at a time; the next generates once the current one
+   reaches Review or Completed.
+3. If it needs one, create it:
+   - **Initial order** (the target just met enrollment / has no prior order for this
+     rule) → due date = enrollment date + **initial due** (if set), else standard
+     cadence.
+   - **Subsequent order** → **standard cadence** (below).
+4. A target keeps generating as long as it still meets enrollment, **until the stop
+   criteria is met**.
+
+### Next-order due date (the recurrence math)
+`next due = MAX(completion date, current due date) + cadence interval`
+where completion date = when the vendor submitted.
+- e.g. due Jul 10, every 14 days, completed **early** Jul 7 → next due =
+  max(Jul 7, Jul 10) + 14 = **Jul 24**.
+- completed **late** Jul 12 → max(Jul 12, Jul 10) + 14 = **Jul 26**.
+
+### Stop criteria → cancel open orders
+When a target hits the stop criteria, **cancel its open orders**, EXCEPT:
+- never touch **Review / Completed** orders, and
+- **protect imminent ones — due within the next 48 hours** (let them run).
+- Past-due-but-not-completed orders **may be canceled**.
+*(Owner: confirm the 48-hour protection reading — the phrasing was ambiguous.)*
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
