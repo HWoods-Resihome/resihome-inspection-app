@@ -3426,7 +3426,9 @@ export function RateCardForm(props: RateCardFormProps) {
     // Zero Dollar Turn: finalize directly (one tap) with NO line items — skips
     // AI review + the pending-approval/second-reviewer step. Section photos are
     // still required (checked below). See /finalize zeroDollarTurn.
-    const zeroDollar = !!opts?.zeroDollar;
+    // Mutable: a pending-approval finalize with zero lines is auto-upgraded to a
+    // $0 turn below (the $0 button only exists pre-approval).
+    let zeroDollar = !!opts?.zeroDollar;
     if (submitGuardRef.current) return; // a submit/finalize is already in flight
     // Offline-started inspection not yet synced → no server record to submit
     // against. It auto-syncs when signal returns (then the page swaps to the real
@@ -3514,16 +3516,26 @@ export function RateCardForm(props: RateCardFormProps) {
         return;
       }
     }
-    // No lines at all? Probably a mistake.
+    // No lines at all? Probably a mistake — unless it's an intended $0 turn.
     const totalLines = Object.values(linesBySection).reduce((s, arr) => s + arr.length, 0);
+    const isPendingApproval = props.inspectionStatus === 'pending_approval';
+    // Finalizing a pending-approval scope that has NO line items (e.g. every line
+    // was removed during review) → close it out as a Zero Dollar Turn. Without
+    // this the approver is stuck on the server's "no line items" rejection: the
+    // $0 button that sets this flag only exists before submit-for-approval.
+    const autoZeroDollarFinalize = isPendingApproval && totalLines === 0 && !zeroDollar;
+    if (autoZeroDollarFinalize) zeroDollar = true;
+
     if (totalLines === 0 && !zeroDollar) {
       const ok = await dialog.confirm('No line items have been added. Submit anyway?', { confirmLabel: 'Submit' });
       if (!ok) return;
     }
     if (zeroDollar) {
       const ok = await dialog.confirm(
-        'Submit a ZERO DOLLAR turn with no line items?\n\nThis completes the inspection at $0, generates the PDFs, and raises a Turnkey ticket — no AI review, no approval step, no tenant charge import.',
-        { confirmLabel: 'Submit $0 turn' },
+        autoZeroDollarFinalize
+          ? 'This inspection has no line items. Finalize it as a ZERO DOLLAR turn?\n\nThis completes it at $0, generates the PDFs, and raises a Turnkey ticket — no tenant charge import.'
+          : 'Submit a ZERO DOLLAR turn with no line items?\n\nThis completes the inspection at $0, generates the PDFs, and raises a Turnkey ticket — no AI review, no approval step, no tenant charge import.',
+        { confirmLabel: autoZeroDollarFinalize ? 'Finalize $0 turn' : 'Submit $0 turn' },
       );
       if (!ok) return;
     }
@@ -3629,21 +3641,47 @@ export function RateCardForm(props: RateCardFormProps) {
         // Burn line labels onto tagged photos before the server builds the PDF
         // (finalize reads photos from HubSpot, so these must be saved first).
         await burnTaggedLabels();
-        const r = await fetch(`/api/inspections/${props.inspectionRecordId}/finalize`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          // Send the timing map so same-device finalize honors "Complete Later"
-          // even for inspections submitted before the map was persisted.
-          body: JSON.stringify({ resolutionTimings, zeroDollarTurn: zeroDollar }),
-        });
-        if (!r.ok) {
+        // Finalize POST, with a one-time escape hatch for the after-photo gate:
+        // if the SERVER reports Internal Resolution lines missing an after-photo
+        // (its check can differ from the client's — e.g. photos not yet synced to
+        // the answer, or a stale afterPhotosEnabled flag), the approver can
+        // finalize anyway by deferring exactly those lines to "Complete Later"
+        // (the documented exemption). We persist the deferral and retry ONCE, so
+        // a legitimate close-out is never trapped behind the gate.
+        const timingBody: Record<string, 'now' | 'later'> = { ...resolutionTimings };
+        let r: Response | null = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          r = await fetch(`/api/inspections/${props.inspectionRecordId}/finalize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // Send the timing map so same-device finalize honors "Complete Later"
+            // even for inspections submitted before the map was persisted.
+            body: JSON.stringify({ resolutionTimings: timingBody, zeroDollarTurn: zeroDollar }),
+          });
+          if (r.ok) break;
+          let j: any = null;
+          try { j = await r.json(); } catch { /* non-JSON */ }
+          const missingIds: string[] = Array.isArray(j?.missingAfterPhotoLineIds) ? j.missingAfterPhotoLineIds : [];
+          if (attempt === 0 && r.status === 400 && missingIds.length > 0) {
+            const names: string[] = Array.isArray(j?.missingAfterPhotos) ? j.missingAfterPhotos : [];
+            const ok = await dialog.confirm(
+              'These Internal Resolution lines have no After Photo:\n\n' +
+              names.slice(0, 10).map((n) => `  • ${n}`).join('\n') +
+              (names.length > 10 ? `\n  ...and ${names.length - 10} more` : '') +
+              '\n\nFinalize anyway and mark them "Complete Later"? The in-house work/after-photo is deferred, not lost — it just isn\'t required to close out.',
+              { confirmLabel: 'Finalize (Complete Later)', cancelLabel: 'Go back' },
+            );
+            if (!ok) { setFinalizing(false); submitGuardRef.current = false; return; }
+            // Defer exactly those lines (persist locally + in state) and retry.
+            for (const id of missingIds) { timingBody[id] = 'later'; setLineTiming(id, 'later'); }
+            continue;
+          }
           // Surface the server's clean message (e.g. the self-approval lockout)
           // rather than a raw HTTP body.
-          let msg = `HTTP ${r.status}`;
-          try { const j = await r.json(); if (j?.error) msg = j.error; } catch { /* non-JSON */ }
-          const err: any = new Error(msg); err.status = r.status;
+          const err: any = new Error(j?.error || `HTTP ${r.status}`); err.status = r.status;
           throw err;
         }
+        if (!r || !r.ok) { const err: any = new Error('Finalize failed. Please try again.'); throw err; }
         const data = await r.json();
         setFinalizeResult(data as FinalizeResult);
         // If a maintenance ticket was created, push the scope PDFs into it in

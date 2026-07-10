@@ -462,6 +462,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         error: 'Cannot finalize: no line items have been added to this inspection.',
       });
     }
+    // Safety: the zeroDollarTurn flag is set by the client from its (possibly
+    // stale) line count. The SERVER count is authoritative — if this turn
+    // actually HAS lines, refuse to treat it as $0 (which would skip the tenant
+    // charge import AND the dual-approval lock). Reject so the caller refreshes
+    // and finalizes normally, rather than silently mis-billing / self-approving.
+    if (zeroDollarTurn && grandLineCount > 0) {
+      return res.status(409).json({
+        error: 'This turn has line items, so it can’t be finalized as a $0 turn. Refresh the inspection and finalize normally.',
+      });
+    }
 
     // Early-warning guard: if a meaningful share of lines couldn't be placed, a
     // grouping/catalog regression likely shipped. Log loudly (and we attach the
@@ -505,12 +515,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // regeneration, not a fresh submit).
     if (!isRefinalize && await answerHasAfterPhotoProperty()) {
       const missingAfter: string[] = [];
+      const missingAfterIds: string[] = [];
       for (const g of sectionGroups.values()) {
         for (const line of g.lines) {
           if (isInternalResolution(line.vendor)
             && !laterLineIds.has(line.externalId)
             && (line.afterPhotoUrls?.length ?? 0) === 0) {
             missingAfter.push(`${g.displayName}: ${line.laborShortDescription}`);
+            missingAfterIds.push(line.externalId);
           }
         }
       }
@@ -518,6 +530,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(400).json({
           error: 'After photos are required on every Internal Resolution line before finalizing.',
           missingAfterPhotos: missingAfter,
+          // Line ids so the client can offer "finalize anyway → Complete Later"
+          // (defer exactly these) as a one-tap close-out for the approver.
+          missingAfterPhotoLineIds: missingAfterIds,
         });
       }
     }
