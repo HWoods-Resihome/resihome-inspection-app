@@ -114,7 +114,7 @@ async function candidatesFromEvents(events: AiFeedbackEvent[]): Promise<AutoKnow
       const ex = exampleList(agg.avoidPhrases);
       candidates.push({
         signature: `reject:${agg.code}`,
-        text: `Inspectors consistently reject ${label(agg.code)}${ex ? ` for call-outs like ${ex}` : ''}. Don't suggest it there unless they ask.`,
+        text: `Inspectors consistently decline ${label(agg.code)}${ex ? ` for call-outs like ${ex}` : ''} when the AI SUGGESTS it — so don't proactively suggest or add it there. This is a suggestion-suppression signal ONLY: a declined suggestion is NOT evidence inspectors want that work removed, so never use it to remove a line the inspector deliberately added.`,
         meta: { code: agg.code, accepts: agg.prefer, rejects: agg.avoid, samples: total, examples: [...agg.avoidPhrases].slice(0, MAX_EXAMPLES) },
       });
     }
