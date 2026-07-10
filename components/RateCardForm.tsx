@@ -935,11 +935,21 @@ export function RateCardForm(props: RateCardFormProps) {
               id: idKey, key: idKey, label: idKey || 'Recovered Items', location: '',
               displayName: idKey || 'Recovered Items', isCustom: true, photoOptional: true,
             }));
-            setSections((prev) => {
-              const have = new Set(prev.map((s) => s.id));
-              const add = recovered.filter((r) => !have.has(r.id));
-              return add.length ? [...prev, ...add] : prev;
-            });
+            const have = new Set(sections.map((s) => s.id));
+            const add = recovered.filter((r) => !have.has(r.id));
+            if (add.length) {
+              const merged = [...sections, ...add];
+              setSections(merged);
+              // Durable: persist the recovered layout so the section survives a
+              // section-list re-sync AND shows for every reviewer/device — not just
+              // this render. Self-limiting: once persisted, resolveSections includes
+              // it on the next load, so it's no longer orphaned and won't re-write.
+              // Only in editable states — never mutate a completed/cancelled record.
+              const editable = props.inspectionStatus === 'in_progress'
+                || props.inspectionStatus === 'pending_approval'
+                || props.inspectionStatus === 'scheduled';
+              if (editable) void persistSectionList(merged);
+            }
           }
         }
         setRecordIdsByExternalId(lineRecordIds);
