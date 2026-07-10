@@ -48,6 +48,7 @@ interface InLine {
   tenantBillBackPercent: number;
   assignedTo?: string;
   note?: string;
+  customLaborFullDescription?: string;  // inspector's custom work description (bid items)
   customVendorCost?: number | null;
   customLaborRate?: number | null;
   customAdjustedMaterialCost?: number | null;
@@ -273,7 +274,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const bidTag = item.isBidItem
           ? ` | BID ITEM — REVIEW & PRICE: current vendor ${money(curVendor)}${l.customVendorCost == null ? ' (PLACEHOLDER ~1 labor hr default — almost certainly too low)' : ' (inspector-set)'}; region labor ≈${money(laborRate)}/hr — estimate the real labor hours + materials for this work and propose a vendor cost`
           : '';
-        rows.push(`    - id=${l.externalId} | ${item.laborShortDescription} [${item.category}/${item.subcategory}, ${item.laborMeas}] | qty ${l.quantity} | ${tenantStr} | ${costStr} | vendor: ${l.assignedTo || 'Vendor 1'}${bidTag}${l.note ? ` | note: ${l.note}` : ''}`);
+        // The inspector's own description of the work (bid items especially,
+        // e.g. "replace knobs"). This is the ground truth for what the line is
+        // for — surface it so the model prices/evaluates the ACTUAL work instead
+        // of inferring from the generic catalog label + photos.
+        const workNote = (l.customLaborFullDescription || '').trim();
+        const workTag = workNote ? ` | INSPECTOR WORK NOTE: "${workNote}"` : '';
+        rows.push(`    - id=${l.externalId} | ${item.laborShortDescription} [${item.category}/${item.subcategory}, ${item.laborMeas}] | qty ${l.quantity} | ${tenantStr} | ${costStr} | vendor: ${l.assignedTo || 'Vendor 1'}${bidTag}${workTag}${l.note ? ` | note: ${l.note}` : ''}`);
       }
       if (rows.length) scopeBlocks.push(`  Room "${s.name}" (id=${s.id}):\n${rows.join('\n')}`);
     }
@@ -417,10 +424,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         type, sectionId, sectionName: section?.name, lineExternalId,
         title: String(a?.title || 'Suggested adjustment'),
         rationale: String(a?.rationale || ''),
-        // The inspector's own note on the target line (bid-item description,
-        // etc.) — surfaced so the reviewer can evaluate the AI's suggestion
-        // against what the inspector actually wrote.
-        inspectorNote: (cur?.note || '').trim() || undefined,
+        // The inspector's own words on the target line — their custom work
+        // description (bid items) if present, else the free-text note — surfaced
+        // so the reviewer can evaluate the AI's suggestion against what the
+        // inspector actually wrote.
+        inspectorNote: ((cur?.customLaborFullDescription || cur?.note || '').trim()) || undefined,
         severity: ['high', 'medium', 'low'].includes(a?.severity) ? a.severity : 'medium',
         needsPhoto: a?.needsPhoto === true,
         wrongRoom,

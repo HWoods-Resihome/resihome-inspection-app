@@ -2847,6 +2847,10 @@ export function RateCardForm(props: RateCardFormProps) {
         tenantBillBackPercent: l.tenantBillBackPercent,
         assignedTo: l.assignedTo,
         note: l.note,
+        // The inspector's custom work description (bid items live here, e.g.
+        // "replace knobs") — the AI needs it to price/evaluate the real work
+        // instead of guessing from the generic catalog label + photos.
+        customLaborFullDescription: l.customLaborFullDescription,
         customVendorCost: l.customVendorCost ?? null,
         customLaborRate: l.customLaborRate ?? null,
         customAdjustedMaterialCost: l.customAdjustedMaterialCost ?? null,
