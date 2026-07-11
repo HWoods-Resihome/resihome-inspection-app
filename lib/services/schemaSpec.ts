@@ -41,8 +41,8 @@ export interface ObjectSpec {
 }
 
 export const SERVICE_OBJECT: ObjectSpec = {
-  name: 'service',
-  labels: { singular: 'Service', plural: 'Services' },
+  name: 'service_work_order',
+  labels: { singular: 'Service Work Order', plural: 'Service Work Orders' },
   primaryDisplayProperty: 'service_name',
   envVar: 'HUBSPOT_SERVICE_TYPE_ID',
   properties: [
@@ -125,10 +125,10 @@ export const SERVICE_OBJECTS: ObjectSpec[] = [SERVICE_OBJECT, SERVICE_RULE_OBJEC
 // Association definitions to create (labeled v4 associations).
 // `to` is a token resolved at apply time: PROPERTY | COMPANY | COMMUNITY | service | service_rule.
 export const SERVICE_ASSOCIATIONS: { from: string; to: string; name: string; label: string }[] = [
-  { from: 'service', to: 'PROPERTY', name: 'service_to_property', label: 'Service → Property' },
-  { from: 'service', to: 'COMMUNITY', name: 'service_to_community', label: 'Service → Community' },
-  { from: 'service', to: 'COMPANY', name: 'service_to_vendor', label: 'Service → Vendor' },
-  { from: 'service', to: 'service_rule', name: 'service_to_rule', label: 'Service → Rule' },
+  { from: 'service_work_order', to: 'PROPERTY', name: 'service_to_property', label: 'Service → Property' },
+  { from: 'service_work_order', to: 'COMMUNITY', name: 'service_to_community', label: 'Service → Community' },
+  { from: 'service_work_order', to: 'COMPANY', name: 'service_to_vendor', label: 'Service → Vendor' },
+  { from: 'service_work_order', to: 'service_rule', name: 'service_to_rule', label: 'Service → Rule' },
   { from: 'service_rule', to: 'PROPERTY', name: 'rule_to_property', label: 'Rule → Property' },
   { from: 'service_rule', to: 'COMMUNITY', name: 'rule_to_community', label: 'Rule → Community' },
   { from: 'service_rule', to: 'COMPANY', name: 'rule_to_vendor', label: 'Rule → Vendor' },

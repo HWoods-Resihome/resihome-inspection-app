@@ -21,7 +21,7 @@ Apply returns the created `objectTypeId`s in `envVars`. Set them in Vercel
 - `HUBSPOT_SERVICE_RULE_TYPE_ID`
 
 ## Objects
-### Service (`service`)
+### Service Work Order (`service_work_order`)
 Primary display `service_name`. Fields: worktype, subtype, status, is_bid_item,
 scope, service_description, due_date, region_snapshot, vendor_cost, markup_pct,
 client_cost, vendor_cost_adjustment (+reason), vendor_name, generated_by_rule_id,
