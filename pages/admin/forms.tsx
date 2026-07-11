@@ -126,18 +126,9 @@ function QuestionEditor({ initial, onSave, onCancel, busy, knownSections = [] }:
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <label className="text-[11px] font-heading font-semibold text-gray-500">Section order
-          <input type="number" inputMode="numeric" min={0} value={d.sectionOrder === 0 ? '' : d.sectionOrder}
-            onChange={(e) => { const n = parseInt(e.target.value, 10); set({ sectionOrder: Number.isFinite(n) && n >= 0 ? n : 0 }); }}
-            className="focus-brand w-full border border-gray-300 rounded-lg p-2 text-sm mt-0.5" />
-        </label>
-        <label className="text-[11px] font-heading font-semibold text-gray-500">Display order
-          <input type="number" inputMode="numeric" min={0} value={d.displayOrder === 0 ? '' : d.displayOrder}
-            onChange={(e) => { const n = parseInt(e.target.value, 10); set({ displayOrder: Number.isFinite(n) && n >= 0 ? n : 0 }); }}
-            className="focus-brand w-full border border-gray-300 rounded-lg p-2 text-sm mt-0.5" />
-        </label>
-      </div>
+      {/* Section + display order are no longer typed in — new questions append to
+          the end of their section, and the ↑/↓ buttons on each question (and
+          section) in the list reorder them. */}
 
       {typeMeta?.hasOptions && (
         <label className="block text-[11px] font-heading font-semibold text-gray-500">Choices (one per line)
@@ -255,18 +246,96 @@ export default function FormBuilderPage() {
     [questions],
   );
 
+  // Ordering helpers — the builder no longer asks the admin to type order
+  // numbers. A section's order is the order of any existing question in it (else
+  // it appends after the last section); a new question appends to the end of its
+  // section. Values are spaced by 10 so a single move never needs to renumber
+  // everything.
+  const sectionOrderOf = (section: string): number => {
+    const existing = (questions || []).find((q) => (q.section || '') === section);
+    if (existing) return existing.sectionOrder;
+    return Math.max(0, ...(questions || []).map((q) => q.sectionOrder)) + 10;
+  };
+  const nextDisplayOrder = (section: string): number => {
+    const inSec = (questions || []).filter((q) => (q.section || '') === section);
+    return Math.max(0, ...inSec.map((q) => q.displayOrder)) + 10;
+  };
+
+  // Persist a batch of order changes (displayOrder / sectionOrder) with an
+  // optimistic list update; on failure, reload from the server to resync.
+  async function persistOrder(updates: { id: string; patch: Partial<Question> }[]) {
+    if (!updates.length) return;
+    setBusy(true);
+    setQuestions((cur) => (cur || []).map((q) => {
+      const u = updates.find((u) => u.id === q.hubspotRecordId);
+      return u ? { ...q, ...u.patch } : q;
+    }));
+    try {
+      await Promise.all(updates.map((u) => fetch(`/api/admin/questions/${u.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u.patch),
+      }).then((r) => { if (!r.ok) throw new Error('reorder failed'); })));
+      setError(null);
+    } catch {
+      setError('Couldn’t save the new order — reloading.');
+      await load();
+    } finally { setBusy(false); }
+  }
+
+  // Move a question up/down WITHIN its section. Reindexes the section's
+  // displayOrder (spaced by 10) and persists only the rows that changed.
+  function moveQuestion(q: Question, dir: 'up' | 'down') {
+    if (busy) return;
+    const inSec = [...(questions || [])]
+      .filter((x) => (x.section || '') === (q.section || ''))
+      .sort((a, b) => a.displayOrder - b.displayOrder);
+    const idx = inSec.findIndex((x) => x.hubspotRecordId === q.hubspotRecordId);
+    const swap = idx + (dir === 'up' ? -1 : 1);
+    if (idx < 0 || swap < 0 || swap >= inSec.length) return;
+    const arr = [...inSec];
+    [arr[idx], arr[swap]] = [arr[swap], arr[idx]];
+    const updates = arr
+      .map((x, i) => ({ x, displayOrder: (i + 1) * 10 }))
+      .filter((u) => u.displayOrder !== u.x.displayOrder)
+      .map((u) => ({ id: u.x.hubspotRecordId, patch: { displayOrder: u.displayOrder } }));
+    void persistOrder(updates);
+  }
+
+  // Move a whole SECTION up/down. Reindexes sectionOrder (spaced by 10) across
+  // sections and persists every question whose sectionOrder changed.
+  function moveSection(section: string, dir: 'up' | 'down') {
+    if (busy) return;
+    const order = grouped.map(([s]) => s); // current section order
+    const idx = order.indexOf(section);
+    const swap = idx + (dir === 'up' ? -1 : 1);
+    if (idx < 0 || swap < 0 || swap >= order.length) return;
+    const arr = [...order];
+    [arr[idx], arr[swap]] = [arr[swap], arr[idx]];
+    const orderBy = new Map(arr.map((s, i) => [s, (i + 1) * 10]));
+    const updates = (questions || [])
+      .map((q) => ({ q, next: orderBy.get(q.section || '(no section)') }))
+      .filter((u) => u.next != null && u.next !== u.q.sectionOrder)
+      .map((u) => ({ id: u.q.hubspotRecordId, patch: { sectionOrder: u.next as number } }));
+    void persistOrder(updates);
+  }
+
   async function saveEdit(id: string, d: Draft) {
     setBusy(true);
     try {
+      // If the section changed, re-home the question: adopt the target section's
+      // order and append to its end (order isn't typed in anymore).
+      const orig = (questions || []).find((q) => q.hubspotRecordId === id);
+      const d2: Draft = orig && (orig.section || '') !== d.section
+        ? { ...d, sectionOrder: sectionOrderOf(d.section), displayOrder: nextDisplayOrder(d.section) }
+        : d;
       const r = await fetch(`/api/admin/questions/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...d, responseOptions: toOptions(d.responseOptionsText) }),
+        body: JSON.stringify({ ...d2, responseOptions: toOptions(d2.responseOptionsText) }),
       });
       const dd = await r.json();
       if (!r.ok) { setError(dd.error || 'Save failed'); return; }
       // Optimistically update the list (HubSpot's search index lags a few
       // seconds after a write, so re-fetching here would show stale data).
-      setQuestions((cur) => (cur || []).map((q) => q.hubspotRecordId === id ? applyDraft(q, d) : q));
+      setQuestions((cur) => (cur || []).map((q) => q.hubspotRecordId === id ? applyDraft(q, d2) : q));
       setEditingId(null); setError(null);
     } finally { setBusy(false); }
   }
@@ -274,9 +343,12 @@ export default function FormBuilderPage() {
   async function create(d: Draft) {
     setBusy(true);
     try {
+      // Auto-assign order: adopt the section's order (or a new section at the end)
+      // and append to the end of that section — no typed order fields anymore.
+      const d2: Draft = { ...d, sectionOrder: sectionOrderOf(d.section), displayOrder: nextDisplayOrder(d.section) };
       const r = await fetch('/api/admin/questions', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...d, responseOptions: toOptions(d.responseOptionsText), appliesToTemplates: [template] }),
+        body: JSON.stringify({ ...d2, responseOptions: toOptions(d2.responseOptionsText), appliesToTemplates: [template] }),
       });
       const dd = await r.json();
       if (!r.ok) { setError(dd.error || 'Create failed'); return; }
@@ -284,7 +356,7 @@ export default function FormBuilderPage() {
       // hide it on an immediate re-fetch).
       const newQ = applyDraft(
         { hubspotRecordId: dd.id, questionIdExternal: dd.questionIdExternal, appliesToTemplates: [template] },
-        d,
+        d2,
       );
       setQuestions((cur) => [...(cur || []), newQ]);
       setAdding(false); setError(null);
@@ -379,18 +451,44 @@ export default function FormBuilderPage() {
           <div className="text-center text-gray-500 py-10 text-sm">No questions for this template yet. Add one above.</div>
         ) : (
           <div className="space-y-5">
-            {grouped.map(([section, qs]) => (
+            {grouped.map(([section, qs], si) => (
               <div key={section}>
-                <h2 className="text-xs font-heading font-bold text-gray-500 uppercase tracking-wide mb-1.5">{section}</h2>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <h2 className="text-xs font-heading font-bold text-gray-500 uppercase tracking-wide flex-1 min-w-0 truncate">{section}</h2>
+                  <button type="button" onClick={() => moveSection(section, 'up')} disabled={busy || si === 0}
+                    aria-label="Move section up" title="Move section up"
+                    className="w-6 h-6 grid place-items-center rounded-md border border-gray-200 text-gray-500 bg-white hover:text-brand hover:border-brand/40 disabled:opacity-30 disabled:hover:text-gray-500">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
+                  </button>
+                  <button type="button" onClick={() => moveSection(section, 'down')} disabled={busy || si === grouped.length - 1}
+                    aria-label="Move section down" title="Move section down"
+                    className="w-6 h-6 grid place-items-center rounded-md border border-gray-200 text-gray-500 bg-white hover:text-brand hover:border-brand/40 disabled:opacity-30 disabled:hover:text-gray-500">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+                  </button>
+                </div>
                 <ul className="space-y-2">
-                  {qs.map((q) => (
+                  {qs.map((q, qi) => (
                     <li key={q.hubspotRecordId} className={`bg-white rounded-xl border p-3 shadow-sm ${q.enabled ? 'border-gray-200' : 'border-gray-200 opacity-60'}`}>
                       {editingId === q.hubspotRecordId ? (
                         <QuestionEditor initial={fromQuestion(q)} busy={busy} knownSections={knownSections}
                           onSave={(d) => saveEdit(q.hubspotRecordId, d)} onCancel={() => setEditingId(null)} />
                       ) : (
                         <>
-                          <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2">
+                            {/* Reorder within the section — ↑/↓ instead of typed order numbers. */}
+                            <div className="flex flex-col gap-0.5 shrink-0 pt-0.5">
+                              <button type="button" onClick={() => moveQuestion(q, 'up')} disabled={busy || qi === 0}
+                                aria-label="Move question up" title="Move up"
+                                className="w-7 h-6 grid place-items-center rounded-md border border-gray-200 text-gray-500 bg-white hover:text-brand hover:border-brand/40 disabled:opacity-30 disabled:hover:text-gray-500">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
+                              </button>
+                              <button type="button" onClick={() => moveQuestion(q, 'down')} disabled={busy || qi === qs.length - 1}
+                                aria-label="Move question down" title="Move down"
+                                className="w-7 h-6 grid place-items-center rounded-md border border-gray-200 text-gray-500 bg-white hover:text-brand hover:border-brand/40 disabled:opacity-30 disabled:hover:text-gray-500">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+                              </button>
+                            </div>
+                          <div className="flex items-start justify-between gap-2 flex-1 min-w-0">
                             <div className="min-w-0">
                               <div className="text-sm font-semibold text-ink leading-snug">{q.questionText || <span className="text-gray-400 italic">(no text)</span>}</div>
                               <div className="text-[11px] text-gray-500 mt-0.5">
@@ -410,6 +508,7 @@ export default function FormBuilderPage() {
                               <button type="button" onClick={() => remove(q)} disabled={busy}
                                 className="text-xs font-heading font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-md px-2.5 py-1">Delete</button>
                             </div>
+                          </div>
                           </div>
                         </>
                       )}
