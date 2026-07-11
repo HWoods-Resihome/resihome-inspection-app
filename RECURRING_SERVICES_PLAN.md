@@ -1099,6 +1099,35 @@ on each created Service to enforce idempotency.
   `pages/api/geocode.ts`, which maps community inspections). Everything
   Services-specific stays on the branch.
 
+## 10.21 Service forms (Form Builder), view-as, vendor visibility (owner-directed)
+### Form Builder (admin) — `/services/forms`, in the Services settings gear
+- Per **(work type × subtype)** question set. Admin picks work type + subtype and
+  can **add / edit / delete / reorder** questions. Preview today (local state,
+  seeded from `lib/services/serviceForms.ts`); Step 2 maps onto the **reused HubSpot
+  Question / Answer objects** (same store the inspection rate-card/question forms use),
+  keyed by worktype+subtype instead of a rate-card template.
+- **Answer types:** Yes/No, Short text, Long text/notes, Date, Photo(s). Each question
+  has Required + an optional Notes field.
+- **Trigger actions:** a question answer can **spawn a follow-up service** created in
+  **Estimated** with its own (separate) before/after photos — e.g. "Back yard cut?"
+  = No → create a follow-up Grass Cut (Estimated). Configurable: which answer fires,
+  the follow-up work type + subtype, and whether separate photos are required. This is
+  the services analog of the inspection rate-card price-effect/promotion logic.
+- Completion flow ([id].tsx) will render the built form for the service's
+  worktype+subtype (replacing the current static checklist) in Step 2.
+
+### View as Vendor (admin) — `/services?as=vendor`
+- Admin preview of the **external vendor experience**: hides admin create/settings
+  and (per the visibility rule) client pricing; shows a "Viewing as Vendor" banner
+  with Exit. Step 2 upgrades this to real per-user impersonation, reusing the
+  inspection app's view-as/impersonation mechanism.
+
+### Vendor visibility rule (LOCKED — also in README)
+- Vendors **never** see markup % or client cost — only **vendor cost** and **changes
+  to their vendor cost** (e.g. a deduction for not cutting the back yard). Internal/
+  admin see the full breakdown. Enforce in every vendor-facing surface (cards,
+  service/completion screen, forms, PDFs, notifications, View-as-Vendor).
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).

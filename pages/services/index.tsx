@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -46,6 +47,11 @@ const fmtDue = (iso: string) => {
 };
 
 export default function ServicesHome({ userName, canCreate }: { userName: string; canCreate: boolean }) {
+  const router = useRouter();
+  // Admin "view as vendor" preview (?as=vendor): shows the external vendor
+  // experience — no admin create/settings, and the vendor-visibility rule applies.
+  const asVendor = router.query.as === 'vendor';
+  const isAdmin = canCreate && !asVendor;
   const [status, setStatus] = useState<ServiceStatus | 'all'>('all');
   const [worktype, setWorktype] = useState<string[]>([]);
   const [vendor, setVendor] = useState<string[]>([]);
@@ -147,6 +153,7 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
                     <div className="px-4 py-2.5 text-sm font-semibold text-brand bg-brand/5">Services ✓</div>
                   </div></>)}
               </div>
+              {isAdmin && (
               <div className="relative">
                 <button type="button" onClick={() => { setGearOpen((o) => !o); setMenuOpen(false); }} aria-label="Settings" aria-expanded={gearOpen}
                   className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors">
@@ -156,13 +163,16 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
                   <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-200 z-40 overflow-hidden text-ink">
                     <div className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Admin</div>
                     <Link href="/services/rules" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Rules Engine</Link>
+                    <Link href="/services/forms" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Form Builder</Link>
+                    <Link href="/services?as=vendor" className="block px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">View as Vendor</Link>
                   </div></>)}
               </div>
+              )}
             </div>
           </div>
           {/* New Service lives INSIDE the pink header (like "+ New Inspection"),
               so the banner extends down past it instead of ending at a white gap. */}
-          {canCreate && (
+          {isAdmin && (
             <Link href="/services/new" className="mt-2.5 flex items-center gap-3 bg-pink-100 hover:bg-pink-200 rounded-xl px-4 py-2.5 transition active:scale-[0.99] shadow-md">
               <span className="w-9 h-9 bg-brand rounded-lg flex items-center justify-center shrink-0">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
@@ -174,6 +184,12 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
       </header>
 
       <main className="max-w-3xl mx-auto w-full px-4 py-3 flex-1">
+        {asVendor && (
+          <div className="mb-3 flex items-center justify-between gap-2 bg-purple-600 text-white rounded-xl px-3 py-2 text-[12px] font-heading font-semibold">
+            <span>Viewing as Vendor — admin controls &amp; client pricing hidden.</span>
+            <Link href="/services" className="underline shrink-0">Exit</Link>
+          </div>
+        )}
         {/* Summary bubbles — dynamic; Past Due is a clickable filter. */}
         <div className="grid grid-cols-3 gap-2 mb-3">
           <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-center">
