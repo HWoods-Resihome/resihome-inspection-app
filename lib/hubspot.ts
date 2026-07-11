@@ -828,7 +828,10 @@ export async function fetchCommunityFirstPropertyId(communityId: string): Promis
 // Additive-only. dry-run diffs the schemaSpec against HubSpot (no writes); apply
 // creates the two custom objects, their properties, the additive Question props,
 // and the labeled associations. Idempotent (skips what already exists).
-const isConflict = (e: unknown) => /409|already ?exists|PROPERTY_ALREADY_EXISTS|been created/i.test(String((e as any)?.message || e || ''));
+const isConflict = (e: unknown) => {
+  const blob = `${String((e as any)?.message || e || '')} ${String((e as any)?.detail || '')}`;
+  return /409|already ?exists|already a label|PROPERTY_ALREADY_EXISTS|been created|duplicate/i.test(blob);
+};
 
 async function ensurePropertyGroup(typeId: string, name: string): Promise<string> {
   try {
