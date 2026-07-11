@@ -106,14 +106,22 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const whenMs = (i: InspectionSummary): number | null =>
     statusKey(i.status) === 'completed' ? hubspotToMs(i.submittedAt || i.completedAt) : hubspotToMs(i.scheduledDate);
   const dayOf = (i: InspectionSummary): string | null => { const ms = whenMs(i); return ms == null ? null : toISO(new Date(ms)); };
-  // H:MM AM/PM for a real time-of-day; null for date-only values (midnight).
+  // H:MM AM/PM — only for COMPLETED (they have a real submitted timestamp). Open
+  // inspections have no meaningful appointment time, so they show none.
   const timeLabel = (i: InspectionSummary): string | null => {
+    if (statusKey(i.status) !== 'completed') return null;
     const ms = whenMs(i); if (ms == null) return null;
     const d = new Date(ms);
-    if (d.getHours() === 0 && d.getMinutes() === 0) return null;
     const ap = d.getHours() >= 12 ? 'PM' : 'AM';
     const h = d.getHours() % 12 || 12;
     return `${h}:${String(d.getMinutes()).padStart(2, '0')} ${ap}`;
+  };
+  // Day/week ordering: completed first (by time, the route order), then open (by address).
+  const dayOrder = (a: InspectionSummary, b: InspectionSummary) => {
+    const ca = statusKey(a.status) === 'completed', cb = statusKey(b.status) === 'completed';
+    if (ca !== cb) return ca ? -1 : 1;
+    if (ca && cb) return (whenMs(a) ?? Infinity) - (whenMs(b) ?? Infinity);
+    return (a.propertyAddressSnapshot || '').localeCompare(b.propertyAddressSnapshot || '');
   };
 
   // Base set the filters operate over: OPEN (scheduled/in_progress) always, plus
@@ -158,8 +166,8 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const byDay = useMemo(() => {
     const m: Record<string, InspectionSummary[]> = {};
     for (const i of scoped) { const day = dayOf(i)!; (m[day] ||= []).push(i); }
-    // Order each day earliest → latest so week columns + the day view read as a route.
-    for (const arr of Object.values(m)) arr.sort((a, b) => (whenMs(a) ?? Infinity) - (whenMs(b) ?? Infinity));
+    // Completed (by time) first, then open (by address) — see dayOrder.
+    for (const arr of Object.values(m)) arr.sort(dayOrder);
     return m;
   }, [scoped]);
   const visible = useMemo(() => scoped.filter((i) => {
@@ -362,9 +370,9 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
             {view === 'day' && (
               <div className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
                 {visible.length === 0 && <div className="text-center text-gray-400 text-sm py-8">No inspections this day.</div>}
-                {[...visible].sort((a, b) => (whenMs(a) ?? Infinity) - (whenMs(b) ?? Infinity)).map((i) => (
+                {[...visible].sort(dayOrder).map((i) => (
                   <Link key={i.recordId} href={`/inspection/${i.recordId}`} className="flex items-center gap-2.5 border border-gray-200 rounded-lg px-3 py-2 hover:border-brand/40">
-                    <span className="w-16 shrink-0 text-right text-[11.5px] font-semibold text-gray-500 tabular-nums">{timeLabel(i) || '—'}</span>
+                    <span className="w-16 shrink-0 text-right text-[11.5px] font-semibold text-gray-500 tabular-nums">{timeLabel(i) || ''}</span>
                     <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: metaOf(i)?.hex || '#9ca3af' }} />
                     <div className="min-w-0 flex-1">
                       <div className="font-heading font-bold text-ink text-sm truncate">{i.propertyAddressSnapshot || i.inspectionName || 'Inspection'}</div>
