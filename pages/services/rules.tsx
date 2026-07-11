@@ -34,15 +34,18 @@ const DEFAULT_MARKUP = '20';   // default markup % on all services
 const firstSubtype = (wt: Worktype): string => subtypesFor(wt)[0]?.id || '';
 const baseRate = (wt: Worktype, sub: string): string => { const r = defaultRateFor(wt, sub); return r != null ? String(r) : ''; };
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-// Curated Property-object fields for enrollment / stop criteria, each with its own
-// value options so the value picker "flows" from the chosen field. (Short list for
-// now; expands as we wire real Property properties.)
+// Curated Property (and associated-Deal) fields for enrollment / stop criteria,
+// each with its own value options so the value picker "flows" from the chosen
+// field. (Sample list for now; expands as we wire the real Property + Deal objects.)
 const PROPERTY_FIELDS: { field: string; options: string[] }[] = [
   { field: 'Property Status', options: ['Vacant', 'Pending MOI/Rekey', 'Occupied', 'Under Turnkey', 'Eviction'] },
   { field: 'Home Type', options: ['Single-Family', 'Townhome', 'Condo', 'Duplex'] },
   { field: 'Recurring Services', options: ['Enrolled', 'Paused', 'Not Enrolled'] },
   { field: 'Has Pool', options: ['Yes', 'No'] },
   { field: 'Occupancy', options: ['Vacant', 'Occupied'] },
+  // Associated leasing-pipeline Deal stage — powers event-triggered, run-once
+  // dispatches like move-in cleans (enroll on the transition INTO a stage).
+  { field: 'Deal Stage', options: ['Application', 'Approved', 'Lease Signed', 'Move-In Scheduled', 'Moved In', 'Leased'] },
 ];
 const FIELD_NAMES = PROPERTY_FIELDS.map((f) => f.field);
 const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field)?.options ?? [];
@@ -155,6 +158,17 @@ const SEED: Rule[] = [
     cadences: [{ id: 21, unit: 'weeks', interval: '1', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
+    stopEnabled: false, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
+  },
+  {
+    // Event-triggered, run-once dispatch: a move-in clean created when the
+    // associated leasing Deal reaches "Move-In Scheduled". Non-recurring.
+    id: 3, name: 'ATL Move-In Cleans', active: true, worktype: 'cleaning', subtype: 'move_in_clean', petStations: false, scope: 'property',
+    portfolios: ['Progress'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '75', markupPct: '20', vendors: ['Peachtree Grounds'], description: descriptionFor('cleaning', 'move_in_clean'),
+    recurring: false,
+    cadences: [],
+    initialDueDays: '2', skipMonths: [],
+    enrollField: 'Deal Stage', enrollOp: 'changes to', enrollVal: 'Move-In Scheduled',
     stopEnabled: false, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
 ];
@@ -737,6 +751,11 @@ export default function RulesEngine() {
               <select value={rule.enrollOp} onChange={(e) => patch({ enrollOp: e.target.value })} className={ctl}>{OPS.map((o) => <option key={o}>{o}</option>)}</select>
               <select value={rule.enrollVal} onChange={(e) => patch({ enrollVal: e.target.value })} className={`${ctl} flex-1 min-w-[140px]`}>{optsFor(rule.enrollField).map((o) => <option key={o}>{o}</option>)}</select>
             </div>
+            {rule.enrollField === 'Deal Stage' && (
+              <div className="mb-4 -mt-1 text-[11px] text-gray-500 bg-brand/5 border border-brand/20 rounded-lg px-3 py-2 leading-relaxed">
+                <b className="text-ink">Deal-stage trigger.</b> Fires on the <b>transition into</b> the stage (an edge, not a standing state), and is de-duplicated on the associated deal — so exactly one service is created per lease.{!rule.recurring ? ' With “Is this recurring?” = No, it never recreates, even if the service is completed before the property flips to occupied.' : ' Tip: set “Is this recurring?” = No for a true one-time move-in dispatch.'}
+              </div>
+            )}
             <label className="flex items-center gap-2 mb-2 cursor-pointer">
               <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked, ...(e.target.checked && !rule.stopVal ? { stopVal: optsFor(rule.stopField)[0] || '' } : {}) })} />
               <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Stop Criteria <span className="normal-case font-normal text-gray-400">(optional)</span></span>
