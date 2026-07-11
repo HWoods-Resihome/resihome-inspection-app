@@ -65,7 +65,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const [regionFilter, setRegionFilter] = useState<string[]>([]); // internal only
   const [typeFilter, setTypeFilter] = useState<string[]>([]);     // internal only
   const [statusFilter, setStatusFilter] = useState<string[]>([]); // from the clickable legend (everyone)
-  const [showCompleted, setShowCompleted] = useState(false);      // internal only — last-2-weeks completed
+  const [showCompleted, setShowCompleted] = useState(false);      // last-2-weeks completed (all users; external sees only their own)
   const [filtersOpen, setFiltersOpen] = useState(true);           // collapsible filter block (internal)
   const [coords, setCoords] = useState<Record<string, { lat: number; lng: number } | null>>({});
   const mine = (i: InspectionSummary) =>
@@ -95,13 +95,14 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
         if (gen?.error && !Array.isArray(gen?.inspections)) { setError(gen.error); return; }
         for (const i of (Array.isArray(gen?.inspections) ? gen.inspections : [])) byId.set(i.recordId, i);
 
-        // Completed (internal only): the server caps a page at 100, and a busy
-        // 2-week window can hold more than that — so walk ALL pages (newest
-        // first) until we cross the window boundary, rather than truncating at
-        // 100. Ordered by last_edited_at, which is always >= an inspection's
-        // completed/submitted date, so once a page's oldest row predates the
-        // window no later page can contain an in-window completion → safe to stop.
-        if (isInternal) {
+        // Completed page-through (ALL users — external gets only their own
+        // completed, scoped server-side + by mine() below): the server caps a
+        // page at 100, and a busy 2-week window can hold more than that — so walk
+        // ALL pages (newest first) until we cross the window boundary, rather than
+        // truncating at 100. Ordered by last_edited_at, which is always >= an
+        // inspection's completed/submitted date, so once a page's oldest row
+        // predates the window no later page can contain an in-window completion.
+        {
           const windowStartMs = Date.now() - COMPLETED_WINDOW_DAYS * 24 * 60 * 60 * 1000;
           const MAX_PAGES = 40; // safety bound (~4000 completed)
           for (let page = 1; page <= MAX_PAGES; page++) {
@@ -333,7 +334,16 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
           </div>
         )}
         {!isInternal && (
-          <div className="text-[12px] font-heading font-semibold text-gray-500">Your assigned inspections</div>
+          <div className="flex items-center gap-2">
+            <div className="text-[12px] font-heading font-semibold text-gray-500">Your assigned inspections</div>
+            {/* External users get a standalone Completed toggle — shows THEIR own
+                completed inspections (last 2 weeks) on the calendar + map. */}
+            <button type="button" onClick={() => setShowCompleted((v) => !v)} title="Show your completed inspections (last 2 weeks)"
+              className={`ml-auto shrink-0 inline-flex items-center gap-1 text-[12px] font-heading font-semibold px-2 py-1.5 rounded-lg border transition ${showCompleted ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:border-green-400'}`}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              Completed
+            </button>
+          </div>
         )}
 
         <div className="flex items-center gap-2">
