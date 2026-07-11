@@ -570,9 +570,10 @@ export default function RulesEngine() {
                   </div>
                 )}
 
-                <div className="mt-3 border border-gray-200 rounded-xl max-w-md">
+                <label className={`${lbl} mt-3`}>Applicable Properties</label>
+                <div className="border border-gray-200 rounded-xl max-w-md">
                   <button type="button" onClick={() => setPropsOpen((o) => !o)} className="w-full flex items-center justify-between px-3 py-2.5 text-[13px] font-semibold text-ink">
-                    <span>Applicable Properties <span className="text-brand">({coveredCount})</span></span>
+                    <span className="text-brand font-bold">{coveredCount.toLocaleString()} <span className="text-gray-500 font-semibold">included</span></span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${propsOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
                   </button>
                   {propsOpen && (
@@ -604,10 +605,13 @@ export default function RulesEngine() {
                 </div>
               </div>
             )}
-            <div className="flex flex-nowrap items-end gap-4 border-t border-gray-100 pt-4 mt-4">
-              <PriceField label="Vendor Cost" adorn="$" colClass="shrink-0 w-24" value={rule.vendorCost} onChange={(v) => patch({ vendorCost: v })} />
-              <PriceField label="Markup %" adorn="%" side="right" colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
-              <PriceField label="Client Cost" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={clientCost.toFixed(2)} />
+            <div className="border-t border-gray-100 pt-4 mt-4">
+              <label className={lbl}>Cost Detail</label>
+              <div className="flex flex-nowrap items-end gap-4">
+                <PriceField label="Vendor Cost" adorn="$" colClass="shrink-0 w-24" value={rule.vendorCost} onChange={(v) => patch({ vendorCost: v })} />
+                <PriceField label="Markup %" adorn="%" side="right" colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
+                <PriceField label="Client Cost" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={clientCost.toFixed(2)} />
+              </div>
             </div>
 
             {/* Vendor Assignment — one or more companies; count = current open volume. */}
@@ -733,8 +737,9 @@ export default function RulesEngine() {
               <select value={rule.enrollOp} onChange={(e) => patch({ enrollOp: e.target.value })} className={ctl}>{OPS.map((o) => <option key={o}>{o}</option>)}</select>
               <select value={rule.enrollVal} onChange={(e) => patch({ enrollVal: e.target.value })} className={`${ctl} flex-1 min-w-[140px]`}>{optsFor(rule.enrollField).map((o) => <option key={o}>{o}</option>)}</select>
             </div>
-            <label className="flex items-center gap-2 text-[13px] font-semibold text-ink mb-2">
-              <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked, ...(e.target.checked && !rule.stopVal ? { stopVal: optsFor(rule.stopField)[0] || '' } : {}) })} /> Add Stop Criteria (Optional)
+            <label className="flex items-center gap-2 mb-2 cursor-pointer">
+              <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked, ...(e.target.checked && !rule.stopVal ? { stopVal: optsFor(rule.stopField)[0] || '' } : {}) })} />
+              <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Stop Criteria <span className="normal-case font-normal text-gray-400">(optional)</span></span>
             </label>
             {rule.stopEnabled && (
               <div className="space-y-2">

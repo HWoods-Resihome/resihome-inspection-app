@@ -1051,6 +1051,12 @@ Net: for the move-in clean, set the rule **non-recurring**, enroll on the deal-s
 **edge**, and dedupe on the **deal id**. That combination makes "run exactly once per
 lease" robust even when completion beats the property-status change.
 
+**Owner-APPROVED (2026-07-11):** all five safeguards above are the agreed approach and
+are LOCKED for the generation engine (Step 2/3). Implication for the enrollment UI:
+add **Deal pipeline stage** as an enrollment trigger source (alongside Property fields),
+and the nightly generator must persist an `enrollment_key` (deal id for run-once rules)
+on each created Service to enforce idempotency.
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
