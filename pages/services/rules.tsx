@@ -6,7 +6,8 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { PriceField } from '@/components/PriceField';
-import { SAMPLE_PROPERTIES } from '@/lib/services/sampleData';
+import { ListPicker } from '@/components/ListPicker';
+import { SAMPLE_PROPERTIES, SAMPLE_REGIONS } from '@/lib/services/sampleData';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
@@ -40,6 +41,12 @@ const FIELD_NAMES = PROPERTY_FIELDS.map((f) => f.field);
 const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field)?.options ?? [];
 const OPS = ['is', 'is any of', 'is not', 'changes to'];
 
+// Rules-list sort (mirrors the Services home sort: tap a field, re-tap to flip).
+type RuleSortField = 'name' | 'coverage' | 'worktype';
+const RULE_SORT: { value: RuleSortField; label: string }[] = [
+  { value: 'name', label: 'Name' }, { value: 'coverage', label: 'Coverage' }, { value: 'worktype', label: 'Work Type' },
+];
+
 type Unit = 'days' | 'weeks' | 'months';
 // interval is a STRING so it can be cleared/retyped; dow -1 and dom 0 mean "Any day".
 interface Cadence { id: number; unit: Unit; interval: string; dow: number; dom: number; months: number[]; }
@@ -72,7 +79,7 @@ function CoveragePicker({ noun, options, selected, onToggle, onSetMany }: {
   const [q, setQ] = useState('');
   const filtered = options.filter((o) => o.key.toLowerCase().includes(q.trim().toLowerCase()));
   const nounTitle = noun.charAt(0).toUpperCase() + noun.slice(1);
-  const summary = selected.length === 0 ? `Select ${nounTitle}…` : selected.length === 1 ? selected[0] : `${selected.length} ${noun} selected`;
+  const summary = selected.length === 0 ? `Select ${nounTitle}…` : selected.length === 1 ? selected[0] : `${selected.length} ${nounTitle} Selected`;
   return (
     <div className="relative max-w-md">
       <button type="button" onClick={() => setOpen((o) => !o)}
@@ -138,12 +145,28 @@ const SEED: Rule[] = [
 
 export default function RulesEngine() {
   const [rules, setRules] = useState<Rule[]>(SEED);
-  const [selId, setSelId] = useState(1);
+  const [openId, setOpenId] = useState<number | null>(null);   // null = list view; else editing that rule
   const [propsOpen, setPropsOpen] = useState(false);
   const [propSearch, setPropSearch] = useState('');
-  const rule = rules.find((r) => r.id === selId) || rules[0];
+  // Section 1/2/3 collapse state (reset each time a rule is opened).
+  const [openSec, setOpenSec] = useState<Record<1 | 2 | 3, boolean>>({ 1: true, 2: true, 3: true });
+  // Rules-list search / filter / sort (mirrors the Services home).
+  const [search, setSearch] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [fWork, setFWork] = useState('all');
+  const [fSub, setFSub] = useState('all');
+  const [fRegion, setFRegion] = useState('all');
+  const [fCommunity, setFCommunity] = useState('all');
+  const [sortField, setSortField] = useState<RuleSortField>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [sortOpen, setSortOpen] = useState(false);
+  const rule = rules.find((r) => r.id === openId) || rules[0];
 
-  const patch = (p: Partial<Rule>) => setRules((rs) => rs.map((r) => (r.id === selId ? { ...r, ...p } : r)));
+  const toggleSec = (n: 1 | 2 | 3) => setOpenSec((s) => ({ ...s, [n]: !s[n] }));
+  const openRule = (id: number) => { setOpenId(id); setOpenSec({ 1: true, 2: true, 3: true }); setPropsOpen(false); setPropSearch(''); };
+  const closeRule = () => setOpenId(null);
+
+  const patch = (p: Partial<Rule>) => setRules((rs) => rs.map((r) => (r.id === openId ? { ...r, ...p } : r)));
   const patchCadence = (cid: number, p: Partial<Cadence>) =>
     patch({ cadences: rule.cadences.map((c) => (c.id === cid ? { ...c, ...p } : c)) });
   const toggleMonth = (cid: number, m: number) =>
@@ -200,18 +223,18 @@ export default function RulesEngine() {
   };
 
   const addRule = () => {
-    const id = Math.max(...rules.map((r) => r.id)) + 1;
+    const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
     setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, description: descriptionFor('landscaping', 'cut'), cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
-    setSelId(id);
+    openRule(id);
   };
   const duplicateRule = () => {
-    const id = Math.max(...rules.map((r) => r.id)) + 1;
+    const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
     setRules((rs) => [...rs, { ...rule, id, name: `${rule.name} (copy)`, cadences: rule.cadences.map((c) => ({ ...c, id: ++_cid })) }]);
-    setSelId(id);
+    openRule(id);
   };
   const deleteRule = (id: number) => {
     setRules((rs) => rs.filter((r) => r.id !== id));
-    if (id === selId) { const rest = rules.filter((r) => r.id !== id); if (rest[0]) setSelId(rest[0].id); }
+    if (id === openId) closeRule();
   };
 
   const countFor = (r: Rule) => {
@@ -220,10 +243,38 @@ export default function RulesEngine() {
     const appl = inPf.filter((p) => r.regions.length === 0 || r.regions.includes(p.region));
     return r.propsMode === 'all' ? appl.length : appl.filter((p) => r.includedProps.includes(p.id)).length;
   };
-  const coveredCount = useMemo(() => countFor(rule), [rule]);
+  // Regions a rule covers (property scope only): its explicit list, else every
+  // region present in its selected portfolios. Drives the list Region filter.
+  const regionsOf = (r: Rule): string[] => {
+    if (r.scope !== 'property') return [];
+    if (r.regions.length) return r.regions;
+    return [...new Set(SAMPLE_PROPERTIES.filter((p) => r.portfolios.includes(p.portfolio)).map((p) => p.region))];
+  };
+
+  // Filtered + sorted rules for the LIST view.
+  const visibleRules = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = rules.filter((r) =>
+      (!q || r.name.toLowerCase().includes(q)) &&
+      (fWork === 'all' || r.worktype === fWork) &&
+      (fSub === 'all' || r.subtype === fSub) &&
+      (fRegion === 'all' || regionsOf(r).includes(fRegion)) &&
+      (fCommunity === 'all' || (r.scope === 'community' && r.communities.includes(fCommunity)))
+    );
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const key = (r: Rule) => ({ name: r.name.toLowerCase(), coverage: countFor(r), worktype: worktypeLabel(r.worktype) }[sortField]);
+    return [...list].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * dir);
+  }, [rules, search, fWork, fSub, fRegion, fCommunity, sortField, sortDir]);
+
+  // Subtype filter options depend on the chosen work type (else the union of all).
+  const subFilterOptions = fWork === 'all'
+    ? [...new Map(WORKTYPES.flatMap((w) => w.subtypes.map((s) => [s.id, s.label] as const))).entries()].map(([value, label]) => ({ value, label }))
+    : subtypesFor(fWork).map((s) => ({ value: s.id, label: s.label }));
+
+  const coveredCount = useMemo(() => (rule ? countFor(rule) : 0), [rule]);
 
   // A month is "accounted for" if it's in a cadence OR explicitly set to no service.
-  const coveredMonths = useMemo(() => new Set([...rule.cadences.flatMap((c) => c.months), ...rule.skipMonths]), [rule]);
+  const coveredMonths = useMemo(() => new Set(rule ? [...rule.cadences.flatMap((c) => c.months), ...rule.skipMonths] : []), [rule]);
   const missingMonths = MONTHS.map((_, i) => i).filter((i) => !coveredMonths.has(i));
 
   // One property → one rule per worktype + subtype: block save if this rule shares
@@ -231,6 +282,7 @@ export default function RulesEngine() {
   // subtype. Different subtypes of the same worktype (e.g. Grass Cut vs. Tree
   // Trimming) may cover the same property, so they never conflict.
   const overlap = useMemo(() => {
+    if (!rule) return null;
     for (const other of rules) {
       if (other.id === rule.id || !other.active || other.worktype !== rule.worktype || other.subtype !== rule.subtype || other.scope !== rule.scope) continue;
       const a = new Set(rule.scope === 'property' ? rule.portfolios : rule.communities);
@@ -240,16 +292,27 @@ export default function RulesEngine() {
     return null;
   }, [rules, rule]);
 
-  const clientCost = (parseFloat(rule.vendorCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100));
+  const clientCost = rule ? (parseFloat(rule.vendorCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100)) : 0;
   const saveErrors: string[] = [];
-  if (overlap) saveErrors.push(`Overlaps “${overlap.rule.name}” on: ${overlap.shared.join(', ')}. A property can only belong to one rule per work type + subtype (here: ${worktypeLabel(rule.worktype)} · ${subtypeLabel(rule.worktype, rule.subtype)}).`);
-  if (missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
-  if (!rule.enrollVal.trim()) saveErrors.push('Set an enrollment trigger.');
+  if (rule) {
+    if (overlap) saveErrors.push(`Overlaps “${overlap.rule.name}” on: ${overlap.shared.join(', ')}. A property can only belong to one rule per work type + subtype (here: ${worktypeLabel(rule.worktype)} · ${subtypeLabel(rule.worktype, rule.subtype)}).`);
+    if (missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
+    if (!rule.enrollVal.trim()) saveErrors.push('Set an enrollment trigger.');
+  }
   const canSave = saveErrors.length === 0;
 
   const sec = 'bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 shadow-sm';
   const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
   const ctl = 'text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg bg-white text-ink';
+  const pickerCls = (active: boolean) =>
+    `w-full truncate text-[11px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-md bg-white flex items-center justify-between ${active ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`;
+  // Section header: click to expand/collapse, with a rotating chevron.
+  const SecHead = ({ n, title }: { n: 1 | 2 | 3; title: string }) => (
+    <button type="button" onClick={() => toggleSec(n)} aria-expanded={openSec[n]} className="w-full flex items-center justify-between gap-2 text-left">
+      <h3 className="font-heading font-bold text-[15px] text-ink"><span className="text-brand">{n}.</span> {title}</h3>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-gray-400 transition-transform ${openSec[n] ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+    </button>
+  );
   // Compact select: hides the wide native arrow and draws a small chevron, so the
   // cadence controls fit on one line without the day/day-of-week select clipping.
   const arrowStyle: React.CSSProperties = {
@@ -262,7 +325,7 @@ export default function RulesEngine() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-brand text-white sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto px-4 py-2.5 flex items-center gap-3">
+        <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-center gap-3">
           <Link href="/services" className="inline-flex items-center gap-1 text-white/90 hover:text-white text-sm font-semibold shrink-0">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
             Services
@@ -273,52 +336,134 @@ export default function RulesEngine() {
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-[250px_minmax(0,1fr)] gap-4 p-4">
-        {/* rule list */}
-        <aside className="space-y-2">
-          <button onClick={addRule} className="w-full text-brand bg-brand/5 border border-dashed border-brand/40 rounded-xl py-2 text-[13px] font-heading font-bold">+ New Rule</button>
-          {rules.map((r) => (
-            <div key={r.id} className={`bg-white border rounded-xl p-3 cursor-pointer ${r.id === selId ? 'border-brand ring-1 ring-brand' : 'border-gray-200 hover:border-gray-300'} ${r.active ? '' : 'opacity-60'}`} onClick={() => setSelId(r.id)}>
-              <div className="font-heading font-bold text-[12.5px] text-ink leading-tight">
-                {r.name} <span className="text-brand font-extrabold whitespace-nowrap">({countFor(r).toLocaleString()})</span>
-              </div>
-              <div className="flex items-center gap-1.5 mt-1.5">
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${r.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{r.scope === 'community' ? 'Community' : 'SFR'}</span>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{worktypeLabel(r.worktype)}</span>
-                {!r.active && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">Paused</span>}
-                <button onClick={(e) => { e.stopPropagation(); setRules((rs) => rs.map((x) => x.id === r.id ? { ...x, active: !x.active } : x)); }}
-                  title={r.active ? 'Active — click to pause' : 'Inactive — click to activate'}
-                  className={`ml-auto relative rounded-full transition shrink-0 ${r.active ? 'bg-brand' : 'bg-gray-300'}`} style={{ height: 18, width: 32 }}>
-                  <span className="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white transition" style={{ transform: r.active ? 'translateX(14px)' : 'none' }} />
-                </button>
-              </div>
-              {r.id === selId && (
-                <div className="flex gap-3 mt-2 text-[11px] font-semibold">
-                  <button onClick={(e) => { e.stopPropagation(); duplicateRule(); }} className="text-gray-500 hover:text-brand">Duplicate</button>
-                  <button onClick={(e) => { e.stopPropagation(); deleteRule(r.id); }} className="text-gray-500 hover:text-red-600">Delete</button>
-                </div>
-              )}
+      {openId === null ? (
+        /* ───────────── LIST VIEW: search + filters + rule cards ───────────── */
+        <main className="max-w-3xl mx-auto w-full px-4 py-3">
+          {/* Search + filter toggle — mirrors the Services home. */}
+          <div className="flex items-center gap-2 mb-3">
+            <div className="relative flex-1 min-w-0">
+              <input type="text" placeholder="Search rules by name…" value={search} onChange={(e) => setSearch(e.target.value)}
+                className="w-full text-sm border border-gray-300 rounded-lg pl-3 pr-9 py-2.5 bg-white focus:outline-none focus:border-brand" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
             </div>
-          ))}
-        </aside>
+            <button type="button" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen} aria-label="Filters"
+              className="shrink-0 inline-flex items-center justify-center gap-1 w-14 h-11 rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50 transition-colors">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+            </button>
+          </div>
 
-        {/* editor */}
-        <main className="space-y-4">
-          <div className="flex items-end gap-3">
-            <div className="flex-1 min-w-0">
-              <label className={lbl}>Rule Name</label>
-              <input value={rule.name} onChange={(e) => patch({ name: e.target.value })} placeholder="Name this rule"
-                className="w-full font-heading font-extrabold text-xl text-ink bg-white border border-gray-300 rounded-lg px-3 py-1.5 focus:border-brand focus:outline-none" />
+          {/* Collapsible: Work Type / Subtype / Region / Community + Sort. */}
+          {filtersOpen && (
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex-1 min-w-0">
+                <ListPicker value={fWork} onChange={(v) => { setFWork(v); setFSub('all'); }} ariaLabel="Filter by work type" className={pickerCls(fWork !== 'all')}
+                  options={[{ value: 'all', label: 'Type' }, ...WORKTYPES.map((w) => ({ value: w.id, label: w.label }))]} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <ListPicker value={fSub} onChange={setFSub} ariaLabel="Filter by subtype" className={pickerCls(fSub !== 'all')}
+                  options={[{ value: 'all', label: 'Subtype' }, ...subFilterOptions]} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <ListPicker value={fRegion} onChange={setFRegion} ariaLabel="Filter by region" className={pickerCls(fRegion !== 'all')}
+                  options={[{ value: 'all', label: 'Region' }, ...SAMPLE_REGIONS.map((r) => ({ value: r, label: r }))]} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <ListPicker value={fCommunity} onChange={setFCommunity} ariaLabel="Filter by community" className={pickerCls(fCommunity !== 'all')}
+                  options={[{ value: 'all', label: 'Community' }, ...Object.keys(COMMUNITIES).map((c) => ({ value: c, label: c }))]} />
+              </div>
+              {/* Sort — tap a field to sort; tap the active field again to flip direction. */}
+              <div className="relative shrink-0">
+                <button type="button" onClick={() => setSortOpen((o) => !o)} aria-expanded={sortOpen}
+                  className="inline-flex items-center gap-1 text-[11px] font-heading font-semibold text-gray-700 hover:text-brand px-2 py-1.5 border border-gray-300 rounded-md bg-white"
+                  title="Choose how to sort. Tap the selected field again to reverse the order.">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="6" x2="20" y2="6" /><line x1="7" y1="12" x2="17" y2="12" /><line x1="10" y1="18" x2="14" y2="18" /></svg>
+                  <span>Sort</span>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${sortOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+                </button>
+                {sortOpen && (<><div className="fixed inset-0 z-30" onClick={() => setSortOpen(false)} />
+                  <div className="absolute right-0 z-40 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+                    {RULE_SORT.map((opt) => {
+                      const active = sortField === opt.value;
+                      return (
+                        <button key={opt.value} type="button"
+                          onClick={() => { active ? setSortDir((d) => (d === 'asc' ? 'desc' : 'asc')) : setSortField(opt.value); }}
+                          className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-heading font-semibold text-left ${active ? 'text-brand bg-pink-50' : 'text-gray-700 hover:bg-gray-50'}`}>
+                          <span>{opt.label}</span>
+                          {active && <span className="text-brand">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                        </button>
+                      );
+                    })}
+                  </div></>)}
+              </div>
             </div>
-            <div className="text-right shrink-0">
-              <div className="text-2xl font-heading font-extrabold text-ink tabular-nums leading-none">{coveredCount.toLocaleString()}</div>
+          )}
+
+          <button onClick={addRule} className="w-full mb-3 text-brand bg-brand/5 border border-dashed border-brand/40 rounded-xl py-2.5 text-[13px] font-heading font-bold">+ New Rule</button>
+
+          <div className="space-y-2">
+            {visibleRules.map((r) => (
+              <div key={r.id} role="button" tabIndex={0} onClick={() => openRule(r.id)} onKeyDown={(e) => { if (e.key === 'Enter') openRule(r.id); }}
+                className={`bg-white border rounded-xl p-3.5 cursor-pointer hover:border-brand/40 transition ${r.active ? 'border-gray-200' : 'border-gray-200 opacity-60'}`}>
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-heading font-bold text-[14px] text-ink leading-tight">
+                      {r.name} <span className="text-brand font-extrabold whitespace-nowrap">({countFor(r).toLocaleString()})</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${r.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{r.scope === 'community' ? 'Community' : 'SFR'}</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{worktypeLabel(r.worktype)} · {subtypeLabel(r.worktype, r.subtype)}</span>
+                      {!r.active && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">Paused</span>}
+                    </div>
+                    <div className="text-[11px] text-gray-500 mt-1 truncate">
+                      {r.scope === 'community'
+                        ? (r.communities.join(', ') || 'No communities')
+                        : `${r.portfolios.join(', ') || 'No portfolios'} · ${r.regions.length ? r.regions.join(', ') : 'All regions'}`}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-2 shrink-0">
+                    <button onClick={(e) => { e.stopPropagation(); setRules((rs) => rs.map((x) => x.id === r.id ? { ...x, active: !x.active } : x)); }}
+                      title={r.active ? 'Active — click to pause' : 'Inactive — click to activate'}
+                      className={`relative rounded-full transition ${r.active ? 'bg-brand' : 'bg-gray-300'}`} style={{ height: 18, width: 32 }}>
+                      <span className="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white transition" style={{ transform: r.active ? 'translateX(14px)' : 'none' }} />
+                    </button>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300"><polyline points="9 18 15 12 9 6" /></svg>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {visibleRules.length === 0 && (
+              <div className="text-center text-gray-500 text-sm py-12 border border-dashed border-gray-300 rounded-xl">No rules match these filters.</div>
+            )}
+          </div>
+        </main>
+      ) : (
+        /* ───────────── EDIT VIEW: one rule, collapsible sections ───────────── */
+        <main className="max-w-3xl mx-auto w-full space-y-4 p-4">
+          <div className="flex items-center gap-3">
+            <button onClick={closeRule} className="inline-flex items-center gap-1 text-sm font-semibold text-gray-600 hover:text-brand shrink-0">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+              Rules
+            </button>
+            <div className="ml-auto text-right shrink-0">
+              <div className="text-xl font-heading font-extrabold text-ink tabular-nums leading-none">{coveredCount.toLocaleString()}</div>
               <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Properties Covered</div>
+            </div>
+          </div>
+          <div>
+            <label className={lbl}>Rule Name</label>
+            <div className="flex items-end gap-2">
+              <input value={rule.name} onChange={(e) => patch({ name: e.target.value })} placeholder="Name this rule"
+                className="flex-1 min-w-0 font-heading font-extrabold text-xl text-ink bg-white border border-gray-300 rounded-lg px-3 py-1.5 focus:border-brand focus:outline-none" />
+              <button onClick={duplicateRule} className="shrink-0 text-[12px] font-semibold text-gray-500 hover:text-brand border border-gray-300 rounded-lg px-2.5 py-2 bg-white">Duplicate</button>
+              <button onClick={() => deleteRule(rule.id)} className="shrink-0 text-[12px] font-semibold text-gray-500 hover:text-red-600 border border-gray-300 rounded-lg px-2.5 py-2 bg-white">Delete</button>
             </div>
           </div>
 
           {/* SECTION 1 — scope & pricing */}
           <section className={sec}>
-            <h3 className="font-heading font-bold text-[15px] text-ink mb-3"><span className="text-brand">1.</span> Work Type, Coverage &amp; Pricing</h3>
+            <SecHead n={1} title="Work Type, Coverage & Pricing" />
+            {openSec[1] && (<div className="mt-4">
             <div className="flex flex-wrap items-center gap-3 mb-4">
               <div>
                 <label className={lbl}>Work Type</label>
@@ -377,6 +522,15 @@ export default function RulesEngine() {
               <div className="mt-3">
                 <label className={lbl}>Regions <span className="text-gray-400 normal-case font-normal">— from the selected portfolios</span></label>
                 <CoveragePicker noun="regions" options={regionOptions} selected={rule.regions} onToggle={toggleRegion} onSetMany={setManyRegions} />
+                {rule.regions.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {rule.regions.map((k) => (
+                      <span key={k} className="inline-flex items-center gap-1.5 text-[12px] font-semibold bg-brand/10 text-brand border border-brand/30 rounded-full pl-2.5 pr-1.5 py-0.5">
+                        {k}<button onClick={() => toggleRegion(k)} className="hover:text-red-600" aria-label={`Remove ${k}`}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
 
                 <div className="mt-3 border border-gray-200 rounded-xl max-w-md">
                   <button type="button" onClick={() => setPropsOpen((o) => !o)} className="w-full flex items-center justify-between px-3 py-2.5 text-[13px] font-semibold text-ink">
@@ -417,11 +571,13 @@ export default function RulesEngine() {
               <PriceField label="Markup %" adorn="%" side="right" colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
               <PriceField label="Client Cost" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={clientCost.toFixed(2)} />
             </div>
+            </div>)}
           </section>
 
           {/* SECTION 2 — cadence */}
           <section className={sec}>
-            <h3 className="font-heading font-bold text-[15px] text-ink"><span className="text-brand">2.</span> Cadence</h3>
+            <SecHead n={2} title="Cadence" />
+            {openSec[2] && (<div className="mt-3">
             <p className="text-[12px] text-gray-500 mb-3">Recurs relative to the last completed service. Assign <b>every month</b> to a cadence — different months can use different intervals.</p>
             <div className="mb-3 bg-brand/5 border border-brand/20 rounded-lg px-3 py-2">
               <div className="flex items-center gap-2 whitespace-nowrap text-[13px]">
@@ -478,11 +634,13 @@ export default function RulesEngine() {
             <div className={`mt-3 text-[12.5px] font-semibold ${missingMonths.length ? 'text-red-600' : 'text-emerald-600'}`}>
               {missingMonths.length ? `Not all months accounted for — missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}` : 'All 12 months accounted for ✓'}
             </div>
+            </div>)}
           </section>
 
           {/* SECTION 3 — enrollment & stop */}
           <section className={sec}>
-            <h3 className="font-heading font-bold text-[15px] text-ink"><span className="text-brand">3.</span> Enrollment &amp; Stop</h3>
+            <SecHead n={3} title="Enrollment & Stop" />
+            {openSec[3] && (<div className="mt-3">
             <p className="text-[12px] text-gray-500 mb-3">Enrollment creates the first service; each service auto-recreates when the last is submitted, until the (optional) stop criteria is met. Vendor assignment is handled separately in Vendor Management.</p>
             <label className={lbl}>Enroll (Create Services) When</label>
             <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -501,6 +659,7 @@ export default function RulesEngine() {
                 <select value={rule.stopVal} onChange={(e) => patch({ stopVal: e.target.value })} className={`${ctl} flex-1 min-w-[140px]`}>{optsFor(rule.stopField).map((o) => <option key={o}>{o}</option>)}</select>
               </div>
             )}
+            </div>)}
           </section>
 
           {/* save */}
@@ -508,12 +667,12 @@ export default function RulesEngine() {
             {saveErrors.map((e, i) => (
               <div key={i} className="mb-2 text-[12.5px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {e}</div>
             ))}
-            <button disabled={!canSave} className={`w-full rounded-2xl py-3 font-heading font-bold text-sm ${canSave ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
-              {canSave ? 'Save & Activate' : 'Resolve the Issues Above to Save'}
+            <button onClick={() => { if (canSave) closeRule(); }} disabled={!canSave} className={`w-full rounded-2xl py-3 font-heading font-bold text-sm ${canSave ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
+              {canSave ? 'Save & Close' : 'Resolve the Issues Above to Save'}
             </button>
           </div>
         </main>
-      </div>
+      )}
     </div>
   );
 }
