@@ -106,6 +106,18 @@ Manual admin dry-run/apply endpoints remain for ad-hoc runs.
   review inline the moment a WO is submitted (best-effort). The nightly
   `services-review` cron remains a backstop for any that errored.
 
+## Bid items (vendor-requested additional work)
+Each service completion asks "Additional work needed?" — Yes requires a
+description + bid cost + photos. On submit, `/api/services/[id]/submit` spawns a
+NEW service: `subtype = bid_item` (Bid Item; added to the subtype enum — re-run
+provision `?apply=1`), `is_bid_item = true`, status `estimated`, SAME worktype +
+property/community/vendor as the parent, carrying the description, photos
+(before_photo_urls), and bid vendor cost. Internal review at
+`/api/services/[id]/bid-decision`: approve → edit vendor cost / markup (client
+cost computed + locked), set days-until-due → status `assigned` (normal cadence);
+reject → status `canceled` (note required). Bid items skip the crew completion
+form and go straight to the read-only + bid-review UI.
+
 ## Editable, persisted Form Builder + AI Knowledge
 Both are now LIVE and editable (admin). Stored as JSON on the admin Agent record
 (same store as the inspection AI KB; properties `service_forms_json` /

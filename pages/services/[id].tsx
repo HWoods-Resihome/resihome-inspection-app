@@ -20,9 +20,10 @@ interface ServiceView {
   id: string; live: boolean;
   worktype: Worktype; subtype: string; scope: 'property' | 'community';
   address: string; locality: string; vendor: string | null; dueDate: string;
-  petStations: boolean; status: string; propertyRecordId: string;
+  petStations: boolean; status: string; propertyRecordId: string; isBidItem: boolean;
   vendorCost: number | null; markupPct: number | null; clientCost: number | null;
   vendorCostAdjustment: number | null; adjustmentReason: string;
+  description: string;
   aiVerdict: string; aiNotes: string;
   reviewDecision: string; reviewNotes: string; reviewedBy: string;
   answers: Record<string, any>;
@@ -58,7 +59,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         address: p.address_snapshot || p.service_name || '(Service)', locality: p.locality_snapshot || '',
         vendor: p.vendor_name || null, dueDate: normDate(p.due_date),
         petStations: p.pet_stations === 'true', status: p.status || 'assigned',
-        propertyRecordId: p.property_id_ref || '',
+        propertyRecordId: p.property_id_ref || '', isBidItem: p.is_bid_item === 'true',
+        description: p.service_description || '',
         vendorCost: num(p.vendor_cost), markupPct: num(p.markup_pct), clientCost: num(p.client_cost),
         vendorCostAdjustment: num(p.vendor_cost_adjustment), adjustmentReason: p.vendor_cost_adjustment_reason || '',
         aiVerdict: p.ai_verdict || '', aiNotes: p.ai_notes || '',
@@ -73,7 +75,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     if (s) svc = {
       id: s.id, live: false, worktype: s.worktype, subtype: s.subtype, scope: s.scope,
       address: s.address, locality: s.locality, vendor: s.vendor, dueDate: s.dueDate,
-      petStations: !!s.petStations, status: s.status, propertyRecordId: '',
+      petStations: !!s.petStations, status: s.status, propertyRecordId: '', isBidItem: false,
+      description: '',
       vendorCost: null, markupPct: null, clientCost: null, vendorCostAdjustment: null, adjustmentReason: '',
       aiVerdict: '', aiNotes: '', reviewDecision: '', reviewNotes: '', reviewedBy: '',
       answers: {}, before: [], after: [], petBefore: [], petAfter: [],
@@ -144,9 +147,11 @@ function PhotoGrid({ label, urls, onOpen }: { label: string; urls: string[]; onO
 }
 
 export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null }) {
-  const editable = EDITABLE.has(svc.status);
+  // Bid items are never crew-completed here — they go straight to internal bid review.
+  const editable = EDITABLE.has(svc.status) && !svc.isBidItem;
   const underReview = svc.status === 'review';
   const canReview = isInternal && underReview;
+  const canBidReview = isInternal && svc.isBidItem && svc.status === 'estimated';
 
   // ── Completion (editable) state ──
   const [answers, setAnswers] = useState<Record<string, any>>({});
@@ -159,6 +164,14 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
   const [error, setError] = useState('');
   const [pendingQueued, setPendingQueued] = useState(false);
   const setAns = (id: string, v: any) => setAnswers((a) => ({ ...a, [id]: v }));
+
+  // Additional-work bid capture: when Yes, description + cost + photos are required.
+  // On submit this spawns a new Estimated "Bid Item" service for internal review.
+  const [bidWanted, setBidWanted] = useState(false);
+  const [bidDesc, setBidDesc] = useState('');
+  const [bidCost, setBidCost] = useState('');
+  const [bidPhotos, setBidPhotos] = useState<string[]>([]);
+  const bidValid = !bidWanted || (!!bidDesc.trim() && !!bidCost.trim() && Number(bidCost) > 0 && bidPhotos.length > 0);
 
   // Kick offline sync (photos + any queued submit) on mount and reconnect; flag a
   // completion that's already queued offline for this service.
@@ -182,12 +195,13 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
     if (q.type === 'multi') return !Array.isArray(v) || v.length === 0;
     return v === undefined || v === '' || v === null;
   }), [form, answers]);
-  const ready = !requiredMissing && before.length > 0 && after.length > 0 && !submitting;
+  const ready = !requiredMissing && before.length > 0 && after.length > 0 && bidValid && !submitting;
 
   const submit = async () => {
     setSubmitting(true); setError('');
     try {
-      const res = await submitServiceOrQueue(svc.id, { answers, before, after, petBefore, petAfter, submittedAt: new Date().toISOString() });
+      const bid = bidWanted && bidValid ? { description: bidDesc.trim(), vendorCost: Number(bidCost), photos: bidPhotos } : undefined;
+      const res = await submitServiceOrQueue(svc.id, { answers, before, after, petBefore, petAfter, bid, submittedAt: new Date().toISOString() });
       setDoneStatus(res.status === 'sent' ? 'submitted' : 'queued');
     } catch { setError('Couldn’t save. Try again.'); }
     finally { setSubmitting(false); }
@@ -219,6 +233,29 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
     finally { setDeciding(false); }
   };
 
+  // ── Bid-item review state (Estimated bid → approve→Assigned / reject→Canceled) ──
+  const [bidNotes, setBidNotes] = useState('');
+  const [bidRejecting, setBidRejecting] = useState(false);
+  const [bidVC, setBidVC] = useState(String(origCost));
+  const [bidMarkup, setBidMarkup] = useState(String(markupPct));
+  const [bidDueDays, setBidDueDays] = useState('5');
+  const [bidDeciding, setBidDeciding] = useState(false);
+  const bidDecide = async (decision: 'approve' | 'reject') => {
+    if (decision === 'reject' && !bidNotes.trim()) { setError('Add a note to reject this bid.'); return; }
+    setBidDeciding(true); setError('');
+    try {
+      const body: any = { decision, notes: bidNotes };
+      if (decision === 'approve') { body.vendorCost = Number(bidVC); body.markupPct = Number(bidMarkup); body.dueDays = Number(bidDueDays); }
+      const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/bid-decision`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || 'Could not save decision.'); return; }
+      setDoneStatus('decided');
+    } catch { setError('Couldn’t reach the server. Try again.'); }
+    finally { setBidDeciding(false); }
+  };
+
   const inputCls = 'w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand';
   const chip = (t: string, cls: string) => <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${cls}`}>{t}</span>;
 
@@ -228,7 +265,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
     const groups: { id: string; name: string }[] = [];
     const map: Record<string, string[]> = {};
     const add = (id: string, name: string, urls: string[]) => { if (urls.length) { groups.push({ id, name }); map[id] = urls; } };
-    add('before', 'Before', svc.before); add('after', 'After', svc.after);
+    add('before', svc.isBidItem ? 'Bid photos' : 'Before', svc.before); add('after', 'After', svc.after);
     add('petBefore', 'Pet — Before', svc.petBefore); add('petAfter', 'Pet — After', svc.petAfter);
     return { groups, map };
   }, [svc]);
@@ -237,15 +274,20 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
   // Cost Detail — its own section (after Photos). Vendor cost is visible to all;
   // Markup % and Client cost are internal-only (vendors never see them). While a
   // reviewer is adjusting the payout (reject flow), this reflects the new figures live.
-  const adjusting = rejecting && rejectCost !== '' && Number.isFinite(Number(rejectCost));
-  const shownVendorCost = adjusting ? Number(rejectCost) : svc.vendorCost;
-  const shownClientCost = adjusting ? Math.round(Number(rejectCost) * (1 + markupPct / 100) * 100) / 100 : svc.clientCost;
+  const rejectAdjusting = rejecting && rejectCost !== '' && Number.isFinite(Number(rejectCost));
+  const bidEditing = canBidReview && !bidRejecting;   // reviewer editing a bid's price live
+  const adjusting = rejectAdjusting || bidEditing;
+  const shownVendorCost = rejectAdjusting ? Number(rejectCost) : bidEditing ? Number(bidVC) : svc.vendorCost;
+  const shownMarkup = bidEditing ? Number(bidMarkup) : (svc.markupPct ?? markupPct);
+  const shownClientCost = rejectAdjusting ? Math.round(Number(rejectCost) * (1 + markupPct / 100) * 100) / 100
+    : bidEditing ? Math.round(Number(bidVC) * (1 + Number(bidMarkup) / 100) * 100) / 100
+    : svc.clientCost;
   const costDetail = svc.vendorCost != null ? (
     <section className="bg-white border border-gray-200 rounded-2xl p-4">
       <div className="font-heading font-bold text-[15px] text-ink mb-2">Cost Detail{adjusting && <span className="text-[11px] font-normal text-brand"> · adjusted</span>}</div>
       <div className="space-y-1 text-[13px]">
         <div className="flex justify-between"><span className="text-gray-500">Vendor cost</span><span className="font-semibold text-ink tabular-nums">{money(shownVendorCost)}</span></div>
-        {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
+        {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{Number.isFinite(shownMarkup) ? shownMarkup : svc.markupPct}%</span></div>}
         {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client cost</span><span className="font-semibold text-ink tabular-nums">{money(shownClientCost)}</span></div>}
       </div>
     </section>
@@ -260,17 +302,17 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
           </Link>
           <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain shrink-0" />
           <div className="min-w-0 flex-1 space-y-0.5">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
                 <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={15} min={10} />
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7" />}
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{SERVICE_STATUS_LABEL[(svc.status || 'assigned') as ServiceStatus] || svc.status}</span>
-              </div>
+              {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7 shrink-0" />}
             </div>
             <div className="text-xs text-gray-500 leading-tight truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}{svc.dueDate ? ` · Due ${svc.dueDate}` : ''}</div>
-            <div className="text-xs text-gray-500 leading-tight truncate">{svc.vendor || 'Unassigned'}</div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-gray-500 leading-tight truncate">{svc.vendor || 'Unassigned'}</span>
+              <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{SERVICE_STATUS_LABEL[(svc.status || 'assigned') as ServiceStatus] || svc.status}</span>
+            </div>
           </div>
         </div>
       </header>
@@ -288,6 +330,13 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
             <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 grid place-items-center text-2xl mx-auto mb-3">⤓</div>
             <div className="font-heading font-extrabold text-lg text-ink">Saved offline</div>
             <p className="text-sm text-gray-500 mt-1">You’re offline. This completion and its photos are saved on your device and will submit automatically the moment you’re back online — you can close the app.</p>
+            <Link href="/services" className="inline-block mt-4 bg-brand text-white font-heading font-bold text-sm rounded-xl px-5 py-2.5">Back to Services</Link>
+          </div>
+        ) : doneStatus === 'decided' ? (
+          <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
+            <div className="font-heading font-extrabold text-lg text-ink">Decision recorded</div>
+            <p className="text-sm text-gray-500 mt-1">The bid decision was saved. Approved bids move to <b>Assigned</b> and follow the normal cadence; rejected bids are <b>Canceled</b>.</p>
             <Link href="/services" className="inline-block mt-4 bg-brand text-white font-heading font-bold text-sm rounded-xl px-5 py-2.5">Back to Services</Link>
           </div>
         ) : doneStatus === 'completed' ? (
@@ -378,6 +427,34 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
                   )}
                 </section>
 
+                {/* Additional-work bid — spawns an Estimated "Bid Item" for review. */}
+                <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3">
+                  <div className="font-heading font-bold text-[15px] text-ink">Additional work needed?</div>
+                  <p className="text-[13px] text-gray-500 -mt-1">Found extra work that needs a separate bid (e.g. a downed tree)? Flag it here — it becomes its own bid for the office to review.</p>
+                  <div className="flex gap-2">
+                    {([['no', 'No'], ['yes', 'Yes — submit a bid']] as const).map(([v, label]) => (
+                      <button key={v} type="button" onClick={() => setBidWanted(v === 'yes')}
+                        className={`px-4 py-2 rounded-full border text-[13px] font-heading font-semibold ${(bidWanted ? 'yes' : 'no') === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{label}</button>
+                    ))}
+                  </div>
+                  {bidWanted && (
+                    <div className="space-y-3 border-t border-gray-100 pt-3">
+                      <div>
+                        <label className="block text-sm font-semibold text-ink mb-1.5">What’s the additional work? <span className="text-brand">*</span></label>
+                        <textarea value={bidDesc} onChange={(e) => setBidDesc(e.target.value)} rows={3} className={inputCls} placeholder="Describe the extra work needed…" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-ink mb-1.5">Your bid (vendor cost) <span className="text-brand">*</span></label>
+                        <div className="relative w-40">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                          <input type="number" inputMode="decimal" value={bidCost} onChange={(e) => setBidCost(e.target.value)} className="w-full text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" placeholder="0.00" />
+                        </div>
+                      </div>
+                      <CameraPhotos label="Bid photos" required urls={bidPhotos} onChange={setBidPhotos} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
+                    </div>
+                  )}
+                </section>
+
                 {costDetail}
 
                 <button type="button" disabled={!ready} onClick={submit}
@@ -388,8 +465,15 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
                 {!ready && !error && !submitting && <div className="text-center text-xs text-gray-400 -mt-2">Answer the required questions and add at least one before and one after photo to submit.</div>}
               </>
             ) : (
-              /* ── Read-only view (submitted / review / completed) ── */
+              /* ── Read-only view (submitted / review / completed / bid) ── */
               <>
+                {svc.isBidItem && svc.description && (
+                  <section className="bg-white border border-gray-200 rounded-2xl p-4">
+                    <div className="font-heading font-bold text-[15px] text-ink mb-1">Bid request</div>
+                    <p className="text-[13px] text-gray-700 whitespace-pre-line">{svc.description}</p>
+                    <p className="text-[12px] text-gray-400 mt-1.5">Submitted by {svc.vendor || 'the vendor'} while completing a {worktypeLabel(svc.worktype)} service.</p>
+                  </section>
+                )}
                 {(svc.aiVerdict || svc.aiNotes) && (
                   <section className="bg-white border border-gray-200 rounded-2xl p-4">
                     <div className="flex items-center gap-2 mb-1">
@@ -416,14 +500,55 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
 
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
                   <div className="font-heading font-bold text-[15px] text-ink">Photos <span className="text-[11px] font-normal text-gray-400">— tap a photo to enlarge</span></div>
-                  <PhotoGrid label="Before photos" urls={svc.before} onOpen={(i) => setLightbox({ groupId: 'before', index: i })} />
-                  <PhotoGrid label="After photos" urls={svc.after} onOpen={(i) => setLightbox({ groupId: 'after', index: i })} />
-                  <PhotoGrid label="Pet station — before" urls={svc.petBefore} onOpen={(i) => setLightbox({ groupId: 'petBefore', index: i })} />
-                  <PhotoGrid label="Pet station — after" urls={svc.petAfter} onOpen={(i) => setLightbox({ groupId: 'petAfter', index: i })} />
+                  <PhotoGrid label={svc.isBidItem ? 'Bid photos' : 'Before photos'} urls={svc.before} onOpen={(i) => setLightbox({ groupId: 'before', index: i })} />
+                  {!svc.isBidItem && <PhotoGrid label="After photos" urls={svc.after} onOpen={(i) => setLightbox({ groupId: 'after', index: i })} />}
+                  {!svc.isBidItem && <PhotoGrid label="Pet station — before" urls={svc.petBefore} onOpen={(i) => setLightbox({ groupId: 'petBefore', index: i })} />}
+                  {!svc.isBidItem && <PhotoGrid label="Pet station — after" urls={svc.petAfter} onOpen={(i) => setLightbox({ groupId: 'petAfter', index: i })} />}
                   {!svc.before.length && !svc.after.length && !svc.petBefore.length && !svc.petAfter.length && <div className="text-[13px] text-gray-400">No photos on this service.</div>}
                 </section>
 
                 {costDetail}
+
+                {canBidReview && (
+                  <section className="bg-white border-2 border-brand/30 rounded-2xl p-4 space-y-3">
+                    <div className="font-heading font-bold text-[15px] text-ink">Bid review</div>
+                    <textarea value={bidNotes} onChange={(e) => setBidNotes(e.target.value)} rows={2} className={inputCls}
+                      placeholder={bidRejecting ? 'Reason — required to reject (visible on the record)…' : 'Notes for this decision (optional)…'} />
+                    {!bidRejecting ? (
+                      <>
+                        <div className="border-t border-gray-100 pt-3 space-y-2">
+                          <div className="text-[12px] font-bold uppercase tracking-wide text-gray-400">Pricing (edit before approving)</div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <label className="flex items-center gap-1.5 text-[13px] text-gray-500">Vendor cost
+                              <span className="relative"><span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                              <input type="number" inputMode="decimal" value={bidVC} onChange={(e) => setBidVC(e.target.value)} className="w-24 text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" /></span>
+                            </label>
+                            <label className="flex items-center gap-1.5 text-[13px] text-gray-500">Markup
+                              <span className="relative"><input type="number" inputMode="decimal" value={bidMarkup} onChange={(e) => setBidMarkup(e.target.value)} className="w-16 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-brand" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span></span>
+                            </label>
+                            <span className="text-[13px] text-gray-500">Client <b className="text-ink tabular-nums">{money(Math.round(Number(bidVC || '0') * (1 + Number(bidMarkup || '0') / 100) * 100) / 100)}</b></span>
+                          </div>
+                          <label className="flex items-center gap-1.5 text-[13px] text-gray-500">Days until due
+                            <input type="number" inputMode="numeric" value={bidDueDays} onChange={(e) => setBidDueDays(e.target.value)} className="w-16 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-brand" />
+                          </label>
+                        </div>
+                        <div className="flex gap-2">
+                          <button type="button" disabled={bidDeciding} onClick={() => bidDecide('approve')}
+                            className="flex-1 rounded-xl py-3 font-heading font-bold text-sm bg-emerald-600 text-white disabled:opacity-50">{bidDeciding ? '…' : 'Approve → Assigned'}</button>
+                          <button type="button" disabled={bidDeciding} onClick={() => setBidRejecting(true)}
+                            className="flex-1 rounded-xl py-3 font-heading font-bold text-sm bg-white text-red-600 border border-red-300">Reject…</button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex gap-2 border-t border-gray-100 pt-3">
+                        <button type="button" onClick={() => setBidRejecting(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
+                        <button type="button" disabled={bidDeciding || !bidNotes.trim()} onClick={() => bidDecide('reject')}
+                          className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-red-600 text-white disabled:opacity-50">{bidDeciding ? '…' : 'Reject bid → Canceled'}</button>
+                      </div>
+                    )}
+                    {error && <div className="text-center text-xs text-red-600">{error}</div>}
+                  </section>
+                )}
 
                 {svc.reviewDecision && (
                   <section className={`border rounded-2xl p-4 ${svc.reviewDecision === 'approve' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>

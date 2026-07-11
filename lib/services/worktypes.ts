@@ -65,7 +65,10 @@ export const worktypeDescription = (id: string): string => WORKTYPES.find((w) =>
 export const descriptionFor = (worktype: string, subtype: string): string =>
   subtypesFor(worktype).find((s) => s.id === subtype)?.description || worktypeDescription(worktype);
 export const subtypesFor = (worktype: string): Subtype[] => WORKTYPES.find((w) => w.id === worktype)?.subtypes || [];
+// Bid items (vendor-requested additional work) carry a universal 'bid_item'
+// subtype under the original service's work type.
+export const BID_SUBTYPE = 'bid_item';
 export const subtypeLabel = (worktype: string, subtype: string): string =>
-  subtypesFor(worktype).find((s) => s.id === subtype)?.label || subtype;
+  subtype === BID_SUBTYPE ? 'Bid Item' : (subtypesFor(worktype).find((s) => s.id === subtype)?.label || subtype);
 export const defaultRateFor = (worktype: string, subtype: string): number | undefined =>
   subtypesFor(worktype).find((s) => s.id === subtype)?.defaultRate;

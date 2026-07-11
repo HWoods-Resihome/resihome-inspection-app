@@ -27,7 +27,10 @@ const BOOL = (name: string, label: string): PropSpec => ({ name, label, type: 'b
 const SEL = (name: string, label: string, options: { label: string; value: string }[]): PropSpec => ({ name, label, type: 'enumeration', fieldType: 'select', options });
 
 const WT_OPTS = WORKTYPES.map((w) => ({ label: w.label, value: w.id }));
-const SUB_OPTS = [...new Map(WORKTYPES.flatMap((w) => w.subtypes.map((s) => [s.id, s.label] as const))).entries()].map(([value, label]) => ({ label, value }));
+const SUB_OPTS = [
+  ...[...new Map(WORKTYPES.flatMap((w) => w.subtypes.map((s) => [s.id, s.label] as const))).entries()].map(([value, label]) => ({ label, value })),
+  { label: 'Bid Item', value: 'bid_item' },   // vendor-requested additional work
+];
 const STATUS_OPTS = opt([['Estimated', 'estimated'], ['Assigned', 'assigned'], ['Submitted', 'submitted'], ['Review', 'review'], ['Completed', 'completed'], ['Canceled', 'canceled']]);
 const SCOPE_OPTS = opt([['Property', 'property'], ['Community', 'community']]);
 const OPERATOR_OPTS = opt([['is', 'is'], ['is any of', 'is any of'], ['is not', 'is not'], ['changes to', 'changes to']]);

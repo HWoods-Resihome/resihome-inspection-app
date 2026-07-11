@@ -125,6 +125,7 @@ export async function flushServicePhotos(): Promise<number> {
 export interface ServiceSubmitPayload {
   answers: Record<string, any>;
   before: string[]; after: string[]; petBefore: string[]; petAfter: string[];
+  bid?: { description: string; vendorCost: number; photos: string[] };
   submittedAt: string;
 }
 
@@ -141,13 +142,14 @@ async function postSubmit(serviceId: string, body: any): Promise<{ ok: boolean; 
  * uploading. Returns { status: 'sent' | 'queued' } (+ review when sent).
  */
 export async function submitServiceOrQueue(serviceId: string, p: ServiceSubmitPayload): Promise<{ status: 'sent' | 'queued'; review?: any }> {
-  const record = {
+  const record: any = {
     serviceId,
     answers: p.answers,
     before: p.before.map(toRef), after: p.after.map(toRef),
     petBefore: p.petBefore.map(toRef), petAfter: p.petAfter.map(toRef),
     submittedAt: p.submittedAt, createdAt: Date.now(),
   };
+  if (p.bid) record.bid = { description: p.bid.description, vendorCost: p.bid.vendorCost, photos: p.bid.photos.map(toRef) };
   // Persist first so an interrupted send is never lost.
   if (hasIDB()) { try { await idbPut(SUBMITS, record); } catch { /* fall back to direct send */ } }
 
@@ -172,9 +174,20 @@ async function trySendSubmit(record: any): Promise<{ status: 'sent' | 'queued'; 
     }
     resolved[g] = out;
   }
+  // Resolve bid photos too (a bid may carry its own evidence photos).
+  let bid: any = undefined;
+  if (record.bid) {
+    const photos: string[] = [];
+    for (const ref of (record.bid.photos || [])) {
+      const u = await resolveRef(ref);
+      if (u == null) return { status: 'queued' };
+      photos.push(u);
+    }
+    bid = { description: record.bid.description, vendorCost: record.bid.vendorCost, photos };
+  }
   try {
     const res = await postSubmit(record.serviceId, {
-      answers: record.answers, ...resolved, submittedAt: record.submittedAt,
+      answers: record.answers, ...resolved, bid, submittedAt: record.submittedAt,
     });
     // 409 = already submitted on the server: treat as done (clear the queue).
     if (res.ok || res.status === 409) {

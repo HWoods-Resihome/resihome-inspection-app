@@ -10,8 +10,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
-import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder } from '@/lib/hubspot';
 import { runServiceAiReview } from '@/lib/services/aiReview';
+import { BID_SUBTYPE } from '@/lib/services/worktypes';
 
 // The AI review call (Claude vision) can take a few seconds — allow headroom so
 // the review runs inline the moment the work order is submitted.
@@ -62,6 +63,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const okp = await patchServiceWorkOrder(id, props);
     if (!okp) return res.status(200).json({ ok: true, preview: true }); // object not configured
 
+    // Bid item: the crew flagged additional work. Spawn a NEW Estimated "Bid Item"
+    // service — same worktype/property/community/vendor as the parent — carrying
+    // the description, photos, and bid cost, for internal review.
+    let bidId: string | null = null;
+    const bid = b.bid;
+    if (bid && typeof bid === 'object' && String(bid.description || '').trim() && Number(bid.vendorCost) > 0) {
+      const pp = existing?.props || {};
+      const vc = Number(bid.vendorCost);
+      const markup = Number(pp.markup_pct);
+      const client = Number.isFinite(vc) && Number.isFinite(markup) ? Math.round(vc * (1 + markup / 100) * 100) / 100 : vc;
+      const addr = pp.address_snapshot || pp.service_name || 'Service';
+      const bidProps: Record<string, any> = {
+        service_name: `Bid Item — ${addr}`,
+        worktype: pp.worktype || '', subtype: BID_SUBTYPE, is_bid_item: 'true', status: 'estimated',
+        scope: pp.scope || 'property', service_description: String(bid.description).slice(0, 2000),
+        region_snapshot: pp.region_snapshot || '', address_snapshot: addr, locality_snapshot: pp.locality_snapshot || '',
+        community_name: pp.community_name || '', property_status_snapshot: pp.property_status_snapshot || '',
+        vendor_name: pp.vendor_name || '', vendor_email: pp.vendor_email || '',
+        vendor_cost: vc, ...(Number.isFinite(markup) ? { markup_pct: markup } : {}), client_cost: client,
+        before_photo_urls: cleanUrls(bid.photos).join('\n'),
+        ...(pp.property_id_ref ? { property_id_ref: pp.property_id_ref } : {}),
+        ...(pp.community_id_ref ? { community_id_ref: pp.community_id_ref } : {}),
+        generated_by_rule_id: id, enrollment_key: `bid:${id}`,
+      };
+      try { bidId = await createServiceWorkOrder(bidProps); }
+      catch (e) { console.warn('[services/submit] bid item create failed:', e); }
+    }
+
     // Kick the AI review for THIS order immediately — don't wait for the nightly
     // bulk cron. Best-effort: if it errors (e.g. ANTHROPIC_API_KEY missing) the
     // order stays "submitted" and the cron picks it up. Result surfaced to the client.
@@ -73,7 +102,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (item) review = { verdict: item.verdict, status: item.action === 'completed' ? 'completed' : item.action === 'review' ? 'review' : 'submitted' };
     } catch (e) { console.warn('[services/submit] inline AI review failed (cron will retry):', e); }
 
-    return res.status(200).json({ ok: true, id, status: review?.status || 'submitted', review });
+    return res.status(200).json({ ok: true, id, status: review?.status || 'submitted', review, bidId });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });
   }
