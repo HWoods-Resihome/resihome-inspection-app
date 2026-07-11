@@ -73,7 +73,11 @@ interface Rule {
   initialDueDays: string;                   // optional: first order due N days after enrollment (blank = standard cadence)
   skipMonths: number[];                     // months explicitly set to NO service
   enrollField: string; enrollOp: string; enrollVal: string;
-  stopEnabled: boolean; stopField: string; stopOp: string; stopVal: string;
+  stopEnabled: boolean;
+  stopMode: 'condition' | 'date' | 'count';  // how enrollment stops
+  stopField: string; stopOp: string; stopVal: string;   // stopMode 'condition'
+  stopDate: string;                          // stopMode 'date'  (YYYY-MM-DD)
+  stopCount: string;                         // stopMode 'count' (services completed)
 }
 
 let _cid = 100;
@@ -142,7 +146,7 @@ const SEED: Rule[] = [
     ],
     initialDueDays: '5', skipMonths: [0, 1],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
-    stopEnabled: true, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied',
+    stopEnabled: true, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'landscaping', subtype: 'cut', petStations: true, scope: 'community',
@@ -151,7 +155,7 @@ const SEED: Rule[] = [
     cadences: [{ id: 21, unit: 'weeks', interval: '1', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
-    stopEnabled: false, stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied',
+    stopEnabled: false, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
 ];
 
@@ -324,6 +328,8 @@ export default function RulesEngine() {
     if (!rule.recurring && !rule.initialDueDays.trim()) saveErrors.push('Set the first order due (days after enrollment) — a one-time service has no cadence to schedule from.');
     if (rule.vendors.length === 0) saveErrors.push('Assign at least one vendor.');
     if (!rule.enrollVal.trim()) saveErrors.push('Set an enrollment trigger.');
+    if (rule.stopEnabled && rule.stopMode === 'date' && !rule.stopDate) saveErrors.push('Set a stop date.');
+    if (rule.stopEnabled && rule.stopMode === 'count' && (!rule.stopCount || Number(rule.stopCount) < 1)) saveErrors.push('Set the number of services before stopping.');
   }
   const canSave = saveErrors.length === 0;
 
@@ -720,7 +726,7 @@ export default function RulesEngine() {
           <section className={sec}>
             <SecHead n={3} title="Enrollment & Stop" />
             {openSec[3] && (<div className="mt-3">
-            <p className="text-[12px] text-gray-500 mb-3">Enrollment creates the first service; each service auto-recreates when the last is submitted, until the (optional) stop criteria is met. Vendor assignment is handled separately in Vendor Management.</p>
+            <p className="text-[12px] text-gray-500 mb-3">Enrollment creates the first service. For a recurring rule each service auto-recreates when the last is submitted, until the (optional) stop criteria is met; a one-time rule creates a single service and does not recreate.</p>
             <label className={lbl}>Enroll (Create Services) When</label>
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <select value={rule.enrollField} onChange={(e) => patch({ enrollField: e.target.value, enrollVal: optsFor(e.target.value)[0] || '' })} className={ctl}>{FIELD_NAMES.map((f) => <option key={f}>{f}</option>)}</select>
@@ -731,11 +737,37 @@ export default function RulesEngine() {
               <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked, ...(e.target.checked && !rule.stopVal ? { stopVal: optsFor(rule.stopField)[0] || '' } : {}) })} /> Add Stop Criteria (Optional)
             </label>
             {rule.stopEnabled && (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[13px] text-gray-600">Stop When</span>
-                <select value={rule.stopField} onChange={(e) => patch({ stopField: e.target.value, stopVal: optsFor(e.target.value)[0] || '' })} className={ctl}>{FIELD_NAMES.map((f) => <option key={f}>{f}</option>)}</select>
-                <select value={rule.stopOp} onChange={(e) => patch({ stopOp: e.target.value })} className={ctl}>{OPS.map((o) => <option key={o}>{o}</option>)}</select>
-                <select value={rule.stopVal} onChange={(e) => patch({ stopVal: e.target.value })} className={`${ctl} flex-1 min-w-[140px]`}>{optsFor(rule.stopField).map((o) => <option key={o}>{o}</option>)}</select>
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[13px] text-gray-600">Stop</span>
+                  <select value={rule.stopMode} onChange={(e) => patch({ stopMode: e.target.value as Rule['stopMode'] })} className={ctl}>
+                    <option value="condition">when a field changes</option>
+                    <option value="date">on a date</option>
+                    <option value="count">after N services</option>
+                  </select>
+                </div>
+                {rule.stopMode === 'condition' && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select value={rule.stopField} onChange={(e) => patch({ stopField: e.target.value, stopVal: optsFor(e.target.value)[0] || '' })} className={ctl}>{FIELD_NAMES.map((f) => <option key={f}>{f}</option>)}</select>
+                    <select value={rule.stopOp} onChange={(e) => patch({ stopOp: e.target.value })} className={ctl}>{OPS.map((o) => <option key={o}>{o}</option>)}</select>
+                    <select value={rule.stopVal} onChange={(e) => patch({ stopVal: e.target.value })} className={`${ctl} flex-1 min-w-[140px]`}>{optsFor(rule.stopField).map((o) => <option key={o}>{o}</option>)}</select>
+                  </div>
+                )}
+                {rule.stopMode === 'date' && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[13px] text-gray-600">On</span>
+                    <input type="date" value={rule.stopDate} onChange={(e) => patch({ stopDate: e.target.value })} className={`${ctl} ${!rule.stopDate ? 'border-red-300' : ''}`} />
+                    <span className="text-[13px] text-gray-600">— cancels remaining open orders past this date.</span>
+                  </div>
+                )}
+                {rule.stopMode === 'count' && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[13px] text-gray-600">After</span>
+                    <input value={rule.stopCount} inputMode="numeric" onChange={(e) => patch({ stopCount: e.target.value.replace(/\D/g, '') })} placeholder="—"
+                      className={`${ctl} w-16 text-center tabular-nums ${!rule.stopCount ? 'border-red-300' : ''}`} />
+                    <span className="text-[13px] text-gray-600">services completed on this property.</span>
+                  </div>
+                )}
               </div>
             )}
             </div>)}

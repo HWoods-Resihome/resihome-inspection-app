@@ -1013,6 +1013,44 @@ completion flow (separate from the main before/after).
   - If a vendor is **removed** from the rule's vendor list, in-flight sticky
     properties fall back to the equal-volume rotation on their next enrollment.
 
+## 10.19 Stop-criteria modes + one-time (run-once) enrollment integrity
+### Stop criteria — three modes (on the RULE)
+`stopMode` ∈ {`condition`, `date`, `count`}:
+- **condition** — a Property/Deal field changes (existing behavior, e.g. status → Occupied).
+- **date** — stop on a fixed date; cancel remaining open orders past that date.
+- **count** — stop after N completed services on the property (rolling per enrollment).
+
+### The move-in-clean problem (run-once, event-triggered)
+Scenario: dispatch a **move-in clean** when a property's associated **deal** reaches a
+leasing-pipeline stage; it must run **once** and must NOT be recreated by the nightly
+job if the clean completes before the property flips to leased/occupied.
+
+Root cause to design around: a **level-triggered** enrollment ("deal IS in stage X")
+stays true for days, so a nightly job that only checks "condition true AND no open WO"
+will happily create a second clean after the first completes. Recommended safeguards:
+
+1. **Edge-trigger, not level-trigger.** Enroll on the **transition into** the stage,
+   not on the stage being true. Persist the last-seen stage per deal (or consume
+   HubSpot stage-change events) so the trigger fires exactly once per transition.
+2. **Idempotency key per enrollment instance.** For run-once rules, key generation on
+   the **triggering entity** — the deal id: *one service per (rule, deal)*. Record the
+   deal id (or a hash) on the created Service (`enrollment_key`). The nightly job skips
+   any (rule, deal) it has already produced — regardless of whether that service is
+   open, completed, or canceled. This is the durable guarantee, independent of timing.
+3. **Non-recurring = terminal on completion.** Recreation logic (MAX(completion,due)+
+   interval, open-WO checks) applies to `recurring:true` only. A `recurring:false` rule
+   never recreates; completion is the end state for that enrollment.
+4. **Re-arm only on a new enrollment instance.** The rule can fire again only when a
+   *new* triggering entity appears (a new deal / a fresh vacant→leased cycle) — i.e. a
+   new `enrollment_key`. The same deal never yields a second clean.
+5. **Guard window / dedup lookback.** Belt-and-suspenders: before creating, check for
+   any Service on the property for this rule within a lookback window (e.g. the current
+   lease/enrollment) and skip if found — covers races and manual creations.
+
+Net: for the move-in clean, set the rule **non-recurring**, enroll on the deal-stage
+**edge**, and dedupe on the **deal id**. That combination makes "run exactly once per
+lease" robust even when completion beats the property-status change.
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
