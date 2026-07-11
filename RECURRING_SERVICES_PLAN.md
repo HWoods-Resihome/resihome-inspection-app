@@ -1072,8 +1072,25 @@ on each created Service to enforce idempotency.
   sample everyone is internal (admin), so it defaults to All with the picker to
   simulate a vendor login; the real build will auto-scope to the signed-in vendor.
 - Entry point: a calendar icon in the Services home header.
-- **TODO (approved, later):** roll the same calendar+map onto the live **Inspections**
-  tab (real data + property coordinates), and wire real vendor-login auto-scoping.
+- **TODO (approved, later):** wire real vendor-login auto-scoping for the Services map.
+
+### Inspections calendar + map (built on branch for preview → ships to main once signed off)
+- New **/inspections/calendar** + a calendar icon in the Inspections home header
+  (`pages/index.tsx`, NOT flag-gated — it's a core inspections feature).
+- Client-fetches the live list from `/api/inspections?pageSize=250&facets=0`; buckets
+  by `scheduledDate` (normalized with `hubspotToMs` — HubSpot returns mixed epoch-ms/
+  ISO). Shows OPEN only (scheduled / in_progress / pending_approval); drops
+  completed + cancelled. Month/Week/Day, colored by status.
+- Filters: Type (templateType) + Inspector scope ("Viewing as") + Past Due — filter
+  calendar and map together.
+- Map reuses `components/ServicesMap.tsx`. Inspections have **no coordinates**, so it
+  **geocodes** each visible inspection via `/api/geocode?propertyId=&address=` (small
+  client concurrency, cached by record id); shows "N/M mapped" (some addresses may
+  not geocode).
+- **Main-ship set** (when approved — inspections-only, keep main in sync): `pages/
+  inspections/calendar.tsx`, `components/ServicesMap.tsx`, the `leaflet` dep, the
+  `leaflet/dist/leaflet.css` import in `pages/_app.tsx`, and the calendar-icon button
+  in `pages/index.tsx`. Everything Services-specific stays on the branch.
 
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
