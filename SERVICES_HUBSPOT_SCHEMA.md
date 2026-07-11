@@ -95,6 +95,17 @@ once merged; `CRON_SECRET`-gated, safe no-op if unset):
 - `/api/cron/services-review` — 07:30 UTC daily (AI review of submitted orders, apply).
 Manual admin dry-run/apply endpoints remain for ad-hoc runs.
 
+## Offline capture + sync, immediate review
+- `lib/services/offlineServices.ts` — isolated from the inspection offline store
+  (no regression risk) but reuses the same primitives: `compressToJpeg` +
+  `uploadJpegBlob`, durable IndexedDB blobs, draft blob→hosted URL rekey. Photos
+  captured offline show immediately and upload on reconnect; the submit itself
+  queues durably and fires once photos resolve (`initServiceSync` runs on mount /
+  `online`). On-device offline testing required (like camera/GPS).
+- **Immediate AI review:** `/api/services/[id]/submit` runs the single-order AI
+  review inline the moment a WO is submitted (best-effort). The nightly
+  `services-review` cron remains a backstop for any that errored.
+
 ## Completion, review & PDF
 - Completion screen `/services/[id]` uses the shared 1099 camera (`CameraCapture`:
   in-camera capture + gallery + GPS stamp). Submit → status `submitted` (locked).

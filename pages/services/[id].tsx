@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
@@ -9,9 +9,9 @@ import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/workt
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SAMPLE_SERVICES } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder } from '@/lib/hubspot';
-import { uploadPhoto } from '@/lib/photoUpload';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoThumb } from '@/components/PhotoThumb';
+import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync } from '@/lib/services/offlineServices';
 
 interface ServiceView {
   id: string; live: boolean;
@@ -84,8 +84,9 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 const money = (n: number | null | undefined) => `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // ── Camera-backed photo group (recycles the 1099 in-camera + gallery experience) ──
-function CameraPhotos({ label, required, urls, onChange, address, propertyRecordId }: {
+function CameraPhotos({ label, required, urls, onChange, address, propertyRecordId, upload }: {
   label: string; required?: boolean; urls: string[]; onChange: (next: string[]) => void; address: string; propertyRecordId: string;
+  upload: (file: File) => Promise<string>;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -95,13 +96,14 @@ function CameraPhotos({ label, required, urls, onChange, address, propertyRecord
         {urls.map((u, i) => (
           <div key={`${u}-${i}`} className="relative aspect-square rounded-lg overflow-hidden border border-gray-300 bg-gray-100">
             <PhotoThumb url={u} alt={`${label} ${i + 1}`} className="w-full h-full object-cover" />
+            {u.startsWith('blob:') && <span className="absolute bottom-0.5 left-0.5 text-[9px] font-bold text-white bg-black/55 rounded px-1">syncing</span>}
             <button type="button" onClick={() => onChange(urls.filter((_, j) => j !== i))}
               className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white text-xs leading-none grid place-items-center" aria-label="Remove photo">×</button>
           </div>
         ))}
         <button type="button" onClick={() => setOpen(true)} className="aspect-square rounded-lg border-2 border-dashed border-gray-300 text-gray-400 hover:border-brand hover:text-brand flex items-center justify-center text-2xl">+</button>
       </div>
-      <CameraCapture isOpen={open} onClose={() => setOpen(false)} uploadPhoto={uploadPhoto}
+      <CameraCapture isOpen={open} onClose={() => setOpen(false)} uploadPhoto={upload}
         addressSnapshot={address} propertyRecordId={propertyRecordId || undefined}
         onComplete={(newUrls) => { setOpen(false); if (newUrls.length) onChange([...urls, ...newUrls]); }} />
     </div>
@@ -136,9 +138,26 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
   const [petBefore, setPetBefore] = useState<string[]>([]);
   const [petAfter, setPetAfter] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [doneStatus, setDoneStatus] = useState<string>('');   // set after submit/decision
+  const [doneStatus, setDoneStatus] = useState<string>('');   // '' | submitted | queued | completed
   const [error, setError] = useState('');
+  const [pendingQueued, setPendingQueued] = useState(false);
   const setAns = (id: string, v: any) => setAnswers((a) => ({ ...a, [id]: v }));
+
+  // Kick offline sync (photos + any queued submit) on mount and reconnect; flag a
+  // completion that's already queued offline for this service.
+  useEffect(() => {
+    initServiceSync();
+    let alive = true;
+    hasPendingSubmit(svc.id).then((p) => { if (alive) setPendingQueued(p); }).catch(() => {});
+    // When a queued photo finishes uploading, swap its draft blob: URL for the hosted URL.
+    const off = onServiceSync(({ url, draftUrl }) => {
+      if (!draftUrl) return;
+      const swap = (arr: string[]) => arr.map((u) => (u === draftUrl ? url : u));
+      setBefore(swap); setAfter(swap); setPetBefore(swap); setPetAfter(swap);
+    });
+    return () => { alive = false; off(); };
+  }, [svc.id]);
+  const uploadFor = useMemo(() => (file: File) => capturePhotoOrQueue(svc.id, file), [svc.id]);
 
   const requiredMissing = useMemo(() => form.some((q) => {
     if (!q.required) return false;
@@ -151,14 +170,9 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
   const submit = async () => {
     setSubmitting(true); setError('');
     try {
-      const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/submit`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers, before, after, petBefore, petAfter, submittedAt: new Date().toISOString() }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setError(d.error || 'Could not submit.'); return; }
-      setDoneStatus('submitted');
-    } catch { setError('Couldn’t reach the server. Try again.'); }
+      const res = await submitServiceOrQueue(svc.id, { answers, before, after, petBefore, petAfter, submittedAt: new Date().toISOString() });
+      setDoneStatus(res.status === 'sent' ? 'submitted' : 'queued');
+    } catch { setError('Couldn’t save. Try again.'); }
     finally { setSubmitting(false); }
   };
 
@@ -211,6 +225,13 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
             <p className="text-sm text-gray-500 mt-1">The AI reviews the photos, timing, and selections. If everything looks clean it moves to <b>Completed</b>; if anything needs a human it moves to <b>Review</b>.</p>
             <Link href="/services" className="inline-block mt-4 bg-brand text-white font-heading font-bold text-sm rounded-xl px-5 py-2.5">Back to Services</Link>
           </div>
+        ) : doneStatus === 'queued' ? (
+          <div className="bg-white border border-amber-300 rounded-2xl p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 grid place-items-center text-2xl mx-auto mb-3">⤓</div>
+            <div className="font-heading font-extrabold text-lg text-ink">Saved offline</div>
+            <p className="text-sm text-gray-500 mt-1">You’re offline. This completion and its photos are saved on your device and will submit automatically the moment you’re back online — you can close the app.</p>
+            <Link href="/services" className="inline-block mt-4 bg-brand text-white font-heading font-bold text-sm rounded-xl px-5 py-2.5">Back to Services</Link>
+          </div>
         ) : doneStatus === 'completed' ? (
           <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center">
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
@@ -240,6 +261,12 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
                 </a>
               )}
             </div>
+
+            {pendingQueued && editable && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[13px] text-amber-800">
+                A completion for this service is saved offline and will submit automatically when you’re back online. No need to re-enter it.
+              </div>
+            )}
 
             {editable ? (
               /* ── Editable completion form (assigned crew) ── */
@@ -294,13 +321,13 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
 
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
                   <div className="font-heading font-bold text-[15px] text-ink">Evidence</div>
-                  <CameraPhotos label="Before photos" urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} />
-                  <CameraPhotos label="After photos" required urls={after} onChange={setAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} />
+                  <CameraPhotos label="Before photos" urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
+                  <CameraPhotos label="After photos" required urls={after} onChange={setAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                   {svc.petStations && (
                     <div className="border-t border-gray-100 pt-4 space-y-4">
                       <div className="text-[12px] font-bold uppercase tracking-wide text-brand">Pet Stations</div>
-                      <CameraPhotos label="Pet station — before" urls={petBefore} onChange={setPetBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} />
-                      <CameraPhotos label="Pet station — after" urls={petAfter} onChange={setPetAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} />
+                      <CameraPhotos label="Pet station — before" urls={petBefore} onChange={setPetBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
+                      <CameraPhotos label="Pet station — after" urls={petAfter} onChange={setPetAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                     </div>
                   )}
                 </section>

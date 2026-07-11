@@ -11,6 +11,11 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
+import { runServiceAiReview } from '@/lib/services/aiReview';
+
+// The AI review call (Claude vision) can take a few seconds — allow headroom so
+// the review runs inline the moment the work order is submitted.
+export const config = { maxDuration: 120 };
 
 const cleanUrls = (v: unknown): string[] =>
   Array.isArray(v) ? v.map((u) => String(u || '').trim()).filter(Boolean) : [];
@@ -56,7 +61,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const okp = await patchServiceWorkOrder(id, props);
     if (!okp) return res.status(200).json({ ok: true, preview: true }); // object not configured
-    return res.status(200).json({ ok: true, id, status: 'submitted' });
+
+    // Kick the AI review for THIS order immediately — don't wait for the nightly
+    // bulk cron. Best-effort: if it errors (e.g. ANTHROPIC_API_KEY missing) the
+    // order stays "submitted" and the cron picks it up. Result surfaced to the client.
+    let review: { verdict: string; status: string } | null = null;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const rep = await runServiceAiReview(true, today, id);
+      const item = rep?.items?.find((i) => i.id === id) || rep?.items?.[0];
+      if (item) review = { verdict: item.verdict, status: item.action === 'completed' ? 'completed' : item.action === 'review' ? 'review' : 'submitted' };
+    } catch (e) { console.warn('[services/submit] inline AI review failed (cron will retry):', e); }
+
+    return res.status(200).json({ ok: true, id, status: review?.status || 'submitted', review });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });
   }
