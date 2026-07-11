@@ -5,7 +5,7 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
-import { ListPicker } from '@/components/ListPicker';
+import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
   SAMPLE_SERVICES, SAMPLE_VENDORS, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY,
@@ -32,10 +32,11 @@ const STATUS_STYLE: Record<ServiceStatus, string> = {
   canceled: 'bg-gray-100 text-gray-500 border-gray-300 line-through',
 };
 
-type SortField = 'due' | 'address' | 'worktype' | 'vendor' | 'status';
+type SortField = 'due' | 'address' | 'worktype' | 'vendor' | 'status' | 'region' | 'community';
 const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: 'due', label: 'Due date' }, { value: 'address', label: 'Address' },
-  { value: 'worktype', label: 'Service type' }, { value: 'vendor', label: 'Vendor' },
+  { value: 'worktype', label: 'Work type' }, { value: 'vendor', label: 'Vendor' },
+  { value: 'region', label: 'Region' }, { value: 'community', label: 'Community' },
   { value: 'status', label: 'Status' },
 ];
 const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'review'];
@@ -46,9 +47,9 @@ const fmtDue = (iso: string) => {
 
 export default function ServicesHome({ userName, canCreate }: { userName: string; canCreate: boolean }) {
   const [status, setStatus] = useState<ServiceStatus | 'all'>('all');
-  const [worktype, setWorktype] = useState('all');
-  const [vendor, setVendor] = useState('all');
-  const [region, setRegion] = useState('all');
+  const [worktype, setWorktype] = useState<string[]>([]);
+  const [vendor, setVendor] = useState<string[]>([]);
+  const [region, setRegion] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [pastDueOnly, setPastDueOnly] = useState(false);
   const [sortField, setSortField] = useState<SortField>('due');
@@ -63,9 +64,9 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
   const scoped = useMemo(() => {
     const q = search.trim().toLowerCase();
     return SAMPLE_SERVICES.filter((s) =>
-      (worktype === 'all' || s.worktype === worktype) &&
-      (vendor === 'all' || (s.vendor || '—') === vendor) &&
-      (region === 'all' || s.region === region) &&
+      (worktype.length === 0 || worktype.includes(s.worktype)) &&
+      (vendor.length === 0 || vendor.includes(s.vendor || '—')) &&
+      (region.length === 0 || region.includes(s.region)) &&
       (!q || `${s.address} ${s.locality} ${s.community || ''} ${s.vendor || ''} ${worktypeLabel(s.worktype)} ${subtypeLabel(s.worktype, s.subtype)} ${s.portfolio}`.toLowerCase().includes(q))
     );
   }, [worktype, vendor, region, search]);
@@ -98,6 +99,7 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
     const key = (s: typeof list[number]) => ({
       due: s.dueDate, address: s.address.toLowerCase(), worktype: worktypeLabel(s.worktype),
       vendor: (s.vendor || '~').toLowerCase(), status: String(SAMPLE_STATUS_ORDER.indexOf(s.status)),
+      region: s.region.toLowerCase(), community: (s.community || '~').toLowerCase(),
     }[sortField]);
     return [...list].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * dir);
   }, [scoped, status, pastDueOnly, sortField, sortDir]);
@@ -209,16 +211,16 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
             </div>
             <div className="flex items-center gap-2 pt-1">
               <div className="flex-1 min-w-0">
-                <ListPicker value={worktype} onChange={setWorktype} ariaLabel="Filter by service type" className={pickerCls(worktype !== 'all')}
-                  options={[{ value: 'all', label: 'Type' }, ...WORKTYPES.map((w) => ({ value: w.id, label: w.label }))]} />
+                <MultiFilter label="Type" selected={worktype} onChange={setWorktype} className={pickerCls(worktype.length > 0)}
+                  options={WORKTYPES.map((w) => ({ value: w.id, label: w.label }))} />
               </div>
               <div className="flex-1 min-w-0">
-                <ListPicker value={vendor} onChange={setVendor} ariaLabel="Filter by vendor" className={pickerCls(vendor !== 'all')}
-                  options={[{ value: 'all', label: 'Vendor' }, ...SAMPLE_VENDORS.map((v) => ({ value: v, label: v })), { value: '—', label: 'Unassigned' }]} />
+                <MultiFilter label="Vendor" selected={vendor} onChange={setVendor} className={pickerCls(vendor.length > 0)}
+                  options={[...SAMPLE_VENDORS.map((v) => ({ value: v, label: v })), { value: '—', label: 'Unassigned' }]} />
               </div>
               <div className="flex-1 min-w-0">
-                <ListPicker value={region} onChange={setRegion} ariaLabel="Filter by region" className={pickerCls(region !== 'all')}
-                  options={[{ value: 'all', label: 'Region' }, ...SAMPLE_REGIONS.map((r) => ({ value: r, label: r }))]} />
+                <MultiFilter label="Region" selected={region} onChange={setRegion} className={pickerCls(region.length > 0)}
+                  options={SAMPLE_REGIONS.map((r) => ({ value: r, label: r }))} />
               </div>
               {/* Sort — identical to inspections: tap a field to sort; tap the active field again to flip direction. */}
               <div className="relative shrink-0">
@@ -245,6 +247,12 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
                   </div></>)}
               </div>
             </div>
+            {(status !== 'all' || pastDueOnly || worktype.length > 0 || vendor.length > 0 || region.length > 0 || search) && (
+              <div className="flex justify-end">
+                <button type="button" onClick={() => { setStatus('all'); setPastDueOnly(false); setWorktype([]); setVendor([]); setRegion([]); setSearch(''); }}
+                  className="text-[11px] font-heading font-semibold text-gray-500 hover:text-brand underline">Clear filters</button>
+              </div>
+            )}
           </div>
         )}
 

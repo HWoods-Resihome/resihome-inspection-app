@@ -6,7 +6,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { PriceField } from '@/components/PriceField';
-import { ListPicker } from '@/components/ListPicker';
+import { MultiFilter } from '@/components/MultiFilter';
 import { SAMPLE_PROPERTIES, SAMPLE_REGIONS } from '@/lib/services/sampleData';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -42,9 +42,10 @@ const optsFor = (field: string) => PROPERTY_FIELDS.find((f) => f.field === field
 const OPS = ['is', 'is any of', 'is not', 'changes to'];
 
 // Rules-list sort (mirrors the Services home sort: tap a field, re-tap to flip).
-type RuleSortField = 'name' | 'coverage' | 'worktype';
+type RuleSortField = 'name' | 'coverage' | 'worktype' | 'region' | 'community';
 const RULE_SORT: { value: RuleSortField; label: string }[] = [
   { value: 'name', label: 'Name' }, { value: 'coverage', label: 'Coverage' }, { value: 'worktype', label: 'Work Type' },
+  { value: 'region', label: 'Region' }, { value: 'community', label: 'Community' },
 ];
 
 type Unit = 'days' | 'weeks' | 'months';
@@ -153,10 +154,10 @@ export default function RulesEngine() {
   // Rules-list search / filter / sort (mirrors the Services home).
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [fWork, setFWork] = useState('all');
-  const [fSub, setFSub] = useState('all');
-  const [fRegion, setFRegion] = useState('all');
-  const [fCommunity, setFCommunity] = useState('all');
+  const [fWork, setFWork] = useState<string[]>([]);
+  const [fSub, setFSub] = useState<string[]>([]);
+  const [fRegion, setFRegion] = useState<string[]>([]);
+  const [fCommunity, setFCommunity] = useState<string[]>([]);
   const [sortField, setSortField] = useState<RuleSortField>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [sortOpen, setSortOpen] = useState(false);
@@ -256,20 +257,24 @@ export default function RulesEngine() {
     const q = search.trim().toLowerCase();
     const list = rules.filter((r) =>
       (!q || r.name.toLowerCase().includes(q)) &&
-      (fWork === 'all' || r.worktype === fWork) &&
-      (fSub === 'all' || r.subtype === fSub) &&
-      (fRegion === 'all' || regionsOf(r).includes(fRegion)) &&
-      (fCommunity === 'all' || (r.scope === 'community' && r.communities.includes(fCommunity)))
+      (fWork.length === 0 || fWork.includes(r.worktype)) &&
+      (fSub.length === 0 || fSub.includes(r.subtype)) &&
+      (fRegion.length === 0 || regionsOf(r).some((rg) => fRegion.includes(rg))) &&
+      (fCommunity.length === 0 || (r.scope === 'community' && r.communities.some((c) => fCommunity.includes(c))))
     );
     const dir = sortDir === 'asc' ? 1 : -1;
-    const key = (r: Rule) => ({ name: r.name.toLowerCase(), coverage: countFor(r), worktype: worktypeLabel(r.worktype) }[sortField]);
+    const key = (r: Rule) => ({
+      name: r.name.toLowerCase(), coverage: countFor(r), worktype: worktypeLabel(r.worktype),
+      region: (regionsOf(r)[0] || '~').toLowerCase(), community: (r.communities[0] || '~').toLowerCase(),
+    }[sortField]);
     return [...list].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * dir);
   }, [rules, search, fWork, fSub, fRegion, fCommunity, sortField, sortDir]);
 
-  // Subtype filter options depend on the chosen work type (else the union of all).
-  const subFilterOptions = fWork === 'all'
-    ? [...new Map(WORKTYPES.flatMap((w) => w.subtypes.map((s) => [s.id, s.label] as const))).entries()].map(([value, label]) => ({ value, label }))
-    : subtypesFor(fWork).map((s) => ({ value: s.id, label: s.label }));
+  // Subtype filter options: the union of subtypes across the chosen work types
+  // (or every subtype when no work type is selected).
+  const subFilterOptions = (fWork.length === 0 ? WORKTYPES : WORKTYPES.filter((w) => fWork.includes(w.id)))
+    .flatMap((w) => w.subtypes.map((s) => [s.id, s.label] as const));
+  const subFilterUnique = [...new Map(subFilterOptions).entries()].map(([value, label]) => ({ value, label }));
 
   const coveredCount = useMemo(() => (rule ? countFor(rule) : 0), [rule]);
 
@@ -355,22 +360,22 @@ export default function RulesEngine() {
 
           {/* Collapsible: Work Type / Subtype / Region / Community + Sort. */}
           {filtersOpen && (
-            <div className="flex items-center gap-2 mb-3">
+            <div className="mb-3">
+            <div className="flex items-center gap-2">
               <div className="flex-1 min-w-0">
-                <ListPicker value={fWork} onChange={(v) => { setFWork(v); setFSub('all'); }} ariaLabel="Filter by work type" className={pickerCls(fWork !== 'all')}
-                  options={[{ value: 'all', label: 'Type' }, ...WORKTYPES.map((w) => ({ value: w.id, label: w.label }))]} />
+                <MultiFilter label="Type" selected={fWork} onChange={(next) => { setFWork(next); setFSub([]); }} className={pickerCls(fWork.length > 0)}
+                  options={WORKTYPES.map((w) => ({ value: w.id, label: w.label }))} />
               </div>
               <div className="flex-1 min-w-0">
-                <ListPicker value={fSub} onChange={setFSub} ariaLabel="Filter by subtype" className={pickerCls(fSub !== 'all')}
-                  options={[{ value: 'all', label: 'Subtype' }, ...subFilterOptions]} />
+                <MultiFilter label="Sub" selected={fSub} onChange={setFSub} className={pickerCls(fSub.length > 0)} options={subFilterUnique} />
               </div>
               <div className="flex-1 min-w-0">
-                <ListPicker value={fRegion} onChange={setFRegion} ariaLabel="Filter by region" className={pickerCls(fRegion !== 'all')}
-                  options={[{ value: 'all', label: 'Region' }, ...SAMPLE_REGIONS.map((r) => ({ value: r, label: r }))]} />
+                <MultiFilter label="Region" selected={fRegion} onChange={setFRegion} className={pickerCls(fRegion.length > 0)}
+                  options={SAMPLE_REGIONS.map((r) => ({ value: r, label: r }))} />
               </div>
               <div className="flex-1 min-w-0">
-                <ListPicker value={fCommunity} onChange={setFCommunity} ariaLabel="Filter by community" className={pickerCls(fCommunity !== 'all')}
-                  options={[{ value: 'all', label: 'Community' }, ...Object.keys(COMMUNITIES).map((c) => ({ value: c, label: c }))]} />
+                <MultiFilter label="Com" selected={fCommunity} onChange={setFCommunity} className={pickerCls(fCommunity.length > 0)}
+                  options={Object.keys(COMMUNITIES).map((c) => ({ value: c, label: c }))} />
               </div>
               {/* Sort — tap a field to sort; tap the active field again to flip direction. */}
               <div className="relative shrink-0">
@@ -396,6 +401,13 @@ export default function RulesEngine() {
                     })}
                   </div></>)}
               </div>
+            </div>
+            {(fWork.length > 0 || fSub.length > 0 || fRegion.length > 0 || fCommunity.length > 0 || search) && (
+              <div className="flex justify-end mt-1.5">
+                <button type="button" onClick={() => { setFWork([]); setFSub([]); setFRegion([]); setFCommunity([]); setSearch(''); }}
+                  className="text-[11px] font-heading font-semibold text-gray-500 hover:text-brand underline">Clear filters</button>
+              </div>
+            )}
             </div>
           )}
 
