@@ -245,6 +245,8 @@ export default function FormBuilderPage() {
     () => Array.from(new Set((questions || []).map((q) => (q.section || '').trim()).filter(Boolean))),
     [questions],
   );
+  // Global id → question lookup (a dragged card can move between sections).
+  const qById = useMemo(() => new Map((questions || []).map((q) => [q.hubspotRecordId, q])), [questions]);
 
   // Ordering helpers — the builder no longer asks the admin to type order
   // numbers. A section's order is the order of any existing question in it (else
@@ -318,15 +320,23 @@ export default function FormBuilderPage() {
     void persistOrder(updates);
   }
 
-  // ── Press-and-hold drag reorder (within a section) ────────────────────────
-  // A long-press lifts a card; dragging reflows the section under the finger;
-  // release persists the new order. Touch + mouse via Pointer Events, no library.
+  // ── Press-and-hold drag reorder (within AND across sections) ──────────────
+  // A long-press lifts a card; dragging reflows the list under the finger and can
+  // cross into another section; auto-scrolls near the viewport edges; release
+  // persists the new order (+ section). Touch + mouse via Pointer Events, no lib.
   const [dragId, setDragId] = useState<string | null>(null);
-  const [dragOrder, setDragOrder] = useState<{ section: string; ids: string[] } | null>(null);
-  const dragMeta = useRef<{ timer: ReturnType<typeof setTimeout> | null; started: boolean; startY: number; pointerId: number; el: HTMLElement } | null>(null);
+  // Live per-section id order while dragging (keyed by the grouped section key).
+  const [dragSections, setDragSections] = useState<Record<string, string[]> | null>(null);
+  const dragMeta = useRef<{ timer: ReturnType<typeof setTimeout> | null; started: boolean; startY: number; pointerId: number; el: HTMLElement; lastY: number } | null>(null);
   const cardRefs = useRef<Record<string, HTMLLIElement | null>>({});
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  // Auto-scroll: a rAF loop reads the current direction; updateTargetRef points at
+  // the latest hit-test closure so the loop always sees current state.
+  const autoScrollDir = useRef(0);
+  const rafRef = useRef<number | null>(null);
+  const updateTargetRef = useRef<(y: number) => void>(() => {});
 
-  function beginPressHold(e: ReactPointerEvent, q: Question, sectionKey: string, ids: string[]) {
+  function beginPressHold(e: ReactPointerEvent, q: Question) {
     if (busy || editingId) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if ((e.target as HTMLElement).closest('button')) return; // let the ↑/↓/On/Edit/Delete buttons work
@@ -337,11 +347,58 @@ export default function FormBuilderPage() {
       dragMeta.current.started = true;
       try { el.setPointerCapture(dragMeta.current.pointerId); } catch { /* ignore */ }
       try { (navigator as any).vibrate?.(10); } catch { /* ignore */ }
+      // Snapshot the current per-section order to drag against.
+      const snap: Record<string, string[]> = {};
+      for (const [sec, qs] of grouped) snap[sec] = qs.map((x) => x.hubspotRecordId);
       setDragId(q.hubspotRecordId);
-      setDragOrder({ section: sectionKey, ids: [...ids] });
+      setDragSections(snap);
+      // Start the auto-scroll loop (no-op until the pointer nears an edge).
+      const loop = () => {
+        if (autoScrollDir.current !== 0) {
+          window.scrollBy(0, autoScrollDir.current * 11);
+          updateTargetRef.current(dragMeta.current?.lastY ?? 0);
+        }
+        rafRef.current = requestAnimationFrame(loop);
+      };
+      rafRef.current = requestAnimationFrame(loop);
     }, 220);
-    dragMeta.current = { timer, started: false, startY, pointerId: e.pointerId, el };
+    dragMeta.current = { timer, started: false, startY, pointerId: e.pointerId, el, lastY: startY };
   }
+
+  // Reflow: move the dragged card to wherever the pointer (clientY) is — into the
+  // hovered section, at the index set by the sibling cards' midpoints.
+  function updateDragTarget(y: number) {
+    const cur = dragSections;
+    if (!cur || !dragId) return;
+    const keys = Object.keys(cur);
+    // Which section is the pointer over? (inside a section's box, else the nearest.)
+    let targetSection = keys[0]; let best = Infinity;
+    for (const sec of keys) {
+      const el = sectionRefs.current[sec];
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (y >= r.top && y <= r.bottom) { targetSection = sec; best = -1; break; }
+      const dist = y < r.top ? r.top - y : y - r.bottom;
+      if (dist < best) { best = dist; targetSection = sec; }
+    }
+    // Insertion index within the target section, ignoring the dragged card itself.
+    const others = cur[targetSection].filter((id) => id !== dragId);
+    let index = others.length;
+    for (let i = 0; i < others.length; i++) {
+      const el = cardRefs.current[others[i]];
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (y < r.top + r.height / 2) { index = i; break; }
+    }
+    const next: Record<string, string[]> = {};
+    for (const sec of keys) next[sec] = cur[sec].filter((id) => id !== dragId);
+    next[targetSection].splice(index, 0, dragId);
+    // Only commit if the order actually changed (avoids render churn each frame).
+    let changed = false;
+    for (const sec of keys) { if (next[sec].length !== cur[sec].length || next[sec].some((id, i) => id !== cur[sec][i])) { changed = true; break; } }
+    if (changed) setDragSections(next);
+  }
+  updateTargetRef.current = updateDragTarget;
 
   function onDragMove(e: ReactPointerEvent) {
     const m = dragMeta.current;
@@ -352,45 +409,44 @@ export default function FormBuilderPage() {
       return;
     }
     e.preventDefault();
-    const ord = dragOrder;
-    if (!ord || !dragId) return;
-    const ids = ord.ids;
-    const y = e.clientY;
-    // Insertion index = first card whose vertical midpoint is below the pointer.
-    let target = ids.length - 1;
-    for (let i = 0; i < ids.length; i++) {
-      const el = cardRefs.current[ids[i]];
-      if (!el) continue;
-      const r = el.getBoundingClientRect();
-      if (y < r.top + r.height / 2) { target = i; break; }
-    }
-    const from = ids.indexOf(dragId);
-    if (from >= 0 && target !== from) {
-      const next = [...ids];
-      next.splice(from, 1);
-      next.splice(target, 0, dragId);
-      setDragOrder({ section: ord.section, ids: next });
-    }
+    m.lastY = e.clientY;
+    // Auto-scroll when near the top/bottom edge of the viewport.
+    const EDGE = 72;
+    autoScrollDir.current = e.clientY < EDGE ? -1 : e.clientY > window.innerHeight - EDGE ? 1 : 0;
+    updateDragTarget(e.clientY);
   }
+
+  function stopAutoScroll() {
+    autoScrollDir.current = 0;
+    if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+  }
+  useEffect(() => () => stopAutoScroll(), []);
 
   function endDrag() {
     const m = dragMeta.current;
     if (m?.timer) clearTimeout(m.timer);
     const started = m?.started;
-    const ord = dragOrder;
+    const secs = dragSections;
     dragMeta.current = null;
-    if (started && ord) {
-      const updates = ord.ids
-        .map((id, i) => {
+    stopAutoScroll();
+    if (started && secs) {
+      const updates: { id: string; patch: Partial<Question> }[] = [];
+      for (const [sec, ids] of Object.entries(secs)) {
+        const secReal = sec === '(no section)' ? '' : sec;
+        ids.forEach((id, i) => {
           const q = (questions || []).find((x) => x.hubspotRecordId === id);
+          if (!q) return;
+          const patch: Partial<Question> = {};
           const displayOrder = (i + 1) * 10;
-          return q && q.displayOrder !== displayOrder ? { id, patch: { displayOrder } as Partial<Question> } : null;
-        })
-        .filter(Boolean) as { id: string; patch: Partial<Question> }[];
+          if (q.displayOrder !== displayOrder) patch.displayOrder = displayOrder;
+          if ((q.section || '') !== secReal) { patch.section = secReal; patch.sectionOrder = sectionOrderOf(secReal); }
+          if (Object.keys(patch).length) updates.push({ id, patch });
+        });
+      }
       void persistOrder(updates);
     }
     setDragId(null);
-    setDragOrder(null);
+    setDragSections(null);
   }
 
   async function saveEdit(id: string, d: Draft) {
@@ -527,15 +583,13 @@ export default function FormBuilderPage() {
         ) : (
           <div className="space-y-5">
             {grouped.map(([section, qs], si) => {
-              // While dragging within this section, reflow the cards by the live
-              // drag order so the list moves under the finger.
-              const isDraggingHere = dragOrder?.section === section;
-              const displayQs = isDraggingHere
-                ? (dragOrder!.ids.map((id) => qs.find((x) => x.hubspotRecordId === id)).filter(Boolean) as Question[])
+              // While a drag is in progress, reflow EVERY section by the live drag
+              // order (a card can cross sections), looking questions up globally.
+              const displayQs = dragSections
+                ? ((dragSections[section] || []).map((id) => qById.get(id)).filter(Boolean) as Question[])
                 : qs;
-              const sectionIds = displayQs.map((x) => x.hubspotRecordId);
               return (
-              <div key={section}>
+              <div key={section} ref={(el) => { sectionRefs.current[section] = el; }}>
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <h2 className="text-xs font-heading font-bold text-gray-500 uppercase tracking-wide flex-1 min-w-0 truncate">{section}</h2>
                   <button type="button" onClick={() => moveSection(section, 'up')} disabled={busy || si === 0}
@@ -553,7 +607,7 @@ export default function FormBuilderPage() {
                   {displayQs.map((q, qi) => (
                     <li key={q.hubspotRecordId}
                       ref={(el) => { cardRefs.current[q.hubspotRecordId] = el; }}
-                      onPointerDown={(e) => beginPressHold(e, q, section, sectionIds)}
+                      onPointerDown={(e) => beginPressHold(e, q)}
                       onPointerMove={onDragMove}
                       onPointerUp={endDrag}
                       onPointerCancel={endDrag}
@@ -572,7 +626,7 @@ export default function FormBuilderPage() {
                                 className="w-7 h-6 grid place-items-center rounded-md border border-gray-200 text-gray-500 bg-white hover:text-brand hover:border-brand/40 disabled:opacity-30 disabled:hover:text-gray-500">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
                               </button>
-                              <button type="button" onClick={() => moveQuestion(q, 'down')} disabled={busy || qi === qs.length - 1}
+                              <button type="button" onClick={() => moveQuestion(q, 'down')} disabled={busy || qi === displayQs.length - 1}
                                 aria-label="Move question down" title="Move down"
                                 className="w-7 h-6 grid place-items-center rounded-md border border-gray-200 text-gray-500 bg-white hover:text-brand hover:border-brand/40 disabled:opacity-30 disabled:hover:text-gray-500">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
