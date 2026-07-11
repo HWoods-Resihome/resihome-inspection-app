@@ -266,7 +266,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
             <div className="flex-1 min-w-0">
               <ListPicker value={inspectorScope} onChange={setInspectorScope} ariaLabel="Inspector"
                 className="w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border border-gray-300 rounded-lg bg-white text-ink flex items-center justify-between"
-                options={[{ value: 'all', label: 'All inspectors' }, ...inspectors.map((n) => ({ value: n, label: n }))]} />
+                options={[{ value: 'all', label: 'Inspectors' }, ...inspectors.map((n) => ({ value: n, label: n }))]} />
             </div>
             <div className="flex-1 min-w-0">
               <MultiFilter label="Template" selected={typeFilter} onChange={setTypeFilter}
