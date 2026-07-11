@@ -6,7 +6,6 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
-import { ListPicker } from '@/components/ListPicker';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { SAMPLE_SERVICES, SAMPLE_VENDORS, REFERENCE_TODAY, type SampleService } from '@/lib/services/sampleData';
@@ -49,7 +48,7 @@ const sameYMD = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.g
 export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) {
   const [view, setView] = useState<View>('month');
   const [cursorISO, setCursorISO] = useState(REFERENCE_TODAY);
-  const [vendorScope, setVendorScope] = useState('all');
+  const [vendorFilter, setVendorFilter] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
   const [pastDueOnly, setPastDueOnly] = useState(false);
   const cursor = parse(cursorISO);
@@ -59,9 +58,9 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
   // Then optionally narrow by vendor (route view), worktype, and past-due.
   const scoped = useMemo(() => SAMPLE_SERVICES.filter((s) =>
     s.status !== 'canceled' && s.status !== 'completed'
-    && (vendorScope === 'all' || s.vendor === vendorScope)
+    && (vendorFilter.length === 0 || (!!s.vendor && vendorFilter.includes(s.vendor)))
     && (typeFilter.length === 0 || typeFilter.includes(s.worktype))
-    && (!pastDueOnly || s.dueDate < REFERENCE_TODAY)), [vendorScope, typeFilter, pastDueOnly]);
+    && (!pastDueOnly || s.dueDate < REFERENCE_TODAY)), [vendorFilter, typeFilter, pastDueOnly]);
 
   // Visible date range for the current view.
   const range = useMemo(() => {
@@ -105,11 +104,14 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
     </Link>
   );
 
-  // ----- Month grid (6×7). Tap a day to drill into Day view. -----
+  // ----- Month grid. Render only the weeks the month needs (usually 5, 6 only when
+  // it truly spills over) so the map below gets more room. Tap a day → Day view. -----
   const monthCells = useMemo(() => {
     const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
     const gridStart = addDays(first, -first.getDay());
-    return Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+    const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+    const weeks = Math.ceil((first.getDay() + daysInMonth) / 7);
+    return Array.from({ length: weeks * 7 }, (_, i) => addDays(gridStart, i));
   }, [cursorISO, view]);
 
   return (
@@ -144,9 +146,9 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
               options={WORKTYPES.map((w) => ({ value: w.id, label: w.label }))} />
           </div>
           <div className="flex-1 min-w-0">
-            <ListPicker value={vendorScope} onChange={setVendorScope} ariaLabel="Viewing as"
-              className="w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border border-gray-300 rounded-lg bg-white text-ink flex items-center justify-between"
-              options={[{ value: 'all', label: canSeeAll ? 'All vendors' : 'My services' }, ...SAMPLE_VENDORS.map((v) => ({ value: v, label: v }))]} />
+            <MultiFilter label="Vendor" selected={vendorFilter} onChange={setVendorFilter}
+              className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${vendorFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+              options={SAMPLE_VENDORS.map((v) => ({ value: v, label: v }))} />
           </div>
           <button type="button" onClick={() => setPastDueOnly((v) => !v)}
             className={`shrink-0 text-[12px] font-heading font-semibold px-3 py-1.5 rounded-lg border transition ${pastDueOnly ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-700 border-gray-300 hover:border-red-300'}`}>

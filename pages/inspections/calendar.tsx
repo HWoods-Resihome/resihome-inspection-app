@@ -5,7 +5,6 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isInternalEmail } from '@/lib/userAccess';
-import { ListPicker } from '@/components/ListPicker';
 import { MultiFilter } from '@/components/MultiFilter';
 import { hubspotToMs } from '@/lib/hubspotDate';
 import type { InspectionSummary } from '@/lib/types';
@@ -62,7 +61,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const [items, setItems] = useState<InspectionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [inspectorScope, setInspectorScope] = useState('all');   // internal only
+  const [inspectorFilter, setInspectorFilter] = useState<string[]>([]); // internal only (multi)
   const [regionFilter, setRegionFilter] = useState<string[]>([]); // internal only
   const [typeFilter, setTypeFilter] = useState<string[]>([]);     // internal only
   const [statusFilter, setStatusFilter] = useState<string[]>([]); // from the clickable legend (everyone)
@@ -100,12 +99,21 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   // see ONLY their own assignments; internal users see all and can filter by
   // region + inspector. Past-due applies to everyone.
   const thirtyAgoISO = toISO(addDays(today, -COMPLETED_WINDOW_DAYS));
-  // The calendar day for an inspection: completed → submitted (falls back to
-  // completed/approved) date; open → scheduled date.
-  const dayOf = (i: InspectionSummary): string | null =>
-    statusKey(i.status) === 'completed'
-      ? schedDay(i.submittedAt || i.completedAt || i.approvedAt)
-      : schedDay(i.scheduledDate);
+  // The timestamp (ms) an inspection lands on: completed → when it went to PENDING
+  // APPROVAL (submittedAt), falling back to the completed date; open → scheduled date.
+  // (Handles rate-card/scope inspections, which carry a submitted date, uniformly.)
+  const whenMs = (i: InspectionSummary): number | null =>
+    statusKey(i.status) === 'completed' ? hubspotToMs(i.submittedAt || i.completedAt) : hubspotToMs(i.scheduledDate);
+  const dayOf = (i: InspectionSummary): string | null => { const ms = whenMs(i); return ms == null ? null : toISO(new Date(ms)); };
+  // H:MM AM/PM for a real time-of-day; null for date-only values (midnight).
+  const timeLabel = (i: InspectionSummary): string | null => {
+    const ms = whenMs(i); if (ms == null) return null;
+    const d = new Date(ms);
+    if (d.getHours() === 0 && d.getMinutes() === 0) return null;
+    const ap = d.getHours() >= 12 ? 'PM' : 'AM';
+    const h = d.getHours() % 12 || 12;
+    return `${h}:${String(d.getMinutes()).padStart(2, '0')} ${ap}`;
+  };
 
   // Base set the filters operate over: OPEN (scheduled/in_progress) always, plus
   // COMPLETED from the last 30 days when the toggle is on. Scoped to the viewer.
@@ -124,23 +132,20 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const passStatus = (i: InspectionSummary) => statusFilter.length === 0 || statusFilter.includes(kOf(i));
   const passType = (i: InspectionSummary) => typeFilter.length === 0 || typeFilter.includes(i.templateType || '');
   const passRegion = (i: InspectionSummary) => regionFilter.length === 0 || regionFilter.includes(i.regionSnapshot || '');
-  const passInspector = (i: InspectionSummary) => inspectorScope === 'all' || (i.inspectorName || '') === inspectorScope;
+  const passInspector = (i: InspectionSummary) => inspectorFilter.length === 0 || inspectorFilter.includes(i.inspectorName || '');
 
   const scoped = useMemo(() => openBase.filter((i) => passStatus(i) && passType(i) && passRegion(i) && passInspector(i)),
-    [openBase, statusFilter, typeFilter, regionFilter, inspectorScope]);
+    [openBase, statusFilter, typeFilter, regionFilter, inspectorFilter]);
 
   // Dynamic, interdependent option lists (faceted): each reflects what's OPEN given
   // the OTHER active filters, plus any already-selected value so it can be cleared.
   const uniq = (a: (string | null | undefined)[]) => [...new Set(a.filter(Boolean) as string[])].sort();
-  const inspectors = useMemo(() => {
-    const l = uniq(openBase.filter((i) => passStatus(i) && passType(i) && passRegion(i)).map((i) => i.inspectorName));
-    if (inspectorScope !== 'all' && !l.includes(inspectorScope)) l.push(inspectorScope);
-    return l.sort();
-  }, [openBase, statusFilter, typeFilter, regionFilter, inspectorScope]);
+  const inspectors = useMemo(() => uniq([...openBase.filter((i) => passStatus(i) && passType(i) && passRegion(i)).map((i) => i.inspectorName), ...inspectorFilter]),
+    [openBase, statusFilter, typeFilter, regionFilter, inspectorFilter]);
   const regions = useMemo(() => uniq([...openBase.filter((i) => passStatus(i) && passType(i) && passInspector(i)).map((i) => i.regionSnapshot), ...regionFilter]),
-    [openBase, statusFilter, typeFilter, inspectorScope, regionFilter]);
+    [openBase, statusFilter, typeFilter, inspectorFilter, regionFilter]);
   const templates = useMemo(() => uniq([...openBase.filter((i) => passStatus(i) && passRegion(i) && passInspector(i)).map((i) => i.templateType), ...typeFilter]),
-    [openBase, statusFilter, regionFilter, inspectorScope, typeFilter]);
+    [openBase, statusFilter, regionFilter, inspectorFilter, typeFilter]);
 
   const range = useMemo(() => {
     if (view === 'day') return { start: cursor, end: cursor };
@@ -152,6 +157,8 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const byDay = useMemo(() => {
     const m: Record<string, InspectionSummary[]> = {};
     for (const i of scoped) { const day = dayOf(i)!; (m[day] ||= []).push(i); }
+    // Order each day earliest → latest so week columns + the day view read as a route.
+    for (const arr of Object.values(m)) arr.sort((a, b) => (whenMs(a) ?? Infinity) - (whenMs(b) ?? Infinity));
     return m;
   }, [scoped]);
   const visible = useMemo(() => scoped.filter((i) => {
@@ -221,7 +228,9 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const monthCells = useMemo(() => {
     const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
     const gridStart = addDays(first, -first.getDay());
-    return Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+    const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+    const weeks = Math.ceil((first.getDay() + daysInMonth) / 7);   // 5 for most months, 6 only when needed
+    return Array.from({ length: weeks * 7 }, (_, i) => addDays(gridStart, i));
   }, [cursorISO, view]);
 
   return (
@@ -264,9 +273,9 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
                 options={regions.map((r) => ({ value: r, label: r }))} />
             </div>
             <div className="flex-1 min-w-0">
-              <ListPicker value={inspectorScope} onChange={setInspectorScope} ariaLabel="Inspector"
-                className="w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border border-gray-300 rounded-lg bg-white text-ink flex items-center justify-between"
-                options={[{ value: 'all', label: 'Inspectors' }, ...inspectors.map((n) => ({ value: n, label: n }))]} />
+              <MultiFilter label="Inspectors" selected={inspectorFilter} onChange={setInspectorFilter}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${inspectorFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                options={inspectors.map((n) => ({ value: n, label: n }))} />
             </div>
             <div className="flex-1 min-w-0">
               <MultiFilter label="Template" selected={typeFilter} onChange={setTypeFilter}
@@ -339,9 +348,10 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
 
             {view === 'day' && (
               <div className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
-                {visible.length === 0 && <div className="text-center text-gray-400 text-sm py-8">No inspections scheduled this day.</div>}
-                {[...visible].sort((a, b) => (a.propertyAddressSnapshot || '').localeCompare(b.propertyAddressSnapshot || '')).map((i) => (
-                  <Link key={i.recordId} href={`/inspection/${i.recordId}`} className="flex items-center gap-3 border border-gray-200 rounded-lg px-3 py-2 hover:border-brand/40">
+                {visible.length === 0 && <div className="text-center text-gray-400 text-sm py-8">No inspections this day.</div>}
+                {[...visible].sort((a, b) => (whenMs(a) ?? Infinity) - (whenMs(b) ?? Infinity)).map((i) => (
+                  <Link key={i.recordId} href={`/inspection/${i.recordId}`} className="flex items-center gap-2.5 border border-gray-200 rounded-lg px-3 py-2 hover:border-brand/40">
+                    <span className="w-16 shrink-0 text-right text-[11.5px] font-semibold text-gray-500 tabular-nums">{timeLabel(i) || '—'}</span>
                     <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: metaOf(i)?.hex || '#9ca3af' }} />
                     <div className="min-w-0 flex-1">
                       <div className="font-heading font-bold text-ink text-sm truncate">{i.propertyAddressSnapshot || i.inspectionName || 'Inspection'}</div>
