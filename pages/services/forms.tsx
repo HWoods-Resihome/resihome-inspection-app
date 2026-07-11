@@ -133,7 +133,7 @@ export default function FormBuilder() {
               : (
                 <section key={q.id} ref={(el) => { cardRefs.current[q.id] = el; }}
                   onPointerDown={(e) => onCardPointerDown(e, q.id)}
-                  className={`bg-white border rounded-2xl p-4 flex items-center gap-3 select-none ${q.enabled ? '' : 'opacity-60'} ${dragId === q.id ? 'border-brand ring-2 ring-brand/40 shadow-lg' : 'border-gray-200'}`}>
+                  className={`bg-white border rounded-2xl p-4 flex items-start gap-3 select-none ${q.enabled ? '' : 'opacity-60'} ${dragId === q.id ? 'border-brand ring-2 ring-brand/40 shadow-lg' : 'border-gray-200'}`}>
                   <div className="flex flex-col shrink-0 gap-1">
                     <button onClick={() => move(q.id, -1)} disabled={idx === 0} aria-label="Move up"
                       className="w-8 h-8 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50 disabled:opacity-30">
@@ -145,7 +145,7 @@ export default function FormBuilder() {
                     </button>
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="font-heading font-bold text-[15px] text-ink truncate">{q.label || <span className="text-gray-400 font-normal">Untitled question</span>}</div>
+                    <div className="font-heading font-bold text-[14px] leading-snug text-ink">{q.label || <span className="text-gray-400 font-normal">Untitled question</span>}</div>
                     <div className="text-[12px] text-gray-500 mt-0.5">{subline(q)}</div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
