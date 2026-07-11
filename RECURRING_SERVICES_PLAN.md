@@ -1128,6 +1128,33 @@ on each created Service to enforce idempotency.
   admin see the full breakdown. Enforce in every vendor-facing surface (cards,
   service/completion screen, forms, PDFs, notifications, View-as-Vendor).
 
+## 10.22 Dropdown-driven pricing + AI review flow + Services AI knowledge base
+### Dropdown answers that drive price (Form Builder)
+- New **Dropdown (options)** answer type. Each option can adjust the **vendor cost**
+  (`priceMode`: none | set-to $ | +/- delta $) — e.g. "Grass height at arrival":
+  Standard (no change) / Tall (+$15) / Overgrown (+$30). Seeded on landscaping:cut.
+- The Form Builder now mirrors the inspection builder's format: collapsed cards
+  (title + summary + On/Edit/Delete) that expand into a pink editor, with
+  Required / Require photo / Require note / Enabled — but **reorder via up/down
+  arrows** instead of section/display-order fields (owner preference). Inspection-side
+  builder changes are handled separately on `main`.
+
+### AI review flow (status pipeline)
+- New transient status **`ai_processing`** (indigo). On submit: Submitted →
+  **AI Processing** → the AI reviews photos/timing/selections → **Completed** if
+  clean, else **Review** for a human. Added to the ServiceStatus enum, labels/styles,
+  status order, and OPEN set; completion screen copy updated.
+
+### Services AI knowledge base — `/services/ai-knowledge` (admin, in the gear)
+- Admin-editable checks (add/edit/delete/toggle), each with a category, severity
+  (High/Medium/Low), and optional worktype scope. High/Medium concern → Review; all
+  clean → auto-Complete. Foundational seed (from owner criteria): realistic service
+  duration; before/after photo time spacing; both photos present & legible; GPS/
+  geofence; no reused/duplicate/wrong-property photos; grass pre-cut height matches
+  the selected tier; back yard shown; all 4 sides of the house; cleaning evidence/
+  supplies visible; pool water clarity + equipment. Preview (local state); Step 2
+  persists them and feeds the AI review prompt (analog of the scope rate-card AI KB).
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).

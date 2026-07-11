@@ -7,7 +7,8 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { ListPicker } from '@/components/ListPicker';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
-  ANSWER_TYPES, SAMPLE_FORMS, formKey, newQuestion, type ServiceQuestion, type AnswerType,
+  ANSWER_TYPES, SAMPLE_FORMS, formKey, newQuestion, newOption, answerTypeLabel,
+  type ServiceQuestion, type AnswerType, type QuestionOption,
 } from '@/lib/services/serviceForms';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -17,17 +18,30 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   return { props: {} };
 };
 
+const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
+const trig = 'w-full flex items-center justify-between gap-2 text-[13px] border border-gray-300 rounded-lg px-2.5 py-2 bg-white text-ink';
+
+// One-line summary under a collapsed question (mirrors the inspection builder).
+function subline(q: ServiceQuestion): string {
+  const bits = [answerTypeLabel(q.type), q.required ? 'required' : 'optional'];
+  if (q.type === 'select') bits.push(`${q.options?.length || 0} choices`);
+  if (q.requirePhoto) bits.push('photo');
+  if (q.trigger) bits.push('triggers follow-up');
+  return bits.join(' · ');
+}
+
 export default function FormBuilder() {
   const [forms, setForms] = useState<Record<string, ServiceQuestion[]>>(() => ({ ...SAMPLE_FORMS }));
   const [worktype, setWorktype] = useState('landscaping');
   const [subtype, setSubtype] = useState('cut');
+  const [editId, setEditId] = useState<string | null>(null);
   const key = formKey(worktype, subtype);
   const questions = forms[key] || [];
 
   const setQuestions = (next: ServiceQuestion[]) => setForms((f) => ({ ...f, [key]: next }));
   const patchQ = (id: string, p: Partial<ServiceQuestion>) => setQuestions(questions.map((q) => (q.id === id ? { ...q, ...p } : q)));
-  const addQ = () => setQuestions([...questions, newQuestion()]);
-  const delQ = (id: string) => setQuestions(questions.filter((q) => q.id !== id));
+  const delQ = (id: string) => { setQuestions(questions.filter((q) => q.id !== id)); if (editId === id) setEditId(null); };
+  const addQ = () => { const q = newQuestion(); setQuestions([...questions, q]); setEditId(q.id); };
   const move = (id: string, dir: -1 | 1) => {
     const i = questions.findIndex((q) => q.id === id);
     const j = i + dir;
@@ -39,9 +53,6 @@ export default function FormBuilder() {
 
   const worktypeOptions = useMemo(() => WORKTYPES.map((w) => ({ value: w.id, label: w.label })), []);
   const subtypeOptions = useMemo(() => subtypesFor(worktype).map((s) => ({ value: s.id, label: s.label })), [worktype]);
-
-  const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
-  const trig = 'w-full flex items-center justify-between gap-2 text-[13px] border border-gray-300 rounded-lg px-2.5 py-2 bg-white text-ink';
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -64,33 +75,46 @@ export default function FormBuilder() {
             <div className="w-40">
               <label className={lbl}>Work Type</label>
               <ListPicker value={worktype} options={worktypeOptions} ariaLabel="Work type" className={trig}
-                onChange={(v) => { setWorktype(v); setSubtype(subtypesFor(v)[0]?.id || ''); }} />
+                onChange={(v) => { setWorktype(v); setSubtype(subtypesFor(v)[0]?.id || ''); setEditId(null); }} />
             </div>
             <div className="w-40">
               <label className={lbl}>Subtype</label>
-              <ListPicker value={subtype} options={subtypeOptions} ariaLabel="Subtype" className={trig} onChange={setSubtype} />
+              <ListPicker value={subtype} options={subtypeOptions} ariaLabel="Subtype" className={trig} onChange={(v) => { setSubtype(v); setEditId(null); }} />
             </div>
-            <div className="text-[12px] text-gray-500 ml-auto">
-              Editing the form for <b className="text-ink">{worktypeLabel(worktype)} · {subtypeLabel(worktype, subtype)}</b>
-            </div>
+            <button onClick={addQ} className="ml-auto bg-brand text-white font-heading font-bold text-sm rounded-xl px-4 py-2.5">+ Add Question</button>
           </div>
+          <p className="text-[12px] text-gray-500 mt-3">
+            Questions for <b className="text-ink">{worktypeLabel(worktype)} · {subtypeLabel(worktype, subtype)}</b>. Changes will sync to the reused Question / Answer objects and apply to new services (Step 2).
+          </p>
         </section>
 
-        {/* Question list */}
         <div className="space-y-3">
           {questions.map((q, idx) => (
-            <QuestionCard key={q.id} q={q} idx={idx} total={questions.length}
-              onPatch={(p) => patchQ(q.id, p)} onDelete={() => delQ(q.id)} onMove={(d) => move(q.id, d)}
-              lbl={lbl} trig={trig} />
+            editId === q.id
+              ? <QuestionEditor key={q.id} q={q} onPatch={(p) => patchQ(q.id, p)} onClose={() => setEditId(null)} onDelete={() => delQ(q.id)} />
+              : (
+                <section key={q.id} className={`bg-white border border-gray-200 rounded-2xl p-4 flex items-center gap-3 ${q.enabled ? '' : 'opacity-60'}`}>
+                  <div className="flex flex-col shrink-0">
+                    <button onClick={() => move(q.id, -1)} disabled={idx === 0} aria-label="Move up" className="w-6 h-5 grid place-items-center rounded text-gray-400 hover:text-brand disabled:opacity-30 leading-none">↑</button>
+                    <button onClick={() => move(q.id, 1)} disabled={idx === questions.length - 1} aria-label="Move down" className="w-6 h-5 grid place-items-center rounded text-gray-400 hover:text-brand disabled:opacity-30 leading-none">↓</button>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-heading font-bold text-[15px] text-ink truncate">{q.label || <span className="text-gray-400 font-normal">Untitled question</span>}</div>
+                    <div className="text-[12px] text-gray-500 mt-0.5">{subline(q)}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button onClick={() => patchQ(q.id, { enabled: !q.enabled })}
+                      className={`text-[12px] font-heading font-semibold px-2.5 py-1.5 rounded-lg border ${q.enabled ? 'text-emerald-700 border-emerald-300 bg-emerald-50' : 'text-gray-500 border-gray-300 bg-white'}`}>{q.enabled ? 'On' : 'Off'}</button>
+                    <button onClick={() => setEditId(q.id)} className="text-[12px] font-heading font-semibold px-2.5 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:border-brand/50">Edit</button>
+                    <button onClick={() => delQ(q.id)} className="text-[12px] font-heading font-semibold px-2.5 py-1.5 rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50">Delete</button>
+                  </div>
+                </section>
+              )
           ))}
           {questions.length === 0 && (
-            <div className="text-center text-gray-400 text-sm py-10 border border-dashed border-gray-300 rounded-2xl">
-              No questions yet for this work type + subtype.
-            </div>
+            <div className="text-center text-gray-400 text-sm py-10 border border-dashed border-gray-300 rounded-2xl">No questions yet — tap “+ Add Question”.</div>
           )}
         </div>
-
-        <button onClick={addQ} className="w-full text-brand bg-brand/5 border border-dashed border-brand/40 rounded-xl py-2.5 text-[13px] font-heading font-bold">+ Add Question</button>
 
         <div className="sticky bottom-0 bg-gray-50 pt-2 pb-2">
           <button className="w-full rounded-2xl py-3 font-heading font-bold text-sm bg-brand text-white">Save Form</button>
@@ -101,54 +125,67 @@ export default function FormBuilder() {
   );
 }
 
-function QuestionCard({ q, idx, total, onPatch, onDelete, onMove, lbl, trig }: {
-  q: ServiceQuestion; idx: number; total: number;
-  onPatch: (p: Partial<ServiceQuestion>) => void; onDelete: () => void; onMove: (d: -1 | 1) => void;
-  lbl: string; trig: string;
+// The expanded editor (pink) — mirrors the inspection builder, minus section/display
+// order (we reorder with the up/down arrows on each card instead).
+function QuestionEditor({ q, onPatch, onClose, onDelete }: {
+  q: ServiceQuestion; onPatch: (p: Partial<ServiceQuestion>) => void; onClose: () => void; onDelete: () => void;
 }) {
-  const toggle = (on: boolean, onText = 'Yes', offText = 'No', onClick: (v: boolean) => void = () => {}) => (
-    <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[12px] font-heading font-semibold">
-      <button type="button" onClick={() => onClick(true)} className={`px-3 py-1 rounded-md ${on ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>{onText}</button>
-      <button type="button" onClick={() => onClick(false)} className={`px-3 py-1 rounded-md ${!on ? 'bg-white text-ink shadow-sm' : 'text-gray-600'}`}>{offText}</button>
-    </div>
+  const check = (label: string, on: boolean, set: (v: boolean) => void) => (
+    <label className="flex items-center gap-2 text-[13px] text-ink cursor-pointer">
+      <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} /> {label}
+    </label>
   );
   return (
-    <section className="bg-white border border-gray-200 rounded-2xl p-4 relative">
-      <div className="absolute top-3 right-3 flex items-center gap-1">
-        <button onClick={() => onMove(-1)} disabled={idx === 0} aria-label="Move up" className="w-7 h-7 grid place-items-center rounded-md text-gray-400 hover:text-brand disabled:opacity-30">↑</button>
-        <button onClick={() => onMove(1)} disabled={idx === total - 1} aria-label="Move down" className="w-7 h-7 grid place-items-center rounded-md text-gray-400 hover:text-brand disabled:opacity-30">↓</button>
-        <button onClick={onDelete} aria-label="Delete question" className="w-7 h-7 grid place-items-center rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 text-lg leading-none">×</button>
-      </div>
-
-      <label className={lbl}>Question {idx + 1}</label>
-      <input value={q.label} onChange={(e) => onPatch({ label: e.target.value })} placeholder="Question text…"
-        className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand mb-3" />
+    <section className="bg-pink-50 border border-brand/40 rounded-2xl p-4 space-y-3">
+      <textarea value={q.label} onChange={(e) => onPatch({ label: e.target.value })} rows={2} placeholder="Question text…"
+        className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand" />
 
       <div className="flex flex-wrap items-end gap-4">
-        <div className="w-44">
+        <div className="w-48">
           <label className={lbl}>Answer Type</label>
           <ListPicker value={q.type} options={ANSWER_TYPES.map((a) => ({ value: a.value, label: a.label }))} ariaLabel="Answer type" className={trig}
-            onChange={(v) => onPatch({ type: v as AnswerType })} />
-        </div>
-        <div>
-          <label className={lbl}>Required</label>
-          {toggle(q.required, 'Yes', 'No', (v) => onPatch({ required: v }))}
-        </div>
-        <div>
-          <label className={lbl}>Notes Field</label>
-          {toggle(q.allowNotes, 'On', 'Off', (v) => onPatch({ allowNotes: v }))}
+            onChange={(v) => onPatch({ type: v as AnswerType, ...(v === 'select' && !q.options?.length ? { options: [newOption()] } : {}) })} />
         </div>
       </div>
 
-      {/* Trigger: an answer that spawns a follow-up Estimated service with its own photos. */}
-      <div className="mt-3 border-t border-gray-100 pt-3">
+      {q.type === 'select' && (
+        <div>
+          <label className={lbl}>Choices <span className="text-gray-400 normal-case font-normal">— a selection can adjust the vendor cost</span></label>
+          <div className="space-y-1.5">
+            {(q.options || []).map((o) => {
+              const setOpt = (p: Partial<QuestionOption>) => onPatch({ options: (q.options || []).map((x) => (x.id === o.id ? { ...x, ...p } : x)) });
+              return (
+                <div key={o.id} className="flex flex-nowrap items-center gap-1.5">
+                  <input value={o.label} onChange={(e) => setOpt({ label: e.target.value })} placeholder="Option label…"
+                    className="flex-1 min-w-0 text-[13px] border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white text-ink focus:outline-none focus:border-brand" />
+                  <ListPicker value={o.priceMode} ariaLabel="Price effect" className={`${trig} w-28 shrink-0`}
+                    options={[{ value: 'none', label: 'No price' }, { value: 'delta', label: '+/− vendor $' }, { value: 'set', label: 'Set vendor $' }]}
+                    onChange={(v) => setOpt({ priceMode: v as QuestionOption['priceMode'] })} />
+                  {o.priceMode !== 'none' && (
+                    <div className="flex items-center shrink-0"><span className="text-gray-400 mr-0.5 text-[13px]">$</span>
+                      <input value={o.priceValue} inputMode="decimal" onChange={(e) => setOpt({ priceValue: e.target.value.replace(/[^\d.\-]/g, '') })} placeholder="0"
+                        className="w-14 text-[13px] text-center tabular-nums border border-gray-300 rounded-lg px-1.5 py-1.5 bg-white text-ink focus:outline-none focus:border-brand" /></div>
+                  )}
+                  <button onClick={() => onPatch({ options: (q.options || []).filter((x) => x.id !== o.id) })} aria-label="Remove option"
+                    className="shrink-0 w-7 h-7 grid place-items-center rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 text-lg leading-none">×</button>
+                </div>
+              );
+            })}
+          </div>
+          <button onClick={() => onPatch({ options: [...(q.options || []), newOption()] })}
+            className="mt-2 text-[12px] font-semibold text-gray-600 border border-gray-300 rounded-lg px-2.5 py-1 bg-white hover:border-brand/40">+ Add Choice</button>
+        </div>
+      )}
+
+      {/* Trigger — an answer that spawns a follow-up Estimated service with its own photos. */}
+      <div className="border-t border-brand/20 pt-3">
         <label className="flex items-center gap-2 cursor-pointer mb-2">
           <input type="checkbox" checked={!!q.trigger}
             onChange={(e) => onPatch({ trigger: e.target.checked ? { whenAnswer: q.type === 'yesno' ? 'no' : 'yes', worktype: 'landscaping', subtype: 'cut', requirePhotos: true } : undefined })} />
-          <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Triggers a Follow-Up Service <span className="normal-case font-normal text-gray-400">(created as Estimated)</span></span>
+          <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500">Triggers a Follow-Up Service <span className="normal-case font-normal text-gray-400">(created as Estimated)</span></span>
         </label>
         {q.trigger && (
-          <div className="flex flex-wrap items-end gap-2 pl-1">
+          <div className="flex flex-wrap items-end gap-2">
             {q.type === 'yesno' && (
               <div>
                 <label className={lbl}>When answer is</label>
@@ -176,6 +213,19 @@ function QuestionCard({ q, idx, total, onPatch, onDelete, onMove, lbl, trig }: {
             </label>
           </div>
         )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-brand/20 pt-3">
+        {check('Required', q.required, (v) => onPatch({ required: v }))}
+        {check('Require photo', q.requirePhoto, (v) => onPatch({ requirePhoto: v }))}
+        {check('Require note', q.requireNote, (v) => onPatch({ requireNote: v }))}
+        {check('Enabled', q.enabled, (v) => onPatch({ enabled: v }))}
+      </div>
+
+      <div className="flex items-center justify-end gap-2">
+        <button onClick={onDelete} className="mr-auto text-[12px] font-heading font-semibold text-red-600 hover:underline">Delete</button>
+        <button onClick={onClose} className="text-sm font-heading font-semibold text-gray-600 px-4 py-2">Cancel</button>
+        <button onClick={onClose} className="text-sm font-heading font-bold text-white bg-brand rounded-lg px-5 py-2">Save</button>
       </div>
     </section>
   );

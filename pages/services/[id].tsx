@@ -68,9 +68,9 @@ export default function ServiceComplete({ svc }: { svc: SampleService }) {
       <main className="max-w-2xl mx-auto w-full px-4 py-4 flex-1 space-y-4">
         {submitted ? (
           <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center">
-            <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
-            <div className="font-heading font-extrabold text-lg text-ink">Completion submitted</div>
-            <p className="text-sm text-gray-500 mt-1">This work order moves to <b>Submitted</b> for coordinator review. (Preview — nothing saved.)</p>
+            <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
+            <div className="font-heading font-extrabold text-lg text-ink">Submitted — AI Processing</div>
+            <p className="text-sm text-gray-500 mt-1">The AI reviews the photos, timing, and selections. If everything looks clean it moves to <b>Completed</b>; if anything needs a human it moves to <b>Review</b>. (Preview — nothing saved.)</p>
             <Link href="/services" className="inline-block mt-4 bg-brand text-white font-heading font-bold text-sm rounded-xl px-5 py-2.5">Back to Services</Link>
           </div>
         ) : (

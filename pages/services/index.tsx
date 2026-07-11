@@ -22,12 +22,13 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 
 const STATUS_LABEL: Record<ServiceStatus, string> = {
   estimated: 'Estimated', assigned: 'Assigned', submitted: 'Submitted',
-  review: 'Review', completed: 'Completed', canceled: 'Canceled',
+  ai_processing: 'AI Processing', review: 'Review', completed: 'Completed', canceled: 'Canceled',
 };
 const STATUS_STYLE: Record<ServiceStatus, string> = {
   estimated: 'bg-gray-100 text-gray-700 border-gray-300',
   assigned: 'bg-sky-100 text-sky-800 border-sky-300',
   submitted: 'bg-amber-100 text-amber-800 border-amber-300',
+  ai_processing: 'bg-indigo-100 text-indigo-800 border-indigo-300',
   review: 'bg-purple-100 text-purple-800 border-purple-300',
   completed: 'bg-green-100 text-green-800 border-green-300',
   canceled: 'bg-gray-100 text-gray-500 border-gray-300 line-through',
@@ -40,7 +41,7 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: 'region', label: 'Region' }, { value: 'community', label: 'Community' },
   { value: 'status', label: 'Status' },
 ];
-const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'review'];
+const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'ai_processing', 'review'];
 const fmtDue = (iso: string) => {
   const d = new Date(iso + 'T00:00:00');
   return isNaN(d.getTime()) ? iso : `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${String(d.getUTCFullYear()).slice(-2)}`;
@@ -164,6 +165,7 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
                     <div className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Admin</div>
                     <Link href="/services/rules" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Rules Engine</Link>
                     <Link href="/services/forms" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Form Builder</Link>
+                    <Link href="/services/ai-knowledge" className="block px-4 py-2.5 text-sm hover:bg-gray-50">AI Knowledge</Link>
                     <Link href="/services?as=vendor" className="block px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">View as Vendor</Link>
                   </div></>)}
               </div>
