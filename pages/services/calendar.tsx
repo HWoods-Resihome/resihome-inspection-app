@@ -189,10 +189,10 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
                   <button key={i} onClick={() => { setCursorISO(toISO(d)); setView('day'); }}
                     className={`min-h-[64px] border-b border-r border-gray-100 p-1 text-left align-top ${inMonth ? 'bg-white' : 'bg-gray-50'} hover:bg-brand/5`}>
                     <div className={`text-[11px] font-semibold mb-0.5 ${isToday ? 'text-white bg-brand rounded-full w-5 h-5 grid place-items-center' : inMonth ? 'text-ink' : 'text-gray-400'}`}>{d.getDate()}</div>
-                    <div className="flex flex-wrap gap-0.5">
+                    <div className="flex gap-0.5">
                       {items.slice(0, 4).map((s) => <span key={s.id} className="w-2 h-2 rounded-full" style={{ background: wtOf(s.worktype).hex }} title={s.address} />)}
-                      {items.length > 4 && <span className="text-[9px] text-gray-400 font-semibold">+{items.length - 4}</span>}
                     </div>
+                    {items.length > 4 && <div className="text-[9px] text-gray-400 font-semibold leading-none mt-0.5">+{items.length - 4}</div>}
                   </button>
                 );
               })}
