@@ -7,7 +7,8 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { ListPicker } from '@/components/ListPicker';
-import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
+import { MultiFilter } from '@/components/MultiFilter';
+import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { SAMPLE_SERVICES, SAMPLE_VENDORS, REFERENCE_TODAY, type SampleService } from '@/lib/services/sampleData';
 import type { MapItem } from '@/components/ServicesMap';
 
@@ -49,12 +50,18 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
   const [view, setView] = useState<View>('month');
   const [cursorISO, setCursorISO] = useState(REFERENCE_TODAY);
   const [vendorScope, setVendorScope] = useState('all');
+  const [typeFilter, setTypeFilter] = useState<string[]>([]);
+  const [pastDueOnly, setPastDueOnly] = useState(false);
   const cursor = parse(cursorISO);
   const today = parse(REFERENCE_TODAY);
 
-  // Scope: hide canceled; optionally narrow to one vendor (the vendor's own view).
+  // Only OPEN work belongs on the schedule/map — exclude Completed and Canceled.
+  // Then optionally narrow by vendor (route view), worktype, and past-due.
   const scoped = useMemo(() => SAMPLE_SERVICES.filter((s) =>
-    s.status !== 'canceled' && (vendorScope === 'all' || s.vendor === vendorScope)), [vendorScope]);
+    s.status !== 'canceled' && s.status !== 'completed'
+    && (vendorScope === 'all' || s.vendor === vendorScope)
+    && (typeFilter.length === 0 || typeFilter.includes(s.worktype))
+    && (!pastDueOnly || s.dueDate < REFERENCE_TODAY)), [vendorScope, typeFilter, pastDueOnly]);
 
   // Visible date range for the current view.
   const range = useMemo(() => {
@@ -120,18 +127,31 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
       </header>
 
       <main className="max-w-3xl mx-auto w-full px-4 py-3 space-y-3">
-        {/* View toggle + vendor scope */}
+        {/* View toggle */}
         <div className="flex items-center gap-2">
           <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
             {(['month', 'week', 'day'] as View[]).map((v) => (
               <button key={v} onClick={() => setView(v)} className={`px-3 py-1.5 rounded-md capitalize ${view === v ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>{v}</button>
             ))}
           </div>
-          <div className="ml-auto w-40">
+        </div>
+
+        {/* Filters: Type + Vendor scope + Past Due — filter both the calendar and the map. */}
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <MultiFilter label="Type" selected={typeFilter} onChange={setTypeFilter}
+              className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+              options={WORKTYPES.map((w) => ({ value: w.id, label: w.label }))} />
+          </div>
+          <div className="flex-1 min-w-0">
             <ListPicker value={vendorScope} onChange={setVendorScope} ariaLabel="Viewing as"
               className="w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border border-gray-300 rounded-lg bg-white text-ink flex items-center justify-between"
               options={[{ value: 'all', label: canSeeAll ? 'All vendors' : 'My services' }, ...SAMPLE_VENDORS.map((v) => ({ value: v, label: v }))]} />
           </div>
+          <button type="button" onClick={() => setPastDueOnly((v) => !v)}
+            className={`shrink-0 text-[12px] font-heading font-semibold px-3 py-1.5 rounded-lg border transition ${pastDueOnly ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-700 border-gray-300 hover:border-red-300'}`}>
+            Past Due
+          </button>
         </div>
 
         {/* Period nav */}
