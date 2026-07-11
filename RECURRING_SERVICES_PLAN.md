@@ -1079,10 +1079,14 @@ on each created Service to enforce idempotency.
   (`pages/index.tsx`, NOT flag-gated — it's a core inspections feature).
 - Client-fetches the live list from `/api/inspections?pageSize=250&facets=0`; buckets
   by `scheduledDate` (normalized with `hubspotToMs` — HubSpot returns mixed epoch-ms/
-  ISO). Shows OPEN only (scheduled / in_progress / pending_approval); drops
-  completed + cancelled. Month/Week/Day, colored by status.
-- Filters: Type (templateType) + Inspector scope ("Viewing as") + Past Due — filter
-  calendar and map together.
+  ISO). **Open = Scheduled + In Progress only** (pending-approval, completed, and
+  cancelled are excluded). Month/Week/Day, colored by status.
+- **Internal users** (isInternalEmail) see ALL open inspections and can filter the
+  calendar + map by **Region** (`regionSnapshot`) and **Inspector** (`inspectorName`),
+  plus a Past Due toggle. **External users** see ONLY their own assignments
+  (matched on `inspectorEmail`/`inspectorName` from the session) — no region/inspector
+  filters, just Past Due. Enforced via `getServerSideProps` (session → isInternal +
+  identity).
 - Map reuses `components/ServicesMap.tsx`. Inspections have **no coordinates**, so it
   **geocodes** each visible inspection via `/api/geocode?propertyId=&address=` (small
   client concurrency, cached by record id); shows "N/M mapped" (some addresses may

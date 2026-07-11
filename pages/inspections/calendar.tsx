@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
+import type { GetServerSideProps } from 'next';
+import type { NextApiRequest } from 'next';
+import { getSessionFromRequest } from '@/lib/auth';
+import { isInternalEmail } from '@/lib/userAccess';
 import { ListPicker } from '@/components/ListPicker';
 import { MultiFilter } from '@/components/MultiFilter';
 import { hubspotToMs } from '@/lib/hubspotDate';
 import type { InspectionSummary } from '@/lib/types';
 import type { MapItem } from '@/components/ServicesMap';
+
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
+  const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
+  if (!session?.email) return { redirect: { destination: '/login', permanent: false } };
+  return { props: { isInternal: isInternalEmail(session.email), myEmail: session.email, myName: session.name || '' } };
+};
 
 // Map is client-only (Leaflet touches window).
 const ServicesMap = dynamic(() => import('@/components/ServicesMap'), {
@@ -18,11 +28,10 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 const MON_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-// Open-status buckets (scheduled/in_progress/pending_approval) with colors.
+// Open-status buckets shown on the calendar/map: Scheduled + In Progress only.
 const STATUS_META: Record<string, { label: string; hex: string; chip: string }> = {
   scheduled: { label: 'Scheduled', hex: '#2563eb', chip: 'bg-blue-100 text-blue-800 border-blue-300' },
   in_progress: { label: 'In Progress', hex: '#d97706', chip: 'bg-amber-100 text-amber-800 border-amber-300' },
-  pending_approval: { label: 'Pending Approval', hex: '#7c3aed', chip: 'bg-purple-100 text-purple-800 border-purple-300' },
 };
 function statusKey(s?: string): 'scheduled' | 'in_progress' | 'pending_approval' | 'completed' | null {
   const x = (s || '').trim().toLowerCase();
@@ -41,15 +50,18 @@ const sameYMD = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.g
 // scheduledDate (raw HubSpot) → local YYYY-MM-DD (or null).
 const schedDay = (v: string | null | undefined): string | null => { const ms = hubspotToMs(v); return ms == null ? null : toISO(new Date(ms)); };
 
-export default function InspectionsCalendar() {
+export default function InspectionsCalendar({ isInternal, myEmail, myName }: { isInternal: boolean; myEmail: string; myName: string }) {
   const [view, setView] = useState<View>('month');
   const [items, setItems] = useState<InspectionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [inspectorScope, setInspectorScope] = useState('all');
-  const [typeFilter, setTypeFilter] = useState<string[]>([]);
+  const [inspectorScope, setInspectorScope] = useState('all');   // internal only
+  const [regionFilter, setRegionFilter] = useState<string[]>([]); // internal only
   const [pastDueOnly, setPastDueOnly] = useState(false);
   const [coords, setCoords] = useState<Record<string, { lat: number; lng: number } | null>>({});
+  const mine = (i: InspectionSummary) =>
+    (!!i.inspectorEmail && i.inspectorEmail.toLowerCase() === myEmail.toLowerCase()) ||
+    (!!myName && (i.inspectorName || '') === myName);
 
   const todayISO = toISO(new Date());
   const [cursorISO, setCursorISO] = useState(todayISO);
@@ -75,21 +87,27 @@ export default function InspectionsCalendar() {
     return () => { cancelled = true; };
   }, []);
 
-  // Only OPEN inspections with a scheduled date belong on the calendar; then
-  // narrow by inspector (route view), template type, and past-due.
+  // Open = Scheduled + In Progress only, with a scheduled date. External users
+  // see ONLY their own assignments; internal users see all and can filter by
+  // region + inspector. Past-due applies to everyone.
   const scoped = useMemo(() => items.filter((i) => {
     const k = statusKey(i.status);
-    if (k === null || k === 'completed') return false;      // drop completed + cancelled
+    if (k !== 'scheduled' && k !== 'in_progress') return false;
     const day = schedDay(i.scheduledDate);
     if (!day) return false;
-    if (inspectorScope !== 'all' && (i.inspectorName || '') !== inspectorScope) return false;
-    if (typeFilter.length && !typeFilter.includes(i.templateType || '')) return false;
+    if (!isInternal) { if (!mine(i)) return false; }
+    else {
+      if (inspectorScope !== 'all' && (i.inspectorName || '') !== inspectorScope) return false;
+      if (regionFilter.length && !regionFilter.includes(i.regionSnapshot || '')) return false;
+    }
     if (pastDueOnly && !(day < todayISO)) return false;
     return true;
-  }), [items, inspectorScope, typeFilter, pastDueOnly, todayISO]);
+  }), [items, isInternal, inspectorScope, regionFilter, pastDueOnly, todayISO]);
 
-  const inspectors = useMemo(() => [...new Set(items.map((i) => i.inspectorName).filter(Boolean) as string[])].sort(), [items]);
-  const templates = useMemo(() => [...new Set(items.map((i) => i.templateType).filter(Boolean) as string[])].sort(), [items]);
+  // Filter option lists (internal only) — derived from the visible-to-me set.
+  const forLists = useMemo(() => isInternal ? items : items.filter(mine), [items, isInternal]);
+  const inspectors = useMemo(() => [...new Set(forLists.map((i) => i.inspectorName).filter(Boolean) as string[])].sort(), [forLists]);
+  const regions = useMemo(() => [...new Set(forLists.map((i) => i.regionSnapshot).filter(Boolean) as string[])].sort(), [forLists]);
 
   const range = useMemo(() => {
     if (view === 'day') return { start: cursor, end: cursor };
@@ -195,18 +213,25 @@ export default function InspectionsCalendar() {
           </div>
         </div>
 
-        {/* Filters: Type + Inspector scope + Past Due — filter calendar and map. */}
+        {/* Filters. Internal: Region + Inspector + Past Due. External: their own
+            assignments only (no region/inspector), just a Past Due toggle. */}
         <div className="flex items-center gap-2">
-          <div className="flex-1 min-w-0">
-            <MultiFilter label="Type" selected={typeFilter} onChange={setTypeFilter}
-              className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
-              options={templates.map((t) => ({ value: t, label: t }))} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <ListPicker value={inspectorScope} onChange={setInspectorScope} ariaLabel="Viewing as"
-              className="w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border border-gray-300 rounded-lg bg-white text-ink flex items-center justify-between"
-              options={[{ value: 'all', label: 'All inspectors' }, ...inspectors.map((n) => ({ value: n, label: n }))]} />
-          </div>
+          {isInternal ? (
+            <>
+              <div className="flex-1 min-w-0">
+                <MultiFilter label="Region" selected={regionFilter} onChange={setRegionFilter}
+                  className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${regionFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                  options={regions.map((r) => ({ value: r, label: r }))} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <ListPicker value={inspectorScope} onChange={setInspectorScope} ariaLabel="Inspector"
+                  className="w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border border-gray-300 rounded-lg bg-white text-ink flex items-center justify-between"
+                  options={[{ value: 'all', label: 'All inspectors' }, ...inspectors.map((n) => ({ value: n, label: n }))]} />
+              </div>
+            </>
+          ) : (
+            <span className="flex-1 text-[12px] font-heading font-semibold text-gray-500">Your assigned inspections</span>
+          )}
           <button type="button" onClick={() => setPastDueOnly((v) => !v)}
             className={`shrink-0 text-[12px] font-heading font-semibold px-3 py-1.5 rounded-lg border transition ${pastDueOnly ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-700 border-gray-300 hover:border-red-300'}`}>
             Past Due
