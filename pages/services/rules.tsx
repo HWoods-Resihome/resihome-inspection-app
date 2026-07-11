@@ -28,8 +28,9 @@ interface Coverage {
   regionsByPortfolio: Record<string, { key: string; count: number }[]>;
   regions: { key: string; count: number }[];
   communities: { id: string; name: string; units: number }[];
+  statuses: { label: string; value: string }[];   // real Property status enum (enrollment values)
 }
-const EMPTY_COVERAGE: Coverage = { portfolios: [], regionsByPortfolio: {}, regions: [], communities: [] };
+const EMPTY_COVERAGE: Coverage = { portfolios: [], regionsByPortfolio: {}, regions: [], communities: [], statuses: [] };
 // A single Property row for the 'list'-mode drill-down (loaded on demand).
 interface CoverageProp { id: string; address: string; locality: string; region: string; portfolio: string; status: string; }
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -256,7 +257,7 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
     fetch('/api/services/coverage').then((r) => r.json()).then((d) => {
       if (alive && d && !d.error) setCoverage({
         portfolios: d.portfolios || [], regionsByPortfolio: d.regionsByPortfolio || {},
-        regions: d.regions || [], communities: d.communities || [],
+        regions: d.regions || [], communities: d.communities || [], statuses: d.statuses || [],
       });
     }).catch(() => {});
     return () => { alive = false; };
@@ -331,8 +332,14 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
     if (!rule || rule.scope !== 'property') return [] as { key: string; count: number }[];
     const m = new Map<string, number>();
     for (const pf of rule.portfolios) for (const x of (coverage.regionsByPortfolio[pf] || [])) m.set(x.key, (m.get(x.key) || 0) + x.count);
-    return [...m.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+    return [...m.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => a.key.localeCompare(b.key));
   }, [rule, coverage]);
+  // Enrollment/stop VALUE options: real Property status enum for "Property Status",
+  // else the curated sample list (Deal Stage etc., wired to those objects later).
+  const valueOptsFor = (field: string): { value: string; label: string }[] =>
+    field === 'Property Status' && coverage.statuses.length
+      ? coverage.statuses.map((s) => ({ value: s.value, label: s.label }))
+      : optsFor(field).map((o) => ({ value: o, label: o }));
   const applicableProps = coverageProps;   // server-filtered to the selected portfolios + regions
   const visibleProps = applicableProps.filter((p) => !propSearch.trim() || `${p.address} ${p.region}`.toLowerCase().includes(propSearch.trim().toLowerCase()));
   const isPropOn = (id: string) => !!rule && (rule.propsMode === 'all' || rule.includedProps.includes(id));
@@ -866,14 +873,14 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <ListPicker value={rule.enrollField} ariaLabel="Enrollment field" className={pick}
                 options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
-                onChange={(v) => patch({ enrollField: v, enrollVal: optsFor(v)[0] || '' })} />
+                onChange={(v) => patch({ enrollField: v, enrollVal: valueOptsFor(v)[0]?.value || '' })} />
               <ListPicker value={rule.enrollOp} ariaLabel="Operator" className={pick}
                 options={OPS.map((o) => ({ value: o, label: o }))} onChange={(v) => patch({ enrollOp: v })} />
               <ListPicker value={rule.enrollVal} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
-                options={optsFor(rule.enrollField).map((o) => ({ value: o, label: o }))} onChange={(v) => patch({ enrollVal: v })} />
+                options={valueOptsFor(rule.enrollField)} onChange={(v) => patch({ enrollVal: v })} />
             </div>
             <label className="flex items-center gap-2 mb-2 cursor-pointer">
-              <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked, ...(e.target.checked && !rule.stopVal ? { stopVal: optsFor(rule.stopField)[0] || '' } : {}) })} />
+              <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked, ...(e.target.checked && !rule.stopVal ? { stopVal: valueOptsFor(rule.stopField)[0]?.value || '' } : {}) })} />
               <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Stop Criteria <span className="normal-case font-normal text-gray-400">(optional)</span></span>
             </label>
             {rule.stopEnabled && (
@@ -888,11 +895,11 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
                   <div className="flex flex-wrap items-center gap-2">
                     <ListPicker value={rule.stopField} ariaLabel="Stop field" className={pick}
                       options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
-                      onChange={(v) => patch({ stopField: v, stopVal: optsFor(v)[0] || '' })} />
+                      onChange={(v) => patch({ stopField: v, stopVal: valueOptsFor(v)[0]?.value || '' })} />
                     <ListPicker value={rule.stopOp} ariaLabel="Operator" className={pick}
                       options={OPS.map((o) => ({ value: o, label: o }))} onChange={(v) => patch({ stopOp: v })} />
                     <ListPicker value={rule.stopVal} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
-                      options={optsFor(rule.stopField).map((o) => ({ value: o, label: o }))} onChange={(v) => patch({ stopVal: v })} />
+                      options={valueOptsFor(rule.stopField)} onChange={(v) => patch({ stopVal: v })} />
                   </div>
                 )}
                 {rule.stopMode === 'date' && (

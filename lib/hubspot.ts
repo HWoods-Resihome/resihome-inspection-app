@@ -827,12 +827,28 @@ export async function fetchPropertyCoverage(cap = 6000): Promise<CoverageCatalog
     } while (after);
   } catch (e) { console.warn('[coverage] scan failed:', e); if (!scanned) return null; }
 
-  const sortDesc = (m: Map<string, number>) => [...m.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  const sortAlpha = (m: Map<string, number>) => [...m.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => a.key.localeCompare(b.key));
   const regionsByPortfolio: Record<string, { key: string; count: number }[]> = {};
-  for (const [p, m] of pfRg.entries()) regionsByPortfolio[p] = sortDesc(m);
-  const data: CoverageCatalog = { portfolios: sortDesc(pf), regionsByPortfolio, regions: sortDesc(rg), scanned, capped };
+  for (const [p, m] of pfRg.entries()) regionsByPortfolio[p] = sortAlpha(m);
+  const data: CoverageCatalog = { portfolios: sortAlpha(pf), regionsByPortfolio, regions: sortAlpha(rg), scanned, capped };
   _coverageCache = { at: Date.now(), cap, data };
   return data;
+}
+
+// Property `status` enum options (label + stored value) for the rules-engine
+// enrollment/stop value picker. Cached for the process lifetime (enum is stable).
+let _statusOptsCache: { label: string; value: string }[] | null = null;
+export async function fetchPropertyStatusOptions(): Promise<{ label: string; value: string }[]> {
+  if (_statusOptsCache) return _statusOptsCache;
+  const { property: typeId } = typeIds();
+  try {
+    const def = await hubspotFetch(`/crm/v3/properties/${typeId}/${PROPERTY_STATUS_PROPERTY}`);
+    const opts = (def?.options || [])
+      .filter((o: any) => !o.hidden)
+      .map((o: any) => ({ label: String(o.label || o.value), value: String(o.value) }));
+    if (opts.length) _statusOptsCache = opts;
+    return opts;
+  } catch (e) { console.warn('[coverage] status options fetch failed:', e); return []; }
 }
 
 /**

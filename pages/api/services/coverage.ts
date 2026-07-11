@@ -7,7 +7,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
-import { fetchPropertyCoverage, listCommunities } from '@/lib/hubspot';
+import { fetchPropertyCoverage, listCommunities, fetchPropertyStatusOptions } from '@/lib/hubspot';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionFromRequest(req).catch(() => null);
@@ -15,15 +15,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!ok) return res.status(403).json({ error: 'Not available' });
 
   try {
-    const [coverage, communities] = await Promise.all([
+    const [coverage, communities, statuses] = await Promise.all([
       fetchPropertyCoverage().catch(() => null),
       listCommunities().catch(() => null),
+      fetchPropertyStatusOptions().catch(() => []),
     ]);
     return res.status(200).json({
       portfolios: coverage?.portfolios || [],
       regionsByPortfolio: coverage?.regionsByPortfolio || {},
       regions: coverage?.regions || [],
       communities: communities || [],
+      statuses: statuses || [],
       capped: coverage?.capped || false,
       scanned: coverage?.scanned || 0,
     });
