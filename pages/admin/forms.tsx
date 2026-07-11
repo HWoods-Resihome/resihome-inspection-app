@@ -68,6 +68,13 @@ const applyDraft = (base: Partial<Question>, d: Draft): Question => ({
 
 const ADD_NEW = '__add_new_section__';
 
+// Stable reference so it can be added/removed. React's onTouchMove is passive
+// (can't preventDefault), so during an ACTIVE drag we attach this non-passive
+// listener to stop the page scrolling and keep pointermove events flowing to the
+// drag — the reliable touch fix (setting touch-action after touchstart is too
+// late: the browser has already committed the gesture to scrolling).
+const preventTouchScroll = (e: TouchEvent) => { e.preventDefault(); };
+
 function QuestionEditor({ initial, onSave, onCancel, busy, knownSections = [] }: {
   initial: Draft; onSave: (d: Draft) => void; onCancel: () => void; busy: boolean; knownSections?: string[];
 }) {
@@ -347,6 +354,9 @@ export default function FormBuilderPage() {
       dragMeta.current.started = true;
       try { el.setPointerCapture(dragMeta.current.pointerId); } catch { /* ignore */ }
       try { (navigator as any).vibrate?.(10); } catch { /* ignore */ }
+      // Block page scrolling for the duration of the drag (non-passive → can
+      // preventDefault), so touch drags actually move the card instead of scrolling.
+      document.addEventListener('touchmove', preventTouchScroll, { passive: false });
       // Snapshot the current per-section order to drag against.
       const snap: Record<string, string[]> = {};
       for (const [sec, qs] of grouped) snap[sec] = qs.map((x) => x.hubspotRecordId);
@@ -419,6 +429,7 @@ export default function FormBuilderPage() {
   function stopAutoScroll() {
     autoScrollDir.current = 0;
     if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    document.removeEventListener('touchmove', preventTouchScroll);
   }
   useEffect(() => () => stopAutoScroll(), []);
 
