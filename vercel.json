@@ -35,6 +35,12 @@
     },
     "pages/api/admin/training-guide/deploy.ts": {
       "maxDuration": 120
+    },
+    "pages/api/cron/services-generate.ts": {
+      "maxDuration": 300
+    },
+    "pages/api/cron/services-review.ts": {
+      "maxDuration": 300
     }
   },
   "crons": [
@@ -61,6 +67,14 @@
     {
       "path": "/api/cron/warm-inspections",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/services-generate",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/services-review",
+      "schedule": "30 7 * * *"
     }
   ]
 }

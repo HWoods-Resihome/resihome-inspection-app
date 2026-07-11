@@ -1373,7 +1373,9 @@ const SERVICE_DETAIL_PROPS = [
   'service_description', 'due_date', 'region_snapshot', 'address_snapshot',
   'locality_snapshot', 'community_name', 'property_status_snapshot',
   'vendor_name', 'vendor_email', 'pet_stations', 'vendor_cost', 'markup_pct',
-  'client_cost', 'submitted_at', 'completed_at', 'ai_verdict', 'ai_notes',
+  'client_cost', 'vendor_cost_adjustment', 'vendor_cost_adjustment_reason',
+  'submitted_at', 'completed_at', 'ai_verdict', 'ai_notes',
+  'review_decision', 'review_notes', 'reviewed_by', 'reviewed_at',
   'before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls',
   'pet_after_photo_urls', 'answers_json', 'property_id_ref', 'enrollment_key',
 ];

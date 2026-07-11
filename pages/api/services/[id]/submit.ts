@@ -10,8 +10,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
-import { isInternalEmail } from '@/lib/userAccess';
-import { patchServiceWorkOrder } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
 
 const cleanUrls = (v: unknown): string[] =>
   Array.isArray(v) ? v.map((u) => String(u || '').trim()).filter(Boolean) : [];
@@ -20,11 +19,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
   const session = await getSessionFromRequest(req).catch(() => null);
   const email = session?.email;
-  const ok = (await servicesEnabled(email).catch(() => false)) && isInternalEmail(email);
-  if (!ok) return res.status(403).json({ error: 'Internal users only' });
+  // The assigned crew/vendor completes the service; allow any authorized Services
+  // user. Once the order has left the editable states it's locked (view-only).
+  const ok = await servicesEnabled(email).catch(() => false);
+  if (!ok) return res.status(403).json({ error: 'Not authorized' });
 
   const id = String(req.query.id || '');
   if (!id) return res.status(400).json({ error: 'Missing service id' });
+
+  // Lock: a service that's already submitted/under review/completed/canceled can
+  // no longer be edited or re-submitted.
+  const existing = await fetchServiceWorkOrder(id).catch(() => null);
+  if (existing && ['submitted', 'review', 'completed', 'canceled'].includes(String(existing.props.status || ''))) {
+    return res.status(409).json({ error: `This service is ${existing.props.status} and can no longer be edited.` });
+  }
 
   const b = req.body || {};
   const before = cleanUrls(b.before);

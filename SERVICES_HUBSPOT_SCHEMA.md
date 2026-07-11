@@ -62,6 +62,8 @@ everything else reports `exists`):
   `community_name`, `property_status_snapshot`, `latitude`, `longitude`, `vendor_email`
 - **Service Work Order** completion (Phase 4): `pet_before_photo_urls`,
   `pet_after_photo_urls`, `answers_json`
+- **Service Work Order** review decision: `review_decision`, `review_notes`,
+  `reviewed_by`, `reviewed_at` (reuses `vendor_cost_adjustment` + `_reason`)
 - **Service Rules Engine** coverage: `portfolios_json`, `communities_json`, `regions_json`
 
 ## Live coverage data (rules engine + create service)
@@ -85,6 +87,23 @@ service AI knowledge base and either auto-completes (clean) or routes to Review.
 - Optional `&id=<recordId>` to review one order; `&today=YYYY-MM-DD` for on-time math.
 - clean → `status=completed` (+ `completed_at`, `ontime`); needs_review → `status=review`;
   writes `ai_verdict` / `ai_notes`. Requires `ANTHROPIC_API_KEY`. Model: claude-sonnet-4-6.
+
+## Nightly crons (Vercel)
+Both engines are wired to nightly Vercel crons (run on the PRODUCTION deployment
+once merged; `CRON_SECRET`-gated, safe no-op if unset):
+- `/api/cron/services-generate` — 07:00 UTC daily (rule → work-order generation, apply).
+- `/api/cron/services-review` — 07:30 UTC daily (AI review of submitted orders, apply).
+Manual admin dry-run/apply endpoints remain for ad-hoc runs.
+
+## Completion, review & PDF
+- Completion screen `/services/[id]` uses the shared 1099 camera (`CameraCapture`:
+  in-camera capture + gallery + GPS stamp). Submit → status `submitted` (locked).
+- Once submitted it is VIEW-ONLY (external users). Internal reviewers get Approve /
+  Reject when status is `review` (`/api/services/[id]/review-decision`): approve →
+  Completed (full payout); reject → Completed with adjusted payout (default $0, or
+  "back yard not serviced" −25%) + reason/notes. Recomputes client cost.
+- `GET /api/services/[id]/pdf` renders the completion PDF (header, pricing, answers,
+  photos, AI + review notes); the "View PDF" link shows once submitted.
 
 ## Delete staging / test services (teardown)
 `purgeServiceWorkOrders()` → `/api/services/admin/purge` (admin-gated). Dry-run
