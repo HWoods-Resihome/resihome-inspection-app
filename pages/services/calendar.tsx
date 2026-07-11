@@ -9,7 +9,8 @@ import { isInternalEmail } from '@/lib/userAccess';
 import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
-import { SAMPLE_SERVICES, SAMPLE_VENDORS, SAMPLE_REGIONS, REFERENCE_TODAY, type SampleService } from '@/lib/services/sampleData';
+import { SAMPLE_SERVICES, SAMPLE_REGIONS, REFERENCE_TODAY, type SampleService } from '@/lib/services/sampleData';
+import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
 import type { MapItem } from '@/components/ServicesMap';
 
 // Map is client-only (Leaflet touches window).
@@ -170,7 +171,7 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
             <div className="flex-1 min-w-0">
               <MultiFilter label="Vendor" selected={vendorFilter} onChange={setVendorFilter}
                 className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${vendorFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
-                options={SAMPLE_VENDORS.map((v) => ({ value: v, label: v }))} />
+                options={SERVICE_VENDOR_NAMES.map((v) => ({ value: v, label: v }))} />
             </div>
             <button type="button" onClick={() => setShowCompleted((v) => !v)} title="Show completed services from the last 14 days"
               className={`shrink-0 inline-flex items-center gap-1 text-[12px] font-heading font-semibold px-2 py-1.5 rounded-lg border transition ${showCompleted ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:border-green-400'}`}>

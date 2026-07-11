@@ -8,7 +8,8 @@ import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, de
 import { PriceField } from '@/components/PriceField';
 import { MultiFilter } from '@/components/MultiFilter';
 import { ListPicker } from '@/components/ListPicker';
-import { SAMPLE_PROPERTIES, SAMPLE_REGIONS, SAMPLE_SERVICES, SAMPLE_VENDORS } from '@/lib/services/sampleData';
+import { SAMPLE_PROPERTIES, SAMPLE_REGIONS, SAMPLE_SERVICES } from '@/lib/services/sampleData';
+import { SERVICE_VENDOR_NAMES, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
 import { searchServiceRuleRecords } from '@/lib/hubspot';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -145,7 +146,7 @@ function CoveragePicker({ noun, options, selected, onToggle, onSetMany }: {
 const SEED: Rule[] = [
   {
     id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'landscaping', subtype: 'cut', petStations: false, scope: 'property',
-    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: ['GreenBlade Lawn Co.'], description: descriptionFor('landscaping', 'cut'),
+    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
     cadences: [
       { id: 11, unit: 'weeks', interval: '2', dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
@@ -157,7 +158,7 @@ const SEED: Rule[] = [
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'landscaping', subtype: 'cut', petStations: true, scope: 'community',
-    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: ['GreenBlade Lawn Co.', 'Peachtree Grounds'], description: descriptionFor('landscaping', 'cut'),
+    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('landscaping', 'cut'),
     recurring: true,
     cadences: [{ id: 21, unit: 'weeks', interval: '1', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
@@ -168,7 +169,7 @@ const SEED: Rule[] = [
     // Event-triggered, run-once dispatch: a move-in clean created when the
     // associated leasing Deal reaches "Move-In Scheduled". Non-recurring.
     id: 3, name: 'ATL Move-In Cleans', active: true, worktype: 'cleaning', subtype: 'move_in_clean', petStations: false, scope: 'property',
-    portfolios: ['Progress'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '75', markupPct: '20', vendors: ['Peachtree Grounds'], description: descriptionFor('cleaning', 'move_in_clean'),
+    portfolios: ['Progress'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '75', markupPct: '20', vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('cleaning', 'move_in_clean'),
     recurring: false,
     cadences: [],
     initialDueDays: '2', skipMonths: [],
@@ -311,7 +312,7 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
 
   const addRule = () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVal: '' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVal: '' }]);
     openRule(id);
   };
   const duplicateRule = () => {
@@ -699,7 +700,7 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
             {/* Vendor Assignment — one or more companies; count = current open volume. */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label className={lbl}>Vendor Assignment</label>
-              <CoveragePicker noun="vendors" options={SAMPLE_VENDORS.map((v) => ({ key: v, count: VENDOR_OPEN[v] || 0 }))} selected={rule.vendors} onToggle={toggleVendor} onSetMany={setManyVendors} />
+              <CoveragePicker noun="vendors" options={SERVICE_VENDOR_NAMES.map((v) => ({ key: v, count: VENDOR_OPEN[v] || 0 }))} selected={rule.vendors} onToggle={toggleVendor} onSetMany={setManyVendors} />
               {rule.vendors.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {rule.vendors.map((v) => (

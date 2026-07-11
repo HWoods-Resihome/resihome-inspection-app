@@ -9,7 +9,8 @@ import { ListPicker } from '@/components/ListPicker';
 import { PriceField } from '@/components/PriceField';
 import { WORKTYPES, descriptionFor, subtypesFor, defaultRateFor } from '@/lib/services/worktypes';
 import { sanitizeNum, clientFrom } from '@/lib/services/pricing';
-import { SAMPLE_PROPERTIES, SAMPLE_COMMUNITIES, SAMPLE_VENDORS } from '@/lib/services/sampleData';
+import { SAMPLE_PROPERTIES, SAMPLE_COMMUNITIES } from '@/lib/services/sampleData';
+import { SERVICE_VENDOR_NAMES, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
 
 const DEFAULT_MARKUP = '20';
 
@@ -31,7 +32,7 @@ export default function NewService() {
   const [scope, setScope] = useState<'property' | 'community'>('property');
   const [target, setTarget] = useState('');
   const [dueDate, setDueDate] = useState('');
-  const [vendor, setVendor] = useState('');
+  const [vendor, setVendor] = useState(DEFAULT_SERVICE_VENDOR.name);
   const [created, setCreated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -78,7 +79,7 @@ export default function NewService() {
   const targetOptions = useMemo(() => scope === 'property'
     ? SAMPLE_PROPERTIES.map((p) => ({ value: p.id, label: p.address, sublabel: p.locality }))
     : SAMPLE_COMMUNITIES.map((c) => ({ value: c.name, label: c.name, sublabel: c.locality })), [scope]);
-  const vendorOptions = SAMPLE_VENDORS.map((v) => ({ value: v, label: v }));
+  const vendorOptions = SERVICE_VENDOR_NAMES.map((v) => ({ value: v, label: v }));
 
   const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5';
   const trig = 'w-full flex items-center justify-between gap-2 text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink';

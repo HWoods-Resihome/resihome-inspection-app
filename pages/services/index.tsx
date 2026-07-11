@@ -10,9 +10,10 @@ import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
-  SAMPLE_SERVICES, SAMPLE_VENDORS, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY,
+  SAMPLE_SERVICES, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY,
   type ServiceStatus, type SampleService,
 } from '@/lib/services/sampleData';
+import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
@@ -245,7 +246,7 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
               </div>
               <div className="flex-1 min-w-0">
                 <MultiFilter label="Vendor" selected={vendor} onChange={setVendor} className={pickerCls(vendor.length > 0)}
-                  options={[...SAMPLE_VENDORS.map((v) => ({ value: v, label: v })), { value: '—', label: 'Unassigned' }]} />
+                  options={[...SERVICE_VENDOR_NAMES.map((v) => ({ value: v, label: v })), { value: '—', label: 'Unassigned' }]} />
               </div>
               <div className="flex-1 min-w-0">
                 <MultiFilter label="Region" selected={region} onChange={setRegion} className={pickerCls(region.length > 0)}

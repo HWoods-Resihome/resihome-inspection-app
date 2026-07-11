@@ -9,6 +9,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { createServiceWorkOrder } from '@/lib/hubspot';
 import { SAMPLE_PROPERTIES, SAMPLE_COMMUNITIES } from '@/lib/services/sampleData';
+import { vendorEmail } from '@/lib/services/vendors';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
@@ -32,7 +33,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     region_snapshot: prop?.region || '',
     address_snapshot: address, locality_snapshot: locality,
     community_name: scope === 'community' ? (comm?.name || b.target || '') : '',
-    vendor_name: b.vendor || '',
+    vendor_name: b.vendor || '', vendor_email: vendorEmail(b.vendor) || '',
     ...(b.vendorCost !== '' && b.vendorCost != null ? { vendor_cost: Number(b.vendorCost) } : {}),
     ...(b.markupPct !== '' && b.markupPct != null ? { markup_pct: Number(b.markupPct) } : {}),
     ...(b.clientCost !== '' && b.clientCost != null ? { client_cost: Number(b.clientCost) } : {}),

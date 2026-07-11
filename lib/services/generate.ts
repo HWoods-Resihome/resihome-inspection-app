@@ -24,6 +24,7 @@
 import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder } from '@/lib/hubspot';
 import { WORKTYPES, type Worktype } from './worktypes';
 import { SAMPLE_PROPERTIES } from './sampleData';
+import { vendorEmail } from './vendors';
 
 const parseArr = (s: any): any[] => { try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
 const OPEN_STATUSES = new Set(['estimated', 'assigned', 'submitted', 'review']);
@@ -140,7 +141,8 @@ export async function runServiceGeneration(apply: boolean, todayISO: string): Pr
         scope: t.scope, service_description: p.service_description || '',
         due_date: dueDate, region_snapshot: t.region, address_snapshot: t.address,
         locality_snapshot: t.locality, pet_stations: p.pet_stations === 'true' ? 'true' : 'false',
-        vendor_name: vendor || '', generated_by_rule_id: ruleId, enrollment_key: enrollmentKey,
+        vendor_name: vendor || '', vendor_email: vendorEmail(vendor) || '',
+        generated_by_rule_id: ruleId, enrollment_key: enrollmentKey,
       };
       if (t.community) orderProps.community_name = t.community;
       if (Number.isFinite(vendorCost)) orderProps.vendor_cost = vendorCost;

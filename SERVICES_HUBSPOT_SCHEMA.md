@@ -59,7 +59,7 @@ service_rule → property · community · company(vendor).
 The spec has grown since the first apply — re-run `?apply=1` to add these (idempotent;
 everything else reports `exists`):
 - **Service Work Order** snapshots: `address_snapshot`, `locality_snapshot`,
-  `community_name`, `property_status_snapshot`, `latitude`, `longitude`
+  `community_name`, `property_status_snapshot`, `latitude`, `longitude`, `vendor_email`
 - **Service Rules Engine** coverage: `portfolios_json`, `communities_json`, `regions_json`
 
 ## Rollout order

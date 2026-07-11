@@ -698,6 +698,79 @@ export async function fetchPropertiesPage(
 }
 
 /**
+ * Discovery helper for wiring the Services rules engine to the REAL Property
+ * object. Returns the Property field catalog (name/label/type, with enum options)
+ * plus the distinct values found on a sample of live records for a set of
+ * candidate "grouping" fields — so we can identify which field represents
+ * portfolio / owner / market / region / community without guessing names.
+ * Read-only; never writes.
+ */
+export async function inspectPropertyFields(sampleSize = 200): Promise<{
+  typeId: string;
+  fields: { name: string; label: string; type: string; fieldType: string; options?: { label: string; value: string }[] }[];
+  candidates: Record<string, { field: string; label: string; distinct: { value: string; count: number }[] }>;
+  sampled: number;
+}> {
+  const { property: typeId } = typeIds();
+  const defs = await hubspotFetch(`/crm/v3/properties/${typeId}`).catch(() => ({ results: [] }));
+  const allFields = (defs.results || []).map((p: any) => ({
+    name: p.name, label: p.label, type: p.type, fieldType: p.fieldType,
+    options: Array.isArray(p.options) && p.options.length ? p.options.map((o: any) => ({ label: o.label, value: o.value })) : undefined,
+  }));
+  // Non-system fields only (drop hs_*, createdate, etc.) for readability.
+  const fields = allFields.filter((f: any) => !/^hs_/.test(f.name) && !['createdate', 'lastmodifieddate'].includes(f.name));
+
+  // Candidate grouping fields — match by name/label containing these tokens, but
+  // only keep ones that actually exist on the object.
+  const tokens: Record<string, RegExp> = {
+    portfolio: /portfolio|owner|client|investor|fund/i,
+    region: /region|market|metro|area/i,
+    community: /communit|subdivision|neighborhood|hoa/i,
+  };
+  const have = new Map<string, { name: string; label: string }>();
+  for (const f of fields) have.set(f.name, { name: f.name, label: f.label });
+  const picked: Record<string, { name: string; label: string }> = {};
+  for (const [key, re] of Object.entries(tokens)) {
+    const hit = fields.find((f: any) => re.test(f.name) || re.test(f.label || ''));
+    if (hit) picked[key] = { name: hit.name, label: hit.label };
+  }
+
+  // Sample records and tally distinct values for the picked candidate fields.
+  const pickedNames = Object.values(picked).map((p) => p.name);
+  const tally: Record<string, Map<string, number>> = {};
+  pickedNames.forEach((n) => (tally[n] = new Map()));
+  let sampled = 0;
+  if (pickedNames.length) {
+    let after: string | undefined;
+    do {
+      const qs = new URLSearchParams({ limit: '100', properties: pickedNames.join(','), archived: 'false' });
+      if (after) qs.set('after', after);
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}?${qs.toString()}`).catch(() => ({ results: [] }));
+      for (const r of resp.results || []) {
+        sampled++;
+        for (const n of pickedNames) {
+          const v = (r.properties?.[n] ?? '').toString().trim();
+          if (!v) continue;
+          tally[n].set(v, (tally[n].get(v) || 0) + 1);
+        }
+      }
+      after = resp.paging?.next?.after;
+    } while (after && sampled < sampleSize);
+  }
+
+  const candidates: Record<string, { field: string; label: string; distinct: { value: string; count: number }[] }> = {};
+  for (const [key, p] of Object.entries(picked)) {
+    const distinct = [...(tally[p.name] || new Map()).entries()]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 50);
+    candidates[key] = { field: p.name, label: p.label, distinct };
+  }
+
+  return { typeId, fields, candidates, sampled };
+}
+
+/**
  * Fetch a single Property's stored coordinates by record id. Used to validate
  * the camera's GPS fix against the property location. Returns null when the
  * property has no usable lat/long (the fields exist but aren't always filled
