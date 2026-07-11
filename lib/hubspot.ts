@@ -1367,6 +1367,35 @@ export async function createServiceWorkOrder(props: Record<string, any>): Promis
   return resp?.id ? String(resp.id) : null;
 }
 
+// Full property set for the single-work-order (completion) view.
+const SERVICE_DETAIL_PROPS = [
+  'service_name', 'worktype', 'subtype', 'status', 'scope', 'is_bid_item',
+  'service_description', 'due_date', 'region_snapshot', 'address_snapshot',
+  'locality_snapshot', 'community_name', 'property_status_snapshot',
+  'vendor_name', 'vendor_email', 'pet_stations', 'vendor_cost', 'markup_pct',
+  'client_cost', 'submitted_at', 'completed_at', 'ai_verdict', 'ai_notes',
+  'before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls',
+  'pet_after_photo_urls', 'answers_json', 'property_id_ref', 'enrollment_key',
+];
+
+/** One Service Work Order's raw props by record id, or null (not configured / not found). */
+export async function fetchServiceWorkOrder(id: string): Promise<{ id: string; props: Record<string, any> } | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId || !id) return null;
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/${id}?properties=${SERVICE_DETAIL_PROPS.join(',')}`);
+    return resp?.id ? { id: String(resp.id), props: resp.properties || {} } : null;
+  } catch (e) { console.warn('[services] work order fetch failed:', e); return null; }
+}
+
+/** Patch a Service Work Order's properties. Returns false when not configured. */
+export async function patchServiceWorkOrder(id: string, props: Record<string, any>): Promise<boolean> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId || !id) return false;
+  await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) });
+  return true;
+}
+
 export async function provisionServicesSchema(apply: boolean): Promise<any> {
   const report: any = { mode: apply ? 'apply' : 'dry-run', objects: [], questionAdditions: [], associations: [], envVars: {}, notes: [] };
   const schemas = await hubspotFetch('/crm/v3/schemas').catch(() => ({ results: [] }));

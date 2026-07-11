@@ -60,6 +60,8 @@ The spec has grown since the first apply — re-run `?apply=1` to add these (ide
 everything else reports `exists`):
 - **Service Work Order** snapshots: `address_snapshot`, `locality_snapshot`,
   `community_name`, `property_status_snapshot`, `latitude`, `longitude`, `vendor_email`
+- **Service Work Order** completion (Phase 4): `pet_before_photo_urls`,
+  `pet_after_photo_urls`, `answers_json`
 - **Service Rules Engine** coverage: `portfolios_json`, `communities_json`, `regions_json`
 
 ## Live coverage data (rules engine + create service)

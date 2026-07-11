@@ -80,6 +80,9 @@ export const SERVICE_OBJECT: ObjectSpec = {
     BOOL('ontime', 'On Time'),
     TA('before_photo_urls', 'Before Photo URLs'),
     TA('after_photo_urls', 'After Photo URLs'),
+    TA('pet_before_photo_urls', 'Pet Station Before Photo URLs'),
+    TA('pet_after_photo_urls', 'Pet Station After Photo URLs'),
+    TA('answers_json', 'Completion Answers (JSON)'),
   ],
 };
 
