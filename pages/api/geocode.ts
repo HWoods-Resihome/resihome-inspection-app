@@ -10,7 +10,7 @@
  * same address on every camera open. Behind the session middleware.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { fetchPropertyCoords, fetchPropertyAddress } from '@/lib/hubspot';
+import { fetchPropertyCoords, fetchPropertyAddress, fetchCommunityFirstPropertyId } from '@/lib/hubspot';
 
 type Coords = { lat: number; lng: number; source: string };
 
@@ -92,15 +92,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (p) coords = { lat: p.lat, lng: p.lng, source: 'property' };
     } catch { /* fall back below */ }
   }
-  // 2) Geocode the associated property's OWN street address. This is what places
-  //    community inspections, whose `address` is a community name, not a street.
+  // 2) Geocode the associated property's OWN street address (when propertyId is a
+  //    real Property whose stored coords are empty).
   if (!coords && propertyId) {
     try {
       const pa = await fetchPropertyAddress(propertyId);
       if (pa) coords = await geocodeText(pa);
-    } catch { /* fall back to the passed address */ }
+    } catch { /* fall through */ }
   }
-  // 3) Fall back to geocoding the passed address text.
+  // 3) Community inspections associate to a Community, not a Property, so the id we
+  //    were given resolves no Property above. Use the community's FIRST associated
+  //    property's coords (then its address) as the mapping location.
+  if (!coords && propertyId) {
+    try {
+      const firstProp = await fetchCommunityFirstPropertyId(propertyId);
+      if (firstProp) {
+        const c = await fetchPropertyCoords(firstProp);
+        if (c) coords = { lat: c.lat, lng: c.lng, source: 'community-property' };
+        if (!coords) { const a = await fetchPropertyAddress(firstProp); if (a) coords = await geocodeText(a); }
+      }
+    } catch { /* fall through */ }
+  }
+  // 4) Fall back to geocoding the passed address text.
   if (!coords && address.length >= 5) coords = await geocodeText(address);
 
   cache.set(cacheKey, coords);

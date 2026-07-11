@@ -805,6 +805,25 @@ export async function fetchPropertyCommunityName(propertyRecordId: string): Prom
 }
 
 /**
+ * The FIRST Property record associated to a Community object, or null. Used to
+ * place a community inspection on the map — its own record has no street address,
+ * so we borrow the community's first property's location. Fail-open.
+ */
+export async function fetchCommunityFirstPropertyId(communityId: string): Promise<string | null> {
+  try {
+    const meta = await resolveCommunityMeta();
+    if (!meta) return null;
+    const { property } = typeIds();
+    const assoc = await hubspotFetch(`/crm/v4/objects/${meta.typeId}/${communityId}/associations/${property}?limit=1`);
+    const pid = assoc?.results?.[0]?.toObjectId;
+    return pid != null ? String(pid) : null;
+  } catch (e) {
+    console.warn('[community] first-property fetch failed:', e);
+    return null;
+  }
+}
+
+/**
  * Fetch all Inspection records for the list view (Round A).
  * Returns lightweight summary records sorted by most-recent-first.
  *
