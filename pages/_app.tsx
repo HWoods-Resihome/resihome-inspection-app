@@ -19,6 +19,7 @@ import { initPushOnLoad } from '@/lib/pushClient';
 import { installGlobalSync } from '@/lib/globalSync';
 import { Raleway } from 'next/font/google';
 import '../styles/globals.css';
+import 'leaflet/dist/leaflet.css';   // Services calendar/map view (namespaced .leaflet-* — inert elsewhere)
 
 // Self-hosted Raleway (was a render-blocking Google Fonts @import in globals.css).
 // next/font downloads + inlines the font at build time and exposes it as the

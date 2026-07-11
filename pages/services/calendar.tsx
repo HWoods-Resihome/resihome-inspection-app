@@ -1,0 +1,228 @@
+import { useMemo, useState } from 'react';
+import Link from 'next/link';
+import dynamic from 'next/dynamic';
+import type { GetServerSideProps } from 'next';
+import type { NextApiRequest } from 'next';
+import { getSessionFromRequest } from '@/lib/auth';
+import { servicesEnabled } from '@/lib/servicesAccess';
+import { isInternalEmail } from '@/lib/userAccess';
+import { ListPicker } from '@/components/ListPicker';
+import { worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
+import { SAMPLE_SERVICES, SAMPLE_VENDORS, REFERENCE_TODAY, type SampleService } from '@/lib/services/sampleData';
+import type { MapItem } from '@/components/ServicesMap';
+
+// Map is client-only (Leaflet touches window).
+const ServicesMap = dynamic(() => import('@/components/ServicesMap'), {
+  ssr: false,
+  loading: () => <div className="w-full h-80 rounded-xl border border-gray-200 bg-gray-100 grid place-items-center text-sm text-gray-400">Loading map…</div>,
+});
+
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
+  const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
+  const ok = await servicesEnabled(session?.email).catch(() => false);
+  if (!ok) return { redirect: { destination: '/', permanent: false } };
+  return { props: { canSeeAll: isInternalEmail(session?.email) } };
+};
+
+type View = 'month' | 'week' | 'day';
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const MON_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Per-worktype colors (pin hex + chip classes).
+const WT: Record<string, { hex: string; chip: string }> = {
+  landscaping: { hex: '#16a34a', chip: 'bg-green-100 text-green-800 border-green-300' },
+  cleaning: { hex: '#2563eb', chip: 'bg-blue-100 text-blue-800 border-blue-300' },
+  pools: { hex: '#0891b2', chip: 'bg-cyan-100 text-cyan-800 border-cyan-300' },
+  trash_removal: { hex: '#d97706', chip: 'bg-amber-100 text-amber-800 border-amber-300' },
+  trip_fee: { hex: '#6b7280', chip: 'bg-gray-100 text-gray-700 border-gray-300' },
+};
+const wtOf = (w: string) => WT[w] || WT.trip_fee;
+
+// Local-time date helpers (avoid TZ drift from ISO parsing).
+const parse = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const toISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const sameYMD = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) {
+  const [view, setView] = useState<View>('month');
+  const [cursorISO, setCursorISO] = useState(REFERENCE_TODAY);
+  const [vendorScope, setVendorScope] = useState('all');
+  const cursor = parse(cursorISO);
+  const today = parse(REFERENCE_TODAY);
+
+  // Scope: hide canceled; optionally narrow to one vendor (the vendor's own view).
+  const scoped = useMemo(() => SAMPLE_SERVICES.filter((s) =>
+    s.status !== 'canceled' && (vendorScope === 'all' || s.vendor === vendorScope)), [vendorScope]);
+
+  // Visible date range for the current view.
+  const range = useMemo(() => {
+    if (view === 'day') return { start: cursor, end: cursor };
+    if (view === 'week') { const s = addDays(cursor, -cursor.getDay()); return { start: s, end: addDays(s, 6) }; }
+    const s = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    return { start: s, end: new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0) };
+  }, [view, cursorISO]);
+
+  const inRange = (iso: string) => { const d = parse(iso); return d >= range.start && d <= addDays(range.end, 0); };
+  const visible = useMemo(() => scoped.filter((s) => inRange(s.dueDate)), [scoped, range]);
+  const byDay = useMemo(() => {
+    const m: Record<string, SampleService[]> = {};
+    for (const s of scoped) (m[s.dueDate] ||= []).push(s);
+    return m;
+  }, [scoped]);
+
+  const mapItems: MapItem[] = visible.map((s) => ({
+    id: s.id, lat: s.lat, lng: s.lng, color: wtOf(s.worktype).hex,
+    title: s.address, vendor: s.vendor || 'Unassigned',
+    subtitle: `${worktypeLabel(s.worktype)} · ${subtypeLabel(s.worktype, s.subtype)} · Due ${parse(s.dueDate).getMonth() + 1}/${parse(s.dueDate).getDate()}`,
+    href: `/services/${s.id}`,
+  }));
+
+  const step = (dir: number) => {
+    if (view === 'day') setCursorISO(toISO(addDays(cursor, dir)));
+    else if (view === 'week') setCursorISO(toISO(addDays(cursor, dir * 7)));
+    else setCursorISO(toISO(new Date(cursor.getFullYear(), cursor.getMonth() + dir, 1)));
+  };
+  const label = view === 'month'
+    ? `${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}`
+    : view === 'week'
+      ? `${MON_ABBR[range.start.getMonth()]} ${range.start.getDate()} – ${MON_ABBR[range.end.getMonth()]} ${range.end.getDate()}`
+      : `${DOW[cursor.getDay()]}, ${MON_ABBR[cursor.getMonth()]} ${cursor.getDate()}`;
+
+  const ChipLink = ({ s, compact }: { s: SampleService; compact?: boolean }) => (
+    <Link href={`/services/${s.id}`} onClick={(e) => e.stopPropagation()}
+      className={`block truncate rounded border px-1.5 py-0.5 text-[10.5px] font-semibold ${wtOf(s.worktype).chip} ${compact ? '' : 'mb-0.5'}`}
+      title={`${s.address} — ${worktypeLabel(s.worktype)} · ${subtypeLabel(s.worktype, s.subtype)}`}>
+      {s.address}
+    </Link>
+  );
+
+  // ----- Month grid (6×7). Tap a day to drill into Day view. -----
+  const monthCells = useMemo(() => {
+    const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const gridStart = addDays(first, -first.getDay());
+    return Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+  }, [cursorISO, view]);
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-brand text-white sticky top-0 z-30">
+        <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-center gap-3">
+          <Link href="/services" className="inline-flex items-center gap-1 text-white/90 hover:text-white text-sm font-semibold shrink-0">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+            Services
+          </Link>
+          <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
+          <div className="font-heading font-extrabold">Calendar</div>
+          <span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">Sample</span>
+        </div>
+      </header>
+
+      <main className="max-w-3xl mx-auto w-full px-4 py-3 space-y-3">
+        {/* View toggle + vendor scope */}
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
+            {(['month', 'week', 'day'] as View[]).map((v) => (
+              <button key={v} onClick={() => setView(v)} className={`px-3 py-1.5 rounded-md capitalize ${view === v ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>{v}</button>
+            ))}
+          </div>
+          <div className="ml-auto w-40">
+            <ListPicker value={vendorScope} onChange={setVendorScope} ariaLabel="Viewing as"
+              className="w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border border-gray-300 rounded-lg bg-white text-ink flex items-center justify-between"
+              options={[{ value: 'all', label: canSeeAll ? 'All vendors' : 'My services' }, ...SAMPLE_VENDORS.map((v) => ({ value: v, label: v }))]} />
+          </div>
+        </div>
+
+        {/* Period nav */}
+        <div className="flex items-center gap-2">
+          <button onClick={() => step(-1)} aria-label="Previous" className="w-9 h-9 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+          </button>
+          <div className="font-heading font-extrabold text-ink text-[15px] flex-1 text-center">{label}</div>
+          <button onClick={() => step(1)} aria-label="Next" className="w-9 h-9 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+          </button>
+          <button onClick={() => setCursorISO(REFERENCE_TODAY)} className="text-[12px] font-heading font-semibold text-gray-600 border border-gray-300 rounded-lg px-2.5 py-2 bg-white hover:border-brand/40">Today</button>
+        </div>
+
+        {/* ---- MONTH ---- */}
+        {view === 'month' && (
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="grid grid-cols-7 text-center text-[10px] font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100">
+              {DOW.map((d) => <div key={d} className="py-1.5">{d}</div>)}
+            </div>
+            <div className="grid grid-cols-7">
+              {monthCells.map((d, i) => {
+                const items = byDay[toISO(d)] || [];
+                const inMonth = d.getMonth() === cursor.getMonth();
+                const isToday = sameYMD(d, today);
+                return (
+                  <button key={i} onClick={() => { setCursorISO(toISO(d)); setView('day'); }}
+                    className={`min-h-[64px] border-b border-r border-gray-100 p-1 text-left align-top ${inMonth ? 'bg-white' : 'bg-gray-50'} hover:bg-brand/5`}>
+                    <div className={`text-[11px] font-semibold mb-0.5 ${isToday ? 'text-white bg-brand rounded-full w-5 h-5 grid place-items-center' : inMonth ? 'text-ink' : 'text-gray-400'}`}>{d.getDate()}</div>
+                    <div className="flex flex-wrap gap-0.5">
+                      {items.slice(0, 4).map((s) => <span key={s.id} className="w-2 h-2 rounded-full" style={{ background: wtOf(s.worktype).hex }} title={s.address} />)}
+                      {items.length > 4 && <span className="text-[9px] text-gray-400 font-semibold">+{items.length - 4}</span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ---- WEEK ---- */}
+        {view === 'week' && (
+          <div className="grid grid-cols-7 gap-1">
+            {Array.from({ length: 7 }, (_, i) => addDays(range.start, i)).map((d, i) => {
+              const items = byDay[toISO(d)] || [];
+              const isToday = sameYMD(d, today);
+              return (
+                <div key={i} className="bg-white border border-gray-200 rounded-lg p-1 min-h-[120px]">
+                  <div className="text-center mb-1">
+                    <div className="text-[9px] uppercase text-gray-400 font-bold">{DOW[d.getDay()]}</div>
+                    <div className={`text-[12px] font-bold ${isToday ? 'text-brand' : 'text-ink'}`}>{d.getDate()}</div>
+                  </div>
+                  {items.map((s) => <ChipLink key={s.id} s={s} />)}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ---- DAY ---- */}
+        {view === 'day' && (
+          <div className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
+            {visible.length === 0 && <div className="text-center text-gray-400 text-sm py-8">No services scheduled this day.</div>}
+            {visible.sort((a, b) => a.address.localeCompare(b.address)).map((s) => (
+              <Link key={s.id} href={`/services/${s.id}`} className="flex items-center gap-3 border border-gray-200 rounded-lg px-3 py-2 hover:border-brand/40">
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: wtOf(s.worktype).hex }} />
+                <div className="min-w-0 flex-1">
+                  <div className="font-heading font-bold text-ink text-sm truncate">{s.address}</div>
+                  <div className="text-[12px] text-gray-500 truncate">{worktypeLabel(s.worktype)} · {subtypeLabel(s.worktype, s.subtype)} · {s.locality}</div>
+                </div>
+                <span className="text-[12px] text-gray-500 shrink-0">{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
+              </Link>
+            ))}
+          </div>
+        )}
+
+        {/* ---- MAP ---- */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400">Map · {visible.length} stop{visible.length === 1 ? '' : 's'}</label>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(WT).map(([k, v]) => (
+                <span key={k} className="inline-flex items-center gap-1 text-[10px] text-gray-500">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: v.hex }} />{worktypeLabel(k)}
+                </span>
+              ))}
+            </div>
+          </div>
+          <ServicesMap items={mapItems} />
+        </div>
+      </main>
+    </div>
+  );
+}

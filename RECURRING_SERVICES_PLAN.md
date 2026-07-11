@@ -1057,6 +1057,24 @@ add **Deal pipeline stage** as an enrollment trigger source (alongside Property 
 and the nightly generator must persist an `enrollment_key` (deal id for run-once rules)
 on each created Service to enforce idempotency.
 
+## 10.20 Calendar + map view (Services preview — first cut)
+- New **/services/calendar**: month / week / day toggle over the sample services by
+  due date. Month = colored dots per day (tap a day → Day view); Week = per-day
+  columns of clickable address chips; Day = full clickable list. Chips/pins colored
+  by worktype.
+- **Map** (Leaflet + OpenStreetMap tiles, client-only via next/dynamic) below the
+  calendar plots the currently-visible stops; custom pink/worktype pins with a popup
+  (address, worktype·subtype·due, vendor, link into the service). Sample lat/lng
+  added to `SAMPLE_SERVICES`; `leaflet` dep added; CSS imported globally in `_app`
+  (namespaced `.leaflet-*`). CSP already allows https img/connect + inline style.
+- **Vendor-scoped by default** intent: a "Viewing as" picker (All / a vendor) narrows
+  both calendar and map to one vendor's assignments — the route-planning view. In the
+  sample everyone is internal (admin), so it defaults to All with the picker to
+  simulate a vendor login; the real build will auto-scope to the signed-in vendor.
+- Entry point: a calendar icon in the Services home header.
+- **TODO (approved, later):** roll the same calendar+map onto the live **Inspections**
+  tab (real data + property coordinates), and wire real vendor-login auto-scoping.
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
