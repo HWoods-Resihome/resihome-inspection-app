@@ -321,6 +321,7 @@ export default function RulesEngine() {
   if (rule) {
     if (overlap) saveErrors.push(`Overlaps “${overlap.rule.name}” on: ${overlap.shared.join(', ')}. A property can only belong to one rule per work type + subtype (here: ${worktypeLabel(rule.worktype)} · ${subtypeLabel(rule.worktype, rule.subtype)}).`);
     if (rule.recurring && missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
+    if (!rule.recurring && !rule.initialDueDays.trim()) saveErrors.push('Set the first order due (days after enrollment) — a one-time service has no cadence to schedule from.');
     if (rule.vendors.length === 0) saveErrors.push('Assign at least one vendor.');
     if (!rule.enrollVal.trim()) saveErrors.push('Set an enrollment trigger.');
   }
@@ -633,11 +634,12 @@ export default function RulesEngine() {
             {/* First order due — optional; blank = due on the enrollment date. */}
             <div className="mb-3 bg-brand/5 border border-brand/20 rounded-lg px-3 py-2">
               <div className="flex items-center gap-2 whitespace-nowrap text-[13px]">
-                <span className="font-semibold text-ink">First order due</span>
-                <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—" className={`${ctl} w-12 text-center tabular-nums`} />
+                <span className="font-semibold text-ink">First order due{!rule.recurring && <span className="text-brand"> *</span>}</span>
+                <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—"
+                  className={`${ctl} w-12 text-center tabular-nums ${!rule.recurring && !rule.initialDueDays.trim() ? 'border-red-300' : ''}`} />
                 <span className="text-gray-600">days after enrollment</span>
               </div>
-              <div className="text-[11px] text-gray-400 mt-1">Optional · blank = due on the enrollment date.</div>
+              <div className="text-[11px] text-gray-400 mt-1">{rule.recurring ? 'Optional · blank = due on the enrollment date.' : 'Required — a one-time service has no cadence to schedule from.'}</div>
             </div>
 
             {/* Is this recurring? — gates the cadence UI. */}

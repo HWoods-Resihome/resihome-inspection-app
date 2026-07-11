@@ -988,7 +988,9 @@ completion flow (separate from the main before/after).
     accounted for" validation applies only when recurring.
   - **No** → one-time: no cadence UI, no ability to add cadence/no-service, and the
     month-coverage validation is skipped. A single work order is created when the
-    enrollment criteria is met.
+    enrollment criteria is met. Because there is no cadence to schedule from, the
+    **"First order due after enrollment" is REQUIRED** when recurring = No (it sets
+    the single order's due date); it stays optional when recurring = Yes.
 - Model: `recurring: boolean` on the Service Rule.
 
 ### Vendor assignment on the rule (equal-volume rotation + sticky-per-address)
