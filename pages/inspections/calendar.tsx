@@ -392,10 +392,15 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
                   const isToday = sameYMD(d, today);
                   return (
                     <div key={idx} className="bg-white border border-gray-200 rounded-lg p-1 min-h-[120px]">
-                      <div className="text-center mb-1">
+                      {/* Clickable day header — dives into that day (list + map),
+                          like tapping a cell in month view. The inspection chips
+                          below stay their own links. */}
+                      <button type="button" onClick={() => { setCursorISO(toISO(d)); setView('day'); }}
+                        title="Open this day"
+                        className="w-full text-center mb-1 rounded-md py-0.5 hover:bg-brand/5 cursor-pointer">
                         <div className="text-[9px] uppercase text-gray-400 font-bold">{DOW[d.getDay()]}</div>
                         <div className={`text-[12px] font-bold ${isToday ? 'text-brand' : 'text-ink'}`}>{d.getDate()}</div>
-                      </div>
+                      </button>
                       {dayItems.map((i) => <ChipLink key={i.recordId} i={i} />)}
                     </div>
                   );
