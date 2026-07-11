@@ -519,17 +519,16 @@ export default function RulesEngine() {
               </div>
             </div>
             {rule.scope === 'community' && (
-              <div className="mb-4 flex flex-wrap items-center gap-3">
-                <span className="text-[13px] font-semibold text-ink">Include pet stations?</span>
+              <div className="mb-4">
+                <label className={lbl}>Include Pet Stations?</label>
                 <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
                   <button onClick={() => patch({ petStations: true })} className={`px-4 py-1.5 rounded-md ${rule.petStations ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>Yes</button>
                   <button onClick={() => patch({ petStations: false })} className={`px-4 py-1.5 rounded-md ${!rule.petStations ? 'bg-white text-ink shadow-sm' : 'text-gray-600'}`}>No</button>
                 </div>
-                <span className="text-[11px] text-gray-400">Adds a dedicated pet-station before/after to each work order.</span>
               </div>
             )}
             <div className="mb-4">
-              <label className={lbl}>Service Description <span className="text-gray-400 normal-case font-normal">— default for this work type &amp; subtype; editable</span></label>
+              <label className={lbl}>Service Description</label>
               <textarea value={rule.description} onChange={(e) => patch({ description: e.target.value })} rows={3}
                 className="w-full text-[13px] border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand" />
             </div>
@@ -607,7 +606,7 @@ export default function RulesEngine() {
 
             {/* Vendor Assignment — one or more companies; count = current open volume. */}
             <div className="border-t border-gray-100 pt-4 mt-4">
-              <label className={lbl}>Vendor Assignment <span className="text-gray-400 normal-case font-normal">— search &amp; select one or more companies</span></label>
+              <label className={lbl}>Vendor Assignment</label>
               <CoveragePicker noun="vendors" options={SAMPLE_VENDORS.map((v) => ({ key: v, count: VENDOR_OPEN[v] || 0 }))} selected={rule.vendors} onToggle={toggleVendor} onSetMany={setManyVendors} />
               {rule.vendors.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
@@ -631,25 +630,27 @@ export default function RulesEngine() {
           <section className={sec}>
             <SecHead n={2} title="Cadence" />
             {openSec[2] && (<div className="mt-3">
-            {/* First order due — optional; blank = due on the enrollment date. */}
-            <div className="mb-3 bg-brand/5 border border-brand/20 rounded-lg px-3 py-2">
-              <div className="flex items-center gap-2 whitespace-nowrap text-[13px]">
-                <span className="font-semibold text-ink">First order due{!rule.recurring && <span className="text-brand"> *</span>}</span>
-                <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—"
-                  className={`${ctl} w-12 text-center tabular-nums ${!rule.recurring && !rule.initialDueDays.trim() ? 'border-red-300' : ''}`} />
-                <span className="text-gray-600">days after enrollment</span>
+            {/* First order due — optional (required when one-time); blank = due on the enrollment date. */}
+            <div className="mb-3">
+              <label className={lbl}>First Order Due{!rule.recurring && <span className="text-brand"> *</span>}</label>
+              <div className="bg-brand/5 border border-brand/20 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2 whitespace-nowrap text-[13px]">
+                  <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—"
+                    className={`${ctl} w-12 text-center tabular-nums ${!rule.recurring && !rule.initialDueDays.trim() ? 'border-red-300' : ''}`} />
+                  <span className="text-gray-600">days after enrollment</span>
+                </div>
+                <div className="text-[11px] text-gray-400 mt-1">{rule.recurring ? 'Optional · blank = due on the enrollment date.' : 'Required — a one-time service has no cadence to schedule from.'}</div>
               </div>
-              <div className="text-[11px] text-gray-400 mt-1">{rule.recurring ? 'Optional · blank = due on the enrollment date.' : 'Required — a one-time service has no cadence to schedule from.'}</div>
             </div>
 
             {/* Is this recurring? — gates the cadence UI. */}
-            <div className="mb-3 flex flex-wrap items-center gap-3">
-              <span className="text-[13px] font-semibold text-ink">Is this recurring?</span>
+            <div className="mb-3">
+              <label className={lbl}>Is This Recurring?</label>
               <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
                 <button onClick={() => patch({ recurring: true })} className={`px-4 py-1.5 rounded-md ${rule.recurring ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>Yes</button>
                 <button onClick={() => patch({ recurring: false })} className={`px-4 py-1.5 rounded-md ${!rule.recurring ? 'bg-white text-ink shadow-sm' : 'text-gray-600'}`}>No</button>
               </div>
-              <span className="text-[11px] text-gray-400">{rule.recurring ? 'Recurs on the cadence below.' : 'One-time — a single service is created on enrollment.'}</span>
+              <div className="text-[11px] text-gray-400 mt-1">{rule.recurring ? 'Recurs on the cadence below.' : 'One-time — a single service is created on enrollment.'}</div>
             </div>
 
             {rule.recurring ? (
