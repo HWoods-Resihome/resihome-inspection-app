@@ -1390,6 +1390,34 @@ export async function fetchServiceWorkOrder(id: string): Promise<{ id: string; p
   } catch (e) { console.warn('[services] work order fetch failed:', e); return null; }
 }
 
+/**
+ * A property's current status + Rently lock telemetry — for the service completion
+ * unlock button (shown for cleaning services at non-Tenant-Leased homes) and its
+ * online/offline ring. Returns null when the id/lookup fails (fail-open: no button).
+ */
+export async function fetchPropertyLockInfo(recordId: string): Promise<{ status: string; deviceType: string; hubStatus: string; lockStatus: string } | null> {
+  if (!recordId) return null;
+  const { property: typeId } = typeIds();
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filterGroups: [{ filters: [{ propertyName: 'hs_object_id', operator: 'EQ', value: recordId }] }],
+        properties: [PROPERTY_STATUS_PROPERTY, 'rently_device_type', 'rently_sh_hub_status', 'rently_sh_lock_status'],
+        limit: 1,
+      }),
+    });
+    const p = resp?.results?.[0]?.properties;
+    if (!p) return null;
+    return {
+      status: String(p[PROPERTY_STATUS_PROPERTY] || '').trim(),
+      deviceType: String(p.rently_device_type || '').trim(),
+      hubStatus: String(p.rently_sh_hub_status || '').trim(),
+      lockStatus: String(p.rently_sh_lock_status || '').trim(),
+    };
+  } catch (e) { console.warn('[services] lock info fetch failed:', e); return null; }
+}
+
 /** Patch a Service Work Order's properties. Returns false when not configured. */
 export async function patchServiceWorkOrder(id: string, props: Record<string, any>): Promise<boolean> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();

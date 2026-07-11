@@ -8,10 +8,11 @@ import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SAMPLE_SERVICES } from '@/lib/services/sampleData';
-import { fetchServiceWorkOrder } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, fetchPropertyLockInfo } from '@/lib/hubspot';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoThumb } from '@/components/PhotoThumb';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
+import { UnlockButton, lockRingFromProperty, type LockRing } from '@/components/UnlockButton';
 import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync } from '@/lib/services/offlineServices';
 
 interface ServiceView {
@@ -79,7 +80,18 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   }
   if (!svc) return { redirect: { destination: '/services', permanent: false } };
   const form = SAMPLE_FORMS[formKey(svc.worktype, svc.subtype)]?.filter((q) => q.enabled) || [];
-  return { props: { svc, form, isInternal } };
+
+  // Cleaning services at a NON-"Tenant Leased" (i.e. vacant) home need indoor
+  // access — surface the same Rently unlock button + online/offline ring the
+  // inspection uses. Only cleaning; only when the property isn't tenant-occupied.
+  let unlock: { propertyId: string; address: string; ring: LockRing } | null = null;
+  if (svc.live && svc.scope === 'property' && svc.worktype === 'cleaning' && svc.propertyRecordId) {
+    const info = await fetchPropertyLockInfo(svc.propertyRecordId).catch(() => null);
+    if (info && info.status && info.status !== 'Tenant Leased') {
+      unlock = { propertyId: svc.propertyRecordId, address: svc.address, ring: lockRingFromProperty(info.deviceType, info.hubStatus, info.lockStatus) };
+    }
+  }
+  return { props: { svc, form, isInternal, unlock } };
 };
 
 const money = (n: number | null | undefined) => `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -128,7 +140,7 @@ function PhotoGrid({ label, urls, onOpen }: { label: string; urls: string[]; onO
   );
 }
 
-export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean }) {
+export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null }) {
   const editable = EDITABLE.has(svc.status);
   const underReview = svc.status === 'review';
   const canReview = isInternal && underReview;
@@ -227,7 +239,10 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
               <h1 className="font-heading font-extrabold text-[15px] text-ink leading-snug min-w-0">{svc.address}{svc.locality ? `, ${svc.locality}` : ''}</h1>
-              <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${underReview ? 'bg-amber-100 text-amber-700' : svc.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : svc.status === 'submitted' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>{svc.status || 'assigned'}</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7" />}
+                <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${underReview ? 'bg-amber-100 text-amber-700' : svc.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : svc.status === 'submitted' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>{svc.status || 'assigned'}</span>
+              </div>
             </div>
             <div className="text-xs text-gray-500 mt-0.5 truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)} · {svc.scope === 'community' ? 'Community' : 'SFR'} · {svc.vendor || 'Unassigned'}</div>
             <div className="text-xs text-gray-500 truncate">
