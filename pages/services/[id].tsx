@@ -194,18 +194,21 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
   };
 
   // ── Review (approve/reject) state ──
+  const origCost = svc.vendorCost ?? 0;
+  const markupPct = svc.markupPct ?? 0;
   const [reviewNotes, setReviewNotes] = useState('');
   const [rejecting, setRejecting] = useState(false);
-  const [rejectCost, setRejectCost] = useState('0');       // default reject → $0
-  const [rejectReason, setRejectReason] = useState('');
+  const [rejectCost, setRejectCost] = useState(String(origCost));   // editable payout; defaults to current vendor cost
   const [deciding, setDeciding] = useState(false);
+  const startReject = () => { setRejectCost(String(origCost)); setRejecting(true); };
 
-  const origCost = svc.vendorCost ?? 0;
   const decide = async (decision: 'approve' | 'reject') => {
+    // A reject must carry a decision note (it's the reason, on the record).
+    if (decision === 'reject' && !reviewNotes.trim()) { setError('Add a decision note to reject.'); return; }
     setDeciding(true); setError('');
     try {
       const body: any = { decision, notes: reviewNotes };
-      if (decision === 'reject') { body.vendorCost = Number(rejectCost || '0'); body.reason = rejectReason || reviewNotes; }
+      if (decision === 'reject') { body.vendorCost = Number(rejectCost || '0'); body.reason = reviewNotes; }
       const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/review-decision`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
@@ -232,14 +235,18 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
   const [lightbox, setLightbox] = useState<{ groupId: string; index: number } | null>(null);
 
   // Cost Detail — its own section (after Photos). Vendor cost is visible to all;
-  // Markup % and Client cost are internal-only (vendors never see them).
+  // Markup % and Client cost are internal-only (vendors never see them). While a
+  // reviewer is adjusting the payout (reject flow), this reflects the new figures live.
+  const adjusting = rejecting && rejectCost !== '' && Number.isFinite(Number(rejectCost));
+  const shownVendorCost = adjusting ? Number(rejectCost) : svc.vendorCost;
+  const shownClientCost = adjusting ? Math.round(Number(rejectCost) * (1 + markupPct / 100) * 100) / 100 : svc.clientCost;
   const costDetail = svc.vendorCost != null ? (
     <section className="bg-white border border-gray-200 rounded-2xl p-4">
-      <div className="font-heading font-bold text-[15px] text-ink mb-2">Cost Detail</div>
+      <div className="font-heading font-bold text-[15px] text-ink mb-2">Cost Detail{adjusting && <span className="text-[11px] font-normal text-brand"> · adjusted</span>}</div>
       <div className="space-y-1 text-[13px]">
-        <div className="flex justify-between"><span className="text-gray-500">Vendor cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.vendorCost)}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">Vendor cost</span><span className="font-semibold text-ink tabular-nums">{money(shownVendorCost)}</span></div>
         {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
-        {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.clientCost)}</span></div>}
+        {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client cost</span><span className="font-semibold text-ink tabular-nums">{money(shownClientCost)}</span></div>}
       </div>
     </section>
   ) : null;
@@ -431,37 +438,31 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
                 {canReview && (
                   <section className="bg-white border-2 border-brand/30 rounded-2xl p-4 space-y-3">
                     <div className="font-heading font-bold text-[15px] text-ink">Your decision</div>
-                    <textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} rows={3} className={inputCls} placeholder="Review notes for this decision (visible on the record)…" />
+                    <textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} rows={3} className={inputCls}
+                      placeholder={rejecting ? 'Decision notes — required to reject (visible on the record)…' : 'Review notes for this decision (visible on the record)…'} />
                     {!rejecting ? (
                       <div className="flex gap-2">
                         <button type="button" disabled={deciding} onClick={() => decide('approve')}
                           className="flex-1 rounded-xl py-3 font-heading font-bold text-sm bg-emerald-600 text-white disabled:opacity-50">{deciding ? '…' : 'Approve → Completed'}</button>
-                        <button type="button" disabled={deciding} onClick={() => { setRejecting(true); setRejectCost('0'); setRejectReason(''); }}
+                        <button type="button" disabled={deciding} onClick={startReject}
                           className="flex-1 rounded-xl py-3 font-heading font-bold text-sm bg-white text-red-600 border border-red-300">Reject…</button>
                       </div>
                     ) : (
                       <div className="space-y-3 border-t border-gray-100 pt-3">
-                        <div className="text-[12px] font-bold uppercase tracking-wide text-gray-400">Adjust payout</div>
-                        <div className="flex flex-wrap gap-2">
-                          <button type="button" onClick={() => { setRejectCost('0'); setRejectReason('Rejected — no payout'); }}
-                            className={`px-3 py-2 rounded-full border text-[13px] font-heading font-semibold ${Number(rejectCost) === 0 ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>Set $0 (default)</button>
-                          <button type="button" onClick={() => { setRejectCost((origCost * 0.75).toFixed(2)); setRejectReason('Back yard not serviced (−25%)'); }}
-                            className={`px-3 py-2 rounded-full border text-[13px] font-heading font-semibold ${Math.abs(Number(rejectCost) - origCost * 0.75) < 0.005 && origCost > 0 ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>Back yard not serviced −25%</button>
-                        </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-[13px] text-gray-500">Final vendor payout</span>
+                          <span className="text-[13px] text-gray-500">Vendor cost</span>
                           <div className="relative">
                             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                             <input type="number" inputMode="decimal" value={rejectCost} onChange={(e) => setRejectCost(e.target.value)} className="w-28 text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" />
                           </div>
                           {origCost > 0 && <span className="text-[12px] text-gray-400">was {money(origCost)}</span>}
                         </div>
-                        <input value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} className={inputCls} placeholder="Reason (shown on the record)" />
                         <div className="flex gap-2">
                           <button type="button" onClick={() => setRejecting(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
-                          <button type="button" disabled={deciding} onClick={() => decide('reject')}
+                          <button type="button" disabled={deciding || !reviewNotes.trim()} onClick={() => decide('reject')}
                             className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-red-600 text-white disabled:opacity-50">{deciding ? '…' : 'Reject & close out → Completed'}</button>
                         </div>
+                        {!reviewNotes.trim() && <div className="text-[12px] text-gray-400">Add a decision note above to finalize.</div>}
                       </div>
                     )}
                     {error && <div className="text-center text-xs text-red-600">{error}</div>}
