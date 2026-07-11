@@ -106,16 +106,19 @@ export default function NewService() {
 
               {/* Description — pre-filled from the work type + subtype default; editable (blank until a work type is chosen). */}
               <div>
-                <label className={lbl}>Service description <span className="text-gray-400 normal-case font-normal">— default for this work type &amp; subtype; editable</span></label>
+                <label className={lbl}>Service Description</label>
                 <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
                   className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink focus:outline-none focus:border-brand" />
               </div>
 
-              {/* Pricing — defaults from the subtype rate + standard markup; all editable. */}
-              <div className="flex items-end gap-3 border-t border-gray-100 pt-4">
-                <PriceField label="Vendor cost" adorn="$" value={vendorCost} onChange={onVendorCost} />
-                <PriceField label="Markup %" adorn="%" side="right" value={markupPct} onChange={onMarkup} />
-                <PriceField label="Client cost" adorn="$" highlight value={clientCost} onChange={onClientCost} />
+              {/* Cost Detail — matches the Rules Engine section. */}
+              <div className="border-t border-gray-100 pt-4">
+                <label className={lbl}>Cost Detail</label>
+                <div className="flex flex-nowrap items-end justify-center gap-4 sm:justify-start">
+                  <PriceField label="Vendor Cost" adorn="$" minDecimals={2} colClass="shrink-0 w-24" value={vendorCost} onChange={onVendorCost} />
+                  <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={markupPct} onChange={onMarkup} />
+                  <PriceField label="Client Cost" adorn="$" highlight minDecimals={2} colClass="shrink-0 w-24" value={clientCost} onChange={onClientCost} />
+                </div>
               </div>
 
               {/* 2 — Coverage type */}

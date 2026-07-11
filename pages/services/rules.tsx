@@ -622,8 +622,8 @@ export default function RulesEngine() {
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label className={lbl}>Cost Detail</label>
               <div className="flex flex-nowrap items-end justify-center gap-4 sm:justify-start">
-                <PriceField label="Vendor Cost" adorn="$" colClass="shrink-0 w-24" value={rule.vendorCost} onChange={(v) => patch({ vendorCost: v })} />
-                <PriceField label="Markup %" adorn="%" side="right" colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
+                <PriceField label="Vendor Cost" adorn="$" minDecimals={2} colClass="shrink-0 w-24" value={rule.vendorCost} onChange={(v) => patch({ vendorCost: v })} />
+                <PriceField label="Markup %" adorn="%" side="right" minDecimals={1} colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
                 <PriceField label="Client Cost" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={clientCost.toFixed(2)} />
               </div>
             </div>
