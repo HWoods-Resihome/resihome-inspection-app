@@ -32,8 +32,8 @@ export interface SampleService {
   vendor: string | null;
   dueDate: string;        // ISO date (YYYY-MM-DD)
   onTime?: boolean;       // completed services only — landed on/before due date
-  lat: number;            // approximate property coordinates (for the map view)
-  lng: number;
+  lat?: number;           // approximate property coordinates (for the map view)
+  lng?: number;
 }
 
 export const SAMPLE_VENDORS = ['GreenBlade Lawn Co.', 'Peachtree Grounds', 'Metro Cut LLC', 'AquaPro Pools'];

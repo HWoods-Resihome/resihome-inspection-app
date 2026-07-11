@@ -6,6 +6,7 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
+import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { SAMPLE_SERVICES, SAMPLE_VENDORS, SAMPLE_REGIONS, REFERENCE_TODAY, type SampleService } from '@/lib/services/sampleData';
@@ -21,7 +22,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
-  return { props: { canSeeAll: isInternalEmail(session?.email) } };
+  const real = await searchServiceWorkOrders().catch(() => null);
+  return { props: { canSeeAll: isInternalEmail(session?.email), services: real ?? SAMPLE_SERVICES, live: !!real } };
 };
 
 type View = 'month' | 'week' | 'day';
@@ -45,7 +47,7 @@ const toISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSta
 const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const sameYMD = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
-export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) {
+export default function ServicesCalendar({ canSeeAll, services, live }: { canSeeAll: boolean; services: SampleService[]; live: boolean }) {
   const [view, setView] = useState<View>('month');
   const [cursorISO, setCursorISO] = useState(REFERENCE_TODAY);
   const [regionFilter, setRegionFilter] = useState<string[]>([]);
@@ -60,14 +62,14 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
 
   // OPEN work always shows; Completed is opt-in (last 14 days, by due date). Canceled
   // never shows. Then narrow by vendor, worktype, and past-due. No result cap.
-  const scoped = useMemo(() => SAMPLE_SERVICES.filter((s) => {
+  const scoped = useMemo(() => services.filter((s) => {
     if (s.status === 'canceled') return false;
     if (s.status === 'completed' && !(showCompleted && s.dueDate >= cutoffISO)) return false;
     if (regionFilter.length && !regionFilter.includes(s.region)) return false;
     if (vendorFilter.length && !(s.vendor && vendorFilter.includes(s.vendor))) return false;
     if (typeFilter.length && !typeFilter.includes(s.worktype)) return false;
     return true;
-  }), [regionFilter, vendorFilter, typeFilter, showCompleted, cutoffISO]);
+  }), [services, regionFilter, vendorFilter, typeFilter, showCompleted, cutoffISO]);
 
   // Visible date range for the current view.
   const range = useMemo(() => {
@@ -85,12 +87,13 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
     return m;
   }, [scoped]);
 
-  const mapItems: MapItem[] = visible.map((s) => ({
-    id: s.id, lat: s.lat, lng: s.lng, color: wtOf(s.worktype).hex,
-    title: s.address, vendor: s.vendor || 'Unassigned',
-    subtitle: `${worktypeLabel(s.worktype)} · ${subtypeLabel(s.worktype, s.subtype)} · Due ${parse(s.dueDate).getMonth() + 1}/${parse(s.dueDate).getDate()}`,
-    href: `/services/${s.id}`,
-  }));
+  const mapItems: MapItem[] = visible.flatMap((s) =>
+    (Number.isFinite(s.lat) && Number.isFinite(s.lng)) ? [{
+      id: s.id, lat: s.lat as number, lng: s.lng as number, color: wtOf(s.worktype).hex,
+      title: s.address, vendor: s.vendor || 'Unassigned',
+      subtitle: `${worktypeLabel(s.worktype)} · ${subtypeLabel(s.worktype, s.subtype)} · Due ${parse(s.dueDate).getMonth() + 1}/${parse(s.dueDate).getDate()}`,
+      href: `/services/${s.id}`,
+    }] : []);
 
   const step = (dir: number) => {
     if (view === 'day') setCursorISO(toISO(addDays(cursor, dir)));
@@ -131,7 +134,7 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
           </Link>
           <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
           <div className="font-heading font-extrabold">Calendar</div>
-          <span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">Sample</span>
+          <span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">{live ? 'Live' : 'Sample'}</span>
         </div>
       </header>
 
@@ -259,7 +262,7 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
         {/* ---- MAP ---- */}
         <div>
           <div className="flex items-center justify-between gap-2 mb-1.5">
-            <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400 shrink-0">Map · {visible.length} stop{visible.length === 1 ? '' : 's'}</label>
+            <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400 shrink-0">Map · {mapItems.length}/{visible.length} mapped</label>
             {/* Clickable legend = the worktype filter for the calendar + map. */}
             <div className="flex flex-wrap gap-1.5 justify-end">
               {Object.entries(WT).map(([k, v]) => {

@@ -6,18 +6,27 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
+import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
   SAMPLE_SERVICES, SAMPLE_VENDORS, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY,
-  type ServiceStatus,
+  type ServiceStatus, type SampleService,
 } from '@/lib/services/sampleData';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
-  return { props: { userName: session?.name || session?.email || '', canCreate: isInternalEmail(session?.email) } };
+  const real = await searchServiceWorkOrders().catch(() => null);
+  return {
+    props: {
+      userName: session?.name || session?.email || '',
+      canCreate: isInternalEmail(session?.email),
+      services: real ?? SAMPLE_SERVICES,
+      live: !!real,
+    },
+  };
 };
 
 const STATUS_LABEL: Record<ServiceStatus, string> = {
@@ -47,7 +56,7 @@ const fmtDue = (iso: string) => {
   return isNaN(d.getTime()) ? iso : `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${String(d.getUTCFullYear()).slice(-2)}`;
 };
 
-export default function ServicesHome({ userName, canCreate }: { userName: string; canCreate: boolean }) {
+export default function ServicesHome({ userName, canCreate, services, live }: { userName: string; canCreate: boolean; services: SampleService[]; live: boolean }) {
   const router = useRouter();
   // Admin "view as vendor" preview (?as=vendor): shows the external vendor
   // experience — no admin create/settings, and the vendor-visibility rule applies.
@@ -70,13 +79,13 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
   // + Past-Due toggle then drill the list within that scope.
   const scoped = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return SAMPLE_SERVICES.filter((s) =>
+    return services.filter((s) =>
       (worktype.length === 0 || worktype.includes(s.worktype)) &&
       (vendor.length === 0 || vendor.includes(s.vendor || '—')) &&
       (region.length === 0 || region.includes(s.region)) &&
       (!q || `${s.address} ${s.locality} ${s.community || ''} ${s.vendor || ''} ${worktypeLabel(s.worktype)} ${subtypeLabel(s.worktype, s.subtype)} ${s.portfolio}`.toLowerCase().includes(q))
     );
-  }, [worktype, vendor, region, search]);
+  }, [worktype, vendor, region, search, services]);
 
   const summary = useMemo(() => {
     const open = scoped.filter((s) => OPEN_STATUSES.includes(s.status));
@@ -133,7 +142,7 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
               <Link href="/" aria-label="Home" className="shrink-0"><img src="/app-icon.svg" alt="ResiWalk" className="h-11 w-11 object-cover" /></Link>
               <div className="min-w-0">
                 <h1 className="font-heading font-extrabold text-lg tracking-tight flex items-center gap-2">
-                  Services<span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">Sample</span>
+                  Services<span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">{live ? 'Live' : 'Sample'}</span>
                 </h1>
                 {userName && <div className="text-xs text-white/80 truncate">Welcome, {userName}</div>}
               </div>

@@ -2,6 +2,8 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Question, Property, HubSpotUser, InspectionSummary } from './types';
+import type { SampleService, ServiceStatus } from './services/sampleData';
+import type { Worktype } from './services/worktypes';
 import { isInternalResolution } from './vendors';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from './answerProps';
 import { extractLeasingAgent1099Fields } from './leasingAgent1099';
@@ -885,6 +887,75 @@ export async function inspectServiceLikeObjects(): Promise<any> {
     });
   }
   return { count: out.length, objects: out };
+}
+
+// ── Services Phase 1: read Service Work Orders (falls back to null when the
+// object isn't configured yet, so the UI can use sample data in the meantime) ──
+const SERVICE_LIST_PROPS = [
+  'service_name', 'worktype', 'subtype', 'status', 'is_bid_item', 'scope', 'due_date',
+  'region_snapshot', 'address_snapshot', 'locality_snapshot', 'community_name',
+  'property_status_snapshot', 'latitude', 'longitude', 'vendor_name', 'pet_stations',
+  'property_id_ref', 'community_id_ref', 'submitted_at', 'completed_at', 'ontime',
+];
+
+function normServiceDate(v: any): string {
+  const s = String(v ?? '').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const n = Number(s);
+  if (Number.isFinite(n)) { const d = new Date(n >= 1e11 ? n : n * 1000); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`; }
+  return '';
+}
+
+function mapServiceRow(r: any): SampleService {
+  const p = r.properties || {};
+  const numOr = (v: any): number | undefined => { const n = Number(v); return Number.isFinite(n) && !(n === 0) ? n : undefined; };
+  return {
+    id: String(r.id),
+    scope: p.scope === 'community' ? 'community' : 'property',
+    address: p.address_snapshot || p.service_name || '(Service)',
+    locality: p.locality_snapshot || '',
+    community: p.community_name || undefined,
+    portfolio: '',
+    region: p.region_snapshot || '',
+    worktype: (p.worktype || 'landscaping') as Worktype,
+    subtype: p.subtype || '',
+    status: (p.status || 'assigned') as ServiceStatus,
+    propertyStatus: p.property_status_snapshot || undefined,
+    petStations: p.pet_stations === 'true',
+    vendor: p.vendor_name || null,
+    dueDate: normServiceDate(p.due_date),
+    onTime: p.ontime === 'true' ? true : undefined,
+    lat: numOr(p.latitude),
+    lng: numOr(p.longitude),
+  };
+}
+
+/** All Service Work Orders (up to `limit`). Returns null when the object type id
+ *  env var isn't set yet — the caller then falls back to sample data. */
+export async function searchServiceWorkOrders(limit = 500): Promise<SampleService[] | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  try {
+    const items: SampleService[] = [];
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({
+          limit: 100, after,
+          properties: SERVICE_LIST_PROPS,
+          sorts: [{ propertyName: 'due_date', direction: 'ASCENDING' }],
+        }),
+      });
+      for (const r of resp.results || []) items.push(mapServiceRow(r));
+      after = resp.paging?.next?.after;
+    } while (after && items.length < limit);
+    return items;
+  } catch (e) {
+    console.warn('[services] searchServiceWorkOrders failed:', e);
+    return null;
+  }
 }
 
 export async function provisionServicesSchema(apply: boolean): Promise<any> {
