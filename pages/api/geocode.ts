@@ -10,7 +10,7 @@
  * same address on every camera open. Behind the session middleware.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { fetchPropertyCoords } from '@/lib/hubspot';
+import { fetchPropertyCoords, fetchPropertyAddress, fetchCommunityFirstPropertyId } from '@/lib/hubspot';
 
 type Coords = { lat: number; lng: number; source: string };
 
@@ -77,21 +77,44 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       : res.status(404).json({ error: 'No geocode match' });
   }
 
+  const geocodeText = async (text: string): Promise<Coords | null> => {
+    let c: Coords | null = null;
+    try { c = await geocodeCensus(text); } catch { /* try next */ }
+    if (!c) { try { c = await geocodeNominatim(text); } catch { /* give up */ } }
+    return c;
+  };
+
   let coords: Coords | null = null;
   // 1) Prefer the property's stored coordinates (most reliable when filled in).
   if (propertyId) {
     try {
       const p = await fetchPropertyCoords(propertyId);
       if (p) coords = { lat: p.lat, lng: p.lng, source: 'property' };
-    } catch { /* fall back to geocoding the address */ }
+    } catch { /* fall back below */ }
   }
-  // 2) Fall back to geocoding the address text.
-  if (!coords && address.length >= 5) {
-    try { coords = await geocodeCensus(address); } catch { /* try next */ }
-    if (!coords) {
-      try { coords = await geocodeNominatim(address); } catch { /* give up */ }
-    }
+  // 2) Geocode the associated property's OWN street address (propertyId is a real
+  //    Property whose stored coords are empty).
+  if (!coords && propertyId) {
+    try {
+      const pa = await fetchPropertyAddress(propertyId);
+      if (pa) coords = await geocodeText(pa);
+    } catch { /* fall through */ }
   }
+  // 3) Community inspections associate to a Community, not a Property, so the id
+  //    resolves no Property above. Use the community's FIRST associated property's
+  //    coords (then its address) as the mapping location.
+  if (!coords && propertyId) {
+    try {
+      const firstProp = await fetchCommunityFirstPropertyId(propertyId);
+      if (firstProp) {
+        const c = await fetchPropertyCoords(firstProp);
+        if (c) coords = { lat: c.lat, lng: c.lng, source: 'community-property' };
+        if (!coords) { const a = await fetchPropertyAddress(firstProp); if (a) coords = await geocodeText(a); }
+      }
+    } catch { /* fall through */ }
+  }
+  // 4) Fall back to geocoding the passed address text.
+  if (!coords && address.length >= 5) coords = await geocodeText(address);
 
   cache.set(cacheKey, coords);
   return coords

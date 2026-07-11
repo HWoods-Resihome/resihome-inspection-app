@@ -1,0 +1,412 @@
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import dynamic from 'next/dynamic';
+import type { GetServerSideProps } from 'next';
+import type { NextApiRequest } from 'next';
+import { getSessionFromRequest } from '@/lib/auth';
+import { isInternalEmail } from '@/lib/userAccess';
+import { MultiFilter } from '@/components/MultiFilter';
+import { hubspotToMs } from '@/lib/hubspotDate';
+import type { InspectionSummary } from '@/lib/types';
+import type { MapItem } from '@/components/ServicesMap';
+
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
+  const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
+  if (!session?.email) return { redirect: { destination: '/login', permanent: false } };
+  return { props: { isInternal: isInternalEmail(session.email), myEmail: session.email, myName: session.name || '' } };
+};
+
+// Map is client-only (Leaflet touches window).
+const ServicesMap = dynamic(() => import('@/components/ServicesMap'), {
+  ssr: false,
+  loading: () => <div className="w-full h-80 rounded-xl border border-gray-200 bg-gray-100 grid place-items-center text-sm text-gray-400">Loading map…</div>,
+});
+
+type View = 'month' | 'week' | 'day';
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const MON_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Status buckets shown on the calendar/map. Open = Scheduled + In Progress;
+// Completed is opt-in (internal "Show Completed" toggle, last 30 days).
+const STATUS_META: Record<string, { label: string; hex: string; chip: string }> = {
+  scheduled: { label: 'Scheduled', hex: '#2563eb', chip: 'bg-blue-100 text-blue-800 border-blue-300' },
+  in_progress: { label: 'In Progress', hex: '#d97706', chip: 'bg-amber-100 text-amber-800 border-amber-300' },
+  completed: { label: 'Completed', hex: '#16a34a', chip: 'bg-green-100 text-green-800 border-green-300' },
+};
+const COMPLETED_WINDOW_DAYS = 30;
+function statusKey(s?: string): 'scheduled' | 'in_progress' | 'pending_approval' | 'completed' | null {
+  const x = (s || '').trim().toLowerCase();
+  if (x === 'scheduled') return 'scheduled';
+  if (x === 'in progress' || x === 'in-progress' || x === 'in_progress') return 'in_progress';
+  if (x === 'pending approval' || x === 'pending-approval' || x === 'pending_approval' || x === 'pendingapproval') return 'pending_approval';
+  if (x === 'completed' || x === 'complete' || x === 'submitted') return 'completed';
+  return null; // cancelled / other
+}
+
+// Local-time date helpers.
+const parse = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const toISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const sameYMD = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+// scheduledDate (raw HubSpot) → local YYYY-MM-DD (or null).
+const schedDay = (v: string | null | undefined): string | null => { const ms = hubspotToMs(v); return ms == null ? null : toISO(new Date(ms)); };
+// Format a raw template type ("pm_turn_reinspect_qc") into a readable name
+// ("PM Turn Reinspect QC"): split on _/-/space, upper-case short tokens (acronyms).
+const prettyType = (s?: string | null): string =>
+  (s || '').split(/[_\-\s]+/).filter(Boolean).map((w) => (w.length <= 2 ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1))).join(' ');
+
+export default function InspectionsCalendar({ isInternal, myEmail, myName }: { isInternal: boolean; myEmail: string; myName: string }) {
+  const [view, setView] = useState<View>('month');
+  const [items, setItems] = useState<InspectionSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [inspectorFilter, setInspectorFilter] = useState<string[]>([]); // internal only (multi)
+  const [regionFilter, setRegionFilter] = useState<string[]>([]); // internal only
+  const [typeFilter, setTypeFilter] = useState<string[]>([]);     // internal only
+  const [statusFilter, setStatusFilter] = useState<string[]>([]); // from the clickable legend (everyone)
+  const [showCompleted, setShowCompleted] = useState(false);      // internal only — last-30-day completed
+  const [filtersOpen, setFiltersOpen] = useState(true);           // collapsible filter block (internal)
+  const [coords, setCoords] = useState<Record<string, { lat: number; lng: number } | null>>({});
+  const mine = (i: InspectionSummary) =>
+    (!!i.inspectorEmail && i.inspectorEmail.toLowerCase() === myEmail.toLowerCase()) ||
+    (!!myName && (i.inspectorName || '') === myName);
+
+  const todayISO = toISO(new Date());
+  const [cursorISO, setCursorISO] = useState(todayISO);
+  const cursor = parse(cursorISO);
+  const today = parse(todayISO);
+
+  // Load open inspections once (client-side, same endpoint as the home list).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/inspections?pageSize=250&facets=0&sort=date&dir=desc', { cache: 'no-store' });
+        const d = await r.json();
+        if (cancelled) return;
+        if (d.error) setError(d.error);
+        else setItems(Array.isArray(d.inspections) ? d.inspections : []);
+      } catch {
+        if (!cancelled) setError('Couldn’t reach the server. Check your connection and try again.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Open = Scheduled + In Progress only, with a scheduled date. External users
+  // see ONLY their own assignments; internal users see all and can filter by
+  // region + inspector. Past-due applies to everyone.
+  const thirtyAgoISO = toISO(addDays(today, -COMPLETED_WINDOW_DAYS));
+  // The timestamp (ms) an inspection lands on: completed → when it went to PENDING
+  // APPROVAL (submittedAt), falling back to the completed date; open → scheduled date.
+  // (Handles rate-card/scope inspections, which carry a submitted date, uniformly.)
+  const whenMs = (i: InspectionSummary): number | null =>
+    statusKey(i.status) === 'completed' ? hubspotToMs(i.submittedAt || i.completedAt) : hubspotToMs(i.scheduledDate);
+  const dayOf = (i: InspectionSummary): string | null => { const ms = whenMs(i); return ms == null ? null : toISO(new Date(ms)); };
+  // H:MM AM/PM — only for COMPLETED (they have a real submitted timestamp). Open
+  // inspections have no meaningful appointment time, so they show none.
+  const timeLabel = (i: InspectionSummary): string | null => {
+    if (statusKey(i.status) !== 'completed') return null;
+    const ms = whenMs(i); if (ms == null) return null;
+    const d = new Date(ms);
+    const ap = d.getHours() >= 12 ? 'PM' : 'AM';
+    const h = d.getHours() % 12 || 12;
+    return `${h}:${String(d.getMinutes()).padStart(2, '0')} ${ap}`;
+  };
+  // Day/week ordering: completed first (by time, the route order), then open (by address).
+  const dayOrder = (a: InspectionSummary, b: InspectionSummary) => {
+    const ca = statusKey(a.status) === 'completed', cb = statusKey(b.status) === 'completed';
+    if (ca !== cb) return ca ? -1 : 1;
+    if (ca && cb) return (whenMs(a) ?? Infinity) - (whenMs(b) ?? Infinity);
+    return (a.propertyAddressSnapshot || '').localeCompare(b.propertyAddressSnapshot || '');
+  };
+
+  // Base set the filters operate over: OPEN (scheduled/in_progress) always, plus
+  // COMPLETED from the last 30 days when the toggle is on. Scoped to the viewer.
+  const openBase = useMemo(() => items.filter((i) => {
+    const k = statusKey(i.status);
+    const day = dayOf(i);
+    if (!day) return false;
+    if (k === 'scheduled' || k === 'in_progress') { /* open — always eligible */ }
+    else if (k === 'completed' && showCompleted && day >= thirtyAgoISO) { /* recent completed */ }
+    else return false;
+    return isInternal || mine(i);
+  }), [items, isInternal, showCompleted, thirtyAgoISO]);
+
+  // Per-facet predicates (each option list applies the OTHER facets, not itself).
+  const kOf = (i: InspectionSummary) => statusKey(i.status) || '';
+  const passStatus = (i: InspectionSummary) => statusFilter.length === 0 || statusFilter.includes(kOf(i));
+  const passType = (i: InspectionSummary) => typeFilter.length === 0 || typeFilter.includes(i.templateType || '');
+  const passRegion = (i: InspectionSummary) => regionFilter.length === 0 || regionFilter.includes(i.regionSnapshot || '');
+  const passInspector = (i: InspectionSummary) => inspectorFilter.length === 0 || inspectorFilter.includes(i.inspectorName || '');
+
+  const scoped = useMemo(() => openBase.filter((i) => passStatus(i) && passType(i) && passRegion(i) && passInspector(i)),
+    [openBase, statusFilter, typeFilter, regionFilter, inspectorFilter]);
+
+  // Dynamic, interdependent option lists (faceted): each reflects what's OPEN given
+  // the OTHER active filters, plus any already-selected value so it can be cleared.
+  const uniq = (a: (string | null | undefined)[]) => [...new Set(a.filter(Boolean) as string[])].sort();
+  const inspectors = useMemo(() => uniq([...openBase.filter((i) => passStatus(i) && passType(i) && passRegion(i)).map((i) => i.inspectorName), ...inspectorFilter]),
+    [openBase, statusFilter, typeFilter, regionFilter, inspectorFilter]);
+  const regions = useMemo(() => uniq([...openBase.filter((i) => passStatus(i) && passType(i) && passInspector(i)).map((i) => i.regionSnapshot), ...regionFilter]),
+    [openBase, statusFilter, typeFilter, inspectorFilter, regionFilter]);
+  const templates = useMemo(() => uniq([...openBase.filter((i) => passStatus(i) && passRegion(i) && passInspector(i)).map((i) => i.templateType), ...typeFilter]),
+    [openBase, statusFilter, regionFilter, inspectorFilter, typeFilter]);
+
+  const range = useMemo(() => {
+    if (view === 'day') return { start: cursor, end: cursor };
+    if (view === 'week') { const s = addDays(cursor, -cursor.getDay()); return { start: s, end: addDays(s, 6) }; }
+    const s = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    return { start: s, end: new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0) };
+  }, [view, cursorISO]);
+
+  const byDay = useMemo(() => {
+    const m: Record<string, InspectionSummary[]> = {};
+    for (const i of scoped) { const day = dayOf(i)!; (m[day] ||= []).push(i); }
+    // Completed (by time) first, then open (by address) — see dayOrder.
+    for (const arr of Object.values(m)) arr.sort(dayOrder);
+    return m;
+  }, [scoped]);
+  const visible = useMemo(() => scoped.filter((i) => {
+    const d = parse(dayOf(i)!); return d >= range.start && d <= range.end;
+  }), [scoped, range]);
+
+  // Geocode the visible inspections for the map (small concurrency; cached by id).
+  useEffect(() => {
+    const todo = visible.filter((i) => coords[i.recordId] === undefined && (i.propertyAddressSnapshot || i.propertyRecordId));
+    if (!todo.length) return;
+    let cancelled = false;
+    (async () => {
+      const CONC = 4;
+      for (let x = 0; x < todo.length; x += CONC) {
+        if (cancelled) return;
+        await Promise.all(todo.slice(x, x + CONC).map(async (i) => {
+          try {
+            const p = new URLSearchParams();
+            if (i.propertyAddressSnapshot) p.set('address', i.propertyAddressSnapshot);
+            if (i.propertyRecordId) p.set('propertyId', i.propertyRecordId);
+            const r = await fetch(`/api/geocode?${p.toString()}`, { cache: 'no-store' });
+            const d = await r.json();
+            const ok = d && typeof d.lat === 'number' && typeof d.lng === 'number';
+            if (!cancelled) setCoords((c) => ({ ...c, [i.recordId]: ok ? { lat: d.lat, lng: d.lng } : null }));
+          } catch { if (!cancelled) setCoords((c) => ({ ...c, [i.recordId]: null })); }
+        }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [visible]);
+
+  const mapItems: MapItem[] = visible.flatMap((i) => {
+    const c = coords[i.recordId];
+    if (!c) return [];
+    const k = statusKey(i.status);
+    const meta = k ? STATUS_META[k] : undefined;
+    return [{
+      id: i.recordId, lat: c.lat, lng: c.lng, color: meta?.hex || '#ff0060',
+      title: i.propertyAddressSnapshot || i.inspectionName || 'Inspection',
+      vendor: i.inspectorName || 'Unassigned',
+      subtitle: `${prettyType(i.templateType) || 'Inspection'} · ${meta?.label || i.status} · ${(() => { const d = parse(dayOf(i)!); return `${k === 'completed' ? 'Done' : 'Sched'} ${d.getMonth() + 1}/${d.getDate()}`; })()}`,
+      href: `/inspection/${i.recordId}`,
+    }];
+  });
+  const mappable = visible.filter((i) => i.propertyAddressSnapshot || i.propertyRecordId).length;
+
+  const step = (dir: number) => {
+    if (view === 'day') setCursorISO(toISO(addDays(cursor, dir)));
+    else if (view === 'week') setCursorISO(toISO(addDays(cursor, dir * 7)));
+    else setCursorISO(toISO(new Date(cursor.getFullYear(), cursor.getMonth() + dir, 1)));
+  };
+  const label = view === 'month'
+    ? `${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}`
+    : view === 'week'
+      ? `${MON_ABBR[range.start.getMonth()]} ${range.start.getDate()} – ${MON_ABBR[range.end.getMonth()]} ${range.end.getDate()}`
+      : `${DOW[cursor.getDay()]}, ${MON_ABBR[cursor.getMonth()]} ${cursor.getDate()}`;
+
+  const metaOf = (i: InspectionSummary) => { const k = statusKey(i.status); return k ? STATUS_META[k] : undefined; };
+  const ChipLink = ({ i }: { i: InspectionSummary }) => (
+    <Link href={`/inspection/${i.recordId}`} onClick={(e) => e.stopPropagation()}
+      className={`block truncate rounded border px-1.5 py-0.5 text-[10.5px] font-semibold mb-0.5 ${metaOf(i)?.chip || 'bg-gray-100 text-gray-700 border-gray-300'}`}
+      title={`${i.propertyAddressSnapshot || i.inspectionName} — ${prettyType(i.templateType)}`}>
+      {i.propertyAddressSnapshot || i.inspectionName || 'Inspection'}
+    </Link>
+  );
+
+  const monthCells = useMemo(() => {
+    const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const gridStart = addDays(first, -first.getDay());
+    const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+    const weeks = Math.ceil((first.getDay() + daysInMonth) / 7);   // 5 for most months, 6 only when needed
+    return Array.from({ length: weeks * 7 }, (_, i) => addDays(gridStart, i));
+  }, [cursorISO, view]);
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-brand text-white sticky top-0 z-30">
+        <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-center gap-3">
+          <Link href="/" className="inline-flex items-center gap-1 text-white/90 hover:text-white text-sm font-semibold shrink-0">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+            Inspections
+          </Link>
+          <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
+          <div className="font-heading font-extrabold">Calendar</div>
+        </div>
+      </header>
+
+      <main className="max-w-3xl mx-auto w-full px-4 py-3 space-y-3">
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
+            {(['month', 'week', 'day'] as View[]).map((v) => (
+              <button key={v} onClick={() => setView(v)} className={`px-3 py-1.5 rounded-md capitalize ${view === v ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>{v}</button>
+            ))}
+          </div>
+          {isInternal && (
+            <button type="button" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen} aria-label="Filters"
+              className="ml-auto shrink-0 inline-flex items-center gap-1.5 text-[12px] font-heading font-semibold px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:text-brand hover:border-brand/50 transition-colors">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+              Filters
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+            </button>
+          )}
+        </div>
+
+        {/* Collapsible filter block (internal): Region + Inspectors + Template +
+            Show Completed + Clear, all on one row. External: their own assignments
+            only. The status legend (below the map) is a clickable filter for everyone. */}
+        {isInternal && filtersOpen && (
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 min-w-0">
+              <MultiFilter label="Region" selected={regionFilter} onChange={setRegionFilter}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${regionFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                options={regions.map((r) => ({ value: r, label: r }))} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <MultiFilter label="Inspectors" selected={inspectorFilter} onChange={setInspectorFilter}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${inspectorFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                options={inspectors.map((n) => ({ value: n, label: n }))} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <MultiFilter label="Template" selected={typeFilter} onChange={setTypeFilter}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                options={templates.map((t) => ({ value: t, label: prettyType(t) }))} />
+            </div>
+            <button type="button" onClick={() => setShowCompleted((v) => !v)} title="Show completed inspections (last 30 days), placed by submitted date"
+              className={`shrink-0 inline-flex items-center gap-1 text-[12px] font-heading font-semibold px-2 py-1.5 rounded-lg border transition ${showCompleted ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:border-green-400'}`}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              Completed
+            </button>
+            {(regionFilter.length > 0 || inspectorFilter.length > 0 || typeFilter.length > 0 || statusFilter.length > 0) && (
+              <button type="button" onClick={() => { setRegionFilter([]); setInspectorFilter([]); setTypeFilter([]); setStatusFilter([]); }}
+                aria-label="Clear filters" title="Clear filters"
+                className="shrink-0 w-8 h-8 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-500 hover:text-brand hover:border-brand/50 text-base leading-none">×</button>
+            )}
+          </div>
+        )}
+        {!isInternal && (
+          <div className="text-[12px] font-heading font-semibold text-gray-500">Your assigned inspections</div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <button onClick={() => step(-1)} aria-label="Previous" className="w-9 h-9 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+          </button>
+          <div className="font-heading font-extrabold text-ink text-[15px] flex-1 text-center">{label}</div>
+          <button onClick={() => step(1)} aria-label="Next" className="w-9 h-9 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+          </button>
+          <button onClick={() => setCursorISO(todayISO)} className="text-[12px] font-heading font-semibold text-gray-600 border border-gray-300 rounded-lg px-2.5 py-2 bg-white hover:border-brand/40">Today</button>
+        </div>
+
+        {loading && <div className="text-center text-gray-400 text-sm py-8">Loading inspections…</div>}
+        {error && <div className="text-center text-red-600 text-sm py-4 bg-red-50 border border-red-200 rounded-lg">{error}</div>}
+
+        {!loading && !error && (
+          <>
+            {view === 'month' && (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="grid grid-cols-7 text-center text-[10px] font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                  {DOW.map((d) => <div key={d} className="py-1.5">{d}</div>)}
+                </div>
+                <div className="grid grid-cols-7">
+                  {monthCells.map((d, idx) => {
+                    const dayItems = byDay[toISO(d)] || [];
+                    const inMonth = d.getMonth() === cursor.getMonth();
+                    const isToday = sameYMD(d, today);
+                    return (
+                      <button key={idx} onClick={() => { setCursorISO(toISO(d)); setView('day'); }}
+                        className={`min-h-[64px] border-b border-r border-gray-100 p-1 text-left align-top ${inMonth ? 'bg-white' : 'bg-gray-50'} hover:bg-brand/5`}>
+                        <div className={`text-[11px] font-semibold mb-0.5 ${isToday ? 'text-white bg-brand rounded-full w-5 h-5 grid place-items-center' : inMonth ? 'text-ink' : 'text-gray-400'}`}>{d.getDate()}</div>
+                        <div className="flex gap-0.5">
+                          {dayItems.slice(0, 4).map((i) => <span key={i.recordId} className="w-2 h-2 rounded-full" style={{ background: metaOf(i)?.hex || '#9ca3af' }} title={i.propertyAddressSnapshot || ''} />)}
+                        </div>
+                        {dayItems.length > 4 && <div className="text-[9px] text-gray-400 font-semibold leading-none mt-0.5">+{dayItems.length - 4}</div>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {view === 'week' && (
+              <div className="grid grid-cols-4 gap-1.5">
+                {Array.from({ length: 7 }, (_, i) => addDays(range.start, i)).map((d, idx) => {
+                  const dayItems = byDay[toISO(d)] || [];
+                  const isToday = sameYMD(d, today);
+                  return (
+                    <div key={idx} className="bg-white border border-gray-200 rounded-lg p-1 min-h-[120px]">
+                      <div className="text-center mb-1">
+                        <div className="text-[9px] uppercase text-gray-400 font-bold">{DOW[d.getDay()]}</div>
+                        <div className={`text-[12px] font-bold ${isToday ? 'text-brand' : 'text-ink'}`}>{d.getDate()}</div>
+                      </div>
+                      {dayItems.map((i) => <ChipLink key={i.recordId} i={i} />)}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {view === 'day' && (
+              <div className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
+                {visible.length === 0 && <div className="text-center text-gray-400 text-sm py-8">No inspections this day.</div>}
+                {[...visible].sort(dayOrder).map((i) => (
+                  <Link key={i.recordId} href={`/inspection/${i.recordId}`} className="flex items-center gap-2.5 border border-gray-200 rounded-lg px-3 py-2 hover:border-brand/40">
+                    <span className="w-16 shrink-0 text-right text-[11.5px] font-semibold text-gray-500 tabular-nums">{timeLabel(i) || ''}</span>
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: metaOf(i)?.hex || '#9ca3af' }} />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-heading font-bold text-ink text-sm truncate">{i.propertyAddressSnapshot || i.inspectionName || 'Inspection'}</div>
+                      <div className="text-[12px] text-gray-500 truncate">{prettyType(i.templateType) || 'Inspection'} · {metaOf(i)?.label || i.status}</div>
+                    </div>
+                    <span className="text-[12px] text-gray-500 shrink-0">{i.inspectorName || <span className="text-brand font-semibold">Unassigned</span>}</span>
+                  </Link>
+                ))}
+              </div>
+            )}
+
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400 shrink-0">Map · {mapItems.length}/{mappable} mapped</label>
+                {/* Clickable status legend = a status filter for the calendar + map. */}
+                <div className="flex flex-wrap gap-1.5 justify-end">
+                  {(['scheduled', 'in_progress', ...(showCompleted ? ['completed'] : [])]).map((k) => {
+                    const v = STATUS_META[k];
+                    const on = statusFilter.length === 0 || statusFilter.includes(k);
+                    return (
+                      <button key={k} type="button" onClick={() => setStatusFilter((f) => f.includes(k) ? f.filter((x) => x !== k) : [...f, k])}
+                        className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full border px-1.5 py-0.5 transition ${on ? 'border-gray-300 text-gray-600 bg-white' : 'border-gray-200 text-gray-300 bg-gray-50'}`}>
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: v.hex, opacity: on ? 1 : 0.35 }} />{v.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <ServicesMap items={mapItems} />
+              {mappable > mapItems.length && <div className="text-[11px] text-gray-400 mt-1">Locating {mappable - mapItems.length} more address{mappable - mapItems.length === 1 ? '' : 'es'}… (some may lack a geocodable address).</div>}
+            </div>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}

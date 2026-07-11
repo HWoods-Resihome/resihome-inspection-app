@@ -735,6 +735,32 @@ export async function fetchPropertyCoords(recordId: string): Promise<{ lat: numb
   return null;
 }
 
+/**
+ * A geocodable street address for a Property record (street, City, ST ZIP), or
+ * null. Used by the map to place COMMUNITY inspections — whose address snapshot
+ * is the community name, not a street — via their associated property.
+ */
+export async function fetchPropertyAddress(recordId: string): Promise<string | null> {
+  const { property: typeId } = typeIds();
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+    method: 'POST',
+    body: JSON.stringify({
+      filterGroups: [{ filters: [{ propertyName: 'hs_object_id', operator: 'EQ', value: recordId }] }],
+      properties: ['full_address', 'address', 'city', 'state_code', 'state', 'zip_code', 'zip'],
+      limit: 1,
+    }),
+  });
+  const p = resp.results?.[0]?.properties || {};
+  const full = (p.full_address || '').toString().trim();
+  if (full.length >= 5) return full;
+  const street = (p.address || '').toString().trim();
+  const city = (p.city || '').toString().trim();
+  const state = (p.state_code || p.state || '').toString().trim();
+  const zip = (p.zip_code || p.zip || '').toString().trim();
+  const joined = [street, city, [state, zip].filter(Boolean).join(' ').trim()].filter(Boolean).join(', ');
+  return joined.length >= 5 ? joined : null;
+}
+
 // ── Community / Visit: the Community custom object linked to a property ──────
 // Optional — only the Community/Visit inspection surfaces it. Everything is
 // fail-open: if the object/association/name can't be resolved we return null
@@ -774,6 +800,25 @@ export async function fetchPropertyCommunityName(propertyRecordId: string): Prom
     return name || null;
   } catch (e) {
     console.warn('[community] name fetch failed:', e);
+    return null;
+  }
+}
+
+/**
+ * The FIRST Property record id associated to a Community object, or null. Used to
+ * place a community inspection on the map — its own record has no street address,
+ * so we borrow the community's first property's location. Fail-open.
+ */
+export async function fetchCommunityFirstPropertyId(communityId: string): Promise<string | null> {
+  try {
+    const meta = await resolveCommunityMeta();
+    if (!meta) return null;
+    const { property } = typeIds();
+    const assoc = await hubspotFetch(`/crm/v4/objects/${meta.typeId}/${communityId}/associations/${property}?limit=1`);
+    const pid = assoc?.results?.[0]?.toObjectId;
+    return pid != null ? String(pid) : null;
+  } catch (e) {
+    console.warn('[community] first-property fetch failed:', e);
     return null;
   }
 }
