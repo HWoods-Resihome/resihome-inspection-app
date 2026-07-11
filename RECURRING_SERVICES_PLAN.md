@@ -1092,9 +1092,12 @@ on each created Service to enforce idempotency.
   client concurrency, cached by record id); shows "N/M mapped" (some addresses may
   not geocode).
 - **Main-ship set** (when approved — inspections-only, keep main in sync): `pages/
-  inspections/calendar.tsx`, `components/ServicesMap.tsx`, the `leaflet` dep, the
-  `leaflet/dist/leaflet.css` import in `pages/_app.tsx`, and the calendar-icon button
-  in `pages/index.tsx`. Everything Services-specific stays on the branch.
+  inspections/calendar.tsx`, `components/ServicesMap.tsx`, `components/MultiFilter.tsx`,
+  the `leaflet` dep, the `leaflet/dist/leaflet.css` import in `pages/_app.tsx`, the
+  calendar-icon button in `pages/index.tsx`, and the geocode improvement
+  (`fetchPropertyAddress` in `lib/hubspot.ts` + the associated-property fallback in
+  `pages/api/geocode.ts`, which maps community inspections). Everything
+  Services-specific stays on the branch.
 
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
