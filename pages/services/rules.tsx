@@ -7,7 +7,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { PriceField } from '@/components/PriceField';
 import { MultiFilter } from '@/components/MultiFilter';
-import { SAMPLE_PROPERTIES, SAMPLE_REGIONS } from '@/lib/services/sampleData';
+import { SAMPLE_PROPERTIES, SAMPLE_REGIONS, SAMPLE_SERVICES, SAMPLE_VENDORS } from '@/lib/services/sampleData';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
@@ -22,6 +22,13 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 const PORTFOLIOS: Record<string, number> = SAMPLE_PROPERTIES.reduce((m, p) => { m[p.portfolio] = (m[p.portfolio] || 0) + 1; return m; }, {} as Record<string, number>);
 const COMMUNITIES: Record<string, number> = { 'Woodbine Crossing': 96, 'River Glen': 124, 'Camden Pointe': 88, 'Harlow Trace': 78, 'Stonecreek': 142, 'Maple Run': 64 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// Current OPEN service volume per vendor — the basis for the equal-volume
+// rotation shown next to each company in the vendor picker.
+const OPEN_SERVICE_STATUSES = ['estimated', 'assigned', 'submitted', 'review'];
+const VENDOR_OPEN: Record<string, number> = SAMPLE_SERVICES.reduce((m, s) => {
+  if (s.vendor && OPEN_SERVICE_STATUSES.includes(s.status)) m[s.vendor] = (m[s.vendor] || 0) + 1;
+  return m;
+}, {} as Record<string, number>);
 const DEFAULT_MARKUP = '20';   // default markup % on all services
 // First subtype's default rate for a worktype (used to prefill vendor cost).
 const firstSubtype = (wt: Worktype): string => subtypesFor(wt)[0]?.id || '';
@@ -59,7 +66,9 @@ interface Rule {
   propsMode: 'all' | 'list';                // 'all' = every applicable property incl. future adds; 'list' = a fixed subset
   includedProps: string[];                  // property scope, 'list' mode only: the specific property ids included
   vendorCost: string; markupPct: string;   // strings so decimals can be typed freely
+  vendors: string[];                        // assigned company/companies (1 = always; many = equal-volume rotation)
   description: string;                      // scope-of-work language (defaults from the worktype; editable)
+  recurring: boolean;                       // false = one-time (no cadence); true = recurring (cadences required)
   cadences: Cadence[];
   initialDueDays: string;                   // optional: first order due N days after enrollment (blank = standard cadence)
   skipMonths: number[];                     // months explicitly set to NO service
@@ -125,7 +134,8 @@ function CoveragePicker({ noun, options, selected, onToggle, onSetMany }: {
 const SEED: Rule[] = [
   {
     id: 1, name: 'Amherst Grass Cut', active: true, worktype: 'landscaping', subtype: 'cut', petStations: false, scope: 'property',
-    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', description: descriptionFor('landscaping', 'cut'),
+    portfolios: ['Amherst Sunbelt'], communities: [], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: ['GreenBlade Lawn Co.'], description: descriptionFor('landscaping', 'cut'),
+    recurring: true,
     cadences: [
       { id: 11, unit: 'weeks', interval: '2', dow: 3, dom: 1, months: [2, 3, 4, 5, 6, 7, 8, 9] },
       { id: 12, unit: 'months', interval: '1', dow: 0, dom: 15, months: [10, 11] },
@@ -136,7 +146,8 @@ const SEED: Rule[] = [
   },
   {
     id: 2, name: 'ATL Community Grass', active: true, worktype: 'landscaping', subtype: 'cut', petStations: true, scope: 'community',
-    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', description: descriptionFor('landscaping', 'cut'),
+    portfolios: [], communities: ['Woodbine Crossing', 'River Glen'], regions: [], propsMode: 'all', includedProps: [], vendorCost: '45', markupPct: '20', vendors: ['GreenBlade Lawn Co.', 'Peachtree Grounds'], description: descriptionFor('landscaping', 'cut'),
+    recurring: true,
     cadences: [{ id: 21, unit: 'weeks', interval: '1', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
     enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
@@ -149,6 +160,7 @@ export default function RulesEngine() {
   const [openId, setOpenId] = useState<number | null>(null);   // null = list view; else editing that rule
   const [propsOpen, setPropsOpen] = useState(false);
   const [propSearch, setPropSearch] = useState('');
+  const [showSkip, setShowSkip] = useState(false);   // No-Service block is added on demand
   // Section 1/2/3 collapse state (reset each time a rule is opened).
   const [openSec, setOpenSec] = useState<Record<1 | 2 | 3, boolean>>({ 1: true, 2: true, 3: true });
   // Rules-list search / filter / sort (mirrors the Services home).
@@ -164,7 +176,10 @@ export default function RulesEngine() {
   const rule = rules.find((r) => r.id === openId) || rules[0];
 
   const toggleSec = (n: 1 | 2 | 3) => setOpenSec((s) => ({ ...s, [n]: !s[n] }));
-  const openRule = (id: number) => { setOpenId(id); setOpenSec({ 1: true, 2: true, 3: true }); setPropsOpen(false); setPropSearch(''); };
+  const openRule = (id: number) => {
+    setOpenId(id); setOpenSec({ 1: true, 2: true, 3: true }); setPropsOpen(false); setPropSearch('');
+    setShowSkip((rules.find((r) => r.id === id)?.skipMonths.length ?? 0) > 0);
+  };
   const closeRule = () => setOpenId(null);
 
   const patch = (p: Partial<Rule>) => setRules((rs) => rs.map((r) => (r.id === openId ? { ...r, ...p } : r)));
@@ -196,6 +211,10 @@ export default function RulesEngine() {
     patch({ regions: on ? [...new Set([...rule.regions, ...keys])] : rule.regions.filter((k) => !keys.includes(k)) });
   const toggleRegion = (r: string) =>
     patch({ regions: rule.regions.includes(r) ? rule.regions.filter((x) => x !== r) : [...rule.regions, r] });
+  const toggleVendor = (v: string) =>
+    patch({ vendors: rule.vendors.includes(v) ? rule.vendors.filter((x) => x !== v) : [...rule.vendors, v] });
+  const setManyVendors = (keys: string[], on: boolean) =>
+    patch({ vendors: on ? [...new Set([...rule.vendors, ...keys])] : rule.vendors.filter((k) => !keys.includes(k)) });
 
   // Property-scope drill-down: portfolios → regions → individual properties.
   const propsInPortfolios = SAMPLE_PROPERTIES.filter((p) => rule.portfolios.includes(p.portfolio));
@@ -225,7 +244,7 @@ export default function RulesEngine() {
 
   const addRule = () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, description: descriptionFor('landscaping', 'cut'), cadences: [newCadence([...Array(12).keys()])], initialDueDays: '5', skipMonths: [], enrollVal: '' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVal: '' }]);
     openRule(id);
   };
   const duplicateRule = () => {
@@ -301,7 +320,8 @@ export default function RulesEngine() {
   const saveErrors: string[] = [];
   if (rule) {
     if (overlap) saveErrors.push(`Overlaps “${overlap.rule.name}” on: ${overlap.shared.join(', ')}. A property can only belong to one rule per work type + subtype (here: ${worktypeLabel(rule.worktype)} · ${subtypeLabel(rule.worktype, rule.subtype)}).`);
-    if (missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
+    if (rule.recurring && missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
+    if (rule.vendors.length === 0) saveErrors.push('Assign at least one vendor.');
     if (!rule.enrollVal.trim()) saveErrors.push('Set an enrollment trigger.');
   }
   const canSave = saveErrors.length === 0;
@@ -583,6 +603,26 @@ export default function RulesEngine() {
               <PriceField label="Markup %" adorn="%" side="right" colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
               <PriceField label="Client Cost" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={clientCost.toFixed(2)} />
             </div>
+
+            {/* Vendor Assignment — one or more companies; count = current open volume. */}
+            <div className="border-t border-gray-100 pt-4 mt-4">
+              <label className={lbl}>Vendor Assignment <span className="text-gray-400 normal-case font-normal">— search &amp; select one or more companies</span></label>
+              <CoveragePicker noun="vendors" options={SAMPLE_VENDORS.map((v) => ({ key: v, count: VENDOR_OPEN[v] || 0 }))} selected={rule.vendors} onToggle={toggleVendor} onSetMany={setManyVendors} />
+              {rule.vendors.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {rule.vendors.map((v) => (
+                    <span key={v} className="inline-flex items-center gap-1.5 text-[12px] font-semibold bg-brand/10 text-brand border border-brand/30 rounded-full pl-2.5 pr-1.5 py-0.5">
+                      {v}<button onClick={() => toggleVendor(v)} className="hover:text-red-600" aria-label={`Remove ${v}`}>×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                {rule.vendors.length <= 1
+                  ? 'One vendor → every service on this rule is assigned to them.'
+                  : `${rule.vendors.length} vendors → new enrollments are rotated to keep open volume even across them. A property keeps the same vendor for every service until enrollment stops; if it re-enrolls later it rejoins the equal-volume rotation.`}
+              </p>
+            </div>
             </div>)}
           </section>
 
@@ -590,62 +630,86 @@ export default function RulesEngine() {
           <section className={sec}>
             <SecHead n={2} title="Cadence" />
             {openSec[2] && (<div className="mt-3">
-            <p className="text-[12px] text-gray-500 mb-3">Recurs relative to the last completed service. Assign <b>every month</b> to a cadence — different months can use different intervals.</p>
+            {/* First order due — optional; blank = due on the enrollment date. */}
             <div className="mb-3 bg-brand/5 border border-brand/20 rounded-lg px-3 py-2">
               <div className="flex items-center gap-2 whitespace-nowrap text-[13px]">
                 <span className="font-semibold text-ink">First order due</span>
                 <input value={rule.initialDueDays} inputMode="numeric" onChange={(e) => patch({ initialDueDays: e.target.value.replace(/\D/g, '') })} placeholder="—" className={`${ctl} w-12 text-center tabular-nums`} />
                 <span className="text-gray-600">days after enrollment</span>
               </div>
-              <div className="text-[11px] text-gray-400 mt-1">Optional · blank uses the standard cadence.</div>
+              <div className="text-[11px] text-gray-400 mt-1">Optional · blank = due on the enrollment date.</div>
             </div>
-            <div className="space-y-3">
-              {rule.cadences.map((c) => (
-                <div key={c.id} className="relative border border-gray-200 rounded-xl p-3 pr-8 bg-gray-50">
-                  {rule.cadences.length > 1 && (
-                    <button onClick={() => patch({ cadences: rule.cadences.filter((x) => x.id !== c.id) })}
-                      aria-label="Delete cadence" title="Delete cadence"
-                      className="absolute top-2 right-2 w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 text-lg leading-none">×</button>
-                  )}
-                  <div className="flex flex-nowrap items-center gap-1.5 mb-2.5">
-                    <span className="text-[13px] text-gray-600 shrink-0">Every</span>
-                    <input value={c.interval} onChange={(e) => patchCadence(c.id, { interval: e.target.value.replace(/\D/g, '') })} className={`${ctl} w-11 shrink-0 text-center tabular-nums`} />
-                    <select value={c.unit} onChange={(e) => patchCadence(c.id, { unit: e.target.value as Unit })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}>
-                      <option value="days">days</option><option value="weeks">weeks</option><option value="months">months</option>
-                    </select>
-                    {c.unit === 'weeks' && (
-                      <><span className="text-[13px] text-gray-600 shrink-0">on</span>
-                      <select value={c.dow} onChange={(e) => patchCadence(c.id, { dow: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}><option value={-1}>Any day</option>{DOW.map((d, di) => <option key={d} value={di}>{d}</option>)}</select></>
-                    )}
-                    {c.unit === 'months' && (
-                      <><span className="text-[13px] text-gray-600 shrink-0 whitespace-nowrap">on day</span>
-                      <select value={c.dom} onChange={(e) => patchCadence(c.id, { dom: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}><option value={0}>Any day</option>{Array.from({ length: 28 }, (_, di) => di + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select></>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {MONTHS.map((m, mi) => {
-                      const on = c.months.includes(mi);
-                      return <button key={m} onClick={() => toggleMonth(c.id, mi)} className={`text-[11.5px] font-heading font-semibold px-2.5 py-1 rounded-md border ${on ? 'bg-brand text-white border-brand' : 'bg-white text-gray-600 border-gray-300'}`}>{m}</button>;
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {/* No-service months — a month set here gets NO cuts and still counts
-                toward the "every month accounted for" rule. */}
-            <div className="mt-3 border border-dashed border-gray-300 rounded-xl p-3 bg-white">
-              <div className="text-[12px] font-semibold text-gray-600 mb-2">No Service — Skip These Months</div>
-              <div className="flex flex-wrap gap-1.5">
-                {MONTHS.map((m, mi) => {
-                  const on = rule.skipMonths.includes(mi);
-                  return <button key={m} onClick={() => toggleSkipMonth(mi)} className={`text-[11.5px] font-heading font-semibold px-2.5 py-1 rounded-md border ${on ? 'bg-gray-700 text-white border-gray-700' : 'bg-white text-gray-600 border-gray-300'}`}>{m}</button>;
-                })}
+
+            {/* Is this recurring? — gates the cadence UI. */}
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <span className="text-[13px] font-semibold text-ink">Is this recurring?</span>
+              <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
+                <button onClick={() => patch({ recurring: true })} className={`px-4 py-1.5 rounded-md ${rule.recurring ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>Yes</button>
+                <button onClick={() => patch({ recurring: false })} className={`px-4 py-1.5 rounded-md ${!rule.recurring ? 'bg-white text-ink shadow-sm' : 'text-gray-600'}`}>No</button>
               </div>
+              <span className="text-[11px] text-gray-400">{rule.recurring ? 'Recurs on the cadence below.' : 'One-time — a single service is created on enrollment.'}</span>
             </div>
-            <button onClick={() => patch({ cadences: [...rule.cadences, newCadence(missingMonths)] })} className="mt-3 text-[12px] font-semibold text-gray-600 border border-gray-300 rounded-lg px-2.5 py-1 bg-white hover:border-brand/40">+ Add Cadence</button>
-            <div className={`mt-3 text-[12.5px] font-semibold ${missingMonths.length ? 'text-red-600' : 'text-emerald-600'}`}>
-              {missingMonths.length ? `Not all months accounted for — missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}` : 'All 12 months accounted for ✓'}
-            </div>
+
+            {rule.recurring ? (
+              <>
+                <p className="text-[12px] text-gray-500 mb-3">Recurs relative to the last completed service. Assign <b>every month</b> to a cadence — different months can use different intervals.</p>
+                <div className="space-y-3">
+                  {rule.cadences.map((c) => (
+                    <div key={c.id} className="relative border border-gray-200 rounded-xl p-3 pr-8 bg-gray-50">
+                      {rule.cadences.length > 1 && (
+                        <button onClick={() => patch({ cadences: rule.cadences.filter((x) => x.id !== c.id) })}
+                          aria-label="Delete cadence" title="Delete cadence"
+                          className="absolute top-2 right-2 w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 text-lg leading-none">×</button>
+                      )}
+                      <div className="flex flex-nowrap items-center gap-1.5 mb-2.5">
+                        <span className="text-[13px] text-gray-600 shrink-0">Every</span>
+                        <input value={c.interval} onChange={(e) => patchCadence(c.id, { interval: e.target.value.replace(/\D/g, '') })} className={`${ctl} w-11 shrink-0 text-center tabular-nums`} />
+                        <select value={c.unit} onChange={(e) => patchCadence(c.id, { unit: e.target.value as Unit })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}>
+                          <option value="days">days</option><option value="weeks">weeks</option><option value="months">months</option>
+                        </select>
+                        {c.unit === 'weeks' && (
+                          <><span className="text-[13px] text-gray-600 shrink-0">on</span>
+                          <select value={c.dow} onChange={(e) => patchCadence(c.id, { dow: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}><option value={-1}>Any day</option>{DOW.map((d, di) => <option key={d} value={di}>{d}</option>)}</select></>
+                        )}
+                        {c.unit === 'months' && (
+                          <><span className="text-[13px] text-gray-600 shrink-0 whitespace-nowrap">on day</span>
+                          <select value={c.dom} onChange={(e) => patchCadence(c.id, { dom: Number(e.target.value) })} className={`${ctl} shrink-0 pr-6`} style={arrowStyle}><option value={0}>Any day</option>{Array.from({ length: 28 }, (_, di) => di + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select></>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {MONTHS.map((m, mi) => {
+                          const on = c.months.includes(mi);
+                          return <button key={m} onClick={() => toggleMonth(c.id, mi)} className={`text-[11.5px] font-heading font-semibold px-2.5 py-1 rounded-md border ${on ? 'bg-brand text-white border-brand' : 'bg-white text-gray-600 border-gray-300'}`}>{m}</button>;
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {/* No-service block — added on demand via "+ No Service". */}
+                {showSkip && (
+                  <div className="mt-3 relative border border-dashed border-gray-300 rounded-xl p-3 pr-8 bg-white">
+                    <button onClick={() => { setShowSkip(false); patch({ skipMonths: [] }); }} aria-label="Remove no-service block" title="Remove no-service block"
+                      className="absolute top-2 right-2 w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 text-lg leading-none">×</button>
+                    <div className="text-[12px] font-semibold text-gray-600 mb-2">No Service — Skip These Months</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {MONTHS.map((m, mi) => {
+                        const on = rule.skipMonths.includes(mi);
+                        return <button key={m} onClick={() => toggleSkipMonth(mi)} className={`text-[11.5px] font-heading font-semibold px-2.5 py-1 rounded-md border ${on ? 'bg-gray-700 text-white border-gray-700' : 'bg-white text-gray-600 border-gray-300'}`}>{m}</button>;
+                      })}
+                    </div>
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <button onClick={() => patch({ cadences: [...rule.cadences, newCadence(missingMonths)] })} className="text-[12px] font-semibold text-gray-600 border border-gray-300 rounded-lg px-2.5 py-1 bg-white hover:border-brand/40">+ Cadence</button>
+                  {!showSkip && <button onClick={() => setShowSkip(true)} className="text-[12px] font-semibold text-gray-600 border border-gray-300 rounded-lg px-2.5 py-1 bg-white hover:border-brand/40">+ No Service</button>}
+                </div>
+                <div className={`mt-3 text-[12.5px] font-semibold ${missingMonths.length ? 'text-red-600' : 'text-emerald-600'}`}>
+                  {missingMonths.length ? `Not all months accounted for — missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}` : 'All 12 months accounted for ✓'}
+                </div>
+              </>
+            ) : (
+              <p className="text-[13px] text-gray-500">One-time service — no recurring cadence. A single work order is created when the enrollment criteria is met.</p>
+            )}
             </div>)}
           </section>
 

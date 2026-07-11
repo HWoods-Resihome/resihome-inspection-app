@@ -977,6 +977,40 @@ completion flow (separate from the main before/after).
 - Cadence UI: the interval number is freely editable (clearable), and the weekly
   day-of-week / monthly day-of-month is **optional** ("Any day").
 
+## 10.18 Recurring toggle + vendor assignment on the rule (owner-defined)
+### Recurring vs one-time (on the RULE)
+- Section 2 opens with **"First order due after enrollment" (default BLANK** — blank
+  = due on the enrollment date; a number = due N days later).
+- Then a required **"Is this recurring?" Yes/No** gate:
+  - **Yes** → show one cadence block by default; the No-Service (skip months) block
+    is **not** shown by default — it's added on demand. Both **`+ Cadence`** and
+    **`+ No Service`** let the user add as many as needed. The "every month
+    accounted for" validation applies only when recurring.
+  - **No** → one-time: no cadence UI, no ability to add cadence/no-service, and the
+    month-coverage validation is skipped. A single work order is created when the
+    enrollment criteria is met.
+- Model: `recurring: boolean` on the Service Rule.
+
+### Vendor assignment on the rule (equal-volume rotation + sticky-per-address)
+- Section 1, under pricing: **Vendor Assignment** — searchable multi-select of
+  companies (Vendors = Companies object). **At least one** required to save; the
+  picker shows each company's **current open volume** as the count.
+- Model: `vendors: string[]` on the Service Rule.
+- Assignment logic (generation-time — plan only; not executed in the sample preview):
+  - **One vendor** → every service on the rule is assigned to them.
+  - **Multiple vendors** → **net-new enrollments** are assigned to keep **open
+    volume even** across the rule's vendors: the vendor with the lowest open count
+    gets the next enrollment, ties broken deterministically, until balanced (e.g.
+    counts 5/4/2 → the next two enrollments go to the "2" vendor, then round-robin).
+  - **Sticky per address:** once a property is enrolled, **every subsequent service
+    for that property keeps the same vendor** for the life of that enrollment —
+    regardless of the equal-volume rule — e.g. a vacant-home grass cut every 10 days
+    stays with the same vendor for all 3 months it's vacant.
+  - Re-enrollment resets stickiness: if enrollment **stops** and later **re-starts**,
+    the property rejoins the equal-volume rotation and may land on any current vendor.
+  - If a vendor is **removed** from the rule's vendor list, in-flight sticky
+    properties fall back to the equal-volume rotation on their next enrollment.
+
 ## 11. Changelog
 - _init_ — created from owner's vision + Grok breakdown; reuse map grounded in the
   current codebase (HubSpot objects, cron infra, vendors, billing, evidence, roles).
