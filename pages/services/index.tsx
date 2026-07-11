@@ -106,7 +106,7 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
 
   const chip = (val: ServiceStatus | 'all', label: string) => (
     <button type="button" onClick={() => { setStatus(val); setPastDueOnly(false); }}
-      className={`text-[11px] font-heading font-semibold px-3 py-1.5 rounded-full border transition whitespace-nowrap ${
+      className={`w-full text-center text-[11px] font-heading font-semibold px-2 py-1.5 rounded-full border transition whitespace-nowrap ${
         status === val && !pastDueOnly ? 'bg-brand text-white border-brand' : 'bg-white text-ink border-gray-300 hover:border-brand/50'}`}>
       {label}{val === 'all' ? ` (${counts.all})` : counts[val] ? ` (${counts[val]})` : ''}
     </button>
@@ -205,7 +205,7 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
         {/* Collapsible: status chips + one-line Type/Vendor/Region + Sort (no h-scroll). */}
         {filtersOpen && (
           <div className="space-y-1.5 mb-3">
-            <div className="flex flex-wrap gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               {chip('all', 'All')}{chip('estimated', 'Estimated')}{chip('assigned', 'Assigned')}{chip('submitted', 'Submitted')}{chip('review', 'Review')}{chip('completed', 'Completed')}
             </div>
             <div className="flex items-center gap-2 pt-1">
