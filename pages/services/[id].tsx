@@ -167,7 +167,7 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
     if (q.type === 'multi') return !Array.isArray(v) || v.length === 0;
     return v === undefined || v === '' || v === null;
   }), [form, answers]);
-  const ready = !requiredMissing && after.length > 0 && !submitting;
+  const ready = !requiredMissing && before.length > 0 && after.length > 0 && !submitting;
 
   const submit = async () => {
     setSubmitting(true); setError('');
@@ -218,15 +218,24 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-brand text-white sticky top-0 z-20 shrink-0" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
-        <div className="max-w-2xl mx-auto px-4 pt-2 pb-2.5 flex items-center gap-3">
-          <Link href="/services" className="inline-flex items-center gap-1 text-white/90 hover:text-white text-sm font-semibold shrink-0">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
-            Services
+      <header className="bg-white border-b-2 border-brand sticky top-0 z-20 shrink-0" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
+        <div className="max-w-2xl mx-auto px-3 pt-2 pb-2.5 flex items-start gap-2.5">
+          <Link href="/services" aria-label="Back to Services" className="shrink-0 mt-1 text-gray-400 hover:text-ink">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
           </Link>
-          <div className="min-w-0">
-            <h1 className="font-heading font-extrabold text-base tracking-tight truncate">{svc.address}</h1>
-            <div className="text-xs text-white/80 truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)} · {svc.locality}</div>
+          <img src="/app-icon.svg" alt="ResiWalk" className="h-9 w-9 object-cover shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <h1 className="font-heading font-extrabold text-[15px] text-ink leading-snug min-w-0">{svc.address}{svc.locality ? `, ${svc.locality}` : ''}</h1>
+              <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${underReview ? 'bg-amber-100 text-amber-700' : svc.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : svc.status === 'submitted' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>{svc.status || 'assigned'}</span>
+            </div>
+            <div className="text-xs text-gray-500 mt-0.5 truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)} · {svc.scope === 'community' ? 'Community' : 'SFR'} · {svc.vendor || 'Unassigned'}</div>
+            <div className="text-xs text-gray-500 truncate">
+              {svc.dueDate ? `Due ${svc.dueDate}` : ''}
+              {svc.vendorCost != null ? `${svc.dueDate ? ' · ' : ''}Vendor ${money(svc.vendorCost)}` : ''}
+              {isInternal && svc.markupPct != null ? ` · Markup ${svc.markupPct}%` : ''}
+              {isInternal && svc.clientCost != null ? ` · Client ${money(svc.clientCost)}` : ''}
+            </div>
           </div>
         </div>
       </header>
@@ -255,26 +264,14 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
           </div>
         ) : (
           <>
-            <div className="bg-white border border-gray-200 rounded-2xl p-4">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Work order</div>
-                <div className="flex items-center gap-1.5">
-                  {chip(svc.status || 'assigned', underReview ? 'bg-amber-50 text-amber-700' : svc.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500')}
-                  {chip(svc.live ? 'Live' : 'Sample', svc.live ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500')}
-                </div>
-              </div>
-              <div className="text-sm text-ink mt-1"><b>{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}</b> · {svc.scope === 'community' ? 'Community' : 'SFR'} · {svc.vendor || 'Unassigned'}</div>
-              {svc.dueDate && <div className="text-xs text-gray-500 mt-0.5">Due {svc.dueDate}</div>}
-              {svc.vendorCost != null && <div className="text-xs text-gray-500 mt-0.5">Vendor {money(svc.vendorCost)}{svc.markupPct != null ? ` · Markup ${svc.markupPct}%` : ''}{svc.clientCost != null ? ` · Client ${money(svc.clientCost)}` : ''}</div>}
-              {/* View PDF — available once the service has been submitted. */}
-              {!editable && svc.live && (
-                <a href={`/api/services/${encodeURIComponent(svc.id)}/pdf`} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 mt-2 text-[13px] font-heading font-bold text-brand">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
-                  View PDF
-                </a>
-              )}
-            </div>
+            {/* View PDF — available once the service has been submitted (live records). */}
+            {!editable && svc.live && (
+              <a href={`/api/services/${encodeURIComponent(svc.id)}/pdf`} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-[13px] font-heading font-bold text-brand">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                View PDF
+              </a>
+            )}
 
             {pendingQueued && editable && (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[13px] text-amber-800">
@@ -334,8 +331,8 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
                 </section>
 
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
-                  <div className="font-heading font-bold text-[15px] text-ink">Evidence</div>
-                  <CameraPhotos label="Before photos" urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
+                  <div className="font-heading font-bold text-[15px] text-ink">Photos</div>
+                  <CameraPhotos label="Before photos" required urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                   <CameraPhotos label="After photos" required urls={after} onChange={setAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                   {svc.petStations && (
                     <div className="border-t border-gray-100 pt-4 space-y-4">
@@ -351,7 +348,7 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
                   {submitting ? 'Submitting…' : 'Submit completion'}
                 </button>
                 {error && <div className="text-center text-xs text-red-600 -mt-2">{error}</div>}
-                {!ready && !error && !submitting && <div className="text-center text-xs text-gray-400 -mt-2">Answer the required questions and add at least one after photo to submit.</div>}
+                {!ready && !error && !submitting && <div className="text-center text-xs text-gray-400 -mt-2">Answer the required questions and add at least one before and one after photo to submit.</div>}
               </>
             ) : (
               /* ── Read-only view (submitted / review / completed) ── */
@@ -381,7 +378,7 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
                 )}
 
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
-                  <div className="font-heading font-bold text-[15px] text-ink">Evidence <span className="text-[11px] font-normal text-gray-400">— tap a photo to enlarge</span></div>
+                  <div className="font-heading font-bold text-[15px] text-ink">Photos <span className="text-[11px] font-normal text-gray-400">— tap a photo to enlarge</span></div>
                   <PhotoGrid label="Before photos" urls={svc.before} onOpen={(i) => setLightbox({ groupId: 'before', index: i })} />
                   <PhotoGrid label="After photos" urls={svc.after} onOpen={(i) => setLightbox({ groupId: 'after', index: i })} />
                   <PhotoGrid label="Pet station — before" urls={svc.petBefore} onOpen={(i) => setLightbox({ groupId: 'petBefore', index: i })} />

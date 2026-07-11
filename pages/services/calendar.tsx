@@ -135,7 +135,6 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
           </Link>
           <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
           <div className="font-heading font-extrabold">Calendar</div>
-          <span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">{live ? 'Live' : 'Sample'}</span>
         </div>
       </header>
 

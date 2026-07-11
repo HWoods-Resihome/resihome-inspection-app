@@ -141,9 +141,7 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
             <div className="flex items-center gap-3 min-w-0">
               <Link href="/" aria-label="Home" className="shrink-0"><img src="/app-icon.svg" alt="ResiWalk" className="h-11 w-11 object-cover" /></Link>
               <div className="min-w-0">
-                <h1 className="font-heading font-extrabold text-lg tracking-tight flex items-center gap-2">
-                  Services<span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">{live ? 'Live' : 'Sample'}</span>
-                </h1>
+                <h1 className="font-heading font-extrabold text-lg tracking-tight">Services</h1>
                 {userName && <div className="text-xs text-white/80 truncate">Welcome, {userName}</div>}
               </div>
             </div>

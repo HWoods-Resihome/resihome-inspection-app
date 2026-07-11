@@ -43,7 +43,6 @@ export default function ServicesAiKnowledge() {
           </Link>
           <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
           <div className="font-heading font-extrabold">AI Knowledge</div>
-          <span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">Admin · Sample</span>
         </div>
       </header>
 
@@ -92,7 +91,6 @@ export default function ServicesAiKnowledge() {
 
         <div className="sticky bottom-0 bg-gray-50 pt-2 pb-2">
           <button className="w-full rounded-2xl py-3 font-heading font-bold text-sm bg-brand text-white">Save Knowledge Base</button>
-          <div className="text-center text-[11px] text-gray-400 mt-1.5">Preview — nothing saved. Step 2 persists these and feeds them into the AI review.</div>
         </div>
       </main>
     </div>

@@ -130,7 +130,6 @@ export default function NewService() {
           </Link>
           <img src="/app-icon.svg" alt="ResiWalk" className="h-9 w-9 object-cover shrink-0" />
           <h1 className="font-heading font-extrabold text-lg tracking-tight">New Service</h1>
-          <span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">Sample</span>
         </div>
       </header>
 

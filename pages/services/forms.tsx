@@ -98,7 +98,6 @@ export default function FormBuilder() {
           </Link>
           <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
           <div className="font-heading font-extrabold">Form Builder</div>
-          <span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">Admin · Sample</span>
         </div>
       </header>
 
@@ -164,7 +163,6 @@ export default function FormBuilder() {
 
         <div className="sticky bottom-0 bg-gray-50 pt-2 pb-2">
           <button className="w-full rounded-2xl py-3 font-heading font-bold text-sm bg-brand text-white">Save Form</button>
-          <div className="text-center text-[11px] text-gray-400 mt-1.5">Preview — nothing saved. In Step 2 this writes to the reused Question / Answer objects.</div>
         </div>
       </main>
     </div>

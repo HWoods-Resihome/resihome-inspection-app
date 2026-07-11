@@ -258,15 +258,26 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
   const [sortOpen, setSortOpen] = useState(false);
   const rule = rules.find((r) => r.id === openId) || rules[0];
 
-  // Real coverage catalog (portfolios / regions / communities) — client-loaded.
+  // Real coverage catalog (portfolios / regions / communities). Cached in
+  // localStorage so the property counts render INSTANTLY (the server-side scan of
+  // the whole Property object is slow on a cold cache); we then revalidate in the
+  // background and only re-render if the numbers actually changed.
   const [coverage, setCoverage] = useState<Coverage>(EMPTY_COVERAGE);
   useEffect(() => {
+    const CACHE_KEY = 'resiwalk.services.coverage.v1';
+    const shape = (d: any): Coverage => ({
+      portfolios: d.portfolios || [], regionsByPortfolio: d.regionsByPortfolio || {},
+      regions: d.regions || [], communities: d.communities || [], statuses: d.statuses || [],
+    });
+    // 1) Instant paint from cache.
+    try { const c = localStorage.getItem(CACHE_KEY); if (c) setCoverage(shape(JSON.parse(c))); } catch { /* ignore */ }
+    // 2) Revalidate in the background; update + re-cache only when it differs.
     let alive = true;
     fetch('/api/services/coverage').then((r) => r.json()).then((d) => {
-      if (alive && d && !d.error) setCoverage({
-        portfolios: d.portfolios || [], regionsByPortfolio: d.regionsByPortfolio || {},
-        regions: d.regions || [], communities: d.communities || [], statuses: d.statuses || [],
-      });
+      if (!alive || !d || d.error) return;
+      const next = JSON.stringify(d);
+      try { if (localStorage.getItem(CACHE_KEY) !== next) { localStorage.setItem(CACHE_KEY, next); setCoverage(shape(d)); } else setCoverage(shape(d)); }
+      catch { setCoverage(shape(d)); }
     }).catch(() => {});
     return () => { alive = false; };
   }, []);
@@ -514,7 +525,6 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
           </Link>
           <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
           <div className="font-heading font-extrabold">Rules Engine</div>
-          <span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">Admin · {live ? 'Live' : 'Sample'}</span>
         </div>
       </header>
 
