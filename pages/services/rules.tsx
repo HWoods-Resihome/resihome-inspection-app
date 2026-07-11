@@ -88,7 +88,7 @@ interface Rule {
   cadences: Cadence[];
   initialDueDays: string;                   // optional: first order due N days after enrollment (blank = standard cadence)
   skipMonths: number[];                     // months explicitly set to NO service
-  enrollField: string; enrollOp: string; enrollVal: string;
+  enrollField: string; enrollOp: string; enrollVals: string[];   // one value, or many when op is "is any of"
   stopEnabled: boolean;
   stopMode: 'condition' | 'date' | 'count';  // how enrollment stops
   stopField: string; stopOp: string; stopVal: string;   // stopMode 'condition'
@@ -161,7 +161,7 @@ const SEED: Rule[] = [
       { id: 12, unit: 'months', interval: '1', dow: 0, dom: 15, months: [10, 11] },
     ],
     initialDueDays: '5', skipMonths: [0, 1],
-    enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
+    enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
     stopEnabled: true, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
   {
@@ -170,7 +170,7 @@ const SEED: Rule[] = [
     recurring: true,
     cadences: [{ id: 21, unit: 'weeks', interval: '1', dow: 1, dom: 1, months: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }],
     initialDueDays: '5', skipMonths: [],
-    enrollField: 'Property Status', enrollOp: 'is', enrollVal: 'Vacant',
+    enrollField: 'Property Status', enrollOp: 'is', enrollVals: ['Vacant'],
     stopEnabled: false, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
   {
@@ -181,13 +181,21 @@ const SEED: Rule[] = [
     recurring: false,
     cadences: [],
     initialDueDays: '2', skipMonths: [],
-    enrollField: 'Deal Stage', enrollOp: 'changes to', enrollVal: 'Move-In Scheduled',
+    enrollField: 'Deal Stage', enrollOp: 'changes to', enrollVals: ['Move-In Scheduled'],
     stopEnabled: false, stopMode: 'condition', stopField: 'Property Status', stopOp: 'changes to', stopVal: 'Occupied', stopDate: '', stopCount: '',
   },
 ];
 
 // ── HubSpot Service Rule ↔ Rule mappers (Phase 3 persistence) ──
 const parseArr = (s: any): any[] => { try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+// enroll_value holds one plain string, or a JSON array when "is any of". Parse both.
+const parseVals = (s: any): string[] => {
+  const raw = (s ?? '').toString();
+  if (!raw) return [];
+  if (raw.startsWith('[')) { try { const v = JSON.parse(raw); return Array.isArray(v) ? v.map(String) : [raw]; } catch { return [raw]; } }
+  return [raw];
+};
+const serializeVals = (a: string[]): string => (a.length <= 1 ? (a[0] || '') : JSON.stringify(a));
 let _rid = 900;
 function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule {
   const p = rec.props;
@@ -203,7 +211,7 @@ function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule 
     vendors: parseArr(p.vendors_json), description: p.service_description || '',
     recurring: p.recurring !== 'false', cadences,
     initialDueDays: p.initial_due_days != null ? String(p.initial_due_days) : '', skipMonths: parseArr(p.skip_months_json),
-    enrollField: p.enroll_field || 'Property Status', enrollOp: p.enroll_op || 'is', enrollVal: p.enroll_value || '',
+    enrollField: p.enroll_field || 'Property Status', enrollOp: p.enroll_op || 'is', enrollVals: parseVals(p.enroll_value),
     stopEnabled: p.stop_enabled === 'true', stopMode: (p.stop_mode || 'condition') as Rule['stopMode'],
     stopField: p.stop_field || 'Property Status', stopOp: p.stop_op || 'changes to', stopVal: p.stop_value || '',
     stopDate: p.stop_date ? String(p.stop_date).slice(0, 10) : '', stopCount: p.stop_count != null ? String(p.stop_count) : '',
@@ -217,7 +225,7 @@ function ruleToProps(r: Rule): Record<string, any> {
     recurring: r.recurring ? 'true' : 'false', cadences_json: JSON.stringify(r.cadences),
     skip_months_json: JSON.stringify(r.skipMonths), included_props_json: JSON.stringify(r.includedProps),
     portfolios_json: JSON.stringify(r.portfolios), communities_json: JSON.stringify(r.communities), regions_json: JSON.stringify(r.regions),
-    enroll_field: r.enrollField, enroll_op: r.enrollOp, enroll_value: r.enrollVal,
+    enroll_field: r.enrollField, enroll_op: r.enrollOp, enroll_value: serializeVals(r.enrollVals),
     stop_enabled: r.stopEnabled ? 'true' : 'false', stop_mode: r.stopMode,
     stop_field: r.stopField, stop_op: r.stopOp, stop_value: r.stopVal,
   };
@@ -364,7 +372,7 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
 
   const addRule = () => {
     const id = (rules.length ? Math.max(...rules.map((r) => r.id)) : 0) + 1;
-    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVal: '' }]);
+    setRules((rs) => [...rs, { ...SEED[0], id, name: 'New rule', portfolios: [], communities: [], regions: [], propsMode: 'all', includedProps: [], subtype: 'cut', petStations: false, vendorCost: baseRate('landscaping', 'cut'), markupPct: DEFAULT_MARKUP, vendors: [DEFAULT_SERVICE_VENDOR.name], description: descriptionFor('landscaping', 'cut'), recurring: true, cadences: [newCadence([...Array(12).keys()])], initialDueDays: '', skipMonths: [], enrollVals: [] }]);
     openRule(id);
   };
   const duplicateRule = () => {
@@ -452,7 +460,7 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
     if (rule.recurring && missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
     if (!rule.recurring && !rule.initialDueDays.trim()) saveErrors.push('Set the first order due (days after enrollment) — a one-time service has no cadence to schedule from.');
     if (rule.vendors.length === 0) saveErrors.push('Assign at least one vendor.');
-    if (!rule.enrollVal.trim()) saveErrors.push('Set an enrollment trigger.');
+    if (!rule.enrollVals.length) saveErrors.push('Set an enrollment trigger.');
     if (rule.stopEnabled && rule.stopMode === 'date' && !rule.stopDate) saveErrors.push('Set a stop date.');
     if (rule.stopEnabled && rule.stopMode === 'count' && (!rule.stopCount || Number(rule.stopCount) < 1)) saveErrors.push('Set the number of services before stopping.');
   }
@@ -873,11 +881,17 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <ListPicker value={rule.enrollField} ariaLabel="Enrollment field" className={pick}
                 options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
-                onChange={(v) => patch({ enrollField: v, enrollVal: valueOptsFor(v)[0]?.value || '' })} />
+                onChange={(v) => { const first = valueOptsFor(v)[0]?.value; patch({ enrollField: v, enrollVals: first ? [first] : [] }); }} />
               <ListPicker value={rule.enrollOp} ariaLabel="Operator" className={pick}
-                options={OPS.map((o) => ({ value: o, label: o }))} onChange={(v) => patch({ enrollOp: v })} />
-              <ListPicker value={rule.enrollVal} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
-                options={valueOptsFor(rule.enrollField)} onChange={(v) => patch({ enrollVal: v })} />
+                options={OPS.map((o) => ({ value: o, label: o }))}
+                onChange={(v) => patch({ enrollOp: v, ...(v !== 'is any of' && rule.enrollVals.length > 1 ? { enrollVals: rule.enrollVals.slice(0, 1) } : {}) })} />
+              {rule.enrollOp === 'is any of' ? (
+                <MultiFilter label="Values" options={valueOptsFor(rule.enrollField)} selected={rule.enrollVals}
+                  onChange={(next) => patch({ enrollVals: next })} className={`${pick} flex-1 min-w-[140px]`} />
+              ) : (
+                <ListPicker value={rule.enrollVals[0] || ''} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
+                  options={valueOptsFor(rule.enrollField)} onChange={(v) => patch({ enrollVals: [v] })} />
+              )}
             </div>
             <label className="flex items-center gap-2 mb-2 cursor-pointer">
               <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked, ...(e.target.checked && !rule.stopVal ? { stopVal: valueOptsFor(rule.stopField)[0]?.value || '' } : {}) })} />

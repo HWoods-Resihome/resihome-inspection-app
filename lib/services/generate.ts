@@ -26,6 +26,13 @@ import { WORKTYPES, type Worktype } from './worktypes';
 import { vendorEmail } from './vendors';
 
 const parseArr = (s: any): any[] => { try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+// enroll_value: one plain string, or a JSON array when the operator is "is any of".
+const parseVals = (s: any): string[] => {
+  const raw = (s ?? '').toString();
+  if (!raw) return [];
+  if (raw.startsWith('[')) { try { const v = JSON.parse(raw); return Array.isArray(v) ? v.map(String) : [raw]; } catch { return [raw]; } }
+  return [raw];
+};
 const OPEN_STATUSES = new Set(['estimated', 'assigned', 'submitted', 'review']);
 
 const wtLabel = (id: string) => WORKTYPES.find((w) => w.id === id)?.label || id;
@@ -62,14 +69,18 @@ async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
   const regions = parseArr(p.regions_json);
   const props = await searchPropertiesForCoverage({ portfolios, regions, limit: 2000 });
 
-  // Enrollment filter (best-effort). enroll_field like "Property Status" + a value.
+  // Enrollment filter (best-effort). enroll_field like "Property Status", one or
+  // more values (is / is any of / is not / changes to). "changes to" can't detect
+  // the transition edge at generation time, so it's treated as membership (v1);
+  // the enrollment_key dedup still guarantees one order per property.
   const enrollField = String(p.enroll_field || '').toLowerCase();
   const enrollOp = String(p.enroll_op || '');
-  const enrollVal = String(p.enroll_value || '').trim().toLowerCase();
+  const enrollVals = parseVals(p.enroll_value).map((v) => v.trim().toLowerCase()).filter(Boolean);
   const statusMatch = (status: string): boolean => {
-    if (!enrollVal || !/status/.test(enrollField) || !['is', 'is any of'].includes(enrollOp)) return true; // no usable condition → include
+    if (!enrollVals.length || !/status/.test(enrollField)) return true; // no usable condition → include
     const s = status.trim().toLowerCase();
-    return s === enrollVal || s.startsWith(enrollVal) || s.includes(enrollVal);
+    const hit = enrollVals.some((v) => s === v || s.startsWith(v) || s.includes(v));
+    return enrollOp === 'is not' ? !hit : hit; // is / is any of / changes to → membership
   };
 
   const included = new Set(parseArr(p.included_props_json).map(String));
