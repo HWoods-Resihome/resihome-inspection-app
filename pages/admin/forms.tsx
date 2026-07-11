@@ -5,7 +5,7 @@
  * remove its questions and change answer types — all syncing to HubSpot.
  * Scope Rate Card and Turn Re-Inspect QC are intentionally NOT listed (locked).
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import type { Question, ResponseType } from '@/lib/types';
@@ -318,6 +318,81 @@ export default function FormBuilderPage() {
     void persistOrder(updates);
   }
 
+  // ── Press-and-hold drag reorder (within a section) ────────────────────────
+  // A long-press lifts a card; dragging reflows the section under the finger;
+  // release persists the new order. Touch + mouse via Pointer Events, no library.
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOrder, setDragOrder] = useState<{ section: string; ids: string[] } | null>(null);
+  const dragMeta = useRef<{ timer: ReturnType<typeof setTimeout> | null; started: boolean; startY: number; pointerId: number; el: HTMLElement } | null>(null);
+  const cardRefs = useRef<Record<string, HTMLLIElement | null>>({});
+
+  function beginPressHold(e: ReactPointerEvent, q: Question, sectionKey: string, ids: string[]) {
+    if (busy || editingId) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('button')) return; // let the ↑/↓/On/Edit/Delete buttons work
+    const el = e.currentTarget as HTMLElement;
+    const startY = e.clientY;
+    const timer = setTimeout(() => {
+      if (!dragMeta.current) return;
+      dragMeta.current.started = true;
+      try { el.setPointerCapture(dragMeta.current.pointerId); } catch { /* ignore */ }
+      try { (navigator as any).vibrate?.(10); } catch { /* ignore */ }
+      setDragId(q.hubspotRecordId);
+      setDragOrder({ section: sectionKey, ids: [...ids] });
+    }, 220);
+    dragMeta.current = { timer, started: false, startY, pointerId: e.pointerId, el };
+  }
+
+  function onDragMove(e: ReactPointerEvent) {
+    const m = dragMeta.current;
+    if (!m) return;
+    if (!m.started) {
+      // Moved before the hold fired → treat as a scroll, cancel the pending drag.
+      if (Math.abs(e.clientY - m.startY) > 8) { if (m.timer) clearTimeout(m.timer); dragMeta.current = null; }
+      return;
+    }
+    e.preventDefault();
+    const ord = dragOrder;
+    if (!ord || !dragId) return;
+    const ids = ord.ids;
+    const y = e.clientY;
+    // Insertion index = first card whose vertical midpoint is below the pointer.
+    let target = ids.length - 1;
+    for (let i = 0; i < ids.length; i++) {
+      const el = cardRefs.current[ids[i]];
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (y < r.top + r.height / 2) { target = i; break; }
+    }
+    const from = ids.indexOf(dragId);
+    if (from >= 0 && target !== from) {
+      const next = [...ids];
+      next.splice(from, 1);
+      next.splice(target, 0, dragId);
+      setDragOrder({ section: ord.section, ids: next });
+    }
+  }
+
+  function endDrag() {
+    const m = dragMeta.current;
+    if (m?.timer) clearTimeout(m.timer);
+    const started = m?.started;
+    const ord = dragOrder;
+    dragMeta.current = null;
+    if (started && ord) {
+      const updates = ord.ids
+        .map((id, i) => {
+          const q = (questions || []).find((x) => x.hubspotRecordId === id);
+          const displayOrder = (i + 1) * 10;
+          return q && q.displayOrder !== displayOrder ? { id, patch: { displayOrder } as Partial<Question> } : null;
+        })
+        .filter(Boolean) as { id: string; patch: Partial<Question> }[];
+      void persistOrder(updates);
+    }
+    setDragId(null);
+    setDragOrder(null);
+  }
+
   async function saveEdit(id: string, d: Draft) {
     setBusy(true);
     try {
@@ -451,7 +526,15 @@ export default function FormBuilderPage() {
           <div className="text-center text-gray-500 py-10 text-sm">No questions for this template yet. Add one above.</div>
         ) : (
           <div className="space-y-5">
-            {grouped.map(([section, qs], si) => (
+            {grouped.map(([section, qs], si) => {
+              // While dragging within this section, reflow the cards by the live
+              // drag order so the list moves under the finger.
+              const isDraggingHere = dragOrder?.section === section;
+              const displayQs = isDraggingHere
+                ? (dragOrder!.ids.map((id) => qs.find((x) => x.hubspotRecordId === id)).filter(Boolean) as Question[])
+                : qs;
+              const sectionIds = displayQs.map((x) => x.hubspotRecordId);
+              return (
               <div key={section}>
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <h2 className="text-xs font-heading font-bold text-gray-500 uppercase tracking-wide flex-1 min-w-0 truncate">{section}</h2>
@@ -467,8 +550,15 @@ export default function FormBuilderPage() {
                   </button>
                 </div>
                 <ul className="space-y-2">
-                  {qs.map((q, qi) => (
-                    <li key={q.hubspotRecordId} className={`bg-white rounded-xl border p-3 shadow-sm ${q.enabled ? 'border-gray-200' : 'border-gray-200 opacity-60'}`}>
+                  {displayQs.map((q, qi) => (
+                    <li key={q.hubspotRecordId}
+                      ref={(el) => { cardRefs.current[q.hubspotRecordId] = el; }}
+                      onPointerDown={(e) => beginPressHold(e, q, section, sectionIds)}
+                      onPointerMove={onDragMove}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                      style={dragId === q.hubspotRecordId ? { touchAction: 'none' } : undefined}
+                      className={`bg-white rounded-xl border p-3 shadow-sm select-none ${editingId === q.hubspotRecordId ? 'cursor-default' : 'cursor-grab'} ${q.enabled ? 'border-gray-200' : 'border-gray-200 opacity-60'} ${dragId === q.hubspotRecordId ? 'shadow-lg ring-2 ring-brand/40 relative z-10 cursor-grabbing' : ''}`}>
                       {editingId === q.hubspotRecordId ? (
                         <QuestionEditor initial={fromQuestion(q)} busy={busy} knownSections={knownSections}
                           onSave={(d) => saveEdit(q.hubspotRecordId, d)} onCancel={() => setEditingId(null)} />
@@ -516,7 +606,8 @@ export default function FormBuilderPage() {
                   ))}
                 </ul>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </main>
