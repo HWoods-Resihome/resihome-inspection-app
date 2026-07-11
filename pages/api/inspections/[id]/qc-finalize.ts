@@ -13,6 +13,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { externalWriteDenial } from '@/lib/inspectionGuard';
+import { recordAuditEvent } from '@/lib/auditLog';
 import {
   fetchInspectionWithPropertyRef,
   fetchAnswersForInspection,
@@ -367,6 +368,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     } catch (e) {
       console.warn('[qc-finalize] qc_overall_note write skipped (property may not exist yet — run /admin/setup):', e);
     }
+
+    // Audit trail: the QC finalize completes the inspection with a Pass/Fail
+    // verdict (there's no separate submit/approve step for QC). Best-effort.
+    void recordAuditEvent({
+      inspectionId: id,
+      action: 'complete',
+      actorEmail: session.email,
+      actorName: session.name,
+      detail: `QC ${verdict.toUpperCase()} — completed (${passCount} pass / ${failCount} fail)`,
+      meta: { verdict, passCount, failCount },
+    });
 
     // Clean short links (resolve to this PDF) for the record + UI. Separate
     // best-effort write so a missing link_* property never disturbs the QC

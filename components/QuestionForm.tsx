@@ -27,6 +27,7 @@ import { FinalChecklist } from '@/components/FinalChecklist';
 import { SyncingBadge } from '@/components/SyncingBadge';
 import { UnlockButton, type LockRing } from '@/components/UnlockButton';
 import InspectionPager from '@/components/InspectionPager';
+import { InspectionAuditTrail } from '@/components/InspectionAuditTrail';
 import { FitText } from '@/components/FitText';
 import { openPdf } from '@/lib/pdfViewerBus';
 import {
@@ -717,6 +718,25 @@ export function QuestionForm({
     // assigned_to must never be written to HubSpot from here.
     isScope: false,
   });
+
+  // Inspection history (audit trail) — reachable from the header gear on EVERY
+  // status, including completed/read-only, so who submitted/approved/reopened/
+  // cancelled/edited is always visible.
+  const [showAuditTrail, setShowAuditTrail] = useState(false);
+  // Audit: record ONE "Edited" event per editing session (on the first save).
+  // Best-effort; the server dedupes. Skipped when read-only.
+  const editAuditLoggedRef = useRef(false);
+  useEffect(() => {
+    if (readOnly || editAuditLoggedRef.current) return;
+    const k = autosave.saveState.kind;
+    if (k !== 'saving' && k !== 'saved') return;
+    editAuditLoggedRef.current = true;
+    try {
+      void fetch(`/api/inspections/${inspectionRecordId}/audit-edit`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', keepalive: true,
+      }).catch(() => { /* best-effort — never blocks editing */ });
+    } catch { /* ignore */ }
+  }, [autosave.saveState, readOnly, inspectionRecordId]);
 
   // After mount, hydrate the autosave hook with existing data so it knows
   // each answer's recordId (for PATCH updates instead of duplicate creates).
@@ -2010,6 +2030,20 @@ export function QuestionForm({
               Compact circle to the LEFT of Back; hidden once read-only
               (completed / cancelled / view-only). */}
           <div className="shrink-0 flex flex-row items-center gap-1.5">
+          {/* History gear — opens the inspection audit trail. Shown on every
+              status (incl. completed/read-only) so history is always reachable. */}
+          <button
+            type="button"
+            onClick={() => setShowAuditTrail(true)}
+            aria-label="Inspection history"
+            title="Inspection history"
+            className="inline-flex items-center justify-center w-8 h-8 text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white transition-colors"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
           <InspectionPager
             currentId={inspectionRecordId}
             onNavigate={(id) => {
@@ -2591,6 +2625,11 @@ export function QuestionForm({
           onReplace={(_g, i, file) => replaceSectionPhoto(photoLightbox.instanceKey, i, file)}
         />
       )}
+      <InspectionAuditTrail
+        open={showAuditTrail}
+        onClose={() => setShowAuditTrail(false)}
+        inspectionId={inspectionRecordId}
+      />
     </main>
   );
 }

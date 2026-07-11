@@ -19,6 +19,7 @@ interface Props {
 const ACTION: Record<string, { label: string; dot: string; glyph: string }> = {
   create:     { label: 'Created',               dot: 'bg-gray-400',    glyph: '＋' },
   submit:     { label: 'Submitted for approval', dot: 'bg-sky-500',     glyph: '↑' },
+  complete:   { label: 'Completed',              dot: 'bg-emerald-500', glyph: '✓' },
   approve:    { label: 'Approved & finalized',   dot: 'bg-emerald-500', glyph: '✓' },
   refinalize: { label: 'Re-finalized',           dot: 'bg-amber-500',   glyph: '⟳' },
   regenerate: { label: 'PDFs regenerated',       dot: 'bg-amber-400',   glyph: '⟳' },
