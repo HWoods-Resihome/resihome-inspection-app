@@ -958,6 +958,52 @@ export async function searchServiceWorkOrders(limit = 500): Promise<SampleServic
   }
 }
 
+// Seed the sample services as real Service Work Order records (dev/demo only).
+// Idempotent via enrollment_key = `seed:<sampleId>`; re-runs skip existing.
+export async function seedSampleServiceWorkOrders(apply: boolean, samples: SampleService[]): Promise<any> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return { error: 'HUBSPOT_SERVICE_TYPE_ID not set — provision the schema and set the env var first.' };
+
+  const existingKeys = new Set<string>();
+  try {
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key'], filterGroups: [{ filters: [{ propertyName: 'enrollment_key', operator: 'HAS_PROPERTY' }] }] }),
+      });
+      for (const r of resp.results || []) { const k = r.properties?.enrollment_key; if (k) existingKeys.add(String(k)); }
+      after = resp.paging?.next?.after;
+    } while (after);
+  } catch { /* fresh object */ }
+
+  const toProps = (s: SampleService, key: string) => ({
+    service_name: s.address,
+    worktype: s.worktype, subtype: s.subtype, status: s.status, scope: s.scope,
+    is_bid_item: s.status === 'estimated' ? 'true' : 'false',
+    due_date: s.dueDate,
+    region_snapshot: s.region, address_snapshot: s.address, locality_snapshot: s.locality,
+    community_name: s.community || '', property_status_snapshot: s.propertyStatus || '',
+    ...(Number.isFinite(s.lat) ? { latitude: s.lat } : {}), ...(Number.isFinite(s.lng) ? { longitude: s.lng } : {}),
+    vendor_name: s.vendor || '', pet_stations: s.petStations ? 'true' : 'false',
+    ontime: s.onTime ? 'true' : 'false', enrollment_key: key,
+  });
+
+  const report: any = { mode: apply ? 'apply' : 'dry-run', typeId, total: samples.length, created: [], skipped: [] };
+  for (const s of samples) {
+    const key = `seed:${s.id}`;
+    if (existingKeys.has(key)) { report.skipped.push(s.id); continue; }
+    if (!apply) { report.created.push(s.id); continue; }
+    try {
+      await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: toProps(s, key) }) });
+      report.created.push(s.id);
+    } catch (e: any) {
+      report.created.push({ id: s.id, error: String(e?.message || e), detail: e?.detail || null });
+    }
+  }
+  return report;
+}
+
 export async function provisionServicesSchema(apply: boolean): Promise<any> {
   const report: any = { mode: apply ? 'apply' : 'dry-run', objects: [], questionAdditions: [], associations: [], envVars: {}, notes: [] };
   const schemas = await hubspotFetch('/crm/v3/schemas').catch(() => ({ results: [] }));
