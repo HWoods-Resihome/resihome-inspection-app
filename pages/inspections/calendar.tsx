@@ -28,11 +28,14 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 const MON_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-// Open-status buckets shown on the calendar/map: Scheduled + In Progress only.
+// Status buckets shown on the calendar/map. Open = Scheduled + In Progress;
+// Completed is opt-in (internal "Show Completed" toggle, last 30 days).
 const STATUS_META: Record<string, { label: string; hex: string; chip: string }> = {
   scheduled: { label: 'Scheduled', hex: '#2563eb', chip: 'bg-blue-100 text-blue-800 border-blue-300' },
   in_progress: { label: 'In Progress', hex: '#d97706', chip: 'bg-amber-100 text-amber-800 border-amber-300' },
+  completed: { label: 'Completed', hex: '#16a34a', chip: 'bg-green-100 text-green-800 border-green-300' },
 };
+const COMPLETED_WINDOW_DAYS = 30;
 function statusKey(s?: string): 'scheduled' | 'in_progress' | 'pending_approval' | 'completed' | null {
   const x = (s || '').trim().toLowerCase();
   if (x === 'scheduled') return 'scheduled';
@@ -63,6 +66,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const [regionFilter, setRegionFilter] = useState<string[]>([]); // internal only
   const [typeFilter, setTypeFilter] = useState<string[]>([]);     // internal only
   const [statusFilter, setStatusFilter] = useState<string[]>([]); // from the clickable legend (everyone)
+  const [showCompleted, setShowCompleted] = useState(false);      // internal only — last-30-day completed
   const [coords, setCoords] = useState<Record<string, { lat: number; lng: number } | null>>({});
   const mine = (i: InspectionSummary) =>
     (!!i.inspectorEmail && i.inspectorEmail.toLowerCase() === myEmail.toLowerCase()) ||
@@ -95,12 +99,25 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   // Open = Scheduled + In Progress only, with a scheduled date. External users
   // see ONLY their own assignments; internal users see all and can filter by
   // region + inspector. Past-due applies to everyone.
-  // Base set the filters operate over: OPEN (scheduled/in_progress) with a date,
-  // already scoped to the viewer (external → only their own).
+  const thirtyAgoISO = toISO(addDays(today, -COMPLETED_WINDOW_DAYS));
+  // The calendar day for an inspection: completed → submitted (falls back to
+  // completed/approved) date; open → scheduled date.
+  const dayOf = (i: InspectionSummary): string | null =>
+    statusKey(i.status) === 'completed'
+      ? schedDay(i.submittedAt || i.completedAt || i.approvedAt)
+      : schedDay(i.scheduledDate);
+
+  // Base set the filters operate over: OPEN (scheduled/in_progress) always, plus
+  // COMPLETED from the last 30 days when the toggle is on. Scoped to the viewer.
   const openBase = useMemo(() => items.filter((i) => {
     const k = statusKey(i.status);
-    return (k === 'scheduled' || k === 'in_progress') && !!schedDay(i.scheduledDate) && (isInternal || mine(i));
-  }), [items, isInternal]);
+    const day = dayOf(i);
+    if (!day) return false;
+    if (k === 'scheduled' || k === 'in_progress') { /* open — always eligible */ }
+    else if (k === 'completed' && showCompleted && day >= thirtyAgoISO) { /* recent completed */ }
+    else return false;
+    return isInternal || mine(i);
+  }), [items, isInternal, showCompleted, thirtyAgoISO]);
 
   // Per-facet predicates (each option list applies the OTHER facets, not itself).
   const kOf = (i: InspectionSummary) => statusKey(i.status) || '';
@@ -134,11 +151,11 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
 
   const byDay = useMemo(() => {
     const m: Record<string, InspectionSummary[]> = {};
-    for (const i of scoped) { const day = schedDay(i.scheduledDate)!; (m[day] ||= []).push(i); }
+    for (const i of scoped) { const day = dayOf(i)!; (m[day] ||= []).push(i); }
     return m;
   }, [scoped]);
   const visible = useMemo(() => scoped.filter((i) => {
-    const d = parse(schedDay(i.scheduledDate)!); return d >= range.start && d <= range.end;
+    const d = parse(dayOf(i)!); return d >= range.start && d <= range.end;
   }), [scoped, range]);
 
   // Geocode the visible inspections for the map (small concurrency; cached by id).
@@ -175,7 +192,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
       id: i.recordId, lat: c.lat, lng: c.lng, color: meta?.hex || '#ff0060',
       title: i.propertyAddressSnapshot || i.inspectionName || 'Inspection',
       vendor: i.inspectorName || 'Unassigned',
-      subtitle: `${prettyType(i.templateType) || 'Inspection'} · ${meta?.label || i.status} · Sched ${(() => { const d = parse(schedDay(i.scheduledDate)!); return `${d.getMonth() + 1}/${d.getDate()}`; })()}`,
+      subtitle: `${prettyType(i.templateType) || 'Inspection'} · ${meta?.label || i.status} · ${(() => { const d = parse(dayOf(i)!); return `${k === 'completed' ? 'Done' : 'Sched'} ${d.getMonth() + 1}/${d.getDate()}`; })()}`,
       href: `/inspection/${i.recordId}`,
     }];
   });
@@ -227,6 +244,13 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
               <button key={v} onClick={() => setView(v)} className={`px-3 py-1.5 rounded-md capitalize ${view === v ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>{v}</button>
             ))}
           </div>
+          {isInternal && (
+            <button type="button" onClick={() => setShowCompleted((v) => !v)}
+              title="Show completed inspections from the last 30 days, placed by their submitted date"
+              className={`ml-auto shrink-0 text-[12px] font-heading font-semibold px-3 py-1.5 rounded-lg border transition ${showCompleted ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:border-green-400'}`}>
+              Show Completed
+            </button>
+          )}
         </div>
 
         {/* Filters. Internal: Region + Inspector + Template. External: their own
@@ -334,7 +358,8 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
                 <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400 shrink-0">Map · {mapItems.length}/{mappable} mapped</label>
                 {/* Clickable status legend = a status filter for the calendar + map. */}
                 <div className="flex flex-wrap gap-1.5 justify-end">
-                  {Object.entries(STATUS_META).map(([k, v]) => {
+                  {(['scheduled', 'in_progress', ...(showCompleted ? ['completed'] : [])]).map((k) => {
+                    const v = STATUS_META[k];
                     const on = statusFilter.length === 0 || statusFilter.includes(k);
                     return (
                       <button key={k} type="button" onClick={() => setStatusFilter((f) => f.includes(k) ? f.filter((x) => x !== k) : [...f, k])}
