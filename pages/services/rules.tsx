@@ -679,7 +679,6 @@ export default function RulesEngine() {
 
             {rule.recurring ? (
               <>
-                <p className="text-[12px] text-gray-500 mb-3">Recurs relative to the last completed service. Assign <b>every month</b> to a cadence — different months can use different intervals.</p>
                 <div className="space-y-3">
                   {rule.cadences.map((c) => (
                     <div key={c.id} className="relative border border-gray-200 rounded-xl p-3 pr-8 bg-gray-50">
@@ -744,7 +743,6 @@ export default function RulesEngine() {
           <section className={sec}>
             <SecHead n={3} title="Enrollment & Stop" />
             {openSec[3] && (<div className="mt-3">
-            <p className="text-[12px] text-gray-500 mb-3">Enrollment creates the first service. For a recurring rule each service auto-recreates when the last is submitted, until the (optional) stop criteria is met; a one-time rule creates a single service and does not recreate.</p>
             <label className={lbl}>Enroll (Create Services) When</label>
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <select value={rule.enrollField} onChange={(e) => patch({ enrollField: e.target.value, enrollVal: optsFor(e.target.value)[0] || '' })} className={ctl}>{FIELD_NAMES.map((f) => <option key={f}>{f}</option>)}</select>
