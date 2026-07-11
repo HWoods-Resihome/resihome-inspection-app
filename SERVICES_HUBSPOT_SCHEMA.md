@@ -76,6 +76,24 @@ communities, and properties appear automatically:
 - Discovery (read-only): `/api/services/admin/inspect-properties` (field catalog +
   distinct values; `?fields=a,b&catalog=0`) and `/api/services/admin/inspect-communities`.
 
+## Phase 5 — AI review (manual dry-run/apply, no cron yet)
+Reviews submitted orders' evidence (answers + before/after photos) against the
+service AI knowledge base and either auto-completes (clean) or routes to Review.
+`runServiceAiReview()` in `lib/services/aiReview.ts` → `/api/services/admin/review`.
+- **Dry-run (verdicts, no writes):** `https://ppw.resiwalk.com/api/services/admin/review`
+- **Apply (writes verdict + moves status):** `https://ppw.resiwalk.com/api/services/admin/review?apply=1`
+- Optional `&id=<recordId>` to review one order; `&today=YYYY-MM-DD` for on-time math.
+- clean → `status=completed` (+ `completed_at`, `ontime`); needs_review → `status=review`;
+  writes `ai_verdict` / `ai_notes`. Requires `ANTHROPIC_API_KEY`. Model: claude-sonnet-4-6.
+
+## Delete staging / test services (teardown)
+`purgeServiceWorkOrders()` → `/api/services/admin/purge` (admin-gated). Dry-run
+lists `wouldDelete`; `?apply=1` deletes. Default scope = TEST data only.
+- **Dry-run (test data):** `https://ppw.resiwalk.com/api/services/admin/purge`
+- **Delete generated + seeded:** `https://ppw.resiwalk.com/api/services/admin/purge?apply=1`
+- **Delete ONLY rule-generated:** `…/api/services/admin/purge?scope=generated&apply=1`
+- **Delete EVERYTHING (incl. manually-created):** `…/api/services/admin/purge?scope=all&apply=1`
+
 ## Rollout order
 1. **Dry-run** → review the report.
 2. **Apply** → objects + properties + Question props (+ associations; re-run apply

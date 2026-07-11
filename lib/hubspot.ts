@@ -1396,6 +1396,58 @@ export async function patchServiceWorkOrder(id: string, props: Record<string, an
   return true;
 }
 
+/** Service Work Orders in a given status (raw props + id), or null when not configured. */
+export async function searchServiceWorkOrdersByStatus(status: string, limit = 200): Promise<{ id: string; props: Record<string, any> }[] | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  try {
+    const out: { id: string; props: Record<string, any> }[] = [];
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({ limit: 100, after, properties: SERVICE_DETAIL_PROPS, filterGroups: [{ filters: [{ propertyName: 'status', operator: 'EQ', value: status }] }] }),
+      });
+      for (const r of resp.results || []) out.push({ id: String(r.id), props: r.properties || {} });
+      after = resp.paging?.next?.after;
+    } while (after && out.length < limit);
+    return out;
+  } catch (e) { console.warn('[services] status search failed:', e); return null; }
+}
+
+/** Delete Service Work Orders (teardown). dry-run lists targets; apply deletes them.
+ *  scope: 'generated' = gen:* keys, 'seeded' = seed:* keys, 'test' = both, 'all' = every order. */
+export async function purgeServiceWorkOrders(apply: boolean, scope: 'generated' | 'seeded' | 'test' | 'all'): Promise<any> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return { error: 'HUBSPOT_SERVICE_TYPE_ID not set.' };
+  const want = (key: string): boolean => {
+    if (scope === 'all') return true;
+    if (scope === 'generated') return key.startsWith('gen:');
+    if (scope === 'seeded') return key.startsWith('seed:');
+    return key.startsWith('gen:') || key.startsWith('seed:'); // test
+  };
+  const targets: { id: string; key: string; name: string }[] = [];
+  let after: string | undefined;
+  do {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+      method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'service_name', 'status'] }),
+    });
+    for (const r of resp.results || []) {
+      const key = String(r.properties?.enrollment_key || '');
+      if (want(key)) targets.push({ id: String(r.id), key, name: String(r.properties?.service_name || '') });
+    }
+    after = resp.paging?.next?.after;
+  } while (after);
+
+  const report: any = { mode: apply ? 'apply' : 'dry-run', scope, typeId, total: targets.length, deleted: [], errors: [] };
+  if (!apply) { report.wouldDelete = targets.map((t) => ({ id: t.id, name: t.name, key: t.key })); return report; }
+  for (const t of targets) {
+    try { await hubspotFetch(`/crm/v3/objects/${typeId}/${t.id}`, { method: 'DELETE' }); report.deleted.push(t.id); }
+    catch (e: any) { report.errors.push({ id: t.id, error: String(e?.message || e) }); }
+  }
+  return report;
+}
+
 export async function provisionServicesSchema(apply: boolean): Promise<any> {
   const report: any = { mode: apply ? 'apply' : 'dry-run', objects: [], questionAdditions: [], associations: [], envVars: {}, notes: [] };
   const schemas = await hubspotFetch('/crm/v3/schemas').catch(() => ({ results: [] }));
