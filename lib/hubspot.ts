@@ -904,6 +904,69 @@ export async function fetchCommunityFirstPropertyId(communityId: string): Promis
   }
 }
 
+/**
+ * All Community records as { id, name }, sorted by name. Null when the Community
+ * object can't be resolved. Prefers the `community_name` property, falling back
+ * to the resolved display property. Used by the Services rules-engine community
+ * coverage picker and generation.
+ */
+export async function listCommunities(): Promise<{ id: string; name: string }[] | null> {
+  const meta = await resolveCommunityMeta();
+  if (!meta) return null;
+  const props = [...new Set(['community_name', meta.nameProp])];
+  try {
+    const out: { id: string; name: string }[] = [];
+    let after: string | undefined;
+    do {
+      const qs = new URLSearchParams({ limit: '100', properties: props.join(','), archived: 'false' });
+      if (after) qs.set('after', after);
+      const resp = await hubspotFetch(`/crm/v3/objects/${meta.typeId}?${qs.toString()}`);
+      for (const r of resp.results || []) {
+        const p = r.properties || {};
+        const name = String(p.community_name || p[meta.nameProp] || '').trim();
+        if (name) out.push({ id: String(r.id), name });
+      }
+      after = resp.paging?.next?.after;
+    } while (after);
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  } catch (e) { console.warn('[community] list failed:', e); return null; }
+}
+
+/** Property record ids associated to a Community (all pages). Empty when none. */
+export async function fetchCommunityPropertyIds(communityId: string): Promise<string[]> {
+  const meta = await resolveCommunityMeta();
+  if (!meta) return [];
+  const { property } = typeIds();
+  const out: string[] = [];
+  try {
+    let after: string | undefined;
+    do {
+      const qs = after ? `?limit=100&after=${after}` : '?limit=100';
+      const assoc = await hubspotFetch(`/crm/v4/objects/${meta.typeId}/${communityId}/associations/${property}${qs}`);
+      for (const a of assoc.results || []) if (a.toObjectId != null) out.push(String(a.toObjectId));
+      after = assoc.paging?.next?.after;
+    } while (after);
+  } catch (e) { console.warn('[community] property ids fetch failed:', e); }
+  return out;
+}
+
+/** Discovery: the Community object's field catalog + full community name list. */
+export async function inspectCommunityObject(): Promise<{
+  typeId: string; nameProp: string;
+  fields: { name: string; label: string; type: string; fieldType: string }[];
+  communities: { id: string; name: string }[]; count: number;
+} | null> {
+  const meta = await resolveCommunityMeta();
+  if (!meta) return null;
+  const defs = await hubspotFetch(`/crm/v3/properties/${meta.typeId}`).catch(() => ({ results: [] }));
+  const fields = (defs.results || [])
+    .filter((p: any) => !/^hs_/.test(p.name) && !['createdate', 'lastmodifieddate'].includes(p.name))
+    .map((p: any) => ({ name: p.name, label: p.label, type: p.type, fieldType: p.fieldType }));
+  const communities = (await listCommunities()) || [];
+  return { typeId: meta.typeId, nameProp: meta.nameProp, fields, communities, count: communities.length };
+}
+
 // ── ResiWalk - Services: Phase 0 schema provisioner ─────────────────────────
 // Additive-only. dry-run diffs the schemaSpec against HubSpot (no writes); apply
 // creates the two custom objects, their properties, the additive Question props,
