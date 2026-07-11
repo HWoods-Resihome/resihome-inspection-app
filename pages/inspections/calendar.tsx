@@ -49,6 +49,10 @@ const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.get
 const sameYMD = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 // scheduledDate (raw HubSpot) → local YYYY-MM-DD (or null).
 const schedDay = (v: string | null | undefined): string | null => { const ms = hubspotToMs(v); return ms == null ? null : toISO(new Date(ms)); };
+// Format a raw template type ("pm_turn_reinspect_qc") into a readable name
+// ("PM Turn Reinspect QC"): split on _/-/space, upper-case short tokens (acronyms).
+const prettyType = (s?: string | null): string =>
+  (s || '').split(/[_\-\s]+/).filter(Boolean).map((w) => (w.length <= 2 ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1))).join(' ');
 
 export default function InspectionsCalendar({ isInternal, myEmail, myName }: { isInternal: boolean; myEmail: string; myName: string }) {
   const [view, setView] = useState<View>('month');
@@ -57,7 +61,8 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const [error, setError] = useState<string | null>(null);
   const [inspectorScope, setInspectorScope] = useState('all');   // internal only
   const [regionFilter, setRegionFilter] = useState<string[]>([]); // internal only
-  const [pastDueOnly, setPastDueOnly] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<string[]>([]);     // internal only
+  const [statusFilter, setStatusFilter] = useState<string[]>([]); // from the clickable legend (everyone)
   const [coords, setCoords] = useState<Record<string, { lat: number; lng: number } | null>>({});
   const mine = (i: InspectionSummary) =>
     (!!i.inspectorEmail && i.inspectorEmail.toLowerCase() === myEmail.toLowerCase()) ||
@@ -93,21 +98,23 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const scoped = useMemo(() => items.filter((i) => {
     const k = statusKey(i.status);
     if (k !== 'scheduled' && k !== 'in_progress') return false;
+    if (statusFilter.length && !statusFilter.includes(k)) return false;   // clickable legend
     const day = schedDay(i.scheduledDate);
     if (!day) return false;
     if (!isInternal) { if (!mine(i)) return false; }
     else {
       if (inspectorScope !== 'all' && (i.inspectorName || '') !== inspectorScope) return false;
       if (regionFilter.length && !regionFilter.includes(i.regionSnapshot || '')) return false;
+      if (typeFilter.length && !typeFilter.includes(i.templateType || '')) return false;
     }
-    if (pastDueOnly && !(day < todayISO)) return false;
     return true;
-  }), [items, isInternal, inspectorScope, regionFilter, pastDueOnly, todayISO]);
+  }), [items, isInternal, inspectorScope, regionFilter, typeFilter, statusFilter]);
 
   // Filter option lists (internal only) — derived from the visible-to-me set.
   const forLists = useMemo(() => isInternal ? items : items.filter(mine), [items, isInternal]);
   const inspectors = useMemo(() => [...new Set(forLists.map((i) => i.inspectorName).filter(Boolean) as string[])].sort(), [forLists]);
   const regions = useMemo(() => [...new Set(forLists.map((i) => i.regionSnapshot).filter(Boolean) as string[])].sort(), [forLists]);
+  const templates = useMemo(() => [...new Set(forLists.map((i) => i.templateType).filter(Boolean) as string[])].sort(), [forLists]);
 
   const range = useMemo(() => {
     if (view === 'day') return { start: cursor, end: cursor };
@@ -159,7 +166,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
       id: i.recordId, lat: c.lat, lng: c.lng, color: meta?.hex || '#ff0060',
       title: i.propertyAddressSnapshot || i.inspectionName || 'Inspection',
       vendor: i.inspectorName || 'Unassigned',
-      subtitle: `${i.templateType || 'Inspection'} · ${meta?.label || i.status} · Sched ${(() => { const d = parse(schedDay(i.scheduledDate)!); return `${d.getMonth() + 1}/${d.getDate()}`; })()}`,
+      subtitle: `${prettyType(i.templateType) || 'Inspection'} · ${meta?.label || i.status} · Sched ${(() => { const d = parse(schedDay(i.scheduledDate)!); return `${d.getMonth() + 1}/${d.getDate()}`; })()}`,
       href: `/inspection/${i.recordId}`,
     }];
   });
@@ -180,7 +187,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const ChipLink = ({ i }: { i: InspectionSummary }) => (
     <Link href={`/inspection/${i.recordId}`} onClick={(e) => e.stopPropagation()}
       className={`block truncate rounded border px-1.5 py-0.5 text-[10.5px] font-semibold mb-0.5 ${metaOf(i)?.chip || 'bg-gray-100 text-gray-700 border-gray-300'}`}
-      title={`${i.propertyAddressSnapshot || i.inspectionName} — ${i.templateType || ''}`}>
+      title={`${i.propertyAddressSnapshot || i.inspectionName} — ${prettyType(i.templateType)}`}>
       {i.propertyAddressSnapshot || i.inspectionName || 'Inspection'}
     </Link>
   );
@@ -213,30 +220,30 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
           </div>
         </div>
 
-        {/* Filters. Internal: Region + Inspector + Past Due. External: their own
-            assignments only (no region/inspector), just a Past Due toggle. */}
-        <div className="flex items-center gap-2">
-          {isInternal ? (
-            <>
-              <div className="flex-1 min-w-0">
-                <MultiFilter label="Region" selected={regionFilter} onChange={setRegionFilter}
-                  className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${regionFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
-                  options={regions.map((r) => ({ value: r, label: r }))} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <ListPicker value={inspectorScope} onChange={setInspectorScope} ariaLabel="Inspector"
-                  className="w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border border-gray-300 rounded-lg bg-white text-ink flex items-center justify-between"
-                  options={[{ value: 'all', label: 'All inspectors' }, ...inspectors.map((n) => ({ value: n, label: n }))]} />
-              </div>
-            </>
-          ) : (
-            <span className="flex-1 text-[12px] font-heading font-semibold text-gray-500">Your assigned inspections</span>
-          )}
-          <button type="button" onClick={() => setPastDueOnly((v) => !v)}
-            className={`shrink-0 text-[12px] font-heading font-semibold px-3 py-1.5 rounded-lg border transition ${pastDueOnly ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-700 border-gray-300 hover:border-red-300'}`}>
-            Past Due
-          </button>
-        </div>
+        {/* Filters. Internal: Type + Inspector + Region. External: their own
+            assignments only (no filters). The status legend (below the map) is a
+            clickable filter for everyone. */}
+        {isInternal ? (
+          <div className="flex items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <MultiFilter label="Type" selected={typeFilter} onChange={setTypeFilter}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                options={templates.map((t) => ({ value: t, label: prettyType(t) }))} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <ListPicker value={inspectorScope} onChange={setInspectorScope} ariaLabel="Inspector"
+                className="w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border border-gray-300 rounded-lg bg-white text-ink flex items-center justify-between"
+                options={[{ value: 'all', label: 'All inspectors' }, ...inspectors.map((n) => ({ value: n, label: n }))]} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <MultiFilter label="Region" selected={regionFilter} onChange={setRegionFilter}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${regionFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                options={regions.map((r) => ({ value: r, label: r }))} />
+            </div>
+          </div>
+        ) : (
+          <div className="text-[12px] font-heading font-semibold text-gray-500">Your assigned inspections</div>
+        )}
 
         <div className="flex items-center gap-2">
           <button onClick={() => step(-1)} aria-label="Previous" className="w-9 h-9 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50">
@@ -280,7 +287,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
             )}
 
             {view === 'week' && (
-              <div className="grid grid-cols-7 gap-1">
+              <div className="grid grid-cols-4 gap-1.5">
                 {Array.from({ length: 7 }, (_, i) => addDays(range.start, i)).map((d, idx) => {
                   const dayItems = byDay[toISO(d)] || [];
                   const isToday = sameYMD(d, today);
@@ -305,7 +312,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
                     <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: metaOf(i)?.hex || '#9ca3af' }} />
                     <div className="min-w-0 flex-1">
                       <div className="font-heading font-bold text-ink text-sm truncate">{i.propertyAddressSnapshot || i.inspectionName || 'Inspection'}</div>
-                      <div className="text-[12px] text-gray-500 truncate">{i.templateType || 'Inspection'} · {metaOf(i)?.label || i.status}</div>
+                      <div className="text-[12px] text-gray-500 truncate">{prettyType(i.templateType) || 'Inspection'} · {metaOf(i)?.label || i.status}</div>
                     </div>
                     <span className="text-[12px] text-gray-500 shrink-0">{i.inspectorName || <span className="text-brand font-semibold">Unassigned</span>}</span>
                   </Link>
@@ -314,14 +321,19 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
             )}
 
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400">Map · {mapItems.length}/{mappable} mapped</label>
-                <div className="flex flex-wrap gap-2">
-                  {Object.values(STATUS_META).map((v) => (
-                    <span key={v.label} className="inline-flex items-center gap-1 text-[10px] text-gray-500">
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ background: v.hex }} />{v.label}
-                    </span>
-                  ))}
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400 shrink-0">Map · {mapItems.length}/{mappable} mapped</label>
+                {/* Clickable status legend = a status filter for the calendar + map. */}
+                <div className="flex flex-wrap gap-1.5 justify-end">
+                  {Object.entries(STATUS_META).map(([k, v]) => {
+                    const on = statusFilter.length === 0 || statusFilter.includes(k);
+                    return (
+                      <button key={k} type="button" onClick={() => setStatusFilter((f) => f.includes(k) ? f.filter((x) => x !== k) : [...f, k])}
+                        className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full border px-1.5 py-0.5 transition ${on ? 'border-gray-300 text-gray-600 bg-white' : 'border-gray-200 text-gray-300 bg-gray-50'}`}>
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: v.hex, opacity: on ? 1 : 0.35 }} />{v.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <ServicesMap items={mapItems} />

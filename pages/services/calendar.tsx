@@ -192,9 +192,9 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
           </div>
         )}
 
-        {/* ---- WEEK ---- */}
+        {/* ---- WEEK ---- (wraps 4 over 3 so day columns are wide enough to read addresses) */}
         {view === 'week' && (
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-4 gap-1.5">
             {Array.from({ length: 7 }, (_, i) => addDays(range.start, i)).map((d, i) => {
               const items = byDay[toISO(d)] || [];
               const isToday = sameYMD(d, today);
@@ -230,14 +230,19 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
 
         {/* ---- MAP ---- */}
         <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400">Map · {visible.length} stop{visible.length === 1 ? '' : 's'}</label>
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(WT).map(([k, v]) => (
-                <span key={k} className="inline-flex items-center gap-1 text-[10px] text-gray-500">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: v.hex }} />{worktypeLabel(k)}
-                </span>
-              ))}
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400 shrink-0">Map · {visible.length} stop{visible.length === 1 ? '' : 's'}</label>
+            {/* Clickable legend = the worktype filter for the calendar + map. */}
+            <div className="flex flex-wrap gap-1.5 justify-end">
+              {Object.entries(WT).map(([k, v]) => {
+                const on = typeFilter.length === 0 || typeFilter.includes(k);
+                return (
+                  <button key={k} type="button" onClick={() => setTypeFilter((f) => f.includes(k) ? f.filter((x) => x !== k) : [...f, k])}
+                    className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full border px-1.5 py-0.5 transition ${on ? 'border-gray-300 text-gray-600 bg-white' : 'border-gray-200 text-gray-300 bg-gray-50'}`}>
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ background: v.hex, opacity: on ? 1 : 0.35 }} />{worktypeLabel(k)}
+                  </button>
+                );
+              })}
             </div>
           </div>
           <ServicesMap items={mapItems} />
