@@ -229,15 +229,15 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
           </div>
         </div>
 
-        {/* Filters. Internal: Type + Inspector + Region. External: their own
+        {/* Filters. Internal: Region + Inspector + Template. External: their own
             assignments only (no filters). The status legend (below the map) is a
             clickable filter for everyone. */}
         {isInternal ? (
           <div className="flex items-center gap-2">
             <div className="flex-1 min-w-0">
-              <MultiFilter label="Type" selected={typeFilter} onChange={setTypeFilter}
-                className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
-                options={templates.map((t) => ({ value: t, label: prettyType(t) }))} />
+              <MultiFilter label="Region" selected={regionFilter} onChange={setRegionFilter}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${regionFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                options={regions.map((r) => ({ value: r, label: r }))} />
             </div>
             <div className="flex-1 min-w-0">
               <ListPicker value={inspectorScope} onChange={setInspectorScope} ariaLabel="Inspector"
@@ -245,9 +245,9 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
                 options={[{ value: 'all', label: 'All inspectors' }, ...inspectors.map((n) => ({ value: n, label: n }))]} />
             </div>
             <div className="flex-1 min-w-0">
-              <MultiFilter label="Region" selected={regionFilter} onChange={setRegionFilter}
-                className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${regionFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
-                options={regions.map((r) => ({ value: r, label: r }))} />
+              <MultiFilter label="Template" selected={typeFilter} onChange={setTypeFilter}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                options={templates.map((t) => ({ value: t, label: prettyType(t) }))} />
             </div>
           </div>
         ) : (
