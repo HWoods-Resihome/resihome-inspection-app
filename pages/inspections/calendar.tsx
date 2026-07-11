@@ -66,6 +66,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const [typeFilter, setTypeFilter] = useState<string[]>([]);     // internal only
   const [statusFilter, setStatusFilter] = useState<string[]>([]); // from the clickable legend (everyone)
   const [showCompleted, setShowCompleted] = useState(false);      // internal only — last-30-day completed
+  const [filtersOpen, setFiltersOpen] = useState(true);           // collapsible filter block (internal)
   const [coords, setCoords] = useState<Record<string, { lat: number; lng: number } | null>>({});
   const mine = (i: InspectionSummary) =>
     (!!i.inspectorEmail && i.inspectorEmail.toLowerCase() === myEmail.toLowerCase()) ||
@@ -254,43 +255,48 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
             ))}
           </div>
           {isInternal && (
-            <button type="button" onClick={() => setShowCompleted((v) => !v)}
-              title="Show completed inspections from the last 30 days, placed by their submitted date"
-              className={`ml-auto shrink-0 text-[12px] font-heading font-semibold px-3 py-1.5 rounded-lg border transition ${showCompleted ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:border-green-400'}`}>
-              Show Completed
+            <button type="button" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen} aria-label="Filters"
+              className="ml-auto shrink-0 inline-flex items-center gap-1.5 text-[12px] font-heading font-semibold px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:text-brand hover:border-brand/50 transition-colors">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+              Filters
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
             </button>
           )}
         </div>
 
-        {/* Filters. Internal: Region + Inspector + Template. External: their own
-            assignments only (no filters). The status legend (below the map) is a
-            clickable filter for everyone. */}
-        {isInternal ? (
-          <div className="flex items-center gap-2">
-            <div className="flex-1 min-w-0">
+        {/* Collapsible filter block (internal): Region + Inspectors + Template +
+            Show Completed + Clear, all on one row. External: their own assignments
+            only. The status legend (below the map) is a clickable filter for everyone. */}
+        {isInternal && filtersOpen && (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex-1 min-w-[88px]">
               <MultiFilter label="Region" selected={regionFilter} onChange={setRegionFilter}
                 className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${regionFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
                 options={regions.map((r) => ({ value: r, label: r }))} />
             </div>
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-[88px]">
               <MultiFilter label="Inspectors" selected={inspectorFilter} onChange={setInspectorFilter}
                 className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${inspectorFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
                 options={inspectors.map((n) => ({ value: n, label: n }))} />
             </div>
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-[88px]">
               <MultiFilter label="Template" selected={typeFilter} onChange={setTypeFilter}
                 className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
                 options={templates.map((t) => ({ value: t, label: prettyType(t) }))} />
             </div>
+            <button type="button" onClick={() => setShowCompleted((v) => !v)}
+              title="Show completed inspections from the last 30 days, placed by their submitted date"
+              className={`shrink-0 text-[12px] font-heading font-semibold px-3 py-1.5 rounded-lg border transition ${showCompleted ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:border-green-400'}`}>
+              Show Completed
+            </button>
+            {(regionFilter.length > 0 || inspectorFilter.length > 0 || typeFilter.length > 0 || statusFilter.length > 0) && (
+              <button type="button" onClick={() => { setRegionFilter([]); setInspectorFilter([]); setTypeFilter([]); setStatusFilter([]); }}
+                className="shrink-0 text-[11px] font-heading font-semibold text-gray-500 hover:text-brand underline">Clear</button>
+            )}
           </div>
-        ) : (
-          <div className="text-[12px] font-heading font-semibold text-gray-500">Your assigned inspections</div>
         )}
-        {(regionFilter.length > 0 || inspectorFilter.length > 0 || typeFilter.length > 0 || statusFilter.length > 0) && (
-          <div className="flex justify-end -mt-1">
-            <button type="button" onClick={() => { setRegionFilter([]); setInspectorFilter([]); setTypeFilter([]); setStatusFilter([]); }}
-              className="text-[11px] font-heading font-semibold text-gray-500 hover:text-brand underline">Clear filters</button>
-          </div>
+        {!isInternal && (
+          <div className="text-[12px] font-heading font-semibold text-gray-500">Your assigned inspections</div>
         )}
 
         <div className="flex items-center gap-2">
