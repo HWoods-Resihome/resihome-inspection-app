@@ -275,14 +275,16 @@ export default function ServicesHome({ userName, canCreate }: { userName: string
                   <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>{STATUS_LABEL[s.status]}</span>
                 </div>
                 <div className="text-[12px] text-gray-500 truncate mt-0.5">{s.locality}{s.community ? ` · ${s.community}` : ''}</div>
-                <div className="mt-1 flex items-end justify-between gap-2">
+                {/* Line 3: worktype · subtype (+ property status) with the vendor on the right. */}
+                <div className="mt-1 flex items-center justify-between gap-2">
                   <div className="text-[12px] text-gray-600 flex flex-wrap gap-x-3 gap-y-0.5 min-w-0">
                     <span className="font-semibold text-ink">{worktypeLabel(s.worktype)} · {subtypeLabel(s.worktype, s.subtype)}</span>
                     {s.scope !== 'community' && s.propertyStatus && <span>{s.propertyStatus}</span>}
-                    <span className={overdue ? 'text-red-600 font-semibold' : ''}>Due {fmtDue(s.dueDate)}</span>
                   </div>
                   <span className="text-[12px] shrink-0 text-right">{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
                 </div>
+                {/* Line 4: due date — always on its own line. */}
+                <div className={`mt-0.5 text-[12px] ${overdue ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>Due {fmtDue(s.dueDate)}</div>
               </Link>
             );
           })}
