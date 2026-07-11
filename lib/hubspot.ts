@@ -854,6 +854,29 @@ async function createProperty(typeId: string, p: PropSpec, groupName: string) {
   catch (e) { if (!isConflict(e)) throw e; }
 }
 
+// Read-only: report every existing custom object whose name/label mentions
+// "service" — so we can see what the pre-existing "Service" object is (and its
+// record count) BEFORE deciding whether it's safe to delete. No writes.
+export async function inspectServiceLikeObjects(): Promise<any> {
+  const schemas = await hubspotFetch('/crm/v3/schemas').catch(() => ({ results: [] }));
+  const matches = (schemas.results || []).filter((s: any) =>
+    /service/i.test(s.name || '') || /service/i.test(s.labels?.singular || '') || /service/i.test(s.labels?.plural || ''));
+  const out: any[] = [];
+  for (const s of matches) {
+    let recordCount: number | null = null;
+    try {
+      const r = await hubspotFetch(`/crm/v3/objects/${s.objectTypeId}/search`, { method: 'POST', body: JSON.stringify({ limit: 1 }) });
+      recordCount = typeof r.total === 'number' ? r.total : null;
+    } catch { /* count unavailable */ }
+    out.push({
+      name: s.name, objectTypeId: s.objectTypeId, fullyQualifiedName: s.fullyQualifiedName,
+      singular: s.labels?.singular, plural: s.labels?.plural, createdAt: s.createdAt,
+      propertyCount: (s.properties || []).length, recordCount,
+    });
+  }
+  return { objects: out };
+}
+
 export async function provisionServicesSchema(apply: boolean): Promise<any> {
   const report: any = { mode: apply ? 'apply' : 'dry-run', objects: [], questionAdditions: [], associations: [], envVars: {}, notes: [] };
   const schemas = await hubspotFetch('/crm/v3/schemas').catch(() => ({ results: [] }));
