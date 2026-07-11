@@ -1078,6 +1078,25 @@ export async function deleteServiceRuleRecord(id: string): Promise<boolean> {
   return true;
 }
 
+/** Existing Service Work Order (enrollment_key, status) pairs — for generation dedup.
+ *  Null when not configured. */
+export async function readServiceWorkOrderKeys(): Promise<{ key: string; status: string }[] | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  try {
+    const out: { key: string; status: string }[] = [];
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'status'] }),
+      });
+      for (const r of resp.results || []) out.push({ key: String(r.properties?.enrollment_key || ''), status: String(r.properties?.status || '') });
+      after = resp.paging?.next?.after;
+    } while (after);
+    return out;
+  } catch (e) { console.warn('[services] key read failed:', e); return null; }
+}
+
 /** Create one Service Work Order from a property map. Returns the new record id,
  *  or null when the object type id env var isn't set (caller falls back to preview). */
 export async function createServiceWorkOrder(props: Record<string, any>): Promise<string | null> {

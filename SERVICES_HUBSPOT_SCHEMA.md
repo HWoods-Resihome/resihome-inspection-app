@@ -69,3 +69,20 @@ everything else reports `exists`):
 3. Set the two env vars, redeploy.
 4. Phase 1: build the Services read layer (`/api/services`) and swap the home
    list + calendar from sample data → real Services (behind the flag).
+
+## Phase 3b — generation engine (manual dry-run/apply, no cron yet)
+Turns saved Service Rules Engine records into real Service Work Orders.
+`runServiceGeneration()` in `lib/services/generate.ts`, exposed at
+`/api/services/admin/generate`. Admin-gated; PROD HubSpot via the preview.
+- **Dry-run (read-only):** `https://ppw.resiwalk.com/api/services/admin/generate`
+- **Apply (creates work orders):** `https://ppw.resiwalk.com/api/services/admin/generate?apply=1`
+- Optional `&today=YYYY-MM-DD` overrides "today" for due-date math (defaults to server today).
+
+Idempotent via `enrollment_key = gen:<ruleId>:<targetId>`: one OPEN (non-terminal)
+order per (rule, target) at a time — the next generates only after the current is
+completed or canceled. v1 simplifications (reported in the response `notes`):
+property targets from sample data; community targets from the rule's own list;
+enrollment/stop conditions assumed met; due = today + First Order Due (days), else
++5; no cadence date math; first assigned vendor used (no rotation). No scheduled
+cron — runs only when an admin hits the endpoint. Wire to a nightly cron once the
+dry-run is validated against live rules.
