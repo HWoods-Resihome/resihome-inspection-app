@@ -7,6 +7,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { PriceField } from '@/components/PriceField';
 import { MultiFilter } from '@/components/MultiFilter';
+import { ListPicker } from '@/components/ListPicker';
 import { SAMPLE_PROPERTIES, SAMPLE_REGIONS, SAMPLE_SERVICES, SAMPLE_VENDORS } from '@/lib/services/sampleData';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -84,7 +85,7 @@ interface Rule {
 }
 
 let _cid = 100;
-const newCadence = (months: number[] = []): Cadence => ({ id: ++_cid, unit: 'weeks', interval: '2', dow: -1, dom: 0, months });
+const newCadence = (months: number[] = []): Cadence => ({ id: ++_cid, unit: 'weeks', interval: '', dow: -1, dom: 0, months });
 
 // Searchable, multi-select, scrollable dropdown for portfolio/community/region
 // coverage, with Select all / Deselect all over the current search results.
@@ -350,6 +351,8 @@ export default function RulesEngine() {
   const sec = 'bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 shadow-sm';
   const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
   const ctl = 'text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg bg-white text-ink';
+  // Branded ListPicker trigger — replaces the native grey <select> boxes.
+  const pick = 'text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg bg-white text-ink flex items-center justify-between gap-1';
   const pickerCls = (active: boolean) =>
     `w-full truncate text-[11px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-md bg-white flex items-center justify-between ${active ? 'border-brand text-brand' : 'border-gray-300 text-gray-700 hover:border-brand/50'}`;
   // Section header: click to expand/collapse, with a rotating chevron.
@@ -518,17 +521,17 @@ export default function RulesEngine() {
             <SecHead n={1} title="Work Type, Coverage & Pricing" />
             {openSec[1] && (<div className="mt-4">
             <div className="flex flex-wrap items-center gap-3 mb-4">
-              <div>
+              <div className="w-40">
                 <label className={lbl}>Work Type</label>
-                <select value={rule.worktype} onChange={(e) => { const wt = e.target.value as Worktype; const sub = firstSubtype(wt); patch({ worktype: wt, subtype: sub, vendorCost: baseRate(wt, sub), description: descriptionFor(wt, sub) }); }} className={ctl}>
-                  {WORKTYPES.filter((w) => w.scopes.includes(rule.scope)).map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
-                </select>
+                <ListPicker value={rule.worktype} ariaLabel="Work type" className={`${pick} w-full`}
+                  options={WORKTYPES.filter((w) => w.scopes.includes(rule.scope)).map((w) => ({ value: w.id, label: w.label }))}
+                  onChange={(v) => { const wt = v as Worktype; const sub = firstSubtype(wt); patch({ worktype: wt, subtype: sub, vendorCost: baseRate(wt, sub), description: descriptionFor(wt, sub) }); }} />
               </div>
-              <div>
+              <div className="w-40">
                 <label className={lbl}>Subtype</label>
-                <select value={rule.subtype} onChange={(e) => patch({ subtype: e.target.value, vendorCost: baseRate(rule.worktype, e.target.value), description: descriptionFor(rule.worktype, e.target.value) })} className={ctl}>
-                  {subtypesFor(rule.worktype).map((st) => <option key={st.id} value={st.id}>{st.label}</option>)}
-                </select>
+                <ListPicker value={rule.subtype} ariaLabel="Subtype" className={`${pick} w-full`}
+                  options={subtypesFor(rule.worktype).map((st) => ({ value: st.id, label: st.label }))}
+                  onChange={(v) => patch({ subtype: v, vendorCost: baseRate(rule.worktype, v), description: descriptionFor(rule.worktype, v) })} />
               </div>
               <div>
                 <label className={lbl}>Coverage</label>
@@ -671,13 +674,13 @@ export default function RulesEngine() {
             <div className="mb-3">
               <label className={lbl}>Is This Recurring?</label>
               <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
-                <button onClick={() => patch({ recurring: true })} className={`px-4 py-1.5 rounded-md ${rule.recurring ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>Yes</button>
+                <button onClick={() => patch({ recurring: true, ...(rule.cadences.length === 0 ? { cadences: [newCadence([...Array(12).keys()])] } : {}) })} className={`px-4 py-1.5 rounded-md ${rule.recurring ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>Yes</button>
                 <button onClick={() => patch({ recurring: false })} className={`px-4 py-1.5 rounded-md ${!rule.recurring ? 'bg-white text-ink shadow-sm' : 'text-gray-600'}`}>No</button>
               </div>
               <div className="text-[11px] text-gray-400 mt-1">{rule.recurring ? 'Recurs on the cadence below.' : 'One-time — a single service is created on enrollment.'}</div>
             </div>
 
-            {rule.recurring ? (
+            {rule.recurring && (
               <>
                 <div className="space-y-3">
                   {rule.cadences.map((c) => (
@@ -733,8 +736,6 @@ export default function RulesEngine() {
                   {missingMonths.length ? `Not all months accounted for — missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}` : 'All 12 months accounted for ✓'}
                 </div>
               </>
-            ) : (
-              <p className="text-[13px] text-gray-500">One-time service — no recurring cadence. A single work order is created when the enrollment criteria is met.</p>
             )}
             </div>)}
           </section>
@@ -745,15 +746,14 @@ export default function RulesEngine() {
             {openSec[3] && (<div className="mt-3">
             <label className={lbl}>Enroll (Create Services) When</label>
             <div className="flex flex-wrap items-center gap-2 mb-4">
-              <select value={rule.enrollField} onChange={(e) => patch({ enrollField: e.target.value, enrollVal: optsFor(e.target.value)[0] || '' })} className={ctl}>{FIELD_NAMES.map((f) => <option key={f}>{f}</option>)}</select>
-              <select value={rule.enrollOp} onChange={(e) => patch({ enrollOp: e.target.value })} className={ctl}>{OPS.map((o) => <option key={o}>{o}</option>)}</select>
-              <select value={rule.enrollVal} onChange={(e) => patch({ enrollVal: e.target.value })} className={`${ctl} flex-1 min-w-[140px]`}>{optsFor(rule.enrollField).map((o) => <option key={o}>{o}</option>)}</select>
+              <ListPicker value={rule.enrollField} ariaLabel="Enrollment field" className={pick}
+                options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
+                onChange={(v) => patch({ enrollField: v, enrollVal: optsFor(v)[0] || '' })} />
+              <ListPicker value={rule.enrollOp} ariaLabel="Operator" className={pick}
+                options={OPS.map((o) => ({ value: o, label: o }))} onChange={(v) => patch({ enrollOp: v })} />
+              <ListPicker value={rule.enrollVal} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
+                options={optsFor(rule.enrollField).map((o) => ({ value: o, label: o }))} onChange={(v) => patch({ enrollVal: v })} />
             </div>
-            {rule.enrollField === 'Deal Stage' && (
-              <div className="mb-4 -mt-1 text-[11px] text-gray-500 bg-brand/5 border border-brand/20 rounded-lg px-3 py-2 leading-relaxed">
-                <b className="text-ink">Deal-stage trigger.</b> Fires on the <b>transition into</b> the stage (an edge, not a standing state), and is de-duplicated on the associated deal — so exactly one service is created per lease.{!rule.recurring ? ' With “Is this recurring?” = No, it never recreates, even if the service is completed before the property flips to occupied.' : ' Tip: set “Is this recurring?” = No for a true one-time move-in dispatch.'}
-              </div>
-            )}
             <label className="flex items-center gap-2 mb-2 cursor-pointer">
               <input type="checkbox" checked={rule.stopEnabled} onChange={(e) => patch({ stopEnabled: e.target.checked, ...(e.target.checked && !rule.stopVal ? { stopVal: optsFor(rule.stopField)[0] || '' } : {}) })} />
               <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Stop Criteria <span className="normal-case font-normal text-gray-400">(optional)</span></span>
@@ -762,17 +762,19 @@ export default function RulesEngine() {
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[13px] text-gray-600">Stop</span>
-                  <select value={rule.stopMode} onChange={(e) => patch({ stopMode: e.target.value as Rule['stopMode'] })} className={ctl}>
-                    <option value="condition">when a field changes</option>
-                    <option value="date">on a date</option>
-                    <option value="count">after N services</option>
-                  </select>
+                  <ListPicker value={rule.stopMode} ariaLabel="Stop mode" className={pick}
+                    options={[{ value: 'condition', label: 'when a field changes' }, { value: 'date', label: 'on a date' }, { value: 'count', label: 'after N services' }]}
+                    onChange={(v) => patch({ stopMode: v as Rule['stopMode'] })} />
                 </div>
                 {rule.stopMode === 'condition' && (
                   <div className="flex flex-wrap items-center gap-2">
-                    <select value={rule.stopField} onChange={(e) => patch({ stopField: e.target.value, stopVal: optsFor(e.target.value)[0] || '' })} className={ctl}>{FIELD_NAMES.map((f) => <option key={f}>{f}</option>)}</select>
-                    <select value={rule.stopOp} onChange={(e) => patch({ stopOp: e.target.value })} className={ctl}>{OPS.map((o) => <option key={o}>{o}</option>)}</select>
-                    <select value={rule.stopVal} onChange={(e) => patch({ stopVal: e.target.value })} className={`${ctl} flex-1 min-w-[140px]`}>{optsFor(rule.stopField).map((o) => <option key={o}>{o}</option>)}</select>
+                    <ListPicker value={rule.stopField} ariaLabel="Stop field" className={pick}
+                      options={FIELD_NAMES.map((f) => ({ value: f, label: f }))}
+                      onChange={(v) => patch({ stopField: v, stopVal: optsFor(v)[0] || '' })} />
+                    <ListPicker value={rule.stopOp} ariaLabel="Operator" className={pick}
+                      options={OPS.map((o) => ({ value: o, label: o }))} onChange={(v) => patch({ stopOp: v })} />
+                    <ListPicker value={rule.stopVal} ariaLabel="Value" className={`${pick} flex-1 min-w-[140px]`}
+                      options={optsFor(rule.stopField).map((o) => ({ value: o, label: o }))} onChange={(v) => patch({ stopVal: v })} />
                   </div>
                 )}
                 {rule.stopMode === 'date' && (
