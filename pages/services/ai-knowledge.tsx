@@ -6,11 +6,8 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { ListPicker } from '@/components/ListPicker';
 import { MultiFilter } from '@/components/MultiFilter';
-import { WORKTYPES, worktypeLabel } from '@/lib/services/worktypes';
-import {
-  AI_CATEGORIES, SAMPLE_AI_CHECKS, SEVERITY_LABEL, SEVERITY_STYLE, newCheck,
-  type AiCheck, type Severity,
-} from '@/lib/services/aiKnowledge';
+import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
+import { SAMPLE_AI_CHECKS, newCheck, type AiCheck } from '@/lib/services/aiKnowledge';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
@@ -21,11 +18,12 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 
 const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
 const trig = 'w-full flex items-center justify-between gap-2 text-[13px] border border-gray-300 rounded-lg px-2.5 py-2 bg-white text-ink';
+const scopeLabel = (c: AiCheck) =>
+  `${c.worktype ? worktypeLabel(c.worktype) : 'All Work Types'} · ${c.subtype ? subtypeLabel(c.worktype, c.subtype) : 'All Subtypes'}`;
 
 export default function ServicesAiKnowledge() {
   const [checks, setChecks] = useState<AiCheck[]>(() => [...SAMPLE_AI_CHECKS]);
   const [editId, setEditId] = useState<string | null>(null);
-  const [catFilter, setCatFilter] = useState<string[]>([]);
   const [wtFilter, setWtFilter] = useState<string[]>([]);
 
   const patch = (id: string, p: Partial<AiCheck>) => setChecks((cs) => cs.map((c) => (c.id === id ? { ...c, ...p } : c)));
@@ -33,8 +31,7 @@ export default function ServicesAiKnowledge() {
   const add = () => { const c = newCheck(); setChecks((cs) => [c, ...cs]); setEditId(c.id); };
 
   const visible = useMemo(() => checks.filter((c) =>
-    (catFilter.length === 0 || catFilter.includes(c.category)) &&
-    (wtFilter.length === 0 || wtFilter.includes(c.worktype || 'all'))), [checks, catFilter, wtFilter]);
+    wtFilter.length === 0 || wtFilter.includes(c.worktype || 'all')), [checks, wtFilter]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -54,19 +51,14 @@ export default function ServicesAiKnowledge() {
         <section className="bg-white border border-gray-200 rounded-2xl p-4">
           <p className="text-[13px] text-gray-600">
             On submit, a service enters <b className="text-ink">AI Processing</b>. The AI checks the evidence against these rules —
-            if all clean it auto-moves to <b className="text-emerald-700">Completed</b>; any High/Medium concern routes it to
-            <b className="text-purple-700"> Review</b> for a human.
+            all are equally important. If everything is clean it auto-moves to <b className="text-emerald-700">Completed</b>;
+            any concern routes it to <b className="text-purple-700">Review</b> for a human.
           </p>
           <div className="flex flex-wrap items-center gap-2 mt-3">
-            <div className="flex-1 min-w-[110px]">
-              <MultiFilter label="Category" selected={catFilter} onChange={setCatFilter}
-                className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${catFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
-                options={AI_CATEGORIES.map((c) => ({ value: c, label: c }))} />
-            </div>
-            <div className="flex-1 min-w-[110px]">
+            <div className="flex-1 min-w-[140px]">
               <MultiFilter label="Work Type" selected={wtFilter} onChange={setWtFilter}
                 className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${wtFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
-                options={[{ value: 'all', label: 'All work types' }, ...WORKTYPES.map((w) => ({ value: w.id, label: w.label }))]} />
+                options={[{ value: 'all', label: 'All Work Types' }, ...WORKTYPES.map((w) => ({ value: w.id, label: w.label }))]} />
             </div>
             <button onClick={add} className="shrink-0 bg-brand text-white font-heading font-bold text-sm rounded-xl px-4 py-2">+ Add Check</button>
           </div>
@@ -80,11 +72,7 @@ export default function ServicesAiKnowledge() {
                 <section key={c.id} className={`bg-white border border-gray-200 rounded-2xl p-4 ${c.active ? '' : 'opacity-60'}`}>
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                        <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{c.category}</span>
-                        <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border ${SEVERITY_STYLE[c.severity]}`}>{SEVERITY_LABEL[c.severity]}</span>
-                        <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{c.worktype ? worktypeLabel(c.worktype) : 'All'}</span>
-                      </div>
+                      <div className="mb-1"><span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{scopeLabel(c)}</span></div>
                       <div className="text-[13px] text-ink">{c.check || <span className="text-gray-400">Empty check</span>}</div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
@@ -98,7 +86,7 @@ export default function ServicesAiKnowledge() {
               )
           ))}
           {visible.length === 0 && (
-            <div className="text-center text-gray-400 text-sm py-10 border border-dashed border-gray-300 rounded-2xl">No checks match these filters.</div>
+            <div className="text-center text-gray-400 text-sm py-10 border border-dashed border-gray-300 rounded-2xl">No checks match this filter.</div>
           )}
         </div>
 
@@ -122,18 +110,17 @@ function CheckEditor({ c, onPatch, onClose, onDelete }: {
           className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand" />
       </div>
       <div className="flex flex-wrap items-end gap-3">
-        <div className="w-40">
-          <label className={lbl}>Category</label>
-          <ListPicker value={c.category} options={AI_CATEGORIES.map((x) => ({ value: x, label: x }))} ariaLabel="Category" className={trig} onChange={(v) => onPatch({ category: v })} />
-        </div>
-        <div className="w-36">
-          <label className={lbl}>Severity</label>
-          <ListPicker value={c.severity} options={(['high', 'medium', 'low'] as Severity[]).map((s) => ({ value: s, label: SEVERITY_LABEL[s] }))} ariaLabel="Severity" className={trig} onChange={(v) => onPatch({ severity: v as Severity })} />
-        </div>
-        <div className="w-40">
+        <div className="w-44">
           <label className={lbl}>Work Type</label>
-          <ListPicker value={c.worktype || 'all'} options={[{ value: 'all', label: 'All work types' }, ...WORKTYPES.map((w) => ({ value: w.id, label: w.label }))]} ariaLabel="Work type" className={trig}
-            onChange={(v) => onPatch({ worktype: v === 'all' ? '' : v })} />
+          <ListPicker value={c.worktype || 'all'} options={[{ value: 'all', label: 'All Work Types' }, ...WORKTYPES.map((w) => ({ value: w.id, label: w.label }))]} ariaLabel="Work type" className={trig}
+            onChange={(v) => onPatch({ worktype: v === 'all' ? '' : v, subtype: '' })} />
+        </div>
+        <div className="w-44">
+          <label className={lbl}>Subtype</label>
+          <ListPicker value={c.subtype || 'all'} disabled={!c.worktype}
+            options={[{ value: 'all', label: 'All Subtypes' }, ...(c.worktype ? subtypesFor(c.worktype).map((s) => ({ value: s.id, label: s.label })) : [])]}
+            ariaLabel="Subtype" className={`${trig} ${!c.worktype ? 'opacity-50' : ''}`}
+            onChange={(v) => onPatch({ subtype: v === 'all' ? '' : v })} />
         </div>
       </div>
       <div className="flex items-center justify-end gap-2">
