@@ -1030,6 +1030,52 @@ export async function unseedSampleServiceWorkOrders(apply: boolean): Promise<any
   return report;
 }
 
+// ── Service Rules Engine: read + upsert rule records ──
+const RULE_PROPS = [
+  'rule_name', 'active', 'worktype', 'subtype', 'scope', 'pet_stations', 'props_mode',
+  'vendor_cost', 'markup_pct', 'vendors_json', 'service_description', 'recurring',
+  'cadences_json', 'initial_due_days', 'skip_months_json', 'included_props_json',
+  'portfolios_json', 'communities_json', 'regions_json', 'enroll_field', 'enroll_op',
+  'enroll_value', 'stop_enabled', 'stop_mode', 'stop_field', 'stop_op', 'stop_value',
+  'stop_date', 'stop_count',
+];
+
+/** All Service Rule records (raw props + id), or null when not configured. */
+export async function searchServiceRuleRecords(): Promise<{ id: string; props: Record<string, any> }[] | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  try {
+    const out: { id: string; props: Record<string, any> }[] = [];
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({ limit: 100, after, properties: RULE_PROPS, sorts: [{ propertyName: 'hs_createdate', direction: 'ASCENDING' }] }),
+      });
+      for (const r of resp.results || []) out.push({ id: String(r.id), props: r.properties || {} });
+      after = resp.paging?.next?.after;
+    } while (after);
+    return out;
+  } catch (e) { console.warn('[services] rule read failed:', e); return null; }
+}
+
+/** Create (id null) or update a Service Rule record. Returns the record id, or
+ *  null when the object type id env var isn't set. */
+export async function upsertServiceRuleRecord(id: string | null, props: Record<string, any>): Promise<string | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  if (id) { await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) }); return id; }
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: props }) });
+  return resp?.id ? String(resp.id) : null;
+}
+
+export async function deleteServiceRuleRecord(id: string): Promise<boolean> {
+  const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
+  if (!typeId || !id) return false;
+  await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'DELETE' });
+  return true;
+}
+
 /** Create one Service Work Order from a property map. Returns the new record id,
  *  or null when the object type id env var isn't set (caller falls back to preview). */
 export async function createServiceWorkOrder(props: Record<string, any>): Promise<string | null> {

@@ -11,10 +11,11 @@
 
 import type { Worktype, ServiceScope } from './worktypes';
 
-// Pipeline: Estimated → Assigned → Submitted → AI Processing → (Completed | Review) → Completed.
-// A submitted service enters ai_processing; the AI review either auto-completes it or
-// routes it to review for a human. Canceled is terminal (hidden from list/counts).
-export type ServiceStatus = 'estimated' | 'assigned' | 'submitted' | 'ai_processing' | 'review' | 'completed' | 'canceled';
+// Pipeline: Estimated → Assigned → Submitted → (Completed | Review).
+// On submit the service STAYS in Submitted with an "AI Processing" tag while the AI
+// reviews; the AI then either auto-completes it or routes it to Review for a human.
+// AI Processing is a tag, not its own status. Canceled is terminal (hidden).
+export type ServiceStatus = 'estimated' | 'assigned' | 'submitted' | 'review' | 'completed' | 'canceled';
 
 export interface SampleService {
   id: string;
@@ -71,7 +72,7 @@ export const SAMPLE_SERVICES: SampleService[] = [
 ];
 
 export const SAMPLE_STATUS_ORDER: ServiceStatus[] =
-  ['estimated', 'assigned', 'submitted', 'ai_processing', 'review', 'completed', 'canceled'];
+  ['estimated', 'assigned', 'submitted', 'review', 'completed', 'canceled'];
 
 // Sample PROPERTY records for the rules-engine coverage drill-down (Portfolio →
 // Region → individual properties). Real data comes from the Property object later.

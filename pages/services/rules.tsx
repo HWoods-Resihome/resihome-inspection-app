@@ -9,12 +9,14 @@ import { PriceField } from '@/components/PriceField';
 import { MultiFilter } from '@/components/MultiFilter';
 import { ListPicker } from '@/components/ListPicker';
 import { SAMPLE_PROPERTIES, SAMPLE_REGIONS, SAMPLE_SERVICES, SAMPLE_VENDORS } from '@/lib/services/sampleData';
+import { searchServiceRuleRecords } from '@/lib/hubspot';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
-  return { props: {} };
+  const recs = await searchServiceRuleRecords().catch(() => null);
+  return { props: { ruleRecords: recs, live: !!recs } };
 };
 
 // Sample reference data (real lists come from Property / Community in a later step).
@@ -63,7 +65,8 @@ type Unit = 'days' | 'weeks' | 'months';
 // interval is a STRING so it can be cleared/retyped; dow -1 and dom 0 mean "Any day".
 interface Cadence { id: number; unit: Unit; interval: string; dow: number; dom: number; months: number[]; }
 interface Rule {
-  id: number; name: string; active: boolean; worktype: Worktype; subtype: string;
+  id: number; recordId?: string;            // HubSpot Service Rule record id (undefined = not saved yet)
+  name: string; active: boolean; worktype: Worktype; subtype: string;
   petStations: boolean;                     // community only: capture dedicated pet-station before/after
   scope: 'property' | 'community'; portfolios: string[]; communities: string[];
   regions: string[];                        // property scope: dependent region filter (empty = all)
@@ -174,8 +177,52 @@ const SEED: Rule[] = [
   },
 ];
 
-export default function RulesEngine() {
-  const [rules, setRules] = useState<Rule[]>(SEED);
+// ── HubSpot Service Rule ↔ Rule mappers (Phase 3 persistence) ──
+const parseArr = (s: any): any[] => { try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+let _rid = 900;
+function rulePropsToRule(rec: { id: string; props: Record<string, any> }): Rule {
+  const p = rec.props;
+  const cadences: Cadence[] = parseArr(p.cadences_json).map((c: any) => ({ id: ++_cid, unit: (c.unit || 'weeks') as Unit, interval: String(c.interval ?? ''), dow: Number(c.dow ?? -1), dom: Number(c.dom ?? 0), months: Array.isArray(c.months) ? c.months : [] }));
+  return {
+    id: ++_rid, recordId: rec.id,
+    name: p.rule_name || 'Rule', active: p.active === 'true',
+    worktype: (p.worktype || 'landscaping') as Worktype, subtype: p.subtype || '',
+    petStations: p.pet_stations === 'true', scope: p.scope === 'community' ? 'community' : 'property',
+    portfolios: parseArr(p.portfolios_json), communities: parseArr(p.communities_json), regions: parseArr(p.regions_json),
+    propsMode: p.props_mode === 'list' ? 'list' : 'all', includedProps: parseArr(p.included_props_json),
+    vendorCost: p.vendor_cost != null ? String(p.vendor_cost) : '', markupPct: p.markup_pct != null ? String(p.markup_pct) : '',
+    vendors: parseArr(p.vendors_json), description: p.service_description || '',
+    recurring: p.recurring !== 'false', cadences,
+    initialDueDays: p.initial_due_days != null ? String(p.initial_due_days) : '', skipMonths: parseArr(p.skip_months_json),
+    enrollField: p.enroll_field || 'Property Status', enrollOp: p.enroll_op || 'is', enrollVal: p.enroll_value || '',
+    stopEnabled: p.stop_enabled === 'true', stopMode: (p.stop_mode || 'condition') as Rule['stopMode'],
+    stopField: p.stop_field || 'Property Status', stopOp: p.stop_op || 'changes to', stopVal: p.stop_value || '',
+    stopDate: p.stop_date ? String(p.stop_date).slice(0, 10) : '', stopCount: p.stop_count != null ? String(p.stop_count) : '',
+  };
+}
+function ruleToProps(r: Rule): Record<string, any> {
+  const props: Record<string, any> = {
+    rule_name: r.name, active: r.active ? 'true' : 'false', worktype: r.worktype, subtype: r.subtype, scope: r.scope,
+    pet_stations: r.petStations ? 'true' : 'false', props_mode: r.propsMode,
+    vendors_json: JSON.stringify(r.vendors), service_description: r.description,
+    recurring: r.recurring ? 'true' : 'false', cadences_json: JSON.stringify(r.cadences),
+    skip_months_json: JSON.stringify(r.skipMonths), included_props_json: JSON.stringify(r.includedProps),
+    portfolios_json: JSON.stringify(r.portfolios), communities_json: JSON.stringify(r.communities), regions_json: JSON.stringify(r.regions),
+    enroll_field: r.enrollField, enroll_op: r.enrollOp, enroll_value: r.enrollVal,
+    stop_enabled: r.stopEnabled ? 'true' : 'false', stop_mode: r.stopMode,
+    stop_field: r.stopField, stop_op: r.stopOp, stop_value: r.stopVal,
+  };
+  if (r.vendorCost !== '') props.vendor_cost = Number(r.vendorCost);
+  if (r.markupPct !== '') props.markup_pct = Number(r.markupPct);
+  if (r.initialDueDays !== '') props.initial_due_days = Number(r.initialDueDays);
+  if (r.stopDate) props.stop_date = r.stopDate;
+  if (r.stopCount !== '') props.stop_count = Number(r.stopCount);
+  return props;
+}
+
+export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: string; props: Record<string, any> }[] | null; live: boolean }) {
+  const [rules, setRules] = useState<Rule[]>(() => (ruleRecords ? ruleRecords.map(rulePropsToRule) : SEED));
+  const [savingRule, setSavingRule] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);   // null = list view; else editing that rule
   const [propsOpen, setPropsOpen] = useState(false);
   const [propSearch, setPropSearch] = useState('');
@@ -272,8 +319,10 @@ export default function RulesEngine() {
     openRule(id);
   };
   const deleteRule = (id: number) => {
+    const recId = rules.find((r) => r.id === id)?.recordId;
     setRules((rs) => rs.filter((r) => r.id !== id));
     if (id === openId) closeRule();
+    if (recId) void fetch('/api/services/rules/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delete: true, recordId: recId }) }).catch(() => {});
   };
 
   const countFor = (r: Rule) => {
@@ -348,6 +397,21 @@ export default function RulesEngine() {
   }
   const canSave = saveErrors.length === 0;
 
+  // Persist the open rule to HubSpot (create or update), stamp the returned id, close.
+  const saveRule = async () => {
+    if (!canSave || !rule) { closeRule(); return; }
+    setSavingRule(true);
+    try {
+      const r = await fetch('/api/services/rules/save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordId: rule.recordId, props: ruleToProps(rule) }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.id) patch({ recordId: d.id });
+    } catch { /* preview / offline — keep local */ }
+    finally { setSavingRule(false); closeRule(); }
+  };
+
   const sec = 'bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 shadow-sm';
   const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
   const ctl = 'text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg bg-white text-ink';
@@ -381,7 +445,7 @@ export default function RulesEngine() {
           </Link>
           <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
           <div className="font-heading font-extrabold">Rules Engine</div>
-          <span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">Admin · Sample</span>
+          <span className="text-[9px] font-bold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">Admin · {live ? 'Live' : 'Sample'}</span>
         </div>
       </header>
 
@@ -802,8 +866,8 @@ export default function RulesEngine() {
             {saveErrors.map((e, i) => (
               <div key={i} className="mb-2 text-[12.5px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {e}</div>
             ))}
-            <button onClick={() => { if (canSave) closeRule(); }} disabled={!canSave} className={`w-full rounded-2xl py-3 font-heading font-bold text-sm ${canSave ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
-              {canSave ? 'Save & Close' : 'Resolve the Issues Above to Save'}
+            <button onClick={saveRule} disabled={!canSave || savingRule} className={`w-full rounded-2xl py-3 font-heading font-bold text-sm ${canSave && !savingRule ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
+              {savingRule ? 'Saving…' : canSave ? 'Save & Close' : 'Resolve the Issues Above to Save'}
             </button>
           </div>
         </main>

@@ -31,13 +31,12 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 
 const STATUS_LABEL: Record<ServiceStatus, string> = {
   estimated: 'Estimated', assigned: 'Assigned', submitted: 'Submitted',
-  ai_processing: 'AI Processing', review: 'Review', completed: 'Completed', canceled: 'Canceled',
+  review: 'Review', completed: 'Completed', canceled: 'Canceled',
 };
 const STATUS_STYLE: Record<ServiceStatus, string> = {
   estimated: 'bg-gray-100 text-gray-700 border-gray-300',
   assigned: 'bg-sky-100 text-sky-800 border-sky-300',
   submitted: 'bg-amber-100 text-amber-800 border-amber-300',
-  ai_processing: 'bg-indigo-100 text-indigo-800 border-indigo-300',
   review: 'bg-purple-100 text-purple-800 border-purple-300',
   completed: 'bg-green-100 text-green-800 border-green-300',
   canceled: 'bg-gray-100 text-gray-500 border-gray-300 line-through',
@@ -50,7 +49,7 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: 'region', label: 'Region' }, { value: 'community', label: 'Community' },
   { value: 'status', label: 'Status' },
 ];
-const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'ai_processing', 'review'];
+const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'review'];
 const fmtDue = (iso: string) => {
   const d = new Date(iso + 'T00:00:00');
   return isNaN(d.getTime()) ? iso : `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${String(d.getUTCFullYear()).slice(-2)}`;
@@ -303,7 +302,10 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
                     <span className="font-heading font-bold text-ink truncate">{s.address}</span>
                     <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${s.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{s.scope === 'community' ? 'Community' : 'SFR'}</span>
                   </div>
-                  <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>{STATUS_LABEL[s.status]}</span>
+                  <span className="shrink-0 inline-flex items-center gap-1">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>{STATUS_LABEL[s.status]}</span>
+                    {s.status === 'submitted' && <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold border bg-indigo-100 text-indigo-700 border-indigo-300">AI Processing</span>}
+                  </span>
                 </div>
                 <div className="text-[12px] text-gray-500 truncate mt-0.5">{s.locality}{s.community ? ` · ${s.community}` : ''}</div>
                 {/* Line 3: worktype · subtype (+ property status) with the vendor on the right. */}

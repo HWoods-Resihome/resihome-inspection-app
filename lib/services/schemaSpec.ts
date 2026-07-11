@@ -28,7 +28,7 @@ const SEL = (name: string, label: string, options: { label: string; value: strin
 
 const WT_OPTS = WORKTYPES.map((w) => ({ label: w.label, value: w.id }));
 const SUB_OPTS = [...new Map(WORKTYPES.flatMap((w) => w.subtypes.map((s) => [s.id, s.label] as const))).entries()].map(([value, label]) => ({ label, value }));
-const STATUS_OPTS = opt([['Estimated', 'estimated'], ['Assigned', 'assigned'], ['Submitted', 'submitted'], ['AI Processing', 'ai_processing'], ['Review', 'review'], ['Completed', 'completed'], ['Canceled', 'canceled']]);
+const STATUS_OPTS = opt([['Estimated', 'estimated'], ['Assigned', 'assigned'], ['Submitted', 'submitted'], ['Review', 'review'], ['Completed', 'completed'], ['Canceled', 'canceled']]);
 const SCOPE_OPTS = opt([['Property', 'property'], ['Community', 'community']]);
 const OPERATOR_OPTS = opt([['is', 'is'], ['is any of', 'is any of'], ['is not', 'is not'], ['changes to', 'changes to']]);
 
@@ -104,6 +104,9 @@ export const SERVICE_RULE_OBJECT: ObjectSpec = {
     NUM('initial_due_days', 'First Order Due (days)'),
     TA('skip_months_json', 'No-Service Months (JSON)'),
     TA('included_props_json', 'Included Properties (JSON)'),
+    TA('portfolios_json', 'Portfolios (JSON)'),
+    TA('communities_json', 'Communities (JSON)'),
+    TA('regions_json', 'Regions (JSON)'),
     T('enroll_field', 'Enroll Field'),
     SEL('enroll_op', 'Enroll Operator', OPERATOR_OPTS),
     T('enroll_value', 'Enroll Value'),

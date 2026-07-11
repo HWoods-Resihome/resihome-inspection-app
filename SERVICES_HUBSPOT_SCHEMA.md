@@ -47,10 +47,20 @@ service_rule → property · community · company(vendor).
 - **Subtype:** Grass Cut, Flowers, Tree Trimming, Mulch / Pine Straw, Common Area,
   Model Home, Move-In Clean, Vacant Clean, One-Time Clean, On-Market Clean,
   Pool Cleaning, Trash Pickup, Base Trip Fee
-- **Status:** Estimated, Assigned, Submitted, AI Processing, Review, Completed, Canceled
+- **Status:** Estimated, Assigned, Submitted, Review, Completed, Canceled
+  (AI Processing is a **tag on Submitted**, not a status — a submitted service stays
+  Submitted while the AI reviews, then moves to Completed or Review. The `ai_processing`
+  option created earlier in HubSpot is now unused and can be removed manually.)
 - **Coverage Scope:** Property, Community · **Property Mode:** All, List
 - **AI Verdict:** Clean, Needs Review · **Stop Mode:** Condition, Date, Count
 - **Operators:** is, is any of, is not, changes to
+
+## Re-apply for later-added properties
+The spec has grown since the first apply — re-run `?apply=1` to add these (idempotent;
+everything else reports `exists`):
+- **Service Work Order** snapshots: `address_snapshot`, `locality_snapshot`,
+  `community_name`, `property_status_snapshot`, `latitude`, `longitude`
+- **Service Rules Engine** coverage: `portfolios_json`, `communities_json`, `regions_json`
 
 ## Rollout order
 1. **Dry-run** → review the report.
