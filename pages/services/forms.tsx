@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
@@ -51,6 +51,40 @@ export default function FormBuilder() {
     setQuestions(next);
   };
 
+  // ── Press-and-hold drag to reorder (pointer events; works on touch + mouse) ──
+  const [dragId, setDragId] = useState<string | null>(null);
+  const dragRef = useRef<string | null>(null);
+  const cardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPress = () => { if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; } };
+  const onCardPointerDown = (e: React.PointerEvent, id: string) => {
+    if ((e.target as HTMLElement).closest('button')) return; // don't start on On/Edit/Delete/arrows
+    cancelPress();
+    pressTimer.current = setTimeout(() => { dragRef.current = id; setDragId(id); }, 250);
+  };
+  const reorderOver = (clientY: number) => {
+    const id = dragRef.current;
+    if (!id) return;
+    const cur = forms[key] || [];
+    let targetId: string | null = null;
+    for (const q of cur) {
+      const el = cardRefs.current[q.id]; if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (clientY >= r.top && clientY <= r.bottom) { targetId = q.id; break; }
+    }
+    if (!targetId || targetId === id) return;
+    const from = cur.findIndex((q) => q.id === id);
+    const to = cur.findIndex((q) => q.id === targetId);
+    if (from < 0 || to < 0) return;
+    const next = [...cur];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setQuestions(next);
+  };
+  const onListPointerMove = (e: React.PointerEvent) => { if (dragRef.current) { e.preventDefault(); reorderOver(e.clientY); } };
+  const endDrag = () => { cancelPress(); dragRef.current = null; setDragId(null);
+  };
+
   const worktypeOptions = useMemo(() => WORKTYPES.map((w) => ({ value: w.id, label: w.label })), []);
   const subtypeOptions = useMemo(() => subtypesFor(worktype).map((s) => ({ value: s.id, label: s.label })), [worktype]);
 
@@ -88,15 +122,27 @@ export default function FormBuilder() {
           </p>
         </section>
 
-        <div className="space-y-3">
+        {questions.length > 1 && !editId && (
+          <div className="text-[11px] text-gray-400 -mb-1">Reorder with the arrows, or press &amp; hold a card and drag.</div>
+        )}
+        <div className="space-y-3" style={{ touchAction: dragId ? 'none' : undefined }}
+          onPointerMove={onListPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag}>
           {questions.map((q, idx) => (
             editId === q.id
               ? <QuestionEditor key={q.id} q={q} onPatch={(p) => patchQ(q.id, p)} onClose={() => setEditId(null)} onDelete={() => delQ(q.id)} />
               : (
-                <section key={q.id} className={`bg-white border border-gray-200 rounded-2xl p-4 flex items-center gap-3 ${q.enabled ? '' : 'opacity-60'}`}>
-                  <div className="flex flex-col shrink-0">
-                    <button onClick={() => move(q.id, -1)} disabled={idx === 0} aria-label="Move up" className="w-6 h-5 grid place-items-center rounded text-gray-400 hover:text-brand disabled:opacity-30 leading-none">↑</button>
-                    <button onClick={() => move(q.id, 1)} disabled={idx === questions.length - 1} aria-label="Move down" className="w-6 h-5 grid place-items-center rounded text-gray-400 hover:text-brand disabled:opacity-30 leading-none">↓</button>
+                <section key={q.id} ref={(el) => { cardRefs.current[q.id] = el; }}
+                  onPointerDown={(e) => onCardPointerDown(e, q.id)}
+                  className={`bg-white border rounded-2xl p-4 flex items-center gap-3 select-none ${q.enabled ? '' : 'opacity-60'} ${dragId === q.id ? 'border-brand ring-2 ring-brand/40 shadow-lg' : 'border-gray-200'}`}>
+                  <div className="flex flex-col shrink-0 gap-1">
+                    <button onClick={() => move(q.id, -1)} disabled={idx === 0} aria-label="Move up"
+                      className="w-8 h-8 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50 disabled:opacity-30">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
+                    </button>
+                    <button onClick={() => move(q.id, 1)} disabled={idx === questions.length - 1} aria-label="Move down"
+                      className="w-8 h-8 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50 disabled:opacity-30">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+                    </button>
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="font-heading font-bold text-[15px] text-ink truncate">{q.label || <span className="text-gray-400 font-normal">Untitled question</span>}</div>
