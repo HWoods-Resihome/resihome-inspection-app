@@ -11,6 +11,7 @@ import { SAMPLE_SERVICES } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder } from '@/lib/hubspot';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoThumb } from '@/components/PhotoThumb';
+import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync } from '@/lib/services/offlineServices';
 
 interface ServiceView {
@@ -110,16 +111,17 @@ function CameraPhotos({ label, required, urls, onChange, address, propertyRecord
   );
 }
 
-function PhotoGrid({ label, urls }: { label: string; urls: string[] }) {
+function PhotoGrid({ label, urls, onOpen }: { label: string; urls: string[]; onOpen: (index: number) => void }) {
   if (!urls.length) return null;
   return (
     <div>
       <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">{label}</div>
       <div className="grid grid-cols-4 gap-2">
         {urls.map((u, i) => (
-          <div key={`${u}-${i}`} className="aspect-square rounded-lg overflow-hidden border border-gray-300 bg-gray-100">
+          <button key={`${u}-${i}`} type="button" onClick={() => onOpen(i)}
+            className="aspect-square rounded-lg overflow-hidden border border-gray-300 bg-gray-100 cursor-zoom-in">
             <PhotoThumb url={u} alt={`${label} ${i + 1}`} className="w-full h-full object-cover" />
-          </div>
+          </button>
         ))}
       </div>
     </div>
@@ -201,6 +203,18 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
 
   const inputCls = 'w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand';
   const chip = (t: string, cls: string) => <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${cls}`}>{t}</span>;
+
+  // Photo gallery (read-only lightbox): Before / After / Pet groups you can toggle
+  // between and swipe through — same viewer inspections use.
+  const gallery = useMemo(() => {
+    const groups: { id: string; name: string }[] = [];
+    const map: Record<string, string[]> = {};
+    const add = (id: string, name: string, urls: string[]) => { if (urls.length) { groups.push({ id, name }); map[id] = urls; } };
+    add('before', 'Before', svc.before); add('after', 'After', svc.after);
+    add('petBefore', 'Pet — Before', svc.petBefore); add('petAfter', 'Pet — After', svc.petAfter);
+    return { groups, map };
+  }, [svc]);
+  const [lightbox, setLightbox] = useState<{ groupId: string; index: number } | null>(null);
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -367,12 +381,12 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
                 )}
 
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
-                  <div className="font-heading font-bold text-[15px] text-ink">Evidence</div>
-                  <PhotoGrid label="Before photos" urls={svc.before} />
-                  <PhotoGrid label="After photos" urls={svc.after} />
-                  <PhotoGrid label="Pet station — before" urls={svc.petBefore} />
-                  <PhotoGrid label="Pet station — after" urls={svc.petAfter} />
-                  {!svc.before.length && !svc.after.length && <div className="text-[13px] text-gray-400">No photos on this service.</div>}
+                  <div className="font-heading font-bold text-[15px] text-ink">Evidence <span className="text-[11px] font-normal text-gray-400">— tap a photo to enlarge</span></div>
+                  <PhotoGrid label="Before photos" urls={svc.before} onOpen={(i) => setLightbox({ groupId: 'before', index: i })} />
+                  <PhotoGrid label="After photos" urls={svc.after} onOpen={(i) => setLightbox({ groupId: 'after', index: i })} />
+                  <PhotoGrid label="Pet station — before" urls={svc.petBefore} onOpen={(i) => setLightbox({ groupId: 'petBefore', index: i })} />
+                  <PhotoGrid label="Pet station — after" urls={svc.petAfter} onOpen={(i) => setLightbox({ groupId: 'petAfter', index: i })} />
+                  {!svc.before.length && !svc.after.length && !svc.petBefore.length && !svc.petAfter.length && <div className="text-[13px] text-gray-400">No photos on this service.</div>}
                 </section>
 
                 {svc.reviewDecision && (
@@ -436,6 +450,19 @@ export default function ServiceDetail({ svc, form, isInternal }: { svc: ServiceV
           </>
         )}
       </main>
+
+      {lightbox && gallery.groups.length > 0 && (
+        <PhotoLightbox
+          groups={gallery.groups}
+          photosByGroup={gallery.map}
+          initialGroupId={lightbox.groupId}
+          initialIndex={lightbox.index}
+          readOnly
+          onClose={() => setLightbox(null)}
+          onDelete={() => { /* read-only */ }}
+          onReplace={() => { /* read-only */ }}
+        />
+      )}
     </div>
   );
 }

@@ -7,7 +7,7 @@
  * data URIs by the API route (reliable server-side rendering).
  */
 import React from 'react';
-import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer';
+import { Document, Page, View, Text, Image, Link, StyleSheet } from '@react-pdf/renderer';
 
 export interface ServicePdfData {
   address: string;
@@ -35,6 +35,10 @@ export interface ServicePdfData {
   after: string[];
   petBefore: string[];
   petAfter: string[];
+  // Absolute URL to the hosted gallery (/services/<id>/photos); each photo links to
+  // it deep-linked to its group + index, so tapping a PDF photo opens the same
+  // enlarge/gallery viewer with Before/After toggle.
+  galleryBase: string;
 }
 
 const BRAND = '#ff0060';
@@ -54,13 +58,17 @@ const s = StyleSheet.create({
   pill: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#fff', backgroundColor: BRAND, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 8 },
 });
 
-function PhotoBlock({ title, urls }: { title: string; urls: string[] }) {
+function PhotoBlock({ title, urls, group, galleryBase }: { title: string; urls: string[]; group: string; galleryBase: string }) {
   if (!urls.length) return null;
   return (
     <View style={s.section} wrap={false}>
-      <Text style={s.secTitle}>{title}</Text>
+      <Text style={s.secTitle}>{title} <Text style={{ color: '#999', fontFamily: 'Helvetica' }}>· tap a photo to open the gallery</Text></Text>
       <View style={s.grid}>
-        {urls.map((u, i) => <Image key={i} src={u} style={s.photo} />)}
+        {urls.map((u, i) => (
+          galleryBase
+            ? <Link key={i} src={`${galleryBase}?g=${group}&i=${i}`} style={s.photo}><Image src={u} style={s.photo} /></Link>
+            : <Image key={i} src={u} style={s.photo} />
+        ))}
       </View>
     </View>
   );
@@ -114,10 +122,10 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
           </View>
         )}
 
-        <PhotoBlock title="Before photos" urls={d.before} />
-        <PhotoBlock title="After photos" urls={d.after} />
-        <PhotoBlock title="Pet station — before" urls={d.petBefore} />
-        <PhotoBlock title="Pet station — after" urls={d.petAfter} />
+        <PhotoBlock title="Before photos" urls={d.before} group="before" galleryBase={d.galleryBase} />
+        <PhotoBlock title="After photos" urls={d.after} group="after" galleryBase={d.galleryBase} />
+        <PhotoBlock title="Pet station — before" urls={d.petBefore} group="petBefore" galleryBase={d.galleryBase} />
+        <PhotoBlock title="Pet station — after" urls={d.petAfter} group="petAfter" galleryBase={d.galleryBase} />
       </Page>
     </Document>
   );

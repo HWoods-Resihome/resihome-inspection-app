@@ -68,6 +68,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       aiVerdict: p.ai_verdict || '', aiNotes: p.ai_notes || '',
       reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: p.reviewed_by || '',
       answers, before, after, petBefore, petAfter,
+      galleryBase: `${(req.headers['x-forwarded-proto'] as string) || 'https'}://${req.headers.host || ''}/services/${encodeURIComponent(id)}/photos`,
     };
 
     const buffer = await renderToBuffer(React.createElement(ServicePdf, { d }) as any);
