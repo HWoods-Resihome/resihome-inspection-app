@@ -705,7 +705,7 @@ export async function fetchPropertiesPage(
  * portfolio / owner / market / region / community without guessing names.
  * Read-only; never writes.
  */
-export async function inspectPropertyFields(sampleSize = 200): Promise<{
+export async function inspectPropertyFields(sampleSize = 200, fieldsOverride?: string[]): Promise<{
   typeId: string;
   fields: { name: string; label: string; type: string; fieldType: string; options?: { label: string; value: string }[] }[];
   candidates: Record<string, { field: string; label: string; distinct: { value: string; count: number }[] }>;
@@ -719,24 +719,29 @@ export async function inspectPropertyFields(sampleSize = 200): Promise<{
   }));
   // Non-system fields only (drop hs_*, createdate, etc.) for readability.
   const fields = allFields.filter((f: any) => !/^hs_/.test(f.name) && !['createdate', 'lastmodifieddate'].includes(f.name));
+  const byName = new Map<string, { name: string; label: string }>(fields.map((f: any) => [f.name, { name: f.name, label: f.label }]));
 
-  // Candidate grouping fields — match by name/label containing these tokens, but
-  // only keep ones that actually exist on the object.
-  const tokens: Record<string, RegExp> = {
-    portfolio: /portfolio|owner|client|investor|fund/i,
-    region: /region|market|metro|area/i,
-    community: /communit|subdivision|neighborhood|hoa/i,
-  };
-  const have = new Map<string, { name: string; label: string }>();
-  for (const f of fields) have.set(f.name, { name: f.name, label: f.label });
+  // Which fields to tally distinct values for. An explicit ?fields= list wins;
+  // otherwise auto-pick grouping fields, preferring an EXACT name match (so
+  // `portfolio`/`region` beat `home_owners_association`/`area_manager`).
   const picked: Record<string, { name: string; label: string }> = {};
-  for (const [key, re] of Object.entries(tokens)) {
-    const hit = fields.find((f: any) => re.test(f.name) || re.test(f.label || ''));
-    if (hit) picked[key] = { name: hit.name, label: hit.label };
+  if (fieldsOverride && fieldsOverride.length) {
+    for (const n of fieldsOverride) { const f = byName.get(n); if (f) picked[n] = f; }
+  } else {
+    const prefs: Record<string, { exact: string[]; re: RegExp }> = {
+      portfolio: { exact: ['portfolio'], re: /portfolio|owner_name|investor|fund/i },
+      region: { exact: ['region'], re: /^region$|market|metro/i },
+      community: { exact: ['neighborhood_name', 'sub_division', 'community_status'], re: /communit|subdivision|neighborhood/i },
+    };
+    for (const [key, { exact, re }] of Object.entries(prefs)) {
+      const hit = exact.map((n) => byName.get(n)).find(Boolean)
+        || fields.find((f: any) => re.test(f.name) || re.test(f.label || ''));
+      if (hit) picked[key] = { name: hit.name, label: hit.label };
+    }
   }
 
   // Sample records and tally distinct values for the picked candidate fields.
-  const pickedNames = Object.values(picked).map((p) => p.name);
+  const pickedNames = [...new Set(Object.values(picked).map((p) => p.name))];
   const tally: Record<string, Map<string, number>> = {};
   pickedNames.forEach((n) => (tally[n] = new Map()));
   let sampled = 0;
@@ -763,7 +768,7 @@ export async function inspectPropertyFields(sampleSize = 200): Promise<{
     const distinct = [...(tally[p.name] || new Map()).entries()]
       .map(([value, count]) => ({ value, count }))
       .sort((a, b) => b.count - a.count)
-      .slice(0, 50);
+      .slice(0, 100);
     candidates[key] = { field: p.name, label: p.label, distinct };
   }
 
