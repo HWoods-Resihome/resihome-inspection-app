@@ -200,6 +200,15 @@ export async function hasPendingSubmit(serviceId: string): Promise<boolean> {
   try { return !!(await idbGet(SUBMITS, serviceId)); } catch { return false; }
 }
 
+/** Count of pending service items on this device (queued photos + queued submits). */
+export async function countServiceQueue(): Promise<number> {
+  if (!hasIDB()) return 0;
+  try {
+    const [photos, submits] = await Promise.all([idbGetAll(PHOTOS), idbGetAll(SUBMITS)]);
+    return photos.length + submits.length;
+  } catch { return 0; }
+}
+
 let _wired = false;
 /** Kick a sync now and (once) on every reconnect. Safe to call from any page mount. */
 export function initServiceSync(): void {

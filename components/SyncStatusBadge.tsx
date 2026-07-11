@@ -19,6 +19,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { countOutbox } from '@/lib/offlineOutbox';
 import { countPhotoAttach } from '@/lib/photoAttachOutbox';
 import { countAllQueuedPhotos } from '@/lib/offlinePhotoStore';
+import { countServiceQueue } from '@/lib/services/offlineServices';
 import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { useRouter } from 'next/router';
 
@@ -26,7 +27,7 @@ import { useRouter } from 'next/router';
 // list and an open inspection. Everywhere else (and inside the full-screen camera /
 // photo editor / gallery, which open on top of an inspection) it just gets in the
 // way, so it stays hidden.
-const FOOTER_ROUTES = new Set(['/', '/inspection/[id]']);
+const FOOTER_ROUTES = new Set(['/', '/inspection/[id]', '/services', '/services/[id]']);
 
 // The height the footer publishes for the action bars to offset by. Kept in sync
 // with the forms (they read `var(--sync-footer-h, 0px)`).
@@ -48,8 +49,10 @@ export function SyncStatusBadge() {
     const tick = async () => {
       let photos = 0;
       try { photos = await countAllQueuedPhotos(); } catch { /* IDB hiccup */ }
+      let services = 0;
+      try { services = await countServiceQueue(); } catch { /* IDB hiccup */ }
       if (cancelled) return;
-      const total = countOutbox() + countPhotoAttach() + photos;
+      const total = countOutbox() + countPhotoAttach() + photos + services;
       const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
       setOnline(isOnline);
       if (prevRef.current > 0 && total === 0) {
