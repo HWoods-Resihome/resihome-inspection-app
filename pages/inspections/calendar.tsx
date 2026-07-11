@@ -336,9 +336,17 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
                     const isToday = sameYMD(d, today);
                     return (
                       <button key={idx} onClick={() => { setCursorISO(toISO(d)); setView('day'); }}
-                        className={`min-h-[64px] border-b border-r border-gray-100 p-1 text-left align-top ${inMonth ? 'bg-white' : 'bg-gray-50'} hover:bg-brand/5`}>
-                        <div className={`text-[11px] font-semibold mb-0.5 ${isToday ? 'text-white bg-brand rounded-full w-5 h-5 grid place-items-center' : inMonth ? 'text-ink' : 'text-gray-400'}`}>{d.getDate()}</div>
-                        <div className="flex gap-0.5">
+                        className={`min-h-[64px] border-b border-r border-gray-100 p-1 text-left flex flex-col ${inMonth ? 'bg-white' : 'bg-gray-50'} hover:bg-brand/5`}>
+                        {/* Fixed-height number row (flex-col top-anchors it) so the
+                            date sits in the SAME spot in every cell — a button
+                            vertically centers its content by default, which pushed
+                            the date up in cells with more dots / a "+N" and down in
+                            lighter cells. Today's circle is the same 5×5 as the row,
+                            so it doesn't shift the date either. */}
+                        <div className="h-5 flex items-center mb-0.5">
+                          <span className={`text-[11px] font-semibold leading-none ${isToday ? 'text-white bg-brand rounded-full w-5 h-5 grid place-items-center' : inMonth ? 'text-ink' : 'text-gray-400'}`}>{d.getDate()}</span>
+                        </div>
+                        <div className="flex gap-0.5 flex-wrap">
                           {dayItems.slice(0, 4).map((i) => <span key={i.recordId} className="w-2 h-2 rounded-full" style={{ background: metaOf(i)?.hex || '#9ca3af' }} title={i.propertyAddressSnapshot || ''} />)}
                         </div>
                         {dayItems.length > 4 && <div className="text-[9px] text-gray-400 font-semibold leading-none mt-0.5">+{dayItems.length - 4}</div>}
