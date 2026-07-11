@@ -9,6 +9,7 @@ import { calculateLine, roundMoney } from './rateCardMath';
 import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion, isExternalEmail } from './userAccess';
 import { normalizeApprovalRouting, type ApprovalRoutingConfig } from './approvalRouting';
 import { reportServerError } from './serverErrorReporter';
+import { SERVICE_OBJECTS, QUESTION_ADDITIONS, SERVICE_ASSOCIATIONS, type PropSpec, type ObjectSpec } from './services/schemaSpec';
 
 const API_BASE = 'https://api.hubapi.com';
 
@@ -821,6 +822,114 @@ export async function fetchCommunityFirstPropertyId(communityId: string): Promis
     console.warn('[community] first-property fetch failed:', e);
     return null;
   }
+}
+
+// ── ResiWalk - Services: Phase 0 schema provisioner ─────────────────────────
+// Additive-only. dry-run diffs the schemaSpec against HubSpot (no writes); apply
+// creates the two custom objects, their properties, the additive Question props,
+// and the labeled associations. Idempotent (skips what already exists).
+const isConflict = (e: unknown) => /409|already ?exists|PROPERTY_ALREADY_EXISTS|been created/i.test(String((e as any)?.message || e || ''));
+
+async function ensurePropertyGroup(typeId: string, name: string): Promise<string> {
+  try {
+    const g = await hubspotFetch(`/crm/v3/properties/${typeId}/groups`);
+    if ((g.results || []).some((x: any) => x.name === name)) return name;
+  } catch { /* fall through to create */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${typeId}/groups`, { method: 'POST', body: JSON.stringify({ name, label: 'Service Information' }) });
+  } catch (e) { if (!isConflict(e)) throw e; }
+  return name;
+}
+
+function propPayload(p: PropSpec, groupName?: string) {
+  return {
+    name: p.name, label: p.label, type: p.type, fieldType: p.fieldType,
+    ...(groupName ? { groupName } : {}),
+    ...(p.options ? { options: p.options.map((o, i) => ({ label: o.label, value: o.value, displayOrder: i })) } : {}),
+  };
+}
+
+async function createProperty(typeId: string, p: PropSpec, groupName: string) {
+  try { await hubspotFetch(`/crm/v3/properties/${typeId}`, { method: 'POST', body: JSON.stringify(propPayload(p, groupName)) }); }
+  catch (e) { if (!isConflict(e)) throw e; }
+}
+
+export async function provisionServicesSchema(apply: boolean): Promise<any> {
+  const report: any = { mode: apply ? 'apply' : 'dry-run', objects: [], questionAdditions: [], associations: [], envVars: {}, notes: [] };
+  const schemas = await hubspotFetch('/crm/v3/schemas').catch(() => ({ results: [] }));
+  const existing: any[] = schemas.results || [];
+  const findSchema = (name: string) => existing.find((s) => s.name === name || (s.fullyQualifiedName || '').endsWith(`_${name}`));
+  const typeIdByName: Record<string, string> = {};
+
+  for (const obj of SERVICE_OBJECTS as ObjectSpec[]) {
+    const found = findSchema(obj.name);
+    const entry: any = { name: obj.name, label: obj.labels.plural };
+    let typeId: string | undefined = found?.objectTypeId;
+    if (!found) {
+      if (apply) {
+        const created = await hubspotFetch('/crm/v3/schemas', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: obj.name, labels: obj.labels, primaryDisplayProperty: obj.primaryDisplayProperty,
+            requiredProperties: [obj.primaryDisplayProperty], secondaryDisplayProperties: [],
+            properties: obj.properties.map((p) => propPayload(p)),
+          }),
+        });
+        typeId = created.objectTypeId;
+        entry.action = 'created'; entry.typeId = typeId; entry.propertiesCreated = obj.properties.length;
+      } else {
+        entry.action = 'CREATE'; entry.willCreateProperties = obj.properties.length;
+      }
+    } else {
+      const props = await hubspotFetch(`/crm/v3/properties/${typeId}`).catch(() => ({ results: [] }));
+      const have = new Set((props.results || []).map((p: any) => p.name));
+      const missing = obj.properties.filter((p) => !have.has(p.name));
+      entry.action = 'exists'; entry.typeId = typeId; entry.missingProperties = missing.map((p) => p.name);
+      if (apply && missing.length) {
+        const group = await ensurePropertyGroup(typeId!, `${obj.name}_information`);
+        for (const p of missing) await createProperty(typeId!, p, group);
+        entry.propertiesCreated = missing.length;
+      }
+    }
+    if (typeId) { typeIdByName[obj.name] = typeId; report.envVars[obj.envVar] = typeId; }
+    report.objects.push(entry);
+  }
+
+  // Additive properties on the reused Question object.
+  const { question } = typeIds();
+  const qprops = await hubspotFetch(`/crm/v3/properties/${question}`).catch(() => ({ results: [] }));
+  const qhave = new Set((qprops.results || []).map((p: any) => p.name));
+  const qMissing = QUESTION_ADDITIONS.filter((p) => !qhave.has(p.name));
+  const qgroup = apply && qMissing.length ? await ensurePropertyGroup(question, 'service_information') : 'service_information';
+  for (const p of QUESTION_ADDITIONS) {
+    if (qhave.has(p.name)) { report.questionAdditions.push({ name: p.name, action: 'exists' }); continue; }
+    if (apply) { await createProperty(question, p, qgroup); report.questionAdditions.push({ name: p.name, action: 'created' }); }
+    else report.questionAdditions.push({ name: p.name, action: 'CREATE' });
+  }
+
+  // Labeled associations (need both type ids to exist).
+  const resolveTo = async (token: string): Promise<string | undefined> => {
+    if (token === 'PROPERTY') return typeIds().property;
+    if (token === 'COMPANY') return '0-2';
+    if (token === 'COMMUNITY') return (await resolveCommunityMeta())?.typeId;
+    return typeIdByName[token];
+  };
+  for (const a of SERVICE_ASSOCIATIONS) {
+    const fromId = typeIdByName[a.from];
+    const toId = await resolveTo(a.to);
+    const e: any = { name: a.name, from: a.from, to: a.to };
+    if (!fromId || !toId) { e.action = apply ? 'skipped (type id not available — run apply after objects exist)' : 'CREATE (after objects exist)'; report.associations.push(e); continue; }
+    if (apply) {
+      try { await hubspotFetch(`/crm/v4/associations/${fromId}/${toId}/labels`, { method: 'POST', body: JSON.stringify({ label: a.label, name: a.name }) }); e.action = 'created'; }
+      catch (err) { e.action = isConflict(err) ? 'exists' : `error: ${String((err as any)?.message || err).slice(0, 100)}`; }
+    } else e.action = 'CREATE';
+    report.associations.push(e);
+  }
+
+  if (apply && report.envVars.HUBSPOT_SERVICE_TYPE_ID) {
+    report.notes.push('Set these env vars in Vercel (Preview + Production) so the app resolves the new objects, then redeploy.');
+  }
+  return report;
 }
 
 /**
