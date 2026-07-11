@@ -51,16 +51,23 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
   const [vendorFilter, setVendorFilter] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
   const [pastDueOnly, setPastDueOnly] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);   // last-14-day completed
+  const [filtersOpen, setFiltersOpen] = useState(true);        // collapsible filter block
   const cursor = parse(cursorISO);
   const today = parse(REFERENCE_TODAY);
+  const COMPLETED_WINDOW_DAYS = 14;
+  const cutoffISO = toISO(addDays(today, -COMPLETED_WINDOW_DAYS));
 
-  // Only OPEN work belongs on the schedule/map — exclude Completed and Canceled.
-  // Then optionally narrow by vendor (route view), worktype, and past-due.
-  const scoped = useMemo(() => SAMPLE_SERVICES.filter((s) =>
-    s.status !== 'canceled' && s.status !== 'completed'
-    && (vendorFilter.length === 0 || (!!s.vendor && vendorFilter.includes(s.vendor)))
-    && (typeFilter.length === 0 || typeFilter.includes(s.worktype))
-    && (!pastDueOnly || s.dueDate < REFERENCE_TODAY)), [vendorFilter, typeFilter, pastDueOnly]);
+  // OPEN work always shows; Completed is opt-in (last 14 days, by due date). Canceled
+  // never shows. Then narrow by vendor, worktype, and past-due. No result cap.
+  const scoped = useMemo(() => SAMPLE_SERVICES.filter((s) => {
+    if (s.status === 'canceled') return false;
+    if (s.status === 'completed' && !(showCompleted && s.dueDate >= cutoffISO)) return false;
+    if (vendorFilter.length && !(s.vendor && vendorFilter.includes(s.vendor))) return false;
+    if (typeFilter.length && !typeFilter.includes(s.worktype)) return false;
+    if (pastDueOnly && !(s.dueDate < REFERENCE_TODAY)) return false;
+    return true;
+  }), [vendorFilter, typeFilter, pastDueOnly, showCompleted, cutoffISO]);
 
   // Visible date range for the current view.
   const range = useMemo(() => {
@@ -129,36 +136,48 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
       </header>
 
       <main className="max-w-3xl mx-auto w-full px-4 py-3 space-y-3">
-        {/* View toggle */}
+        {/* View toggle + collapsible Filters button */}
         <div className="flex items-center gap-2">
           <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
             {(['month', 'week', 'day'] as View[]).map((v) => (
               <button key={v} onClick={() => setView(v)} className={`px-3 py-1.5 rounded-md capitalize ${view === v ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>{v}</button>
             ))}
           </div>
-        </div>
-
-        {/* Filters: Type + Vendor scope + Past Due — filter both the calendar and the map. */}
-        <div className="flex items-center gap-2">
-          <div className="flex-1 min-w-0">
-            <MultiFilter label="Type" selected={typeFilter} onChange={setTypeFilter}
-              className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
-              options={WORKTYPES.map((w) => ({ value: w.id, label: w.label }))} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <MultiFilter label="Vendor" selected={vendorFilter} onChange={setVendorFilter}
-              className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${vendorFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
-              options={SAMPLE_VENDORS.map((v) => ({ value: v, label: v }))} />
-          </div>
-          <button type="button" onClick={() => setPastDueOnly((v) => !v)}
-            className={`shrink-0 text-[12px] font-heading font-semibold px-3 py-1.5 rounded-lg border transition ${pastDueOnly ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-700 border-gray-300 hover:border-red-300'}`}>
-            Past Due
+          <button type="button" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen} aria-label="Filters"
+            className="ml-auto shrink-0 inline-flex items-center gap-1.5 text-[12px] font-heading font-semibold px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:text-brand hover:border-brand/50 transition-colors">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+            Filters
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
           </button>
         </div>
-        {(typeFilter.length > 0 || vendorFilter.length > 0 || pastDueOnly) && (
-          <div className="flex justify-end -mt-1">
-            <button type="button" onClick={() => { setTypeFilter([]); setVendorFilter([]); setPastDueOnly(false); }}
-              className="text-[11px] font-heading font-semibold text-gray-500 hover:text-brand underline">Clear filters</button>
+
+        {/* Collapsible filters: Type + Vendor + Past Due + Completed + Clear on one row. */}
+        {filtersOpen && (
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 min-w-0">
+              <MultiFilter label="Type" selected={typeFilter} onChange={setTypeFilter}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                options={WORKTYPES.map((w) => ({ value: w.id, label: w.label }))} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <MultiFilter label="Vendor" selected={vendorFilter} onChange={setVendorFilter}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${vendorFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                options={SAMPLE_VENDORS.map((v) => ({ value: v, label: v }))} />
+            </div>
+            <button type="button" onClick={() => setPastDueOnly((v) => !v)}
+              className={`shrink-0 text-[12px] font-heading font-semibold px-2 py-1.5 rounded-lg border transition ${pastDueOnly ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-700 border-gray-300 hover:border-red-300'}`}>
+              Past Due
+            </button>
+            <button type="button" onClick={() => setShowCompleted((v) => !v)} title="Show completed services from the last 14 days"
+              className={`shrink-0 inline-flex items-center gap-1 text-[12px] font-heading font-semibold px-2 py-1.5 rounded-lg border transition ${showCompleted ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:border-green-400'}`}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              Completed
+            </button>
+            {(typeFilter.length > 0 || vendorFilter.length > 0 || pastDueOnly) && (
+              <button type="button" onClick={() => { setTypeFilter([]); setVendorFilter([]); setPastDueOnly(false); }}
+                aria-label="Clear filters" title="Clear filters"
+                className="shrink-0 w-8 h-8 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-500 hover:text-brand hover:border-brand/50 text-base leading-none">×</button>
+            )}
           </div>
         )}
 
