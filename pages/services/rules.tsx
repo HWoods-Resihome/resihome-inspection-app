@@ -283,14 +283,15 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
     patch({ vendors: on ? [...new Set([...rule.vendors, ...keys])] : rule.vendors.filter((k) => !keys.includes(k)) });
 
   // Property-scope drill-down: portfolios → regions → individual properties.
-  const propsInPortfolios = SAMPLE_PROPERTIES.filter((p) => rule.portfolios.includes(p.portfolio));
+  // Guarded: `rule` is undefined when the (live) rules list is empty and none is open.
+  const propsInPortfolios = rule ? SAMPLE_PROPERTIES.filter((p) => rule.portfolios.includes(p.portfolio)) : [];
   const regionOptions = [...new Set(propsInPortfolios.map((p) => p.region))].sort()
     .map((r) => ({ key: r, count: propsInPortfolios.filter((p) => p.region === r).length }));
-  const applicableProps = propsInPortfolios.filter((p) => rule.regions.length === 0 || rule.regions.includes(p.region));
+  const applicableProps = rule ? propsInPortfolios.filter((p) => rule.regions.length === 0 || rule.regions.includes(p.region)) : [];
   const visibleProps = applicableProps.filter((p) => !propSearch.trim() || `${p.address} ${p.region}`.toLowerCase().includes(propSearch.trim().toLowerCase()));
-  const isPropOn = (id: string) => rule.propsMode === 'all' || rule.includedProps.includes(id);
+  const isPropOn = (id: string) => !!rule && (rule.propsMode === 'all' || rule.includedProps.includes(id));
   // Current included id set: everything applicable in 'all' mode, else the fixed list.
-  const effectiveIncluded = () => new Set(rule.propsMode === 'all' ? applicableProps.map((p) => p.id) : rule.includedProps);
+  const effectiveIncluded = () => new Set(rule && rule.propsMode === 'all' ? applicableProps.map((p) => p.id) : (rule?.includedProps || []));
   // Any manual pick makes it a FIXED list (no future auto-include).
   const toggleProp = (id: string) => {
     const cur = effectiveIncluded();

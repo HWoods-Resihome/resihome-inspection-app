@@ -909,26 +909,28 @@ function normServiceDate(v: any): string {
 
 function mapServiceRow(r: any): SampleService {
   const p = r.properties || {};
-  const numOr = (v: any): number | undefined => { const n = Number(v); return Number.isFinite(n) && !(n === 0) ? n : undefined; };
-  return {
+  const num = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) && n !== 0 ? n : null; };
+  // Only DEFINED keys — getServerSideProps can't serialize `undefined` values.
+  const rec: SampleService = {
     id: String(r.id),
     scope: p.scope === 'community' ? 'community' : 'property',
     address: p.address_snapshot || p.service_name || '(Service)',
     locality: p.locality_snapshot || '',
-    community: p.community_name || undefined,
     portfolio: '',
     region: p.region_snapshot || '',
     worktype: (p.worktype || 'landscaping') as Worktype,
     subtype: p.subtype || '',
     status: (p.status || 'assigned') as ServiceStatus,
-    propertyStatus: p.property_status_snapshot || undefined,
     petStations: p.pet_stations === 'true',
     vendor: p.vendor_name || null,
     dueDate: normServiceDate(p.due_date),
-    onTime: p.ontime === 'true' ? true : undefined,
-    lat: numOr(p.latitude),
-    lng: numOr(p.longitude),
   };
+  if (p.community_name) rec.community = p.community_name;
+  if (p.property_status_snapshot) rec.propertyStatus = p.property_status_snapshot;
+  if (p.ontime === 'true') rec.onTime = true;
+  const lat = num(p.latitude); if (lat !== null) rec.lat = lat;
+  const lng = num(p.longitude); if (lng !== null) rec.lng = lng;
+  return rec;
 }
 
 /** All Service Work Orders (up to `limit`). Returns null when the object type id
