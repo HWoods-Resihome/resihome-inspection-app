@@ -13,6 +13,7 @@ import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoThumb } from '@/components/PhotoThumb';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { UnlockButton, lockRingFromProperty, type LockRing } from '@/components/UnlockButton';
+import { FitText } from '@/components/FitText';
 import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync } from '@/lib/services/offlineServices';
 
 interface ServiceView {
@@ -252,8 +253,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
           </Link>
           <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain shrink-0" />
           <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-2">
-              <h1 className="font-heading font-extrabold text-[15px] text-ink leading-snug min-w-0">{svc.address}{svc.locality ? `, ${svc.locality}` : ''}</h1>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={15} min={10} />
+              </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7" />}
                 <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${underReview ? 'bg-amber-100 text-amber-700' : svc.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : svc.status === 'submitted' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>{svc.status || 'assigned'}</span>
