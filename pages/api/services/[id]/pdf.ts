@@ -9,7 +9,7 @@ import React from 'react';
 import { renderToBuffer } from '@react-pdf/renderer';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
-import { fetchServiceWorkOrder } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, readServiceForms } from '@/lib/hubspot';
 import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_FORMS, formKey } from '@/lib/services/serviceForms';
 import { ServicePdf, type ServicePdfData } from '@/lib/servicePdf';
@@ -48,7 +48,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const worktype = (p.worktype || '') as Worktype;
     const subtype = p.subtype || '';
     const answersRaw = (() => { try { return JSON.parse(p.answers_json || '{}'); } catch { return {}; } })();
-    const form = SAMPLE_FORMS[formKey(worktype, subtype)] || [];
+    const savedForms = await readServiceForms().catch(() => null);
+    const form = ({ ...SAMPLE_FORMS, ...(savedForms || {}) })[formKey(worktype, subtype)] || [];
     const answers = form
       .filter((q) => answersRaw[q.id] != null && answersRaw[q.id] !== '')
       .map((q) => ({ label: q.label, value: Array.isArray(answersRaw[q.id]) ? answersRaw[q.id].join(', ') : String(answersRaw[q.id]) }));

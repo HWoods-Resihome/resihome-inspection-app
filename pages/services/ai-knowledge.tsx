@@ -4,6 +4,8 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
+import { isAppAdmin } from '@/lib/adminAccess';
+import { readServiceAiChecks } from '@/lib/hubspot';
 import { ListPicker } from '@/components/ListPicker';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
@@ -13,7 +15,9 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
-  return { props: {} };
+  const admin = await isAppAdmin(session?.email).catch(() => false);
+  const saved = admin ? await readServiceAiChecks().catch(() => null) : null;
+  return { props: { savedChecks: saved || null, canSave: admin } };
 };
 
 const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
@@ -21,14 +25,25 @@ const trig = 'w-full flex items-center justify-between gap-2 text-[13px] border 
 const scopeLabel = (c: AiCheck) =>
   `${c.worktype ? worktypeLabel(c.worktype) : 'All Work Types'} · ${c.subtype ? subtypeLabel(c.worktype, c.subtype) : 'All Subtypes'}`;
 
-export default function ServicesAiKnowledge() {
-  const [checks, setChecks] = useState<AiCheck[]>(() => [...SAMPLE_AI_CHECKS]);
+export default function ServicesAiKnowledge({ savedChecks, canSave }: { savedChecks: AiCheck[] | null; canSave: boolean }) {
+  const [checks, setChecks] = useState<AiCheck[]>(() => (savedChecks && savedChecks.length ? savedChecks : [...SAMPLE_AI_CHECKS]));
   const [editId, setEditId] = useState<string | null>(null);
   const [wtFilter, setWtFilter] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
-  const patch = (id: string, p: Partial<AiCheck>) => setChecks((cs) => cs.map((c) => (c.id === id ? { ...c, ...p } : c)));
-  const del = (id: string) => { setChecks((cs) => cs.filter((c) => c.id !== id)); if (editId === id) setEditId(null); };
-  const add = () => { const c = newCheck(); setChecks((cs) => [c, ...cs]); setEditId(c.id); };
+  const mutate = (fn: (cs: AiCheck[]) => AiCheck[]) => { setSaved(false); setChecks(fn); };
+  const patch = (id: string, p: Partial<AiCheck>) => mutate((cs) => cs.map((c) => (c.id === id ? { ...c, ...p } : c)));
+  const del = (id: string) => { mutate((cs) => cs.filter((c) => c.id !== id)); if (editId === id) setEditId(null); };
+  const add = () => { const c = newCheck(); mutate((cs) => [c, ...cs]); setEditId(c.id); };
+  const saveAll = async () => {
+    setSaving(true);
+    try {
+      const r = await fetch('/api/services/ai-checks/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ checks }) });
+      if (r.ok) setSaved(true);
+    } catch { /* keep local; retry */ }
+    finally { setSaving(false); }
+  };
 
   const visible = useMemo(() => checks.filter((c) =>
     wtFilter.length === 0 || wtFilter.includes(c.worktype || 'all')), [checks, wtFilter]);
@@ -43,6 +58,12 @@ export default function ServicesAiKnowledge() {
           </Link>
           <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
           <div className="font-heading font-extrabold">AI Knowledge</div>
+          {canSave && (
+            <button onClick={saveAll} disabled={saving}
+              className="ml-auto bg-white/15 hover:bg-white/25 text-white font-heading font-bold text-[13px] rounded-lg px-3.5 py-1.5 disabled:opacity-60">
+              {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
+            </button>
+          )}
         </div>
       </header>
 

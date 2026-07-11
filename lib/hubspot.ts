@@ -4833,6 +4833,56 @@ export async function fetchW2Agents(): Promise<{ owners: AgentOwnerOption[]; typ
 // ---------------------------------------------------------------------------
 const AI_KB_PROP = 'ai_knowledge_base_json';
 
+// ── ResiWalk - Services settings (Form Builder + AI checks) ─────────────────
+// Persisted as JSON on the SAME admin Agent record as the AI knowledge base —
+// no new custom object. The properties self-provision on first write. These make
+// the Form Builder + service AI-review checks editable AND live: the completion
+// screen reads the forms, the AI review reads the checks.
+const SERVICE_FORMS_PROP = 'service_forms_json';
+const SERVICE_CHECKS_PROP = 'service_ai_checks_json';
+
+async function ensureAgentProp(prop: string, label: string): Promise<string | null> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) return null;
+  const typeId = agentTypeId();
+  try {
+    const props = await hubspotFetch(`/crm/v3/properties/${typeId}`).catch(() => ({ results: [] }));
+    const have = new Set((props.results || []).map((p: any) => p.name));
+    if (!have.has(prop)) {
+      const group = await ensurePropertyGroup(typeId, 'service_settings');
+      await createProperty(typeId, { name: prop, label, type: 'string', fieldType: 'textarea' }, group);
+    }
+  } catch (e) { console.warn('[services] ensure agent prop failed:', e); }
+  return recId;
+}
+
+async function readAgentJson<T>(prop: string): Promise<T | null> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) return null;
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}?properties=${prop}`);
+    const raw = resp?.properties?.[prop];
+    return raw ? (JSON.parse(String(raw)) as T) : null;
+  } catch (e) { console.warn(`[services] read ${prop} failed:`, e); return null; }
+}
+
+async function writeAgentJson(prop: string, label: string, value: any): Promise<boolean> {
+  const recId = await ensureAgentProp(prop, label);
+  if (!recId) return false;
+  await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}`, {
+    method: 'PATCH', body: JSON.stringify({ properties: { [prop]: JSON.stringify(value) } }),
+  });
+  return true;
+}
+
+/** Service completion forms, keyed by `worktype:subtype` → question array. Null when unset/unreachable. */
+export function readServiceForms(): Promise<Record<string, any[]> | null> { return readAgentJson<Record<string, any[]>>(SERVICE_FORMS_PROP); }
+export function writeServiceForms(forms: Record<string, any[]>): Promise<boolean> { return writeAgentJson(SERVICE_FORMS_PROP, 'Service Forms (JSON)', forms); }
+
+/** Service AI-review checks (array). Null when unset/unreachable. */
+export function readServiceAiChecks(): Promise<any[] | null> { return readAgentJson<any[]>(SERVICE_CHECKS_PROP); }
+export function writeServiceAiChecks(checks: any[]): Promise<boolean> { return writeAgentJson(SERVICE_CHECKS_PROP, 'Service AI Checks (JSON)', checks); }
+
 export interface AiKnowledgeEntry {
   id: string;
   text: string;

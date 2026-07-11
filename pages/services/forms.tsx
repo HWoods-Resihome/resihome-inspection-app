@@ -4,6 +4,8 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
+import { isAppAdmin } from '@/lib/adminAccess';
+import { readServiceForms } from '@/lib/hubspot';
 import { ListPicker } from '@/components/ListPicker';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
@@ -15,7 +17,10 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
-  return { props: {} };
+  const admin = await isAppAdmin(session?.email).catch(() => false);
+  // Persisted forms (Agent-record JSON) override the seeded defaults per key.
+  const saved = admin ? await readServiceForms().catch(() => null) : null;
+  return { props: { savedForms: saved || null, canSave: admin } };
 };
 
 const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
@@ -30,15 +35,25 @@ function subline(q: ServiceQuestion): string {
   return bits.join(' · ');
 }
 
-export default function FormBuilder() {
-  const [forms, setForms] = useState<Record<string, ServiceQuestion[]>>(() => ({ ...SAMPLE_FORMS }));
+export default function FormBuilder({ savedForms, canSave }: { savedForms: Record<string, ServiceQuestion[]> | null; canSave: boolean }) {
+  const [forms, setForms] = useState<Record<string, ServiceQuestion[]>>(() => ({ ...SAMPLE_FORMS, ...(savedForms || {}) }));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [worktype, setWorktype] = useState('landscaping');
   const [subtype, setSubtype] = useState('cut');
   const [editId, setEditId] = useState<string | null>(null);
   const key = formKey(worktype, subtype);
   const questions = forms[key] || [];
 
-  const setQuestions = (next: ServiceQuestion[]) => setForms((f) => ({ ...f, [key]: next }));
+  const setQuestions = (next: ServiceQuestion[]) => { setSaved(false); setForms((f) => ({ ...f, [key]: next })); };
+  const saveAll = async () => {
+    setSaving(true);
+    try {
+      const r = await fetch('/api/services/forms/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forms }) });
+      if (r.ok) setSaved(true);
+    } catch { /* keep local; retry */ }
+    finally { setSaving(false); }
+  };
   const patchQ = (id: string, p: Partial<ServiceQuestion>) => setQuestions(questions.map((q) => (q.id === id ? { ...q, ...p } : q)));
   const delQ = (id: string) => { setQuestions(questions.filter((q) => q.id !== id)); if (editId === id) setEditId(null); };
   const addQ = () => { const q = newQuestion(); setQuestions([...questions, q]); setEditId(q.id); };
@@ -98,6 +113,12 @@ export default function FormBuilder() {
           </Link>
           <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
           <div className="font-heading font-extrabold">Form Builder</div>
+          {canSave && (
+            <button onClick={saveAll} disabled={saving}
+              className="ml-auto bg-white/15 hover:bg-white/25 text-white font-heading font-bold text-[13px] rounded-lg px-3.5 py-1.5 disabled:opacity-60">
+              {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
+            </button>
+          )}
         </div>
       </header>
 
@@ -117,7 +138,7 @@ export default function FormBuilder() {
             <button onClick={addQ} className="ml-auto bg-brand text-white font-heading font-bold text-sm rounded-xl px-4 py-2.5">+ Add Question</button>
           </div>
           <p className="text-[12px] text-gray-500 mt-3">
-            Questions for <b className="text-ink">{worktypeLabel(worktype)} · {subtypeLabel(worktype, subtype)}</b>. Changes will sync to the reused Question / Answer objects and apply to new services (Step 2).
+            Questions for <b className="text-ink">{worktypeLabel(worktype)} · {subtypeLabel(worktype, subtype)}</b>. <b>Save</b> to apply to new service completions of this type.
           </p>
         </section>
 

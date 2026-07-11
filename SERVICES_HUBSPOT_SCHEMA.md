@@ -106,6 +106,15 @@ Manual admin dry-run/apply endpoints remain for ad-hoc runs.
   review inline the moment a WO is submitted (best-effort). The nightly
   `services-review` cron remains a backstop for any that errored.
 
+## Editable, persisted Form Builder + AI Knowledge
+Both are now LIVE and editable (admin). Stored as JSON on the admin Agent record
+(same store as the inspection AI KB; properties `service_forms_json` /
+`service_ai_checks_json` self-provision on first Save — no new object):
+- Form Builder Save → `/api/services/forms/save`; read by the completion screen +
+  PDF (`readServiceForms`, falls back to seeded defaults per worktype:subtype).
+- AI Knowledge Save → `/api/services/ai-checks/save`; read by the AI review
+  (`readServiceAiChecks`, falls back to seeded checks).
+
 ## Completion, review & PDF
 - Completion screen `/services/[id]` uses the shared 1099 camera (`CameraCapture`:
   in-camera capture + gallery + GPS stamp). Submit → status `submitted` (locked).

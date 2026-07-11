@@ -8,7 +8,7 @@ import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SAMPLE_SERVICES } from '@/lib/services/sampleData';
-import { fetchServiceWorkOrder, fetchPropertyLockInfo } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoThumb } from '@/components/PhotoThumb';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
@@ -79,7 +79,9 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     };
   }
   if (!svc) return { redirect: { destination: '/services', permanent: false } };
-  const form = SAMPLE_FORMS[formKey(svc.worktype, svc.subtype)]?.filter((q) => q.enabled) || [];
+  const savedForms = await readServiceForms().catch(() => null);
+  const formSet: Record<string, any[]> = { ...SAMPLE_FORMS, ...(savedForms || {}) };
+  const form = (formSet[formKey(svc.worktype, svc.subtype)] || []).filter((q: any) => q.enabled);
 
   // Cleaning services at a NON-"Tenant Leased" (i.e. vacant) home need indoor
   // access — surface the same Rently unlock button + online/offline ring the
@@ -228,14 +230,27 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
   }, [svc]);
   const [lightbox, setLightbox] = useState<{ groupId: string; index: number } | null>(null);
 
+  // Cost Detail — its own section (after Photos). Vendor cost is visible to all;
+  // Markup % and Client cost are internal-only (vendors never see them).
+  const costDetail = svc.vendorCost != null ? (
+    <section className="bg-white border border-gray-200 rounded-2xl p-4">
+      <div className="font-heading font-bold text-[15px] text-ink mb-2">Cost Detail</div>
+      <div className="space-y-1 text-[13px]">
+        <div className="flex justify-between"><span className="text-gray-500">Vendor cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.vendorCost)}</span></div>
+        {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
+        {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.clientCost)}</span></div>}
+      </div>
+    </section>
+  ) : null;
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b-2 border-brand sticky top-0 z-20 shrink-0" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
-        <div className="max-w-2xl mx-auto px-3 pt-2 pb-2.5 flex items-start gap-2.5">
-          <Link href="/services" aria-label="Back to Services" className="shrink-0 mt-1 text-gray-400 hover:text-ink">
+        <div className="max-w-2xl mx-auto px-3 py-2.5 flex items-center gap-2.5">
+          <Link href="/services" aria-label="Back to Services" className="shrink-0 text-gray-400 hover:text-ink">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
           </Link>
-          <img src="/app-icon.svg" alt="ResiWalk" className="h-9 w-9 object-cover shrink-0 mt-0.5" />
+          <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
               <h1 className="font-heading font-extrabold text-[15px] text-ink leading-snug min-w-0">{svc.address}{svc.locality ? `, ${svc.locality}` : ''}</h1>
@@ -244,13 +259,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
                 <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${underReview ? 'bg-amber-100 text-amber-700' : svc.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : svc.status === 'submitted' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>{svc.status || 'assigned'}</span>
               </div>
             </div>
-            <div className="text-xs text-gray-500 mt-0.5 truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)} · {svc.scope === 'community' ? 'Community' : 'SFR'} · {svc.vendor || 'Unassigned'}</div>
-            <div className="text-xs text-gray-500 truncate">
-              {svc.dueDate ? `Due ${svc.dueDate}` : ''}
-              {svc.vendorCost != null ? `${svc.dueDate ? ' · ' : ''}Vendor ${money(svc.vendorCost)}` : ''}
-              {isInternal && svc.markupPct != null ? ` · Markup ${svc.markupPct}%` : ''}
-              {isInternal && svc.clientCost != null ? ` · Client ${money(svc.clientCost)}` : ''}
-            </div>
+            <div className="text-xs text-gray-500 mt-0.5 truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}{svc.dueDate ? ` · Due ${svc.dueDate}` : ''}</div>
+            <div className="text-xs text-gray-500 truncate">{svc.vendor || 'Unassigned'}</div>
           </div>
         </div>
       </header>
@@ -358,6 +368,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
                   )}
                 </section>
 
+                {costDetail}
+
                 <button type="button" disabled={!ready} onClick={submit}
                   className={`w-full rounded-2xl py-3.5 font-heading font-bold text-sm ${ready ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
                   {submitting ? 'Submitting…' : 'Submit completion'}
@@ -400,6 +412,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
                   <PhotoGrid label="Pet station — after" urls={svc.petAfter} onOpen={(i) => setLightbox({ groupId: 'petAfter', index: i })} />
                   {!svc.before.length && !svc.after.length && !svc.petBefore.length && !svc.petAfter.length && <div className="text-[13px] text-gray-400">No photos on this service.</div>}
                 </section>
+
+                {costDetail}
 
                 {svc.reviewDecision && (
                   <section className={`border rounded-2xl p-4 ${svc.reviewDecision === 'approve' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
