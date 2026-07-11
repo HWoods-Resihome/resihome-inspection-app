@@ -286,6 +286,12 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
         ) : (
           <div className="text-[12px] font-heading font-semibold text-gray-500">Your assigned inspections</div>
         )}
+        {(regionFilter.length > 0 || inspectorFilter.length > 0 || typeFilter.length > 0 || statusFilter.length > 0) && (
+          <div className="flex justify-end -mt-1">
+            <button type="button" onClick={() => { setRegionFilter([]); setInspectorFilter([]); setTypeFilter([]); setStatusFilter([]); }}
+              className="text-[11px] font-heading font-semibold text-gray-500 hover:text-brand underline">Clear filters</button>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <button onClick={() => step(-1)} aria-label="Previous" className="w-9 h-9 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:text-brand hover:border-brand/50">

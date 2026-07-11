@@ -155,6 +155,12 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
             Past Due
           </button>
         </div>
+        {(typeFilter.length > 0 || vendorFilter.length > 0 || pastDueOnly) && (
+          <div className="flex justify-end -mt-1">
+            <button type="button" onClick={() => { setTypeFilter([]); setVendorFilter([]); setPastDueOnly(false); }}
+              className="text-[11px] font-heading font-semibold text-gray-500 hover:text-brand underline">Clear filters</button>
+          </div>
+        )}
 
         {/* Period nav */}
         <div className="flex items-center gap-2">
