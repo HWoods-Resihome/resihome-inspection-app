@@ -21,9 +21,8 @@
  *  - No cadence date math — due date is today + First Order Due (days), else +5.
  *  - No vendor rotation — the first assigned vendor is used for every order.
  */
-import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceWorkOrderKeys, createServiceWorkOrder, searchPropertiesForCoverage } from '@/lib/hubspot';
 import { WORKTYPES, type Worktype } from './worktypes';
-import { SAMPLE_PROPERTIES } from './sampleData';
 import { vendorEmail } from './vendors';
 
 const parseArr = (s: any): any[] => { try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
@@ -42,22 +41,42 @@ function addDays(iso: string, days: number): string {
 
 interface Target { id: string; scope: 'property' | 'community'; address: string; locality: string; region: string; community?: string; }
 
-/** Resolve the concrete targets a rule applies to (v1: sample properties / rule's communities). */
-function targetsForRule(p: Record<string, any>): Target[] {
+/**
+ * Resolve the concrete targets a rule applies to, against LIVE data:
+ *  - community scope → one target per selected community (community-level service);
+ *  - property scope → every real Property in the selected portfolios/regions,
+ *    filtered by the rule's enrollment condition (best-effort: when the enroll
+ *    field looks like status and op is is/is-any-of, keep only properties whose
+ *    status matches the enroll value, exact or prefix — e.g. "Vacant" → "Vacant - *").
+ *    'list' mode restricts to the explicitly included property ids.
+ */
+async function targetsForRule(p: Record<string, any>): Promise<Target[]> {
   const scope = p.scope === 'community' ? 'community' : 'property';
   if (scope === 'community') {
     return parseArr(p.communities_json).map((name: string) => ({
       id: name, scope: 'community' as const, address: name, locality: '', region: '', community: name,
     }));
   }
-  const portfolios = new Set(parseArr(p.portfolios_json));
+  const portfolios = parseArr(p.portfolios_json);
+  if (!portfolios.length) return [];
   const regions = parseArr(p.regions_json);
-  const included = new Set(parseArr(p.included_props_json));
+  const props = await searchPropertiesForCoverage({ portfolios, regions, limit: 2000 });
+
+  // Enrollment filter (best-effort). enroll_field like "Property Status" + a value.
+  const enrollField = String(p.enroll_field || '').toLowerCase();
+  const enrollOp = String(p.enroll_op || '');
+  const enrollVal = String(p.enroll_value || '').trim().toLowerCase();
+  const statusMatch = (status: string): boolean => {
+    if (!enrollVal || !/status/.test(enrollField) || !['is', 'is any of'].includes(enrollOp)) return true; // no usable condition → include
+    const s = status.trim().toLowerCase();
+    return s === enrollVal || s.startsWith(enrollVal) || s.includes(enrollVal);
+  };
+
+  const included = new Set(parseArr(p.included_props_json).map(String));
   const listMode = p.props_mode === 'list';
-  return SAMPLE_PROPERTIES
-    .filter((prop) => portfolios.has(prop.portfolio))
-    .filter((prop) => regions.length === 0 || regions.includes(prop.region))
+  return props
     .filter((prop) => !listMode || included.has(prop.id))
+    .filter((prop) => statusMatch(prop.status))
     .map((prop) => ({ id: prop.id, scope: 'property' as const, address: prop.address, locality: prop.locality, region: prop.region }));
 }
 
@@ -95,8 +114,8 @@ export async function runServiceGeneration(apply: boolean, todayISO: string): Pr
     mode: apply ? 'apply' : 'dry-run', today: todayISO, configured: true,
     rulesActive: 0, rulesSkipped: 0, wouldCreate: 0, created: 0, skippedExisting: 0, errors: 0,
     items: [], notes: [
-      'v1: property targets from sample data; community targets from the rule.',
-      'v1: enrollment/stop conditions assumed met; no cadence date math (due = today + First Order Due days, else +5).',
+      'Property targets: live Property records in the rule’s portfolios/regions, filtered by the enrollment condition (best-effort status match). Community targets: one per selected community.',
+      'v1: stop conditions not yet evaluated; no cadence date math (due = today + First Order Due days, else +5).',
       'v1: first assigned vendor used for every order (no rotation).',
       'One open order per (rule, target) at a time — the next generates after the current completes/cancels.',
     ],
@@ -116,7 +135,7 @@ export async function runServiceGeneration(apply: boolean, todayISO: string): Pr
     const markupPct = Number(p.markup_pct);
     const clientCost = Number.isFinite(vendorCost) ? Math.round(vendorCost * (1 + (Number.isFinite(markupPct) ? markupPct : 0) / 100) * 100) / 100 : null;
 
-    for (const t of targetsForRule(p)) {
+    for (const t of await targetsForRule(p)) {
       const enrollmentKey = `gen:${ruleId}:${t.id}`;
       const base = {
         ruleId, ruleName: p.rule_name || 'Rule', target: t.address, worktype, subtype,

@@ -62,6 +62,18 @@ everything else reports `exists`):
   `community_name`, `property_status_snapshot`, `latitude`, `longitude`, `vendor_email`
 - **Service Rules Engine** coverage: `portfolios_json`, `communities_json`, `regions_json`
 
+## Live coverage data (rules engine + create service)
+Coverage options are read LIVE from the real objects — new portfolios, regions,
+communities, and properties appear automatically:
+- **Portfolios / regions** — scanned from the Property object (`portfolio`, `region`),
+  served at `/api/services/coverage` (10-min in-process cache; these lists rarely change).
+- **Communities** — the Community object (`2-56454860`, name `community_name`),
+  served at `/api/services/communities` (no cache).
+- **Property drill-down / create-service search** — live Property Search
+  (`/api/services/properties`, `/api/properties?q=`), never pre-loaded (15k+ records).
+- Discovery (read-only): `/api/services/admin/inspect-properties` (field catalog +
+  distinct values; `?fields=a,b&catalog=0`) and `/api/services/admin/inspect-communities`.
+
 ## Rollout order
 1. **Dry-run** → review the report.
 2. **Apply** → objects + properties + Question props (+ associations; re-run apply

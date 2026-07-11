@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
@@ -8,7 +8,7 @@ import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, de
 import { PriceField } from '@/components/PriceField';
 import { MultiFilter } from '@/components/MultiFilter';
 import { ListPicker } from '@/components/ListPicker';
-import { SAMPLE_PROPERTIES, SAMPLE_REGIONS, SAMPLE_SERVICES } from '@/lib/services/sampleData';
+import { SAMPLE_SERVICES } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
 import { searchServiceRuleRecords } from '@/lib/hubspot';
 
@@ -20,11 +20,18 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   return { props: { ruleRecords: recs, live: !!recs } };
 };
 
-// Sample reference data (real lists come from Property / Community in a later step).
-// Portfolio counts are derived from the sample properties so the drill-down list,
-// the region counts, and "Properties Covered" all agree.
-const PORTFOLIOS: Record<string, number> = SAMPLE_PROPERTIES.reduce((m, p) => { m[p.portfolio] = (m[p.portfolio] || 0) + 1; return m; }, {} as Record<string, number>);
-const COMMUNITIES: Record<string, number> = { 'Woodbine Crossing': 96, 'River Glen': 124, 'Camden Pointe': 88, 'Harlow Trace': 78, 'Stonecreek': 142, 'Maple Run': 64 };
+// Real coverage catalog, loaded client-side from /api/services/coverage (portfolios
+// and per-portfolio regions from the Property object; community names from the
+// Community object). Empty until fetched.
+interface Coverage {
+  portfolios: { key: string; count: number }[];
+  regionsByPortfolio: Record<string, { key: string; count: number }[]>;
+  regions: { key: string; count: number }[];
+  communities: { id: string; name: string; units: number }[];
+}
+const EMPTY_COVERAGE: Coverage = { portfolios: [], regionsByPortfolio: {}, regions: [], communities: [] };
+// A single Property row for the 'list'-mode drill-down (loaded on demand).
+interface CoverageProp { id: string; address: string; locality: string; region: string; portfolio: string; status: string; }
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // Current OPEN service volume per vendor — the basis for the equal-volume
 // rotation shown next to each company in the vendor picker.
@@ -242,6 +249,39 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
   const [sortOpen, setSortOpen] = useState(false);
   const rule = rules.find((r) => r.id === openId) || rules[0];
 
+  // Real coverage catalog (portfolios / regions / communities) — client-loaded.
+  const [coverage, setCoverage] = useState<Coverage>(EMPTY_COVERAGE);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/services/coverage').then((r) => r.json()).then((d) => {
+      if (alive && d && !d.error) setCoverage({
+        portfolios: d.portfolios || [], regionsByPortfolio: d.regionsByPortfolio || {},
+        regions: d.regions || [], communities: d.communities || [],
+      });
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const portfolioCount = useMemo(() => Object.fromEntries(coverage.portfolios.map((p) => [p.key, p.count])), [coverage]);
+  const communityUnits = useMemo(() => Object.fromEntries(coverage.communities.map((c) => [c.name, c.units])), [coverage]);
+
+  // Individual Property rows for the 'list'-mode drill-down — fetched on demand
+  // for the open rule's selected portfolios/regions (only when the panel is open).
+  const [coverageProps, setCoverageProps] = useState<CoverageProp[]>([]);
+  const [loadingProps, setLoadingProps] = useState(false);
+  const pfKey = rule && rule.scope === 'property' ? rule.portfolios.join(',') : '';
+  const rgKey = rule && rule.scope === 'property' ? rule.regions.join(',') : '';
+  useEffect(() => {
+    if (!propsOpen || !rule || rule.scope !== 'property' || !rule.portfolios.length) { setCoverageProps([]); return; }
+    const ctrl = new AbortController();
+    setLoadingProps(true);
+    const qs = new URLSearchParams({ portfolios: pfKey, regions: rgKey });
+    fetch(`/api/services/properties?${qs.toString()}`, { signal: ctrl.signal })
+      .then((r) => r.json()).then((d) => setCoverageProps(d.properties || []))
+      .catch(() => {}).finally(() => setLoadingProps(false));
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [propsOpen, pfKey, rgKey]);
+
   const toggleSec = (n: 1 | 2 | 3) => setOpenSec((s) => ({ ...s, [n]: !s[n] }));
   const openRule = (id: number) => {
     setOpenId(id); setOpenSec({ 1: true, 2: true, 3: true }); setPropsOpen(false); setPropSearch('');
@@ -284,11 +324,16 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
     patch({ vendors: on ? [...new Set([...rule.vendors, ...keys])] : rule.vendors.filter((k) => !keys.includes(k)) });
 
   // Property-scope drill-down: portfolios → regions → individual properties.
+  // Regions come from the coverage catalog (union of the selected portfolios'
+  // regions); individual properties are the lazily-fetched coverageProps.
   // Guarded: `rule` is undefined when the (live) rules list is empty and none is open.
-  const propsInPortfolios = rule ? SAMPLE_PROPERTIES.filter((p) => rule.portfolios.includes(p.portfolio)) : [];
-  const regionOptions = [...new Set(propsInPortfolios.map((p) => p.region))].sort()
-    .map((r) => ({ key: r, count: propsInPortfolios.filter((p) => p.region === r).length }));
-  const applicableProps = rule ? propsInPortfolios.filter((p) => rule.regions.length === 0 || rule.regions.includes(p.region)) : [];
+  const regionOptions = useMemo(() => {
+    if (!rule || rule.scope !== 'property') return [] as { key: string; count: number }[];
+    const m = new Map<string, number>();
+    for (const pf of rule.portfolios) for (const x of (coverage.regionsByPortfolio[pf] || [])) m.set(x.key, (m.get(x.key) || 0) + x.count);
+    return [...m.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  }, [rule, coverage]);
+  const applicableProps = coverageProps;   // server-filtered to the selected portfolios + regions
   const visibleProps = applicableProps.filter((p) => !propSearch.trim() || `${p.address} ${p.region}`.toLowerCase().includes(propSearch.trim().toLowerCase()));
   const isPropOn = (id: string) => !!rule && (rule.propsMode === 'all' || rule.includedProps.includes(id));
   // Current included id set: everything applicable in 'all' mode, else the fixed list.
@@ -327,18 +372,25 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
     if (recId) void fetch('/api/services/rules/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delete: true, recordId: recId }) }).catch(() => {});
   };
 
+  // Covered count from the catalog (no per-property fetch): community units, or
+  // property counts summed over selected portfolios (× region filter). In 'list'
+  // mode the count is the fixed included set.
   const countFor = (r: Rule) => {
-    if (r.scope === 'community') return r.communities.reduce((n, k) => n + (COMMUNITIES[k] || 0), 0);
-    const inPf = SAMPLE_PROPERTIES.filter((p) => r.portfolios.includes(p.portfolio));
-    const appl = inPf.filter((p) => r.regions.length === 0 || r.regions.includes(p.region));
-    return r.propsMode === 'all' ? appl.length : appl.filter((p) => r.includedProps.includes(p.id)).length;
+    if (r.scope === 'community') return r.communities.reduce((n, name) => n + (communityUnits[name] || 0), 0);
+    if (r.propsMode === 'list') return r.includedProps.length;
+    return r.portfolios.reduce((n, pf) => {
+      if (r.regions.length === 0) return n + (portfolioCount[pf] || 0);
+      return n + (coverage.regionsByPortfolio[pf] || []).filter((x) => r.regions.includes(x.key)).reduce((s, x) => s + x.count, 0);
+    }, 0);
   };
   // Regions a rule covers (property scope only): its explicit list, else every
   // region present in its selected portfolios. Drives the list Region filter.
   const regionsOf = (r: Rule): string[] => {
     if (r.scope !== 'property') return [];
     if (r.regions.length) return r.regions;
-    return [...new Set(SAMPLE_PROPERTIES.filter((p) => r.portfolios.includes(p.portfolio)).map((p) => p.region))];
+    const s = new Set<string>();
+    for (const pf of r.portfolios) for (const x of (coverage.regionsByPortfolio[pf] || [])) s.add(x.key);
+    return [...s];
   };
 
   // Filtered + sorted rules for the LIST view.
@@ -481,11 +533,11 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
               </div>
               <div className="flex-1 min-w-0">
                 <MultiFilter label="Region" selected={fRegion} onChange={setFRegion} className={pickerCls(fRegion.length > 0)}
-                  options={SAMPLE_REGIONS.map((r) => ({ value: r, label: r }))} />
+                  options={coverage.regions.map((r) => ({ value: r.key, label: r.key }))} />
               </div>
               <div className="flex-1 min-w-0">
                 <MultiFilter label="Com" selected={fCommunity} onChange={setFCommunity} className={pickerCls(fCommunity.length > 0)}
-                  options={Object.keys(COMMUNITIES).map((c) => ({ value: c, label: c }))} />
+                  options={coverage.communities.map((c) => ({ value: c.name, label: c.name }))} />
               </div>
               {/* Sort — tap a field to sort; tap the active field again to flip direction. */}
               <div className="relative shrink-0">
@@ -624,7 +676,7 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
             <label className={lbl}>{rule.scope === 'property' ? 'Portfolios' : 'Communities'}</label>
             <CoveragePicker
               noun={rule.scope === 'property' ? 'portfolios' : 'communities'}
-              options={Object.entries(rule.scope === 'property' ? PORTFOLIOS : COMMUNITIES).map(([key, count]) => ({ key, count }))}
+              options={rule.scope === 'property' ? coverage.portfolios : coverage.communities.map((c) => ({ key: c.name, count: c.units }))}
               selected={rule.scope === 'property' ? rule.portfolios : rule.communities}
               onToggle={toggleCoverage}
               onSetMany={setManyCoverage}
@@ -681,7 +733,7 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
                             </button>
                           );
                         })}
-                        {visibleProps.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-gray-400">{applicableProps.length === 0 ? 'No properties for these portfolios/regions.' : 'No properties match your search.'}</div>}
+                        {visibleProps.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-gray-400">{loadingProps ? 'Loading properties…' : applicableProps.length === 0 ? 'No properties for these portfolios/regions.' : 'No properties match your search.'}</div>}
                       </div>
                     </div>
                   )}

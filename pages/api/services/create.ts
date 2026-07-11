@@ -8,7 +8,6 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { createServiceWorkOrder } from '@/lib/hubspot';
-import { SAMPLE_PROPERTIES, SAMPLE_COMMUNITIES } from '@/lib/services/sampleData';
 import { vendorEmail } from '@/lib/services/vendors';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -20,20 +19,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const b = req.body || {};
   const scope = b.scope === 'community' ? 'community' : 'property';
-  const prop = scope === 'property' ? SAMPLE_PROPERTIES.find((p) => p.id === b.target) : null;
-  const comm = scope === 'community' ? SAMPLE_COMMUNITIES.find((c) => c.name === b.target) : null;
-  const address = prop?.address || b.target || 'New Service';
-  const locality = prop?.locality || comm?.locality || '';
+  // Snapshot fields are resolved client-side from the LIVE Property / Community
+  // pickers (address/locality/region + record ids); we just persist them.
+  const communityName = scope === 'community' ? String(b.communityName || b.target || '') : '';
+  const address = scope === 'community' ? (communityName || 'New Service') : (b.address || b.target || 'New Service');
+  const locality = String(b.locality || '');
 
   const props: Record<string, any> = {
     service_name: address,
     worktype: b.worktype || '', subtype: b.subtype || '', status: 'assigned', is_bid_item: 'false', scope,
     service_description: b.description || '',
     due_date: b.dueDate || '',
-    region_snapshot: prop?.region || '',
+    region_snapshot: String(b.region || ''),
     address_snapshot: address, locality_snapshot: locality,
-    community_name: scope === 'community' ? (comm?.name || b.target || '') : '',
+    community_name: communityName,
     vendor_name: b.vendor || '', vendor_email: vendorEmail(b.vendor) || '',
+    ...(scope === 'property' && b.propertyId ? { property_id_ref: String(b.propertyId) } : {}),
     ...(b.vendorCost !== '' && b.vendorCost != null ? { vendor_cost: Number(b.vendorCost) } : {}),
     ...(b.markupPct !== '' && b.markupPct != null ? { markup_pct: Number(b.markupPct) } : {}),
     ...(b.clientCost !== '' && b.clientCost != null ? { client_cost: Number(b.clientCost) } : {}),

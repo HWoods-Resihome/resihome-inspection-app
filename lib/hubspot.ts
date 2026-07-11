@@ -775,6 +775,109 @@ export async function inspectPropertyFields(sampleSize = 200, fieldsOverride?: s
   return { typeId, fields, candidates, sampled };
 }
 
+// ── Services coverage: real portfolio / region catalog from the Property object ──
+// The rules-engine coverage picker (Portfolio → Region drill-down) needs the live
+// list of portfolios and, per portfolio, the regions present in it — with counts.
+// HubSpot has no GROUP BY, so we page the LIST endpoint (not Search, which caps at
+// 10k) up to a cap and tally. Cached in-module briefly since the catalog is stable
+// and this is display-only; generation reads live records via searchPropertiesForCoverage.
+export interface CoverageCatalog {
+  portfolios: { key: string; count: number }[];
+  regionsByPortfolio: Record<string, { key: string; count: number }[]>;
+  regions: { key: string; count: number }[];
+  scanned: number;
+  capped: boolean;
+}
+let _coverageCache: { at: number; cap: number; data: CoverageCatalog } | null = null;
+const COVERAGE_TTL_MS = 10 * 60 * 1000;
+
+export async function fetchPropertyCoverage(cap = 6000): Promise<CoverageCatalog | null> {
+  if (_coverageCache && _coverageCache.cap === cap && Date.now() - _coverageCache.at < COVERAGE_TTL_MS) return _coverageCache.data;
+  const { property: typeId } = typeIds();
+  const pf = new Map<string, number>();
+  const rg = new Map<string, number>();
+  const pfRg = new Map<string, Map<string, number>>();
+  let scanned = 0;
+  let capped = false;
+  try {
+    let after: string | undefined;
+    do {
+      const qs = new URLSearchParams({ limit: '100', properties: ['portfolio', 'region', PROPERTY_STATUS_PROPERTY].join(','), archived: 'false' });
+      if (after) qs.set('after', after);
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}?${qs.toString()}`);
+      for (const r of resp.results || []) {
+        const p = r.properties || {};
+        const status = String(p[PROPERTY_STATUS_PROPERTY] || '').trim();
+        if (status && PROPERTY_EXCLUDE_STATUSES.includes(status)) continue; // skip inactive
+        scanned++;
+        const portfolio = String(p.portfolio || '').trim();
+        const region = String(p.region || '').trim();
+        if (portfolio) {
+          pf.set(portfolio, (pf.get(portfolio) || 0) + 1);
+          if (region) {
+            if (!pfRg.has(portfolio)) pfRg.set(portfolio, new Map());
+            const m = pfRg.get(portfolio)!;
+            m.set(region, (m.get(region) || 0) + 1);
+          }
+        }
+        if (region) rg.set(region, (rg.get(region) || 0) + 1);
+      }
+      after = resp.paging?.next?.after;
+      if (scanned >= cap) { capped = !!after; break; }
+    } while (after);
+  } catch (e) { console.warn('[coverage] scan failed:', e); if (!scanned) return null; }
+
+  const sortDesc = (m: Map<string, number>) => [...m.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  const regionsByPortfolio: Record<string, { key: string; count: number }[]> = {};
+  for (const [p, m] of pfRg.entries()) regionsByPortfolio[p] = sortDesc(m);
+  const data: CoverageCatalog = { portfolios: sortDesc(pf), regionsByPortfolio, regions: sortDesc(rg), scanned, capped };
+  _coverageCache = { at: Date.now(), cap, data };
+  return data;
+}
+
+/**
+ * Live Property records within a coverage selection (portfolios AND/OR regions),
+ * for generation and the rules-engine 'list' mode drill-down. Uses Search with IN
+ * filters so result sets stay well under the 10k cap. Optionally filters by status.
+ */
+export async function searchPropertiesForCoverage(
+  opts: { portfolios?: string[]; regions?: string[]; statuses?: string[]; limit?: number } = {},
+): Promise<{ id: string; address: string; locality: string; region: string; portfolio: string; status: string }[]> {
+  const { property: typeId } = typeIds();
+  const limit = Math.min(Math.max(opts.limit || 1000, 1), 2000);
+  const filters: any[] = [];
+  if (opts.portfolios?.length) filters.push({ propertyName: 'portfolio', operator: 'IN', values: opts.portfolios });
+  if (opts.regions?.length) filters.push({ propertyName: 'region', operator: 'IN', values: opts.regions });
+  if (opts.statuses?.length) filters.push({ propertyName: PROPERTY_STATUS_PROPERTY, operator: 'IN', values: opts.statuses });
+  if (PROPERTY_EXCLUDE_STATUSES.length) filters.push({ propertyName: PROPERTY_STATUS_PROPERTY, operator: 'NOT_IN', values: PROPERTY_EXCLUDE_STATUSES });
+  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'portfolio', PROPERTY_STATUS_PROPERTY];
+  const out: { id: string; address: string; locality: string; region: string; portfolio: string; status: string }[] = [];
+  try {
+    let after: string | undefined;
+    do {
+      const body: any = { filterGroups: [{ filters }], properties: projection, limit: 100 };
+      if (after) body.after = after;
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, { method: 'POST', body: JSON.stringify(body) });
+      for (const r of resp.results || []) {
+        const p = r.properties || {};
+        const address = String(p.address || '').trim();
+        const city = String(p.city || '').trim();
+        const st = String(p.state_code || p.state || '').trim();
+        const zip = String(p.zip_code || p.zip || '').trim();
+        out.push({
+          id: String(r.id), address: address || `(Property ${r.id})`,
+          locality: [city, st, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
+          region: String(p.region || '').trim(), portfolio: String(p.portfolio || '').trim(),
+          status: String(p[PROPERTY_STATUS_PROPERTY] || '').trim(),
+        });
+        if (out.length >= limit) return out;
+      }
+      after = resp.paging?.next?.after;
+    } while (after);
+  } catch (e) { console.warn('[coverage] property search failed:', e); }
+  return out;
+}
+
 /**
  * Fetch a single Property's stored coordinates by record id. Used to validate
  * the camera's GPS fix against the property location. Returns null when the
@@ -910,12 +1013,12 @@ export async function fetchCommunityFirstPropertyId(communityId: string): Promis
  * to the resolved display property. Used by the Services rules-engine community
  * coverage picker and generation.
  */
-export async function listCommunities(): Promise<{ id: string; name: string }[] | null> {
+export async function listCommunities(): Promise<{ id: string; name: string; units: number }[] | null> {
   const meta = await resolveCommunityMeta();
   if (!meta) return null;
-  const props = [...new Set(['community_name', meta.nameProp])];
+  const props = [...new Set(['community_name', meta.nameProp, 'total_units'])];
   try {
-    const out: { id: string; name: string }[] = [];
+    const out: { id: string; name: string; units: number }[] = [];
     let after: string | undefined;
     do {
       const qs = new URLSearchParams({ limit: '100', properties: props.join(','), archived: 'false' });
@@ -924,7 +1027,8 @@ export async function listCommunities(): Promise<{ id: string; name: string }[] 
       for (const r of resp.results || []) {
         const p = r.properties || {};
         const name = String(p.community_name || p[meta.nameProp] || '').trim();
-        if (name) out.push({ id: String(r.id), name });
+        const units = Number(p.total_units);
+        if (name) out.push({ id: String(r.id), name, units: Number.isFinite(units) ? units : 0 });
       }
       after = resp.paging?.next?.after;
     } while (after);

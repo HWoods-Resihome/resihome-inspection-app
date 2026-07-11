@@ -6,11 +6,13 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { ListPicker } from '@/components/ListPicker';
+import { Combobox } from '@/components/Combobox';
 import { PriceField } from '@/components/PriceField';
 import { WORKTYPES, descriptionFor, subtypesFor, defaultRateFor } from '@/lib/services/worktypes';
 import { sanitizeNum, clientFrom } from '@/lib/services/pricing';
-import { SAMPLE_PROPERTIES, SAMPLE_COMMUNITIES } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
+
+interface PropOpt { value: string; label: string; sublabel: string; address: string; locality: string; region: string; }
 
 const DEFAULT_MARKUP = '20';
 
@@ -31,6 +33,11 @@ export default function NewService() {
   const [clientCost, setClientCost] = useState('');
   const [scope, setScope] = useState<'property' | 'community'>('property');
   const [target, setTarget] = useState('');
+  // Live property search (server-backed) + selected snapshot; live community list.
+  const [propOptions, setPropOptions] = useState<PropOpt[]>([]);
+  const [propLoading, setPropLoading] = useState(false);
+  const [selectedProp, setSelectedProp] = useState<PropOpt | null>(null);
+  const [communities, setCommunities] = useState<{ id: string; name: string; units: number }[]>([]);
   const [dueDate, setDueDate] = useState('');
   const [vendor, setVendor] = useState(DEFAULT_SERVICE_VENDOR.name);
   const [created, setCreated] = useState(false);
@@ -42,7 +49,15 @@ export default function NewService() {
     try {
       const r = await fetch('/api/services/create', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ worktype, subtype, description, scope, target, dueDate, vendor, vendorCost, markupPct, clientCost }),
+        body: JSON.stringify({
+          worktype, subtype, description, scope, target, dueDate, vendor, vendorCost, markupPct, clientCost,
+          // Real snapshot fields resolved client-side (no sample lookup server-side).
+          propertyId: scope === 'property' ? target : '',
+          communityName: scope === 'community' ? target : '',
+          address: scope === 'property' ? (selectedProp?.address || '') : target,
+          locality: scope === 'property' ? (selectedProp?.locality || '') : '',
+          region: scope === 'property' ? (selectedProp?.region || '') : '',
+        }),
       });
       const d = await r.json();
       if (!r.ok) { setCreateError(d.error || 'Could not create the service.'); return; }
@@ -74,17 +89,36 @@ export default function NewService() {
     if (vc > 0) setMarkupPct((((parseFloat(cc || '0') / vc) - 1) * 100).toFixed(2));
   };
 
+  // Live community list (stays current as communities are added in HubSpot).
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/services/communities').then((r) => r.json()).then((d) => { if (alive && d?.communities) setCommunities(d.communities); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  // Live property search — server-backed via the Combobox's onQueryChange (the
+  // Property object is far too large to pre-load). Loads a default page on mount.
+  const searchProps = (q: string) => {
+    setPropLoading(true);
+    const url = '/api/properties' + (q ? `?q=${encodeURIComponent(q)}` : '');
+    fetch(url).then((r) => r.json()).then((d) => {
+      setPropOptions((d.properties || []).map((p: any) => {
+        const locality = [p.city, p.state, p.zip].filter(Boolean).join(', ');
+        return { value: String(p.recordId), label: p.address || p.name || `(Property ${p.recordId})`, sublabel: locality, address: p.address || p.name || '', locality, region: p.region || '' };
+      }));
+    }).catch(() => {}).finally(() => setPropLoading(false));
+  };
+  useEffect(() => { if (scope === 'property') searchProps(''); }, [scope]);
+
   const worktypeOptions = useMemo(() => WORKTYPES.filter((w) => w.scopes.includes(scope)).map((w) => ({ value: w.id, label: w.label })), [scope]);
   const subtypeOptions = useMemo(() => subtypesFor(worktype).map((s) => ({ value: s.id, label: s.label })), [worktype]);
-  const targetOptions = useMemo(() => scope === 'property'
-    ? SAMPLE_PROPERTIES.map((p) => ({ value: p.id, label: p.address, sublabel: p.locality }))
-    : SAMPLE_COMMUNITIES.map((c) => ({ value: c.name, label: c.name, sublabel: c.locality })), [scope]);
+  const communityOptions = useMemo(() => communities.map((c) => ({ value: c.name, label: c.name, sublabel: c.units ? `${c.units} units` : undefined })), [communities]);
   const vendorOptions = SERVICE_VENDOR_NAMES.map((v) => ({ value: v, label: v }));
 
   const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5';
   const trig = 'w-full flex items-center justify-between gap-2 text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink';
   const ready = !!worktype && !!subtype && !!target && !!dueDate && !!vendor;
-  const targetLabel = scope === 'property' ? (SAMPLE_PROPERTIES.find((p) => p.id === target)?.address || '') : target;
+  const targetLabel = scope === 'property' ? (selectedProp?.address || '') : target;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -145,17 +179,23 @@ export default function NewService() {
               <div>
                 <label className={lbl}>Coverage type</label>
                 <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
-                  <button onClick={() => { setScope('property'); setTarget(''); }} className={`px-4 py-1.5 rounded-md ${scope === 'property' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}>Property</button>
-                  <button onClick={() => { setScope('community'); setTarget(''); }} className={`px-4 py-1.5 rounded-md ${scope === 'community' ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-600'}`}>Community</button>
+                  <button onClick={() => { setScope('property'); setTarget(''); setSelectedProp(null); }} className={`px-4 py-1.5 rounded-md ${scope === 'property' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}>Property</button>
+                  <button onClick={() => { setScope('community'); setTarget(''); setSelectedProp(null); }} className={`px-4 py-1.5 rounded-md ${scope === 'community' ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-600'}`}>Community</button>
                 </div>
               </div>
 
-              {/* 3 — Property address / Community (subdivision + city, ST ZIP) */}
+              {/* 3 — Property address (live search) / Community (live list) */}
               <div>
                 <label className={lbl}>{scope === 'property' ? 'Property address' : 'Community'}</label>
-                <ListPicker value={target} options={targetOptions} onChange={setTarget}
-                  ariaLabel={scope === 'property' ? 'Select a property' : 'Select a community'}
-                  placeholder={scope === 'property' ? 'Select a property…' : 'Select a community…'} className={trig} />
+                {scope === 'property' ? (
+                  <Combobox value={target} options={propOptions} loading={propLoading}
+                    onQueryChange={searchProps}
+                    onChange={(v) => { setTarget(v); setSelectedProp(propOptions.find((o) => o.value === v) || null); }}
+                    placeholder="Search properties…" emptyLabel="No matching properties" />
+                ) : (
+                  <ListPicker value={target} options={communityOptions} onChange={setTarget}
+                    ariaLabel="Select a community" placeholder="Select a community…" className={trig} />
+                )}
               </div>
 
               {/* 4 — Due date + Vendor */}
