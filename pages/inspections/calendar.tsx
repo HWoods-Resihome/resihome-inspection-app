@@ -268,30 +268,31 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
             Show Completed + Clear, all on one row. External: their own assignments
             only. The status legend (below the map) is a clickable filter for everyone. */}
         {isInternal && filtersOpen && (
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex-1 min-w-[88px]">
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 min-w-0">
               <MultiFilter label="Region" selected={regionFilter} onChange={setRegionFilter}
-                className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${regionFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${regionFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
                 options={regions.map((r) => ({ value: r, label: r }))} />
             </div>
-            <div className="flex-1 min-w-[88px]">
+            <div className="flex-1 min-w-0">
               <MultiFilter label="Inspectors" selected={inspectorFilter} onChange={setInspectorFilter}
-                className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${inspectorFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${inspectorFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
                 options={inspectors.map((n) => ({ value: n, label: n }))} />
             </div>
-            <div className="flex-1 min-w-[88px]">
+            <div className="flex-1 min-w-0">
               <MultiFilter label="Template" selected={typeFilter} onChange={setTypeFilter}
-                className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
                 options={templates.map((t) => ({ value: t, label: prettyType(t) }))} />
             </div>
-            <button type="button" onClick={() => setShowCompleted((v) => !v)}
-              title="Show completed inspections from the last 30 days, placed by their submitted date"
-              className={`shrink-0 text-[12px] font-heading font-semibold px-3 py-1.5 rounded-lg border transition ${showCompleted ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:border-green-400'}`}>
-              Show Completed
+            <button type="button" onClick={() => setShowCompleted((v) => !v)} title="Show completed inspections (last 30 days), placed by submitted date"
+              className={`shrink-0 inline-flex items-center gap-1 text-[12px] font-heading font-semibold px-2 py-1.5 rounded-lg border transition ${showCompleted ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:border-green-400'}`}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              Completed
             </button>
             {(regionFilter.length > 0 || inspectorFilter.length > 0 || typeFilter.length > 0 || statusFilter.length > 0) && (
               <button type="button" onClick={() => { setRegionFilter([]); setInspectorFilter([]); setTypeFilter([]); setStatusFilter([]); }}
-                className="shrink-0 text-[11px] font-heading font-semibold text-gray-500 hover:text-brand underline">Clear</button>
+                aria-label="Clear filters" title="Clear filters"
+                className="shrink-0 w-8 h-8 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-500 hover:text-brand hover:border-brand/50 text-base leading-none">×</button>
             )}
           </div>
         )}
