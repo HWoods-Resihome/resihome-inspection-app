@@ -7,7 +7,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
-import { SAMPLE_SERVICES } from '@/lib/services/sampleData';
+import { SAMPLE_SERVICES, SERVICE_STATUS_LABEL, SERVICE_STATUS_STYLE, type ServiceStatus } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoThumb } from '@/components/PhotoThumb';
@@ -259,7 +259,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7" />}
-                <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${underReview ? 'bg-amber-100 text-amber-700' : svc.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : svc.status === 'submitted' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>{svc.status || 'assigned'}</span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{SERVICE_STATUS_LABEL[(svc.status || 'assigned') as ServiceStatus] || svc.status}</span>
               </div>
             </div>
             <div className="text-xs text-gray-500 mt-0.5 truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}{svc.dueDate ? ` · Due ${svc.dueDate}` : ''}</div>

@@ -74,6 +74,21 @@ export const SAMPLE_SERVICES: SampleService[] = [
 export const SAMPLE_STATUS_ORDER: ServiceStatus[] =
   ['estimated', 'assigned', 'submitted', 'review', 'completed', 'canceled'];
 
+// Shared status chip label + color (used on the home list AND the service record
+// header so a status reads identically everywhere).
+export const SERVICE_STATUS_LABEL: Record<ServiceStatus, string> = {
+  estimated: 'Estimated', assigned: 'Assigned', submitted: 'Submitted',
+  review: 'Review', completed: 'Completed', canceled: 'Canceled',
+};
+export const SERVICE_STATUS_STYLE: Record<ServiceStatus, string> = {
+  estimated: 'bg-gray-100 text-gray-700 border-gray-300',
+  assigned: 'bg-sky-100 text-sky-800 border-sky-300',
+  submitted: 'bg-amber-100 text-amber-800 border-amber-300',
+  review: 'bg-purple-100 text-purple-800 border-purple-300',
+  completed: 'bg-green-100 text-green-800 border-green-300',
+  canceled: 'bg-gray-100 text-gray-500 border-gray-300 line-through',
+};
+
 // Sample PROPERTY records for the rules-engine coverage drill-down (Portfolio →
 // Region → individual properties). Real data comes from the Property object later.
 export interface SampleProperty { id: string; address: string; locality: string; portfolio: string; region: string; }

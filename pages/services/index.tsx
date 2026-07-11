@@ -11,6 +11,7 @@ import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
   SAMPLE_SERVICES, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY,
+  SERVICE_STATUS_LABEL as STATUS_LABEL, SERVICE_STATUS_STYLE as STATUS_STYLE,
   type ServiceStatus, type SampleService,
 } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
@@ -30,18 +31,6 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   };
 };
 
-const STATUS_LABEL: Record<ServiceStatus, string> = {
-  estimated: 'Estimated', assigned: 'Assigned', submitted: 'Submitted',
-  review: 'Review', completed: 'Completed', canceled: 'Canceled',
-};
-const STATUS_STYLE: Record<ServiceStatus, string> = {
-  estimated: 'bg-gray-100 text-gray-700 border-gray-300',
-  assigned: 'bg-sky-100 text-sky-800 border-sky-300',
-  submitted: 'bg-amber-100 text-amber-800 border-amber-300',
-  review: 'bg-purple-100 text-purple-800 border-purple-300',
-  completed: 'bg-green-100 text-green-800 border-green-300',
-  canceled: 'bg-gray-100 text-gray-500 border-gray-300 line-through',
-};
 
 type SortField = 'due' | 'address' | 'worktype' | 'vendor' | 'status' | 'region' | 'community';
 const SORT_OPTIONS: { value: SortField; label: string }[] = [
