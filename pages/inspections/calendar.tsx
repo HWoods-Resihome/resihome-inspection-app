@@ -28,13 +28,13 @@ const MON_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // Status buckets shown on the calendar/map. Open = Scheduled + In Progress;
-// Completed is opt-in (internal "Show Completed" toggle, last 30 days).
+// Completed is opt-in (internal "Show Completed" toggle, last 2 weeks).
 const STATUS_META: Record<string, { label: string; hex: string; chip: string }> = {
   scheduled: { label: 'Scheduled', hex: '#2563eb', chip: 'bg-blue-100 text-blue-800 border-blue-300' },
   in_progress: { label: 'In Progress', hex: '#d97706', chip: 'bg-amber-100 text-amber-800 border-amber-300' },
   completed: { label: 'Completed', hex: '#16a34a', chip: 'bg-green-100 text-green-800 border-green-300' },
 };
-const COMPLETED_WINDOW_DAYS = 30;
+const COMPLETED_WINDOW_DAYS = 14;
 function statusKey(s?: string): 'scheduled' | 'in_progress' | 'pending_approval' | 'completed' | null {
   const x = (s || '').trim().toLowerCase();
   if (x === 'scheduled') return 'scheduled';
@@ -65,7 +65,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const [regionFilter, setRegionFilter] = useState<string[]>([]); // internal only
   const [typeFilter, setTypeFilter] = useState<string[]>([]);     // internal only
   const [statusFilter, setStatusFilter] = useState<string[]>([]); // from the clickable legend (everyone)
-  const [showCompleted, setShowCompleted] = useState(false);      // internal only — last-30-day completed
+  const [showCompleted, setShowCompleted] = useState(false);      // internal only — last-2-weeks completed
   const [filtersOpen, setFiltersOpen] = useState(true);           // collapsible filter block (internal)
   const [coords, setCoords] = useState<Record<string, { lat: number; lng: number } | null>>({});
   const mine = (i: InspectionSummary) =>
@@ -81,7 +81,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   // server caps pageSize at 100, so a single newest-first "all statuses" page
   // fills up with upcoming/recent rows and only reaches back a few days — hiding
   // older COMPLETED work. Fetch completed on its OWN page (a dedicated 100-row
-  // budget, newest first) so it reaches back the full 30-day window, then merge
+  // budget, newest first) so it reaches back the full 2-week window, then merge
   // + dedupe with the general page. The completed page is internal-only (the
   // "Show Completed" toggle is too).
   useEffect(() => {
@@ -111,7 +111,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   // Open = Scheduled + In Progress only, with a scheduled date. External users
   // see ONLY their own assignments; internal users see all and can filter by
   // region + inspector. Past-due applies to everyone.
-  const thirtyAgoISO = toISO(addDays(today, -COMPLETED_WINDOW_DAYS));
+  const completedSinceISO = toISO(addDays(today, -COMPLETED_WINDOW_DAYS));
   // The timestamp (ms) an inspection lands on: completed → when it went to PENDING
   // APPROVAL (submittedAt), falling back to the completed date; open → scheduled date.
   // (Handles rate-card/scope inspections, which carry a submitted date, uniformly.)
@@ -137,16 +137,16 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   };
 
   // Base set the filters operate over: OPEN (scheduled/in_progress) always, plus
-  // COMPLETED from the last 30 days when the toggle is on. Scoped to the viewer.
+  // COMPLETED from the last 2 weeks when the toggle is on. Scoped to the viewer.
   const openBase = useMemo(() => items.filter((i) => {
     const k = statusKey(i.status);
     const day = dayOf(i);
     if (!day) return false;
     if (k === 'scheduled' || k === 'in_progress') { /* open — always eligible */ }
-    else if (k === 'completed' && showCompleted && day >= thirtyAgoISO) { /* recent completed */ }
+    else if (k === 'completed' && showCompleted && day >= completedSinceISO) { /* recent completed */ }
     else return false;
     return isInternal || mine(i);
-  }), [items, isInternal, showCompleted, thirtyAgoISO]);
+  }), [items, isInternal, showCompleted, completedSinceISO]);
 
   // Per-facet predicates (each option list applies the OTHER facets, not itself).
   const kOf = (i: InspectionSummary) => statusKey(i.status) || '';
@@ -304,7 +304,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
                 className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
                 options={templates.map((t) => ({ value: t, label: prettyType(t) }))} />
             </div>
-            <button type="button" onClick={() => setShowCompleted((v) => !v)} title="Show completed inspections (last 30 days), placed by submitted date"
+            <button type="button" onClick={() => setShowCompleted((v) => !v)} title="Show completed inspections (last 2 weeks), placed by submitted date"
               className={`shrink-0 inline-flex items-center gap-1 text-[12px] font-heading font-semibold px-2 py-1.5 rounded-lg border transition ${showCompleted ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:border-green-400'}`}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
               Completed
