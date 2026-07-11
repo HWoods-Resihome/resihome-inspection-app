@@ -88,16 +88,32 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
     let cancelled = false;
     (async () => {
       try {
-        const reqs = [fetch('/api/inspections?pageSize=100&facets=0&sort=date&dir=desc', { cache: 'no-store' })];
-        if (isInternal) reqs.push(fetch('/api/inspections?status=completed&pageSize=100&facets=0&sort=date&dir=desc', { cache: 'no-store' }));
-        const resps = await Promise.all(reqs);
-        const datas = await Promise.all(resps.map((r) => r.json()));
-        if (cancelled) return;
-        const firstErr = datas.find((d) => d?.error)?.error;
-        if (firstErr && datas.every((d) => !Array.isArray(d?.inspections))) { setError(firstErr); return; }
-        // Merge both pages, de-duped by recordId (a row can appear in both).
         const byId = new Map<string, InspectionSummary>();
-        for (const d of datas) for (const i of (Array.isArray(d?.inspections) ? d.inspections : [])) byId.set(i.recordId, i);
+        // General page: open + recent across all statuses (newest first).
+        const gen = await fetch('/api/inspections?pageSize=100&facets=0&sort=date&dir=desc', { cache: 'no-store' }).then((r) => r.json());
+        if (cancelled) return;
+        if (gen?.error && !Array.isArray(gen?.inspections)) { setError(gen.error); return; }
+        for (const i of (Array.isArray(gen?.inspections) ? gen.inspections : [])) byId.set(i.recordId, i);
+
+        // Completed (internal only): the server caps a page at 100, and a busy
+        // 2-week window can hold more than that — so walk ALL pages (newest
+        // first) until we cross the window boundary, rather than truncating at
+        // 100. Ordered by last_edited_at, which is always >= an inspection's
+        // completed/submitted date, so once a page's oldest row predates the
+        // window no later page can contain an in-window completion → safe to stop.
+        if (isInternal) {
+          const windowStartMs = Date.now() - COMPLETED_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+          const MAX_PAGES = 40; // safety bound (~4000 completed)
+          for (let page = 1; page <= MAX_PAGES; page++) {
+            const d = await fetch(`/api/inspections?status=completed&pageSize=100&facets=0&sort=date&dir=desc&page=${page}`, { cache: 'no-store' }).then((r) => r.json());
+            if (cancelled) return;
+            const rows: InspectionSummary[] = Array.isArray(d?.inspections) ? d.inspections : [];
+            for (const i of rows) byId.set(i.recordId, i);
+            const crossedWindow = rows.some((i) => { const ms = hubspotToMs(i.updatedAt); return ms != null && ms < windowStartMs; });
+            if (rows.length < 100 || crossedWindow) break; // last page, or reached older-than-window
+          }
+        }
+        if (cancelled) return;
         setItems(Array.from(byId.values()));
       } catch {
         if (!cancelled) setError('Couldn’t reach the server. Check your connection and try again.');
