@@ -7,7 +7,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { ListPicker } from '@/components/ListPicker';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
-  ANSWER_TYPES, SAMPLE_FORMS, formKey, newQuestion, newOption, answerTypeLabel,
+  ANSWER_TYPES, SAMPLE_FORMS, formKey, newQuestion, newOption, answerTypeLabel, hasOptions,
   type ServiceQuestion, type AnswerType, type QuestionOption,
 } from '@/lib/services/serviceForms';
 
@@ -24,7 +24,7 @@ const trig = 'w-full flex items-center justify-between gap-2 text-[13px] border 
 // One-line summary under a collapsed question (mirrors the inspection builder).
 function subline(q: ServiceQuestion): string {
   const bits = [answerTypeLabel(q.type), q.required ? 'required' : 'optional'];
-  if (q.type === 'select') bits.push(`${q.options?.length || 0} choices`);
+  if (hasOptions(q.type)) bits.push(`${q.options?.length || 0} choices`);
   if (q.requirePhoto) bits.push('photo');
   if (q.trigger) bits.push('triggers follow-up');
   return bits.join(' · ');
@@ -190,11 +190,11 @@ function QuestionEditor({ q, onPatch, onClose, onDelete }: {
         <div className="w-48">
           <label className={lbl}>Answer Type</label>
           <ListPicker value={q.type} options={ANSWER_TYPES.map((a) => ({ value: a.value, label: a.label }))} ariaLabel="Answer type" className={trig}
-            onChange={(v) => onPatch({ type: v as AnswerType, ...(v === 'select' && !q.options?.length ? { options: [newOption()] } : {}) })} />
+            onChange={(v) => onPatch({ type: v as AnswerType, ...(hasOptions(v as AnswerType) && !q.options?.length ? { options: [newOption()] } : {}) })} />
         </div>
       </div>
 
-      {q.type === 'select' && (
+      {hasOptions(q.type) && (
         <div>
           <label className={lbl}>Choices <span className="text-gray-400 normal-case font-normal">— a selection can adjust the vendor cost</span></label>
           <div className="space-y-1.5">

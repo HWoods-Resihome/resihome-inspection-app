@@ -7,16 +7,21 @@
  * use), keyed by worktype+subtype instead of a rate-card template.
  */
 
-export type AnswerType = 'yesno' | 'short' | 'long' | 'date' | 'photo' | 'select';
+// Mirrors the inspection Form Builder's answer types.
+export type AnswerType = 'single' | 'multi' | 'yesno' | 'text' | 'number' | 'date' | 'photo';
 
 export const ANSWER_TYPES: { value: AnswerType; label: string }[] = [
+  { value: 'single', label: 'Single choice (dropdown/radio)' },
+  { value: 'multi', label: 'Multiple choice (checkboxes)' },
   { value: 'yesno', label: 'Yes / No' },
-  { value: 'select', label: 'Dropdown (options)' },
-  { value: 'short', label: 'Short text' },
-  { value: 'long', label: 'Long text / notes' },
+  { value: 'text', label: 'Text' },
+  { value: 'number', label: 'Number' },
   { value: 'date', label: 'Date' },
-  { value: 'photo', label: 'Photo(s)' },
+  { value: 'photo', label: 'Photo only' },
 ];
+
+// Choice-style answers (carry options that can drive price).
+export const hasOptions = (t: AnswerType): boolean => t === 'single' || t === 'multi';
 
 /** A dropdown option. Selecting it can adjust the VENDOR COST (set to, or +/- delta).
  *  priceMode 'none' = no price effect. Amounts are strings so they type freely. */
@@ -52,7 +57,7 @@ export const formKey = (worktype: string, subtype: string) => `${worktype}:${sub
 // Seeded sample forms so the builder + completion preview have content.
 export const SAMPLE_FORMS: Record<string, ServiceQuestion[]> = {
   'landscaping:cut': [
-    { id: 'gc0', label: 'Grass height at arrival', type: 'select', required: true, requirePhoto: false, requireNote: false, enabled: true, options: [
+    { id: 'gc0', label: 'Grass height at arrival', type: 'single', required: true, requirePhoto: false, requireNote: false, enabled: true, options: [
       { id: 'h1', label: 'Standard (≤ 6")', priceMode: 'none', priceValue: '' },
       { id: 'h2', label: 'Tall (6–12")', priceMode: 'delta', priceValue: '15' },
       { id: 'h3', label: 'Overgrown (12"+)', priceMode: 'delta', priceValue: '30' },
@@ -60,8 +65,8 @@ export const SAMPLE_FORMS: Record<string, ServiceQuestion[]> = {
     { id: 'gc1', label: 'Front AND back yard fully mowed?', type: 'yesno', required: true, requirePhoto: true, requireNote: false, enabled: true,
       trigger: { whenAnswer: 'no', worktype: 'landscaping', subtype: 'cut', requirePhotos: true } },
     { id: 'gc2', label: 'Edged, blown off, and debris removed?', type: 'yesno', required: true, requirePhoto: true, requireNote: false, enabled: true },
-    { id: 'gc3', label: 'Gate / lock code used', type: 'short', required: false, requirePhoto: false, requireNote: false, enabled: true },
-    { id: 'gc4', label: 'Notes for the coordinator', type: 'long', required: false, requirePhoto: false, requireNote: false, enabled: true },
+    { id: 'gc3', label: 'Gate / lock code used', type: 'text', required: false, requirePhoto: false, requireNote: false, enabled: true },
+    { id: 'gc4', label: 'Notes for the coordinator', type: 'text', required: false, requirePhoto: false, requireNote: true, enabled: true },
   ],
   'pools:pool_cleaning': [
     { id: 'pc1', label: 'Skimmed, brushed, and vacuumed?', type: 'yesno', required: true, requirePhoto: true, requireNote: false, enabled: true },
