@@ -8,7 +8,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
-import { SAMPLE_SERVICES, SAMPLE_VENDORS, REFERENCE_TODAY, type SampleService } from '@/lib/services/sampleData';
+import { SAMPLE_SERVICES, SAMPLE_VENDORS, SAMPLE_REGIONS, REFERENCE_TODAY, type SampleService } from '@/lib/services/sampleData';
 import type { MapItem } from '@/components/ServicesMap';
 
 // Map is client-only (Leaflet touches window).
@@ -48,9 +48,9 @@ const sameYMD = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.g
 export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) {
   const [view, setView] = useState<View>('month');
   const [cursorISO, setCursorISO] = useState(REFERENCE_TODAY);
+  const [regionFilter, setRegionFilter] = useState<string[]>([]);
   const [vendorFilter, setVendorFilter] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
-  const [pastDueOnly, setPastDueOnly] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);   // last-14-day completed
   const [filtersOpen, setFiltersOpen] = useState(true);        // collapsible filter block
   const cursor = parse(cursorISO);
@@ -63,11 +63,11 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
   const scoped = useMemo(() => SAMPLE_SERVICES.filter((s) => {
     if (s.status === 'canceled') return false;
     if (s.status === 'completed' && !(showCompleted && s.dueDate >= cutoffISO)) return false;
+    if (regionFilter.length && !regionFilter.includes(s.region)) return false;
     if (vendorFilter.length && !(s.vendor && vendorFilter.includes(s.vendor))) return false;
     if (typeFilter.length && !typeFilter.includes(s.worktype)) return false;
-    if (pastDueOnly && !(s.dueDate < REFERENCE_TODAY)) return false;
     return true;
-  }), [vendorFilter, typeFilter, pastDueOnly, showCompleted, cutoffISO]);
+  }), [regionFilter, vendorFilter, typeFilter, showCompleted, cutoffISO]);
 
   // Visible date range for the current view.
   const range = useMemo(() => {
@@ -151,9 +151,14 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
           </button>
         </div>
 
-        {/* Collapsible filters: Type + Vendor + Past Due + Completed + Clear on one row. */}
+        {/* Collapsible filters: Region + Type + Vendor + Completed + Clear on one row. */}
         {filtersOpen && (
           <div className="flex items-center gap-1.5">
+            <div className="flex-1 min-w-0">
+              <MultiFilter label="Region" selected={regionFilter} onChange={setRegionFilter}
+                className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${regionFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+                options={SAMPLE_REGIONS.map((r) => ({ value: r, label: r }))} />
+            </div>
             <div className="flex-1 min-w-0">
               <MultiFilter label="Type" selected={typeFilter} onChange={setTypeFilter}
                 className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${typeFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
@@ -164,17 +169,13 @@ export default function ServicesCalendar({ canSeeAll }: { canSeeAll: boolean }) 
                 className={`w-full truncate text-[12px] font-heading font-semibold pl-2 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${vendorFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
                 options={SAMPLE_VENDORS.map((v) => ({ value: v, label: v }))} />
             </div>
-            <button type="button" onClick={() => setPastDueOnly((v) => !v)}
-              className={`shrink-0 text-[12px] font-heading font-semibold px-2 py-1.5 rounded-lg border transition ${pastDueOnly ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-700 border-gray-300 hover:border-red-300'}`}>
-              Past Due
-            </button>
             <button type="button" onClick={() => setShowCompleted((v) => !v)} title="Show completed services from the last 14 days"
               className={`shrink-0 inline-flex items-center gap-1 text-[12px] font-heading font-semibold px-2 py-1.5 rounded-lg border transition ${showCompleted ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:border-green-400'}`}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
               Completed
             </button>
-            {(typeFilter.length > 0 || vendorFilter.length > 0 || pastDueOnly) && (
-              <button type="button" onClick={() => { setTypeFilter([]); setVendorFilter([]); setPastDueOnly(false); }}
+            {(regionFilter.length > 0 || typeFilter.length > 0 || vendorFilter.length > 0) && (
+              <button type="button" onClick={() => { setRegionFilter([]); setTypeFilter([]); setVendorFilter([]); }}
                 aria-label="Clear filters" title="Clear filters"
                 className="shrink-0 w-8 h-8 grid place-items-center rounded-lg border border-gray-300 bg-white text-gray-500 hover:text-brand hover:border-brand/50 text-base leading-none">×</button>
             )}
