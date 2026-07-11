@@ -95,26 +95,35 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   // Open = Scheduled + In Progress only, with a scheduled date. External users
   // see ONLY their own assignments; internal users see all and can filter by
   // region + inspector. Past-due applies to everyone.
-  const scoped = useMemo(() => items.filter((i) => {
+  // Base set the filters operate over: OPEN (scheduled/in_progress) with a date,
+  // already scoped to the viewer (external → only their own).
+  const openBase = useMemo(() => items.filter((i) => {
     const k = statusKey(i.status);
-    if (k !== 'scheduled' && k !== 'in_progress') return false;
-    if (statusFilter.length && !statusFilter.includes(k)) return false;   // clickable legend
-    const day = schedDay(i.scheduledDate);
-    if (!day) return false;
-    if (!isInternal) { if (!mine(i)) return false; }
-    else {
-      if (inspectorScope !== 'all' && (i.inspectorName || '') !== inspectorScope) return false;
-      if (regionFilter.length && !regionFilter.includes(i.regionSnapshot || '')) return false;
-      if (typeFilter.length && !typeFilter.includes(i.templateType || '')) return false;
-    }
-    return true;
-  }), [items, isInternal, inspectorScope, regionFilter, typeFilter, statusFilter]);
+    return (k === 'scheduled' || k === 'in_progress') && !!schedDay(i.scheduledDate) && (isInternal || mine(i));
+  }), [items, isInternal]);
 
-  // Filter option lists (internal only) — derived from the visible-to-me set.
-  const forLists = useMemo(() => isInternal ? items : items.filter(mine), [items, isInternal]);
-  const inspectors = useMemo(() => [...new Set(forLists.map((i) => i.inspectorName).filter(Boolean) as string[])].sort(), [forLists]);
-  const regions = useMemo(() => [...new Set(forLists.map((i) => i.regionSnapshot).filter(Boolean) as string[])].sort(), [forLists]);
-  const templates = useMemo(() => [...new Set(forLists.map((i) => i.templateType).filter(Boolean) as string[])].sort(), [forLists]);
+  // Per-facet predicates (each option list applies the OTHER facets, not itself).
+  const kOf = (i: InspectionSummary) => statusKey(i.status) || '';
+  const passStatus = (i: InspectionSummary) => statusFilter.length === 0 || statusFilter.includes(kOf(i));
+  const passType = (i: InspectionSummary) => typeFilter.length === 0 || typeFilter.includes(i.templateType || '');
+  const passRegion = (i: InspectionSummary) => regionFilter.length === 0 || regionFilter.includes(i.regionSnapshot || '');
+  const passInspector = (i: InspectionSummary) => inspectorScope === 'all' || (i.inspectorName || '') === inspectorScope;
+
+  const scoped = useMemo(() => openBase.filter((i) => passStatus(i) && passType(i) && passRegion(i) && passInspector(i)),
+    [openBase, statusFilter, typeFilter, regionFilter, inspectorScope]);
+
+  // Dynamic, interdependent option lists (faceted): each reflects what's OPEN given
+  // the OTHER active filters, plus any already-selected value so it can be cleared.
+  const uniq = (a: (string | null | undefined)[]) => [...new Set(a.filter(Boolean) as string[])].sort();
+  const inspectors = useMemo(() => {
+    const l = uniq(openBase.filter((i) => passStatus(i) && passType(i) && passRegion(i)).map((i) => i.inspectorName));
+    if (inspectorScope !== 'all' && !l.includes(inspectorScope)) l.push(inspectorScope);
+    return l.sort();
+  }, [openBase, statusFilter, typeFilter, regionFilter, inspectorScope]);
+  const regions = useMemo(() => uniq([...openBase.filter((i) => passStatus(i) && passType(i) && passInspector(i)).map((i) => i.regionSnapshot), ...regionFilter]),
+    [openBase, statusFilter, typeFilter, inspectorScope, regionFilter]);
+  const templates = useMemo(() => uniq([...openBase.filter((i) => passStatus(i) && passRegion(i) && passInspector(i)).map((i) => i.templateType), ...typeFilter]),
+    [openBase, statusFilter, regionFilter, inspectorScope, typeFilter]);
 
   const range = useMemo(() => {
     if (view === 'day') return { start: cursor, end: cursor };
