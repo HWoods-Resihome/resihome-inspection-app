@@ -77,16 +77,28 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const cursor = parse(cursorISO);
   const today = parse(todayISO);
 
-  // Load open inspections once (client-side, same endpoint as the home list).
+  // Load inspections once (client-side, same endpoint as the home list). The
+  // server caps pageSize at 100, so a single newest-first "all statuses" page
+  // fills up with upcoming/recent rows and only reaches back a few days — hiding
+  // older COMPLETED work. Fetch completed on its OWN page (a dedicated 100-row
+  // budget, newest first) so it reaches back the full 30-day window, then merge
+  // + dedupe with the general page. The completed page is internal-only (the
+  // "Show Completed" toggle is too).
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch('/api/inspections?pageSize=250&facets=0&sort=date&dir=desc', { cache: 'no-store' });
-        const d = await r.json();
+        const reqs = [fetch('/api/inspections?pageSize=100&facets=0&sort=date&dir=desc', { cache: 'no-store' })];
+        if (isInternal) reqs.push(fetch('/api/inspections?status=completed&pageSize=100&facets=0&sort=date&dir=desc', { cache: 'no-store' }));
+        const resps = await Promise.all(reqs);
+        const datas = await Promise.all(resps.map((r) => r.json()));
         if (cancelled) return;
-        if (d.error) setError(d.error);
-        else setItems(Array.isArray(d.inspections) ? d.inspections : []);
+        const firstErr = datas.find((d) => d?.error)?.error;
+        if (firstErr && datas.every((d) => !Array.isArray(d?.inspections))) { setError(firstErr); return; }
+        // Merge both pages, de-duped by recordId (a row can appear in both).
+        const byId = new Map<string, InspectionSummary>();
+        for (const d of datas) for (const i of (Array.isArray(d?.inspections) ? d.inspections : [])) byId.set(i.recordId, i);
+        setItems(Array.from(byId.values()));
       } catch {
         if (!cancelled) setError('Couldn’t reach the server. Check your connection and try again.');
       } finally {
@@ -94,7 +106,7 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [isInternal]);
 
   // Open = Scheduled + In Progress only, with a scheduled date. External users
   // see ONLY their own assignments; internal users see all and can filter by
