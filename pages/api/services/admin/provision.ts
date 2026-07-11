@@ -24,6 +24,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const report = await provisionServicesSchema(apply);
     return res.status(200).json(report);
   } catch (e: any) {
-    return res.status(500).json({ error: String(e?.message || e).slice(0, 400), mode: apply ? 'apply' : 'dry-run' });
+    return res.status(500).json({ error: String(e?.message || e).slice(0, 400), detail: e?.detail || null, mode: apply ? 'apply' : 'dry-run' });
   }
 }

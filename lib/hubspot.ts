@@ -865,31 +865,35 @@ export async function provisionServicesSchema(apply: boolean): Promise<any> {
     const found = findSchema(obj.name);
     const entry: any = { name: obj.name, label: obj.labels.plural };
     let typeId: string | undefined = found?.objectTypeId;
-    if (!found) {
-      if (apply) {
-        const created = await hubspotFetch('/crm/v3/schemas', {
-          method: 'POST',
-          body: JSON.stringify({
-            name: obj.name, labels: obj.labels, primaryDisplayProperty: obj.primaryDisplayProperty,
-            requiredProperties: [obj.primaryDisplayProperty], secondaryDisplayProperties: [],
-            properties: obj.properties.map((p) => propPayload(p)),
-          }),
-        });
-        typeId = created.objectTypeId;
-        entry.action = 'created'; entry.typeId = typeId; entry.propertiesCreated = obj.properties.length;
+    try {
+      if (!found) {
+        if (apply) {
+          const created = await hubspotFetch('/crm/v3/schemas', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: obj.name, labels: obj.labels, primaryDisplayProperty: obj.primaryDisplayProperty,
+              requiredProperties: [obj.primaryDisplayProperty], secondaryDisplayProperties: [],
+              properties: obj.properties.map((p) => propPayload(p)),
+            }),
+          });
+          typeId = created.objectTypeId;
+          entry.action = 'created'; entry.typeId = typeId; entry.propertiesCreated = obj.properties.length;
+        } else {
+          entry.action = 'CREATE'; entry.willCreateProperties = obj.properties.length;
+        }
       } else {
-        entry.action = 'CREATE'; entry.willCreateProperties = obj.properties.length;
+        const props = await hubspotFetch(`/crm/v3/properties/${typeId}`).catch(() => ({ results: [] }));
+        const have = new Set((props.results || []).map((p: any) => p.name));
+        const missing = obj.properties.filter((p) => !have.has(p.name));
+        entry.action = 'exists'; entry.typeId = typeId; entry.missingProperties = missing.map((p) => p.name);
+        if (apply && missing.length) {
+          const group = await ensurePropertyGroup(typeId!, `${obj.name}_information`);
+          for (const p of missing) await createProperty(typeId!, p, group);
+          entry.propertiesCreated = missing.length;
+        }
       }
-    } else {
-      const props = await hubspotFetch(`/crm/v3/properties/${typeId}`).catch(() => ({ results: [] }));
-      const have = new Set((props.results || []).map((p: any) => p.name));
-      const missing = obj.properties.filter((p) => !have.has(p.name));
-      entry.action = 'exists'; entry.typeId = typeId; entry.missingProperties = missing.map((p) => p.name);
-      if (apply && missing.length) {
-        const group = await ensurePropertyGroup(typeId!, `${obj.name}_information`);
-        for (const p of missing) await createProperty(typeId!, p, group);
-        entry.propertiesCreated = missing.length;
-      }
+    } catch (e: any) {
+      entry.action = 'error'; entry.error = String(e?.message || e); entry.detail = e?.detail || null;
     }
     if (typeId) { typeIdByName[obj.name] = typeId; report.envVars[obj.envVar] = typeId; }
     report.objects.push(entry);
