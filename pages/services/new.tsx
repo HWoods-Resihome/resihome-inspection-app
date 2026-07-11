@@ -6,18 +6,12 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { ListPicker } from '@/components/ListPicker';
+import { PriceField } from '@/components/PriceField';
 import { WORKTYPES, descriptionFor, subtypesFor, defaultRateFor } from '@/lib/services/worktypes';
+import { sanitizeNum, clientFrom } from '@/lib/services/pricing';
 import { SAMPLE_PROPERTIES, SAMPLE_COMMUNITIES, SAMPLE_VENDORS } from '@/lib/services/sampleData';
 
 const DEFAULT_MARKUP = '20';
-// Keep digits + one dot + up to 2 decimals as the user types.
-const sanitizeNum = (v: string): string => {
-  const parts = v.replace(/[^\d.]/g, '').split('.');
-  const int = parts.shift() ?? '';
-  return parts.length ? `${int}.${parts.join('').slice(0, 2)}` : int;
-};
-const clientFrom = (vc: string, mk: string): string =>
-  vc === '' ? '' : (parseFloat(vc || '0') * (1 + parseFloat(mk || '0') / 100)).toFixed(2);
 
 // Internal users (@resihome / @resicap / …) only; also flag+admin gated.
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -118,25 +112,10 @@ export default function NewService() {
               </div>
 
               {/* Pricing — defaults from the subtype rate + standard markup; all editable. */}
-              <div className="flex flex-nowrap items-end gap-4 border-t border-gray-100 pt-4">
-                <div className="flex flex-col shrink-0">
-                  <label className={`${lbl} text-center`}>Vendor cost</label>
-                  <div className="flex items-center"><span className="text-gray-400 mr-1">$</span>
-                    <input value={vendorCost} inputMode="decimal" onChange={(e) => onVendorCost(e.target.value)} placeholder="0.00"
-                      className="text-sm px-2.5 py-2 border border-gray-300 rounded-lg bg-white text-ink w-24 text-center tabular-nums focus:outline-none focus:border-brand" /></div>
-                </div>
-                <div className="flex flex-col shrink-0">
-                  <label className={`${lbl} text-center`}>Markup %</label>
-                  <div className="flex items-center">
-                    <input value={markupPct} inputMode="decimal" onChange={(e) => onMarkup(e.target.value)} placeholder="0"
-                      className="text-sm px-2.5 py-2 border border-gray-300 rounded-lg bg-white text-ink w-24 text-center tabular-nums focus:outline-none focus:border-brand" /><span className="text-gray-400 ml-1">%</span></div>
-                </div>
-                <div className="flex flex-col shrink-0">
-                  <label className={`${lbl} text-center`}>Client cost</label>
-                  <div className="flex items-center"><span className="text-gray-400 mr-1">$</span>
-                    <input value={clientCost} inputMode="decimal" onChange={(e) => onClientCost(e.target.value)} placeholder="0.00"
-                      className="text-sm px-2.5 py-2 border border-emerald-300 bg-emerald-50 rounded-lg text-emerald-700 font-bold w-24 text-center tabular-nums focus:outline-none focus:border-brand" /></div>
-                </div>
+              <div className="flex items-end gap-3 border-t border-gray-100 pt-4">
+                <PriceField label="Vendor cost" adorn="$" value={vendorCost} onChange={onVendorCost} />
+                <PriceField label="Markup %" adorn="%" side="right" value={markupPct} onChange={onMarkup} />
+                <PriceField label="Client cost" adorn="$" highlight value={clientCost} onChange={onClientCost} />
               </div>
 
               {/* 2 — Coverage type */}

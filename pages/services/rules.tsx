@@ -5,6 +5,7 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
+import { PriceField } from '@/components/PriceField';
 import { SAMPLE_PROPERTIES } from '@/lib/services/sampleData';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -57,12 +58,6 @@ interface Rule {
   enrollField: string; enrollOp: string; enrollVal: string;
   stopEnabled: boolean; stopField: string; stopOp: string; stopVal: string;
 }
-// Keep digits + one dot + up to 2 decimals as the user types.
-const sanitizeNum = (v: string): string => {
-  const parts = v.replace(/[^\d.]/g, '').split('.');
-  const int = parts.shift() ?? '';
-  return parts.length ? `${int}.${parts.join('').slice(0, 2)}` : int;
-};
 
 let _cid = 100;
 const newCadence = (months: number[] = []): Cadence => ({ id: ++_cid, unit: 'weeks', interval: '2', dow: -1, dom: 0, months });
@@ -418,9 +413,9 @@ export default function RulesEngine() {
               </div>
             )}
             <div className="flex flex-nowrap items-end gap-4 border-t border-gray-100 pt-4 mt-4">
-              <div className="flex flex-col shrink-0"><label className={lbl}>Vendor Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><input value={rule.vendorCost} inputMode="decimal" onChange={(e) => patch({ vendorCost: sanitizeNum(e.target.value) })} className={`${ctl} w-20 text-center tabular-nums`} /></div></div>
-              <div className="flex flex-col shrink-0"><label className={lbl}>Markup %</label><div className="flex items-center"><input value={rule.markupPct} inputMode="decimal" onChange={(e) => patch({ markupPct: sanitizeNum(e.target.value) })} className={`${ctl} w-20 text-center tabular-nums`} /><span className="text-gray-400 ml-1">%</span></div></div>
-              <div className="flex flex-col shrink-0"><label className={lbl}>Client Cost</label><div className="flex items-center"><span className="text-gray-400 mr-1">$</span><div className="text-[13px] font-bold tabular-nums text-emerald-700 px-2.5 py-1.5 border border-emerald-300 bg-emerald-50 rounded-lg w-20 text-center">{clientCost.toFixed(2)}</div></div></div>
+              <PriceField label="Vendor Cost" adorn="$" colClass="shrink-0 w-24" value={rule.vendorCost} onChange={(v) => patch({ vendorCost: v })} />
+              <PriceField label="Markup %" adorn="%" side="right" colClass="shrink-0 w-24" value={rule.markupPct} onChange={(v) => patch({ markupPct: v })} />
+              <PriceField label="Client Cost" adorn="$" highlight readOnly colClass="shrink-0 w-24" value={clientCost.toFixed(2)} />
             </div>
           </section>
 
