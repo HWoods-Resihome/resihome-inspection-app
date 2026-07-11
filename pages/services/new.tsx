@@ -33,6 +33,25 @@ export default function NewService() {
   const [dueDate, setDueDate] = useState('');
   const [vendor, setVendor] = useState('');
   const [created, setCreated] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [createError, setCreateError] = useState('');
+
+  const handleCreate = async () => {
+    setSubmitting(true); setCreateError('');
+    try {
+      const r = await fetch('/api/services/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ worktype, subtype, description, scope, target, dueDate, vendor, vendorCost, markupPct, clientCost }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setCreateError(d.error || 'Could not create the service.'); return; }
+      setCreated(true);   // d.id present when live; d.preview true pre-go-live
+    } catch {
+      setCreateError('Couldn’t reach the server. Try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   // Prefill the editable description + pricing defaults from the worktype+subtype
   // whenever either changes (mirrors Section 1 of the Rules Engine).
@@ -151,11 +170,12 @@ export default function NewService() {
               </div>
             </section>
 
-            <button type="button" disabled={!ready} onClick={() => setCreated(true)}
-              className={`w-full rounded-2xl py-3.5 font-heading font-bold text-sm ${ready ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
-              Create Service{targetLabel ? ` — ${targetLabel}` : ''}
+            <button type="button" disabled={!ready || submitting} onClick={handleCreate}
+              className={`w-full rounded-2xl py-3.5 font-heading font-bold text-sm ${ready && !submitting ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
+              {submitting ? 'Creating…' : `Create Service${targetLabel ? ` — ${targetLabel}` : ''}`}
             </button>
-            {!ready && <div className="text-center text-xs text-gray-400 -mt-2">Fill in every field to create the service.</div>}
+            {createError && <div className="text-center text-xs text-red-600 -mt-2">{createError}</div>}
+            {!ready && !createError && <div className="text-center text-xs text-gray-400 -mt-2">Fill in every field to create the service.</div>}
           </div>
         )}
       </main>

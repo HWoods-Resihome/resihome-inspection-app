@@ -1004,6 +1004,41 @@ export async function seedSampleServiceWorkOrders(apply: boolean, samples: Sampl
   return report;
 }
 
+// Delete only the seed:-tagged sample records (teardown). dry-run lists them.
+export async function unseedSampleServiceWorkOrders(apply: boolean): Promise<any> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return { error: 'HUBSPOT_SERVICE_TYPE_ID not set.' };
+  const ids: string[] = [];
+  try {
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key'], filterGroups: [{ filters: [{ propertyName: 'enrollment_key', operator: 'HAS_PROPERTY' }] }] }),
+      });
+      for (const r of resp.results || []) { if (String(r.properties?.enrollment_key || '').startsWith('seed:')) ids.push(String(r.id)); }
+      after = resp.paging?.next?.after;
+    } while (after);
+  } catch (e) { return { error: String((e as any)?.message || e) }; }
+  const report: any = { mode: apply ? 'apply' : 'dry-run', typeId, count: ids.length, ids, deleted: [] };
+  if (apply) {
+    for (const id of ids) {
+      try { await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'DELETE' }); report.deleted.push(id); }
+      catch (e: any) { report.deleted.push({ id, error: String(e?.message || e) }); }
+    }
+  }
+  return report;
+}
+
+/** Create one Service Work Order from a property map. Returns the new record id,
+ *  or null when the object type id env var isn't set (caller falls back to preview). */
+export async function createServiceWorkOrder(props: Record<string, any>): Promise<string | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: props }) });
+  return resp?.id ? String(resp.id) : null;
+}
+
 export async function provisionServicesSchema(apply: boolean): Promise<any> {
   const report: any = { mode: apply ? 'apply' : 'dry-run', objects: [], questionAdditions: [], associations: [], envVars: {}, notes: [] };
   const schemas = await hubspotFetch('/crm/v3/schemas').catch(() => ({ results: [] }));
