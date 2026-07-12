@@ -154,18 +154,18 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
         })()}
 
         {(() => {
-          // Due / Submitted / Cost live in the summary tiles above, so the Work
-          // Order section carries only what those don't: vendor, completion,
-          // client markup, and any payout adjustment.
-          const rows: { label: string; value: string }[] = [{ label: 'Vendor', value: d.vendor || '-' }];
+          // Vendor + Due / Submitted / Cost are all in the header + summary tiles
+          // above, so the Work Order section carries only the extras: completion
+          // date, client markup, and any payout adjustment. Hidden when empty.
+          const rows: { label: string; value: string }[] = [];
           if (d.completedAt) rows.push({ label: 'Completed', value: humanDate(d.completedAt) });
           if (d.variant === 'client' && d.markupPct) rows.push({ label: 'Markup', value: `${d.markupPct}%` });
           if (d.variant !== 'client' && d.adjustment) rows.push({ label: 'Payout adjustment', value: `-${d.adjustment}${d.adjustmentReason ? ` (${d.adjustmentReason})` : ''}` });
-          return (
+          return rows.length ? (
             <Section title="Work Order">
               {rows.map((r, i) => <Row key={i} label={r.label} value={r.value} last={i === rows.length - 1} />)}
             </Section>
-          );
+          ) : null;
         })()}
 
         {d.answers.length > 0 && (
