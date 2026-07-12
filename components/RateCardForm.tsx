@@ -3979,7 +3979,7 @@ export function RateCardForm(props: RateCardFormProps) {
               type="button"
               onClick={handleSaveAndClose}
               aria-label="Save and go back"
-              className="order-1 inline-flex items-center justify-center w-6 h-8 -mx-0.5 text-gray-400 hover:text-gray-700"
+              className="order-4 inline-flex items-center justify-center w-6 h-8 -mx-0.5 text-gray-400 hover:text-gray-700"
               title="Save and go back"
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M15 18l-6-6 6-6" /></svg>

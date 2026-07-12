@@ -982,8 +982,17 @@ export function QcReinspectForm(props: Props) {
               </svg>
             </button>
             <InspectionPager currentId={props.inspectionRecordId} onNavigate={(id) => props.onNavigateTo?.(id)} />
+            {!props.readOnly && (
+              <UnlockButton
+                propertyId={props.propertyRecordId}
+                address={props.propertyName}
+                inspectionId={props.inspectionRecordId}
+                lockRing={props.lockRing}
+              />
+            )}
             {/* Back — bare chevron (no boxed button) like the services window, so
-                the template title gets more width before it truncates. */}
+                the template title gets more width before it truncates. Sits to the
+                right of the lock button. */}
             <button
               type="button"
               onClick={props.onCancel}
@@ -993,14 +1002,6 @@ export function QcReinspectForm(props: Props) {
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M15 18l-6-6 6-6" /></svg>
             </button>
-            {!props.readOnly && (
-              <UnlockButton
-                propertyId={props.propertyRecordId}
-                address={props.propertyName}
-                inspectionId={props.inspectionRecordId}
-                lockRing={props.lockRing}
-              />
-            )}
           </div>
         </div>
       </div>

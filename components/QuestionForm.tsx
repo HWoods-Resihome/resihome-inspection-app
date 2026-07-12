@@ -2070,8 +2070,17 @@ export function QuestionForm({
               onNavigateTo?.(id);
             }}
           />
+          {!readOnly && (
+            <UnlockButton
+              propertyId={propertyRecordId}
+              address={propertyName}
+              inspectionId={inspectionRecordId}
+              lockRing={lockRing}
+            />
+          )}
           {/* Back — bare chevron (no boxed button) like the services window, so
-              the template title gets more width before it truncates. */}
+              the template title gets more width before it truncates. Sits to the
+              right of the lock button. */}
           <button
             type="button"
             onClick={() => { void handleSaveAndClose(); }}
@@ -2081,14 +2090,6 @@ export function QuestionForm({
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M15 18l-6-6 6-6" /></svg>
           </button>
-          {!readOnly && (
-            <UnlockButton
-              propertyId={propertyRecordId}
-              address={propertyName}
-              inspectionId={inspectionRecordId}
-              lockRing={lockRing}
-            />
-          )}
           </div>
         </div>
       </div>
