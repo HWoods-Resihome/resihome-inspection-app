@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
+import { PageHeader } from '@/components/PageHeader';
 import { InsightsDashboard } from '@/components/insights/Dashboard';
 import { InsightsUsersManager } from '@/components/insights/InsightsUsersManager';
 import { clearCachedMe } from '@/lib/offlineCache';
@@ -47,31 +48,14 @@ export default function InsightsPortal() {
     <>
       <Head><title>ResiWalk Insights</title></Head>
       <div className="min-h-screen bg-[#0e0e11]">
-        {/* Brand header — matches the app (app-icon mark on brand pink). */}
-        <header className="bg-brand text-white">
-          <div className="max-w-[1600px] mx-auto px-5 py-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/app-icon.svg" alt="ResiWalk" className="h-10 w-10 object-cover shrink-0"
-                   onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }} />
-              <div className="min-w-0">
-                <h1 className="font-heading font-extrabold text-xl tracking-tight leading-none">
-                  ResiWalk <span className="text-white/85">Insights</span>
-                </h1>
-                {access?.user && (
-                  <div className="text-xs text-white/80 truncate mt-0.5">{access.user.name}</div>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center gap-4 shrink-0">
-              <Link href="/" className="text-xs font-heading font-semibold text-white/90 hover:text-white inline-flex items-center gap-1">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M11 18l-6-6 6-6" /></svg>
-                Inspections
-              </Link>
-              {access?.user && <AccountMenu name={access.user.name} email={access.user.email} />}
-            </div>
-          </div>
-        </header>
+        {/* Standard centered header (logo + title + back), with the account menu
+            in the right slot. */}
+        <PageHeader
+          title="Insights"
+          backHref="/"
+          maxW="max-w-[1600px]"
+          right={access?.user ? <AccountMenu name={access.user.name} email={access.user.email} /> : undefined}
+        />
 
         <main className="max-w-[1600px] mx-auto px-5 py-6">
           {loading ? (
