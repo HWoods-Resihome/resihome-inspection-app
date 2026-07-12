@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import type { GetServerSideProps } from 'next';
@@ -63,6 +63,33 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
   const [showCompleted, setShowCompleted] = useState(false);   // last-14-day completed
   const [filtersOpen, setFiltersOpen] = useState(true);        // collapsible filter block
+  // Persist the calendar's view + filters + day across navigation, so clicking
+  // into a service and coming BACK returns you to the exact map/list you left
+  // (not a reset page). sessionStorage survives back-navigation within the tab.
+  const CAL_KEY = 'resiwalk.svc.cal';
+  const hydrated = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(CAL_KEY);
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s.view === 'month' || s.view === 'week' || s.view === 'day') setView(s.view);
+        if (typeof s.cursorISO === 'string') setCursorISO(s.cursorISO);
+        if (Array.isArray(s.regionFilter)) setRegionFilter(s.regionFilter);
+        if (Array.isArray(s.vendorFilter)) setVendorFilter(s.vendorFilter);
+        if (Array.isArray(s.typeFilter)) setTypeFilter(s.typeFilter);
+        if (typeof s.showCompleted === 'boolean') setShowCompleted(s.showCompleted);
+        if (typeof s.filtersOpen === 'boolean') setFiltersOpen(s.filtersOpen);
+      }
+    } catch { /* ignore corrupt state */ }
+    hydrated.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!hydrated.current) return;
+    try { sessionStorage.setItem(CAL_KEY, JSON.stringify({ view, cursorISO, regionFilter, vendorFilter, typeFilter, showCompleted, filtersOpen })); } catch { /* quota/private */ }
+  }, [view, cursorISO, regionFilter, vendorFilter, typeFilter, showCompleted, filtersOpen]);
+
   const cursor = parse(cursorISO);
   const today = parse(REFERENCE_TODAY);
   const COMPLETED_WINDOW_DAYS = 14;

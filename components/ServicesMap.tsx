@@ -116,7 +116,10 @@ export default function ServicesMap({ items, routes }: { items: MapItem[]; route
     layer.clearLayers();
     for (const r of routes || []) {
       if (r.points.length < 2) continue;
-      L.polyline(r.points, { color: r.color, weight: 2.5, opacity: 0.55, dashArray: '4 6', lineJoin: 'round' }).addTo(layer);
+      // Soft white casing beneath so the colored line stays readable over busy
+      // map tiles, then the rounded, dashed colored line on top.
+      L.polyline(r.points, { color: '#fff', weight: 6, opacity: 0.9, lineJoin: 'round', lineCap: 'round' }).addTo(layer);
+      L.polyline(r.points, { color: r.color, weight: 3, opacity: 0.9, dashArray: '4 6', lineJoin: 'round', lineCap: 'round' }).addTo(layer);
     }
   }, [routes]);
 

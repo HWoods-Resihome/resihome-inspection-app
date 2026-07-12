@@ -17,6 +17,16 @@ type Coords = { lat: number; lng: number; source: string };
 // cache key (propertyId + address) -> coords | null (null = a confirmed miss)
 const cache = new Map<string, Coords | null>();
 
+// The 2-letter US state at the end of an address ("…, Anderson, SC 29625" → "SC").
+function stateOf(address: string): string {
+  const m = /,\s*([A-Za-z]{2})(?:\s*,?\s*\d{5}(?:-\d{4})?)?\s*$/.exec(address);
+  return m ? m[1].toUpperCase() : '';
+}
+// Sanity box for US coverage (incl. AK/HI). Guards against a wildly-wrong match.
+function inUS(lat: number, lng: number): boolean {
+  return lat >= 18 && lat <= 72 && lng >= -170 && lng <= -66;
+}
+
 async function fetchWithTimeout(url: string, ms: number, headers?: Record<string, string>) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
@@ -37,14 +47,19 @@ async function geocodeCensus(address: string): Promise<Coords | null> {
   const m = d?.result?.addressMatches?.[0];
   const lng = Number(m?.coordinates?.x);
   const lat = Number(m?.coordinates?.y);
-  if (isFinite(lat) && isFinite(lng)) return { lat, lng, source: 'census' };
-  return null;
+  if (!isFinite(lat) || !isFinite(lng) || !inUS(lat, lng)) return null;
+  // Reject a cross-state match: the address wanted a state the matched address
+  // doesn't have (this is what plotted an SC home in CA).
+  const want = stateOf(address);
+  const matched = String(m?.matchedAddress || '');
+  if (want && matched && !new RegExp(`\\b${want}\\b`, 'i').test(matched)) return null;
+  return { lat, lng, source: 'census' };
 }
 
 async function geocodeNominatim(address: string): Promise<Coords | null> {
   const url =
     'https://nominatim.openstreetmap.org/search' +
-    `?format=jsonv2&limit=1&q=${encodeURIComponent(address)}`;
+    `?format=jsonv2&limit=1&countrycodes=us&addressdetails=1&q=${encodeURIComponent(address)}`;
   const r = await fetchWithTimeout(url, 6000, {
     'User-Agent': 'ResiHome-Inspection-App/1.0 (property inspections)',
     Accept: 'application/json',
@@ -54,8 +69,12 @@ async function geocodeNominatim(address: string): Promise<Coords | null> {
   const first = Array.isArray(d) ? d[0] : null;
   const lat = Number(first?.lat);
   const lng = Number(first?.lon);
-  if (isFinite(lat) && isFinite(lng)) return { lat, lng, source: 'nominatim' };
-  return null;
+  if (!isFinite(lat) || !isFinite(lng) || !inUS(lat, lng)) return null;
+  // Cross-state guard via the result's ISO state code ("US-SC").
+  const want = stateOf(address);
+  const iso = String(first?.address?.['ISO3166-2-lvl4'] || '');
+  if (want && iso && iso.toUpperCase() !== `US-${want}`) return null;
+  return { lat, lng, source: 'nominatim' };
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
