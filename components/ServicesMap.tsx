@@ -111,7 +111,10 @@ export default function ServicesMap({ items }: { items: MapItem[] }) {
       Object.values(groups).forEach((arr) => {
         if (arr.length < 2) return;
         const path = arr.slice().sort((a, b) => (a.routeOrder || 0) - (b.routeOrder || 0)).map((it) => [it.lat, it.lng] as L.LatLngExpression);
-        L.polyline(path, { color: arr[0].color, weight: 2, opacity: 0.55, dashArray: '5 6' }).addTo(routeLayer);
+        // White casing underneath makes the colored dashes readable over busy
+        // map tiles; the colored dashed line rides on top — visible, not heavy.
+        L.polyline(path, { color: '#ffffff', weight: 5, opacity: 0.7, lineCap: 'round', lineJoin: 'round' }).addTo(routeLayer);
+        L.polyline(path, { color: arr[0].color, weight: 3, opacity: 0.9, dashArray: '6 6', lineCap: 'round', lineJoin: 'round' }).addTo(routeLayer);
       });
     }
 
