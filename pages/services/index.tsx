@@ -122,6 +122,10 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   const isAdmin = canCreate && !asVendor;
   const enterVendorView = () => { setViewAsVendor(true); window.location.href = '/services'; };
   const exitVendorView = () => { setViewAsVendor(false); window.location.href = '/services'; };
+  // Past-due is measured against the REAL today for live data (the sample preview
+  // keeps its fixed reference date). Strict "<" so a service due TODAY is still
+  // on-time — it only goes red once at least a day past due.
+  const todayISO = useMemo(() => (live ? new Date().toISOString().slice(0, 10) : REFERENCE_TODAY), [live]);
   const [status, setStatus] = useState<ServiceStatus | 'all'>('all');
   const [worktype, setWorktype] = useState<string[]>([]);
   const [vendor, setVendor] = useState<string[]>([]);
@@ -230,7 +234,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
     const onTime = done.filter((s) => s.onTime);
     return {
       open: open.length,
-      pastDue: open.filter((s) => !!s.dueDate && s.dueDate < REFERENCE_TODAY).length,
+      pastDue: open.filter((s) => !!s.dueDate && s.dueDate < todayISO).length,
       onTimePct: done.length ? Math.round((onTime.length / done.length) * 100) : null,
     };
   }, [scoped]);
@@ -246,7 +250,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
 
   const rows = useMemo(() => {
     let list = scoped.filter((s) => s.status !== 'canceled');
-    if (pastDueOnly) list = list.filter((s) => OPEN_STATUSES.includes(s.status) && !!s.dueDate && s.dueDate < REFERENCE_TODAY);
+    if (pastDueOnly) list = list.filter((s) => OPEN_STATUSES.includes(s.status) && !!s.dueDate && s.dueDate < todayISO);
     else if (status !== 'all') list = list.filter((s) => s.status === status);
     const dir = sortDir === 'asc' ? 1 : -1;
     const key = (s: typeof list[number]) => ({
@@ -491,7 +495,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
 
         <div className="space-y-2">
           {pagedRows.map((s) => (
-            <ServiceCard key={s.id} s={s} overdue={OPEN_STATUSES.includes(s.status) && !!s.dueDate && s.dueDate < REFERENCE_TODAY}
+            <ServiceCard key={s.id} s={s} overdue={OPEN_STATUSES.includes(s.status) && !!s.dueDate && s.dueDate < todayISO}
               isAdmin={isAdmin}
               selectMode={selectMode} selectable={isSelectable(s)} selected={selectedIds.has(s.id)} onToggleSelect={toggleSelect} onLongPress={enterSelectWith} />
           ))}

@@ -345,7 +345,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   // Bid items are never crew-completed here — they go straight to internal bid review.
   const editable = EDITABLE.has(svc.status) && !svc.isBidItem;
   // Past-due (open statuses only) — turns the header Due date red, like the home list.
-  const overdue = ['estimated', 'assigned', 'submitted', 'review'].includes(svc.status) && !!svc.dueDate && svc.dueDate < REFERENCE_TODAY;
+  // Past-due against the REAL today for live records (sample preview keeps its
+  // fixed reference date). Strict "<" so a service due TODAY is still on-time.
+  const todayISO = svc.live ? new Date().toISOString().slice(0, 10) : REFERENCE_TODAY;
+  const overdue = ['estimated', 'assigned', 'submitted', 'review'].includes(svc.status) && !!svc.dueDate && svc.dueDate < todayISO;
   // Resting display for a $ input: pad to 2 decimals on blur (e.g. "250" → "250.00").
   const fmt2 = (v: string): string => { const n = Number(v); return v.trim() !== '' && Number.isFinite(n) ? n.toFixed(2) : v; };
   const underReview = svc.status === 'review';
