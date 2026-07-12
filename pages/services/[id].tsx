@@ -443,7 +443,21 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const [reissueMsg, setReissueMsg] = useState<string>('');   // set when a review re-issues the service
   const [error, setError] = useState('');
   const [pendingQueued, setPendingQueued] = useState(false);
-  const setAns = (id: string, v: any) => setAnswers((a) => ({ ...a, [id]: v }));
+  const setAns = (id: string, v: any) => setAnswers((a) => {
+    const next: Record<string, any> = { ...a, [id]: v };
+    // Changing a parent answer hides its dependent questions — clear those hidden
+    // answers (and their note/photo) so they don't persist unseen or keep driving
+    // pricing/routing. Parents precede dependents in the form, so one ordered
+    // pass cascades correctly.
+    for (const q of form) {
+      if (q.showWhen && next[q.showWhen.qid] !== q.showWhen.value) {
+        delete next[q.id];
+        delete next[`${q.id}__note`];
+        delete next[`${q.id}__photos`];
+      }
+    }
+    return next;
+  });
 
   // Additional-work bid capture: when Yes, description + cost + photos are required.
   // On submit this spawns a new Estimated "Bid Item" service for internal review.
