@@ -175,6 +175,19 @@ export default function LoginPage() {
         <meta property="og:site_name" content="ResiWalk" />
         <meta property="og:title" content="ResiWalk — Field Inspections & Recurring Services" />
         <meta property="og:description" content="ResiWalk is the leading edge field inspection and recurring services platform for Property Managers. Powered with AI automation, customizable workflows, and an intuitive interface that maximizes efficiency and solves day to day challenges." />
+        {/* WebSite structured data — the authoritative signal Google uses for the
+            "site name" line in results, so it reads "ResiWalk" instead of the bare
+            resiwalk.com domain. */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'WebSite',
+            name: 'ResiWalk',
+            alternateName: 'ResiWalk — Field Inspections & Recurring Services',
+            url: 'https://resiwalk.com/',
+          }) }}
+        />
       </Head>
       <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-white">
         <div className="w-full max-w-md">
