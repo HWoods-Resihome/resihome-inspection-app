@@ -176,10 +176,9 @@ export default function FormBuilder({ savedForms, canSave, embedded, savedTaxono
               <label className={lbl}>Subtype</label>
               <ListPicker value={subtype} options={subtypeOptions} ariaLabel="Subtype" className={trig} onChange={(v) => { setSubtype(v); setEditId(null); }} />
             </div>
-            <button onClick={addQ} className="ml-auto bg-brand text-white font-heading font-bold text-sm rounded-xl px-4 py-2.5">+ Add Question</button>
           </div>
 
-          {/* Add a work type / subtype (persisted on Save). */}
+          {/* Add a work type / subtype / question — matching pills on one line. */}
           <div className="flex flex-wrap items-center gap-2 mt-3">
             {addingWt ? (
               <div className="flex items-center gap-2">
@@ -201,6 +200,7 @@ export default function FormBuilder({ savedForms, canSave, embedded, savedTaxono
             ) : (
               <button onClick={() => { setAddingSub(true); setAddingWt(false); }} className="text-[12px] font-heading font-semibold text-brand border border-brand/40 rounded-lg px-3 py-1.5 hover:bg-brand/5">+ New subtype</button>
             )}
+            <button onClick={addQ} className="text-[12px] font-heading font-semibold text-brand border border-brand/40 rounded-lg px-3 py-1.5 hover:bg-brand/5">+ Add Question</button>
           </div>
 
           <p className="text-[12px] text-gray-500 mt-3">
