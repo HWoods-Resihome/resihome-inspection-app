@@ -6,7 +6,7 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
+import { descriptionFor, defaultRateFor, mergeWorktypes, type Worktype, type CustomWorktypeDef } from '@/lib/services/worktypes';
 import { PriceField } from '@/components/PriceField';
 import { MultiFilter } from '@/components/MultiFilter';
 import { DatePicker } from '@/components/DatePicker';
@@ -14,7 +14,7 @@ import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { SAMPLE_SERVICES } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
-import { searchServiceRuleRecords } from '@/lib/hubspot';
+import { searchServiceRuleRecords, readServiceTaxonomy } from '@/lib/hubspot';
 import { isViewingAsVendor } from '@/lib/services/viewAs';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
@@ -24,7 +24,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   if (isViewingAsVendor(ctx.req)) return { redirect: { destination: '/services', permanent: false } };
   const recs = await searchServiceRuleRecords().catch(() => null);
   const canGenerate = await isAppAdmin(session?.email).catch(() => false);
-  return { props: { ruleRecords: recs, live: !!recs, canGenerate } };
+  const taxonomy = await readServiceTaxonomy().catch(() => null);
+  return { props: { ruleRecords: recs, live: !!recs, canGenerate, taxonomy: (taxonomy as CustomWorktypeDef[] | null) || null } };
 };
 
 // Real coverage catalog, loaded client-side from /api/services/coverage (portfolios
@@ -49,8 +50,6 @@ const VENDOR_OPEN: Record<string, number> = SAMPLE_SERVICES.reduce((m, s) => {
   return m;
 }, {} as Record<string, number>);
 const DEFAULT_MARKUP = '20';   // default markup % on all services
-// First subtype's default rate for a worktype (used to prefill vendor cost).
-const firstSubtype = (wt: Worktype): string => subtypesFor(wt)[0]?.id || '';
 const baseRate = (wt: Worktype, sub: string): string => { const r = defaultRateFor(wt, sub); return r != null ? String(r) : ''; };
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 // Curated Property (and associated-Deal) fields for enrollment / stop criteria,
@@ -244,7 +243,13 @@ function ruleToProps(r: Rule): Record<string, any> {
   return props;
 }
 
-export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRecords: { id: string; props: Record<string, any> }[] | null; live: boolean; canGenerate: boolean }) {
+export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }: { ruleRecords: { id: string; props: Record<string, any> }[] | null; live: boolean; canGenerate: boolean; taxonomy?: CustomWorktypeDef[] | null }) {
+  // Built-in taxonomy merged with the admin's custom work types / subtypes.
+  const defs = useMemo(() => mergeWorktypes(taxonomy), [taxonomy]);
+  const subsOfD = (wt: string) => defs.find((w) => w.id === wt)?.subtypes || [];
+  const wtLabelD = (wt: string) => defs.find((w) => w.id === wt)?.label || wt;
+  const subLabelD = (wt: string, st: string) => subsOfD(wt).find((s) => s.id === st)?.label || st;
+  const firstSubOf = (wt: string) => subsOfD(wt)[0]?.id || '';
   const [rules, setRules] = useState<Rule[]>(() => (ruleRecords ? ruleRecords.map(rulePropsToRule) : SEED));
   const [savingRule, setSavingRule] = useState(false);
   const [genBusy, setGenBusy] = useState(false);
@@ -466,7 +471,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
     );
     const dir = sortDir === 'asc' ? 1 : -1;
     const key = (r: Rule) => ({
-      name: r.name.toLowerCase(), coverage: countFor(r), worktype: worktypeLabel(r.worktype),
+      name: r.name.toLowerCase(), coverage: countFor(r), worktype: wtLabelD(r.worktype),
       region: (regionsOf(r)[0] || '~').toLowerCase(), community: (r.communities[0] || '~').toLowerCase(),
     }[sortField]);
     return [...list].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * dir);
@@ -474,7 +479,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
 
   // Subtype filter options: the union of subtypes across the chosen work types
   // (or every subtype when no work type is selected).
-  const subFilterOptions = (fWork.length === 0 ? WORKTYPES : WORKTYPES.filter((w) => fWork.includes(w.id)))
+  const subFilterOptions = (fWork.length === 0 ? defs : defs.filter((w) => fWork.includes(w.id)))
     .flatMap((w) => w.subtypes.map((s) => [s.id, s.label] as const));
   const subFilterUnique = [...new Map(subFilterOptions).entries()].map(([value, label]) => ({ value, label }));
 
@@ -507,7 +512,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
   const clientCost = rule ? (parseFloat(rule.vendorCost || '0') * (1 + parseFloat(rule.markupPct || '0') / 100)) : 0;
   const saveErrors: string[] = [];
   if (rule) {
-    if (overlap) saveErrors.push(`Overlaps “${overlap.rule.name}” on: ${overlap.shared.join(', ')}. A property can only belong to one rule per work type + subtype (here: ${worktypeLabel(rule.worktype)} · ${subtypeLabel(rule.worktype, rule.subtype)}).`);
+    if (overlap) saveErrors.push(`Overlaps “${overlap.rule.name}” on: ${overlap.shared.join(', ')}. A property can only belong to one rule per work type + subtype (here: ${wtLabelD(rule.worktype)} · ${subLabelD(rule.worktype, rule.subtype)}).`);
     if (rule.recurring && missingMonths.length) saveErrors.push(`Every month must be tied to a cadence or set to no service. Missing: ${missingMonths.map((i) => MONTHS[i]).join(', ')}.`);
     if (!rule.recurring && !rule.initialDueDays.trim()) saveErrors.push('Set the first order due (days after enrollment) — a one-time service has no cadence to schedule from.');
     if (rule.vendors.length === 0) saveErrors.push('Assign at least one vendor.');
@@ -618,7 +623,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
             <div className="flex items-center gap-2">
               <div className="flex-1 min-w-0">
                 <MultiFilter label="Type" selected={fWork} onChange={(next) => { setFWork(next); setFSub([]); }} className={pickerCls(fWork.length > 0)}
-                  options={WORKTYPES.map((w) => ({ value: w.id, label: w.label }))} />
+                  options={defs.map((w) => ({ value: w.id, label: w.label }))} />
               </div>
               <div className="flex-1 min-w-0">
                 <MultiFilter label="Sub" selected={fSub} onChange={setFSub} className={pickerCls(fSub.length > 0)} options={subFilterUnique} />
@@ -678,7 +683,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${r.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{r.scope === 'community' ? 'Community' : 'SFR'}</span>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{worktypeLabel(r.worktype)} · {subtypeLabel(r.worktype, r.subtype)}</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{wtLabelD(r.worktype)} · {subLabelD(r.worktype, r.subtype)}</span>
                       {!r.active && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">Paused</span>}
                     </div>
                     <div className="text-[11px] text-gray-500 mt-1 truncate">
@@ -734,13 +739,13 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
               <div className="w-40">
                 <label className={lbl}>Work Type</label>
                 <ListPicker value={rule.worktype} ariaLabel="Work type" className={`${pick} w-full`}
-                  options={WORKTYPES.filter((w) => w.scopes.includes(rule.scope)).map((w) => ({ value: w.id, label: w.label }))}
-                  onChange={(v) => { const wt = v as Worktype; const sub = firstSubtype(wt); patch({ worktype: wt, subtype: sub, vendorCost: baseRate(wt, sub), description: descriptionFor(wt, sub) }); }} />
+                  options={defs.filter((w) => w.scopes.includes(rule.scope)).map((w) => ({ value: w.id, label: w.label }))}
+                  onChange={(v) => { const wt = v as Worktype; const sub = firstSubOf(wt); patch({ worktype: wt, subtype: sub, vendorCost: baseRate(wt, sub), description: descriptionFor(wt, sub) }); }} />
               </div>
               <div className="w-40">
                 <label className={lbl}>Subtype</label>
                 <ListPicker value={rule.subtype} ariaLabel="Subtype" className={`${pick} w-full`}
-                  options={subtypesFor(rule.worktype).map((st) => ({ value: st.id, label: st.label }))}
+                  options={subsOfD(rule.worktype).map((st) => ({ value: st.id, label: st.label }))}
                   onChange={(v) => patch({ subtype: v, vendorCost: baseRate(rule.worktype, v), description: descriptionFor(rule.worktype, v) })} />
               </div>
               <div>

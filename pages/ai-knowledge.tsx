@@ -15,8 +15,9 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { readServiceAiChecks } from '@/lib/hubspot';
+import { readServiceAiChecks, readServiceTaxonomy } from '@/lib/hubspot';
 import type { AiCheck } from '@/lib/services/aiKnowledge';
+import type { CustomWorktypeDef } from '@/lib/services/worktypes';
 import ServicesAiKnowledge from '@/pages/services/ai-knowledge';
 
 // Loads the persisted Services AI checks so the "Services" tab renders inside
@@ -25,7 +26,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const admin = await isAppAdmin(session?.email).catch(() => false);
   const servicesChecks = admin ? await readServiceAiChecks().catch(() => null) : null;
-  return { props: { servicesChecks: (servicesChecks as AiCheck[] | null) || null } };
+  const servicesTaxonomy = admin ? await readServiceTaxonomy().catch(() => null) : null;
+  return { props: { servicesChecks: (servicesChecks as AiCheck[] | null) || null, servicesTaxonomy: (servicesTaxonomy as CustomWorktypeDef[] | null) || null } };
 };
 
 interface Entry {
@@ -65,7 +67,7 @@ function fmtDate(ms?: number): string {
   return d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
 }
 
-export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: AiCheck[] | null }) {
+export default function AiKnowledgePage({ servicesChecks, servicesTaxonomy }: { servicesChecks: AiCheck[] | null; servicesTaxonomy: CustomWorktypeDef[] | null }) {
   const router = useRouter();
   const [tab, setTab] = useState<'inspections' | 'services'>(router.query.tab === 'services' ? 'services' : 'inspections');
   const [authChecked, setAuthChecked] = useState(false);
@@ -206,7 +208,7 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
           ))}
         </div>
         {tab === 'services' ? (
-          <ServicesAiKnowledge embedded savedChecks={servicesChecks} canSave={isAdmin} />
+          <ServicesAiKnowledge embedded savedChecks={servicesChecks} savedTaxonomy={servicesTaxonomy} canSave={isAdmin} />
         ) : (
         <>
         <p className="text-[13px] text-gray-600 mb-4 leading-snug">

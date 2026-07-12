@@ -582,12 +582,6 @@ export default function FormBuilderPage({ servicesForms, servicesTaxonomy }: { s
         <>
         <div className="flex items-end justify-between gap-2 mb-1">
           <label className="block text-xs font-heading font-semibold text-gray-500">Template</label>
-          <div className="flex items-center gap-2">
-            {templates.find((t) => t.id === template)?.custom && (
-              <button type="button" onClick={removeTemplate} disabled={busy} className="text-xs font-heading font-semibold text-red-700 hover:underline">Remove template</button>
-            )}
-            <button type="button" onClick={newTemplate} disabled={busy} className="text-xs font-heading font-semibold text-brand hover:underline">+ New template</button>
-          </div>
         </div>
         <div className="mb-3">
           <Combobox
@@ -598,14 +592,21 @@ export default function FormBuilderPage({ servicesForms, servicesTaxonomy }: { s
             onChange={(v) => { setEditingId(null); setAdding(false); setTemplate(v); }}
           />
         </div>
+
+        {/* Add a template / question — matching pills on one line (mirrors Services). */}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <button type="button" onClick={newTemplate} disabled={busy}
+            className="text-[12px] font-heading font-semibold text-brand border border-brand/40 rounded-lg px-3 py-1.5 hover:bg-brand/5 disabled:opacity-50 whitespace-nowrap">+ New Template</button>
+          <button type="button" onClick={() => { setAdding(true); setEditingId(null); }} disabled={adding}
+            className="text-[12px] font-heading font-semibold text-brand border border-brand/40 rounded-lg px-3 py-1.5 hover:bg-brand/5 disabled:opacity-50 whitespace-nowrap">+ Add Question</button>
+          {templates.find((t) => t.id === template)?.custom && (
+            <button type="button" onClick={removeTemplate} disabled={busy}
+              className="text-[12px] font-heading font-semibold text-red-600 border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-50 disabled:opacity-50 whitespace-nowrap">Remove Template</button>
+          )}
+        </div>
         <p className="text-[12px] text-gray-500 mb-4">Scope Rate Card and Turn Re-Inspect QC are locked and not editable here. New templates and question changes sync to HubSpot and apply to new inspections immediately.</p>
 
         {error && <div className="mb-4 p-3 bg-rose-50 border border-rose-300 rounded text-sm text-rose-800">{error}</div>}
-
-        <div className="flex justify-end mb-3">
-          <button type="button" onClick={() => { setAdding(true); setEditingId(null); }} disabled={adding}
-            className="h-9 px-4 rounded-lg bg-brand text-white font-heading font-bold text-sm disabled:bg-gray-300">+ Add question</button>
-        </div>
 
         {adding && (
           <div className="mb-4">

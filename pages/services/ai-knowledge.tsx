@@ -4,7 +4,7 @@ import type { GetServerSideProps } from 'next';
 import { ListPicker } from '@/components/ListPicker';
 import { MultiFilter } from '@/components/MultiFilter';
 import { SaveFooter } from '@/components/SaveFooter';
-import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
+import { mergeWorktypes, type CustomWorktypeDef } from '@/lib/services/worktypes';
 import { SAMPLE_AI_CHECKS, newCheck, type AiCheck } from '@/lib/services/aiKnowledge';
 
 // The Services AI knowledge now lives as the "Services" tab of the unified AI
@@ -16,12 +16,17 @@ export const getServerSideProps: GetServerSideProps = async () => ({
 
 const trig = 'w-full flex items-center justify-between gap-2 text-[13px] border border-gray-300 rounded-lg px-2.5 py-2 bg-white text-ink';
 const miniLbl = 'block text-xs font-heading font-semibold text-gray-500 mb-1';
-const scopeLabel = (c: AiCheck) =>
-  `${c.worktype ? worktypeLabel(c.worktype) : 'All Work Types'} · ${c.subtype ? subtypeLabel(c.worktype, c.subtype) : 'All Subtypes'}`;
-const wtOptions = [{ value: 'all', label: 'All Work Types' }, ...WORKTYPES.map((w) => ({ value: w.id, label: w.label }))];
-const subOptions = (wt: string) => [{ value: 'all', label: 'All Subtypes' }, ...(wt ? subtypesFor(wt).map((s) => ({ value: s.id, label: s.label })) : [])];
 
-export default function ServicesAiKnowledge({ savedChecks, canSave, embedded }: { savedChecks: AiCheck[] | null; canSave: boolean; embedded?: boolean }) {
+export default function ServicesAiKnowledge({ savedChecks, canSave, embedded, savedTaxonomy }: { savedChecks: AiCheck[] | null; canSave: boolean; embedded?: boolean; savedTaxonomy?: CustomWorktypeDef[] | null }) {
+  // Built-in taxonomy merged with the admin's custom work types / subtypes.
+  const defs = useMemo(() => mergeWorktypes(savedTaxonomy), [savedTaxonomy]);
+  const subsOf = (wt: string) => defs.find((w) => w.id === wt)?.subtypes || [];
+  const wtLabelOf = (wt: string) => defs.find((w) => w.id === wt)?.label || wt;
+  const subLabelOf = (wt: string, st: string) => subsOf(wt).find((s) => s.id === st)?.label || st;
+  const scopeLabel = (c: AiCheck) => `${c.worktype ? wtLabelOf(c.worktype) : 'All Work Types'} · ${c.subtype ? subLabelOf(c.worktype, c.subtype) : 'All Subtypes'}`;
+  const wtOptions = useMemo(() => [{ value: 'all', label: 'All Work Types' }, ...defs.map((w) => ({ value: w.id, label: w.label }))], [defs]);
+  const subOptions = (wt: string) => [{ value: 'all', label: 'All Subtypes' }, ...(wt ? subsOf(wt).map((s) => ({ value: s.id, label: s.label })) : [])];
+
   const [checks, setChecks] = useState<AiCheck[]>(() => (savedChecks && savedChecks.length ? savedChecks : [...SAMPLE_AI_CHECKS]));
   const [editId, setEditId] = useState<string | null>(null);
   const [wtFilter, setWtFilter] = useState<string[]>([]);

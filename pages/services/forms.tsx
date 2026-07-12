@@ -188,7 +188,7 @@ export default function FormBuilder({ savedForms, canSave, embedded, savedTaxono
                 <button onClick={() => { setAddingWt(false); setNewWtLabel(''); }} className="text-[12px] font-heading font-semibold text-gray-500 px-1">Cancel</button>
               </div>
             ) : (
-              <button onClick={() => { setAddingWt(true); setAddingSub(false); }} className="text-[12px] font-heading font-semibold text-brand border border-brand/40 rounded-lg px-3 py-1.5 hover:bg-brand/5">+ New work type</button>
+              <button onClick={() => { setAddingWt(true); setAddingSub(false); }} className="text-[12px] font-heading font-semibold text-brand border border-brand/40 rounded-lg px-3 py-1.5 hover:bg-brand/5 whitespace-nowrap">+ Work Type</button>
             )}
             {addingSub ? (
               <div className="flex items-center gap-2">
@@ -198,9 +198,9 @@ export default function FormBuilder({ savedForms, canSave, embedded, savedTaxono
                 <button onClick={() => { setAddingSub(false); setNewSubLabel(''); }} className="text-[12px] font-heading font-semibold text-gray-500 px-1">Cancel</button>
               </div>
             ) : (
-              <button onClick={() => { setAddingSub(true); setAddingWt(false); }} className="text-[12px] font-heading font-semibold text-brand border border-brand/40 rounded-lg px-3 py-1.5 hover:bg-brand/5">+ New subtype</button>
+              <button onClick={() => { setAddingSub(true); setAddingWt(false); }} className="text-[12px] font-heading font-semibold text-brand border border-brand/40 rounded-lg px-3 py-1.5 hover:bg-brand/5 whitespace-nowrap">+ Subtype</button>
             )}
-            <button onClick={addQ} className="text-[12px] font-heading font-semibold text-brand border border-brand/40 rounded-lg px-3 py-1.5 hover:bg-brand/5">+ Add Question</button>
+            <button onClick={addQ} className="text-[12px] font-heading font-semibold text-brand border border-brand/40 rounded-lg px-3 py-1.5 hover:bg-brand/5 whitespace-nowrap">+ Question</button>
           </div>
 
           <p className="text-[12px] text-gray-500 mt-3">
