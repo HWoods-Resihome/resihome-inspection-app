@@ -1395,15 +1395,16 @@ export async function fetchServiceWorkOrder(id: string): Promise<{ id: string; p
  * unlock button (shown for cleaning services at non-Tenant-Leased homes) and its
  * online/offline ring. Returns null when the id/lookup fails (fail-open: no button).
  */
-export async function fetchPropertyLockInfo(recordId: string): Promise<{ status: string; deviceType: string; hubStatus: string; lockStatus: string } | null> {
+export async function fetchPropertyLockInfo(recordId: string): Promise<{ status: string; deviceType: string; hubStatus: string; lockStatus: string; bedrooms: number | null; bathrooms: number | null; squareFootage: number | null; region: string } | null> {
   if (!recordId) return null;
   const { property: typeId } = typeIds();
+  const numOrNull = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
   try {
     const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
       method: 'POST',
       body: JSON.stringify({
         filterGroups: [{ filters: [{ propertyName: 'hs_object_id', operator: 'EQ', value: recordId }] }],
-        properties: [PROPERTY_STATUS_PROPERTY, 'rently_device_type', 'rently_sh_hub_status', 'rently_sh_lock_status'],
+        properties: [PROPERTY_STATUS_PROPERTY, 'rently_device_type', 'rently_sh_hub_status', 'rently_sh_lock_status', 'bedrooms', 'bathrooms', 'square_footage', 'region'],
         limit: 1,
       }),
     });
@@ -1414,6 +1415,8 @@ export async function fetchPropertyLockInfo(recordId: string): Promise<{ status:
       deviceType: String(p.rently_device_type || '').trim(),
       hubStatus: String(p.rently_sh_hub_status || '').trim(),
       lockStatus: String(p.rently_sh_lock_status || '').trim(),
+      bedrooms: numOrNull(p.bedrooms), bathrooms: numOrNull(p.bathrooms), squareFootage: numOrNull(p.square_footage),
+      region: String(p.region || '').trim(),
     };
   } catch (e) { console.warn('[services] lock info fetch failed:', e); return null; }
 }

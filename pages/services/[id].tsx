@@ -93,17 +93,21 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const formSet: Record<string, any[]> = { ...SAMPLE_FORMS, ...(savedForms || {}) };
   const form = (formSet[formKey(svc.worktype, svc.subtype)] || []).filter((q: any) => q.enabled);
 
-  // Cleaning services at a NON-"Tenant Leased" (i.e. vacant) home need indoor
-  // access — surface the same Rently unlock button + online/offline ring the
-  // inspection uses. Only cleaning; only when the property isn't tenant-occupied.
+  // For property-scope live services, pull the property brief (bed/bath/sqft/
+  // region) for the header's second line, and — for CLEANING at a non-"Tenant
+  // Leased" (vacant) home — the Rently unlock button + online/offline ring.
   let unlock: { propertyId: string; address: string; ring: LockRing } | null = null;
-  if (svc.live && svc.scope === 'property' && svc.worktype === 'cleaning' && svc.propertyRecordId) {
+  let propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null = null;
+  if (svc.live && svc.scope === 'property' && svc.propertyRecordId) {
     const info = await fetchPropertyLockInfo(svc.propertyRecordId).catch(() => null);
-    if (info && info.status && info.status !== 'Tenant Leased') {
-      unlock = { propertyId: svc.propertyRecordId, address: svc.address, ring: lockRingFromProperty(info.deviceType, info.hubStatus, info.lockStatus) };
+    if (info) {
+      propMeta = { bedrooms: info.bedrooms, bathrooms: info.bathrooms, sqft: info.squareFootage, region: info.region };
+      if (svc.worktype === 'cleaning' && info.status && info.status !== 'Tenant Leased') {
+        unlock = { propertyId: svc.propertyRecordId, address: svc.address, ring: lockRingFromProperty(info.deviceType, info.hubStatus, info.lockStatus) };
+      }
     }
   }
-  return { props: { svc, form, isInternal, unlock } };
+  return { props: { svc, form, isInternal, unlock, propMeta } };
 };
 
 const money = (n: number | null | undefined) => `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -152,7 +156,7 @@ function PhotoGrid({ label, urls, onOpen }: { label: string; urls: string[]; onO
   );
 }
 
-export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null }) {
+export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null }) {
   // Bid items are never crew-completed here — they go straight to internal bid review.
   const editable = EDITABLE.has(svc.status) && !svc.isBidItem;
   const underReview = svc.status === 'review';
@@ -346,42 +350,32 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b-2 border-brand sticky top-0 z-30 shrink-0" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
-        <div className="max-w-2xl mx-auto px-3 py-2.5 flex items-center gap-2.5">
+        {/* Tier 1 — top bar: worktype · subtype, status chip, lock (if any), back.
+            Keeping the chip + lock up here means they never crowd the info rows. */}
+        <div className="max-w-2xl mx-auto px-3 pt-2 flex items-center gap-2">
+          <div className="min-w-0 flex-1 text-[13px] font-heading font-bold text-ink truncate">
+            {worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}
+          </div>
+          <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{serviceStatusText(svc.status || 'assigned', isInternal)}</span>
+          {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7 shrink-0" />}
           <Link href="/services" aria-label="Back to Services" className="shrink-0 text-gray-400 hover:text-ink">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
           </Link>
+        </div>
+        {/* Tier 2 — info: logo + full address + (property) bed/bath·sqft·region + vendor·due. */}
+        <div className="max-w-2xl mx-auto px-3 pt-1 pb-2.5 flex items-center gap-2.5">
           <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain shrink-0" />
-          {(() => {
-            const chip = (
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{serviceStatusText(svc.status || 'assigned', isInternal)}</span>
-            );
-            const meta = <div className="text-xs text-gray-500 leading-tight truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}{svc.dueDate ? ` · Due ${fmtMDY(svc.dueDate)}` : ''}</div>;
-            const vendorRow = <div className="text-xs text-gray-500 leading-tight truncate">{svc.vendor || 'Unassigned'}</div>;
-            // Address always gets full width. WITH a lock button: chip drops to its
-            // own 4th row and the lock button sits far-right (its own column).
-            // WITHOUT: chip sits to the right of the meta/vendor rows.
-            return unlock ? (
-              <>
-                <div className="min-w-0 flex-1 space-y-0.5">
-                  <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={17} min={11} />
-                  {meta}
-                  {vendorRow}
-                  <div>{chip}</div>
-                </div>
-                <div className="shrink-0 self-center">
-                  <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-8 h-8" />
-                </div>
-              </>
-            ) : (
-              <div className="min-w-0 flex-1 space-y-0.5">
-                <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={17} min={11} />
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0 space-y-0.5">{meta}{vendorRow}</div>
-                  <div className="shrink-0">{chip}</div>
-                </div>
-              </div>
-            );
-          })()}
+          <div className="min-w-0 flex-1 space-y-0.5">
+            <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={17} min={11} />
+            {svc.scope === 'property' && propMeta && (propMeta.bedrooms || propMeta.bathrooms || propMeta.sqft || propMeta.region) && (
+              <div className="text-xs text-gray-500 leading-tight truncate">{[
+                (propMeta.bedrooms || propMeta.bathrooms) ? `${propMeta.bedrooms ?? '?'} Bed / ${propMeta.bathrooms ?? '?'} Bath` : '',
+                propMeta.sqft ? `${propMeta.sqft.toLocaleString()} sqft` : '',
+                propMeta.region || '',
+              ].filter(Boolean).join(' · ')}</div>
+            )}
+            <div className="text-xs text-gray-500 leading-tight truncate">{svc.vendor || 'Unassigned'}{svc.dueDate ? ` · Due ${fmtMDY(svc.dueDate)}` : ''}</div>
+          </div>
         </div>
       </header>
 
