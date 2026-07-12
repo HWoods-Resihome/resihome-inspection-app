@@ -35,6 +35,7 @@ import { stampEntryWithLabel, isStamped } from '@/lib/photoStamp';
 import { UnlockButton, type LockRing } from '@/components/UnlockButton';
 import InspectionPager from '@/components/InspectionPager';
 import { InspectionAuditTrail } from '@/components/InspectionAuditTrail';
+import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { FitText } from '@/components/FitText';
 import { SaveIndicator } from '@/components/inspection/SaveIndicator';
 import { openPdf } from '@/lib/pdfViewerBus';
@@ -1007,7 +1008,7 @@ export function QcReinspectForm(props: Props) {
 
       {/* Frozen header — logo + address + bed/bath/sqft + the Pass/Fail tally
           (the subheading). The ONLY thing pinned on scroll (mirrors Scope/1099). */}
-      <header className="sticky top-0 z-10 -mx-5 sm:-mx-6 px-5 sm:px-6 bg-white border-b-2 border-brand shadow-sm">
+      <header className="sticky top-0 z-30 -mx-5 sm:-mx-6 px-5 sm:px-6 bg-white border-b-2 border-brand shadow-sm">
         <div className="max-w-7xl mx-auto py-1.5 relative">
           {/* Pass/Fail tally + save indicator, pinned to the TOP-right (out of
               flow). The address/bed-bath lines get right padding to clear it, but
@@ -1222,7 +1223,7 @@ export function QcReinspectForm(props: Props) {
                         <span className="text-xs font-heading font-semibold text-gray-500 uppercase tracking-wider">Notes</span>
                         {failNeedsNote && <span className="text-[11px] text-brand font-heading font-bold normal-case">• Required</span>}
                       </div>
-                      <textarea
+                      <AutoGrowTextarea
                         value={roomNote[s.key] || ''}
                         disabled={props.readOnly}
                         onChange={(e) => setRoomNoteText(s.key, e.target.value)}
@@ -1311,7 +1312,7 @@ export function QcReinspectForm(props: Props) {
                           <tr>
                             <td colSpan={8} className="px-3 pb-3 pt-0 bg-brand/5">
                               <label className="block text-[11px] font-heading font-semibold text-brand mb-1">Failure note (required) — what failed &amp; how to fix it</label>
-                              <textarea
+                              <AutoGrowTextarea
                                 value={ln.qcFailureNote || ''}
                                 disabled={props.readOnly}
                                 onChange={(e) => updateFailureNote(ln.recordId, e.target.value)}
@@ -1397,7 +1398,7 @@ export function QcReinspectForm(props: Props) {
                        {ln.passFail === 'fail' && (
                          <div className="mt-2">
                            <label className="block text-[11px] font-heading font-semibold text-brand mb-1">Failure note (required) — what failed &amp; how to fix it</label>
-                           <textarea
+                           <AutoGrowTextarea
                              value={ln.qcFailureNote || ''}
                              disabled={props.readOnly}
                              onChange={(e) => updateFailureNote(ln.recordId, e.target.value)}
@@ -1451,7 +1452,7 @@ export function QcReinspectForm(props: Props) {
           {verdict === 'fail' && (
             <div className="mb-2">
               <label className="block text-[11px] font-heading font-semibold text-brand mb-1">Overall failure comment (required) — why the re-inspect failed</label>
-              <textarea
+              <AutoGrowTextarea
                 value={overallNote}
                 onChange={(e) => setOverallNote(e.target.value)}
                 rows={3}
@@ -1504,7 +1505,7 @@ export function QcReinspectForm(props: Props) {
               <label className="block text-sm font-heading font-semibold text-ink mb-1.5">
                 Ticket description <span className="text-brand">*</span>
               </label>
-              <textarea
+              <AutoGrowTextarea
                 value={maintTicketDescription}
                 onChange={(e) => setMaintTicketDescription(e.target.value)}
                 rows={3}

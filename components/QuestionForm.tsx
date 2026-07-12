@@ -28,6 +28,7 @@ import { SyncingBadge } from '@/components/SyncingBadge';
 import { UnlockButton, type LockRing } from '@/components/UnlockButton';
 import InspectionPager from '@/components/InspectionPager';
 import { InspectionAuditTrail } from '@/components/InspectionAuditTrail';
+import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { FitText } from '@/components/FitText';
 import { openPdf } from '@/lib/pdfViewerBus';
 import {
@@ -2099,7 +2100,7 @@ export function QuestionForm({
 
       {/* Frozen header — logo + address + status + meta. The ONLY thing pinned
           on scroll (mirrors the Scope rate-card sticky header). */}
-      <header className="sticky top-0 z-10 bg-white border-b-2 border-brand shadow-sm">
+      <header className="sticky top-0 z-30 bg-white border-b-2 border-brand shadow-sm">
         <div className="max-w-3xl mx-auto px-4 py-1.5">
           <div className="flex items-center gap-2.5">
             <button
@@ -2441,7 +2442,7 @@ export function QuestionForm({
                               <label htmlFor="maint-ticket-desc" className="block text-sm font-heading font-semibold text-ink mb-1.5">
                                 Ticket description <span className="text-brand">*</span>
                               </label>
-                              <textarea
+                              <AutoGrowTextarea
                                 id="maint-ticket-desc"
                                 value={maintTicketDescription}
                                 disabled={readOnly}
@@ -2477,7 +2478,7 @@ export function QuestionForm({
           on the right. Save & Close gets a green hover/active style for
           visual reassurance that it's saving work. Matches the same layout
           used in RateCardForm so behavior is consistent across templates. */}
-      <div className="lz-foot fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand px-3 sm:px-4 py-1.5 shadow-lg" style={{ bottom: 'var(--sync-footer-h, 0px)', transition: 'bottom .25s ease' }}>
+      <div className="lz-foot fixed bottom-0 inset-x-0 z-30 bg-white border-t-2 border-brand px-3 sm:px-4 py-1.5 shadow-lg" style={{ bottom: 'var(--sync-footer-h, 0px)', transition: 'bottom .25s ease' }}>
         <div className={`max-w-3xl mx-auto flex items-center gap-2 ${readOnly ? 'justify-center' : 'justify-between'}`}>
           {/* scopeStyle templates drop the destructive Cancel button and move
               Save & Close to the LEFT (Submit stays on the right). Completed /

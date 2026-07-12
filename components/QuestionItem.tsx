@@ -6,6 +6,7 @@ import { NumberField } from '@/components/NumberPad';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { useAppDialog } from '@/components/AppDialog';
 import { PhotoThumb } from '@/components/PhotoThumb';
+import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { useAnyCameraOpen } from '@/lib/cameraOpenState';
 import { isVideoEntry } from '@/lib/media';
 import { SyncingBadge } from '@/components/SyncingBadge';
@@ -325,7 +326,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             }`}>
               Note {noteMandatory ? <span className="text-brand">(Required)</span> : <span className="text-gray-400 font-normal">(Optional)</span>}
             </label>
-            <textarea
+            <AutoGrowTextarea
               value={answer.note || ''}
               onChange={(e) => onUpdate({ note: e.target.value })}
               rows={2}
@@ -661,7 +662,7 @@ function renderInput(
 
   if (q.responseType === 'text') {
     return (
-      <textarea
+      <AutoGrowTextarea
         value={a.answerValue}
         onChange={(e) => onUpdate({ answerValue: e.target.value })}
         rows={2}
