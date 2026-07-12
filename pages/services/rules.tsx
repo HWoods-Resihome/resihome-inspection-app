@@ -4,6 +4,7 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
+import { isAppAdmin } from '@/lib/adminAccess';
 import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { PriceField } from '@/components/PriceField';
 import { MultiFilter } from '@/components/MultiFilter';
@@ -20,7 +21,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   if (isViewingAsVendor(ctx.req)) return { redirect: { destination: '/services', permanent: false } };
   const recs = await searchServiceRuleRecords().catch(() => null);
-  return { props: { ruleRecords: recs, live: !!recs } };
+  const canGenerate = await isAppAdmin(session?.email).catch(() => false);
+  return { props: { ruleRecords: recs, live: !!recs, canGenerate } };
 };
 
 // Real coverage catalog, loaded client-side from /api/services/coverage (portfolios
@@ -240,9 +242,11 @@ function ruleToProps(r: Rule): Record<string, any> {
   return props;
 }
 
-export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: string; props: Record<string, any> }[] | null; live: boolean }) {
+export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRecords: { id: string; props: Record<string, any> }[] | null; live: boolean; canGenerate: boolean }) {
   const [rules, setRules] = useState<Rule[]>(() => (ruleRecords ? ruleRecords.map(rulePropsToRule) : SEED));
   const [savingRule, setSavingRule] = useState(false);
+  const [genBusy, setGenBusy] = useState(false);
+  const [genMsg, setGenMsg] = useState('');
   const [openId, setOpenId] = useState<number | null>(null);   // null = list view; else editing that rule
   const [propsOpen, setPropsOpen] = useState(false);
   const [propSearch, setPropSearch] = useState('');
@@ -493,6 +497,28 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
       if (r.ok && d.id) patch({ recordId: d.id });
     } catch { /* preview / offline — keep local */ }
     finally { setSavingRule(false); closeRule(); }
+  };
+
+  // Ad-hoc: run THIS rule now to create any missing work orders. Idempotent — the
+  // enrollment-key dedup means it only creates targets without an open order, so
+  // it never duplicates what the nightly job (or a prior run) already made.
+  const generateNow = async () => {
+    if (!rule?.recordId || genBusy) return;
+    setGenBusy(true); setGenMsg('');
+    try {
+      const r = await fetch(`/api/services/admin/generate?apply=1&ruleId=${encodeURIComponent(rule.recordId)}`);
+      const d = await r.json();
+      if (!r.ok) { setGenMsg(d.error || 'Generation failed.'); return; }
+      if (d.configured === false) { setGenMsg('Services objects aren’t configured yet.'); return; }
+      if (!d.rulesActive) { setGenMsg('This rule is inactive — nothing generated.'); return; }
+      const created = d.created ?? 0, skipped = d.skippedExisting ?? 0, errors = d.errors ?? 0;
+      const parts: string[] = [];
+      if (created) parts.push(`Created ${created} work order${created === 1 ? '' : 's'}`);
+      if (skipped) parts.push(`${skipped} already open`);
+      if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
+      setGenMsg(created ? parts.join(' · ') : (skipped ? `Up to date — ${skipped} already open` : 'No missing work orders to create.'));
+    } catch { setGenMsg('Couldn’t reach the server. Try again.'); }
+    finally { setGenBusy(false); }
   };
 
   const sec = 'bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 shadow-sm';
@@ -957,6 +983,17 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
             <button onClick={saveRule} disabled={!canSave || savingRule} className={`w-full rounded-2xl py-3 font-heading font-bold text-sm ${canSave && !savingRule ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
               {savingRule ? 'Saving…' : canSave ? 'Save & Close' : 'Resolve the Issues Above to Save'}
             </button>
+            {/* Ad-hoc generation for the saved rule (admin). Idempotent: only fills gaps. */}
+            {canGenerate && rule?.recordId && (
+              <>
+                <button onClick={generateNow} disabled={genBusy}
+                  className="mt-2 w-full rounded-2xl py-2.5 font-heading font-bold text-[13px] border border-brand text-brand bg-white disabled:opacity-50">
+                  {genBusy ? 'Generating…' : 'Generate missing work orders now'}
+                </button>
+                {genMsg && <div className="mt-1.5 text-center text-[12px] text-gray-600">{genMsg}</div>}
+                <p className="mt-1 text-center text-[11px] text-gray-400">Creates only work orders that don’t already have an open one — safe to run anytime; the nightly job fills the rest.</p>
+              </>
+            )}
           </div>
         </main>
       )}

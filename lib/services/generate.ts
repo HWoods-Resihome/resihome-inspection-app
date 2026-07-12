@@ -113,10 +113,13 @@ export interface GenerateResult {
  * Compute (and, when apply, create) the Service Work Orders the active rules call
  * for. Returns null when the Service Work Order object isn't configured yet.
  */
-export async function runServiceGeneration(apply: boolean, todayISO: string): Promise<GenerateResult | null> {
-  const rules = await searchServiceRuleRecords();
+export async function runServiceGeneration(apply: boolean, todayISO: string, onlyRuleId?: string): Promise<GenerateResult | null> {
+  const allRules = await searchServiceRuleRecords();
   const existing = await readServiceWorkOrderKeys();
-  if (rules === null || existing === null) return null; // objects not configured
+  if (allRules === null || existing === null) return null; // objects not configured
+  // Ad-hoc: run a single rule (the "generate missing now" button) vs. the whole
+  // set (nightly). Either way the enrollment-key dedup below prevents duplicates.
+  const rules = onlyRuleId ? allRules.filter((r) => r.id === onlyRuleId) : allRules;
 
   // Enrollment keys with a currently-open (non-terminal) order — dedup set.
   const openKeys = new Set(existing.filter((e) => OPEN_STATUSES.has(e.status)).map((e) => e.key).filter(Boolean));

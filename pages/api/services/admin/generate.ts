@@ -21,10 +21,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!ok) return res.status(403).json({ error: 'Admin only' });
 
   const apply = req.query.apply === '1' || req.query.apply === 'true';
+  const onlyRuleId = typeof req.query.ruleId === 'string' && req.query.ruleId.trim() ? req.query.ruleId.trim() : undefined;
   const today = typeof req.query.today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.today)
     ? req.query.today : new Date().toISOString().slice(0, 10);
   try {
-    const report = await runServiceGeneration(apply, today);
+    const report = await runServiceGeneration(apply, today, onlyRuleId);
     if (report === null) return res.status(200).json({ configured: false, mode: apply ? 'apply' : 'dry-run', note: 'Service Work Order / Service Rule object type ids not set — nothing to generate.' });
     return res.status(200).json(report);
   } catch (e: any) {
