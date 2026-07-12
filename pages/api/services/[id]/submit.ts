@@ -10,11 +10,11 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
-import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder, readServiceForms } from '@/lib/hubspot';
 import { runServiceAiReview } from '@/lib/services/aiReview';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { BID_SUBTYPE, defaultRateFor } from '@/lib/services/worktypes';
-import { GRASSCUT_AREAS_QID } from '@/lib/services/serviceForms';
+import { GRASSCUT_AREAS_QID, SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 
 // The AI review call (Claude vision) can take a few seconds — allow headroom so
 // the review runs inline the moment the work order is submitted.
@@ -81,8 +81,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const origVendor = Number(p0.vendor_cost);
   const markup = Number(p0.markup_pct);
   const clientOf = (v: number) => (Number.isFinite(v) && Number.isFinite(markup) ? Math.round(v * (1 + markup / 100) * 100) / 100 : v);
-  const notCompleted = String(answers.svc_completed) === 'no';
-  const billTrip = answers.bill_trip_fee === 'yes' || answers.bill_trip_fee === true;
+  // Resolve the universal answers by id OR by label — a Form-Builder-edited form
+  // can carry a different question id, and we must still detect completion / trip
+  // fee / grass height to price + route correctly.
+  const savedForms = await readServiceForms().catch(() => null);
+  const form: ServiceQuestion[] = ({ ...SAMPLE_FORMS, ...(savedForms || {}) })[formKey(worktype, subtype)] || [];
+  const answerFor = (idHint: string, labelRe: RegExp) => {
+    if (answers[idHint] != null && answers[idHint] !== '') return answers[idHint];
+    const q = form.find((x) => labelRe.test(x.label));
+    return q ? answers[q.id] : undefined;
+  };
+  const completedAns = answerFor('svc_completed', /service\s*completed/i);
+  const billAns = answerFor('bill_trip_fee', /trip\s*fee/i);
+  const heightAns = answerFor('grass_height', /grass\s*height/i);
+  const notCompleted = String(completedAns) === 'no';
+  const billTrip = billAns === 'yes' || billAns === true;
   let routeToReview = false;
   if (notCompleted) {
     routeToReview = true;                 // not completed → human review, no AI
@@ -98,7 +111,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     props.ai_notes = billTrip ? 'Vendor marked NOT completed — trip fee billed. Routed to review (AI skipped).' : 'Vendor marked NOT completed — no charge. Routed to review (AI skipped).';
   } else if (worktype === 'landscaping' && subtype === 'cut') {
     // Height-based hard rate, then a 25% cut if the back yard wasn't serviced.
-    let finalV = grassCutRate(String(answers.grass_height || ''));
+    let finalV = grassCutRate(String(heightAns || ''));
     const areas = Array.isArray(answers[GRASSCUT_AREAS_QID]) ? answers[GRASSCUT_AREAS_QID].map(String) : [];
     const backYardSkipped = areas.length > 0 && !areas.includes('Back Yard');
     if (backYardSkipped) finalV = Math.round(finalV * 0.75 * 100) / 100;
