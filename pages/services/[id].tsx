@@ -39,6 +39,11 @@ const normDate = (v: any): string => {
   if (/^\d{10,}$/.test(s)) return new Date(Number(s)).toISOString().slice(0, 10);
   return s.slice(0, 10);
 };
+// Display a YYYY-MM-DD date as M-D-YY (e.g. 2026-07-13 → 7-13-26).
+const fmtMDY = (iso: string): string => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+  return m ? `${Number(m[2])}-${Number(m[3])}-${m[1].slice(2)}` : iso;
+};
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
@@ -301,18 +306,17 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
           </Link>
           <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain shrink-0" />
+          {/* Text block — three evenly-spaced rows. */}
           <div className="min-w-0 flex-1 space-y-0.5">
-            <div className="flex items-center gap-2">
-              <div className="min-w-0 flex-1">
-                <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={15} min={10} />
-              </div>
-              {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7 shrink-0" />}
-            </div>
-            <div className="text-xs text-gray-500 leading-tight truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}{svc.dueDate ? ` · Due ${svc.dueDate}` : ''}</div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs text-gray-500 leading-tight truncate">{svc.vendor || 'Unassigned'}</span>
-              <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{SERVICE_STATUS_LABEL[(svc.status || 'assigned') as ServiceStatus] || svc.status}</span>
-            </div>
+            <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={15} min={10} />
+            <div className="text-xs text-gray-500 leading-tight truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}{svc.dueDate ? ` · Due ${fmtMDY(svc.dueDate)}` : ''}</div>
+            <div className="text-xs text-gray-500 leading-tight truncate">{svc.vendor || 'Unassigned'}</div>
+          </div>
+          {/* Chip + unlock live in their OWN column (siblings of the text block), so
+              they never affect the row spacing. */}
+          <div className="shrink-0 flex flex-col items-end gap-1.5 self-center">
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{SERVICE_STATUS_LABEL[(svc.status || 'assigned') as ServiceStatus] || svc.status}</span>
+            {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7" />}
           </div>
         </div>
       </header>
