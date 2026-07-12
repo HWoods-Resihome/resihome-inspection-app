@@ -36,9 +36,12 @@ type Props = {
   /** Property's current listing price — shown as the greyed-out placeholder in
    *  the 1099 recommended-rent input so the inspector adjusts from it. */
   listingPrice?: number | null;
+  /** Read-only (completed / cancelled / view-only): photos can be viewed but not
+   *  added, replaced, or deleted — the × and capture controls are hidden. */
+  readOnly?: boolean;
 };
 
-export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName, propertyRecordId, plainStyle, photoFirst, compactOptions, listingPrice }: Props) {
+export function QuestionItem({ question, answer, onUpdate, uploadPhoto, propertyName, propertyRecordId, plainStyle, photoFirst, compactOptions, listingPrice, readOnly }: Props) {
   const dialog = useAppDialog();
   // A note is required when the selected value is explicitly configured
   // (noteRequiredOnValues) OR — robust to the Good/Fail relabel — when a
@@ -171,6 +174,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
         {question.helpText && (
           <p className="text-xs text-gray-500 mb-2 italic">{question.helpText}</p>
         )}
+        {!readOnly && (
         <div className="flex flex-wrap gap-2 items-center">
           <button
             type="button"
@@ -200,6 +204,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             </label>
           )}
         </div>
+        )}
         {uploadProgress && (
           <div className="text-xs text-brand mt-1 font-heading font-semibold">
             Uploading {uploadProgress.current} of {uploadProgress.total}...
@@ -226,8 +231,10 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                 {url.startsWith('blob:') && (
                   <SyncingBadge />
                 )}
-                <button type="button" onClick={() => removePhoto(idx)}
-                  className="absolute top-0 right-0 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand transition">&times;</button>
+                {!readOnly && (
+                  <button type="button" onClick={() => removePhoto(idx)}
+                    className="absolute top-0 right-0 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand transition">&times;</button>
+                )}
               </div>
             ))}
           </div>
@@ -238,6 +245,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
             photosByGroup={{ q: answer.photoUrls }}
             initialGroupId="q"
             initialIndex={Math.min(lightboxIndex, answer.photoUrls.length - 1)}
+            readOnly={readOnly}
             onClose={() => setLightboxIndex(null)}
             onDelete={(_g, i) => removePhoto(i)}
             onReplace={(_g, i, file) => replacePhoto(i, file)}
@@ -402,16 +410,20 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                   {url.startsWith('blob:') && (
                     <span className="absolute bottom-0 inset-x-0 bg-amber-500/95 text-white text-[8px] font-heading font-bold text-center leading-tight py-0.5 rounded-b pointer-events-none" title="Saved Offline · Will Sync When Online">Saved Offline</span>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => removePhoto(idx)}
-                    aria-label="Delete photo"
-                    className="absolute top-0 right-0 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand transition"
-                  >&times;</button>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      onClick={() => removePhoto(idx)}
+                      aria-label="Delete photo"
+                      className="absolute top-0 right-0 z-10 bg-ink text-white text-sm w-6 h-6 rounded-full leading-none flex items-center justify-center hover:bg-brand transition"
+                    >&times;</button>
+                  )}
                 </div>
               ))}
               {/* Add photo — dashed box + plus (matches the HVAC/air-filter strip).
-                  Amber dashed when a photo is required and none yet; grey when optional. */}
+                  Amber dashed when a photo is required and none yet; grey when optional.
+                  Hidden read-only (completed): no adding photos. */}
+              {!readOnly && (<>
               <button
                 type="button"
                 onClick={() => setCameraOpen(true)}
@@ -447,6 +459,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
                   />
                 </label>
               )}
+              </>)}
             </div>
             {uploadProgress && (
               <div className="text-xs text-brand mt-1 font-heading font-semibold">
@@ -475,6 +488,7 @@ export function QuestionItem({ question, answer, onUpdate, uploadPhoto, property
           photosByGroup={{ q: answer.photoUrls }}
           initialGroupId="q"
           initialIndex={Math.min(lightboxIndex, answer.photoUrls.length - 1)}
+          readOnly={readOnly}
           onClose={() => setLightboxIndex(null)}
           onDelete={(_g, i) => removePhoto(i)}
           onReplace={(_g, i, file) => replacePhoto(i, file)}

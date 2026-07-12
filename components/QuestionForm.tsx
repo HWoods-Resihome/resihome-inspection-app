@@ -2411,6 +2411,7 @@ export function QuestionForm({
                           photoFirst={isCommunity}
                           compactOptions={isCommunity}
                           listingPrice={listingPrice}
+                          readOnly={readOnly}
                         />
                       </div>
                       {showTicketWidget && (
