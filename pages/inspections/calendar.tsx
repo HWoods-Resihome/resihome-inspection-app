@@ -35,6 +35,10 @@ const STATUS_META: Record<string, { label: string; hex: string; chip: string }> 
   completed: { label: 'Completed', hex: '#16a34a', chip: 'bg-green-100 text-green-800 border-green-300' },
 };
 const COMPLETED_WINDOW_DAYS = 14;
+// Distinct green/teal/lime shades used in the DAY view to color each inspector's
+// completed route (dots, connecting line, and the list badge). Index 0 is the
+// base "Completed" green, so a single-inspector day looks unchanged.
+const ROUTE_GREENS = ['#16a34a', '#0d9488', '#65a30d', '#047857', '#4d7c0f', '#0e7490', '#15803d', '#84cc16'];
 function statusKey(s?: string): 'scheduled' | 'in_progress' | 'pending_approval' | 'completed' | null {
   const x = (s || '').trim().toLowerCase();
   if (x === 'scheduled') return 'scheduled';
@@ -203,6 +207,27 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
     const d = parse(dayOf(i)!); return d >= range.start && d <= range.end;
   }), [scoped, range]);
 
+  // DAY-VIEW ROUTES: number each inspector's COMPLETED visits in the order they
+  // did them (by completion time) and give each inspector a distinct green. The
+  // numbering restarts per inspector, so with several inspectors multiple dots
+  // can be "1" (each route starts somewhere). Only meaningful in the day view.
+  const dayRoutes = useMemo(() => {
+    const order: Record<string, number> = {};
+    const color: Record<string, string> = {};
+    const legend: { inspector: string; color: string; count: number }[] = [];
+    if (view !== 'day') return { order, color, legend };
+    const completed = visible.filter((i) => statusKey(i.status) === 'completed');
+    const byInspector: Record<string, InspectionSummary[]> = {};
+    for (const i of completed) { (byInspector[i.inspectorName || 'Unassigned'] ||= []).push(i); }
+    Object.keys(byInspector).sort().forEach((name, idx) => {
+      const c = ROUTE_GREENS[idx % ROUTE_GREENS.length];
+      const arr = byInspector[name].sort((a, b) => (whenMs(a) ?? Infinity) - (whenMs(b) ?? Infinity));
+      arr.forEach((i, n) => { order[i.recordId] = n + 1; color[i.recordId] = c; });
+      legend.push({ inspector: name, color: c, count: arr.length });
+    });
+    return { order, color, legend };
+  }, [view, visible]);
+
   // Geocode the visible inspections for the map (small concurrency; cached by id).
   useEffect(() => {
     const todo = visible.filter((i) => coords[i.recordId] === undefined && (i.propertyAddressSnapshot || i.propertyRecordId));
@@ -237,9 +262,15 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
     const datePart = `${k === 'completed' ? 'Done' : 'Sched'} ${d.getMonth() + 1}/${d.getDate()}`;
     const t = timeLabel(i);                       // "3:45 PM" for completed; null otherwise
     const dateTime = t ? `${datePart} · ${t}` : datePart;
+    const routeOrder = dayRoutes.order[i.recordId];   // per-inspector visit # (day view, completed)
+    const routeColor = dayRoutes.color[i.recordId];
     return [{
-      id: i.recordId, lat: c.lat, lng: c.lng, color: meta?.hex || '#ff0060',
+      id: i.recordId, lat: c.lat, lng: c.lng, color: routeColor || meta?.hex || '#ff0060',
       title: i.propertyAddressSnapshot || i.inspectionName || 'Inspection',
+      // Route number + inspector "group" so the map can label the dot and draw a
+      // dashed line joining that inspector's stops in order.
+      routeOrder,
+      routeGroup: routeOrder ? (i.inspectorName || 'Unassigned') : undefined,
       // Row 2: template · status.  Row 3: date · time · inspector.
       subtitle: `${prettyType(i.templateType) || 'Inspection'} · ${meta?.label || i.status}`,
       detail: `${dateTime} · ${i.inspectorName || 'Unassigned'}`,
@@ -426,17 +457,38 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
             {view === 'day' && (
               <div className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
                 {visible.length === 0 && <div className="text-center text-gray-400 text-sm py-8">No inspections this day.</div>}
-                {[...visible].sort(dayOrder).map((i) => (
+                {/* Route legend — one chip per inspector with completed stops today,
+                    matching the numbered dots/line on the map. Only when 2+ routes. */}
+                {dayRoutes.legend.length > 1 && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 px-0.5 pb-1">
+                    {dayRoutes.legend.map((r) => (
+                      <span key={r.inspector} className="inline-flex items-center gap-1.5 text-[11px] text-gray-600">
+                        <span className="w-3 h-3 rounded-full shrink-0" style={{ background: r.color }} />
+                        <span className="font-semibold">{r.inspector}</span>
+                        <span className="text-gray-400">· {r.count} stop{r.count === 1 ? '' : 's'}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {[...visible].sort(dayOrder).map((i) => {
+                  const routeOrder = dayRoutes.order[i.recordId];
+                  const routeColor = dayRoutes.color[i.recordId];
+                  return (
                   <Link key={i.recordId} href={`/inspection/${i.recordId}`} className="flex items-center gap-2.5 border border-gray-200 rounded-lg px-3 py-2 hover:border-brand/40">
                     <span className="w-16 shrink-0 text-right text-[11.5px] font-semibold text-gray-500 tabular-nums">{timeLabel(i) || ''}</span>
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: metaOf(i)?.hex || '#9ca3af' }} />
+                    {routeOrder ? (
+                      <span className="w-5 h-5 shrink-0 rounded-full grid place-items-center text-[10px] font-bold text-white tabular-nums" style={{ background: routeColor }}>{routeOrder}</span>
+                    ) : (
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: metaOf(i)?.hex || '#9ca3af' }} />
+                    )}
                     <div className="min-w-0 flex-1">
                       <div className="font-heading font-bold text-ink text-sm truncate">{i.propertyAddressSnapshot || i.inspectionName || 'Inspection'}</div>
                       <div className="text-[12px] text-gray-500 truncate">{prettyType(i.templateType) || 'Inspection'} · {metaOf(i)?.label || i.status}</div>
                     </div>
                     <span className="text-[12px] text-gray-500 shrink-0">{i.inspectorName || <span className="text-brand font-semibold">Unassigned</span>}</span>
                   </Link>
-                ))}
+                  );
+                })}
               </div>
             )}
 
