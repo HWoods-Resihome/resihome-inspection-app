@@ -979,7 +979,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                         <input type="number" inputMode="decimal" value={answers[q.id] || ''} onChange={(e) => setAns(q.id, e.target.value)} className={inputCls} />
                       )}
                       {q.type === 'date' && (
-                        <DatePicker value={answers[q.id] || ''} onChange={(v) => setAns(q.id, v)} className={`${inputCls} flex items-center justify-between`} />
+                        <div className="w-44 max-w-full">
+                          <DatePicker value={answers[q.id] || ''} onChange={(v) => setAns(q.id, v)} className={`${inputCls} flex items-center justify-between`} />
+                        </div>
                       )}
                       {/* Per-answer requirements: the chosen answer asks for a note / photo. */}
                       {noteRequired(q) && (
