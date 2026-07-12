@@ -252,6 +252,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
   // not the coverage catalog (which can be incomplete for some portfolios). null =
   // loading. Bumping wcReload re-runs it (after a generate).
   const [wouldCreate, setWouldCreate] = useState<number | null>(null);   // NEW services the rule would create (dry-run)
+  const [coveredLive, setCoveredLive] = useState<number | null>(null);   // accurate applicable-property count (live query)
   const [wcReload, setWcReload] = useState(0);
   const [openId, setOpenId] = useState<number | null>(null);   // null = list view; else editing that rule
   const [propsOpen, setPropsOpen] = useState(false);
@@ -318,6 +319,22 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propsOpen, pfKey, rgKey]);
+
+  // Accurate applicable-property COUNT for the open property-scope rule (a live
+  // query — the coverage catalog can be incomplete for some portfolios). This is
+  // "Properties Covered" (all in the portfolios+regions); it differs from the
+  // dry-run "would create" (which also applies the enrollment condition).
+  useEffect(() => {
+    if (!rule || rule.scope !== 'property' || !rule.portfolios.length) { setCoveredLive(null); return; }
+    const ctrl = new AbortController();
+    setCoveredLive(null);
+    const qs = new URLSearchParams({ portfolios: pfKey, regions: rgKey });
+    fetch(`/api/services/properties?${qs.toString()}`, { signal: ctrl.signal })
+      .then((r) => r.json()).then((d) => setCoveredLive(Array.isArray(d.properties) ? d.properties.length : 0))
+      .catch(() => {});
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rule?.scope, pfKey, rgKey]);
 
   const toggleSec = (n: 1 | 2 | 3) => setOpenSec((s) => ({ ...s, [n]: !s[n] }));
   const openRule = (id: number) => {
@@ -461,6 +478,11 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
   const subFilterUnique = [...new Map(subFilterOptions).entries()].map(([value, label]) => ({ value, label }));
 
   const coveredCount = useMemo(() => (rule ? countFor(rule) : 0), [rule]);
+  // Property scope → the accurate live count (…​ while loading); community scope →
+  // the catalog unit count.
+  const coveredDisplay = rule && rule.scope === 'property'
+    ? (coveredLive != null ? coveredLive.toLocaleString() : '…')
+    : countLabel(coveredCount);
 
   // A month is "accounted for" if it's in a cadence OR explicitly set to no service.
   const coveredMonths = useMemo(() => new Set(rule ? [...rule.cadences.flatMap((c) => c.months), ...rule.skipMonths] : []), [rule]);
@@ -698,7 +720,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
               Rules
             </button>
             <div className="ml-auto text-right shrink-0">
-              <div className="text-xl font-heading font-extrabold text-ink tabular-nums leading-none">{countLabel(coveredCount)}</div>
+              <div className="text-xl font-heading font-extrabold text-ink tabular-nums leading-none">{coveredDisplay}</div>
               <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Properties Covered</div>
             </div>
           </div>
@@ -786,7 +808,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
                 <label className={`${lbl} mt-3`}>Applicable Properties</label>
                 <div className="border border-gray-200 rounded-xl max-w-md">
                   <button type="button" onClick={() => setPropsOpen((o) => !o)} className="w-full flex items-center justify-between px-3 py-2.5 text-[13px] font-semibold text-ink">
-                    <span className="text-brand font-bold">{countLabel(coveredCount)} <span className="text-gray-500 font-semibold">included</span></span>
+                    <span className="text-brand font-bold">{coveredDisplay} <span className="text-gray-500 font-semibold">included</span></span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${propsOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
                   </button>
                   {propsOpen && (
