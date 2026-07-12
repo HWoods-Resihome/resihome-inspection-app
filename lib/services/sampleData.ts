@@ -28,6 +28,7 @@ export interface SampleService {
   worktype: Worktype;
   subtype: string;
   status: ServiceStatus;
+  isBidItem?: boolean;     // a vendor-requested bid awaiting approval (no real due date yet)
   propertyStatus?: string; // the PROPERTY's status (SFR only), like the inspection cards
   petStations?: boolean;   // community services that include dedicated pet-station photos
   vendor: string | null;

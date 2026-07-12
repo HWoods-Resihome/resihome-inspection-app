@@ -1186,6 +1186,7 @@ function mapServiceRow(r: any): SampleService {
     vendor: p.vendor_name || null,
     dueDate: normServiceDate(p.due_date),
   };
+  if (p.is_bid_item === 'true') rec.isBidItem = true;
   if (p.community_name) rec.community = p.community_name;
   if (p.property_status_snapshot) rec.propertyStatus = p.property_status_snapshot;
   if (p.ontime === 'true') rec.onTime = true;

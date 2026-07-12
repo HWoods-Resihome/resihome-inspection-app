@@ -121,6 +121,13 @@ function CameraPhotos({ label, required, urls, onChange, address, propertyRecord
   upload: (file: File) => Promise<string>;
 }) {
   const [open, setOpen] = useState(false);
+  // The add-photo tile signals state: PINK while the required first photo is still
+  // missing, then YELLOW once at least one is added (further photos are optional).
+  // Optional groups (no `required`) are yellow from the start.
+  const needsFirst = !!required && urls.length === 0;
+  const addTileCls = needsFirst
+    ? 'border-brand text-brand hover:bg-brand/5'
+    : 'border-amber-400 text-amber-500 hover:bg-amber-50';
   return (
     <div>
       <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">{label}{required && <span className="text-brand"> *</span>}</div>
@@ -133,7 +140,8 @@ function CameraPhotos({ label, required, urls, onChange, address, propertyRecord
               className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white text-xs leading-none grid place-items-center" aria-label="Remove photo">×</button>
           </div>
         ))}
-        <button type="button" onClick={() => setOpen(true)} className="aspect-square rounded-lg border-2 border-dashed border-gray-300 text-gray-400 hover:border-brand hover:text-brand flex items-center justify-center text-2xl">+</button>
+        <button type="button" onClick={() => setOpen(true)} aria-label={`Add ${label}${needsFirst ? ' (required)' : ' (optional)'}`}
+          className={`aspect-square rounded-lg border-2 border-dashed flex items-center justify-center text-2xl transition-colors ${addTileCls}`}>+</button>
       </div>
       <CameraCapture isOpen={open} onClose={() => setOpen(false)} uploadPhoto={upload}
         addressSnapshot={address} propertyRecordId={propertyRecordId || undefined}
@@ -452,7 +460,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
             )}
             <div className="text-xs text-gray-500 leading-tight truncate">
               {svc.vendor || 'Unassigned'}
-              {svc.dueDate && <> · <span className={overdue ? 'text-red-600 font-semibold' : ''}>Due {fmtMDY(svc.dueDate)}</span></>}
+              {svc.isBidItem && svc.status === 'estimated'
+                ? <> · <span className="font-semibold text-gray-600">Bid Item</span></>
+                : svc.dueDate && <> · <span className={overdue ? 'text-red-600 font-semibold' : ''}>Due {fmtMDY(svc.dueDate)}</span></>}
             </div>
           </div>
         </div>

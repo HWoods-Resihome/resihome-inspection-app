@@ -90,7 +90,9 @@ function ServiceCard({ s, overdue, isAdmin, canCancel, onCancel }: {
         </div>
         <span className="text-[12px] shrink-0 text-right">{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
       </div>
-      <div className={`mt-0.5 text-[12px] ${overdue ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>Due {fmtMDY(s.dueDate)}</div>
+      {s.isBidItem && s.status === 'estimated'
+        ? <div className="mt-0.5 text-[12px] font-semibold text-gray-600">Bid Item</div>
+        : <div className={`mt-0.5 text-[12px] ${overdue ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>Due {fmtMDY(s.dueDate)}</div>}
     </Link>
   );
 }
@@ -123,6 +125,30 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
       const r = await fetch(`/api/services/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
       if (r.ok) setCancelledIds((p) => new Set(p).add(id));
     } catch { /* leave as-is; user can retry */ }
+  };
+
+  // Admin: rerun the AI review across every currently-submitted service (the same
+  // apply pass the nightly cron runs). Clean → auto-completed, else → Review.
+  const submittedCount = useMemo(() => services.filter((s) => s.status === 'submitted').length, [services]);
+  const [aiRerun, setAiRerun] = useState<{ status: 'running' | 'done' | 'error'; msg: string } | null>(null);
+  const rerunAiReview = async () => {
+    setGearOpen(false);
+    if (aiRerun?.status === 'running') return;
+    setAiRerun({ status: 'running', msg: 'Reviewing submitted services… this can take a moment.' });
+    try {
+      const r = await fetch('/api/services/admin/review?apply=1');
+      const d = await r.json();
+      if (!r.ok) { setAiRerun({ status: 'error', msg: d.error || 'AI review failed.' }); return; }
+      if (d.configured === false) { setAiRerun({ status: 'error', msg: 'Services object isn’t configured — nothing to review.' }); return; }
+      if (!d.reviewed) { setAiRerun({ status: 'done', msg: 'No submitted services to review right now.' }); return; }
+      const parts = [`${d.reviewed} reviewed`];
+      if (d.completed) parts.push(`${d.completed} auto-completed`);
+      if (d.routedToReview) parts.push(`${d.routedToReview} → Review`);
+      if (d.errors) parts.push(`${d.errors} error${d.errors > 1 ? 's' : ''}`);
+      setAiRerun({ status: d.errors ? 'error' : 'done', msg: parts.join(' · ') });
+      // Reflect the new statuses in the list.
+      router.replace(router.asPath, undefined, { scroll: false });
+    } catch { setAiRerun({ status: 'error', msg: 'Couldn’t reach the server. Try again.' }); }
   };
 
   // Scope (type/vendor/region/search) drives the summary bubbles; the status chip
@@ -241,6 +267,11 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
                     <Link href="/services/rules" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Rules Engine</Link>
                     <Link href="/services/forms" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Form Builder</Link>
                     <Link href="/services/ai-knowledge" className="block px-4 py-2.5 text-sm hover:bg-gray-50">AI Knowledge</Link>
+                    <button type="button" onClick={rerunAiReview} disabled={aiRerun?.status === 'running'}
+                      className="w-full flex items-center justify-between gap-2 text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100 disabled:opacity-60">
+                      <span className="inline-flex items-center gap-1.5"><AiSparkle className="w-3.5 h-3.5 text-brand" />Rerun AI Review</span>
+                      {submittedCount > 0 && <span className="text-[11px] font-bold text-gray-400 tabular-nums">{submittedCount}</span>}
+                    </button>
                     <Link href="/services?as=vendor" className="block px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">View as Vendor</Link>
                   </div></>)}
               </div>
@@ -265,6 +296,22 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
           <div className="mb-3 flex items-center justify-between gap-2 bg-purple-600 text-white rounded-xl px-3 py-2 text-[12px] font-heading font-semibold">
             <span>Viewing as Vendor — admin controls &amp; client pricing hidden.</span>
             <Link href="/services" className="underline shrink-0">Exit</Link>
+          </div>
+        )}
+        {aiRerun && (
+          <div className={`mb-3 flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-[12px] font-heading font-semibold border ${
+            aiRerun.status === 'error' ? 'bg-red-50 border-red-200 text-red-700'
+            : aiRerun.status === 'running' ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+            : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+            <span className="inline-flex items-center gap-2 min-w-0">
+              {aiRerun.status === 'running'
+                ? <svg className="w-3.5 h-3.5 animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><circle cx="12" cy="12" r="9" opacity="0.25" /><path d="M21 12a9 9 0 0 0-9-9" strokeLinecap="round" /></svg>
+                : <AiSparkle className="w-3.5 h-3.5 shrink-0" />}
+              <span className="truncate">AI review — {aiRerun.msg}</span>
+            </span>
+            {aiRerun.status !== 'running' && (
+              <button type="button" onClick={() => setAiRerun(null)} aria-label="Dismiss" className="shrink-0 opacity-60 hover:opacity-100">✕</button>
+            )}
           </div>
         )}
         {/* Summary bubbles — dynamic; Past Due is a clickable filter. */}
