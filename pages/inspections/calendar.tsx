@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
@@ -35,6 +36,9 @@ const STATUS_META: Record<string, { label: string; hex: string; chip: string }> 
   completed: { label: 'Completed', hex: '#16a34a', chip: 'bg-green-100 text-green-800 border-green-300' },
 };
 const COMPLETED_WINDOW_DAYS = 14;
+// Where we stash the calendar's view/filters/date/scroll so clicking into an
+// inspection and coming back lands you right where you left (per browser tab).
+const CAL_STATE_KEY = 'resiwalk:calendar:state:v1';
 // Distinct green/teal/lime shades used in the DAY view to color each inspector's
 // completed route (dots, connecting line, and the list badge). Index 0 is the
 // base "Completed" green, so a single-inspector day looks unchanged.
@@ -80,6 +84,58 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
   const [cursorISO, setCursorISO] = useState(todayISO);
   const cursor = parse(cursorISO);
   const today = parse(todayISO);
+
+  const router = useRouter();
+  const pendingScrollRef = useRef<number | null>(null);
+
+  // Restore the last view/filters/date/scroll on mount (once) so returning from
+  // an inspection doesn't reset the page — you can click in and out freely.
+  // Done in an effect (not a useState initializer) to avoid an SSR/hydration
+  // mismatch; the brief default flash is hidden by the initial loading state.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(CAL_STATE_KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (s.view === 'month' || s.view === 'week' || s.view === 'day') setView(s.view);
+      if (typeof s.cursorISO === 'string') setCursorISO(s.cursorISO);
+      if (Array.isArray(s.inspectorFilter)) setInspectorFilter(s.inspectorFilter);
+      if (Array.isArray(s.regionFilter)) setRegionFilter(s.regionFilter);
+      if (Array.isArray(s.typeFilter)) setTypeFilter(s.typeFilter);
+      if (Array.isArray(s.statusFilter)) setStatusFilter(s.statusFilter);
+      if (typeof s.showCompleted === 'boolean') setShowCompleted(s.showCompleted);
+      if (typeof s.filtersOpen === 'boolean') setFiltersOpen(s.filtersOpen);
+      if (typeof s.scrollY === 'number') pendingScrollRef.current = s.scrollY;
+    } catch { /* ignore malformed/absent state */ }
+  }, []);
+
+  // Save everything the instant we navigate away (e.g. into an inspection), so
+  // the snapshot — including the exact scroll position — is accurate at exit.
+  useEffect(() => {
+    const save = () => {
+      try {
+        sessionStorage.setItem(CAL_STATE_KEY, JSON.stringify({
+          view, cursorISO, inspectorFilter, regionFilter, typeFilter, statusFilter,
+          showCompleted, filtersOpen, scrollY: window.scrollY,
+        }));
+      } catch { /* storage full / unavailable — non-fatal */ }
+    };
+    router.events.on('routeChangeStart', save);
+    window.addEventListener('pagehide', save);
+    return () => { router.events.off('routeChangeStart', save); window.removeEventListener('pagehide', save); };
+  }, [router.events, view, cursorISO, inspectorFilter, regionFilter, typeFilter, statusFilter, showCompleted, filtersOpen]);
+
+  // Once data has loaded and the view has rendered, jump back to the saved
+  // scroll position. Retry a couple of times so the async map/list layout has
+  // settled before we scroll.
+  useEffect(() => {
+    if (loading || pendingScrollRef.current == null) return;
+    const y = pendingScrollRef.current;
+    pendingScrollRef.current = null;
+    const tries = [0, 120, 320];
+    const timers = tries.map((t) => setTimeout(() => window.scrollTo(0, y), t));
+    return () => timers.forEach(clearTimeout);
+  }, [loading]);
 
   // Load inspections once (client-side, same endpoint as the home list). The
   // server caps pageSize at 100, so a single newest-first "all statuses" page
