@@ -502,6 +502,25 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
   // Ad-hoc: run THIS rule now to create any missing work orders. Idempotent — the
   // enrollment-key dedup means it only creates targets without an open order, so
   // it never duplicates what the nightly job (or a prior run) already made.
+  // Dry-run: show how many work orders WOULD be created for this saved rule
+  // (validates the logic server-side) without creating anything.
+  const previewNow = async () => {
+    if (!rule?.recordId || genBusy) return;
+    setGenBusy(true); setGenMsg('');
+    try {
+      const r = await fetch(`/api/services/admin/generate?ruleId=${encodeURIComponent(rule.recordId)}`);
+      const d = await r.json();
+      if (!r.ok) { setGenMsg(d.error || 'Preview failed.'); return; }
+      if (d.configured === false) { setGenMsg('Services objects aren’t configured yet.'); return; }
+      if (!d.rulesActive) { setGenMsg('This rule is inactive — nothing would generate.'); return; }
+      const would = d.wouldCreate ?? 0, open = d.skippedExisting ?? 0;
+      setGenMsg(would
+        ? `Would create ${would} work order${would === 1 ? '' : 's'}${open ? ` · ${open} already open` : ''}`
+        : (open ? `Up to date — ${open} already open` : 'No missing work orders — nothing to create.'));
+    } catch { setGenMsg('Couldn’t reach the server. Try again.'); }
+    finally { setGenBusy(false); }
+  };
+
   const generateNow = async () => {
     if (!rule?.recordId || genBusy) return;
     setGenBusy(true); setGenMsg('');
@@ -983,16 +1002,26 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
             <button onClick={saveRule} disabled={!canSave || savingRule} className={`w-full rounded-2xl py-3 font-heading font-bold text-sm ${canSave && !savingRule ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
               {savingRule ? 'Saving…' : canSave ? 'Save & Close' : 'Resolve the Issues Above to Save'}
             </button>
-            {/* Ad-hoc generation for the saved rule (admin). Idempotent: only fills gaps. */}
+            {/* Preview + ad-hoc generation for the saved rule (admin). Preview is a
+                dry-run count; Generate is idempotent and only fills gaps. */}
             {canGenerate && rule?.recordId && (
               <>
-                <button onClick={generateNow} disabled={genBusy}
-                  className="mt-2 w-full rounded-2xl py-2.5 font-heading font-bold text-[13px] border border-brand text-brand bg-white disabled:opacity-50">
-                  {genBusy ? 'Generating…' : 'Generate missing work orders now'}
-                </button>
-                {genMsg && <div className="mt-1.5 text-center text-[12px] text-gray-600">{genMsg}</div>}
-                <p className="mt-1 text-center text-[11px] text-gray-400">Creates only work orders that don’t already have an open one — safe to run anytime; the nightly job fills the rest.</p>
+                <div className="mt-2 flex gap-2">
+                  <button onClick={previewNow} disabled={genBusy}
+                    className="flex-1 rounded-2xl py-2.5 font-heading font-bold text-[13px] border border-gray-300 text-gray-700 bg-white disabled:opacity-50">
+                    {genBusy ? '…' : 'Preview count'}
+                  </button>
+                  <button onClick={generateNow} disabled={genBusy}
+                    className="flex-1 rounded-2xl py-2.5 font-heading font-bold text-[13px] border border-brand text-brand bg-white disabled:opacity-50">
+                    {genBusy ? '…' : 'Generate missing now'}
+                  </button>
+                </div>
+                {genMsg && <div className="mt-1.5 text-center text-[12px] font-heading font-semibold text-ink">{genMsg}</div>}
+                <p className="mt-1 text-center text-[11px] text-gray-400">Preview shows how many would be created. Generate makes only the missing ones — safe anytime; the nightly job fills the rest.</p>
               </>
+            )}
+            {canGenerate && rule && !rule.recordId && (
+              <p className="mt-2 text-center text-[11px] text-gray-400">Save the rule to preview or generate its work orders.</p>
             )}
           </div>
         </main>
