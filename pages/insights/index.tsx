@@ -16,7 +16,6 @@ import Link from 'next/link';
 import { PageHeader } from '@/components/PageHeader';
 import { InsightsDashboard } from '@/components/insights/Dashboard';
 import { InsightsUsersManager } from '@/components/insights/InsightsUsersManager';
-import { clearCachedMe } from '@/lib/offlineCache';
 
 interface Access {
   authenticated: boolean;
@@ -50,12 +49,7 @@ export default function InsightsPortal() {
       <div className="min-h-screen bg-[#0e0e11]">
         {/* Standard centered header (logo + title + back), with the account menu
             in the right slot. */}
-        <PageHeader
-          title="Insights"
-          backHref="/"
-          maxW="max-w-[1600px]"
-          right={access?.user ? <AccountMenu name={access.user.name} email={access.user.email} /> : undefined}
-        />
+        <PageHeader title="Insights" backHref="/" maxW="max-w-[1600px]" />
 
         <main className="max-w-[1600px] mx-auto px-5 py-6">
           {loading ? (
@@ -82,54 +76,6 @@ export default function InsightsPortal() {
   );
 }
 
-/** Account menu on the user's name — sign out clears the session and returns to /login. */
-function AccountMenu({ name, email }: { name: string; email: string }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  async function signOut() {
-    setBusy(true);
-    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* clear anyway */ }
-    clearCachedMe(); // drop the cached identity so an offline reload doesn't show the signed-out user
-    window.location.href = '/login';
-  }
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        className="inline-flex items-center gap-1.5 text-xs font-heading font-semibold text-white/90 hover:text-white"
-      >
-        <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-white/20 text-white text-[11px] font-bold uppercase">
-          {(name || email || '?').trim().charAt(0)}
-        </span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${open ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
-      </button>
-      {open && (
-        <>
-          {/* click-away */}
-          <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setOpen(false)} />
-          <div role="menu" className="absolute right-0 top-full mt-2 z-50 w-56 bg-[#18181c] rounded-xl border border-white/10 shadow-lg overflow-hidden text-left">
-            <div className="px-4 py-3 border-b border-white/10">
-              <div className="text-sm font-heading font-semibold text-[#f4f4f5] truncate">{name}</div>
-              <div className="text-[11px] text-[#71717a] truncate">{email}</div>
-            </div>
-            <button
-              type="button" role="menuitem" onClick={signOut} disabled={busy}
-              className="w-full text-left px-4 py-2.5 text-sm font-heading font-semibold text-[#a1a1aa] hover:bg-white/5 hover:text-[#f4f4f5] disabled:opacity-60 flex items-center gap-2"
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
-              {busy ? 'Signing out…' : 'Sign out'}
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 /** Collapsible admin-only menu: manage Insights-Only users from inside the portal.
  *  (Approver NTE moved to Admin → Approval Routing under the home page.) */

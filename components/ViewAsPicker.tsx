@@ -15,6 +15,9 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  // When the search input is focused the on-screen keyboard covers the lower
+  // half, so pin the modal to the TOP for max list room; re-center on blur.
+  const [kbOpen, setKbOpen] = useState(false);
 
   useEffect(() => {
     fetch('/api/admin/impersonate-users')
@@ -54,17 +57,10 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
     window.location.href = '/'; // reload as the impersonated user
   };
 
-  // Generic vendor preview (no specific vendor).
-  const viewAsVendorGeneric = () => {
-    setBusy('__vendor__');
-    setViewAsVendor(true);
-    window.location.href = '/services';
-  };
-
   return (
-    <div className="fixed inset-0 z-[2500] bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className={`fixed inset-0 z-[2500] bg-black/50 flex justify-center p-4 ${kbOpen ? 'items-start' : 'items-center'}`} onClick={onClose}>
       <div
-        className="bg-white w-full max-w-md rounded-2xl max-h-[80vh] flex flex-col overflow-hidden shadow-xl"
+        className="bg-white w-full max-w-md rounded-2xl max-h-[85vh] flex flex-col overflow-hidden shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between shrink-0">
@@ -75,25 +71,12 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} aria-label="Close" className="text-gray-500 text-2xl leading-none px-1">×</button>
         </div>
 
-        {/* Pinned: generic external vendor preview (no specific vendor). */}
-        <button
-          onClick={viewAsVendorGeneric}
-          disabled={!!busy}
-          className="w-full text-left px-4 py-3 flex items-center gap-3 border-b border-gray-200 hover:bg-gray-50 disabled:opacity-50 shrink-0"
-        >
-          <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-brand/10 text-brand shrink-0">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l1-5h16l1 5" /><path d="M4 9v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9" /><path d="M9 21v-6h6v6" /></svg>
-          </span>
-          <span className="min-w-0">
-            <span className="block text-sm font-heading font-semibold text-ink">View as Vendor</span>
-            <span className="block text-xs text-gray-500 truncate">{busy === '__vendor__' ? 'Switching…' : 'External vendor experience (Services)'}</span>
-          </span>
-        </button>
-
         <div className="p-3 border-b border-gray-200 shrink-0">
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
+            onFocus={() => setKbOpen(true)}
+            onBlur={() => setKbOpen(false)}
             placeholder="Search users or vendors…"
             className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2 text-base bg-white text-ink placeholder-gray-400"
           />
