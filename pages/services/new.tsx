@@ -49,6 +49,7 @@ export default function NewService({ servicesTaxonomy }: { servicesTaxonomy: Cus
   const [dueDate, setDueDate] = useState('');
   const [vendor, setVendor] = useState(DEFAULT_SERVICE_VENDOR.name);
   const [created, setCreated] = useState(false);
+  const [createdId, setCreatedId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [createError, setCreateError] = useState('');
 
@@ -69,7 +70,8 @@ export default function NewService({ servicesTaxonomy }: { servicesTaxonomy: Cus
       });
       const d = await r.json();
       if (!r.ok) { setCreateError(d.error || 'Could not create the service.'); return; }
-      setCreated(true);   // d.id present when live; d.preview true pre-go-live
+      setCreatedId(d.id ? String(d.id) : null);   // present when live; d.preview true pre-go-live
+      setCreated(true);
     } catch {
       setCreateError('Couldn’t reach the server. Try again.');
     } finally {
@@ -165,11 +167,15 @@ export default function NewService({ servicesTaxonomy }: { servicesTaxonomy: Cus
             <div className="font-heading font-extrabold text-lg text-ink">Service Created</div>
             <p className="text-sm text-ink mt-1 font-semibold">{wtLabelOf(worktype)} · {subLabelOf(worktype, subtype)}</p>
             <p className="text-sm text-gray-500">{confirmTarget} · Due {fmtMDY(dueDate)}</p>
-            <div className="flex gap-2 justify-center mt-4">
-              <button onClick={() => { setCreated(false); setWorktype(''); setSubtype(''); setTarget(''); setSelectedProp(null); setDueDate(''); setVendor(DEFAULT_SERVICE_VENDOR.name); }} className="border border-gray-300 bg-white rounded-xl px-4 py-2 font-heading font-bold text-sm">Create another</button>
-              {/* Hard navigation so the Services list re-runs its server fetch and
-                  the just-created service is reflected in the counts + list. */}
-              <a href="/services" className="bg-brand text-white rounded-xl px-5 py-2 font-heading font-bold text-sm">Back to Services</a>
+            <div className="flex flex-wrap gap-2 justify-center mt-4">
+              {/* Open the new record directly (a by-id fetch, available immediately —
+                  the list search can lag a few seconds behind a fresh create). */}
+              {createdId && (
+                <a href={`/services/${encodeURIComponent(createdId)}`} className="bg-brand text-white rounded-xl px-5 py-2 font-heading font-bold text-sm">Open Service</a>
+              )}
+              <button onClick={() => { setCreated(false); setCreatedId(null); setWorktype(''); setSubtype(''); setTarget(''); setSelectedProp(null); setDueDate(''); setVendor(DEFAULT_SERVICE_VENDOR.name); }} className="border border-gray-300 bg-white rounded-xl px-4 py-2 font-heading font-bold text-sm">Create another</button>
+              {/* Hard navigation so the Services list re-runs its server fetch. */}
+              <a href="/services" className={`rounded-xl px-5 py-2 font-heading font-bold text-sm ${createdId ? 'border border-gray-300 bg-white text-ink' : 'bg-brand text-white'}`}>Back to Services</a>
             </div>
           </div>
         ) : (
