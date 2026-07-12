@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -14,6 +15,7 @@ import { PhotoThumb } from '@/components/PhotoThumb';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { UnlockButton, lockRingFromProperty, type LockRing } from '@/components/UnlockButton';
 import { FitText } from '@/components/FitText';
+import ServicePager from '@/components/ServicePager';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync } from '@/lib/services/offlineServices';
 
@@ -157,6 +159,7 @@ function PhotoGrid({ label, urls, onOpen }: { label: string; urls: string[]; onO
 }
 
 export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null }) {
+  const router = useRouter();
   // Bid items are never crew-completed here — they go straight to internal bid review.
   const editable = EDITABLE.has(svc.status) && !svc.isBidItem;
   const underReview = svc.status === 'review';
@@ -357,6 +360,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
             {worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}
           </div>
           <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{serviceStatusText(svc.status || 'assigned', isInternal)}</span>
+          <ServicePager currentId={svc.id} onNavigate={(id) => router.replace(`/services/${id}`)} />
           {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7 shrink-0" />}
           <Link href="/services" aria-label="Back to Services" className="shrink-0 text-gray-400 hover:text-ink">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>

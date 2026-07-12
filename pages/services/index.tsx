@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { SERVICE_NAV_KEY } from '@/components/ServicePager';
 import { useRouter } from 'next/router';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
@@ -166,6 +167,12 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
     }[sortField]);
     return [...list].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * dir);
   }, [scoped, status, pastDueOnly, sortField, sortDir]);
+
+  // Publish the CURRENT visible order so the record's ‹ | › pager steps through
+  // exactly this filtered/sorted list (mirrors the inspections nav list).
+  useEffect(() => {
+    try { sessionStorage.setItem(SERVICE_NAV_KEY, JSON.stringify(rows.filter((s) => !cancelledIds.has(s.id)).map((s) => s.id))); } catch { /* non-fatal */ }
+  }, [rows, cancelledIds]);
 
   const chip = (val: ServiceStatus | 'all', label: string) => (
     <button type="button" onClick={() => { setStatus(val); setPastDueOnly(false); }}
