@@ -259,6 +259,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
   const [reissue, setReissue] = useState(false);
   const [reissueDays, setReissueDays] = useState('5');
   const [reissueNote, setReissueNote] = useState('');
+  const [open, setOpen] = useState(true);   // the panel is collapsible
   const money = (n: number) => `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmt2 = (v: string) => { const n = Number(v); return v.trim() !== '' && Number.isFinite(n) ? n.toFixed(2) : v; };
   const inputCls = 'w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand';
@@ -291,7 +292,12 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
   const cell = 'text-[12px] tabular-nums';
   return (
     <section className="bg-white border-2 border-brand/30 rounded-2xl p-4 space-y-3">
-      <div className={SECTION_HEAD}>Your Decision</div>
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        className={`${SECTION_HEAD} ${open ? '' : '!mb-0'} w-full flex items-center justify-between gap-2 text-left`}>
+        <span>Decision</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+      </button>
+      {open && (<>
       <div className="grid grid-cols-3 gap-2">
         {options.map(([val, label, hint, tone]) => {
           const on = decision === val;
@@ -405,6 +411,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
       {needsDays && !(Number(days) > 0) && <div className="text-[12px] text-gray-400 text-center -mt-1">Enter the days until due.</div>}
       {kind === 'review' && reissue && !reissueOk && <div className="text-[12px] text-gray-400 text-center -mt-1">Enter the days until the re-issued service is due.</div>}
       {error && <div className="text-center text-xs text-red-600">{error}</div>}
+      </>)}
     </section>
   );
 }
