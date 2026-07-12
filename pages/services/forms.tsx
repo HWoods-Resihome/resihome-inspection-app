@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
@@ -185,9 +185,14 @@ export default function FormBuilder({ savedForms, canSave }: { savedForms: Recor
           )}
         </div>
 
-        <div className="sticky bottom-0 bg-gray-50 pt-2 pb-2">
-          <button className="w-full rounded-2xl py-3 font-heading font-bold text-sm bg-brand text-white">Save Form</button>
-        </div>
+        {canSave && (
+          <div className="sticky bottom-0 bg-gray-50 pt-2 pb-2">
+            <button onClick={saveAll} disabled={saving}
+              className="w-full rounded-2xl py-3 font-heading font-bold text-sm bg-brand text-white disabled:opacity-60">
+              {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save Form'}
+            </button>
+          </div>
+        )}
       </main>
     </div>
   );
@@ -198,13 +203,20 @@ export default function FormBuilder({ savedForms, canSave }: { savedForms: Recor
 function QuestionEditor({ q, onPatch, onClose, onDelete }: {
   q: ServiceQuestion; onPatch: (p: Partial<ServiceQuestion>) => void; onClose: () => void; onDelete: () => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // When a question opens for editing, scroll the whole editor (incl. its Save
+  // button) into view so you don't have to hunt for it below the fold.
+  useEffect(() => {
+    const t = setTimeout(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+    return () => clearTimeout(t);
+  }, []);
   const check = (label: string, on: boolean, set: (v: boolean) => void) => (
     <label className="flex items-center gap-2 text-[13px] text-ink cursor-pointer">
       <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} /> {label}
     </label>
   );
   return (
-    <section className="bg-pink-50 border border-brand/40 rounded-2xl p-4 space-y-3">
+    <section ref={ref} className="bg-pink-50 border border-brand/40 rounded-2xl p-4 space-y-3">
       <AutoGrowTextarea value={q.label} onChange={(e) => onPatch({ label: e.target.value })} minPx={52} placeholder="Question text…"
         className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand" />
 
