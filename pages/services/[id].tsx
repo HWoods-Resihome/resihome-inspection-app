@@ -802,8 +802,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
         {/* Tier 1 — top bar: worktype · subtype, status chip, lock (if any), back.
             Keeping the chip + lock up here means they never crowd the info rows. */}
         <div className="max-w-2xl mx-auto px-3 pt-2 flex items-center gap-2">
-          <div className="min-w-0 flex-1 text-[13px] font-heading font-bold text-ink truncate">
-            {worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="text-[13px] font-heading font-bold text-ink truncate">{worktypeLabel(svc.worktype)}</div>
+            <div className="text-[12px] font-heading font-semibold text-gray-500 truncate">{subtypeLabel(svc.worktype, svc.subtype)}</div>
           </div>
           <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>
             {serviceStatusText(svc.status || 'assigned', isInternal)}
