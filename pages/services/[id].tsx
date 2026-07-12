@@ -211,6 +211,30 @@ function AiNotes({ text }: { text: string }) {
   return <div className="space-y-2">{out}</div>;
 }
 
+// A white card whose grey header band toggles the body open/closed — mirrors the
+// collapsible sections in the inspection template.
+function CollapsibleSection({ title, subtitle, right, defaultOpen = true, bodyClass = 'space-y-4', children }: {
+  title: React.ReactNode; subtitle?: string; right?: React.ReactNode; defaultOpen?: boolean; bodyClass?: string; children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        className="w-full flex items-center justify-between gap-2 px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-left">
+        <div className="min-w-0">
+          <div className="font-heading font-bold text-[15px] text-ink">{title}</div>
+          {subtitle && <p className="text-[12px] font-normal text-gray-500 mt-0.5">{subtitle}</p>}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {right}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`text-gray-400 transition-transform ${open ? '' : '-rotate-90'}`}><polyline points="6 9 12 15 18 9" /></svg>
+        </div>
+      </button>
+      {open && <div className={`p-4 ${bodyClass}`}>{children}</div>}
+    </section>
+  );
+}
+
 interface DecisionPayload { decision: 'approve' | 'modify' | 'reject'; vendorCost: number; markupPct: number; dueDays: number; notes: string; }
 
 // Shared reviewer decision panel — used for BOTH the completion review (kind
@@ -649,14 +673,11 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   // reviewer deciding sees the live New/Original/Difference in the DecisionPanel's
   // mini-table below, so this stays the plain saved figures.
   const costDetail = svc.vendorCost != null ? (
-    <section className="bg-white border border-gray-200 rounded-2xl p-4">
-      <div className={SECTION_HEAD}>Cost Detail</div>
-      <div className="space-y-1 text-[13px]">
-        <div className="flex justify-between"><span className="text-gray-500">Vendor Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.vendorCost)}</span></div>
-        {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
-        {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.clientCost)}</span></div>}
-      </div>
-    </section>
+    <CollapsibleSection title="Cost Detail" bodyClass="space-y-1 text-[13px]">
+      <div className="flex justify-between"><span className="text-gray-500">Vendor Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.vendorCost)}</span></div>
+      {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
+      {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.clientCost)}</span></div>}
+    </CollapsibleSection>
   ) : null;
 
   return (
@@ -780,8 +801,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             {editable ? (
               /* ── Editable completion form (assigned crew) ── */
               <>
-                <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
-                  <div className={SECTION_HEAD}>Completion Checklist</div>
+                <CollapsibleSection title="Completion Checklist">
                   {form.length === 0 && <div className="text-[13px] text-gray-400">No completion form is configured for this service type yet.</div>}
                   {form.filter(isVisible).map((q) => (
                     <div key={q.id}>
@@ -839,10 +859,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                       )}
                     </div>
                   ))}
-                </section>
+                </CollapsibleSection>
 
-                <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
-                  <div className={SECTION_HEAD}>Photos</div>
+                <CollapsibleSection title="Photos">
                   <CameraPhotos label="Before photos" required urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                   <CameraPhotos label="After photos" required urls={after} onChange={setAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                   {svc.petStations && (
@@ -852,14 +871,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                       <CameraPhotos label="Pet station — after" urls={petAfter} onChange={setPetAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                     </div>
                   )}
-                </section>
+                </CollapsibleSection>
 
                 {/* Additional-work bid — spawns an Estimated "Bid Item" for review. */}
-                <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3">
-                  <div className={SECTION_HEAD}>
-                    Submit Separate Bid Item Request
-                    <p className="text-[12px] font-normal text-gray-500 mt-0.5">Have additional items that need a separate bid? Flag here — the office will review the bid separately.</p>
-                  </div>
+                <CollapsibleSection title="Submit Separate Bid Item Request" subtitle="Have additional items that need a separate bid? Flag here — the office will review the bid separately." bodyClass="space-y-3">
                   <div className="flex gap-2">
                     {([['no', 'No'], ['yes', 'Yes — submit a bid']] as const).map(([v, label]) => (
                       <button key={v} type="button" onClick={() => setBidWanted(v === 'yes')}
@@ -869,11 +884,11 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   {bidWanted && (
                     <div className="space-y-3 border-t border-gray-100 pt-3">
                       <div>
-                        <label className={Q_LABEL}>What’s the additional work? <span className="text-brand">*</span></label>
+                        <label className={Q_LABEL}>What’s the Additional Work? <span className="text-brand">*</span></label>
                         <AutoGrowTextarea value={bidDesc} onChange={(e) => setBidDesc(e.target.value)} minPx={64} className={inputCls} placeholder="Describe the extra work needed…" />
                       </div>
                       <div>
-                        <label className={Q_LABEL}>Your bid (vendor cost) <span className="text-brand">*</span></label>
+                        <label className={Q_LABEL}>Your Bid (Vendor Cost) <span className="text-brand">*</span></label>
                         <div className="relative w-40">
                           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                           <input type="number" inputMode="decimal" value={bidCost} onChange={(e) => setBidCost(e.target.value)} onBlur={() => setBidCost(fmt2(bidCost))} className="w-full text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" placeholder="0.00" />
@@ -882,7 +897,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                       <CameraPhotos label="Bid photos" required urls={bidPhotos} onChange={setBidPhotos} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                     </div>
                   )}
-                </section>
+                </CollapsibleSection>
 
                 {costDetail}
 
@@ -897,25 +912,20 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
               /* ── Read-only view (submitted / review / completed / bid) ── */
               <>
                 {svc.isBidItem && svc.description && (
-                  <section className="bg-white border border-gray-200 rounded-2xl p-4">
-                    <div className={SECTION_HEAD}>Bid request</div>
+                  <CollapsibleSection title="Bid request" bodyClass="">
                     <p className="text-[13px] text-gray-700 whitespace-pre-line">{svc.description}</p>
                     <p className="text-[12px] text-gray-400 mt-1.5">Submitted by {svc.vendor || 'the vendor'} while completing a {worktypeLabel(svc.worktype)} service.</p>
-                  </section>
+                  </CollapsibleSection>
                 )}
                 {isInternal && (svc.aiVerdict || svc.aiNotes) && (
-                  <section className="bg-white border border-gray-200 rounded-2xl p-4">
-                    <div className={`${SECTION_HEAD} flex items-center gap-2`}>
-                      <div>AI review</div>
-                      {svc.aiVerdict && chip(svc.aiVerdict === 'clean' ? 'Clean' : 'Needs review', svc.aiVerdict === 'clean' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}
-                    </div>
+                  <CollapsibleSection title="AI review" bodyClass=""
+                    right={svc.aiVerdict ? chip(svc.aiVerdict === 'clean' ? 'Clean' : 'Needs review', svc.aiVerdict === 'clean' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700') : undefined}>
                     {svc.aiNotes && <AiNotes text={svc.aiNotes} />}
-                  </section>
+                  </CollapsibleSection>
                 )}
 
                 {Object.keys(svc.answers).length > 0 && (
-                  <section className="bg-white border border-gray-200 rounded-2xl p-4">
-                    <div className={SECTION_HEAD}>Answers</div>
+                  <CollapsibleSection title="Answers" bodyClass="">
                     <dl className="space-y-2">
                       {form.map((q) => {
                         if (svc.answers[q.id] == null || svc.answers[q.id] === '') return null;
@@ -943,17 +953,16 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                         );
                       })}
                     </dl>
-                  </section>
+                  </CollapsibleSection>
                 )}
 
-                <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
-                  <div className={SECTION_HEAD}>Photos <span className="text-[11px] font-normal text-gray-400">— tap a photo to enlarge</span></div>
+                <CollapsibleSection title="Photos" subtitle="Tap a photo to enlarge">
                   <PhotoGrid label={svc.isBidItem ? 'Bid photos' : 'Before photos'} urls={svc.before} onOpen={(i) => setLightbox({ groupId: 'before', index: i })} />
                   {!svc.isBidItem && <PhotoGrid label="After photos" urls={svc.after} onOpen={(i) => setLightbox({ groupId: 'after', index: i })} />}
                   {!svc.isBidItem && <PhotoGrid label="Pet station — before" urls={svc.petBefore} onOpen={(i) => setLightbox({ groupId: 'petBefore', index: i })} />}
                   {!svc.isBidItem && <PhotoGrid label="Pet station — after" urls={svc.petAfter} onOpen={(i) => setLightbox({ groupId: 'petAfter', index: i })} />}
                   {!svc.before.length && !svc.after.length && !svc.petBefore.length && !svc.petAfter.length && <div className="text-[13px] text-gray-400">No photos on this service.</div>}
-                </section>
+                </CollapsibleSection>
 
                 {costDetail}
 
