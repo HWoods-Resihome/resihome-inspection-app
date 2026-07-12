@@ -5,6 +5,7 @@ import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { MultiFilter } from '@/components/MultiFilter';
 import { FIELD_LABEL } from '@/components/formStyles';
+import { SaveFooter } from '@/components/SaveFooter';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { SAMPLE_AI_CHECKS, newCheck, type AiCheck } from '@/lib/services/aiKnowledge';
 
@@ -107,9 +108,7 @@ export default function ServicesAiKnowledge({ savedChecks, canSave, embedded }: 
           )}
         </div>
 
-        <div className="sticky bottom-0 bg-gray-50 pt-2 pb-2">
-          <button className="w-full rounded-2xl py-3 font-heading font-bold text-sm bg-brand text-white">Save Knowledge Base</button>
-        </div>
+        {canSave && <SaveFooter label="Save Knowledge Base" onClick={saveAll} busy={saving} saved={saved} />}
       </main>
     </div>
   );

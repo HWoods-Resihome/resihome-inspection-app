@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/PageHeader';
+import { SaveFooter } from '@/components/SaveFooter';
 import { useRouter } from 'next/router';
 import type { Question, ResponseType } from '@/lib/types';
 import { RESPONSE_TYPES, STANDARD_SECTIONS } from '@/lib/formBuilder';
@@ -183,6 +184,10 @@ export default function FormBuilderPage({ servicesForms }: { servicesForms: Reco
   const [tab, setTab] = useState<'inspections' | 'services'>(router.query.tab === 'services' ? 'services' : 'inspections');
   const [authChecked, setAuthChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  // Inspections template edits persist to HubSpot immediately, so the footer
+  // just confirms — its shape matches the Services tab's bulk Save footer.
+  const [savedTick, setSavedTick] = useState(false);
+  const confirmSaved = () => { setSavedTick(true); window.setTimeout(() => setSavedTick(false), 2000); };
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [template, setTemplate] = useState<string>('');
   const [questions, setQuestions] = useState<Question[] | null>(null);
@@ -695,6 +700,7 @@ export default function FormBuilderPage({ servicesForms }: { servicesForms: Reco
             })}
           </div>
         )}
+        <SaveFooter label="Save Form" onClick={confirmSaved} saved={savedTick} />
         </>
         )}
       </main>

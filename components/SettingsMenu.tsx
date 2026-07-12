@@ -11,7 +11,6 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useAppDialog } from '@/components/AppDialog';
 import { ViewAsPicker } from '@/components/ViewAsPicker';
 import { clearCachedMe } from '@/lib/offlineCache';
 
@@ -20,10 +19,8 @@ const rowCls =
 
 export function SettingsMenu({ isAdmin, onOpen }: { isAdmin: boolean; onOpen?: () => void }) {
   const router = useRouter();
-  const dialog = useAppDialog();
   const [open, setOpen] = useState(false);
   const [viewAsOpen, setViewAsOpen] = useState(false);
-  const [aiRerunBusy, setAiRerunBusy] = useState(false);
 
   async function handleLogout() {
     try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* offline */ }
@@ -31,32 +28,6 @@ export function SettingsMenu({ isAdmin, onOpen }: { isAdmin: boolean; onOpen?: (
     // rendering the app as the (now signed-out) user.
     clearCachedMe();
     router.replace('/login');
-  }
-
-  // Admin: rerun the Services AI review across every currently-submitted service
-  // (the same apply pass the nightly cron runs). Clean → auto-completed, else →
-  // Review. Result is reported via the branded dialog.
-  async function rerunAiReview() {
-    if (aiRerunBusy) return;
-    setAiRerunBusy(true);
-    try {
-      const r = await fetch('/api/services/admin/review?apply=1');
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) { await dialog.alert(`AI review — ${d.error || 'failed.'}`); return; }
-      if (d.configured === false) { await dialog.alert('AI review — the Services object isn’t configured.'); return; }
-      if (!d.reviewed) { await dialog.alert('AI review — no submitted services to review right now.'); return; }
-      const parts = [`${d.reviewed} reviewed`];
-      if (d.completed) parts.push(`${d.completed} auto-completed`);
-      if (d.routedToReview) parts.push(`${d.routedToReview} → Review`);
-      if (d.errors) parts.push(`${d.errors} error${d.errors > 1 ? 's' : ''}`);
-      await dialog.alert(`AI review — ${parts.join(' · ')}`);
-      // Reflect the new statuses if the current page reads them from SSR.
-      router.replace(router.asPath, undefined, { scroll: false });
-    } catch {
-      await dialog.alert('AI review — couldn’t reach the server. Try again.');
-    } finally {
-      setAiRerunBusy(false);
-    }
   }
 
   return (
@@ -105,10 +76,6 @@ export function SettingsMenu({ isAdmin, onOpen }: { isAdmin: boolean; onOpen?: (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><circle cx="12" cy="12" r="3" /><path d="M12 1v6m0 6v6M4.2 4.2l4.3 4.3m6.9 6.9l4.3 4.3M1 12h6m6 0h6M4.2 19.8l4.3-4.3m6.9-6.9l4.3-4.3" /></svg>
                   Rules Engine
                 </Link>
-                <button type="button" disabled={aiRerunBusy} onClick={() => { setOpen(false); void rerunAiReview(); }} className={`${rowCls} disabled:opacity-60`}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" /></svg>
-                  {aiRerunBusy ? 'Rerunning AI Review…' : 'Rerun AI Review'}
-                </button>
                 <Link href="/admin/flows" onClick={() => setOpen(false)} className={rowCls}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
                   Admin

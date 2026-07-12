@@ -4,6 +4,7 @@ import type { GetServerSideProps } from 'next';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { FIELD_LABEL } from '@/components/formStyles';
+import { SaveFooter } from '@/components/SaveFooter';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
   ANSWER_TYPES, SAMPLE_FORMS, formKey, newQuestion, newOption, answerTypeLabel, hasOptions,
@@ -178,14 +179,7 @@ export default function FormBuilder({ savedForms, canSave, embedded }: { savedFo
           )}
         </div>
 
-        {canSave && (
-          <div className="sticky bottom-0 bg-gray-50 pt-2 pb-2">
-            <button onClick={saveAll} disabled={saving}
-              className="w-full rounded-2xl py-3 font-heading font-bold text-sm bg-brand text-white disabled:opacity-60">
-              {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save Form'}
-            </button>
-          </div>
-        )}
+        {canSave && <SaveFooter label="Save Form" onClick={saveAll} busy={saving} saved={saved} />}
       </main>
     </div>
   );

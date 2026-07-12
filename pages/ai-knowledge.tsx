@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/PageHeader';
+import { SaveFooter } from '@/components/SaveFooter';
 import { useRouter } from 'next/router';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
@@ -52,6 +53,10 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
   const [tab, setTab] = useState<'inspections' | 'services'>(router.query.tab === 'services' ? 'services' : 'inspections');
   const [authChecked, setAuthChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  // Inspections entries persist to HubSpot immediately; the footer just confirms,
+  // matching the Services tab's bulk Save footer for a consistent look.
+  const [savedTick, setSavedTick] = useState(false);
+  const confirmSaved = () => { setSavedTick(true); window.setTimeout(() => setSavedTick(false), 2000); };
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -304,6 +309,7 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
             ))}
           </ul>
         )}
+        <SaveFooter label="Save Knowledge Base" onClick={confirmSaved} saved={savedTick} />
         </>
         )}
       </main>

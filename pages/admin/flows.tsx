@@ -62,6 +62,29 @@ export default function AdminFlowsPage() {
     } finally { setBusy(false); }
   }
 
+  // Services AI review — the same apply pass the nightly cron runs. Clean →
+  // auto-completed, else → Review. (Moved here from the settings gear.)
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewMsg, setReviewMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  async function rerunAiReview() {
+    if (reviewBusy) return;
+    setReviewBusy(true); setReviewMsg(null);
+    try {
+      const r = await fetch('/api/services/admin/review?apply=1');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setReviewMsg({ ok: false, text: d.error || 'AI review failed.' }); return; }
+      if (d.configured === false) { setReviewMsg({ ok: false, text: 'The Services object isn’t configured.' }); return; }
+      if (!d.reviewed) { setReviewMsg({ ok: true, text: 'No submitted services to review right now.' }); return; }
+      const parts = [`${d.reviewed} reviewed`];
+      if (d.completed) parts.push(`${d.completed} auto-completed`);
+      if (d.routedToReview) parts.push(`${d.routedToReview} → Review`);
+      if (d.errors) parts.push(`${d.errors} error${d.errors > 1 ? 's' : ''}`);
+      setReviewMsg({ ok: !d.errors, text: parts.join(' · ') });
+    } catch {
+      setReviewMsg({ ok: false, text: 'Couldn’t reach the server. Try again.' });
+    } finally { setReviewBusy(false); }
+  }
+
   if (!authChecked) return null;
   if (!isAdmin) {
     return (
@@ -89,6 +112,16 @@ export default function AdminFlowsPage() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
             Manage Admins
           </Link>
+        </Section>
+
+        {/* ---- Services AI Review (moved here from the settings gear) ---- */}
+        <Section title="Rerun AI Review" desc="Re-runs the Services AI review across every currently-submitted service — the same pass the nightly job runs. Clean submissions auto-complete; anything with a concern routes to Review.">
+          <button type="button" onClick={rerunAiReview} disabled={reviewBusy}
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-brand text-white font-heading font-bold text-sm hover:opacity-90 disabled:bg-gray-300">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" /></svg>
+            {reviewBusy ? 'Rerunning…' : 'Rerun AI Review'}
+          </button>
+          {reviewMsg && <p className={`text-[13px] mt-2 font-heading font-semibold ${reviewMsg.ok ? 'text-emerald-700' : 'text-red-600'}`}>{reviewMsg.text}</p>}
         </Section>
 
         {/* ---- Approval Routing (PODs / Regions) — self-contained collapsible card ---- */}
