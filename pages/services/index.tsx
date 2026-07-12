@@ -337,8 +337,6 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
                       <span className="inline-flex items-center gap-1.5">Rerun AI Review<AiSparkle className="w-3.5 h-3.5 text-brand" /></span>
                       {submittedCount > 0 && <span className="text-[11px] font-bold text-gray-400 tabular-nums">{submittedCount}</span>}
                     </button>
-                    <button type="button" onClick={() => { setGearOpen(false); setSelectedIds(new Set()); setSelectMode(true); }}
-                      className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Select Services</button>
                     <button type="button" onClick={enterVendorView} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">View as Vendor</button>
                   </div></>)}
               </div>
