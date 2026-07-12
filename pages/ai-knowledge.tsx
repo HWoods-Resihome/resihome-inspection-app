@@ -61,10 +61,7 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-  const [draftExpected, setDraftExpected] = useState('');
-  const [draftIsExample, setDraftIsExample] = useState(false);
   const [newText, setNewText] = useState('');
-  const [newExpected, setNewExpected] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -113,17 +110,15 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
   async function addEntry() {
     const text = newText.trim();
     if (!text) return;
-    const expected = newExpected.trim();
     setBusy(true);
     try {
       const r = await fetch('/api/ai-knowledge', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, expected: expected || undefined }),
+        body: JSON.stringify({ text }),
       });
       const d = await r.json();
       if (!r.ok) { setError(d.error || 'Add failed'); return; }
       setNewText('');
-      setNewExpected('');
       await load();
     } finally { setBusy(false); }
   }
@@ -135,7 +130,7 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
     try {
       const r = await fetch(`/api/ai-knowledge/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(draftIsExample ? { text, expected: draftExpected.trim() } : { text }),
+        body: JSON.stringify({ text }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d.error || 'Save failed'); return; }
@@ -199,22 +194,14 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
           </button>
         </div>
 
-        {/* Add new — a plain rule, OR a worked example (fill in the expected action). */}
+        {/* Add a rule. */}
         <div className="bg-white rounded-xl border border-gray-200 p-3 mb-5 shadow-sm">
-          <label className="block text-xs font-heading font-semibold text-gray-500 mb-1">Add a rule, or a worked example</label>
+          <label className="block text-xs font-heading font-semibold text-gray-500 mb-1">Add a rule</label>
           <textarea
             value={newText}
             onChange={(e) => setNewText(e.target.value)}
             rows={2}
-            placeholder="Rule, e.g. “Gutter cleaning is always 100% tenant.”  —  OR what the inspector says, e.g. “whole house mismatch”"
-            className="focus-brand w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-y"
-          />
-          <label className="block text-xs font-heading font-semibold text-gray-500 mt-2 mb-1">Correct action <span className="font-normal text-gray-400">(optional — fill in to make this a worked example)</span></label>
-          <textarea
-            value={newExpected}
-            onChange={(e) => setNewExpected(e.target.value)}
-            rows={2}
-            placeholder="e.g. Mist-match paint for the whole house; route to Whole House and use the property sqft — don’t ask for square feet."
+            placeholder="e.g. “Gutter cleaning is always 100% tenant.”"
             className="focus-brand w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-y"
           />
           <div className="flex justify-end mt-2">
@@ -224,7 +211,7 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
               disabled={busy || !newText.trim()}
               className="h-9 px-4 rounded-lg bg-brand text-white font-heading font-bold text-sm hover:opacity-90 disabled:bg-gray-300"
             >
-              {newExpected.trim() ? 'Add example' : 'Add rule'}
+              Add rule
             </button>
           </div>
         </div>
@@ -241,24 +228,12 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
               <li key={e.id} className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
                 {editingId === e.id ? (
                   <>
-                    {draftIsExample && <label className="block text-xs font-heading font-semibold text-gray-500 mb-1">Inspector says</label>}
                     <textarea
                       value={draft}
                       onChange={(ev) => setDraft(ev.target.value)}
-                      rows={draftIsExample ? 2 : 3}
+                      rows={3}
                       className="focus-brand w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-y"
                     />
-                    {draftIsExample && (
-                      <>
-                        <label className="block text-xs font-heading font-semibold text-gray-500 mt-2 mb-1">Correct action</label>
-                        <textarea
-                          value={draftExpected}
-                          onChange={(ev) => setDraftExpected(ev.target.value)}
-                          rows={2}
-                          className="focus-brand w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-y"
-                        />
-                      </>
-                    )}
                     <div className="flex justify-end gap-2 mt-2">
                       <button type="button" onClick={() => setEditingId(null)} className="text-sm font-heading font-semibold text-gray-600 px-3 h-9">Cancel</button>
                       <button type="button" onClick={() => saveEdit(e.id)} disabled={busy || !draft.trim()} className="h-9 px-4 rounded-lg bg-emerald-600 text-white font-heading font-bold text-sm disabled:bg-gray-300">Save</button>
@@ -277,21 +252,13 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
                         )}
                       </div>
                     )}
-                    {e.kind === 'example' ? (
-                      <div>
-                        <span className="inline-flex items-center gap-1 text-[10px] font-heading font-bold uppercase tracking-wide text-sky-700 bg-sky-100 border border-sky-200 rounded-full px-2 py-0.5 mb-1.5">◎ Worked example</span>
-                        <p className="text-sm text-ink"><span className="text-gray-500">Inspector says:</span> “{e.text}”</p>
-                        <p className="text-sm text-ink mt-0.5"><span className="text-gray-500">Correct action:</span> {e.expected}</p>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-ink whitespace-pre-wrap">{e.text}</p>
-                    )}
+                    <p className="text-sm text-ink whitespace-pre-wrap">{e.text}</p>
                     <div className="flex items-center justify-between gap-2 mt-2">
                       <div className="text-[11px] text-gray-500 truncate">
                         {(e.addedByName || e.addedByEmail || 'Unknown')}{e.createdAt ? ` · ${fmtDate(e.createdAt)}` : ''}{e.updatedAt ? (e.source === 'auto' ? '' : ' · edited') : ''}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        <button type="button" onClick={() => { setEditingId(e.id); setDraft(e.text); setDraftIsExample(e.kind === 'example'); setDraftExpected(e.expected || ''); }}
+                        <button type="button" onClick={() => { setEditingId(e.id); setDraft(e.text); }}
                           className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md px-2.5 py-1">
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
                           Edit

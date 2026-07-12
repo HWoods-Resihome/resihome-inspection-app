@@ -2,9 +2,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { GetServerSideProps } from 'next';
 import { ListPicker } from '@/components/ListPicker';
-import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { MultiFilter } from '@/components/MultiFilter';
-import { FIELD_LABEL } from '@/components/formStyles';
 import { SaveFooter } from '@/components/SaveFooter';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { SAMPLE_AI_CHECKS, newCheck, type AiCheck } from '@/lib/services/aiKnowledge';
@@ -16,10 +14,12 @@ export const getServerSideProps: GetServerSideProps = async () => ({
   redirect: { destination: '/ai-knowledge?tab=services', permanent: false },
 });
 
-const lbl = FIELD_LABEL;
 const trig = 'w-full flex items-center justify-between gap-2 text-[13px] border border-gray-300 rounded-lg px-2.5 py-2 bg-white text-ink';
+const miniLbl = 'block text-xs font-heading font-semibold text-gray-500 mb-1';
 const scopeLabel = (c: AiCheck) =>
   `${c.worktype ? worktypeLabel(c.worktype) : 'All Work Types'} · ${c.subtype ? subtypeLabel(c.worktype, c.subtype) : 'All Subtypes'}`;
+const wtOptions = [{ value: 'all', label: 'All Work Types' }, ...WORKTYPES.map((w) => ({ value: w.id, label: w.label }))];
+const subOptions = (wt: string) => [{ value: 'all', label: 'All Subtypes' }, ...(wt ? subtypesFor(wt).map((s) => ({ value: s.id, label: s.label })) : [])];
 
 export default function ServicesAiKnowledge({ savedChecks, canSave, embedded }: { savedChecks: AiCheck[] | null; canSave: boolean; embedded?: boolean }) {
   const [checks, setChecks] = useState<AiCheck[]>(() => (savedChecks && savedChecks.length ? savedChecks : [...SAMPLE_AI_CHECKS]));
@@ -27,11 +27,21 @@ export default function ServicesAiKnowledge({ savedChecks, canSave, embedded }: 
   const [wtFilter, setWtFilter] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // Add-panel local state (mirrors the Inspections "Add a rule" panel).
+  const [ncText, setNcText] = useState('');
+  const [ncWt, setNcWt] = useState('');
+  const [ncSub, setNcSub] = useState('');
 
   const mutate = (fn: (cs: AiCheck[]) => AiCheck[]) => { setSaved(false); setChecks(fn); };
   const patch = (id: string, p: Partial<AiCheck>) => mutate((cs) => cs.map((c) => (c.id === id ? { ...c, ...p } : c)));
-  const del = (id: string) => { mutate((cs) => cs.filter((c) => c.id !== id)); if (editId === id) setEditId(null); };
-  const add = () => { const c = newCheck(); mutate((cs) => [c, ...cs]); setEditId(c.id); };
+  const del = (id: string) => { if (!confirm('Delete this check? The AI will stop using it.')) return; mutate((cs) => cs.filter((c) => c.id !== id)); if (editId === id) setEditId(null); };
+  const addCheck = () => {
+    const text = ncText.trim();
+    if (!text) return;
+    const c: AiCheck = { ...newCheck(), check: text, worktype: ncWt, subtype: ncSub };
+    mutate((cs) => [c, ...cs]);
+    setNcText(''); setNcWt(''); setNcSub('');
+  };
   const saveAll = async () => {
     setSaving(true);
     try {
@@ -55,94 +65,109 @@ export default function ServicesAiKnowledge({ savedChecks, canSave, embedded }: 
           </Link>
           <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
           <div className="font-heading font-extrabold">AI Knowledge</div>
-          {canSave && (
-            <button onClick={saveAll} disabled={saving}
-              className="ml-auto bg-white/15 hover:bg-white/25 text-white font-heading font-bold text-[13px] rounded-lg px-3.5 py-1.5 disabled:opacity-60">
-              {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
-            </button>
-          )}
         </div>
       </header>
       )}
 
-      <main className={embedded ? 'space-y-4' : 'max-w-3xl mx-auto w-full px-4 py-4 space-y-4'}>
-        <section className="bg-white border border-gray-200 rounded-2xl p-4">
-          <p className="text-[13px] text-gray-600">
-            On submit, a service enters <b className="text-ink">AI Processing</b>. The AI checks the evidence against these rules —
-            all are equally important. If everything is clean it auto-moves to <b className="text-emerald-700">Completed</b>;
-            any concern routes it to <b className="text-purple-700">Review</b> for a human.
-          </p>
-          <div className="flex flex-wrap items-center gap-2 mt-3">
-            <div className="flex-1 min-w-[140px]">
-              <MultiFilter label="Work Type" selected={wtFilter} onChange={setWtFilter}
-                className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${wtFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
-                options={[{ value: 'all', label: 'All Work Types' }, ...WORKTYPES.map((w) => ({ value: w.id, label: w.label }))]} />
-            </div>
-            <button onClick={add} className="shrink-0 bg-brand text-white font-heading font-bold text-sm rounded-xl px-4 py-2">+ Add Check</button>
-          </div>
-        </section>
+      <main className={embedded ? '' : 'max-w-3xl mx-auto w-full px-4 py-4'}>
+        <p className="text-[13px] text-gray-600 mb-4 leading-snug">
+          On submit, a service enters <b className="text-ink">AI Processing</b>. The AI checks the evidence against these rules —
+          all are equally important. If everything is clean it auto-moves to <b className="text-emerald-700">Completed</b>;
+          any concern routes it to <b className="text-purple-700">Review</b> for a human.
+        </p>
 
-        <div className="space-y-3">
-          {visible.map((c) => (
-            editId === c.id
-              ? <CheckEditor key={c.id} c={c} onPatch={(p) => patch(c.id, p)} onClose={() => setEditId(null)} onDelete={() => del(c.id)} />
-              : (
-                <section key={c.id} className={`bg-white border border-gray-200 rounded-2xl p-4 ${c.active ? '' : 'opacity-60'}`}>
-                  <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="mb-1"><span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{scopeLabel(c)}</span></div>
-                      <div className="text-[13px] text-ink">{c.check || <span className="text-gray-400">Empty check</span>}</div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button onClick={() => patch(c.id, { active: !c.active })}
-                        className={`text-[12px] font-heading font-semibold px-2.5 py-1.5 rounded-lg border ${c.active ? 'text-emerald-700 border-emerald-300 bg-emerald-50' : 'text-gray-500 border-gray-300 bg-white'}`}>{c.active ? 'On' : 'Off'}</button>
-                      <button onClick={() => setEditId(c.id)} className="text-[12px] font-heading font-semibold px-2.5 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:border-brand/50">Edit</button>
-                      <button onClick={() => del(c.id)} className="text-[12px] font-heading font-semibold px-2.5 py-1.5 rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50">Delete</button>
-                    </div>
-                  </div>
-                </section>
-              )
-          ))}
-          {visible.length === 0 && (
-            <div className="text-center text-gray-400 text-sm py-10 border border-dashed border-gray-300 rounded-2xl">No checks match this filter.</div>
-          )}
+        {/* Add a check — mirrors the Inspections "Add a rule" panel. */}
+        <div className="bg-white rounded-xl border border-gray-200 p-3 mb-5 shadow-sm">
+          <label className={miniLbl}>Add a check</label>
+          <textarea value={ncText} onChange={(e) => setNcText(e.target.value)} rows={2}
+            placeholder="e.g. Back yard is clearly shown in the after photos…"
+            className="focus-brand w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-y" />
+          <div className="flex flex-wrap items-end gap-3 mt-2">
+            <div className="w-40">
+              <label className={miniLbl}>Work Type</label>
+              <ListPicker value={ncWt || 'all'} options={wtOptions} ariaLabel="Work type" className={trig}
+                onChange={(v) => { setNcWt(v === 'all' ? '' : v); setNcSub(''); }} />
+            </div>
+            <div className="w-40">
+              <label className={miniLbl}>Subtype</label>
+              <ListPicker value={ncSub || 'all'} disabled={!ncWt} options={subOptions(ncWt)} ariaLabel="Subtype"
+                className={`${trig} ${!ncWt ? 'opacity-50' : ''}`} onChange={(v) => setNcSub(v === 'all' ? '' : v)} />
+            </div>
+            <button type="button" onClick={addCheck} disabled={!ncText.trim()}
+              className="ml-auto h-9 px-4 rounded-lg bg-brand text-white font-heading font-bold text-sm hover:opacity-90 disabled:bg-gray-300">
+              Add check
+            </button>
+          </div>
         </div>
+
+        {/* Work Type filter. */}
+        <div className="flex items-center gap-2 mb-3">
+          <div className="min-w-[160px]">
+            <MultiFilter label="Work Type" selected={wtFilter} onChange={setWtFilter}
+              className={`w-full truncate text-[12px] font-heading font-semibold pl-2.5 pr-1 py-1.5 border rounded-lg bg-white flex items-center justify-between ${wtFilter.length ? 'border-brand text-brand' : 'border-gray-300 text-gray-700'}`}
+              options={wtOptions} />
+          </div>
+        </div>
+
+        {visible.length === 0 ? (
+          <div className="text-center text-gray-500 py-10 text-sm">No checks match this filter.</div>
+        ) : (
+          <ul className="space-y-2.5">
+            {visible.map((c) => (
+              <li key={c.id} className={`bg-white rounded-xl border border-gray-200 p-3 shadow-sm ${c.active ? '' : 'opacity-60'}`}>
+                {editId === c.id ? (
+                  <>
+                    <textarea value={c.check} onChange={(e) => patch(c.id, { check: e.target.value })} rows={3}
+                      placeholder="e.g. Back yard is clearly shown in the after photos…"
+                      className="focus-brand w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-y" />
+                    <div className="flex flex-wrap items-end gap-3 mt-2">
+                      <div className="w-40">
+                        <label className={miniLbl}>Work Type</label>
+                        <ListPicker value={c.worktype || 'all'} options={wtOptions} ariaLabel="Work type" className={trig}
+                          onChange={(v) => patch(c.id, { worktype: v === 'all' ? '' : v, subtype: '' })} />
+                      </div>
+                      <div className="w-40">
+                        <label className={miniLbl}>Subtype</label>
+                        <ListPicker value={c.subtype || 'all'} disabled={!c.worktype} options={subOptions(c.worktype)} ariaLabel="Subtype"
+                          className={`${trig} ${!c.worktype ? 'opacity-50' : ''}`} onChange={(v) => patch(c.id, { subtype: v === 'all' ? '' : v })} />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2 mt-2">
+                      <button type="button" onClick={() => setEditId(null)} className="text-sm font-heading font-semibold text-gray-600 px-3 h-9">Cancel</button>
+                      <button type="button" onClick={() => setEditId(null)} disabled={!c.check.trim()} className="h-9 px-4 rounded-lg bg-emerald-600 text-white font-heading font-bold text-sm disabled:bg-gray-300">Save</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="mb-1.5"><span className="inline-flex items-center text-[10px] font-heading font-bold uppercase tracking-wide text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5">{scopeLabel(c)}</span></div>
+                    <p className="text-sm text-ink whitespace-pre-wrap">{c.check || <span className="text-gray-400">Empty check</span>}</p>
+                    <div className="flex items-center justify-between gap-2 mt-2">
+                      <button type="button" onClick={() => patch(c.id, { active: !c.active })}
+                        className={`inline-flex items-center gap-1 text-xs font-heading font-semibold rounded-md px-2.5 py-1 border ${c.active ? 'text-emerald-700 border-emerald-300 bg-emerald-50' : 'text-gray-500 border-gray-300 bg-white'}`}>
+                        {c.active ? 'On' : 'Off'}
+                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button type="button" onClick={() => setEditId(c.id)}
+                          className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md px-2.5 py-1">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                          Edit
+                        </button>
+                        <button type="button" onClick={() => del(c.id)}
+                          className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-md px-2.5 py-1">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
 
         {canSave && <SaveFooter label="Save Knowledge Base" onClick={saveAll} busy={saving} saved={saved} />}
       </main>
     </div>
-  );
-}
-
-function CheckEditor({ c, onPatch, onClose, onDelete }: {
-  c: AiCheck; onPatch: (p: Partial<AiCheck>) => void; onClose: () => void; onDelete: () => void;
-}) {
-  return (
-    <section className="bg-pink-50 border border-brand/40 rounded-2xl p-4 space-y-3">
-      <div>
-        <label className={lbl}>Check — what the AI must verify</label>
-        <AutoGrowTextarea value={c.check} onChange={(e) => onPatch({ check: e.target.value })} minPx={52} placeholder="e.g. Back yard is clearly shown in the after photos…"
-          className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand" />
-      </div>
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="w-44">
-          <label className={lbl}>Work Type</label>
-          <ListPicker value={c.worktype || 'all'} options={[{ value: 'all', label: 'All Work Types' }, ...WORKTYPES.map((w) => ({ value: w.id, label: w.label }))]} ariaLabel="Work type" className={trig}
-            onChange={(v) => onPatch({ worktype: v === 'all' ? '' : v, subtype: '' })} />
-        </div>
-        <div className="w-44">
-          <label className={lbl}>Subtype</label>
-          <ListPicker value={c.subtype || 'all'} disabled={!c.worktype}
-            options={[{ value: 'all', label: 'All Subtypes' }, ...(c.worktype ? subtypesFor(c.worktype).map((s) => ({ value: s.id, label: s.label })) : [])]}
-            ariaLabel="Subtype" className={`${trig} ${!c.worktype ? 'opacity-50' : ''}`}
-            onChange={(v) => onPatch({ subtype: v === 'all' ? '' : v })} />
-        </div>
-      </div>
-      <div className="flex items-center justify-end gap-2">
-        <button onClick={onDelete} className="mr-auto text-[12px] font-heading font-semibold text-red-600 hover:underline">Delete</button>
-        <button onClick={onClose} className="text-sm font-heading font-semibold text-gray-600 px-4 py-2">Cancel</button>
-        <button onClick={onClose} className="text-sm font-heading font-bold text-white bg-brand rounded-lg px-5 py-2">Save</button>
-      </div>
-    </section>
   );
 }
