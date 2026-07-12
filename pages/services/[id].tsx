@@ -7,7 +7,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
-import { SAMPLE_SERVICES, SERVICE_STATUS_LABEL, SERVICE_STATUS_STYLE, type ServiceStatus } from '@/lib/services/sampleData';
+import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, type ServiceStatus } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoThumb } from '@/components/PhotoThumb';
@@ -306,17 +306,22 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
           </Link>
           <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain shrink-0" />
-          {/* Text block — three evenly-spaced rows. */}
           <div className="min-w-0 flex-1 space-y-0.5">
-            <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={15} min={10} />
-            <div className="text-xs text-gray-500 leading-tight truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}{svc.dueDate ? ` · Due ${fmtMDY(svc.dueDate)}` : ''}</div>
-            <div className="text-xs text-gray-500 leading-tight truncate">{svc.vendor || 'Unassigned'}</div>
-          </div>
-          {/* Chip + unlock live in their OWN column (siblings of the text block), so
-              they never affect the row spacing. */}
-          <div className="shrink-0 flex flex-col items-end gap-1.5 self-center">
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{SERVICE_STATUS_LABEL[(svc.status || 'assigned') as ServiceStatus] || svc.status}</span>
-            {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7" />}
+            {/* Address gets the FULL width so it sizes up. */}
+            <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={17} min={11} />
+            {/* Meta rows on the left, status chip + unlock on the right — the chip
+                only sits beside these short rows, never the address, and its height
+                can't inflate the row spacing. */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 space-y-0.5">
+                <div className="text-xs text-gray-500 leading-tight truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}{svc.dueDate ? ` · Due ${fmtMDY(svc.dueDate)}` : ''}</div>
+                <div className="text-xs text-gray-500 leading-tight truncate">{svc.vendor || 'Unassigned'}</div>
+              </div>
+              <div className="shrink-0 flex flex-col items-end gap-1.5">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{serviceStatusText(svc.status || 'assigned', isInternal)}</span>
+                {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7" />}
+              </div>
+            </div>
           </div>
         </div>
       </header>
@@ -325,8 +330,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
         {doneStatus === 'submitted' ? (
           <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center">
             <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
-            <div className="font-heading font-extrabold text-lg text-ink">Submitted — AI Processing</div>
-            <p className="text-sm text-gray-500 mt-1">The AI reviews the photos, timing, and selections. If everything looks clean it moves to <b>Completed</b>; if anything needs a human it moves to <b>Review</b>.</p>
+            <div className="font-heading font-extrabold text-lg text-ink">{isInternal ? 'Submitted — AI Processing' : 'Submitted — Under Review'}</div>
+            <p className="text-sm text-gray-500 mt-1">{isInternal
+              ? <>The AI reviews the photos, timing, and selections. If everything looks clean it moves to <b>Completed</b>; if anything needs a human it moves to <b>Review</b>.</>
+              : <>Thanks — your completion was submitted and is now under review. You’ll see it move to <b>Completed</b> once it’s approved.</>}</p>
             <Link href="/services" className="inline-block mt-4 bg-brand text-white font-heading font-bold text-sm rounded-xl px-5 py-2.5">Back to Services</Link>
           </div>
         ) : doneStatus === 'queued' ? (
@@ -478,7 +485,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
                     <p className="text-[12px] text-gray-400 mt-1.5">Submitted by {svc.vendor || 'the vendor'} while completing a {worktypeLabel(svc.worktype)} service.</p>
                   </section>
                 )}
-                {(svc.aiVerdict || svc.aiNotes) && (
+                {isInternal && (svc.aiVerdict || svc.aiNotes) && (
                   <section className="bg-white border border-gray-200 rounded-2xl p-4">
                     <div className="flex items-center gap-2 mb-1">
                       <div className="font-heading font-bold text-[15px] text-ink">AI review</div>

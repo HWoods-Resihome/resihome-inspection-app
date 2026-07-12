@@ -88,6 +88,13 @@ export const SERVICE_STATUS_STYLE: Record<ServiceStatus, string> = {
   completed: 'bg-green-100 text-green-800 border-green-300',
   canceled: 'bg-gray-100 text-gray-500 border-gray-300 line-through',
 };
+// Status text as shown to a viewer. Vendors (external) never see the internal AI
+// step: a submitted service reads "Submitted - Under Review" for them; internal
+// users see "Submitted" (plus the internal-only AI Processing tag elsewhere).
+export function serviceStatusText(status: ServiceStatus | string, isInternal: boolean): string {
+  if (status === 'submitted' && !isInternal) return 'Submitted - Under Review';
+  return SERVICE_STATUS_LABEL[status as ServiceStatus] || String(status);
+}
 
 // Sample PROPERTY records for the rules-engine coverage drill-down (Portfolio →
 // Region → individual properties). Real data comes from the Property object later.

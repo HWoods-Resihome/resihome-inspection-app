@@ -11,7 +11,7 @@ import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
   SAMPLE_SERVICES, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY,
-  SERVICE_STATUS_LABEL as STATUS_LABEL, SERVICE_STATUS_STYLE as STATUS_STYLE,
+  SERVICE_STATUS_LABEL as STATUS_LABEL, SERVICE_STATUS_STYLE as STATUS_STYLE, serviceStatusText,
   type ServiceStatus, type SampleService,
 } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
@@ -291,8 +291,8 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
                     <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${s.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{s.scope === 'community' ? 'Community' : 'SFR'}</span>
                   </div>
                   <span className="shrink-0 inline-flex items-center gap-1">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>{STATUS_LABEL[s.status]}</span>
-                    {s.status === 'submitted' && <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold border bg-indigo-100 text-indigo-700 border-indigo-300">AI Processing</span>}
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>{serviceStatusText(s.status, isAdmin)}</span>
+                    {isAdmin && s.status === 'submitted' && <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold border bg-indigo-100 text-indigo-700 border-indigo-300">AI Processing</span>}
                   </span>
                 </div>
                 <div className="text-[12px] text-gray-500 truncate mt-0.5">{s.locality}{s.community ? ` · ${s.community}` : ''}</div>
