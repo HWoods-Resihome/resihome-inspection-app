@@ -40,6 +40,11 @@ interface ServiceView {
 }
 
 const EDITABLE = new Set(['', 'estimated', 'assigned']);
+// Standardized to mirror the inspection template: a section header is a black
+// bold title on a light-grey band across the top of its white card; question
+// labels within a section are black bold (photo group labels stay grey-uppercase).
+const SECTION_HEAD = '-mx-4 -mt-4 mb-4 px-4 py-2.5 bg-gray-50 border-b border-gray-200 rounded-t-2xl font-heading font-bold text-[15px] text-ink';
+const Q_LABEL = 'block text-sm font-heading font-bold text-ink mb-1.5';
 const splitUrls = (v: any): string[] => String(v || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
 const num = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 const normDate = (v: any): string => {
@@ -141,9 +146,9 @@ function CameraPhotos({ label, required, urls, onChange, address, propertyRecord
   return (
     <div>
       <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">{label}{required && <span className="text-brand"> *</span>}</div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2">
+      <div className="flex flex-wrap gap-2">
         {urls.map((u, i) => (
-          <div key={`${u}-${i}`} className="relative aspect-square rounded-lg overflow-hidden border border-gray-300 bg-gray-100">
+          <div key={`${u}-${i}`} className="relative w-20 h-20 rounded-lg overflow-hidden border border-gray-300 bg-gray-100">
             <PhotoThumb url={u} alt={`${label} ${i + 1}`} className="w-full h-full object-cover" />
             {u.startsWith('blob:') && <span className="absolute bottom-0.5 left-0.5 text-[9px] font-bold text-white bg-black/55 rounded px-1">syncing</span>}
             <button type="button" onClick={() => onChange(urls.filter((_, j) => j !== i))}
@@ -151,7 +156,7 @@ function CameraPhotos({ label, required, urls, onChange, address, propertyRecord
           </div>
         ))}
         <button type="button" onClick={() => setOpen(true)} aria-label={`Add ${label}${needsFirst ? ' (required)' : ' (optional)'}`}
-          className={`aspect-square rounded-lg border-2 border-dashed flex items-center justify-center text-2xl transition-colors ${addTileCls}`}>+</button>
+          className={`w-20 h-20 rounded-lg border-2 border-dashed flex items-center justify-center text-2xl transition-colors ${addTileCls}`}>+</button>
       </div>
       <CameraCapture isOpen={open} onClose={() => setOpen(false)} uploadPhoto={upload}
         addressSnapshot={address} propertyRecordId={propertyRecordId || undefined}
@@ -165,10 +170,10 @@ function PhotoGrid({ label, urls, onOpen }: { label: string; urls: string[]; onO
   return (
     <div>
       <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">{label}</div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2">
+      <div className="flex flex-wrap gap-2">
         {urls.map((u, i) => (
           <button key={`${u}-${i}`} type="button" onClick={() => onOpen(i)}
-            className="aspect-square rounded-lg overflow-hidden border border-gray-300 bg-gray-100 cursor-zoom-in">
+            className="w-20 h-20 rounded-lg overflow-hidden border border-gray-300 bg-gray-100 cursor-zoom-in">
             <PhotoThumb url={u} alt={`${label} ${i + 1}`} className="w-full h-full object-cover" />
           </button>
         ))}
@@ -255,7 +260,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
   const cell = 'text-[12px] tabular-nums';
   return (
     <section className="bg-white border-2 border-brand/30 rounded-2xl p-4 space-y-3">
-      <div className="font-heading font-bold text-[15px] text-ink">Your Decision</div>
+      <div className={SECTION_HEAD}>Your Decision</div>
       <div className="grid grid-cols-3 gap-2">
         {options.map(([val, label, hint, tone]) => {
           const on = decision === val;
@@ -646,7 +651,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   // mini-table below, so this stays the plain saved figures.
   const costDetail = svc.vendorCost != null ? (
     <section className="bg-white border border-gray-200 rounded-2xl p-4">
-      <div className="font-heading font-bold text-[15px] text-ink mb-2">Cost Detail</div>
+      <div className={SECTION_HEAD}>Cost Detail</div>
       <div className="space-y-1 text-[13px]">
         <div className="flex justify-between"><span className="text-gray-500">Vendor Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.vendorCost)}</span></div>
         {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
@@ -777,16 +782,16 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
               /* ── Editable completion form (assigned crew) ── */
               <>
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
-                  <div className="font-heading font-bold text-[15px] text-ink">Completion Checklist</div>
+                  <div className={SECTION_HEAD}>Completion Checklist</div>
                   {form.length === 0 && <div className="text-[13px] text-gray-400">No completion form is configured for this service type yet.</div>}
                   {form.filter(isVisible).map((q) => (
                     <div key={q.id}>
-                      <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">{q.label}{q.required && <span className="text-brand"> *</span>}</label>
+                      <label className={Q_LABEL}>{q.label}{q.required && <span className="text-brand"> *</span>}</label>
                       {q.type === 'yesno' && (
                         <div className="flex gap-2">
                           {(['yes', 'no'] as const).map((v) => (
                             <button key={v} type="button" onClick={() => setAns(q.id, v)}
-                              className={`px-5 py-2 rounded-full border text-sm font-heading font-semibold ${answers[q.id] === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{v === 'yes' ? 'Yes' : 'No'}</button>
+                              className={`px-4 py-1.5 rounded-full border text-[13px] font-heading font-semibold ${answers[q.id] === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{v === 'yes' ? 'Yes' : 'No'}</button>
                           ))}
                         </div>
                       )}
@@ -794,7 +799,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                         <div className="flex flex-wrap gap-2">
                           {(q.options || []).map((o) => (
                             <button key={o.id} type="button" onClick={() => setAns(q.id, o.label)}
-                              className={`px-3.5 py-2 rounded-full border text-[13px] font-heading font-semibold ${answers[q.id] === o.label ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
+                              className={`px-3 py-1.5 rounded-full border text-[13px] font-heading font-semibold ${answers[q.id] === o.label ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
                           ))}
                         </div>
                       )}
@@ -806,7 +811,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                             return (
                               <button key={o.id} type="button"
                                 onClick={() => setAns(q.id, on ? sel.filter((x) => x !== o.label) : [...sel, o.label])}
-                                className={`px-3.5 py-2 rounded-full border text-[13px] font-heading font-semibold ${on ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
+                                className={`px-3 py-1.5 rounded-full border text-[13px] font-heading font-semibold ${on ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
                             );
                           })}
                         </div>
@@ -838,7 +843,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 </section>
 
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
-                  <div className="font-heading font-bold text-[15px] text-ink">Photos</div>
+                  <div className={SECTION_HEAD}>Photos</div>
                   {notCompleted && <p className="text-[12px] text-gray-500 -mt-2">Before/After photos aren’t required since the service wasn’t completed — add any that show why, if helpful.</p>}
                   <CameraPhotos label="Before photos" required={!notCompleted} urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                   <CameraPhotos label="After photos" required={!notCompleted} urls={after} onChange={setAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
@@ -853,7 +858,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
                 {/* Additional-work bid — spawns an Estimated "Bid Item" for review. */}
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3">
-                  <div className="font-heading font-bold text-[15px] text-ink">Submit Separate Bid Item Request</div>
+                  <div className={SECTION_HEAD}>Submit Separate Bid Item Request</div>
                   <p className="text-[13px] text-gray-500 -mt-1">Have additional items that need a separate bid? Flag here — the office will review the bid separately.</p>
                   <div className="flex gap-2">
                     {([['no', 'No'], ['yes', 'Yes — submit a bid']] as const).map(([v, label]) => (
@@ -864,11 +869,11 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   {bidWanted && (
                     <div className="space-y-3 border-t border-gray-100 pt-3">
                       <div>
-                        <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">What’s the additional work? <span className="text-brand">*</span></label>
+                        <label className={Q_LABEL}>What’s the additional work? <span className="text-brand">*</span></label>
                         <AutoGrowTextarea value={bidDesc} onChange={(e) => setBidDesc(e.target.value)} minPx={64} className={inputCls} placeholder="Describe the extra work needed…" />
                       </div>
                       <div>
-                        <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">Your bid (vendor cost) <span className="text-brand">*</span></label>
+                        <label className={Q_LABEL}>Your bid (vendor cost) <span className="text-brand">*</span></label>
                         <div className="relative w-40">
                           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                           <input type="number" inputMode="decimal" value={bidCost} onChange={(e) => setBidCost(e.target.value)} onBlur={() => setBidCost(fmt2(bidCost))} className="w-full text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" placeholder="0.00" />
@@ -893,15 +898,15 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
               <>
                 {svc.isBidItem && svc.description && (
                   <section className="bg-white border border-gray-200 rounded-2xl p-4">
-                    <div className="font-heading font-bold text-[15px] text-ink mb-1">Bid request</div>
+                    <div className={SECTION_HEAD}>Bid request</div>
                     <p className="text-[13px] text-gray-700 whitespace-pre-line">{svc.description}</p>
                     <p className="text-[12px] text-gray-400 mt-1.5">Submitted by {svc.vendor || 'the vendor'} while completing a {worktypeLabel(svc.worktype)} service.</p>
                   </section>
                 )}
                 {isInternal && (svc.aiVerdict || svc.aiNotes) && (
                   <section className="bg-white border border-gray-200 rounded-2xl p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="font-heading font-bold text-[15px] text-ink">AI review</div>
+                    <div className={`${SECTION_HEAD} flex items-center gap-2`}>
+                      <div>AI review</div>
                       {svc.aiVerdict && chip(svc.aiVerdict === 'clean' ? 'Clean' : 'Needs review', svc.aiVerdict === 'clean' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}
                     </div>
                     {svc.aiNotes && <AiNotes text={svc.aiNotes} />}
@@ -910,7 +915,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
                 {Object.keys(svc.answers).length > 0 && (
                   <section className="bg-white border border-gray-200 rounded-2xl p-4">
-                    <div className="font-heading font-bold text-[15px] text-ink mb-2">Answers</div>
+                    <div className={SECTION_HEAD}>Answers</div>
                     <dl className="space-y-2">
                       {form.map((q) => {
                         if (svc.answers[q.id] == null || svc.answers[q.id] === '') return null;
@@ -942,7 +947,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 )}
 
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
-                  <div className="font-heading font-bold text-[15px] text-ink">Photos <span className="text-[11px] font-normal text-gray-400">— tap a photo to enlarge</span></div>
+                  <div className={SECTION_HEAD}>Photos <span className="text-[11px] font-normal text-gray-400">— tap a photo to enlarge</span></div>
                   <PhotoGrid label={svc.isBidItem ? 'Bid photos' : 'Before photos'} urls={svc.before} onOpen={(i) => setLightbox({ groupId: 'before', index: i })} />
                   {!svc.isBidItem && <PhotoGrid label="After photos" urls={svc.after} onOpen={(i) => setLightbox({ groupId: 'after', index: i })} />}
                   {!svc.isBidItem && <PhotoGrid label="Pet station — before" urls={svc.petBefore} onOpen={(i) => setLightbox({ groupId: 'petBefore', index: i })} />}
