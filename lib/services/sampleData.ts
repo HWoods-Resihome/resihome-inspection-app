@@ -59,6 +59,14 @@ export const SAMPLE_COMMUNITIES: { name: string; locality: string }[] = [
 // due dates (real code uses the actual date).
 export const REFERENCE_TODAY = '2026-07-18';
 
+// Today's date (YYYY-MM-DD) in Eastern time — the business timezone. Using this
+// instead of a UTC date keeps a service due "today" from flipping to past-due
+// after UTC midnight while it's still the prior day on the East Coast.
+export const easternTodayISO = (): string => {
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date()); }
+  catch { return new Date().toISOString().slice(0, 10); }
+};
+
 export const SAMPLE_SERVICES: SampleService[] = [
   { id: 'S-1041', scope: 'property',  address: '935 River Glen Pl',  locality: 'Riverdale, GA 30296', portfolio: 'Amherst Sunbelt', region: 'GA: Atlanta',  worktype: 'landscaping', subtype: 'cut',          status: 'estimated',   propertyStatus: 'Vacant',           vendor: 'GreenBlade Lawn Co.', dueDate: '2026-07-22', lat: 33.573, lng: -84.413 },
   { id: 'S-1042', scope: 'property',  address: '7558 Woodbine Pl',   locality: 'Riverdale, GA 30296', portfolio: 'Amherst Sunbelt', region: 'GA: Atlanta',  worktype: 'landscaping', subtype: 'cut',          status: 'assigned',  propertyStatus: 'Pending MOI/Rekey', vendor: 'GreenBlade Lawn Co.', dueDate: '2026-07-19', lat: 33.560, lng: -84.405 },

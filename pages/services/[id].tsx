@@ -8,7 +8,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
-import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, type ServiceStatus } from '@/lib/services/sampleData';
+import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, easternTodayISO, type ServiceStatus } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
 import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
 import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
@@ -347,7 +347,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   // Past-due (open statuses only) — turns the header Due date red, like the home list.
   // Past-due against the REAL today for live records (sample preview keeps its
   // fixed reference date). Strict "<" so a service due TODAY is still on-time.
-  const todayISO = svc.live ? new Date().toISOString().slice(0, 10) : REFERENCE_TODAY;
+  const todayISO = svc.live ? easternTodayISO() : REFERENCE_TODAY;
   const overdue = ['estimated', 'assigned', 'submitted', 'review'].includes(svc.status) && !!svc.dueDate && svc.dueDate < todayISO;
   // Resting display for a $ input: pad to 2 decimals on blur (e.g. "250" → "250.00").
   const fmt2 = (v: string): string => { const n = Number(v); return v.trim() !== '' && Number.isFinite(n) ? n.toFixed(2) : v; };

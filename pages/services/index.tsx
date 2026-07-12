@@ -13,7 +13,7 @@ import { ListPicker } from '@/components/ListPicker';
 import { AiSparkle } from '@/components/AiSparkle';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
-  SAMPLE_SERVICES, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY,
+  SAMPLE_SERVICES, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY, easternTodayISO,
   SERVICE_STATUS_LABEL as STATUS_LABEL, SERVICE_STATUS_STYLE as STATUS_STYLE, serviceStatusText, fmtMDY,
   type ServiceStatus, type SampleService,
 } from '@/lib/services/sampleData';
@@ -125,7 +125,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   // Past-due is measured against the REAL today for live data (the sample preview
   // keeps its fixed reference date). Strict "<" so a service due TODAY is still
   // on-time — it only goes red once at least a day past due.
-  const todayISO = useMemo(() => (live ? new Date().toISOString().slice(0, 10) : REFERENCE_TODAY), [live]);
+  const todayISO = useMemo(() => (live ? easternTodayISO() : REFERENCE_TODAY), [live]);
   const [status, setStatus] = useState<ServiceStatus | 'all'>('all');
   const [worktype, setWorktype] = useState<string[]>([]);
   const [vendor, setVendor] = useState<string[]>([]);
