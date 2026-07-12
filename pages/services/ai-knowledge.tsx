@@ -4,6 +4,7 @@ import type { GetServerSideProps } from 'next';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { MultiFilter } from '@/components/MultiFilter';
+import { FIELD_LABEL } from '@/components/formStyles';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { SAMPLE_AI_CHECKS, newCheck, type AiCheck } from '@/lib/services/aiKnowledge';
 
@@ -14,7 +15,7 @@ export const getServerSideProps: GetServerSideProps = async () => ({
   redirect: { destination: '/ai-knowledge?tab=services', permanent: false },
 });
 
-const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
+const lbl = FIELD_LABEL;
 const trig = 'w-full flex items-center justify-between gap-2 text-[13px] border border-gray-300 rounded-lg px-2.5 py-2 bg-white text-ink';
 const scopeLabel = (c: AiCheck) =>
   `${c.worktype ? worktypeLabel(c.worktype) : 'All Work Types'} · ${c.subtype ? subtypeLabel(c.worktype, c.subtype) : 'All Subtypes'}`;

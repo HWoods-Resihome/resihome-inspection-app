@@ -3,6 +3,7 @@ import Link from 'next/link';
 import type { GetServerSideProps } from 'next';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
+import { FIELD_LABEL } from '@/components/formStyles';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
   ANSWER_TYPES, SAMPLE_FORMS, formKey, newQuestion, newOption, answerTypeLabel, hasOptions,
@@ -16,7 +17,7 @@ export const getServerSideProps: GetServerSideProps = async () => ({
   redirect: { destination: '/admin/forms?tab=services', permanent: false },
 });
 
-const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
+const lbl = FIELD_LABEL;
 const trig = 'w-full flex items-center justify-between gap-2 text-[13px] border border-gray-300 rounded-lg px-2.5 py-2 bg-white text-ink';
 
 // One-line summary under a collapsed question (mirrors the inspection builder).

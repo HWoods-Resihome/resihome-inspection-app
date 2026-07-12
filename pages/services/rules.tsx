@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
+import { FIELD_LABEL } from '@/components/formStyles';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -568,7 +569,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
   }, [rule?.recordId, canGenerate, wcReload]);
 
   const sec = 'bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 shadow-sm';
-  const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
+  const lbl = FIELD_LABEL;
   const ctl = 'text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg bg-white text-ink';
   // Branded ListPicker trigger — replaces the native grey <select> boxes.
   const pick = 'text-[13px] px-2.5 py-1.5 border border-gray-300 rounded-lg bg-white text-ink flex items-center justify-between gap-1';
