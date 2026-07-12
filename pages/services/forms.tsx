@@ -226,7 +226,8 @@ function QuestionEditor({ q, onPatch, onClose, onDelete }: {
                 <div key={o.id} className="flex flex-nowrap items-center gap-1.5">
                   <input value={o.label} onChange={(e) => setOpt({ label: e.target.value })} placeholder="Option label…"
                     className="flex-1 min-w-0 text-[13px] border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white text-ink focus:outline-none focus:border-brand" />
-                  <ListPicker value={o.priceMode} ariaLabel="Price effect" className={`${trig} w-28 shrink-0`}
+                  <ListPicker value={o.priceMode} ariaLabel="Price effect"
+                    className="w-28 shrink-0 flex items-center justify-between gap-1 text-[13px] border border-gray-300 rounded-lg px-2 py-2 bg-white text-ink"
                     options={[{ value: 'none', label: 'No price' }, { value: 'delta', label: '+/− vendor $' }, { value: 'set', label: 'Set vendor $' }]}
                     onChange={(v) => setOpt({ priceMode: v as QuestionOption['priceMode'] })} />
                   {o.priceMode !== 'none' && (
