@@ -141,7 +141,7 @@ function CameraPhotos({ label, required, urls, onChange, address, propertyRecord
   return (
     <div>
       <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">{label}{required && <span className="text-brand"> *</span>}</div>
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2">
         {urls.map((u, i) => (
           <div key={`${u}-${i}`} className="relative aspect-square rounded-lg overflow-hidden border border-gray-300 bg-gray-100">
             <PhotoThumb url={u} alt={`${label} ${i + 1}`} className="w-full h-full object-cover" />
@@ -165,7 +165,7 @@ function PhotoGrid({ label, urls, onOpen }: { label: string; urls: string[]; onO
   return (
     <div>
       <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">{label}</div>
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2">
         {urls.map((u, i) => (
           <button key={`${u}-${i}`} type="button" onClick={() => onOpen(i)}
             className="aspect-square rounded-lg overflow-hidden border border-gray-300 bg-gray-100 cursor-zoom-in">
@@ -853,8 +853,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
                 {/* Additional-work bid — spawns an Estimated "Bid Item" for review. */}
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3">
-                  <div className="font-heading font-bold text-[15px] text-ink">Additional work needed?</div>
-                  <p className="text-[13px] text-gray-500 -mt-1">Found extra work that needs a separate bid (e.g. a downed tree)? Flag it here — it becomes its own bid for the office to review.</p>
+                  <div className="font-heading font-bold text-[15px] text-ink">Submit Separate Bid Item Request</div>
+                  <p className="text-[13px] text-gray-500 -mt-1">Have additional items that need a separate bid? Flag here — the office will review the bid separately.</p>
                   <div className="flex gap-2">
                     {([['no', 'No'], ['yes', 'Yes — submit a bid']] as const).map(([v, label]) => (
                       <button key={v} type="button" onClick={() => setBidWanted(v === 'yes')}
