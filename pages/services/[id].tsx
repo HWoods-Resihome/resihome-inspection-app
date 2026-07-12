@@ -202,6 +202,141 @@ function AiNotes({ text }: { text: string }) {
   return <div className="space-y-2">{out}</div>;
 }
 
+interface DecisionPayload { decision: 'approve' | 'modify' | 'reject'; vendorCost: number; markupPct: number; dueDays: number; notes: string; }
+
+// Shared reviewer decision panel — used for BOTH the completion review (kind
+// 'review' → Completed) and the estimated bid review (kind 'bid' → Assigned, with
+// a days-until-due). Three options in one row (Approve / Modify / Reject) with
+// short one-line hints; Modify shows a borderless mini-table of New / Original /
+// Difference across Vendor · Markup · Client. All decisions require a note.
+function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
+  kind: 'review' | 'bid';
+  orig: { vendor: number; markup: number; client: number };
+  busy: boolean; error: string;
+  onSubmit: (p: DecisionPayload) => void;
+}) {
+  const [decision, setDecision] = useState<'' | 'approve' | 'modify' | 'reject'>('');
+  const [vc, setVc] = useState(orig.vendor ? orig.vendor.toFixed(2) : '0.00');
+  const [mk, setMk] = useState(String(orig.markup || 0));
+  const [days, setDays] = useState('5');
+  const [notes, setNotes] = useState('');
+  const money = (n: number) => `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmt2 = (v: string) => { const n = Number(v); return v.trim() !== '' && Number.isFinite(n) ? n.toFixed(2) : v; };
+  const inputCls = 'w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand';
+
+  const needsDays = kind === 'bid' && (decision === 'approve' || decision === 'modify');
+  const newVendor = decision === 'modify' ? Number(vc || '0') : orig.vendor;
+  const newMarkup = decision === 'modify' ? Number(mk || '0') : orig.markup;
+  const newClient = (kind === 'review' && decision === 'reject') ? 0 : Math.round(newVendor * (1 + newMarkup / 100) * 100) / 100;
+  const target = kind === 'bid' ? 'Assigned' : 'Completed';
+  const hints = kind === 'bid'
+    ? { approve: 'Assign as-is', modify: 'Edit pricing', reject: 'Cancel bid' }
+    : { approve: 'Complete as-is', modify: 'Edit pricing', reject: 'Deny — $0' };
+  const canSubmit = !!decision && !!notes.trim() && (!needsDays || Number(days) > 0) && !busy;
+
+  const diffCls = (d: number) => d > 0 ? 'text-emerald-600' : d < 0 ? 'text-red-600' : 'text-gray-400';
+  const signMoney = (d: number) => `${d > 0 ? '+' : d < 0 ? '−' : ''}$${Math.abs(d).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const signPct = (d: number) => d === 0 ? '0%' : `${d > 0 ? '+' : '−'}${Math.abs(d)}%`;
+
+  const options = [
+    ['approve', 'Approve', hints.approve, 'emerald'],
+    ['modify', 'Modify', hints.modify, 'amber'],
+    ['reject', 'Reject', hints.reject, 'red'],
+  ] as const;
+  const submitLabel = decision === 'reject' ? (kind === 'bid' ? 'Reject → Canceled' : 'Reject → Completed')
+    : decision === 'modify' ? `Save Changes → ${target}`
+    : decision === 'approve' ? `Approve → ${target}`
+    : 'Choose a decision above';
+
+  const cell = 'text-[12px] tabular-nums';
+  return (
+    <section className="bg-white border-2 border-brand/30 rounded-2xl p-4 space-y-3">
+      <div className="font-heading font-bold text-[15px] text-ink">Your Decision</div>
+      <div className="grid grid-cols-3 gap-2">
+        {options.map(([val, label, hint, tone]) => {
+          const on = decision === val;
+          const onCls = tone === 'red' ? 'bg-red-600 text-white border-red-600' : tone === 'amber' ? 'bg-amber-500 text-white border-amber-500' : 'bg-emerald-600 text-white border-emerald-600';
+          return (
+            <button key={val} type="button" onClick={() => setDecision(val)}
+              className={`rounded-xl py-2 px-1 border text-center transition ${on ? onCls : 'bg-white text-gray-700 border-gray-300 hover:border-brand/50'}`}>
+              <div className="font-heading font-bold text-sm">{label}</div>
+              <div className={`text-[10px] leading-tight mt-0.5 ${on ? 'text-white/85' : 'text-gray-400'}`}>{hint}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Modify → borderless mini-table: New (editable) / Original / Difference. */}
+      {decision === 'modify' && (
+        <div className="border-t border-gray-100 pt-3">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-2">Revised pricing</div>
+          <div className="grid grid-cols-[64px_1fr_1fr_1fr] gap-x-2 gap-y-1.5 items-center">
+            <div />
+            <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 text-center">Vendor</div>
+            <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 text-center">Markup</div>
+            <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 text-right">Client</div>
+
+            <div className="text-[12px] text-gray-500">New</div>
+            <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+              <input type="number" inputMode="decimal" value={vc} onChange={(e) => setVc(e.target.value)} onBlur={() => setVc(fmt2(vc))}
+                className="w-full text-[13px] border border-gray-300 rounded-lg pl-5 pr-1.5 py-1.5 bg-white focus:outline-none focus:border-brand text-center tabular-nums" /></div>
+            <div className="relative"><input type="number" inputMode="decimal" value={mk} onChange={(e) => setMk(e.target.value)}
+                className="w-full text-[13px] border border-gray-300 rounded-lg pl-2 pr-4 py-1.5 bg-white focus:outline-none focus:border-brand text-center tabular-nums" /><span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span></div>
+            <div className="text-right text-[13px] font-bold text-ink tabular-nums">{money(newClient)}</div>
+
+            <div className="text-[12px] text-gray-400">Original</div>
+            <div className={`${cell} text-gray-400 text-center`}>{money(orig.vendor)}</div>
+            <div className={`${cell} text-gray-400 text-center`}>{orig.markup}%</div>
+            <div className={`${cell} text-gray-400 text-right`}>{money(orig.client)}</div>
+
+            <div className="text-[12px] text-gray-400">Difference</div>
+            <div className={`${cell} text-center ${diffCls(newVendor - orig.vendor)}`}>{signMoney(newVendor - orig.vendor)}</div>
+            <div className={`${cell} text-center ${diffCls(newMarkup - orig.markup)}`}>{signPct(newMarkup - orig.markup)}</div>
+            <div className={`${cell} text-right ${diffCls(newClient - orig.client)}`}>{signMoney(newClient - orig.client)}</div>
+          </div>
+        </div>
+      )}
+
+      {decision === 'approve' && (
+        <div className="border-t border-gray-100 pt-3 text-[13px] text-gray-500">
+          Keeps current pricing — Vendor <b className="text-ink tabular-nums">{money(orig.vendor)}</b>{kind === 'bid' ? '' : <> · Client <b className="text-ink tabular-nums">{money(orig.client)}</b></>}.
+        </div>
+      )}
+      {decision === 'reject' && (
+        <div className="border-t border-gray-100 pt-3 text-[13px] text-red-700 font-semibold">
+          {kind === 'bid' ? 'This bid will be Canceled.' : 'Vendor payout will be set to $0 and the service closed out.'}
+        </div>
+      )}
+
+      {needsDays && (
+        <div className="flex items-center gap-2">
+          <span className="text-[13px] text-gray-500">Days until due <span className="text-brand">*</span></span>
+          <input type="number" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)}
+            className="w-16 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-brand" />
+        </div>
+      )}
+
+      {/* Notes — below the options; required for every decision. */}
+      <div>
+        <label className="block text-[12px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">Decision note <span className="text-brand">*</span></label>
+        <AutoGrowTextarea value={notes} onChange={(e) => setNotes(e.target.value)} minPx={64} className={inputCls}
+          placeholder="Required — the reason for this decision (visible on the record)…" />
+      </div>
+
+      <button type="button" disabled={!canSubmit}
+        onClick={() => canSubmit && onSubmit({ decision: decision as DecisionPayload['decision'], vendorCost: Number(vc || '0'), markupPct: Number(mk || '0'), dueDays: Number(days || '0'), notes })}
+        className={`w-full rounded-xl py-3 font-heading font-bold text-sm ${
+          !canSubmit ? 'bg-gray-200 text-gray-400'
+            : decision === 'reject' ? 'bg-red-600 text-white' : decision === 'modify' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'}`}>
+        {busy ? '…' : submitLabel}
+      </button>
+      {decision && !notes.trim() && <div className="text-[12px] text-gray-400 text-center -mt-1">A decision note is required to finalize.</div>}
+      {needsDays && !(Number(days) > 0) && <div className="text-[12px] text-gray-400 text-center -mt-1">Enter the days until due.</div>}
+      {error && <div className="text-center text-xs text-red-600">{error}</div>}
+    </section>
+  );
+}
+
 export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta, asVendor }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null; asVendor: boolean }) {
   const router = useRouter();
   // Bid items are never crew-completed here — they go straight to internal bid review.
@@ -376,25 +511,21 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     finally { setSubmitting(false); }
   };
 
-  // ── Review (approve / modify / reject) state ──
-  // Three terminal decisions, ALL require a note. Approve keeps pricing; Modify
-  // edits vendor cost + markup (client cost recomputed) and resubmits; Reject
-  // denies payment (vendor + client → $0). All close the order to Completed.
+  // ── Review / bid decisions (shared DecisionPanel) ──
+  // Both use the SAME three options (Approve / Modify / Reject), all requiring a
+  // note. Completion review (status=review) closes to Completed; bid review
+  // (estimated bid item) moves Approve/Modify to Assigned (both need days-until-
+  // due) and Reject to Canceled.
   const origCost = svc.vendorCost ?? 0;
   const markupPct = svc.markupPct ?? 0;
-  const [reviewNotes, setReviewNotes] = useState('');
-  const [decisionMode, setDecisionMode] = useState<'' | 'approve' | 'modify' | 'reject'>('');
-  const [modCost, setModCost] = useState(origCost ? origCost.toFixed(2) : '0.00');       // modify: revised vendor payout
-  const [modMarkup, setModMarkup] = useState(String(markupPct));                          // modify: revised markup %
+  const origClient = svc.clientCost ?? Math.round(origCost * (1 + markupPct / 100) * 100) / 100;
   const [deciding, setDeciding] = useState(false);
 
-  const decide = async () => {
-    if (!decisionMode) { setError('Choose Approve, Modify, or Reject.'); return; }
-    if (!reviewNotes.trim()) { setError('A decision note is required.'); return; }
+  const submitReview = async (p: DecisionPayload) => {
     setDeciding(true); setError('');
     try {
-      const body: any = { decision: decisionMode, notes: reviewNotes };
-      if (decisionMode === 'modify') { body.vendorCost = Number(modCost || '0'); body.markupPct = Number(modMarkup || '0'); }
+      const body: any = { decision: p.decision, notes: p.notes };
+      if (p.decision === 'modify') { body.vendorCost = p.vendorCost; body.markupPct = p.markupPct; }
       const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/review-decision`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
@@ -405,19 +536,11 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     finally { setDeciding(false); }
   };
 
-  // ── Bid-item review state (Estimated bid → approve→Assigned / reject→Canceled) ──
-  const [bidNotes, setBidNotes] = useState('');
-  const [bidRejecting, setBidRejecting] = useState(false);
-  const [bidVC, setBidVC] = useState(origCost ? origCost.toFixed(2) : '0.00');
-  const [bidMarkup, setBidMarkup] = useState(String(markupPct));
-  const [bidDueDays, setBidDueDays] = useState('5');
-  const [bidDeciding, setBidDeciding] = useState(false);
-  const bidDecide = async (decision: 'approve' | 'reject') => {
-    if (decision === 'reject' && !bidNotes.trim()) { setError('Add a note to reject this bid.'); return; }
-    setBidDeciding(true); setError('');
+  const submitBid = async (p: DecisionPayload) => {
+    setDeciding(true); setError('');
     try {
-      const body: any = { decision, notes: bidNotes };
-      if (decision === 'approve') { body.vendorCost = Number(bidVC); body.markupPct = Number(bidMarkup); body.dueDays = Number(bidDueDays); }
+      const body: any = { decision: p.decision, notes: p.notes };
+      if (p.decision !== 'reject') { body.vendorCost = p.vendorCost; body.markupPct = p.markupPct; body.dueDays = p.dueDays; }
       const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/bid-decision`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
@@ -425,7 +548,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       if (!r.ok) { setError(d.error || 'Could not save decision.'); return; }
       setDoneStatus('decided');
     } catch { setError('Couldn’t reach the server. Try again.'); }
-    finally { setBidDeciding(false); }
+    finally { setDeciding(false); }
   };
 
   const inputCls = 'w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand';
@@ -477,26 +600,16 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   };
 
   // Cost Detail — its own section (after Photos). Vendor Cost is visible to all;
-  // Markup % and Client Cost are internal-only (vendors never see them). While a
-  // reviewer is deciding (Modify → edited figures; Reject → $0), this reflects the
-  // outcome live.
-  const modifyEditing = canReview && decisionMode === 'modify';
-  const rejectPreview = canReview && decisionMode === 'reject';
-  const bidEditing = canBidReview && !bidRejecting;   // reviewer editing a bid's price live
-  const adjusting = modifyEditing || rejectPreview || bidEditing;
-  const shownVendorCost = modifyEditing ? Number(modCost) : rejectPreview ? 0 : bidEditing ? Number(bidVC) : svc.vendorCost;
-  const shownMarkup = modifyEditing ? Number(modMarkup) : bidEditing ? Number(bidMarkup) : (svc.markupPct ?? markupPct);
-  const shownClientCost = modifyEditing ? Math.round(Number(modCost) * (1 + Number(modMarkup) / 100) * 100) / 100
-    : rejectPreview ? 0
-    : bidEditing ? Math.round(Number(bidVC) * (1 + Number(bidMarkup) / 100) * 100) / 100
-    : svc.clientCost;
+  // Markup % and Client Cost are internal-only (vendors never see them). A
+  // reviewer deciding sees the live New/Original/Difference in the DecisionPanel's
+  // mini-table below, so this stays the plain saved figures.
   const costDetail = svc.vendorCost != null ? (
     <section className="bg-white border border-gray-200 rounded-2xl p-4">
-      <div className="font-heading font-bold text-[15px] text-ink mb-2">Cost Detail{adjusting && <span className="text-[11px] font-normal text-brand"> · adjusted</span>}</div>
+      <div className="font-heading font-bold text-[15px] text-ink mb-2">Cost Detail</div>
       <div className="space-y-1 text-[13px]">
-        <div className="flex justify-between"><span className="text-gray-500">Vendor Cost</span><span className="font-semibold text-ink tabular-nums">{money(shownVendorCost)}</span></div>
-        {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{Number.isFinite(shownMarkup) ? shownMarkup : svc.markupPct}%</span></div>}
-        {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(shownClientCost)}</span></div>}
+        <div className="flex justify-between"><span className="text-gray-500">Vendor Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.vendorCost)}</span></div>
+        {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{svc.markupPct}%</span></div>}
+        {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(svc.clientCost)}</span></div>}
       </div>
     </section>
   ) : null;
@@ -766,44 +879,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 {costDetail}
 
                 {canBidReview && (
-                  <section className="bg-white border-2 border-brand/30 rounded-2xl p-4 space-y-3">
-                    <div className="font-heading font-bold text-[15px] text-ink">Bid review</div>
-                    <AutoGrowTextarea value={bidNotes} onChange={(e) => setBidNotes(e.target.value)} minPx={52} className={inputCls}
-                      placeholder={bidRejecting ? 'Reason — required to reject (visible on the record)…' : 'Notes for this decision (optional)…'} />
-                    {!bidRejecting ? (
-                      <>
-                        <div className="border-t border-gray-100 pt-3 space-y-2">
-                          <div className="text-[12px] font-bold uppercase tracking-wide text-gray-400">Pricing (edit before approving)</div>
-                          <div className="flex flex-wrap items-center gap-3">
-                            <label className="flex items-center gap-1.5 text-[13px] text-gray-500">Vendor cost
-                              <span className="relative"><span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                              <input type="number" inputMode="decimal" value={bidVC} onChange={(e) => setBidVC(e.target.value)} onBlur={() => setBidVC(fmt2(bidVC))} className="w-24 text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" /></span>
-                            </label>
-                            <label className="flex items-center gap-1.5 text-[13px] text-gray-500">Markup
-                              <span className="relative"><input type="number" inputMode="decimal" value={bidMarkup} onChange={(e) => setBidMarkup(e.target.value)} className="w-16 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-brand" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span></span>
-                            </label>
-                            <span className="text-[13px] text-gray-500">Client <b className="text-ink tabular-nums">{money(Math.round(Number(bidVC || '0') * (1 + Number(bidMarkup || '0') / 100) * 100) / 100)}</b></span>
-                          </div>
-                          <label className="flex items-center gap-1.5 text-[13px] text-gray-500">Days until due
-                            <input type="number" inputMode="numeric" value={bidDueDays} onChange={(e) => setBidDueDays(e.target.value)} className="w-16 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-brand" />
-                          </label>
-                        </div>
-                        <div className="flex gap-2">
-                          <button type="button" disabled={bidDeciding} onClick={() => bidDecide('approve')}
-                            className="flex-1 rounded-xl py-3 font-heading font-bold text-sm bg-emerald-600 text-white disabled:opacity-50">{bidDeciding ? '…' : 'Approve → Assigned'}</button>
-                          <button type="button" disabled={bidDeciding} onClick={() => setBidRejecting(true)}
-                            className="flex-1 rounded-xl py-3 font-heading font-bold text-sm bg-white text-red-600 border border-red-300">Reject…</button>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex gap-2 border-t border-gray-100 pt-3">
-                        <button type="button" onClick={() => setBidRejecting(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
-                        <button type="button" disabled={bidDeciding || !bidNotes.trim()} onClick={() => bidDecide('reject')}
-                          className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-red-600 text-white disabled:opacity-50">{bidDeciding ? '…' : 'Reject bid → Canceled'}</button>
-                      </div>
-                    )}
-                    {error && <div className="text-center text-xs text-red-600">{error}</div>}
-                  </section>
+                  <DecisionPanel kind="bid" orig={{ vendor: origCost, markup: markupPct, client: origClient }} busy={deciding} error={error} onSubmit={submitBid} />
                 )}
 
                 {svc.reviewDecision && (
@@ -820,68 +896,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 )}
 
                 {canReview && (
-                  <section className="bg-white border-2 border-brand/30 rounded-2xl p-4 space-y-3">
-                    <div className="font-heading font-bold text-[15px] text-ink">Your Decision</div>
-                    {/* Three options — all close the order to Completed. */}
-                    <div className="grid grid-cols-3 gap-2">
-                      {([
-                        ['approve', 'Approve', 'Straight to Completed', 'emerald'],
-                        ['modify', 'Modify', 'Edit price / markup', 'amber'],
-                        ['reject', 'Reject', 'Deny — payout $0', 'red'],
-                      ] as const).map(([val, label, hint, tone]) => {
-                        const on = decisionMode === val;
-                        const onCls = tone === 'red' ? 'bg-red-600 text-white border-red-600' : tone === 'amber' ? 'bg-amber-500 text-white border-amber-500' : 'bg-emerald-600 text-white border-emerald-600';
-                        return (
-                          <button key={val} type="button" onClick={() => setDecisionMode(val)}
-                            className={`rounded-xl py-2.5 px-1.5 border text-center transition ${on ? onCls : 'bg-white text-gray-700 border-gray-300 hover:border-brand/50'}`}>
-                            <div className="font-heading font-bold text-sm">{label}</div>
-                            <div className={`text-[10px] leading-tight mt-0.5 ${on ? 'text-white/85' : 'text-gray-400'}`}>{hint}</div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Modify — revised pricing (client cost recomputed live in Cost Detail above). */}
-                    {decisionMode === 'modify' && (
-                      <div className="border-t border-gray-100 pt-3 space-y-2">
-                        <div className="text-[12px] font-bold uppercase tracking-wide text-gray-400">Revised pricing</div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <label className="flex items-center gap-1.5 text-[13px] text-gray-500">Vendor cost
-                            <span className="relative"><span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                            <input type="number" inputMode="decimal" value={modCost} onChange={(e) => setModCost(e.target.value)} onBlur={() => setModCost(fmt2(modCost))} className="w-24 text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" /></span>
-                          </label>
-                          <label className="flex items-center gap-1.5 text-[13px] text-gray-500">Markup
-                            <span className="relative"><input type="number" inputMode="decimal" value={modMarkup} onChange={(e) => setModMarkup(e.target.value)} className="w-16 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-brand" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span></span>
-                          </label>
-                          <span className="text-[13px] text-gray-500">Client <b className="text-ink tabular-nums">{money(Math.round(Number(modCost || '0') * (1 + Number(modMarkup || '0') / 100) * 100) / 100)}</b></span>
-                        </div>
-                        {origCost > 0 && <div className="text-[12px] text-gray-400">was {money(origCost)} vendor{svc.markupPct != null ? ` · ${svc.markupPct}% markup` : ''}</div>}
-                      </div>
-                    )}
-                    {decisionMode === 'reject' && (
-                      <div className="border-t border-gray-100 pt-3 text-[13px] text-red-700 font-semibold">Vendor payout will be set to $0 and the service closed out.</div>
-                    )}
-
-                    {/* Notes — below the options; REQUIRED for every decision. */}
-                    <div>
-                      <label className="block text-[12px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">Decision note <span className="text-brand">*</span></label>
-                      <AutoGrowTextarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} minPx={64} className={inputCls}
-                        placeholder="Required — the reason for this decision (visible on the record)…" />
-                    </div>
-
-                    <button type="button" disabled={deciding || !decisionMode || !reviewNotes.trim()} onClick={decide}
-                      className={`w-full rounded-xl py-3 font-heading font-bold text-sm ${
-                        !decisionMode || !reviewNotes.trim() ? 'bg-gray-200 text-gray-400'
-                          : decisionMode === 'reject' ? 'bg-red-600 text-white' : decisionMode === 'modify' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'}`}>
-                      {deciding ? '…'
-                        : decisionMode === 'reject' ? 'Reject → Completed'
-                        : decisionMode === 'modify' ? 'Save Changes → Completed'
-                        : decisionMode === 'approve' ? 'Approve → Completed'
-                        : 'Choose a decision above'}
-                    </button>
-                    {decisionMode && !reviewNotes.trim() && <div className="text-[12px] text-gray-400 text-center -mt-1">A decision note is required to finalize.</div>}
-                    {error && <div className="text-center text-xs text-red-600">{error}</div>}
-                  </section>
+                  <DecisionPanel kind="review" orig={{ vendor: origCost, markup: markupPct, client: origClient }} busy={deciding} error={error} onSubmit={submitReview} />
                 )}
 
                 {!canReview && underReview && (
