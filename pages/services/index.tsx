@@ -47,38 +47,40 @@ const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'r
 // Service card with press-and-hold to cancel (internal only, live records) —
 // mirrors the inspection card's long-press. A ~500ms hold prompts to cancel; a
 // normal tap opens the service. The click after a long-press is swallowed.
-function ServiceCard({ s, overdue, isAdmin, canCancel, onCancel, bulkMode, selectable, selected, onToggleSelect }: {
-  s: SampleService; overdue: boolean; isAdmin: boolean; canCancel: boolean; onCancel: (id: string) => void;
-  bulkMode?: boolean; selectable?: boolean; selected?: boolean; onToggleSelect?: (id: string) => void;
+function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, onToggleSelect, onLongPress }: {
+  s: SampleService; overdue: boolean; isAdmin: boolean;
+  selectMode?: boolean; selectable?: boolean; selected?: boolean; onToggleSelect?: (id: string) => void; onLongPress?: (id: string, selectable: boolean) => void;
 }) {
   const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lpFired = useRef(false);
   const lpStart = useRef<{ x: number; y: number } | null>(null);
   const clearLp = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
   const onPointerDown = (e: React.PointerEvent) => {
-    if (!canCancel || bulkMode) return;
+    // Long-press enters multi-select (pre-selecting this card when selectable).
+    // Disabled once already in select mode (taps toggle instead).
+    if (!isAdmin || selectMode) return;
     lpFired.current = false;
     lpStart.current = { x: e.clientX, y: e.clientY };
     clearLp();
-    lpTimer.current = setTimeout(() => { lpFired.current = true; try { navigator.vibrate?.(15); } catch { /* n/a */ } onCancel(s.id); }, 500);
+    lpTimer.current = setTimeout(() => { lpFired.current = true; onLongPress?.(s.id, !!selectable); }, 500);
   };
   const onPointerMove = (e: React.PointerEvent) => {
     if (!lpTimer.current || !lpStart.current) return;
     if (Math.abs(e.clientX - lpStart.current.x) > 10 || Math.abs(e.clientY - lpStart.current.y) > 10) clearLp();
   };
-  const bulkCls = bulkMode ? (!selectable ? 'opacity-50' : selected ? 'border-brand ring-1 ring-brand' : 'border-gray-200') : 'border-gray-200 hover:border-brand/40';
+  const selCls = selectMode ? (!selectable ? 'opacity-50 border-gray-200' : selected ? 'border-brand ring-1 ring-brand' : 'border-gray-200') : 'border-gray-200 hover:border-brand/40';
   return (
     <Link href={`/services/${s.id}`}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={clearLp} onPointerCancel={clearLp}
       onClick={(e) => {
-        if (bulkMode) { e.preventDefault(); e.stopPropagation(); if (selectable) onToggleSelect?.(s.id); return; }
+        if (selectMode) { e.preventDefault(); e.stopPropagation(); if (selectable) onToggleSelect?.(s.id); return; }
         if (lpFired.current) { e.preventDefault(); e.stopPropagation(); lpFired.current = false; }
       }}
-      onContextMenu={(e) => { if (canCancel) e.preventDefault(); }}
-      className={`block select-none bg-white border rounded-xl px-3.5 py-2.5 active:scale-[0.998] transition ${bulkCls}`}
+      onContextMenu={(e) => { if (isAdmin) e.preventDefault(); }}
+      className={`block select-none bg-white border rounded-xl px-3.5 py-2.5 active:scale-[0.998] transition ${selCls}`}
       style={{ WebkitTouchCallout: 'none' }}>
       <div className="flex items-center gap-2">
-        {bulkMode && (
+        {selectMode && (
           <span className={`shrink-0 w-5 h-5 rounded-md border-2 grid place-items-center ${!selectable ? 'border-gray-200 bg-gray-100' : selected ? 'bg-brand border-brand text-white' : 'border-gray-300 bg-white'}`}>
             {selectable && selected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
           </span>
@@ -125,16 +127,58 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
   const [sortOpen, setSortOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [gearOpen, setGearOpen] = useState(false);
-  // Press-and-hold cancel (internal + live records only). Optimistically hide the
-  // card once canceled.
+  // Press-and-hold a card (internal + live) → enter multi-select, exactly like the
+  // inspection home. In select mode an action bar offers Move to Cancelled and
+  // Reassign Vendor over the whole selection. Canceled cards are optimistically
+  // hidden. Selectable = any open (non-terminal) service.
   const [cancelledIds, setCancelledIds] = useState<Set<string>>(new Set());
-  const canCancel = isAdmin && live;
-  const cancelService = async (id: string) => {
-    if (typeof window !== 'undefined' && !window.confirm('Cancel this service? It moves to Canceled.')) return;
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [actionBusy, setActionBusy] = useState(false);
+  const [reassignOpen, setReassignOpen] = useState(false);
+  const [reassignVendor, setReassignVendor] = useState(SERVICE_VENDOR_NAMES[0] || '');
+  const canSelect = isAdmin && live;
+  const isSelectable = (s: SampleService) => canSelect && !['completed', 'canceled'].includes(s.status);
+  const toggleSelect = (id: string) => setSelectedIds((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const exitSelect = () => { setSelectMode(false); setSelectedIds(new Set()); setReassignOpen(false); };
+  const enterSelectWith = (id: string, selectable: boolean) => { if (!canSelect) return; try { navigator.vibrate?.(15); } catch { /* n/a */ } setSelectMode(true); setSelectedIds(selectable ? new Set([id]) : new Set()); };
+
+  const handleBulkCancel = async () => {
+    if (!selectedIds.size || actionBusy) return;
+    if (typeof window !== 'undefined' && !window.confirm(`Move ${selectedIds.size} service${selectedIds.size > 1 ? 's' : ''} to Canceled?`)) return;
+    setActionBusy(true); setAiRerun(null);
+    const ids = Array.from(selectedIds);
     try {
-      const r = await fetch(`/api/services/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
-      if (r.ok) setCancelledIds((p) => new Set(p).add(id));
-    } catch { /* leave as-is; user can retry */ }
+      const r = await fetch('/api/services/bulk-cancel', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setAiRerun({ status: 'error', msg: `Cancel — ${d.error || 'failed.'}` }); return; }
+      setCancelledIds((p) => { const n = new Set(p); for (const x of ids) n.add(x); return n; });
+      const parts = [`${d.canceled} canceled`]; if (d.skipped) parts.push(`${d.skipped} skipped`); if (d.failed) parts.push(`${d.failed} failed`);
+      setAiRerun({ status: d.failed ? 'error' : 'done', msg: `Cancel — ${parts.join(' · ')}` });
+      exitSelect();
+      router.replace(router.asPath, undefined, { scroll: false });
+    } catch { setAiRerun({ status: 'error', msg: 'Cancel — couldn’t reach the server. Try again.' }); }
+    finally { setActionBusy(false); }
+  };
+
+  const applyReassign = async () => {
+    if (!selectedIds.size || !reassignVendor || actionBusy) return;
+    setActionBusy(true); setAiRerun(null);
+    try {
+      const r = await fetch('/api/services/bulk-reassign', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds), vendorName: reassignVendor }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setAiRerun({ status: 'error', msg: `Reassign — ${d.error || 'failed.'}` }); return; }
+      const parts = [`${d.reassigned} reassigned to ${d.vendorName}`]; if (d.skipped) parts.push(`${d.skipped} skipped`); if (d.failed) parts.push(`${d.failed} failed`);
+      setAiRerun({ status: d.failed ? 'error' : 'done', msg: `Reassign — ${parts.join(' · ')}` });
+      exitSelect();
+      router.replace(router.asPath, undefined, { scroll: false });
+    } catch { setAiRerun({ status: 'error', msg: 'Reassign — couldn’t reach the server. Try again.' }); }
+    finally { setActionBusy(false); }
   };
 
   // Admin: rerun the AI review across every currently-submitted service (the same
@@ -159,33 +203,6 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
       // Reflect the new statuses in the list.
       router.replace(router.asPath, undefined, { scroll: false });
     } catch { setAiRerun({ status: 'error', msg: 'AI review — couldn’t reach the server. Try again.' }); }
-  };
-
-  // Admin: bulk-reassign vendor across selected ASSIGNED services.
-  const [bulkMode, setBulkMode] = useState(false);
-  const [bulkSel, setBulkSel] = useState<Set<string>>(new Set());
-  const [bulkVendor, setBulkVendor] = useState(SERVICE_VENDOR_NAMES[0] || '');
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const exitBulk = () => { setBulkMode(false); setBulkSel(new Set()); };
-  const toggleBulk = (id: string) => setBulkSel((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const applyBulk = async () => {
-    if (!bulkSel.size || !bulkVendor) return;
-    setBulkBusy(true); setAiRerun(null);
-    try {
-      const r = await fetch('/api/services/bulk-reassign', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: Array.from(bulkSel), vendorName: bulkVendor }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setAiRerun({ status: 'error', msg: `Reassign — ${d.error || 'failed.'}` }); return; }
-      const parts = [`${d.reassigned} reassigned to ${d.vendorName}`];
-      if (d.skipped) parts.push(`${d.skipped} skipped`);
-      if (d.failed) parts.push(`${d.failed} failed`);
-      setAiRerun({ status: d.failed ? 'error' : 'done', msg: `Reassign — ${parts.join(' · ')}` });
-      exitBulk();
-      router.replace(router.asPath, undefined, { scroll: false });
-    } catch { setAiRerun({ status: 'error', msg: 'Reassign — couldn’t reach the server. Try again.' }); }
-    finally { setBulkBusy(false); }
   };
 
   // Scope (type/vendor/region/search) drives the summary bubbles; the status chip
@@ -309,8 +326,8 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
                       <span className="inline-flex items-center gap-1.5"><AiSparkle className="w-3.5 h-3.5 text-brand" />Rerun AI Review</span>
                       {submittedCount > 0 && <span className="text-[11px] font-bold text-gray-400 tabular-nums">{submittedCount}</span>}
                     </button>
-                    <button type="button" onClick={() => { setGearOpen(false); setBulkSel(new Set()); setBulkMode(true); }}
-                      className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Bulk Reassign Vendors</button>
+                    <button type="button" onClick={() => { setGearOpen(false); setSelectedIds(new Set()); setSelectMode(true); }}
+                      className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Select Services</button>
                     <Link href="/services?as=vendor" className="block px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">View as Vendor</Link>
                   </div></>)}
               </div>
@@ -445,31 +462,31 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
           </div>
         )}
 
-        {bulkMode && (
-          <div className="mb-3 bg-white border-2 border-brand rounded-xl px-3 py-2.5 shadow-md">
+        {/* Select-mode action bar (press-and-hold a card, or gear → Select Services).
+            Acts on the whole selection: Reassign Vendor (opens a picker) or Move to
+            Cancelled. Reassign only touches Assigned services; the rest are skipped. */}
+        {selectMode && (
+          <div className="mb-3 bg-white border-2 border-brand rounded-xl px-3 py-2.5 shadow-md sticky top-2 z-20">
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-heading font-bold text-ink">{bulkSel.size} selected</span>
+              <span className="text-[13px] font-heading font-bold text-ink">{selectedIds.size} selected</span>
               <div className="flex-1" />
-              <button type="button" onClick={exitBulk} className="text-[12px] font-heading font-semibold text-gray-500 hover:text-brand underline">Cancel</button>
+              <button type="button" onClick={exitSelect} className="text-[12px] font-heading font-semibold text-gray-500 hover:text-brand underline">Done</button>
             </div>
             <div className="flex items-center gap-2 mt-2">
-              <span className="text-[12px] text-gray-500 shrink-0">Reassign to</span>
-              <div className="flex-1 min-w-0">
-                <ListPicker value={bulkVendor} options={SERVICE_VENDOR_NAMES.map((n) => ({ value: n, label: n }))} onChange={setBulkVendor} ariaLabel="Reassign vendor"
-                  className="w-full text-xs font-heading font-semibold pl-2.5 pr-2 py-2 border border-gray-300 rounded-md bg-white flex items-center justify-between text-gray-700 hover:border-brand/50" />
-              </div>
-              <button type="button" disabled={!bulkSel.size || bulkBusy} onClick={applyBulk}
-                className="shrink-0 rounded-lg px-4 py-2 text-sm font-heading font-bold bg-brand text-white disabled:opacity-50">{bulkBusy ? '…' : 'Apply'}</button>
+              <button type="button" disabled={!selectedIds.size || actionBusy} onClick={() => { setReassignVendor(SERVICE_VENDOR_NAMES[0] || ''); setReassignOpen(true); }}
+                className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-brand text-white disabled:opacity-50">Reassign Vendor</button>
+              <button type="button" disabled={!selectedIds.size || actionBusy} onClick={handleBulkCancel}
+                className="flex-1 rounded-lg px-3 py-2 text-sm font-heading font-bold bg-white text-red-600 border border-red-300 disabled:opacity-50">{actionBusy ? '…' : 'Move to Cancelled'}</button>
             </div>
-            <p className="text-[11px] text-gray-400 mt-1.5">Tap <b>Assigned</b> services below to select — only those can be bulk-reassigned.</p>
+            <p className="text-[11px] text-gray-400 mt-1.5">Tap services to select. Reassign applies to <b>Assigned</b> services in the selection; others are skipped.</p>
           </div>
         )}
 
         <div className="space-y-2">
           {pagedRows.map((s) => (
             <ServiceCard key={s.id} s={s} overdue={OPEN_STATUSES.includes(s.status) && s.dueDate < REFERENCE_TODAY}
-              isAdmin={isAdmin} canCancel={canCancel} onCancel={cancelService}
-              bulkMode={bulkMode} selectable={s.status === 'assigned'} selected={bulkSel.has(s.id)} onToggleSelect={toggleBulk} />
+              isAdmin={isAdmin}
+              selectMode={selectMode} selectable={isSelectable(s)} selected={selectedIds.has(s.id)} onToggleSelect={toggleSelect} onLongPress={enterSelectWith} />
           ))}
           {visibleRows.length === 0 && (
             <div className="text-center text-gray-500 text-sm py-12 border border-dashed border-gray-300 rounded-xl">No services match these filters.</div>
@@ -502,6 +519,29 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
           </div>
         )}
       </main>
+
+      {/* Reassign Vendor popup (select mode). */}
+      {reassignOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setReassignOpen(false)}>
+          <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="font-heading font-bold text-[15px] text-ink">Reassign Vendor</div>
+            <p className="text-[13px] text-gray-500 -mt-1">Assign the <b className="text-ink">{selectedIds.size}</b> selected service{selectedIds.size > 1 ? 's' : ''} to a vendor. Only services in <b>Assigned</b> status are reassigned.</p>
+            <div className="space-y-1.5">
+              {SERVICE_VENDOR_NAMES.map((name) => (
+                <button key={name} type="button" onClick={() => setReassignVendor(name)}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm font-heading font-semibold ${reassignVendor === name ? 'bg-brand/5 border-brand text-brand' : 'bg-white border-gray-300 text-gray-700 hover:border-brand/50'}`}>
+                  {name}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={() => setReassignOpen(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
+              <button type="button" disabled={actionBusy || !reassignVendor} onClick={applyReassign}
+                className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{actionBusy ? '…' : 'Submit'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
