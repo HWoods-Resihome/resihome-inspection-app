@@ -67,6 +67,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // service — same worktype/property/community/vendor as the parent — carrying
     // the description, photos, and bid cost, for internal review.
     let bidId: string | null = null;
+    let bidError: string | null = null;
     const bid = b.bid;
     if (bid && typeof bid === 'object' && String(bid.description || '').trim() && Number(bid.vendorCost) > 0) {
       const pp = existing?.props || {};
@@ -88,7 +89,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         generated_by_rule_id: id, enrollment_key: `bid:${id}`,
       };
       try { bidId = await createServiceWorkOrder(bidProps); }
-      catch (e) { console.warn('[services/submit] bid item create failed:', e); }
+      catch (e: any) {
+        // Most likely the 'bid_item' subtype enum option isn't provisioned yet —
+        // retry with the parent's subtype (still flagged is_bid_item=true so it
+        // reads as a Bid Item), so the bid is never lost for a schema lag.
+        console.warn('[services/submit] bid create failed, retrying with parent subtype:', e?.message || e);
+        try { bidId = await createServiceWorkOrder({ ...bidProps, subtype: pp.subtype || BID_SUBTYPE }); }
+        catch (e2: any) { console.warn('[services/submit] bid create retry failed:', e2?.message || e2); bidError = String(e2?.message || e2).slice(0, 200); }
+      }
     }
 
     // Kick the AI review for THIS order immediately — don't wait for the nightly
@@ -102,7 +110,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (item) review = { verdict: item.verdict, status: item.action === 'completed' ? 'completed' : item.action === 'review' ? 'review' : 'submitted' };
     } catch (e) { console.warn('[services/submit] inline AI review failed (cron will retry):', e); }
 
-    return res.status(200).json({ ok: true, id, status: review?.status || 'submitted', review, bidId });
+    return res.status(200).json({ ok: true, id, status: review?.status || 'submitted', review, bidId, bidError });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });
   }

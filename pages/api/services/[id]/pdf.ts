@@ -9,6 +9,7 @@ import React from 'react';
 import { renderToBuffer } from '@react-pdf/renderer';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
+import { isInternalEmail } from '@/lib/userAccess';
 import { fetchServiceWorkOrder, readServiceForms } from '@/lib/hubspot';
 import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_FORMS, formKey } from '@/lib/services/serviceForms';
@@ -70,6 +71,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: p.reviewed_by || '',
       answers, before, after, petBefore, petAfter,
       galleryBase: `${(req.headers['x-forwarded-proto'] as string) || 'https'}://${req.headers.host || ''}/services/${encodeURIComponent(id)}/photos`,
+      isInternal: isInternalEmail(session?.email),
     };
 
     const buffer = await renderToBuffer(React.createElement(ServicePdf, { d }) as any);
