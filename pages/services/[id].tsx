@@ -521,8 +521,6 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const photoRequired = (q: ServiceQuestion) => reqFor(q, 'photo');
   const noteMissing = (q: ServiceQuestion) => noteRequired(q) && !String(answers[noteKey(q.id)] || '').trim();
   const photoMissing = (q: ServiceQuestion) => photoRequired(q) && !(Array.isArray(answers[photosKey(q.id)]) && answers[photosKey(q.id)].length > 0);
-  // Was the service marked completed? (universal gate — 'no' relaxes photo reqs.)
-  const notCompleted = answers.svc_completed === 'no';
 
   // Default any visible date question flagged defaultToday to today (editable).
   useEffect(() => {
@@ -542,8 +540,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     if (q.type === 'multi') return !Array.isArray(v) || v.length === 0;
     return v === undefined || v === '' || v === null;
   }), [form, answers]);
-  // Photos are only required when the service was actually completed.
-  const photosOk = notCompleted || (before.length > 0 && after.length > 0);
+  // Before + after photos are ALWAYS required — even when the service wasn't
+  // completed or access failed — to verify the vendor's effort on site.
+  const photosOk = before.length > 0 && after.length > 0;
   const ready = !requiredMissing && photosOk && bidValid && !submitting;
 
   const submit = async () => {
@@ -844,9 +843,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
                   <div className={SECTION_HEAD}>Photos</div>
-                  {notCompleted && <p className="text-[12px] text-gray-500 -mt-2">Before/After photos aren’t required since the service wasn’t completed — add any that show why, if helpful.</p>}
-                  <CameraPhotos label="Before photos" required={!notCompleted} urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
-                  <CameraPhotos label="After photos" required={!notCompleted} urls={after} onChange={setAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
+                  <CameraPhotos label="Before photos" required urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
+                  <CameraPhotos label="After photos" required urls={after} onChange={setAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                   {svc.petStations && (
                     <div className="border-t border-gray-100 pt-4 space-y-4">
                       <div className="text-[12px] font-bold uppercase tracking-wide text-brand">Pet Stations</div>
@@ -893,7 +891,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   {submitting ? "Submitting…" : "Submit Completion"}
                 </button>
                 {error && <div className="text-center text-xs text-red-600 -mt-2">{error}</div>}
-                {!ready && !error && !submitting && <div className="text-center text-xs text-gray-400 -mt-2">{notCompleted ? 'Answer the required questions to submit.' : 'Answer the required questions and add at least one before and one after photo to submit.'}</div>}
+                {!ready && !error && !submitting && <div className="text-center text-xs text-gray-400 -mt-2">Answer the required questions and add at least one before and one after photo to submit.</div>}
               </>
             ) : (
               /* ── Read-only view (submitted / review / completed / bid) ── */
