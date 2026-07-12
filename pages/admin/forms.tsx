@@ -7,6 +7,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import Link from 'next/link';
+import { PageHeader } from '@/components/PageHeader';
 import { useRouter } from 'next/router';
 import type { Question, ResponseType } from '@/lib/types';
 import { RESPONSE_TYPES, STANDARD_SECTIONS } from '@/lib/formBuilder';
@@ -559,15 +560,7 @@ export default function FormBuilderPage({ servicesForms }: { servicesForms: Reco
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-brand text-white">
-        <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h6" /></svg>
-            <h1 className="font-heading font-extrabold text-lg tracking-tight truncate">Form Builder</h1>
-          </div>
-          <Link href="/" className="text-xs font-heading font-semibold text-white/90 hover:text-white shrink-0 inline-flex items-center gap-1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M11 18l-6-6 6-6" /></svg> Inspections</Link>
-        </div>
-      </header>
+      <PageHeader title="Form Builder" backHref="/" maxW="max-w-3xl" />
 
       <main className="max-w-3xl mx-auto px-4 py-5">
         {/* Unified builder: Inspections templates + Services completion forms. */}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import { PageHeader } from '@/components/PageHeader';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
@@ -592,16 +592,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-brand text-white sticky top-0 z-30">
-        <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-center gap-3">
-          <Link href="/services" className="inline-flex items-center gap-1 text-white/90 hover:text-white text-sm font-semibold shrink-0">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
-            Services
-          </Link>
-          <img src="/app-icon.svg" alt="ResiWalk" className="h-8 w-8 object-cover shrink-0" />
-          <div className="font-heading font-extrabold">Rules Engine</div>
-        </div>
-      </header>
+      <PageHeader title="Rules Engine" backHref="/services" maxW="max-w-3xl" />
 
       {openId === null ? (
         /* ───────────── LIST VIEW: search + filters + rule cards ───────────── */
