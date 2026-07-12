@@ -5180,6 +5180,7 @@ export async function upsertAutoServiceChecks(candidates: AutoServiceCheckCandid
   for (const cand of candidates) {
     const existing = bySig.get(cand.signature);
     if (existing) {
+      if (existing.status === 'dismissed') continue; // admin deleted it — don't resurrect
       existing.check = cand.check.slice(0, 600);
       existing.worktype = cand.worktype || '';
       existing.subtype = cand.subtype || '';

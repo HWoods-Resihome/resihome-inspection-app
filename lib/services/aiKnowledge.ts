@@ -26,6 +26,9 @@ export interface AiCheck {
   source?: 'admin' | 'auto';
   // Stable fingerprint so re-learning refreshes the same auto check in place.
   signature?: string;
+  // 'dismissed' tombstones a deleted AUTO check so the learning loop won't
+  // re-add it; such checks are hidden from the UI and excluded from the AI.
+  status?: 'active' | 'dismissed';
   // Why the loop wrote this (sample size, dominant decision) — shown to admins.
   meta?: { samples?: number; decision?: string; examples?: string[] };
 }

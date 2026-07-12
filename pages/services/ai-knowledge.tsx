@@ -41,7 +41,17 @@ export default function ServicesAiKnowledge({ savedChecks, canSave, embedded, sa
 
   const mutate = (fn: (cs: AiCheck[]) => AiCheck[]) => { setSaved(false); setChecks(fn); };
   const patch = (id: string, p: Partial<AiCheck>) => mutate((cs) => cs.map((c) => (c.id === id ? { ...c, ...p } : c)));
-  const del = (id: string) => { if (!confirm('Delete this check? The AI will stop using it.')) return; mutate((cs) => cs.filter((c) => c.id !== id)); if (editId === id) setEditId(null); };
+  // Deleting an AI-learned (auto) check TOMBSTONES it (status: dismissed) so the
+  // learning loop won't re-add it on the next "Learn now"; a human check is
+  // removed outright.
+  const del = (id: string) => {
+    if (!confirm('Delete this check? The AI will stop using it.')) return;
+    mutate((cs) => cs.flatMap((c) => {
+      if (c.id !== id) return [c];
+      return c.source === 'auto' ? [{ ...c, active: false, status: 'dismissed' as const }] : [];
+    }));
+    if (editId === id) setEditId(null);
+  };
   const addCheck = () => {
     const text = ncText.trim();
     if (!text) return;
@@ -77,7 +87,7 @@ export default function ServicesAiKnowledge({ savedChecks, canSave, embedded, sa
   };
 
   const visible = useMemo(() => checks.filter((c) =>
-    wtFilter.length === 0 || wtFilter.includes(c.worktype || 'all')), [checks, wtFilter]);
+    c.status !== 'dismissed' && (wtFilter.length === 0 || wtFilter.includes(c.worktype || 'all'))), [checks, wtFilter]);
 
   return (
     <div className={embedded ? '' : 'min-h-screen bg-gray-50'}>

@@ -46,7 +46,7 @@ async function fetchPhotoBlock(url: string): Promise<any | null> {
 // empty subtype = all subtypes of that worktype), from the given check set.
 function checksFor(all: AiCheck[], worktype: string, subtype: string): string[] {
   return all
-    .filter((c) => c.active)
+    .filter((c) => c.active && c.status !== 'dismissed')
     .filter((c) => !c.worktype || c.worktype === worktype)
     .filter((c) => !c.subtype || c.subtype === subtype)
     .map((c) => c.check);
