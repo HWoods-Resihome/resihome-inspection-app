@@ -134,7 +134,7 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
   const rerunAiReview = async () => {
     setGearOpen(false);
     if (aiRerun?.status === 'running') return;
-    setAiRerun({ status: 'running', msg: 'Reviewing submitted services… this can take a moment.' });
+    setAiRerun({ status: 'running', msg: 'Reviewing submitted services…' });
     try {
       const r = await fetch('/api/services/admin/review?apply=1');
       const d = await r.json();
