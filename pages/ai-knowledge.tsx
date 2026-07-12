@@ -8,6 +8,22 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import type { GetServerSideProps } from 'next';
+import type { NextApiRequest } from 'next';
+import { getSessionFromRequest } from '@/lib/auth';
+import { isAppAdmin } from '@/lib/adminAccess';
+import { readServiceAiChecks } from '@/lib/hubspot';
+import type { AiCheck } from '@/lib/services/aiKnowledge';
+import ServicesAiKnowledge from '@/pages/services/ai-knowledge';
+
+// Loads the persisted Services AI checks so the "Services" tab renders inside
+// this unified AI Knowledge page. Inspection entries still load client-side.
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
+  const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
+  const admin = await isAppAdmin(session?.email).catch(() => false);
+  const servicesChecks = admin ? await readServiceAiChecks().catch(() => null) : null;
+  return { props: { servicesChecks: (servicesChecks as AiCheck[] | null) || null } };
+};
 
 interface Entry {
   id: string;
@@ -30,8 +46,9 @@ function fmtDate(ms?: number): string {
   return d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
 }
 
-export default function AiKnowledgePage() {
+export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: AiCheck[] | null }) {
   const router = useRouter();
+  const [tab, setTab] = useState<'inspections' | 'services'>(router.query.tab === 'services' ? 'services' : 'inspections');
   const [authChecked, setAuthChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [entries, setEntries] = useState<Entry[] | null>(null);
@@ -157,6 +174,16 @@ export default function AiKnowledgePage() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-5">
+        {/* Unified: Inspections knowledge base + Services AI review checks. */}
+        <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold mb-4">
+          {(['inspections', 'services'] as const).map((t) => (
+            <button key={t} type="button" onClick={() => setTab(t)} className={`px-3.5 py-1.5 rounded-md capitalize ${tab === t ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>{t}</button>
+          ))}
+        </div>
+        {tab === 'services' ? (
+          <ServicesAiKnowledge embedded savedChecks={servicesChecks} canSave={isAdmin} />
+        ) : (
+        <>
         <p className="text-[13px] text-gray-600 mb-4 leading-snug">
           Guidance the <strong>AI</strong> uses for its call-outs, edits, and voice matching. Inspectors add entries by voice (“Teach AI” in the camera), and the AI <strong>auto-learns</strong> entries (marked <span className="text-violet-700 font-semibold">✨ AI-learned</span>) from how inspectors accept or reject its suggestions. Edit any entry to adopt and refine it, or delete it to stop the AI using it.
         </p>
@@ -283,6 +310,8 @@ export default function AiKnowledgePage() {
               </li>
             ))}
           </ul>
+        )}
+        </>
         )}
       </main>
     </div>

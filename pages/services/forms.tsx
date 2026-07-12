@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { GetServerSideProps } from 'next';
-import type { NextApiRequest } from 'next';
-import { getSessionFromRequest } from '@/lib/auth';
-import { servicesEnabled } from '@/lib/servicesAccess';
-import { isAppAdmin } from '@/lib/adminAccess';
-import { isViewingAsVendor } from '@/lib/services/viewAs';
-import { readServiceForms } from '@/lib/hubspot';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
@@ -15,16 +9,12 @@ import {
   type ServiceQuestion, type AnswerType, type QuestionOption,
 } from '@/lib/services/serviceForms';
 
-export const getServerSideProps: GetServerSideProps = async (ctx) => {
-  const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
-  const ok = await servicesEnabled(session?.email).catch(() => false);
-  if (!ok) return { redirect: { destination: '/', permanent: false } };
-  if (isViewingAsVendor(ctx.req)) return { redirect: { destination: '/services', permanent: false } };
-  const admin = await isAppAdmin(session?.email).catch(() => false);
-  // Persisted forms (Agent-record JSON) override the seeded defaults per key.
-  const saved = admin ? await readServiceForms().catch(() => null) : null;
-  return { props: { savedForms: saved || null, canSave: admin } };
-};
+// The Services form builder now lives as the "Services" tab of the unified Form
+// Builder at /admin/forms — this route just redirects there. The component below
+// is still exported and reused (embedded) by that page.
+export const getServerSideProps: GetServerSideProps = async () => ({
+  redirect: { destination: '/admin/forms?tab=services', permanent: false },
+});
 
 const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
 const trig = 'w-full flex items-center justify-between gap-2 text-[13px] border border-gray-300 rounded-lg px-2.5 py-2 bg-white text-ink';
@@ -38,7 +28,7 @@ function subline(q: ServiceQuestion): string {
   return bits.join(' · ');
 }
 
-export default function FormBuilder({ savedForms, canSave }: { savedForms: Record<string, ServiceQuestion[]> | null; canSave: boolean }) {
+export default function FormBuilder({ savedForms, canSave, embedded }: { savedForms: Record<string, ServiceQuestion[]> | null; canSave: boolean; embedded?: boolean }) {
   const [forms, setForms] = useState<Record<string, ServiceQuestion[]>>(() => ({ ...SAMPLE_FORMS, ...(savedForms || {}) }));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -107,7 +97,8 @@ export default function FormBuilder({ savedForms, canSave }: { savedForms: Recor
   const subtypeOptions = useMemo(() => subtypesFor(worktype).map((s) => ({ value: s.id, label: s.label })), [worktype]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className={embedded ? '' : 'min-h-screen bg-gray-50'}>
+      {!embedded && (
       <header className="bg-brand text-white sticky top-0 z-30">
         <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-center gap-3">
           <Link href="/services" className="inline-flex items-center gap-1 text-white/90 hover:text-white text-sm font-semibold shrink-0">
@@ -124,8 +115,9 @@ export default function FormBuilder({ savedForms, canSave }: { savedForms: Recor
           )}
         </div>
       </header>
+      )}
 
-      <main className="max-w-3xl mx-auto w-full px-4 py-4 space-y-4">
+      <main className={embedded ? 'space-y-4' : 'max-w-3xl mx-auto w-full px-4 py-4 space-y-4'}>
         {/* Work type + subtype selector — the form is per (work type × subtype). */}
         <section className="bg-white border border-gray-200 rounded-2xl p-4">
           <div className="flex flex-wrap items-end gap-3">

@@ -11,6 +11,22 @@ import { useRouter } from 'next/router';
 import type { Question, ResponseType } from '@/lib/types';
 import { RESPONSE_TYPES, STANDARD_SECTIONS } from '@/lib/formBuilder';
 import { Combobox } from '@/components/Combobox';
+import type { GetServerSideProps } from 'next';
+import type { NextApiRequest } from 'next';
+import { getSessionFromRequest } from '@/lib/auth';
+import { isAppAdmin } from '@/lib/adminAccess';
+import { readServiceForms } from '@/lib/hubspot';
+import type { ServiceQuestion } from '@/lib/services/serviceForms';
+import ServicesFormBuilder from '@/pages/services/forms';
+
+// Loads the persisted Services forms so the "Services" tab renders inside this
+// unified Form Builder. Inspection templates still load client-side (below).
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
+  const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
+  const admin = await isAppAdmin(session?.email).catch(() => false);
+  const servicesForms = admin ? await readServiceForms().catch(() => null) : null;
+  return { props: { servicesForms: servicesForms || null } };
+};
 
 interface TemplateInfo { id: string; label: string; custom: boolean; }
 
@@ -161,8 +177,9 @@ function QuestionEditor({ initial, onSave, onCancel, busy, knownSections = [] }:
   );
 }
 
-export default function FormBuilderPage() {
+export default function FormBuilderPage({ servicesForms }: { servicesForms: Record<string, ServiceQuestion[]> | null }) {
   const router = useRouter();
+  const [tab, setTab] = useState<'inspections' | 'services'>(router.query.tab === 'services' ? 'services' : 'inspections');
   const [authChecked, setAuthChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
@@ -553,6 +570,16 @@ export default function FormBuilderPage() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-5">
+        {/* Unified builder: Inspections templates + Services completion forms. */}
+        <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold mb-4">
+          {(['inspections', 'services'] as const).map((t) => (
+            <button key={t} type="button" onClick={() => setTab(t)} className={`px-3.5 py-1.5 rounded-md capitalize ${tab === t ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>{t}</button>
+          ))}
+        </div>
+        {tab === 'services' ? (
+          <ServicesFormBuilder embedded savedForms={servicesForms} canSave={isAdmin} />
+        ) : (
+        <>
         <div className="flex items-end justify-between gap-2 mb-1">
           <label className="block text-xs font-heading font-semibold text-gray-500">Template</label>
           <div className="flex items-center gap-2">
@@ -674,6 +701,8 @@ export default function FormBuilderPage() {
               );
             })}
           </div>
+        )}
+        </>
         )}
       </main>
     </div>

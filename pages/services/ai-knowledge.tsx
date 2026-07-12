@@ -1,34 +1,25 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { GetServerSideProps } from 'next';
-import type { NextApiRequest } from 'next';
-import { getSessionFromRequest } from '@/lib/auth';
-import { servicesEnabled } from '@/lib/servicesAccess';
-import { isAppAdmin } from '@/lib/adminAccess';
-import { isViewingAsVendor } from '@/lib/services/viewAs';
-import { readServiceAiChecks } from '@/lib/hubspot';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { SAMPLE_AI_CHECKS, newCheck, type AiCheck } from '@/lib/services/aiKnowledge';
 
-export const getServerSideProps: GetServerSideProps = async (ctx) => {
-  const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
-  const ok = await servicesEnabled(session?.email).catch(() => false);
-  if (!ok) return { redirect: { destination: '/', permanent: false } };
-  if (isViewingAsVendor(ctx.req)) return { redirect: { destination: '/services', permanent: false } };
-  const admin = await isAppAdmin(session?.email).catch(() => false);
-  const saved = admin ? await readServiceAiChecks().catch(() => null) : null;
-  return { props: { savedChecks: saved || null, canSave: admin } };
-};
+// The Services AI knowledge now lives as the "Services" tab of the unified AI
+// Knowledge page at /ai-knowledge — this route just redirects there. The
+// component below is still exported and reused (embedded) by that page.
+export const getServerSideProps: GetServerSideProps = async () => ({
+  redirect: { destination: '/ai-knowledge?tab=services', permanent: false },
+});
 
 const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
 const trig = 'w-full flex items-center justify-between gap-2 text-[13px] border border-gray-300 rounded-lg px-2.5 py-2 bg-white text-ink';
 const scopeLabel = (c: AiCheck) =>
   `${c.worktype ? worktypeLabel(c.worktype) : 'All Work Types'} · ${c.subtype ? subtypeLabel(c.worktype, c.subtype) : 'All Subtypes'}`;
 
-export default function ServicesAiKnowledge({ savedChecks, canSave }: { savedChecks: AiCheck[] | null; canSave: boolean }) {
+export default function ServicesAiKnowledge({ savedChecks, canSave, embedded }: { savedChecks: AiCheck[] | null; canSave: boolean; embedded?: boolean }) {
   const [checks, setChecks] = useState<AiCheck[]>(() => (savedChecks && savedChecks.length ? savedChecks : [...SAMPLE_AI_CHECKS]));
   const [editId, setEditId] = useState<string | null>(null);
   const [wtFilter, setWtFilter] = useState<string[]>([]);
@@ -52,7 +43,8 @@ export default function ServicesAiKnowledge({ savedChecks, canSave }: { savedChe
     wtFilter.length === 0 || wtFilter.includes(c.worktype || 'all')), [checks, wtFilter]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className={embedded ? '' : 'min-h-screen bg-gray-50'}>
+      {!embedded && (
       <header className="bg-brand text-white sticky top-0 z-30">
         <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-center gap-3">
           <Link href="/services" className="inline-flex items-center gap-1 text-white/90 hover:text-white text-sm font-semibold shrink-0">
@@ -69,8 +61,9 @@ export default function ServicesAiKnowledge({ savedChecks, canSave }: { savedChe
           )}
         </div>
       </header>
+      )}
 
-      <main className="max-w-3xl mx-auto w-full px-4 py-4 space-y-4">
+      <main className={embedded ? 'space-y-4' : 'max-w-3xl mx-auto w-full px-4 py-4 space-y-4'}>
         <section className="bg-white border border-gray-200 rounded-2xl p-4">
           <p className="text-[13px] text-gray-600">
             On submit, a service enters <b className="text-ink">AI Processing</b>. The AI checks the evidence against these rules —
