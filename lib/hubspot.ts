@@ -5175,10 +5175,22 @@ export interface AiKnowledgeEntry {
   // curates here; they're injected into EVERY AI as worked examples.
   kind?: 'rule' | 'example';
   expected?: string;
+  // Template scope: which inspection template this rule applies to. '' / absent =
+  // ALL templates. The knowledge feeds the Scope Rate Card camera AI, so a rule
+  // scoped to a specific template only applies when that template is in context.
+  template?: string;
+  // On/Off. Absent/true ⇒ the AI uses this entry; false ⇒ excluded from the prompt
+  // (kept in the store so it can be toggled back on).
+  active?: boolean;
   // Why the loop wrote this (sample size, example phrases, catalog code) — shown
   // to admins for context. Auto entries only.
   meta?: Record<string, string | number | string[] | undefined>;
 }
+
+// The knowledge base feeds the Scope Rate Card camera AI — the template a rule is
+// evaluated in. Rules scoped to another template stay dormant until that template
+// has a consumer.
+export const KB_CONSUMER_TEMPLATE = 'pm_scope_rate_card';
 
 const MAX_AUTO_ENTRIES = 150; // cap auto entries so they never crowd out human ones
 
@@ -5247,7 +5259,7 @@ async function writeKnowledgeEntries(entries: AiKnowledgeEntry[]): Promise<void>
 
 /** Append a new entry (inspector-submitted). Goes live immediately. Pass
  *  `expected` to record a worked EXAMPLE (utterance → correct action). */
-export async function addKnowledgeEntry(input: { text: string; addedByEmail: string; addedByName?: string; expected?: string }): Promise<AiKnowledgeEntry> {
+export async function addKnowledgeEntry(input: { text: string; addedByEmail: string; addedByName?: string; expected?: string; template?: string }): Promise<AiKnowledgeEntry> {
   const text = (input.text || '').trim();
   if (!text) throw new Error('Empty knowledge text.');
   const expected = (input.expected || '').trim();
@@ -5258,6 +5270,8 @@ export async function addKnowledgeEntry(input: { text: string; addedByEmail: str
     addedByEmail: input.addedByEmail || '',
     addedByName: input.addedByName || '',
     createdAt: Date.now(),
+    active: true,
+    ...(input.template ? { template: String(input.template) } : {}),
     ...(expected ? { kind: 'example' as const, expected: expected.slice(0, 1000) } : {}),
   };
   entries.unshift(entry);
@@ -5303,14 +5317,17 @@ export async function seedKnowledgeExamples(
 
 /** Admin: edit an entry's text. Editing an AUTO entry ADOPTS it as admin-owned
  *  so the self-improvement loop won't overwrite the curated wording. */
-export async function updateKnowledgeEntry(id: string, text: string, expected?: string): Promise<void> {
+export async function updateKnowledgeEntry(id: string, patch: { text?: string; expected?: string; template?: string; active?: boolean }): Promise<void> {
   const entries = await readKnowledgeEntries();
   const i = entries.findIndex((e) => e.id === id);
   if (i < 0) throw new Error('Entry not found.');
   const adopt = entries[i].source === 'auto' ? { source: 'admin' as const } : {};
+  const textPatch = patch.text !== undefined ? { text: patch.text.trim().slice(0, 1000) } : {};
   // When `expected` is provided, update the worked-example action too.
-  const expectedPatch = expected !== undefined ? { expected: expected.trim().slice(0, 1000) } : {};
-  entries[i] = { ...entries[i], text: (text || '').trim().slice(0, 1000), updatedAt: Date.now(), ...adopt, ...expectedPatch };
+  const expectedPatch = patch.expected !== undefined ? { expected: patch.expected.trim().slice(0, 1000) } : {};
+  const templatePatch = patch.template !== undefined ? { template: String(patch.template) } : {};
+  const activePatch = patch.active !== undefined ? { active: !!patch.active } : {};
+  entries[i] = { ...entries[i], updatedAt: Date.now(), ...adopt, ...textPatch, ...expectedPatch, ...templatePatch, ...activePatch };
   await writeKnowledgeEntries(entries);
 }
 
@@ -5397,7 +5414,11 @@ export async function getKnowledgeBasePromptText(maxChars = 4000): Promise<strin
       _kbEntriesCache = { entries: [], at: Date.now() };
     }
   }
-  const entries = (_kbEntriesCache?.entries || []).filter((e) => e.status !== 'dismissed');
+  const entries = (_kbEntriesCache?.entries || []).filter((e) =>
+    e.status !== 'dismissed'
+    && e.active !== false                                              // On/Off: skip disabled
+    && (!e.template || e.template === KB_CONSUMER_TEMPLATE),           // template scope
+  );
   if (!entries.length) return '';
   const clean = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
   // Rules render as bullets; curated examples render as a worked few-shot block.

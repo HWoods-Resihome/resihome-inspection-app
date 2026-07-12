@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/PageHeader';
 import { SaveFooter } from '@/components/SaveFooter';
+import { ListPicker } from '@/components/ListPicker';
 import { useRouter } from 'next/router';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
@@ -38,8 +39,24 @@ interface Entry {
   status?: 'active' | 'dismissed';
   kind?: 'rule' | 'example';
   expected?: string;
+  template?: string;     // '' = all templates
+  active?: boolean;      // absent/true = on
   meta?: { code?: string; samples?: number; accepts?: number; rejects?: number; examples?: string[] };
 }
+
+// Template scope options for inspection rules (mirrors the Services work-type
+// scope). The knowledge feeds the Scope Rate Card camera AI.
+const KB_TEMPLATES: { value: string; label: string }[] = [
+  { value: '', label: 'All Templates' },
+  { value: 'pm_scope_rate_card', label: 'Scope Rate Card' },
+  { value: 'pm_turn_reinspect_qc', label: 'Turn Re-Inspect QC' },
+  { value: 'pm_community_inspection', label: 'Community / Visit' },
+  { value: 'pm_vacancy_occupancy_check', label: 'Vacancy / Occupancy' },
+  { value: 'leasing_agent_1099_property_inspection', label: 'Leasing Agent' },
+  { value: 'qc_new_construction_rrqc', label: 'New Construction RRQC' },
+];
+const kbTemplateLabel = (t?: string) => KB_TEMPLATES.find((o) => o.value === (t || ''))?.label || 'All Templates';
+const KB_TRIG = 'w-full flex items-center justify-between gap-2 text-[13px] border border-gray-300 rounded-lg px-2.5 py-2 bg-white text-ink';
 
 function fmtDate(ms?: number): string {
   if (!ms) return '';
@@ -61,7 +78,10 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [editTemplate, setEditTemplate] = useState('');
   const [newText, setNewText] = useState('');
+  const [newTemplate, setNewTemplate] = useState('');
+  const [tplFilter, setTplFilter] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -114,11 +134,11 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
     try {
       const r = await fetch('/api/ai-knowledge', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, template: newTemplate || undefined }),
       });
       const d = await r.json();
       if (!r.ok) { setError(d.error || 'Add failed'); return; }
-      setNewText('');
+      setNewText(''); setNewTemplate('');
       await load();
     } finally { setBusy(false); }
   }
@@ -130,13 +150,25 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
     try {
       const r = await fetch(`/api/ai-knowledge/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, template: editTemplate }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d.error || 'Save failed'); return; }
       setEditingId(null);
       await load();
     } finally { setBusy(false); }
+  }
+
+  // On/Off — persist immediately (optimistic), like the per-entry save model.
+  async function toggleActive(e: Entry) {
+    const next = e.active === false; // currently off → turn on, else off
+    setEntries((list) => (list || []).map((x) => (x.id === e.id ? { ...x, active: next } : x)));
+    try {
+      await fetch(`/api/ai-knowledge/${e.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: next }),
+      });
+    } catch { /* optimistic; reload will reconcile */ }
   }
 
   async function remove(id: string) {
@@ -204,15 +236,26 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
             placeholder="e.g. “Gutter cleaning is always 100% tenant.”"
             className="focus-brand w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-y"
           />
-          <div className="flex justify-end mt-2">
+          <div className="flex flex-wrap items-end gap-3 mt-2">
+            <div className="w-52">
+              <label className="block text-xs font-heading font-semibold text-gray-500 mb-1">Template</label>
+              <ListPicker value={newTemplate} options={KB_TEMPLATES} ariaLabel="Template scope" className={KB_TRIG} onChange={setNewTemplate} />
+            </div>
             <button
               type="button"
               onClick={addEntry}
               disabled={busy || !newText.trim()}
-              className="h-9 px-4 rounded-lg bg-brand text-white font-heading font-bold text-sm hover:opacity-90 disabled:bg-gray-300"
+              className="ml-auto h-9 px-4 rounded-lg bg-brand text-white font-heading font-bold text-sm hover:opacity-90 disabled:bg-gray-300"
             >
               Add rule
             </button>
+          </div>
+        </div>
+
+        {/* Template filter. */}
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-52">
+            <ListPicker value={tplFilter} options={[{ value: '', label: 'All Templates' }, ...KB_TEMPLATES.filter((t) => t.value)]} ariaLabel="Filter by template" className={KB_TRIG} onChange={setTplFilter} />
           </div>
         </div>
 
@@ -220,12 +263,12 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
 
         {entries === null ? (
           <div className="text-center text-gray-500 py-10 text-sm">Loading…</div>
-        ) : entries.length === 0 ? (
-          <div className="text-center text-gray-500 py-10 text-sm">No knowledge entries yet. Add one above, or use “Teach AI” in the camera.</div>
+        ) : entries.filter((e) => !tplFilter || (e.template || '') === tplFilter).length === 0 ? (
+          <div className="text-center text-gray-500 py-10 text-sm">No knowledge entries{tplFilter ? ' for this template' : ' yet'}. Add one above, or use “Teach AI” in the camera.</div>
         ) : (
           <ul className="space-y-2.5">
-            {entries.map((e) => (
-              <li key={e.id} className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
+            {entries.filter((e) => !tplFilter || (e.template || '') === tplFilter).map((e) => (
+              <li key={e.id} className={`bg-white rounded-xl border border-gray-200 p-3 shadow-sm ${e.active === false ? 'opacity-60' : ''}`}>
                 {editingId === e.id ? (
                   <>
                     <textarea
@@ -234,6 +277,12 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
                       rows={3}
                       className="focus-brand w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-y"
                     />
+                    <div className="flex flex-wrap items-end gap-3 mt-2">
+                      <div className="w-52">
+                        <label className="block text-xs font-heading font-semibold text-gray-500 mb-1">Template</label>
+                        <ListPicker value={editTemplate} options={KB_TEMPLATES} ariaLabel="Template scope" className={KB_TRIG} onChange={setEditTemplate} />
+                      </div>
+                    </div>
                     <div className="flex justify-end gap-2 mt-2">
                       <button type="button" onClick={() => setEditingId(null)} className="text-sm font-heading font-semibold text-gray-600 px-3 h-9">Cancel</button>
                       <button type="button" onClick={() => saveEdit(e.id)} disabled={busy || !draft.trim()} className="h-9 px-4 rounded-lg bg-emerald-600 text-white font-heading font-bold text-sm disabled:bg-gray-300">Save</button>
@@ -241,24 +290,28 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
                   </>
                 ) : (
                   <>
-                    {e.source === 'auto' && (
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        <span className="inline-flex items-center gap-1 text-[10px] font-heading font-bold uppercase tracking-wide text-violet-700 bg-violet-100 border border-violet-200 rounded-full px-2 py-0.5">✨ AI-learned</span>
-                        {e.meta?.samples != null && (
-                          <span className="text-[10px] text-gray-400" title={(e.meta.examples || []).join(' · ')}>
-                            from {e.meta.samples} decision{e.meta.samples === 1 ? '' : 's'}
-                            {e.meta.accepts != null && e.meta.rejects != null ? ` (${e.meta.accepts}✓ / ${e.meta.rejects}✗)` : ''}
-                          </span>
-                        )}
-                      </div>
-                    )}
+                    <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                      <span className="inline-flex items-center text-[10px] font-heading font-bold uppercase tracking-wide text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5">{kbTemplateLabel(e.template)}</span>
+                      {e.source === 'auto' && (
+                        <>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-heading font-bold uppercase tracking-wide text-violet-700 bg-violet-100 border border-violet-200 rounded-full px-2 py-0.5">✨ AI-learned</span>
+                          {e.meta?.samples != null && (
+                            <span className="text-[10px] text-gray-400" title={(e.meta.examples || []).join(' · ')}>
+                              from {e.meta.samples} decision{e.meta.samples === 1 ? '' : 's'}
+                              {e.meta.accepts != null && e.meta.rejects != null ? ` (${e.meta.accepts}✓ / ${e.meta.rejects}✗)` : ''}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
                     <p className="text-sm text-ink whitespace-pre-wrap">{e.text}</p>
                     <div className="flex items-center justify-between gap-2 mt-2">
-                      <div className="text-[11px] text-gray-500 truncate">
-                        {(e.addedByName || e.addedByEmail || 'Unknown')}{e.createdAt ? ` · ${fmtDate(e.createdAt)}` : ''}{e.updatedAt ? (e.source === 'auto' ? '' : ' · edited') : ''}
-                      </div>
+                      <button type="button" onClick={() => toggleActive(e)}
+                        className={`inline-flex items-center gap-1 text-xs font-heading font-semibold rounded-md px-2.5 py-1 border ${e.active === false ? 'text-gray-500 border-gray-300 bg-white' : 'text-emerald-700 border-emerald-300 bg-emerald-50'}`}>
+                        {e.active === false ? 'Off' : 'On'}
+                      </button>
                       <div className="flex items-center gap-2 shrink-0">
-                        <button type="button" onClick={() => { setEditingId(e.id); setDraft(e.text); }}
+                        <button type="button" onClick={() => { setEditingId(e.id); setDraft(e.text); setEditTemplate(e.template || ''); }}
                           className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md px-2.5 py-1">
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
                           Edit
@@ -269,6 +322,9 @@ export default function AiKnowledgePage({ servicesChecks }: { servicesChecks: Ai
                           Delete
                         </button>
                       </div>
+                    </div>
+                    <div className="text-[11px] text-gray-500 truncate mt-1.5">
+                      {(e.addedByName || e.addedByEmail || 'Unknown')}{e.createdAt ? ` · ${fmtDate(e.createdAt)}` : ''}{e.updatedAt ? (e.source === 'auto' ? '' : ' · edited') : ''}
                     </div>
                   </>
                 )}

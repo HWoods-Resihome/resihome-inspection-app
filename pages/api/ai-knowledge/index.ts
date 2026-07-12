@@ -38,10 +38,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       const text = String((req.body || {}).text || '').trim();
       const expected = String((req.body || {}).expected || '').trim();
+      const template = String((req.body || {}).template || '').trim();
       if (!text) return res.status(400).json({ error: 'Knowledge text is required.' });
       const entry = await addKnowledgeEntry({
         text,
         expected: expected || undefined,
+        template: template || undefined,
         addedByEmail: session.email,
         addedByName: session.name,
       });

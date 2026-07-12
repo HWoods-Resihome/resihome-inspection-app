@@ -21,12 +21,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     if (req.method === 'PATCH') {
-      const text = String((req.body || {}).text || '').trim();
-      if (!text) return res.status(400).json({ error: 'Knowledge text is required.' });
+      const body = req.body || {};
+      const patch: { text?: string; expected?: string; template?: string; active?: boolean } = {};
+      if (body.text !== undefined) {
+        const text = String(body.text || '').trim();
+        if (!text) return res.status(400).json({ error: 'Knowledge text is required.' });
+        patch.text = text;
+      }
       // `expected` present (even empty) means this is an example being edited.
-      const hasExpected = (req.body || {}).expected !== undefined;
-      const expected = hasExpected ? String((req.body || {}).expected || '').trim() : undefined;
-      await updateKnowledgeEntry(id, text, expected);
+      if (body.expected !== undefined) patch.expected = String(body.expected || '').trim();
+      if (body.template !== undefined) patch.template = String(body.template || '');
+      if (body.active !== undefined) patch.active = !!body.active;
+      await updateKnowledgeEntry(id, patch);
       return res.status(200).json({ ok: true });
     }
     if (req.method === 'DELETE') {
