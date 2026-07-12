@@ -40,6 +40,9 @@ interface ServiceView {
 }
 
 const EDITABLE = new Set(['', 'estimated', 'assigned']);
+// Yes/No questions whose "No" does NOT auto-require a note (they have their own
+// dedicated follow-ups): the universal completion gate + the trip-fee flag.
+const NOTE_EXCLUDE = new Set(['svc_completed', 'bill_trip_fee']);
 const splitUrls = (v: any): string[] => String(v || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
 const num = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 const normDate = (v: any): string => {
@@ -501,6 +504,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
   // A question is visible unless its showWhen condition isn't met.
   const isVisible = (q: ServiceQuestion) => !q.showWhen || answers[q.showWhen.qid] === q.showWhen.value;
+  // A "No" on any yes/no requires a note — except the universal gates
+  // (svc_completed has its own reason field; bill_trip_fee is just a flag).
+  const noteKey = (id: string) => `${id}__note`;
+  const noteMissing = (q: ServiceQuestion) => q.type === 'yesno' && !NOTE_EXCLUDE.has(q.id) && answers[q.id] === 'no' && !String(answers[noteKey(q.id)] || '').trim();
   // Was the service marked completed? (universal gate — 'no' relaxes photo reqs.)
   const notCompleted = answers.svc_completed === 'no';
 
@@ -515,7 +522,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   }, [answers.svc_completed, form]);
 
   const requiredMissing = useMemo(() => form.some((q) => {
-    if (!q.required || !isVisible(q)) return false;
+    if (!isVisible(q)) return false;
+    if (noteMissing(q)) return true;                 // "No" without its required note
+    if (!q.required) return false;
     const v = answers[q.id];
     if (q.type === 'multi') return !Array.isArray(v) || v.length === 0;
     return v === undefined || v === '' || v === null;
@@ -773,6 +782,13 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                           ))}
                         </div>
                       )}
+                      {/* A "No" on any yes/no (other than the universal gates) requires a note. */}
+                      {q.type === 'yesno' && !NOTE_EXCLUDE.has(q.id) && answers[q.id] === 'no' && (
+                        <div className="mt-2">
+                          <label className="block text-[12px] font-bold uppercase tracking-wide text-gray-400 mb-1">Add a note <span className="text-brand">*</span></label>
+                          <AutoGrowTextarea value={answers[noteKey(q.id)] || ''} onChange={(e) => setAns(noteKey(q.id), e.target.value)} minPx={52} className={inputCls} placeholder="Required — explain why…" />
+                        </div>
+                      )}
                       {q.type === 'single' && (
                         <div className="flex flex-wrap gap-2">
                           {(q.options || []).map((o) => (
@@ -882,12 +898,19 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   <section className="bg-white border border-gray-200 rounded-2xl p-4">
                     <div className="font-heading font-bold text-[15px] text-ink mb-2">Answers</div>
                     <dl className="space-y-1.5">
-                      {form.map((q) => svc.answers[q.id] != null && svc.answers[q.id] !== '' && (
-                        <div key={q.id} className="flex gap-2 text-[13px]">
-                          <dt className="text-gray-500 flex-1">{q.label}</dt>
-                          <dd className="text-ink font-semibold text-right">{Array.isArray(svc.answers[q.id]) ? svc.answers[q.id].join(', ') : String(svc.answers[q.id])}</dd>
-                        </div>
-                      ))}
+                      {form.map((q) => {
+                        if (svc.answers[q.id] == null || svc.answers[q.id] === '') return null;
+                        const note = q.type === 'yesno' && svc.answers[q.id] === 'no' ? String(svc.answers[`${q.id}__note`] || '') : '';
+                        return (
+                          <div key={q.id} className="flex gap-2 text-[13px]">
+                            <dt className="text-gray-500 flex-1">{q.label}</dt>
+                            <dd className="text-ink font-semibold text-right">
+                              {Array.isArray(svc.answers[q.id]) ? svc.answers[q.id].join(', ') : String(svc.answers[q.id])}
+                              {note && <span className="block font-normal text-gray-500">{note}</span>}
+                            </dd>
+                          </div>
+                        );
+                      })}
                     </dl>
                   </section>
                 )}

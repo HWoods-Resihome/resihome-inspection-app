@@ -58,7 +58,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const form = ({ ...SAMPLE_FORMS, ...(savedForms || {}) })[formKey(worktype, subtype)] || [];
     const answers = form
       .filter((q) => answersRaw[q.id] != null && answersRaw[q.id] !== '')
-      .map((q) => ({ label: q.label, value: Array.isArray(answersRaw[q.id]) ? answersRaw[q.id].join(', ') : String(answersRaw[q.id]) }));
+      .map((q) => {
+        const base = Array.isArray(answersRaw[q.id]) ? answersRaw[q.id].join(', ') : String(answersRaw[q.id]);
+        // Append the required "No" note inline so the reason shows on the PDF.
+        const note = q.type === 'yesno' && answersRaw[q.id] === 'no' ? String(answersRaw[`${q.id}__note`] || '').trim() : '';
+        return { label: q.label, value: note ? `${base} — ${note}` : base };
+      });
 
     const [before, after, petBefore, petAfter] = await Promise.all([
       encodeAll(splitUrls(p.before_photo_urls)), encodeAll(splitUrls(p.after_photo_urls)),
