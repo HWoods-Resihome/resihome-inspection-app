@@ -1,59 +1,57 @@
-/**
- * AutoGrowTextarea — a <textarea> that grows to fit its content (so the whole
- * note is visible without an inner scrollbar) AND stays hand-resizable: drag the
- * bottom-right corner to make it taller/shorter. Once the user drags it, we stop
- * auto-growing and respect their size. Works on every inspection status — a
- * read-only/locked completed inspection can still be expanded to read the note.
- *
- * Drop-in for <textarea>: same props. Manage `value`/`onChange` as usual.
- */
-import { useEffect, useLayoutEffect, useRef, type TextareaHTMLAttributes } from 'react';
+import { useEffect, useRef } from 'react';
 
-export function AutoGrowTextarea({ className = '', style, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+/**
+ * A textarea that GROWS to fit its whole content (no clipped text / tiny inner
+ * scrollbar) and can be dragged taller/shorter by the corner handle. Once the user
+ * drags to resize, a ResizeObserver hands control over — we stop auto-growing and
+ * respect their size. Auto-grow runs on every status, including disabled/locked
+ * fields, so a completed note still expands so the whole thing is readable.
+ *
+ * Drop-in for <textarea>: pass value/onChange/className/etc. as usual. `minPx`
+ * sets a floor height; we never shrink below the content otherwise.
+ */
+type Props = React.TextareaHTMLAttributes<HTMLTextAreaElement> & { minPx?: number };
+
+export function AutoGrowTextarea({ value, className, style, minPx = 38, ...rest }: Props) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
-  const lastAuto = useRef(-1);       // last height we set programmatically
-  const userResized = useRef(false); // true once the user drags the handle
+  const userSized = useRef(false);   // set once the user drags the handle
+  const autoSetting = useRef(false);  // guards our own height writes from the ResizeObserver
 
   const grow = () => {
     const el = ref.current;
-    if (!el || userResized.current) return;
+    if (!el || userSized.current) return;
+    autoSetting.current = true;
     el.style.height = 'auto';
-    const h = el.scrollHeight;
-    el.style.height = `${h}px`;
-    lastAuto.current = h;
+    el.style.height = `${Math.max(minPx, el.scrollHeight)}px`;
+    // Clear the guard AFTER the ResizeObserver has had a chance to fire for this write.
+    requestAnimationFrame(() => { autoSetting.current = false; });
   };
 
-  // Re-fit whenever the content (value) changes or on first paint.
-  useLayoutEffect(grow);
+  // Re-fit whenever the text changes.
+  useEffect(grow, [value]);
 
-  // Detect a manual drag-resize: a height change that isn't one we made. Once the
-  // user resizes, hand control over to them (and enable scrolling if they shrink
-  // it below the content).
+  // Fit on mount + observe for a manual drag-resize (which disables auto-grow).
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
+    if (!el) return;
+    grow();
+    let prev = el.offsetHeight;
     const ro = new ResizeObserver(() => {
-      const node = ref.current;
-      if (!node || userResized.current) return;
-      if (lastAuto.current >= 0 && Math.abs(node.clientHeight - lastAuto.current) > 3) {
-        userResized.current = true;
-        node.style.overflowY = 'auto';
-      }
+      const h = el.offsetHeight;
+      if (!autoSetting.current && Math.abs(h - prev) > 1) userSized.current = true;
+      prev = h;
     });
     ro.observe(el);
-    const onWinResize = () => grow();
-    window.addEventListener('resize', onWinResize);
-    return () => { ro.disconnect(); window.removeEventListener('resize', onWinResize); };
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <textarea
       ref={ref}
-      onInput={grow}
-      className={`resize-y ${className}`}
-      // Hidden overflow while auto-fitting (no scrollbar since it fits); the
-      // ResizeObserver flips it to auto if the user shrinks it below the content.
-      style={{ overflowY: 'hidden', ...style }}
+      value={value}
+      className={className}
+      style={{ resize: 'vertical', overflow: 'hidden', ...style }}
       {...rest}
     />
   );

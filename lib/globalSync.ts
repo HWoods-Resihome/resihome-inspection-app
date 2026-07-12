@@ -24,6 +24,7 @@ import { flushOutbox, reconcileNativeBackgroundAnswers } from '@/lib/offlineOutb
 import { drainPendingCreates } from '@/lib/deferredCreate';
 import { requestPhotoBackgroundSync, queuedInspectionIds, flushQueuedPhotos, getActiveFormInspectionIds, reconcileNativeBackgroundUploads } from '@/lib/offlinePhotoStore';
 import { drainPhotoAttachOutbox } from '@/lib/photoAttachOutbox';
+import { flushServicePhotos, flushServiceSubmits } from '@/lib/services/offlineServices';
 
 let installed = false;
 let inFlight = false;
@@ -75,7 +76,13 @@ async function tick(): Promise<void> {
       await reconcileNativeBackgroundUploads().catch(() => {});
     })();
 
-    await Promise.allSettled([answers, photos]);
+    // Services offline queue drains here too (isolated store): upload queued
+    // completion photos, then fire any queued submit once its photos resolve.
+    // Idempotent (uploads dedupe by localId), so it's safe alongside the
+    // per-page initServiceSync kick.
+    const services = flushServicePhotos().then(() => flushServiceSubmits()).catch(() => { /* retries next tick */ });
+
+    await Promise.allSettled([answers, photos, services]);
     // Also nudge the SW to upload with the tab CLOSED (Chromium only; no-op on iOS,
     // where the foreground pass above is the background-upload path).
     void requestPhotoBackgroundSync();

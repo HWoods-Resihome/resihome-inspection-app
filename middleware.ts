@@ -49,6 +49,8 @@ const PUBLIC_PATHS = new Set<string>([
   '/api/cron/auto-cancel-stale',
   '/api/cron/training-guide-sync',
   '/api/cron/warm-inspections',
+  '/api/cron/services-generate',
+  '/api/cron/services-review',
   // HubSpot change webhook → cache invalidation. Called with no session cookie;
   // self-enforces HUBSPOT_WEBHOOK_SECRET (Bearer / ?key=) inside the handler.
   '/api/webhooks/hubspot',

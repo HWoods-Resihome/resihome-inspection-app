@@ -25,6 +25,16 @@ Result: changes to *different* files/lines merge automatically and both survive;
 only edits to the *same lines* need a quick manual merge. Nothing is silently
 overwritten.
 
+## ResiWalk - Services — vendor visibility rule (IMPORTANT)
+
+For the Services surface (recurring field services), **vendors must NEVER see markup
+or client cost.** A vendor only ever sees the **vendor cost** and any **changes to
+their vendor cost** (e.g. a deduction when they didn't cut the back yard). Markup %
+and client cost are internal-only and must be excluded from every vendor-facing view
+(service cards, the service/completion screen, forms, PDFs, notifications, and the
+"View as Vendor" preview). Internal/admin users see the full breakdown. Enforce this
+wherever pricing is rendered — it's an access rule, not just a UI preference.
+
 ## What's new in v0.10 (Round B)
 
 This is the big one. Round B introduces inspection lifecycle and auto-save.

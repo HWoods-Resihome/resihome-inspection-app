@@ -2,6 +2,8 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Question, Property, HubSpotUser, InspectionSummary } from './types';
+import type { SampleService, ServiceStatus } from './services/sampleData';
+import type { Worktype } from './services/worktypes';
 import { isInternalResolution } from './vendors';
 import { buildSectionPhotoAnswerProps, joinPhotoUrls } from './answerProps';
 import { extractLeasingAgent1099Fields } from './leasingAgent1099';
@@ -9,6 +11,7 @@ import { calculateLine, roundMoney } from './rateCardMath';
 import { EXTERNAL_EDIT_TEMPLATES, EXTERNAL_VIEW_TEMPLATES, stateOfRegion, isExternalEmail } from './userAccess';
 import { normalizeApprovalRouting, type ApprovalRoutingConfig } from './approvalRouting';
 import { reportServerError } from './serverErrorReporter';
+import { SERVICE_OBJECTS, QUESTION_ADDITIONS, SERVICE_ASSOCIATIONS, type PropSpec, type ObjectSpec } from './services/schemaSpec';
 
 const API_BASE = 'https://api.hubapi.com';
 
@@ -695,6 +698,203 @@ export async function fetchPropertiesPage(
 }
 
 /**
+ * Discovery helper for wiring the Services rules engine to the REAL Property
+ * object. Returns the Property field catalog (name/label/type, with enum options)
+ * plus the distinct values found on a sample of live records for a set of
+ * candidate "grouping" fields — so we can identify which field represents
+ * portfolio / owner / market / region / community without guessing names.
+ * Read-only; never writes.
+ */
+export async function inspectPropertyFields(sampleSize = 200, fieldsOverride?: string[]): Promise<{
+  typeId: string;
+  fields: { name: string; label: string; type: string; fieldType: string; options?: { label: string; value: string }[] }[];
+  candidates: Record<string, { field: string; label: string; distinct: { value: string; count: number }[] }>;
+  sampled: number;
+}> {
+  const { property: typeId } = typeIds();
+  const defs = await hubspotFetch(`/crm/v3/properties/${typeId}`).catch(() => ({ results: [] }));
+  const allFields = (defs.results || []).map((p: any) => ({
+    name: p.name, label: p.label, type: p.type, fieldType: p.fieldType,
+    options: Array.isArray(p.options) && p.options.length ? p.options.map((o: any) => ({ label: o.label, value: o.value })) : undefined,
+  }));
+  // Non-system fields only (drop hs_*, createdate, etc.) for readability.
+  const fields = allFields.filter((f: any) => !/^hs_/.test(f.name) && !['createdate', 'lastmodifieddate'].includes(f.name));
+  const byName = new Map<string, { name: string; label: string }>(fields.map((f: any) => [f.name, { name: f.name, label: f.label }]));
+
+  // Which fields to tally distinct values for. An explicit ?fields= list wins;
+  // otherwise auto-pick grouping fields, preferring an EXACT name match (so
+  // `portfolio`/`region` beat `home_owners_association`/`area_manager`).
+  const picked: Record<string, { name: string; label: string }> = {};
+  if (fieldsOverride && fieldsOverride.length) {
+    for (const n of fieldsOverride) { const f = byName.get(n); if (f) picked[n] = f; }
+  } else {
+    const prefs: Record<string, { exact: string[]; re: RegExp }> = {
+      portfolio: { exact: ['portfolio'], re: /portfolio|owner_name|investor|fund/i },
+      region: { exact: ['region'], re: /^region$|market|metro/i },
+      community: { exact: ['neighborhood_name', 'sub_division', 'community_status'], re: /communit|subdivision|neighborhood/i },
+    };
+    for (const [key, { exact, re }] of Object.entries(prefs)) {
+      const hit = exact.map((n) => byName.get(n)).find(Boolean)
+        || fields.find((f: any) => re.test(f.name) || re.test(f.label || ''));
+      if (hit) picked[key] = { name: hit.name, label: hit.label };
+    }
+  }
+
+  // Sample records and tally distinct values for the picked candidate fields.
+  const pickedNames = [...new Set(Object.values(picked).map((p) => p.name))];
+  const tally: Record<string, Map<string, number>> = {};
+  pickedNames.forEach((n) => (tally[n] = new Map()));
+  let sampled = 0;
+  if (pickedNames.length) {
+    let after: string | undefined;
+    do {
+      const qs = new URLSearchParams({ limit: '100', properties: pickedNames.join(','), archived: 'false' });
+      if (after) qs.set('after', after);
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}?${qs.toString()}`).catch(() => ({ results: [] }));
+      for (const r of resp.results || []) {
+        sampled++;
+        for (const n of pickedNames) {
+          const v = (r.properties?.[n] ?? '').toString().trim();
+          if (!v) continue;
+          tally[n].set(v, (tally[n].get(v) || 0) + 1);
+        }
+      }
+      after = resp.paging?.next?.after;
+    } while (after && sampled < sampleSize);
+  }
+
+  const candidates: Record<string, { field: string; label: string; distinct: { value: string; count: number }[] }> = {};
+  for (const [key, p] of Object.entries(picked)) {
+    const distinct = [...(tally[p.name] || new Map()).entries()]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 100);
+    candidates[key] = { field: p.name, label: p.label, distinct };
+  }
+
+  return { typeId, fields, candidates, sampled };
+}
+
+// ── Services coverage: real portfolio / region catalog from the Property object ──
+// The rules-engine coverage picker (Portfolio → Region drill-down) needs the live
+// list of portfolios and, per portfolio, the regions present in it — with counts.
+// HubSpot has no GROUP BY, so we page the LIST endpoint (not Search, which caps at
+// 10k) up to a cap and tally. Cached in-module briefly since the catalog is stable
+// and this is display-only; generation reads live records via searchPropertiesForCoverage.
+export interface CoverageCatalog {
+  portfolios: { key: string; count: number }[];
+  regionsByPortfolio: Record<string, { key: string; count: number }[]>;
+  regions: { key: string; count: number }[];
+  scanned: number;
+  capped: boolean;
+}
+let _coverageCache: { at: number; cap: number; data: CoverageCatalog } | null = null;
+const COVERAGE_TTL_MS = 10 * 60 * 1000;
+
+export async function fetchPropertyCoverage(cap = 6000): Promise<CoverageCatalog | null> {
+  if (_coverageCache && _coverageCache.cap === cap && Date.now() - _coverageCache.at < COVERAGE_TTL_MS) return _coverageCache.data;
+  const { property: typeId } = typeIds();
+  const pf = new Map<string, number>();
+  const rg = new Map<string, number>();
+  const pfRg = new Map<string, Map<string, number>>();
+  let scanned = 0;
+  let capped = false;
+  try {
+    let after: string | undefined;
+    do {
+      const qs = new URLSearchParams({ limit: '100', properties: ['portfolio', 'region', PROPERTY_STATUS_PROPERTY].join(','), archived: 'false' });
+      if (after) qs.set('after', after);
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}?${qs.toString()}`);
+      for (const r of resp.results || []) {
+        const p = r.properties || {};
+        const status = String(p[PROPERTY_STATUS_PROPERTY] || '').trim();
+        if (status && PROPERTY_EXCLUDE_STATUSES.includes(status)) continue; // skip inactive
+        scanned++;
+        const portfolio = String(p.portfolio || '').trim();
+        const region = String(p.region || '').trim();
+        if (portfolio) {
+          pf.set(portfolio, (pf.get(portfolio) || 0) + 1);
+          if (region) {
+            if (!pfRg.has(portfolio)) pfRg.set(portfolio, new Map());
+            const m = pfRg.get(portfolio)!;
+            m.set(region, (m.get(region) || 0) + 1);
+          }
+        }
+        if (region) rg.set(region, (rg.get(region) || 0) + 1);
+      }
+      after = resp.paging?.next?.after;
+      if (scanned >= cap) { capped = !!after; break; }
+    } while (after);
+  } catch (e) { console.warn('[coverage] scan failed:', e); if (!scanned) return null; }
+
+  const sortAlpha = (m: Map<string, number>) => [...m.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => a.key.localeCompare(b.key));
+  const regionsByPortfolio: Record<string, { key: string; count: number }[]> = {};
+  for (const [p, m] of pfRg.entries()) regionsByPortfolio[p] = sortAlpha(m);
+  const data: CoverageCatalog = { portfolios: sortAlpha(pf), regionsByPortfolio, regions: sortAlpha(rg), scanned, capped };
+  _coverageCache = { at: Date.now(), cap, data };
+  return data;
+}
+
+// Property `status` enum options (label + stored value) for the rules-engine
+// enrollment/stop value picker. Cached for the process lifetime (enum is stable).
+let _statusOptsCache: { label: string; value: string }[] | null = null;
+export async function fetchPropertyStatusOptions(): Promise<{ label: string; value: string }[]> {
+  if (_statusOptsCache) return _statusOptsCache;
+  const { property: typeId } = typeIds();
+  try {
+    const def = await hubspotFetch(`/crm/v3/properties/${typeId}/${PROPERTY_STATUS_PROPERTY}`);
+    const opts = (def?.options || [])
+      .filter((o: any) => !o.hidden)
+      .map((o: any) => ({ label: String(o.label || o.value), value: String(o.value) }));
+    if (opts.length) _statusOptsCache = opts;
+    return opts;
+  } catch (e) { console.warn('[coverage] status options fetch failed:', e); return []; }
+}
+
+/**
+ * Live Property records within a coverage selection (portfolios AND/OR regions),
+ * for generation and the rules-engine 'list' mode drill-down. Uses Search with IN
+ * filters so result sets stay well under the 10k cap. Optionally filters by status.
+ */
+export async function searchPropertiesForCoverage(
+  opts: { portfolios?: string[]; regions?: string[]; statuses?: string[]; limit?: number } = {},
+): Promise<{ id: string; address: string; locality: string; region: string; portfolio: string; status: string }[]> {
+  const { property: typeId } = typeIds();
+  const limit = Math.min(Math.max(opts.limit || 1000, 1), 2000);
+  const filters: any[] = [];
+  if (opts.portfolios?.length) filters.push({ propertyName: 'portfolio', operator: 'IN', values: opts.portfolios });
+  if (opts.regions?.length) filters.push({ propertyName: 'region', operator: 'IN', values: opts.regions });
+  if (opts.statuses?.length) filters.push({ propertyName: PROPERTY_STATUS_PROPERTY, operator: 'IN', values: opts.statuses });
+  if (PROPERTY_EXCLUDE_STATUSES.length) filters.push({ propertyName: PROPERTY_STATUS_PROPERTY, operator: 'NOT_IN', values: PROPERTY_EXCLUDE_STATUSES });
+  const projection = ['address', 'city', 'state_code', 'state', 'zip_code', 'zip', 'region', 'portfolio', PROPERTY_STATUS_PROPERTY];
+  const out: { id: string; address: string; locality: string; region: string; portfolio: string; status: string }[] = [];
+  try {
+    let after: string | undefined;
+    do {
+      const body: any = { filterGroups: [{ filters }], properties: projection, limit: 100 };
+      if (after) body.after = after;
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, { method: 'POST', body: JSON.stringify(body) });
+      for (const r of resp.results || []) {
+        const p = r.properties || {};
+        const address = String(p.address || '').trim();
+        const city = String(p.city || '').trim();
+        const st = String(p.state_code || p.state || '').trim();
+        const zip = String(p.zip_code || p.zip || '').trim();
+        out.push({
+          id: String(r.id), address: address || `(Property ${r.id})`,
+          locality: [city, st, zip].filter(Boolean).join(', ').replace(/, (\d)/, ' $1'),
+          region: String(p.region || '').trim(), portfolio: String(p.portfolio || '').trim(),
+          status: String(p[PROPERTY_STATUS_PROPERTY] || '').trim(),
+        });
+        if (out.length >= limit) return out;
+      }
+      after = resp.paging?.next?.after;
+    } while (after);
+  } catch (e) { console.warn('[coverage] property search failed:', e); }
+  return out;
+}
+
+/**
  * Fetch a single Property's stored coordinates by record id. Used to validate
  * the camera's GPS fix against the property location. Returns null when the
  * property has no usable lat/long (the fields exist but aren't always filled
@@ -805,7 +1005,7 @@ export async function fetchPropertyCommunityName(propertyRecordId: string): Prom
 }
 
 /**
- * The FIRST Property record id associated to a Community object, or null. Used to
+ * The FIRST Property record associated to a Community object, or null. Used to
  * place a community inspection on the map — its own record has no street address,
  * so we borrow the community's first property's location. Fail-open.
  */
@@ -924,6 +1124,214 @@ export async function fetchCommunityById(communityId: string): Promise<Community
   }
 }
 
+/**
+ * All Community records as { id, name }, sorted by name. Null when the Community
+ * object can't be resolved. Prefers the `community_name` property, falling back
+ * to the resolved display property. Used by the Services rules-engine community
+ * coverage picker and generation.
+ */
+export async function listServiceCommunities(): Promise<{ id: string; name: string; units: number }[] | null> {
+  const meta = await resolveCommunityMeta();
+  if (!meta) return null;
+  const props = [...new Set(['community_name', meta.nameProp, 'total_units'])];
+  try {
+    const out: { id: string; name: string; units: number }[] = [];
+    let after: string | undefined;
+    do {
+      const qs = new URLSearchParams({ limit: '100', properties: props.join(','), archived: 'false' });
+      if (after) qs.set('after', after);
+      const resp = await hubspotFetch(`/crm/v3/objects/${meta.typeId}?${qs.toString()}`);
+      for (const r of resp.results || []) {
+        const p = r.properties || {};
+        const name = String(p.community_name || p[meta.nameProp] || '').trim();
+        const units = Number(p.total_units);
+        if (name) out.push({ id: String(r.id), name, units: Number.isFinite(units) ? units : 0 });
+      }
+      after = resp.paging?.next?.after;
+    } while (after);
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  } catch (e) { console.warn('[community] list failed:', e); return null; }
+}
+
+/** Property record ids associated to a Community (all pages). Empty when none. */
+export async function fetchCommunityPropertyIds(communityId: string): Promise<string[]> {
+  const meta = await resolveCommunityMeta();
+  if (!meta) return [];
+  const { property } = typeIds();
+  const out: string[] = [];
+  try {
+    let after: string | undefined;
+    do {
+      const qs = after ? `?limit=100&after=${after}` : '?limit=100';
+      const assoc = await hubspotFetch(`/crm/v4/objects/${meta.typeId}/${communityId}/associations/${property}${qs}`);
+      for (const a of assoc.results || []) if (a.toObjectId != null) out.push(String(a.toObjectId));
+      after = assoc.paging?.next?.after;
+    } while (after);
+  } catch (e) { console.warn('[community] property ids fetch failed:', e); }
+  return out;
+}
+
+/** Discovery: the Community object's field catalog + full community name list. */
+export async function inspectCommunityObject(): Promise<{
+  typeId: string; nameProp: string;
+  fields: { name: string; label: string; type: string; fieldType: string }[];
+  communities: { id: string; name: string }[]; count: number;
+} | null> {
+  const meta = await resolveCommunityMeta();
+  if (!meta) return null;
+  const defs = await hubspotFetch(`/crm/v3/properties/${meta.typeId}`).catch(() => ({ results: [] }));
+  const fields = (defs.results || [])
+    .filter((p: any) => !/^hs_/.test(p.name) && !['createdate', 'lastmodifieddate'].includes(p.name))
+    .map((p: any) => ({ name: p.name, label: p.label, type: p.type, fieldType: p.fieldType }));
+  const communities = (await listCommunities()) || [];
+  return { typeId: meta.typeId, nameProp: meta.nameProp, fields, communities, count: communities.length };
+}
+
+// ── ResiWalk - Services: Phase 0 schema provisioner ─────────────────────────
+// Additive-only. dry-run diffs the schemaSpec against HubSpot (no writes); apply
+// creates the two custom objects, their properties, the additive Question props,
+// and the labeled associations. Idempotent (skips what already exists).
+const isConflict = (e: unknown) => {
+  const blob = `${String((e as any)?.message || e || '')} ${String((e as any)?.detail || '')}`;
+  return /409|already ?exists|already a label|PROPERTY_ALREADY_EXISTS|been created|duplicate/i.test(blob);
+};
+
+async function ensurePropertyGroup(typeId: string, name: string): Promise<string> {
+  try {
+    const g = await hubspotFetch(`/crm/v3/properties/${typeId}/groups`);
+    if ((g.results || []).some((x: any) => x.name === name)) return name;
+  } catch { /* fall through to create */ }
+  try {
+    await hubspotFetch(`/crm/v3/properties/${typeId}/groups`, { method: 'POST', body: JSON.stringify({ name, label: 'Service Information' }) });
+  } catch (e) { if (!isConflict(e)) throw e; }
+  return name;
+}
+
+function propPayload(p: PropSpec, groupName?: string) {
+  return {
+    name: p.name, label: p.label, type: p.type, fieldType: p.fieldType,
+    ...(groupName ? { groupName } : {}),
+    ...(p.options ? { options: p.options.map((o, i) => ({ label: o.label, value: o.value, displayOrder: i })) } : {}),
+  };
+}
+
+async function createProperty(typeId: string, p: PropSpec, groupName: string) {
+  try { await hubspotFetch(`/crm/v3/properties/${typeId}`, { method: 'POST', body: JSON.stringify(propPayload(p, groupName)) }); }
+  catch (e) { if (!isConflict(e)) throw e; }
+}
+
+// Read-only: report ALL custom objects (active + archived) with their record
+// counts — so we can find the pre-existing "Service" object (likely archived,
+// which the default schema list hides) and see if it's safe to delete. No writes.
+export async function inspectServiceLikeObjects(): Promise<any> {
+  const fetchList = async (archived: boolean): Promise<any[]> => {
+    try {
+      const r = await hubspotFetch(`/crm/v3/schemas${archived ? '?archived=true' : ''}`);
+      return (r.results || []).map((s: any) => ({ ...s, _archived: archived }));
+    } catch { return []; }
+  };
+  const all = [...await fetchList(false), ...await fetchList(true)];
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const s of all) {
+    if (seen.has(s.objectTypeId)) continue;
+    seen.add(s.objectTypeId);
+    let recordCount: number | null = null;
+    try {
+      const r = await hubspotFetch(`/crm/v3/objects/${s.objectTypeId}/search`, { method: 'POST', body: JSON.stringify({ limit: 1 }) });
+      recordCount = typeof r.total === 'number' ? r.total : null;
+    } catch { /* count unavailable (e.g. archived) */ }
+    out.push({
+      name: s.name, objectTypeId: s.objectTypeId, fullyQualifiedName: s.fullyQualifiedName,
+      singular: s.labels?.singular, plural: s.labels?.plural, archived: !!s._archived,
+      createdAt: s.createdAt, propertyCount: (s.properties || []).length, recordCount,
+    });
+  }
+  return { count: out.length, objects: out };
+}
+
+// ── Services Phase 1: read Service Work Orders (falls back to null when the
+// object isn't configured yet, so the UI can use sample data in the meantime) ──
+const SERVICE_LIST_PROPS = [
+  'service_name', 'worktype', 'subtype', 'status', 'is_bid_item', 'scope', 'due_date',
+  'region_snapshot', 'address_snapshot', 'locality_snapshot', 'community_name',
+  'property_status_snapshot', 'latitude', 'longitude', 'vendor_name', 'pet_stations',
+  'property_id_ref', 'community_id_ref', 'submitted_at', 'completed_at', 'ontime',
+  'hs_createdate',
+];
+
+function normServiceDate(v: any): string {
+  const s = String(v ?? '').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const n = Number(s);
+  if (Number.isFinite(n)) { const d = new Date(n >= 1e11 ? n : n * 1000); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`; }
+  return '';
+}
+
+function mapServiceRow(r: any): SampleService {
+  const p = r.properties || {};
+  const num = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) && n !== 0 ? n : null; };
+  // Only DEFINED keys — getServerSideProps can't serialize `undefined` values.
+  const rec: SampleService = {
+    id: String(r.id),
+    scope: p.scope === 'community' ? 'community' : 'property',
+    address: p.address_snapshot || p.service_name || '(Service)',
+    locality: p.locality_snapshot || '',
+    portfolio: '',
+    region: p.region_snapshot || '',
+    worktype: (p.worktype || 'landscaping') as Worktype,
+    subtype: p.subtype || '',
+    status: (p.status || 'assigned') as ServiceStatus,
+    petStations: p.pet_stations === 'true',
+    vendor: p.vendor_name || null,
+    dueDate: normServiceDate(p.due_date),
+  };
+  if (p.is_bid_item === 'true') rec.isBidItem = true;
+  if (p.community_name) rec.community = p.community_name;
+  if (p.property_status_snapshot) rec.propertyStatus = p.property_status_snapshot;
+  if (p.ontime === 'true') rec.onTime = true;
+  // Completion timestamp (ms epoch or ISO) → ISO, for day-view route ordering.
+  if (p.completed_at) {
+    const t = String(p.completed_at).trim();
+    const d = /^\d{10,}$/.test(t) ? new Date(Number(t)) : new Date(t);
+    if (!isNaN(+d)) rec.completedAt = d.toISOString();
+  }
+  // Creation date → the "estimated" date shown for estimated (bid) services.
+  if (p.hs_createdate) { const e = normServiceDate(p.hs_createdate); if (e) rec.estimatedAt = e; }
+  const lat = num(p.latitude); if (lat !== null) rec.lat = lat;
+  const lng = num(p.longitude); if (lng !== null) rec.lng = lng;
+  return rec;
+}
+
+/** All Service Work Orders (up to `limit`). Returns null when the object type id
+ *  env var isn't set yet — the caller then falls back to sample data. */
+export async function searchServiceWorkOrders(limit = 500): Promise<SampleService[] | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  try {
+    const items: SampleService[] = [];
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({
+          limit: 100, after,
+          properties: SERVICE_LIST_PROPS,
+          sorts: [{ propertyName: 'due_date', direction: 'ASCENDING' }],
+        }),
+      });
+      for (const r of resp.results || []) items.push(mapServiceRow(r));
+      after = resp.paging?.next?.after;
+    } while (after && items.length < limit);
+    return items;
+  } catch (e) {
+    console.warn('[services] searchServiceWorkOrders failed:', e);
+    return null;
+  }
+}
+
 /** City/State/ZIP + region of the FIRST property associated to a Community — the
  *  fallback when the Community object's own fields are blank. Uses the standard
  *  property fields (city / state_code / zip_code|zip / region). Fail-open → null. */
@@ -1010,6 +1418,362 @@ export async function associateCommunityToInspection(inspectionId: string, commu
   } catch (e) {
     console.warn('[community] associate to inspection failed:', e);
   }
+}
+
+// Seed the sample services as real Service Work Order records (dev/demo only).
+// Idempotent via enrollment_key = `seed:<sampleId>`; re-runs skip existing.
+export async function seedSampleServiceWorkOrders(apply: boolean, samples: SampleService[]): Promise<any> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return { error: 'HUBSPOT_SERVICE_TYPE_ID not set — provision the schema and set the env var first.' };
+
+  const existingKeys = new Set<string>();
+  try {
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key'], filterGroups: [{ filters: [{ propertyName: 'enrollment_key', operator: 'HAS_PROPERTY' }] }] }),
+      });
+      for (const r of resp.results || []) { const k = r.properties?.enrollment_key; if (k) existingKeys.add(String(k)); }
+      after = resp.paging?.next?.after;
+    } while (after);
+  } catch { /* fresh object */ }
+
+  const toProps = (s: SampleService, key: string) => ({
+    service_name: s.address,
+    worktype: s.worktype, subtype: s.subtype, status: s.status, scope: s.scope,
+    is_bid_item: s.status === 'estimated' ? 'true' : 'false',
+    due_date: s.dueDate,
+    region_snapshot: s.region, address_snapshot: s.address, locality_snapshot: s.locality,
+    community_name: s.community || '', property_status_snapshot: s.propertyStatus || '',
+    ...(Number.isFinite(s.lat) ? { latitude: s.lat } : {}), ...(Number.isFinite(s.lng) ? { longitude: s.lng } : {}),
+    vendor_name: s.vendor || '', pet_stations: s.petStations ? 'true' : 'false',
+    ontime: s.onTime ? 'true' : 'false', enrollment_key: key,
+  });
+
+  const report: any = { mode: apply ? 'apply' : 'dry-run', typeId, total: samples.length, created: [], skipped: [] };
+  for (const s of samples) {
+    const key = `seed:${s.id}`;
+    if (existingKeys.has(key)) { report.skipped.push(s.id); continue; }
+    if (!apply) { report.created.push(s.id); continue; }
+    try {
+      await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: toProps(s, key) }) });
+      report.created.push(s.id);
+    } catch (e: any) {
+      report.created.push({ id: s.id, error: String(e?.message || e), detail: e?.detail || null });
+    }
+  }
+  return report;
+}
+
+// Delete only the seed:-tagged sample records (teardown). dry-run lists them.
+export async function unseedSampleServiceWorkOrders(apply: boolean): Promise<any> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return { error: 'HUBSPOT_SERVICE_TYPE_ID not set.' };
+  const ids: string[] = [];
+  try {
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key'], filterGroups: [{ filters: [{ propertyName: 'enrollment_key', operator: 'HAS_PROPERTY' }] }] }),
+      });
+      for (const r of resp.results || []) { if (String(r.properties?.enrollment_key || '').startsWith('seed:')) ids.push(String(r.id)); }
+      after = resp.paging?.next?.after;
+    } while (after);
+  } catch (e) { return { error: String((e as any)?.message || e) }; }
+  const report: any = { mode: apply ? 'apply' : 'dry-run', typeId, count: ids.length, ids, deleted: [] };
+  if (apply) {
+    for (const id of ids) {
+      try { await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'DELETE' }); report.deleted.push(id); }
+      catch (e: any) { report.deleted.push({ id, error: String(e?.message || e) }); }
+    }
+  }
+  return report;
+}
+
+// ── Service Rules Engine: read + upsert rule records ──
+const RULE_PROPS = [
+  'rule_name', 'active', 'worktype', 'subtype', 'scope', 'pet_stations', 'props_mode',
+  'vendor_cost', 'markup_pct', 'vendors_json', 'service_description', 'recurring',
+  'cadences_json', 'initial_due_days', 'skip_months_json', 'included_props_json',
+  'portfolios_json', 'communities_json', 'regions_json', 'enroll_field', 'enroll_op',
+  'enroll_value', 'stop_enabled', 'stop_mode', 'stop_field', 'stop_op', 'stop_value',
+  'stop_date', 'stop_count',
+];
+
+/** All Service Rule records (raw props + id), or null when not configured. */
+export async function searchServiceRuleRecords(): Promise<{ id: string; props: Record<string, any> }[] | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  try {
+    const out: { id: string; props: Record<string, any> }[] = [];
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({ limit: 100, after, properties: RULE_PROPS, sorts: [{ propertyName: 'hs_createdate', direction: 'ASCENDING' }] }),
+      });
+      for (const r of resp.results || []) out.push({ id: String(r.id), props: r.properties || {} });
+      after = resp.paging?.next?.after;
+    } while (after);
+    return out;
+  } catch (e) { console.warn('[services] rule read failed:', e); return null; }
+}
+
+/** Create (id null) or update a Service Rule record. Returns the record id, or
+ *  null when the object type id env var isn't set. */
+export async function upsertServiceRuleRecord(id: string | null, props: Record<string, any>): Promise<string | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  if (id) { await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) }); return id; }
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: props }) });
+  return resp?.id ? String(resp.id) : null;
+}
+
+export async function deleteServiceRuleRecord(id: string): Promise<boolean> {
+  const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
+  if (!typeId || !id) return false;
+  await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'DELETE' });
+  return true;
+}
+
+/** Existing Service Work Order (enrollment_key, status) pairs — for generation dedup.
+ *  Null when not configured. */
+export async function readServiceWorkOrderKeys(): Promise<{ key: string; status: string }[] | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  try {
+    const out: { key: string; status: string }[] = [];
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'status'] }),
+      });
+      for (const r of resp.results || []) out.push({ key: String(r.properties?.enrollment_key || ''), status: String(r.properties?.status || '') });
+      after = resp.paging?.next?.after;
+    } while (after);
+    return out;
+  } catch (e) { console.warn('[services] key read failed:', e); return null; }
+}
+
+/** Create one Service Work Order from a property map. Returns the new record id,
+ *  or null when the object type id env var isn't set (caller falls back to preview). */
+export async function createServiceWorkOrder(props: Record<string, any>): Promise<string | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: props }) });
+  return resp?.id ? String(resp.id) : null;
+}
+
+// Full property set for the single-work-order (completion) view.
+const SERVICE_DETAIL_PROPS = [
+  'service_name', 'worktype', 'subtype', 'status', 'scope', 'is_bid_item',
+  'service_description', 'due_date', 'region_snapshot', 'address_snapshot',
+  'locality_snapshot', 'community_name', 'property_status_snapshot',
+  'vendor_name', 'vendor_email', 'pet_stations', 'vendor_cost', 'markup_pct',
+  'client_cost', 'vendor_cost_adjustment', 'vendor_cost_adjustment_reason',
+  'submitted_at', 'completed_at', 'ai_verdict', 'ai_notes',
+  'review_decision', 'review_notes', 'reviewed_by', 'reviewed_at',
+  'before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls',
+  'pet_after_photo_urls', 'answers_json', 'property_id_ref', 'enrollment_key',
+  'hs_createdate',
+];
+
+/** One Service Work Order's raw props by record id, or null (not configured / not found). */
+export async function fetchServiceWorkOrder(id: string): Promise<{ id: string; props: Record<string, any> } | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId || !id) return null;
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/${id}?properties=${SERVICE_DETAIL_PROPS.join(',')}`);
+    return resp?.id ? { id: String(resp.id), props: resp.properties || {} } : null;
+  } catch (e) { console.warn('[services] work order fetch failed:', e); return null; }
+}
+
+/**
+ * A property's current status + Rently lock telemetry — for the service completion
+ * unlock button (shown for cleaning services at non-Tenant-Leased homes) and its
+ * online/offline ring. Returns null when the id/lookup fails (fail-open: no button).
+ */
+export async function fetchPropertyLockInfo(recordId: string): Promise<{ status: string; deviceType: string; hubStatus: string; lockStatus: string; bedrooms: number | null; bathrooms: number | null; squareFootage: number | null; region: string } | null> {
+  if (!recordId) return null;
+  const { property: typeId } = typeIds();
+  const numOrNull = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filterGroups: [{ filters: [{ propertyName: 'hs_object_id', operator: 'EQ', value: recordId }] }],
+        properties: [PROPERTY_STATUS_PROPERTY, 'rently_device_type', 'rently_sh_hub_status', 'rently_sh_lock_status', 'bedrooms', 'bathrooms', 'square_footage', 'region'],
+        limit: 1,
+      }),
+    });
+    const p = resp?.results?.[0]?.properties;
+    if (!p) return null;
+    return {
+      status: String(p[PROPERTY_STATUS_PROPERTY] || '').trim(),
+      deviceType: String(p.rently_device_type || '').trim(),
+      hubStatus: String(p.rently_sh_hub_status || '').trim(),
+      lockStatus: String(p.rently_sh_lock_status || '').trim(),
+      bedrooms: numOrNull(p.bedrooms), bathrooms: numOrNull(p.bathrooms), squareFootage: numOrNull(p.square_footage),
+      region: String(p.region || '').trim(),
+    };
+  } catch (e) { console.warn('[services] lock info fetch failed:', e); return null; }
+}
+
+/** Patch a Service Work Order's properties. Returns false when not configured. */
+export async function patchServiceWorkOrder(id: string, props: Record<string, any>): Promise<boolean> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId || !id) return false;
+  await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) });
+  return true;
+}
+
+/** Bid-item children spawned from a parent completion (enrollment_key = bid:<parentId>). */
+export async function findServiceBidChildren(parentId: string): Promise<{ id: string; props: Record<string, any> }[]> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId || !parentId) return [];
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+      method: 'POST',
+      body: JSON.stringify({ limit: 20, properties: SERVICE_DETAIL_PROPS, filterGroups: [{ filters: [{ propertyName: 'enrollment_key', operator: 'EQ', value: `bid:${parentId}` }] }] }),
+    });
+    return (resp.results || []).map((r: any) => ({ id: String(r.id), props: r.properties || {} }));
+  } catch (e) { console.warn('[services] bid children search failed:', e); return []; }
+}
+
+/** Service Work Orders in a given status (raw props + id), or null when not configured. */
+export async function searchServiceWorkOrdersByStatus(status: string, limit = 200): Promise<{ id: string; props: Record<string, any> }[] | null> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return null;
+  try {
+    const out: { id: string; props: Record<string, any> }[] = [];
+    let after: string | undefined;
+    do {
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({ limit: 100, after, properties: SERVICE_DETAIL_PROPS, filterGroups: [{ filters: [{ propertyName: 'status', operator: 'EQ', value: status }] }] }),
+      });
+      for (const r of resp.results || []) out.push({ id: String(r.id), props: r.properties || {} });
+      after = resp.paging?.next?.after;
+    } while (after && out.length < limit);
+    return out;
+  } catch (e) { console.warn('[services] status search failed:', e); return null; }
+}
+
+/** Delete Service Work Orders (teardown). dry-run lists targets; apply deletes them.
+ *  scope: 'generated' = gen:* keys, 'seeded' = seed:* keys, 'test' = both, 'all' = every order. */
+export async function purgeServiceWorkOrders(apply: boolean, scope: 'generated' | 'seeded' | 'test' | 'all'): Promise<any> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId) return { error: 'HUBSPOT_SERVICE_TYPE_ID not set.' };
+  const want = (key: string): boolean => {
+    if (scope === 'all') return true;
+    if (scope === 'generated') return key.startsWith('gen:');
+    if (scope === 'seeded') return key.startsWith('seed:');
+    return key.startsWith('gen:') || key.startsWith('seed:'); // test
+  };
+  const targets: { id: string; key: string; name: string }[] = [];
+  let after: string | undefined;
+  do {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+      method: 'POST', body: JSON.stringify({ limit: 100, after, properties: ['enrollment_key', 'service_name', 'status'] }),
+    });
+    for (const r of resp.results || []) {
+      const key = String(r.properties?.enrollment_key || '');
+      if (want(key)) targets.push({ id: String(r.id), key, name: String(r.properties?.service_name || '') });
+    }
+    after = resp.paging?.next?.after;
+  } while (after);
+
+  const report: any = { mode: apply ? 'apply' : 'dry-run', scope, typeId, total: targets.length, deleted: [], errors: [] };
+  if (!apply) { report.wouldDelete = targets.map((t) => ({ id: t.id, name: t.name, key: t.key })); return report; }
+  for (const t of targets) {
+    try { await hubspotFetch(`/crm/v3/objects/${typeId}/${t.id}`, { method: 'DELETE' }); report.deleted.push(t.id); }
+    catch (e: any) { report.errors.push({ id: t.id, error: String(e?.message || e) }); }
+  }
+  return report;
+}
+
+export async function provisionServicesSchema(apply: boolean): Promise<any> {
+  const report: any = { mode: apply ? 'apply' : 'dry-run', objects: [], questionAdditions: [], associations: [], envVars: {}, notes: [] };
+  const schemas = await hubspotFetch('/crm/v3/schemas').catch(() => ({ results: [] }));
+  const existing: any[] = schemas.results || [];
+  const findSchema = (name: string) => existing.find((s) => s.name === name || (s.fullyQualifiedName || '').endsWith(`_${name}`));
+  const typeIdByName: Record<string, string> = {};
+
+  for (const obj of SERVICE_OBJECTS as ObjectSpec[]) {
+    const found = findSchema(obj.name);
+    const entry: any = { name: obj.name, label: obj.labels.plural };
+    let typeId: string | undefined = found?.objectTypeId;
+    try {
+      if (!found) {
+        if (apply) {
+          const created = await hubspotFetch('/crm/v3/schemas', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: obj.name, labels: obj.labels, primaryDisplayProperty: obj.primaryDisplayProperty,
+              requiredProperties: [obj.primaryDisplayProperty], secondaryDisplayProperties: [],
+              properties: obj.properties.map((p) => propPayload(p)),
+            }),
+          });
+          typeId = created.objectTypeId;
+          entry.action = 'created'; entry.typeId = typeId; entry.propertiesCreated = obj.properties.length;
+        } else {
+          entry.action = 'CREATE'; entry.willCreateProperties = obj.properties.length;
+        }
+      } else {
+        const props = await hubspotFetch(`/crm/v3/properties/${typeId}`).catch(() => ({ results: [] }));
+        const have = new Set((props.results || []).map((p: any) => p.name));
+        const missing = obj.properties.filter((p) => !have.has(p.name));
+        entry.action = 'exists'; entry.typeId = typeId; entry.missingProperties = missing.map((p) => p.name);
+        if (apply && missing.length) {
+          const group = await ensurePropertyGroup(typeId!, `${obj.name}_information`);
+          for (const p of missing) await createProperty(typeId!, p, group);
+          entry.propertiesCreated = missing.length;
+        }
+      }
+    } catch (e: any) {
+      entry.action = 'error'; entry.error = String(e?.message || e); entry.detail = e?.detail || null;
+    }
+    if (typeId) { typeIdByName[obj.name] = typeId; report.envVars[obj.envVar] = typeId; }
+    report.objects.push(entry);
+  }
+
+  // Additive properties on the reused Question object.
+  const { question } = typeIds();
+  const qprops = await hubspotFetch(`/crm/v3/properties/${question}`).catch(() => ({ results: [] }));
+  const qhave = new Set((qprops.results || []).map((p: any) => p.name));
+  const qMissing = QUESTION_ADDITIONS.filter((p) => !qhave.has(p.name));
+  const qgroup = apply && qMissing.length ? await ensurePropertyGroup(question, 'service_information') : 'service_information';
+  for (const p of QUESTION_ADDITIONS) {
+    if (qhave.has(p.name)) { report.questionAdditions.push({ name: p.name, action: 'exists' }); continue; }
+    if (apply) { await createProperty(question, p, qgroup); report.questionAdditions.push({ name: p.name, action: 'created' }); }
+    else report.questionAdditions.push({ name: p.name, action: 'CREATE' });
+  }
+
+  // Labeled associations (need both type ids to exist).
+  const resolveTo = async (token: string): Promise<string | undefined> => {
+    if (token === 'PROPERTY') return typeIds().property;
+    if (token === 'COMPANY') return '0-2';
+    if (token === 'COMMUNITY') return (await resolveCommunityMeta())?.typeId;
+    return typeIdByName[token];
+  };
+  for (const a of SERVICE_ASSOCIATIONS) {
+    const fromId = typeIdByName[a.from];
+    const toId = await resolveTo(a.to);
+    const e: any = { name: a.name, from: a.from, to: a.to };
+    if (!fromId || !toId) { e.action = apply ? 'skipped (type id not available — run apply after objects exist)' : 'CREATE (after objects exist)'; report.associations.push(e); continue; }
+    if (apply) {
+      try { await hubspotFetch(`/crm/v4/associations/${fromId}/${toId}/labels`, { method: 'POST', body: JSON.stringify({ label: a.label, name: a.name }) }); e.action = 'created'; }
+      catch (err) { e.action = isConflict(err) ? 'exists' : `error: ${String((err as any)?.message || err).slice(0, 100)}`; }
+    } else e.action = 'CREATE';
+    report.associations.push(e);
+  }
+
+  if (apply && report.envVars.HUBSPOT_SERVICE_TYPE_ID) {
+    report.notes.push('Set these env vars in Vercel (Preview + Production) so the app resolves the new objects, then redeploy.');
+  }
+  return report;
 }
 
 /**
@@ -4336,6 +5100,56 @@ export async function fetchW2Agents(): Promise<{ owners: AgentOwnerOption[]; typ
 // its system prompt so call-outs/edits learn from field feedback over time.
 // ---------------------------------------------------------------------------
 const AI_KB_PROP = 'ai_knowledge_base_json';
+
+// ── ResiWalk - Services settings (Form Builder + AI checks) ─────────────────
+// Persisted as JSON on the SAME admin Agent record as the AI knowledge base —
+// no new custom object. The properties self-provision on first write. These make
+// the Form Builder + service AI-review checks editable AND live: the completion
+// screen reads the forms, the AI review reads the checks.
+const SERVICE_FORMS_PROP = 'service_forms_json';
+const SERVICE_CHECKS_PROP = 'service_ai_checks_json';
+
+async function ensureAgentProp(prop: string, label: string): Promise<string | null> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) return null;
+  const typeId = agentTypeId();
+  try {
+    const props = await hubspotFetch(`/crm/v3/properties/${typeId}`).catch(() => ({ results: [] }));
+    const have = new Set((props.results || []).map((p: any) => p.name));
+    if (!have.has(prop)) {
+      const group = await ensurePropertyGroup(typeId, 'service_settings');
+      await createProperty(typeId, { name: prop, label, type: 'string', fieldType: 'textarea' }, group);
+    }
+  } catch (e) { console.warn('[services] ensure agent prop failed:', e); }
+  return recId;
+}
+
+async function readAgentJson<T>(prop: string): Promise<T | null> {
+  const recId = await resolveKnowledgeAgentRecordId();
+  if (!recId) return null;
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}?properties=${prop}`);
+    const raw = resp?.properties?.[prop];
+    return raw ? (JSON.parse(String(raw)) as T) : null;
+  } catch (e) { console.warn(`[services] read ${prop} failed:`, e); return null; }
+}
+
+async function writeAgentJson(prop: string, label: string, value: any): Promise<boolean> {
+  const recId = await ensureAgentProp(prop, label);
+  if (!recId) return false;
+  await hubspotFetch(`/crm/v3/objects/${agentTypeId()}/${recId}`, {
+    method: 'PATCH', body: JSON.stringify({ properties: { [prop]: JSON.stringify(value) } }),
+  });
+  return true;
+}
+
+/** Service completion forms, keyed by `worktype:subtype` → question array. Null when unset/unreachable. */
+export function readServiceForms(): Promise<Record<string, any[]> | null> { return readAgentJson<Record<string, any[]>>(SERVICE_FORMS_PROP); }
+export function writeServiceForms(forms: Record<string, any[]>): Promise<boolean> { return writeAgentJson(SERVICE_FORMS_PROP, 'Service Forms (JSON)', forms); }
+
+/** Service AI-review checks (array). Null when unset/unreachable. */
+export function readServiceAiChecks(): Promise<any[] | null> { return readAgentJson<any[]>(SERVICE_CHECKS_PROP); }
+export function writeServiceAiChecks(checks: any[]): Promise<boolean> { return writeAgentJson(SERVICE_CHECKS_PROP, 'Service AI Checks (JSON)', checks); }
 
 export interface AiKnowledgeEntry {
   id: string;
