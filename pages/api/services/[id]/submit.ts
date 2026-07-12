@@ -61,11 +61,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     pet_after_photo_urls: petAfter.join('\n'),
   };
 
+  // Hard-coded grass-cut price by height (NOT driven by the question form):
+  // Standard <=6" = $45, Overgrown 6–12" = $60, Heavy 12"+ = $90.
+  const grassCutRate = (heightAnswer: string): number => {
+    const h = String(heightAnswer || '').toLowerCase();
+    if (h.includes('heavy') || h.includes('over 12') || h.includes('12"+') || h.includes('12+')) return 90;
+    if (h.includes('overgrown') || h.includes('6-12') || h.includes('6–12') || h.includes('6 - 12')) return 60;
+    return 45;
+  };
+
   // ── Completion-answer pricing + routing ──────────────────────────────────
   // Universal gate: "Service Completed? = No" → skip AI, route straight to human
   // Review, and set the payout (trip-fee rate if billing a trip fee, else $0).
-  // Landscaping grass-cut: if the Back Yard wasn't among the areas serviced,
-  // reduce the vendor payout 25%.
+  // Landscaping grass-cut: price by grass height ($45/$60/$90), then reduce the
+  // payout 25% if the Back Yard wasn't among the areas serviced.
   const p0 = existing?.props || {};
   const worktype = String(p0.worktype || '');
   const subtype = String(p0.subtype || '');
@@ -88,11 +97,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     props.ai_verdict = 'needs_review';
     props.ai_notes = billTrip ? 'Vendor marked NOT completed — trip fee billed. Routed to review (AI skipped).' : 'Vendor marked NOT completed — no charge. Routed to review (AI skipped).';
   } else if (worktype === 'landscaping' && subtype === 'cut') {
+    // Height-based hard rate, then a 25% cut if the back yard wasn't serviced.
+    let finalV = grassCutRate(String(answers.grass_height || ''));
     const areas = Array.isArray(answers[GRASSCUT_AREAS_QID]) ? answers[GRASSCUT_AREAS_QID].map(String) : [];
-    if (areas.length && !areas.includes('Back Yard') && Number.isFinite(origVendor)) {
-      const finalV = Math.round(origVendor * 0.75 * 100) / 100;
-      props.vendor_cost = finalV;
-      props.client_cost = clientOf(finalV);
+    const backYardSkipped = areas.length > 0 && !areas.includes('Back Yard');
+    if (backYardSkipped) finalV = Math.round(finalV * 0.75 * 100) / 100;
+    props.vendor_cost = finalV;
+    props.client_cost = clientOf(finalV);
+    if (backYardSkipped && Number.isFinite(origVendor)) {
       props.vendor_cost_adjustment = Math.round((origVendor - finalV) * 100) / 100;
       props.vendor_cost_adjustment_reason = 'Back yard not serviced — 25% reduction';
     }

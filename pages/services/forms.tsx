@@ -252,7 +252,7 @@ function QuestionEditor({ q, onPatch, onClose, onDelete }: {
 
       {hasOptions(q.type) && (
         <div>
-          <label className={lbl}>Choices <span className="text-gray-400 normal-case font-normal">— a selection can adjust the vendor cost, or require a note / photo</span></label>
+          <label className={lbl}>Choices <span className="text-gray-400 normal-case font-normal">— each choice can require a note / photo (pricing is set by the Rules Engine, not here)</span></label>
           <div className="space-y-2">
             {(q.options || []).map((o) => {
               const setOpt = (p: Partial<QuestionOption>) => onPatch({ options: (q.options || []).map((x) => (x.id === o.id ? { ...x, ...p } : x)) });
@@ -261,15 +261,6 @@ function QuestionEditor({ q, onPatch, onClose, onDelete }: {
                   <div className="flex flex-nowrap items-center gap-1.5">
                     <input value={o.label} onChange={(e) => setOpt({ label: e.target.value })} placeholder="Option label…"
                       className="flex-1 min-w-0 text-[13px] border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white text-ink focus:outline-none focus:border-brand" />
-                    <ListPicker value={o.priceMode} ariaLabel="Price effect"
-                      className="w-28 shrink-0 flex items-center justify-between gap-1 text-[13px] border border-gray-300 rounded-lg px-2 py-2 bg-white text-ink"
-                      options={[{ value: 'none', label: 'No price' }, { value: 'delta', label: '+/− vendor $' }, { value: 'set', label: 'Set vendor $' }]}
-                      onChange={(v) => setOpt({ priceMode: v as QuestionOption['priceMode'] })} />
-                    {o.priceMode !== 'none' && (
-                      <div className="flex items-center shrink-0"><span className="text-gray-400 mr-0.5 text-[13px]">$</span>
-                        <input value={o.priceValue} inputMode="decimal" onChange={(e) => setOpt({ priceValue: e.target.value.replace(/[^\d.\-]/g, '') })} placeholder="0"
-                          className="w-14 text-[13px] text-center tabular-nums border border-gray-300 rounded-lg px-1.5 py-1.5 bg-white text-ink focus:outline-none focus:border-brand" /></div>
-                    )}
                     <button onClick={() => onPatch({ options: (q.options || []).filter((x) => x.id !== o.id) })} aria-label="Remove option"
                       className="shrink-0 w-7 h-7 grid place-items-center rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 text-lg leading-none">×</button>
                   </div>
