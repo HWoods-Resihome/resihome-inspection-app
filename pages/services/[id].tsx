@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
@@ -195,6 +195,49 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
   }, [svc.id]);
   const uploadFor = useMemo(() => (file: File) => capturePhotoOrQueue(svc.id, file), [svc.id]);
 
+  // ── Draft autosave: persist in-progress answers/photos/bid locally as you go so
+  // nothing is lost if you leave and come back (no waiting for Submit). Restored on
+  // reopen; cleared once the completion is submitted/queued. Only hosted photo URLs
+  // are kept (session blob: drafts would be dead after a reload). ──
+  const DRAFT_KEY = `resiwalk.svc.draft.${svc.id}`;
+  const hydrated = useRef(false);
+  useEffect(() => {
+    if (editable) {
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (raw) {
+          const d = JSON.parse(raw);
+          if (d.answers && typeof d.answers === 'object') setAnswers(d.answers);
+          if (Array.isArray(d.before)) setBefore(d.before);
+          if (Array.isArray(d.after)) setAfter(d.after);
+          if (Array.isArray(d.petBefore)) setPetBefore(d.petBefore);
+          if (Array.isArray(d.petAfter)) setPetAfter(d.petAfter);
+          if (typeof d.bidWanted === 'boolean') setBidWanted(d.bidWanted);
+          if (typeof d.bidDesc === 'string') setBidDesc(d.bidDesc);
+          if (typeof d.bidCost === 'string') setBidCost(d.bidCost);
+          if (Array.isArray(d.bidPhotos)) setBidPhotos(d.bidPhotos);
+        }
+      } catch { /* ignore a corrupt draft */ }
+    }
+    hydrated.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [svc.id]);
+  useEffect(() => {
+    if (!hydrated.current || !editable) return;
+    const keep = (arr: string[]) => arr.filter((u) => !u.startsWith('blob:'));
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({
+          answers, before: keep(before), after: keep(after), petBefore: keep(petBefore), petAfter: keep(petAfter),
+          bidWanted, bidDesc, bidCost, bidPhotos: keep(bidPhotos),
+        }));
+      } catch { /* quota / private mode — ignore */ }
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answers, before, after, petBefore, petAfter, bidWanted, bidDesc, bidCost, bidPhotos, editable]);
+  const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ } };
+
   const requiredMissing = useMemo(() => form.some((q) => {
     if (!q.required) return false;
     const v = answers[q.id];
@@ -208,6 +251,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
     try {
       const bid = bidWanted && bidValid ? { description: bidDesc.trim(), vendorCost: Number(bidCost), photos: bidPhotos } : undefined;
       const res = await submitServiceOrQueue(svc.id, { answers, before, after, petBefore, petAfter, bid, submittedAt: new Date().toISOString() });
+      clearDraft();   // completion captured (sent or durably queued) — draft no longer needed
       setDoneStatus(res.status === 'sent' ? 'submitted' : 'queued');
     } catch { setError('Couldn’t save. Try again.'); }
     finally { setSubmitting(false); }

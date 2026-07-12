@@ -106,7 +106,11 @@ export default function NewService() {
     searchCachedProperties(q, 50).then((rows) => {
       setPropOptions(rows.map((p) => {
         const locality = [p.city, p.state, p.zip].filter(Boolean).join(', ');
-        return { value: String(p.recordId), label: p.address || p.name || `(Property ${p.recordId})`, sublabel: locality, address: p.address || p.name || '', locality, region: p.region || '' };
+        // Mirror the inspection picker: full address as the label, "Region ·
+        // Property Status" as the sublabel.
+        const fullAddress = [p.address || p.name, p.city, p.state, p.zip].filter(Boolean).join(', ');
+        const sub = [p.region, p.status].filter(Boolean).join(' · ');
+        return { value: String(p.recordId), label: fullAddress || p.name || `(Property ${p.recordId})`, sublabel: sub, address: p.address || p.name || '', locality, region: p.region || '' };
       }));
     }).catch(() => {});
   };
