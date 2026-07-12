@@ -9,6 +9,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
+import { ListPicker } from '@/components/ListPicker';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
   SAMPLE_SERVICES, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY,
@@ -168,11 +169,23 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
     return [...list].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * dir);
   }, [scoped, status, pastDueOnly, sortField, sortDir]);
 
+  const visibleRows = useMemo(() => rows.filter((s) => !cancelledIds.has(s.id)), [rows, cancelledIds]);
+
   // Publish the CURRENT visible order so the record's ‹ | › pager steps through
   // exactly this filtered/sorted list (mirrors the inspections nav list).
   useEffect(() => {
-    try { sessionStorage.setItem(SERVICE_NAV_KEY, JSON.stringify(rows.filter((s) => !cancelledIds.has(s.id)).map((s) => s.id))); } catch { /* non-fatal */ }
-  }, [rows, cancelledIds]);
+    try { sessionStorage.setItem(SERVICE_NAV_KEY, JSON.stringify(visibleRows.map((s) => s.id))); } catch { /* non-fatal */ }
+  }, [visibleRows]);
+
+  // Client-side pagination (mirrors the inspection home): choose how many to view
+  // per page + step pages. Reset to page 1 whenever the filtered set changes.
+  const [pageSize, setPageSize] = useState(20);
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [status, pastDueOnly, worktype, vendor, region, search, sortField, sortDir, pageSize]);
+  const totalPages = Math.max(1, Math.ceil(visibleRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pagedRows = visibleRows.slice(pageStart, pageStart + pageSize);
 
   const chip = (val: ServiceStatus | 'all', label: string) => (
     <button type="button" onClick={() => { setStatus(val); setPastDueOnly(false); }}
@@ -346,14 +359,40 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
         )}
 
         <div className="space-y-2">
-          {rows.filter((s) => !cancelledIds.has(s.id)).map((s) => (
+          {pagedRows.map((s) => (
             <ServiceCard key={s.id} s={s} overdue={OPEN_STATUSES.includes(s.status) && s.dueDate < REFERENCE_TODAY}
               isAdmin={isAdmin} canCancel={canCancel} onCancel={cancelService} />
           ))}
-          {rows.filter((s) => !cancelledIds.has(s.id)).length === 0 && (
+          {visibleRows.length === 0 && (
             <div className="text-center text-gray-500 text-sm py-12 border border-dashed border-gray-300 rounded-xl">No services match these filters.</div>
           )}
         </div>
+
+        {/* Bottom pagination — mirrors the inspection home (per-page + Back/Next). */}
+        {visibleRows.length > 0 && (
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xs text-gray-500 font-heading whitespace-nowrap">Per page</span>
+              <ListPicker value={String(pageSize)}
+                options={[{ value: '20', label: '20' }, { value: '50', label: '50' }, { value: '100', label: '100' }]}
+                onChange={(v) => setPageSize(Number(v))} ariaLabel="Services per page"
+                className="text-xs font-heading font-semibold pl-2.5 pr-2 py-1.5 border border-gray-300 rounded-md bg-white flex items-center gap-1 text-gray-700 hover:border-brand/50" />
+            </div>
+            <div className="flex items-center gap-2 sm:gap-3">
+              <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}
+                className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-3 py-1.5 border border-gray-300 rounded-md bg-white disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+                Back
+              </button>
+              <span className="text-xs font-heading text-gray-600 whitespace-nowrap">Page {currentPage} of {totalPages}</span>
+              <button type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}
+                className="inline-flex items-center gap-1 text-xs font-heading font-semibold text-gray-700 hover:text-brand px-3 py-1.5 border border-gray-300 rounded-md bg-white disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+                Next
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

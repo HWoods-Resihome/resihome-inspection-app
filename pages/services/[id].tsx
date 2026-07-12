@@ -8,7 +8,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
-import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, type ServiceStatus } from '@/lib/services/sampleData';
+import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, type ServiceStatus } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoThumb } from '@/components/PhotoThumb';
@@ -162,6 +162,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
   const router = useRouter();
   // Bid items are never crew-completed here — they go straight to internal bid review.
   const editable = EDITABLE.has(svc.status) && !svc.isBidItem;
+  // Past-due (open statuses only) — turns the header Due date red, like the home list.
+  const overdue = ['estimated', 'assigned', 'submitted', 'review'].includes(svc.status) && !!svc.dueDate && svc.dueDate < REFERENCE_TODAY;
   const underReview = svc.status === 'review';
   const canReview = isInternal && underReview;
   const canBidReview = isInternal && svc.isBidItem && svc.status === 'estimated';
@@ -378,7 +380,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
                 propMeta.region || '',
               ].filter(Boolean).join(' · ')}</div>
             )}
-            <div className="text-xs text-gray-500 leading-tight truncate">{svc.vendor || 'Unassigned'}{svc.dueDate ? ` · Due ${fmtMDY(svc.dueDate)}` : ''}</div>
+            <div className="text-xs text-gray-500 leading-tight truncate">
+              {svc.vendor || 'Unassigned'}
+              {svc.dueDate && <> · <span className={overdue ? 'text-red-600 font-semibold' : ''}>Due {fmtMDY(svc.dueDate)}</span></>}
+            </div>
           </div>
         </div>
       </header>
