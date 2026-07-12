@@ -941,16 +941,35 @@ export function QcReinspectForm(props: Props) {
       {/* Title block — template name + status + inspector + Back/Unlock. Scrolls
           away on scroll (mirrors Scope / 1099); only the logo bar below pins. */}
       <div className="pt-3 pb-2">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-start justify-between gap-3">
+          {/* Title + inspector + report link stack tightly in ONE column so the
+              control cluster no longer inflates the title↔inspector gap. */}
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <FitText text={props.templateLabel} className="font-heading font-bold text-gray-900 flex-1 min-w-0" max={22} min={11} copyLink={`/inspection/${props.inspectionRecordId}`} />
-              {statusLabel && (
-                <span className={`inline-flex items-center shrink-0 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold border whitespace-nowrap ${statusLabel.color}`}>{statusLabel.label}</span>
-              )}
+            <FitText text={props.templateLabel} className="font-heading font-bold text-gray-900" max={22} min={11} copyLink={`/inspection/${props.inspectionRecordId}`} />
+            <div className="text-xs text-gray-500 mt-0.5 truncate">
+              Inspector: {props.inspectorName}
             </div>
+            {props.pdfUrl && (
+              <a
+                href={props.pdfUrl}
+                onClick={(e) => { e.preventDefault(); openPdf(props.pdfUrl!, `${props.templateLabel} Report`); }}
+                className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline cursor-pointer"
+                title="View the generated QC report"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                View PDF Report
+              </a>
+            )}
           </div>
-          <div className="shrink-0 flex flex-row items-center gap-1.5">
+          {/* Status chip + controls — an INDEPENDENT top-right cluster. */}
+          <div className="shrink-0 flex items-center gap-1.5">
+            {statusLabel && (
+              <span className={`inline-flex items-center shrink-0 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold border whitespace-nowrap ${statusLabel.color}`}>{statusLabel.label}</span>
+            )}
             {/* History gear — inspection audit trail; shown on every status. */}
             <button
               type="button"
@@ -984,26 +1003,6 @@ export function QcReinspectForm(props: Props) {
             )}
           </div>
         </div>
-        {/* Inspector / report link — full width below the title + controls row
-            so it never truncates under the buttons. */}
-        <div className="text-xs text-gray-500 mt-0.5 truncate">
-          Inspector: {props.inspectorName}
-        </div>
-        {props.pdfUrl && (
-          <a
-            href={props.pdfUrl}
-            onClick={(e) => { e.preventDefault(); openPdf(props.pdfUrl!, `${props.templateLabel} Report`); }}
-            className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline cursor-pointer"
-            title="View the generated QC report"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-            </svg>
-            View PDF Report
-          </a>
-        )}
       </div>
 
       {/* Frozen header — logo + address + bed/bath/sqft + the Pass/Fail tally

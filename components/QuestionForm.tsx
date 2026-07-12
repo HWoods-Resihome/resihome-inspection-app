@@ -2008,29 +2008,47 @@ export function QuestionForm({
 
       {/* Top block — title + inspector + Back. NOT sticky: scrolls away (Scope style). */}
       <div className="lz-head max-w-3xl mx-auto px-4 pt-3 pb-2">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-start justify-between gap-3">
+          {/* Title + inspector + report link stack tightly in ONE column, so the
+              (taller) control cluster on the right no longer inflates the row and
+              leaves an awkward gap between the title and the inspector line. */}
           <div className="min-w-0 flex-1">
-            {/* Title + status on ONE line — the title font auto-shrinks so both
-                the full template name AND the status chip fit without truncating
-                (Unlock is now a small bubble, so there's room). min-h matches the
-                Unlock/Back control row so the status chip lines up with them. */}
-            <div className="flex items-center gap-2">
-              <FitText
-                text={templateLabel}
-                className="font-heading font-bold text-gray-900 flex-1 min-w-0"
-                max={22}
-                min={11}
-                copyLink={`/inspection/${inspectionRecordId}`}
-              />
-              {headerBadge && (
-                <span className={`inline-flex items-center shrink-0 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold border whitespace-nowrap ${headerBadge.color}`}>{headerBadge.label}</span>
+            <FitText
+              text={templateLabel}
+              className="font-heading font-bold text-gray-900"
+              max={22}
+              min={11}
+              copyLink={`/inspection/${inspectionRecordId}`}
+            />
+            <div className="text-xs text-gray-500 mt-0.5 truncate">
+              Inspector: {inspectorName}
+              {isSubmittedState && fmtStamp(submittedAt) && (
+                <span className="text-gray-400">{'  ·  '}{fmtStamp(submittedAt)} Submitted</span>
               )}
             </div>
+            {pdfUrl && (
+              <a
+                href={pdfUrl}
+                onClick={(e) => { e.preventDefault(); openPdf(pdfUrl, `${templateLabel} Report`); }}
+                className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline cursor-pointer"
+                title="View the generated inspection report"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                View PDF Report
+              </a>
+            )}
           </div>
-          {/* Unlock (Rently code) + Back on ONE row so they don't add height.
-              Compact circle to the LEFT of Back; hidden once read-only
-              (completed / cancelled / view-only). */}
-          <div className="shrink-0 flex flex-row items-center gap-1.5">
+          {/* Status chip + controls (history · pager · save-close · unlock) — an
+              INDEPENDENT top-right cluster, so it doesn't drive the title row's
+              height. */}
+          <div className="shrink-0 flex items-center gap-1.5">
+          {headerBadge && (
+            <span className={`inline-flex items-center shrink-0 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold border whitespace-nowrap ${headerBadge.color}`}>{headerBadge.label}</span>
+          )}
           {/* History gear — opens the inspection audit trail. Shown on every
               status (incl. completed/read-only) so history is always reachable. */}
           <button
@@ -2073,29 +2091,6 @@ export function QuestionForm({
           )}
           </div>
         </div>
-        {/* Inspector / report link — full width below the title + controls row
-            so the "· date Submitted" stamp never truncates under the buttons. */}
-        <div className="text-xs text-gray-500 mt-0.5 truncate">
-          Inspector: {inspectorName}
-          {isSubmittedState && fmtStamp(submittedAt) && (
-            <span className="text-gray-400">{'  ·  '}{fmtStamp(submittedAt)} Submitted</span>
-          )}
-        </div>
-        {pdfUrl && (
-          <a
-            href={pdfUrl}
-            onClick={(e) => { e.preventDefault(); openPdf(pdfUrl, `${templateLabel} Report`); }}
-            className="mt-1 inline-flex items-center gap-1 text-xs font-heading font-semibold text-brand hover:underline cursor-pointer"
-            title="View the generated inspection report"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-            </svg>
-            View PDF Report
-          </a>
-        )}
       </div>
 
       {/* Frozen header — logo + address + status + meta. The ONLY thing pinned
