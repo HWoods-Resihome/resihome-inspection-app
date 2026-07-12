@@ -23,12 +23,26 @@ const SETUP_LABELS: Record<string, string> = {
   is_enabled: 'Question on/off flag (Question)',
 };
 
+function Chevron({ open }: { open: boolean }) {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform shrink-0 ${open ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>;
+}
+
+// Collapsible admin section — matches the self-contained manager cards
+// (Approval Routing / Slack / Error Log) so every section on this page opens and
+// closes the same way. Collapsed by default.
 function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
   return (
-    <section className="mt-5 border border-gray-200 rounded-xl bg-white p-4">
-      <h2 className="font-heading font-bold text-base text-ink">{title}</h2>
-      {desc && <p className="text-[13px] text-gray-600 mt-1 leading-relaxed">{desc}</p>}
-      <div className="mt-3">{children}</div>
+    <section className="mt-5 border border-gray-200 rounded-xl bg-white">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        className="w-full flex items-center justify-between gap-3 p-4 text-left">
+        <div>
+          <h2 className="font-heading font-bold text-base text-ink">{title}</h2>
+          {desc && <p className="text-[12px] text-gray-500 mt-0.5 leading-relaxed">{desc}</p>}
+        </div>
+        <Chevron open={open} />
+      </button>
+      {open && <div className="px-4 pb-4">{children}</div>}
     </section>
   );
 }
