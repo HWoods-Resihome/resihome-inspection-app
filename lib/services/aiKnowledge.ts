@@ -20,6 +20,14 @@ export interface AiCheck {
   worktype: string;  // '' = all work types
   subtype: string;   // '' = all subtypes
   active: boolean;
+  // Provenance. Absent ⇒ admin-authored. 'auto' checks are synthesized by the
+  // review-learning loop from reviewer decisions (approve/modify/reject + the
+  // reason a service went to review); admins can edit (adopts it) or delete them.
+  source?: 'admin' | 'auto';
+  // Stable fingerprint so re-learning refreshes the same auto check in place.
+  signature?: string;
+  // Why the loop wrote this (sample size, dominant decision) — shown to admins.
+  meta?: { samples?: number; decision?: string; examples?: string[] };
 }
 
 // Foundational knowledge — seeded from the initial review criteria.

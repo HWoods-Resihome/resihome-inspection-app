@@ -27,6 +27,8 @@ export default function ServicesAiKnowledge({ savedChecks, canSave, embedded }: 
   const [wtFilter, setWtFilter] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [learning, setLearning] = useState(false);
+  const [learnMsg, setLearnMsg] = useState('');
   // Add-panel local state (mirrors the Inspections "Add a rule" panel).
   const [ncText, setNcText] = useState('');
   const [ncWt, setNcWt] = useState('');
@@ -49,6 +51,24 @@ export default function ServicesAiKnowledge({ savedChecks, canSave, embedded }: 
       if (r.ok) setSaved(true);
     } catch { /* keep local; retry */ }
     finally { setSaving(false); }
+  };
+
+  // Learn from reviewer decisions (approve/modify/reject + the reason a service
+  // went to review). Merges ✨ AI-learned checks server-side and adopts the
+  // returned merged array into local state so the footer Save preserves them.
+  const learnNow = async () => {
+    if (learning) return;
+    setLearning(true); setLearnMsg('');
+    try {
+      const r = await fetch('/api/services/ai-learning', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setLearnMsg(d.error || 'Learn failed.'); return; }
+      if (Array.isArray(d.checks)) { setChecks(d.checks); setSaved(true); }
+      setLearnMsg(d.candidates
+        ? `Learned from ${d.samples} reviewed service${d.samples === 1 ? '' : 's'}: ${d.added} new, ${d.refreshed} updated.`
+        : `No new patterns yet — reviewed ${d.samples} service${d.samples === 1 ? '' : 's'}.`);
+    } catch { setLearnMsg('Couldn’t reach the server. Try again.'); }
+    finally { setLearning(false); }
   };
 
   const visible = useMemo(() => checks.filter((c) =>
@@ -75,6 +95,22 @@ export default function ServicesAiKnowledge({ savedChecks, canSave, embedded }: 
           all are equally important. If everything is clean it auto-moves to <b className="text-emerald-700">Completed</b>;
           any concern routes it to <b className="text-purple-700">Review</b> for a human.
         </p>
+
+        {/* Learn from feedback — synthesize ✨ AI-learned checks from reviewer
+            decisions (approve/modify/reject + the reason a service went to review). */}
+        {canSave && (
+          <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 mb-5 flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-[13px] text-violet-900 min-w-0">
+              <span className="font-heading font-semibold">Learn from feedback now</span>
+              <span className="block text-violet-700/80 text-xs">Turn reviewer decisions (approve/modify/reject and why a service went to review) into ✨ AI-learned checks.</span>
+              {learnMsg && <span className="block text-xs text-emerald-700 font-heading font-semibold mt-1">{learnMsg}</span>}
+            </div>
+            <button type="button" onClick={learnNow} disabled={learning}
+              className="h-9 px-4 rounded-lg bg-violet-600 text-white font-heading font-bold text-sm hover:bg-violet-700 disabled:bg-gray-300 shrink-0">
+              {learning ? 'Learning…' : 'Learn now'}
+            </button>
+          </div>
+        )}
 
         {/* Add a check — mirrors the Inspections "Add a rule" panel. */}
         <div className="bg-white rounded-xl border border-gray-200 p-3 mb-5 shadow-sm">
@@ -139,7 +175,15 @@ export default function ServicesAiKnowledge({ savedChecks, canSave, embedded }: 
                   </>
                 ) : (
                   <>
-                    <div className="mb-1.5"><span className="inline-flex items-center text-[10px] font-heading font-bold uppercase tracking-wide text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5">{scopeLabel(c)}</span></div>
+                    <div className="mb-1.5 flex items-center gap-1.5 flex-wrap">
+                      <span className="inline-flex items-center text-[10px] font-heading font-bold uppercase tracking-wide text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-2 py-0.5">{scopeLabel(c)}</span>
+                      {c.source === 'auto' && (
+                        <>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-heading font-bold uppercase tracking-wide text-violet-700 bg-violet-100 border border-violet-200 rounded-full px-2 py-0.5">✨ AI-learned</span>
+                          {c.meta?.samples != null && <span className="text-[10px] text-gray-400">from {c.meta.samples} review{c.meta.samples === 1 ? '' : 's'}</span>}
+                        </>
+                      )}
+                    </div>
                     <p className="text-sm text-ink whitespace-pre-wrap">{c.check || <span className="text-gray-400">Empty check</span>}</p>
                     <div className="flex items-center justify-between gap-2 mt-2">
                       <button type="button" onClick={() => patch(c.id, { active: !c.active })}

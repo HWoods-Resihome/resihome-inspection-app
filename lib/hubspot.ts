@@ -5151,6 +5151,54 @@ export function writeServiceForms(forms: Record<string, any[]>): Promise<boolean
 export function readServiceAiChecks(): Promise<any[] | null> { return readAgentJson<any[]>(SERVICE_CHECKS_PROP); }
 export function writeServiceAiChecks(checks: any[]): Promise<boolean> { return writeAgentJson(SERVICE_CHECKS_PROP, 'Service AI Checks (JSON)', checks); }
 
+/** A learned service-check candidate produced by the review-learning loop. */
+export interface AutoServiceCheckCandidate {
+  signature: string;
+  check: string;
+  worktype?: string;
+  subtype?: string;
+  meta?: { samples?: number; decision?: string; examples?: string[] };
+}
+
+/**
+ * Merge synthesized AUTO service checks into the stored set and RETURN the full
+ * merged array (the Services AI Knowledge tab edits/bulk-saves the whole array,
+ * so it adopts what we return). Refreshes an existing auto check in place (same
+ * signature) and never touches admin-authored checks. Auto checks are capped.
+ */
+export async function upsertAutoServiceChecks(candidates: AutoServiceCheckCandidate[]): Promise<{ checks: any[]; added: number; refreshed: number }> {
+  const checks = (await readServiceAiChecks()) || [];
+  const bySig = new Map<string, any>();
+  for (const c of checks) if (c && c.source === 'auto' && c.signature) bySig.set(String(c.signature), c);
+
+  let added = 0, refreshed = 0;
+  for (const cand of candidates) {
+    const existing = bySig.get(cand.signature);
+    if (existing) {
+      existing.check = cand.check.slice(0, 600);
+      existing.worktype = cand.worktype || '';
+      existing.subtype = cand.subtype || '';
+      existing.meta = cand.meta;
+      refreshed++;
+    } else {
+      checks.unshift({
+        id: `svc-auto-${cand.signature}`.slice(0, 80),
+        check: cand.check.slice(0, 600),
+        worktype: cand.worktype || '', subtype: cand.subtype || '',
+        active: true, source: 'auto', signature: cand.signature, meta: cand.meta,
+      });
+      added++;
+    }
+  }
+
+  // Cap auto checks (newest kept); keep every admin/human check.
+  const humans = checks.filter((c) => c.source !== 'auto');
+  const autos = checks.filter((c) => c.source === 'auto').slice(0, 100);
+  const merged = [...autos, ...humans];
+  await writeServiceAiChecks(merged);
+  return { checks: merged, added, refreshed };
+}
+
 export interface AiKnowledgeEntry {
   id: string;
   text: string;
