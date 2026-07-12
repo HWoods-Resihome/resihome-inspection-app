@@ -460,12 +460,12 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
                 {/* Route legend — one chip per inspector with completed stops today,
                     matching the numbered dots/line on the map. Only when 2+ routes. */}
                 {dayRoutes.legend.length > 1 && (
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 px-0.5 pb-1">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 px-0.5 pb-1">
                     {dayRoutes.legend.map((r) => (
-                      <span key={r.inspector} className="inline-flex items-center gap-1.5 text-[11px] text-gray-600">
+                      <span key={r.inspector} className="flex items-center gap-1.5 text-[11px] text-gray-600 min-w-0">
                         <span className="w-3 h-3 rounded-full shrink-0" style={{ background: r.color }} />
-                        <span className="font-semibold">{r.inspector}</span>
-                        <span className="text-gray-400">· {r.count} stop{r.count === 1 ? '' : 's'}</span>
+                        <span className="font-semibold truncate">{r.inspector}</span>
+                        <span className="text-gray-400 shrink-0">· {r.count} stop{r.count === 1 ? '' : 's'}</span>
                       </span>
                     ))}
                   </div>
