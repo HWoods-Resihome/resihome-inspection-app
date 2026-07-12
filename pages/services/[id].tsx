@@ -28,6 +28,7 @@ interface ServiceView {
   worktype: Worktype; subtype: string; scope: 'property' | 'community';
   address: string; locality: string; vendor: string | null; dueDate: string;
   petStations: boolean; status: string; propertyRecordId: string; isBidItem: boolean;
+  estimatedAt: string;
   vendorCost: number | null; markupPct: number | null; clientCost: number | null;
   vendorCostAdjustment: number | null; adjustmentReason: string;
   description: string;
@@ -75,6 +76,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         vendor: p.vendor_name || null, dueDate: normDate(p.due_date),
         petStations: p.pet_stations === 'true', status: p.status || 'assigned',
         propertyRecordId: p.property_id_ref || '', isBidItem: p.is_bid_item === 'true',
+        estimatedAt: normDate(p.hs_createdate),
         description: p.service_description || '',
         vendorCost: num(p.vendor_cost), markupPct: num(p.markup_pct), clientCost: num(p.client_cost),
         vendorCostAdjustment: num(p.vendor_cost_adjustment), adjustmentReason: p.vendor_cost_adjustment_reason || '',
@@ -91,6 +93,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       id: s.id, live: false, worktype: s.worktype, subtype: s.subtype, scope: s.scope,
       address: s.address, locality: s.locality, vendor: s.vendor, dueDate: s.dueDate,
       petStations: !!s.petStations, status: s.status, propertyRecordId: '', isBidItem: false,
+      estimatedAt: s.estimatedAt || '',
       description: '',
       vendorCost: null, markupPct: null, clientCost: null, vendorCostAdjustment: null, adjustmentReason: '',
       aiVerdict: '', aiNotes: '', reviewDecision: '', reviewNotes: '', reviewedBy: '',
@@ -661,8 +664,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             )}
             <div className="text-xs text-gray-500 leading-tight truncate">
               {svc.vendor || 'Unassigned'}
-              {svc.isBidItem && svc.status === 'estimated'
-                ? <> · <span className="font-semibold text-gray-600">Bid Item</span></>
+              {svc.status === 'estimated'
+                ? <> · <span className="font-semibold text-gray-600">Estimated{(svc.estimatedAt || svc.dueDate) ? ` ${fmtMDY(svc.estimatedAt || svc.dueDate)}` : ''}</span></>
                 : svc.dueDate && <> · <span className={overdue ? 'text-red-600 font-semibold' : ''}>Due {fmtMDY(svc.dueDate)}</span></>}
             </div>
           </div>

@@ -107,8 +107,8 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
         </div>
         <span className="text-[12px] shrink-0 text-right">{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
       </div>
-      {s.isBidItem && s.status === 'estimated'
-        ? <div className="mt-0.5 text-[12px] font-semibold text-gray-600">Bid Item</div>
+      {s.status === 'estimated'
+        ? <div className="mt-0.5 text-[12px] font-semibold text-gray-600">Estimated{(s.estimatedAt || s.dueDate) ? ` ${fmtMDY(s.estimatedAt || s.dueDate)}` : ''}</div>
         : <div className={`mt-0.5 text-[12px] ${overdue ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>Due {fmtMDY(s.dueDate)}</div>}
     </Link>
   );
@@ -230,7 +230,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
     const onTime = done.filter((s) => s.onTime);
     return {
       open: open.length,
-      pastDue: open.filter((s) => s.dueDate < REFERENCE_TODAY).length,
+      pastDue: open.filter((s) => !!s.dueDate && s.dueDate < REFERENCE_TODAY).length,
       onTimePct: done.length ? Math.round((onTime.length / done.length) * 100) : null,
     };
   }, [scoped]);
@@ -246,7 +246,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
 
   const rows = useMemo(() => {
     let list = scoped.filter((s) => s.status !== 'canceled');
-    if (pastDueOnly) list = list.filter((s) => OPEN_STATUSES.includes(s.status) && s.dueDate < REFERENCE_TODAY);
+    if (pastDueOnly) list = list.filter((s) => OPEN_STATUSES.includes(s.status) && !!s.dueDate && s.dueDate < REFERENCE_TODAY);
     else if (status !== 'all') list = list.filter((s) => s.status === status);
     const dir = sortDir === 'asc' ? 1 : -1;
     const key = (s: typeof list[number]) => ({
@@ -491,7 +491,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
 
         <div className="space-y-2">
           {pagedRows.map((s) => (
-            <ServiceCard key={s.id} s={s} overdue={OPEN_STATUSES.includes(s.status) && s.dueDate < REFERENCE_TODAY}
+            <ServiceCard key={s.id} s={s} overdue={OPEN_STATUSES.includes(s.status) && !!s.dueDate && s.dueDate < REFERENCE_TODAY}
               isAdmin={isAdmin}
               selectMode={selectMode} selectable={isSelectable(s)} selected={selectedIds.has(s.id)} onToggleSelect={toggleSelect} onLongPress={enterSelectWith} />
           ))}

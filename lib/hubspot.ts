@@ -1157,6 +1157,7 @@ const SERVICE_LIST_PROPS = [
   'region_snapshot', 'address_snapshot', 'locality_snapshot', 'community_name',
   'property_status_snapshot', 'latitude', 'longitude', 'vendor_name', 'pet_stations',
   'property_id_ref', 'community_id_ref', 'submitted_at', 'completed_at', 'ontime',
+  'hs_createdate',
 ];
 
 function normServiceDate(v: any): string {
@@ -1196,6 +1197,8 @@ function mapServiceRow(r: any): SampleService {
     const d = /^\d{10,}$/.test(t) ? new Date(Number(t)) : new Date(t);
     if (!isNaN(+d)) rec.completedAt = d.toISOString();
   }
+  // Creation date → the "estimated" date shown for estimated (bid) services.
+  if (p.hs_createdate) { const e = normServiceDate(p.hs_createdate); if (e) rec.estimatedAt = e; }
   const lat = num(p.latitude); if (lat !== null) rec.lat = lat;
   const lng = num(p.longitude); if (lng !== null) rec.lng = lng;
   return rec;
@@ -1385,6 +1388,7 @@ const SERVICE_DETAIL_PROPS = [
   'review_decision', 'review_notes', 'reviewed_by', 'reviewed_at',
   'before_photo_urls', 'after_photo_urls', 'pet_before_photo_urls',
   'pet_after_photo_urls', 'answers_json', 'property_id_ref', 'enrollment_key',
+  'hs_createdate',
 ];
 
 /** One Service Work Order's raw props by record id, or null (not configured / not found). */
