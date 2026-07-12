@@ -810,7 +810,6 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             {serviceStatusText(svc.status || 'assigned', isInternal)}
             {isInternal && svc.status === 'submitted' && <AiSparkle className="w-3 h-3" />}
           </span>
-          <ServicePager currentId={svc.id} onNavigate={(id) => { flushDraft(true); router.replace(`/services/${id}`); }} />
           {isInternal && svc.live && (
             <div className="relative shrink-0">
               <button type="button" onClick={() => setSettingsOpen((o) => !o)} aria-label="Service settings" aria-expanded={settingsOpen}
@@ -825,6 +824,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 </div></>)}
             </div>
           )}
+          <ServicePager currentId={svc.id} onNavigate={(id) => { flushDraft(true); router.replace(`/services/${id}`); }} />
           {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7 shrink-0" />}
           <Link href="/services" aria-label="Back to Services" className="shrink-0 text-gray-400 hover:text-ink">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
