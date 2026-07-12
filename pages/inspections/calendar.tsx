@@ -204,12 +204,18 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
     if (!c) return [];
     const k = statusKey(i.status);
     const meta = k ? STATUS_META[k] : undefined;
+    const d = parse(dayOf(i)!);
+    const done = k === 'completed';
+    const dateLabel = `${done ? 'Done' : 'Sched'} ${d.getMonth() + 1}/${d.getDate()}`;
+    const ts = done ? hubspotToMs(i.submittedAt || i.completedAt) : 0;
+    const timeLabel = ts ? new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
     return [{
       id: i.recordId, lat: c.lat, lng: c.lng, color: meta?.hex || '#ff0060',
       title: i.propertyAddressSnapshot || i.inspectionName || 'Inspection',
-      vendor: i.inspectorName || 'Unassigned',
-      subtitle: `${prettyType(i.templateType) || 'Inspection'} · ${meta?.label || i.status} · ${(() => { const d = parse(dayOf(i)!); return `${k === 'completed' ? 'Done' : 'Sched'} ${d.getMonth() + 1}/${d.getDate()}`; })()}`,
       href: `/inspection/${i.recordId}`,
+      // Row 2: template · status. Row 3: date · time (completed only) · inspector.
+      line2: `${prettyType(i.templateType) || 'Inspection'} · ${meta?.label || i.status}`,
+      line3: [dateLabel, timeLabel, i.inspectorName || 'Unassigned'].filter(Boolean).join(' · '),
     }];
   });
   const mappable = visible.filter((i) => i.propertyAddressSnapshot || i.propertyRecordId).length;

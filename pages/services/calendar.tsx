@@ -10,7 +10,7 @@ import { isViewingAsVendor } from '@/lib/services/viewAs';
 import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
-import { SAMPLE_SERVICES, SAMPLE_REGIONS, REFERENCE_TODAY, type SampleService } from '@/lib/services/sampleData';
+import { SAMPLE_SERVICES, SAMPLE_REGIONS, REFERENCE_TODAY, serviceStatusText, type SampleService } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
 import type { MapItem } from '@/components/ServicesMap';
 
@@ -90,13 +90,18 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
     return m;
   }, [scoped]);
 
-  const mapItems: MapItem[] = visible.flatMap((s) =>
-    (Number.isFinite(s.lat) && Number.isFinite(s.lng)) ? [{
+  const mapItems: MapItem[] = visible.flatMap((s) => {
+    if (!Number.isFinite(s.lat) || !Number.isFinite(s.lng)) return [];
+    const d = parse(s.dueDate);
+    const done = s.status === 'completed';
+    return [{
       id: s.id, lat: s.lat as number, lng: s.lng as number, color: wtOf(s.worktype).hex,
-      title: s.address, vendor: s.vendor || 'Unassigned',
-      subtitle: `${worktypeLabel(s.worktype)} · ${subtypeLabel(s.worktype, s.subtype)} · Due ${parse(s.dueDate).getMonth() + 1}/${parse(s.dueDate).getDate()}`,
-      href: `/services/${s.id}`,
-    }] : []);
+      title: s.address, href: `/services/${s.id}`,
+      // Row 2: worktype · subtype · status. Row 3: date · vendor.
+      line2: `${worktypeLabel(s.worktype)} · ${subtypeLabel(s.worktype, s.subtype)} · ${serviceStatusText(s.status, canSeeAll)}`,
+      line3: `${done ? 'Done' : 'Due'} ${d.getMonth() + 1}/${d.getDate()} · ${s.vendor || 'Unassigned'}`,
+    }];
+  });
 
   const step = (dir: number) => {
     if (view === 'day') setCursorISO(toISO(addDays(cursor, dir)));
