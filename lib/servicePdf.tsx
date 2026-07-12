@@ -41,9 +41,10 @@ const s = StyleSheet.create({
   noteBox: { backgroundColor: C.white, border: `1px solid ${C.grayLight}`, padding: 6, marginTop: 4, borderRadius: 2 },
 });
 
+// App-wide M-D-YY.
 const humanDate = (iso: string): string => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
-  return m ? `${Number(m[2])}/${Number(m[3])}/${m[1].slice(2)}` : (iso || '');
+  return m ? `${Number(m[2])}-${Number(m[3])}-${m[1].slice(2)}` : (iso || '');
 };
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

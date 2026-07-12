@@ -9,9 +9,11 @@ import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { Combobox } from '@/components/Combobox';
 import { PriceField } from '@/components/PriceField';
-import { WORKTYPES, descriptionFor, subtypesFor, defaultRateFor } from '@/lib/services/worktypes';
+import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, defaultRateFor } from '@/lib/services/worktypes';
 import { sanitizeNum, clientFrom } from '@/lib/services/pricing';
+import { fmtMDY } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
+import { syncAllProperties, searchCachedProperties } from '@/lib/propertyCache';
 
 interface PropOpt { value: string; label: string; sublabel: string; address: string; locality: string; region: string; }
 
@@ -97,19 +99,31 @@ export default function NewService() {
     return () => { alive = false; };
   }, []);
 
-  // Live property search — server-backed via the Combobox's onQueryChange (the
-  // Property object is far too large to pre-load). Loads a default page on mount.
+  // Property search runs against the SAME device-cached full property list the
+  // inspection picker uses (IndexedDB via propertyCache) — so typing filters
+  // INSTANTLY, with no per-keystroke server round-trip / "Loading…" flicker.
   const searchProps = (q: string) => {
-    setPropLoading(true);
-    const url = '/api/properties' + (q ? `?q=${encodeURIComponent(q)}` : '');
-    fetch(url).then((r) => r.json()).then((d) => {
-      setPropOptions((d.properties || []).map((p: any) => {
+    searchCachedProperties(q, 50).then((rows) => {
+      setPropOptions(rows.map((p) => {
         const locality = [p.city, p.state, p.zip].filter(Boolean).join(', ');
         return { value: String(p.recordId), label: p.address || p.name || `(Property ${p.recordId})`, sublabel: locality, address: p.address || p.name || '', locality, region: p.region || '' };
       }));
-    }).catch(() => {}).finally(() => setPropLoading(false));
+    }).catch(() => {});
   };
-  useEffect(() => { if (scope === 'property') searchProps(''); }, [scope]);
+  // Warm the cache once (no-op if the inspection side already synced it today),
+  // then paint the first page. Only the initial sync shows a loading state.
+  useEffect(() => {
+    let alive = true;
+    setPropLoading(true);
+    (async () => {
+      try { await syncAllProperties(); } catch { /* offline / partial — search what's cached */ }
+      if (!alive) return;
+      searchProps('');
+      setPropLoading(false);
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const worktypeOptions = useMemo(() => WORKTYPES.filter((w) => w.scopes.includes(scope)).map((w) => ({ value: w.id, label: w.label })), [scope]);
   const subtypeOptions = useMemo(() => subtypesFor(worktype).map((s) => ({ value: s.id, label: s.label })), [worktype]);
@@ -120,6 +134,10 @@ export default function NewService() {
   const trig = 'w-full flex items-center justify-between gap-2 text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink';
   const ready = !!worktype && !!subtype && !!target && !!dueDate && !!vendor;
   const targetLabel = scope === 'property' ? (selectedProp?.address || '') : target;
+  // Full address (property) or community name — shown on the confirmation.
+  const confirmTarget = scope === 'property'
+    ? [selectedProp?.address, selectedProp?.locality].filter(Boolean).join(', ')
+    : target;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -138,11 +156,14 @@ export default function NewService() {
         {created ? (
           <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center">
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
-            <div className="font-heading font-extrabold text-lg text-ink">Service created</div>
-            <p className="text-sm text-gray-500 mt-1">Assigned to <b>{vendor}</b>, due {dueDate}{clientCost ? <>, client cost <b>${clientCost}</b></> : null}. (Preview — nothing saved.)</p>
+            <div className="font-heading font-extrabold text-lg text-ink">Service Created</div>
+            <p className="text-sm text-ink mt-1 font-semibold">{worktypeLabel(worktype)} · {subtypeLabel(worktype, subtype)}</p>
+            <p className="text-sm text-gray-500">{confirmTarget} · Due {fmtMDY(dueDate)}</p>
             <div className="flex gap-2 justify-center mt-4">
-              <button onClick={() => { setCreated(false); setWorktype(''); setSubtype(''); setTarget(''); setDueDate(''); setVendor(''); }} className="border border-gray-300 bg-white rounded-xl px-4 py-2 font-heading font-bold text-sm">Create another</button>
-              <Link href="/services" className="bg-brand text-white rounded-xl px-5 py-2 font-heading font-bold text-sm">Back to Services</Link>
+              <button onClick={() => { setCreated(false); setWorktype(''); setSubtype(''); setTarget(''); setSelectedProp(null); setDueDate(''); setVendor(DEFAULT_SERVICE_VENDOR.name); }} className="border border-gray-300 bg-white rounded-xl px-4 py-2 font-heading font-bold text-sm">Create another</button>
+              {/* Hard navigation so the Services list re-runs its server fetch and
+                  the just-created service is reflected in the counts + list. */}
+              <a href="/services" className="bg-brand text-white rounded-xl px-5 py-2 font-heading font-bold text-sm">Back to Services</a>
             </div>
           </div>
         ) : (

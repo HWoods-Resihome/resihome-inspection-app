@@ -88,6 +88,17 @@ export const SERVICE_STATUS_STYLE: Record<ServiceStatus, string> = {
   completed: 'bg-green-100 text-green-800 border-green-300',
   canceled: 'bg-gray-100 text-gray-500 border-gray-300 line-through',
 };
+// App-wide service date format: M-D-YY (e.g. 2026-07-11 → 7-11-26). Accepts a
+// YYYY-MM-DD string, an epoch-ms string, or any Date-parseable string.
+export function fmtMDY(v: string): string {
+  const s = String(v ?? '').trim();
+  if (!s) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (m) return `${Number(m[2])}-${Number(m[3])}-${m[1].slice(2)}`;
+  const d = /^\d{10,}$/.test(s) ? new Date(Number(s)) : new Date(s);
+  return isNaN(d.getTime()) ? s : `${d.getUTCMonth() + 1}-${d.getUTCDate()}-${String(d.getUTCFullYear()).slice(-2)}`;
+}
+
 // Status text as shown to a viewer. Vendors (external) never see the internal AI
 // step: a submitted service reads "Submitted - Under Review" for them; internal
 // users see "Submitted" (plus the internal-only AI Processing tag elsewhere).

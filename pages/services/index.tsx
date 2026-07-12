@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import type { GetServerSideProps } from 'next';
@@ -11,7 +11,7 @@ import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
   SAMPLE_SERVICES, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY,
-  SERVICE_STATUS_LABEL as STATUS_LABEL, SERVICE_STATUS_STYLE as STATUS_STYLE, serviceStatusText,
+  SERVICE_STATUS_LABEL as STATUS_LABEL, SERVICE_STATUS_STYLE as STATUS_STYLE, serviceStatusText, fmtMDY,
   type ServiceStatus, type SampleService,
 } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
@@ -40,10 +40,57 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: 'status', label: 'Status' },
 ];
 const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'review'];
-const fmtDue = (iso: string) => {
-  const d = new Date(iso + 'T00:00:00');
-  return isNaN(d.getTime()) ? iso : `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${String(d.getUTCFullYear()).slice(-2)}`;
-};
+
+// Service card with press-and-hold to cancel (internal only, live records) —
+// mirrors the inspection card's long-press. A ~500ms hold prompts to cancel; a
+// normal tap opens the service. The click after a long-press is swallowed.
+function ServiceCard({ s, overdue, isAdmin, canCancel, onCancel }: {
+  s: SampleService; overdue: boolean; isAdmin: boolean; canCancel: boolean; onCancel: (id: string) => void;
+}) {
+  const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lpFired = useRef(false);
+  const lpStart = useRef<{ x: number; y: number } | null>(null);
+  const clearLp = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!canCancel) return;
+    lpFired.current = false;
+    lpStart.current = { x: e.clientX, y: e.clientY };
+    clearLp();
+    lpTimer.current = setTimeout(() => { lpFired.current = true; try { navigator.vibrate?.(15); } catch { /* n/a */ } onCancel(s.id); }, 500);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!lpTimer.current || !lpStart.current) return;
+    if (Math.abs(e.clientX - lpStart.current.x) > 10 || Math.abs(e.clientY - lpStart.current.y) > 10) clearLp();
+  };
+  return (
+    <Link href={`/services/${s.id}`}
+      onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={clearLp} onPointerCancel={clearLp}
+      onClick={(e) => { if (lpFired.current) { e.preventDefault(); e.stopPropagation(); lpFired.current = false; } }}
+      onContextMenu={(e) => { if (canCancel) e.preventDefault(); }}
+      className="block select-none bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 hover:border-brand/40 active:scale-[0.998] transition"
+      style={{ WebkitTouchCallout: 'none' }}>
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <span className="font-heading font-bold text-ink truncate">{s.address}</span>
+          <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${s.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{s.scope === 'community' ? 'Community' : 'SFR'}</span>
+        </div>
+        <span className="shrink-0 inline-flex items-center gap-1">
+          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>{serviceStatusText(s.status, isAdmin)}</span>
+          {isAdmin && s.status === 'submitted' && <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold border bg-indigo-100 text-indigo-700 border-indigo-300">AI Processing</span>}
+        </span>
+      </div>
+      <div className="text-[12px] text-gray-500 truncate mt-0.5">{s.locality}{s.community ? ` · ${s.community}` : ''}</div>
+      <div className="mt-1 flex items-center justify-between gap-2">
+        <div className="text-[12px] text-gray-600 flex flex-wrap gap-x-3 gap-y-0.5 min-w-0">
+          <span className="font-semibold text-ink">{worktypeLabel(s.worktype)} · {subtypeLabel(s.worktype, s.subtype)}</span>
+          {s.scope !== 'community' && s.propertyStatus && <span>{s.propertyStatus}</span>}
+        </div>
+        <span className="text-[12px] shrink-0 text-right">{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
+      </div>
+      <div className={`mt-0.5 text-[12px] ${overdue ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>Due {fmtMDY(s.dueDate)}</div>
+    </Link>
+  );
+}
 
 export default function ServicesHome({ userName, canCreate, services, live }: { userName: string; canCreate: boolean; services: SampleService[]; live: boolean }) {
   const router = useRouter();
@@ -63,6 +110,17 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
   const [sortOpen, setSortOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [gearOpen, setGearOpen] = useState(false);
+  // Press-and-hold cancel (internal + live records only). Optimistically hide the
+  // card once canceled.
+  const [cancelledIds, setCancelledIds] = useState<Set<string>>(new Set());
+  const canCancel = isAdmin && live;
+  const cancelService = async (id: string) => {
+    if (typeof window !== 'undefined' && !window.confirm('Cancel this service? It moves to Canceled.')) return;
+    try {
+      const r = await fetch(`/api/services/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+      if (r.ok) setCancelledIds((p) => new Set(p).add(id));
+    } catch { /* leave as-is; user can retry */ }
+  };
 
   // Scope (type/vendor/region/search) drives the summary bubbles; the status chip
   // + Past-Due toggle then drill the list within that scope.
@@ -281,35 +339,11 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
         )}
 
         <div className="space-y-2">
-          {rows.map((s) => {
-            const overdue = OPEN_STATUSES.includes(s.status) && s.dueDate < REFERENCE_TODAY;
-            return (
-              <Link key={s.id} href={`/services/${s.id}`} className="block bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 hover:border-brand/40 active:scale-[0.998] transition">
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <span className="font-heading font-bold text-ink truncate">{s.address}</span>
-                    <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${s.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{s.scope === 'community' ? 'Community' : 'SFR'}</span>
-                  </div>
-                  <span className="shrink-0 inline-flex items-center gap-1">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>{serviceStatusText(s.status, isAdmin)}</span>
-                    {isAdmin && s.status === 'submitted' && <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold border bg-indigo-100 text-indigo-700 border-indigo-300">AI Processing</span>}
-                  </span>
-                </div>
-                <div className="text-[12px] text-gray-500 truncate mt-0.5">{s.locality}{s.community ? ` · ${s.community}` : ''}</div>
-                {/* Line 3: worktype · subtype (+ property status) with the vendor on the right. */}
-                <div className="mt-1 flex items-center justify-between gap-2">
-                  <div className="text-[12px] text-gray-600 flex flex-wrap gap-x-3 gap-y-0.5 min-w-0">
-                    <span className="font-semibold text-ink">{worktypeLabel(s.worktype)} · {subtypeLabel(s.worktype, s.subtype)}</span>
-                    {s.scope !== 'community' && s.propertyStatus && <span>{s.propertyStatus}</span>}
-                  </div>
-                  <span className="text-[12px] shrink-0 text-right">{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
-                </div>
-                {/* Line 4: due date — always on its own line. */}
-                <div className={`mt-0.5 text-[12px] ${overdue ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>Due {fmtDue(s.dueDate)}</div>
-              </Link>
-            );
-          })}
-          {rows.length === 0 && (
+          {rows.filter((s) => !cancelledIds.has(s.id)).map((s) => (
+            <ServiceCard key={s.id} s={s} overdue={OPEN_STATUSES.includes(s.status) && s.dueDate < REFERENCE_TODAY}
+              isAdmin={isAdmin} canCancel={canCancel} onCancel={cancelService} />
+          ))}
+          {rows.filter((s) => !cancelledIds.has(s.id)).length === 0 && (
             <div className="text-center text-gray-500 text-sm py-12 border border-dashed border-gray-300 rounded-xl">No services match these filters.</div>
           )}
         </div>
