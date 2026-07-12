@@ -42,6 +42,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const id = String(req.query.id || '');
   if (!/^\d+$/.test(id)) return res.status(404).json({ error: 'PDF is available for live services only.' });
 
+  // Vendor copy (shows Vendor Cost) is available to everyone; the Client copy
+  // (shows Client Cost) is internal-only — vendors never see client pricing.
+  const internal = isInternalEmail(session?.email);
+  const variant: 'vendor' | 'client' = req.query.variant === 'client' && internal ? 'client' : 'vendor';
+
   try {
     const rec = await fetchServiceWorkOrder(id);
     if (!rec) return res.status(404).json({ error: 'Service not found.' });
@@ -80,12 +85,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: p.reviewed_by || '',
       answers, before, after, petBefore, petAfter, bids,
       galleryBase: `${(req.headers['x-forwarded-proto'] as string) || 'https'}://${req.headers.host || ''}/services/${encodeURIComponent(id)}/photos`,
-      isInternal: isInternalEmail(session?.email),
+      isInternal: internal,
+      variant,
     };
 
     const buffer = await renderToBuffer(React.createElement(ServicePdf, { d }) as any);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="service-${id}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="service-${id}-${variant}.pdf"`);
     return res.status(200).send(buffer);
   } catch (e: any) {
     console.error('GET /api/services/[id]/pdf failed:', e);

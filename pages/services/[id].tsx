@@ -167,6 +167,35 @@ function PhotoGrid({ label, urls, onOpen }: { label: string; urls: string[]; onO
   );
 }
 
+// Render the AI review notes cleanly: a lead paragraph, a subtle "Issues"
+// subheading, then the concerns as a spaced bullet list (small gap between each
+// so it's easy to scan) — instead of one dense run-on block.
+function AiNotes({ text }: { text: string }) {
+  const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const out: React.ReactNode[] = [];
+  let bullets: string[] = [];
+  const flush = () => {
+    if (!bullets.length) return;
+    const items = bullets;
+    out.push(
+      <ul key={`u${out.length}`} className="space-y-1.5">
+        {items.map((b, i) => (
+          <li key={i} className="flex gap-2 text-[13px] text-gray-600 leading-snug"><span className="text-brand shrink-0">•</span><span>{b}</span></li>
+        ))}
+      </ul>,
+    );
+    bullets = [];
+  };
+  for (const line of lines) {
+    if (/^[•\-*]\s*/.test(line)) { bullets.push(line.replace(/^[•\-*]\s*/, '')); continue; }
+    flush();
+    if (/:$/.test(line) && line.length < 40) out.push(<div key={`h${out.length}`} className="text-[12px] font-bold uppercase tracking-wide text-gray-400 pt-1">{line.replace(/:$/, '')}</div>);
+    else out.push(<p key={`p${out.length}`} className="text-[13px] text-gray-600 leading-relaxed">{line}</p>);
+  }
+  flush();
+  return <div className="space-y-2">{out}</div>;
+}
+
 export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null }) {
   const router = useRouter();
   // Bid items are never crew-completed here — they go straight to internal bid review.
@@ -341,22 +370,25 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
     finally { setSubmitting(false); }
   };
 
-  // ── Review (approve/reject) state ──
+  // ── Review (approve / modify / reject) state ──
+  // Three terminal decisions, ALL require a note. Approve keeps pricing; Modify
+  // edits vendor cost + markup (client cost recomputed) and resubmits; Reject
+  // denies payment (vendor + client → $0). All close the order to Completed.
   const origCost = svc.vendorCost ?? 0;
   const markupPct = svc.markupPct ?? 0;
   const [reviewNotes, setReviewNotes] = useState('');
-  const [rejecting, setRejecting] = useState(false);
-  const [rejectCost, setRejectCost] = useState(origCost ? origCost.toFixed(2) : '0.00');   // editable payout; defaults to current vendor cost
+  const [decisionMode, setDecisionMode] = useState<'' | 'approve' | 'modify' | 'reject'>('');
+  const [modCost, setModCost] = useState(origCost ? origCost.toFixed(2) : '0.00');       // modify: revised vendor payout
+  const [modMarkup, setModMarkup] = useState(String(markupPct));                          // modify: revised markup %
   const [deciding, setDeciding] = useState(false);
-  const startReject = () => { setRejectCost(origCost ? origCost.toFixed(2) : '0.00'); setRejecting(true); };
 
-  const decide = async (decision: 'approve' | 'reject') => {
-    // A reject must carry a decision note (it's the reason, on the record).
-    if (decision === 'reject' && !reviewNotes.trim()) { setError('Add a decision note to reject.'); return; }
+  const decide = async () => {
+    if (!decisionMode) { setError('Choose Approve, Modify, or Reject.'); return; }
+    if (!reviewNotes.trim()) { setError('A decision note is required.'); return; }
     setDeciding(true); setError('');
     try {
-      const body: any = { decision, notes: reviewNotes };
-      if (decision === 'reject') { body.vendorCost = Number(rejectCost || '0'); body.reason = reviewNotes; }
+      const body: any = { decision: decisionMode, notes: reviewNotes };
+      if (decisionMode === 'modify') { body.vendorCost = Number(modCost || '0'); body.markupPct = Number(modMarkup || '0'); }
       const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/review-decision`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
@@ -405,24 +437,27 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
   }, [svc]);
   const [lightbox, setLightbox] = useState<{ groupId: string; index: number } | null>(null);
 
-  // Cost Detail — its own section (after Photos). Vendor cost is visible to all;
-  // Markup % and Client cost are internal-only (vendors never see them). While a
-  // reviewer is adjusting the payout (reject flow), this reflects the new figures live.
-  const rejectAdjusting = rejecting && rejectCost !== '' && Number.isFinite(Number(rejectCost));
+  // Cost Detail — its own section (after Photos). Vendor Cost is visible to all;
+  // Markup % and Client Cost are internal-only (vendors never see them). While a
+  // reviewer is deciding (Modify → edited figures; Reject → $0), this reflects the
+  // outcome live.
+  const modifyEditing = canReview && decisionMode === 'modify';
+  const rejectPreview = canReview && decisionMode === 'reject';
   const bidEditing = canBidReview && !bidRejecting;   // reviewer editing a bid's price live
-  const adjusting = rejectAdjusting || bidEditing;
-  const shownVendorCost = rejectAdjusting ? Number(rejectCost) : bidEditing ? Number(bidVC) : svc.vendorCost;
-  const shownMarkup = bidEditing ? Number(bidMarkup) : (svc.markupPct ?? markupPct);
-  const shownClientCost = rejectAdjusting ? Math.round(Number(rejectCost) * (1 + markupPct / 100) * 100) / 100
+  const adjusting = modifyEditing || rejectPreview || bidEditing;
+  const shownVendorCost = modifyEditing ? Number(modCost) : rejectPreview ? 0 : bidEditing ? Number(bidVC) : svc.vendorCost;
+  const shownMarkup = modifyEditing ? Number(modMarkup) : bidEditing ? Number(bidMarkup) : (svc.markupPct ?? markupPct);
+  const shownClientCost = modifyEditing ? Math.round(Number(modCost) * (1 + Number(modMarkup) / 100) * 100) / 100
+    : rejectPreview ? 0
     : bidEditing ? Math.round(Number(bidVC) * (1 + Number(bidMarkup) / 100) * 100) / 100
     : svc.clientCost;
   const costDetail = svc.vendorCost != null ? (
     <section className="bg-white border border-gray-200 rounded-2xl p-4">
       <div className="font-heading font-bold text-[15px] text-ink mb-2">Cost Detail{adjusting && <span className="text-[11px] font-normal text-brand"> · adjusted</span>}</div>
       <div className="space-y-1 text-[13px]">
-        <div className="flex justify-between"><span className="text-gray-500">Vendor cost</span><span className="font-semibold text-ink tabular-nums">{money(shownVendorCost)}</span></div>
+        <div className="flex justify-between"><span className="text-gray-500">Vendor Cost</span><span className="font-semibold text-ink tabular-nums">{money(shownVendorCost)}</span></div>
         {isInternal && svc.markupPct != null && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{Number.isFinite(shownMarkup) ? shownMarkup : svc.markupPct}%</span></div>}
-        {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client cost</span><span className="font-semibold text-ink tabular-nums">{money(shownClientCost)}</span></div>}
+        {isInternal && svc.clientCost != null && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(shownClientCost)}</span></div>}
       </div>
     </section>
   ) : null;
@@ -499,13 +534,24 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
           </div>
         ) : (
           <>
-            {/* View PDF — available once the service has been submitted (live records). */}
+            {/* PDFs (live records, once submitted). Vendor copy shows the Vendor Cost
+                and is available to everyone; the Client copy shows the Client Cost and
+                is internal-only, unlocked once the review is finalized (Completed). */}
             {!editable && svc.live && (
-              <a href={`/api/services/${encodeURIComponent(svc.id)}/pdf`} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-[13px] font-heading font-bold text-brand">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
-                View PDF
-              </a>
+              <div className="flex flex-wrap items-center gap-4">
+                <a href={`/api/services/${encodeURIComponent(svc.id)}/pdf?variant=vendor`} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[13px] font-heading font-bold text-brand">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                  Vendor PDF
+                </a>
+                {isInternal && svc.status === 'completed' && (
+                  <a href={`/api/services/${encodeURIComponent(svc.id)}/pdf?variant=client`} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-[13px] font-heading font-bold text-brand">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                    Client PDF
+                  </a>
+                )}
+              </div>
             )}
 
             {pendingQueued && editable && (
@@ -627,11 +673,11 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
                 )}
                 {isInternal && (svc.aiVerdict || svc.aiNotes) && (
                   <section className="bg-white border border-gray-200 rounded-2xl p-4">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-2">
                       <div className="font-heading font-bold text-[15px] text-ink">AI review</div>
                       {svc.aiVerdict && chip(svc.aiVerdict === 'clean' ? 'Clean' : 'Needs review', svc.aiVerdict === 'clean' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}
                     </div>
-                    {svc.aiNotes && <p className="text-[13px] text-gray-600 whitespace-pre-line">{svc.aiNotes}</p>}
+                    {svc.aiNotes && <AiNotes text={svc.aiNotes} />}
                   </section>
                 )}
 
@@ -702,45 +748,79 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
                 )}
 
                 {svc.reviewDecision && (
-                  <section className={`border rounded-2xl p-4 ${svc.reviewDecision === 'approve' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                    <div className="font-heading font-bold text-[14px] text-ink">Review: {svc.reviewDecision === 'approve' ? 'Approved' : 'Rejected'}{svc.reviewedBy ? ` · ${svc.reviewedBy}` : ''}</div>
+                  <section className={`border rounded-2xl p-4 ${svc.reviewDecision === 'reject' ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                    <div className="font-heading font-bold text-[14px] text-ink">Review: {svc.reviewDecision === 'reject' ? 'Rejected' : svc.reviewDecision === 'modify' ? 'Modified' : 'Approved'}{svc.reviewedBy ? ` · ${svc.reviewedBy}` : ''}</div>
                     {svc.reviewNotes && <p className="text-[13px] text-gray-700 mt-1 whitespace-pre-line">{svc.reviewNotes}</p>}
-                    {svc.reviewDecision === 'reject' && svc.vendorCostAdjustment != null && svc.vendorCostAdjustment > 0 && (
-                      <p className="text-[13px] text-red-700 mt-1 font-semibold">Payout reduced by {money(svc.vendorCostAdjustment)} → vendor {money(svc.vendorCost)}{svc.adjustmentReason ? ` (${svc.adjustmentReason})` : ''}</p>
+                    {svc.reviewDecision === 'reject' && (
+                      <p className="text-[13px] text-red-700 mt-1 font-semibold">Payment denied — vendor payout set to {money(svc.vendorCost)}.</p>
+                    )}
+                    {svc.reviewDecision === 'modify' && svc.vendorCostAdjustment != null && svc.vendorCostAdjustment !== 0 && (
+                      <p className="text-[13px] text-emerald-700 mt-1 font-semibold">Payout adjusted by {money(Math.abs(svc.vendorCostAdjustment))} → vendor {money(svc.vendorCost)}.</p>
                     )}
                   </section>
                 )}
 
                 {canReview && (
                   <section className="bg-white border-2 border-brand/30 rounded-2xl p-4 space-y-3">
-                    <div className="font-heading font-bold text-[15px] text-ink">Your decision</div>
-                    <AutoGrowTextarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} minPx={64} className={inputCls}
-                      placeholder={rejecting ? 'Decision notes — required to reject (visible on the record)…' : 'Review notes for this decision (visible on the record)…'} />
-                    {!rejecting ? (
-                      <div className="flex gap-2">
-                        <button type="button" disabled={deciding} onClick={() => decide('approve')}
-                          className="flex-1 rounded-xl py-3 font-heading font-bold text-sm bg-emerald-600 text-white disabled:opacity-50">{deciding ? '…' : 'Approve → Completed'}</button>
-                        <button type="button" disabled={deciding} onClick={startReject}
-                          className="flex-1 rounded-xl py-3 font-heading font-bold text-sm bg-white text-red-600 border border-red-300">Reject…</button>
-                      </div>
-                    ) : (
-                      <div className="space-y-3 border-t border-gray-100 pt-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[13px] text-gray-500">Vendor cost</span>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                            <input type="number" inputMode="decimal" value={rejectCost} onChange={(e) => setRejectCost(e.target.value)} onBlur={() => setRejectCost(fmt2(rejectCost))} className="w-28 text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" />
-                          </div>
-                          {origCost > 0 && <span className="text-[12px] text-gray-400">was {money(origCost)}</span>}
+                    <div className="font-heading font-bold text-[15px] text-ink">Your Decision</div>
+                    {/* Three options — all close the order to Completed. */}
+                    <div className="grid grid-cols-3 gap-2">
+                      {([
+                        ['approve', 'Approve', 'Straight to Completed', 'emerald'],
+                        ['modify', 'Modify', 'Edit price / markup', 'amber'],
+                        ['reject', 'Reject', 'Deny — payout $0', 'red'],
+                      ] as const).map(([val, label, hint, tone]) => {
+                        const on = decisionMode === val;
+                        const onCls = tone === 'red' ? 'bg-red-600 text-white border-red-600' : tone === 'amber' ? 'bg-amber-500 text-white border-amber-500' : 'bg-emerald-600 text-white border-emerald-600';
+                        return (
+                          <button key={val} type="button" onClick={() => setDecisionMode(val)}
+                            className={`rounded-xl py-2.5 px-1.5 border text-center transition ${on ? onCls : 'bg-white text-gray-700 border-gray-300 hover:border-brand/50'}`}>
+                            <div className="font-heading font-bold text-sm">{label}</div>
+                            <div className={`text-[10px] leading-tight mt-0.5 ${on ? 'text-white/85' : 'text-gray-400'}`}>{hint}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Modify — revised pricing (client cost recomputed live in Cost Detail above). */}
+                    {decisionMode === 'modify' && (
+                      <div className="border-t border-gray-100 pt-3 space-y-2">
+                        <div className="text-[12px] font-bold uppercase tracking-wide text-gray-400">Revised pricing</div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <label className="flex items-center gap-1.5 text-[13px] text-gray-500">Vendor cost
+                            <span className="relative"><span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                            <input type="number" inputMode="decimal" value={modCost} onChange={(e) => setModCost(e.target.value)} onBlur={() => setModCost(fmt2(modCost))} className="w-24 text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" /></span>
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[13px] text-gray-500">Markup
+                            <span className="relative"><input type="number" inputMode="decimal" value={modMarkup} onChange={(e) => setModMarkup(e.target.value)} className="w-16 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-brand" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span></span>
+                          </label>
+                          <span className="text-[13px] text-gray-500">Client <b className="text-ink tabular-nums">{money(Math.round(Number(modCost || '0') * (1 + Number(modMarkup || '0') / 100) * 100) / 100)}</b></span>
                         </div>
-                        <div className="flex gap-2">
-                          <button type="button" onClick={() => setRejecting(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
-                          <button type="button" disabled={deciding || !reviewNotes.trim()} onClick={() => decide('reject')}
-                            className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-red-600 text-white disabled:opacity-50">{deciding ? '…' : 'Reject & close out → Completed'}</button>
-                        </div>
-                        {!reviewNotes.trim() && <div className="text-[12px] text-gray-400">Add a decision note above to finalize.</div>}
+                        {origCost > 0 && <div className="text-[12px] text-gray-400">was {money(origCost)} vendor{svc.markupPct != null ? ` · ${svc.markupPct}% markup` : ''}</div>}
                       </div>
                     )}
+                    {decisionMode === 'reject' && (
+                      <div className="border-t border-gray-100 pt-3 text-[13px] text-red-700 font-semibold">Vendor payout will be set to $0 and the service closed out.</div>
+                    )}
+
+                    {/* Notes — below the options; REQUIRED for every decision. */}
+                    <div>
+                      <label className="block text-[12px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">Decision note <span className="text-brand">*</span></label>
+                      <AutoGrowTextarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} minPx={64} className={inputCls}
+                        placeholder="Required — the reason for this decision (visible on the record)…" />
+                    </div>
+
+                    <button type="button" disabled={deciding || !decisionMode || !reviewNotes.trim()} onClick={decide}
+                      className={`w-full rounded-xl py-3 font-heading font-bold text-sm ${
+                        !decisionMode || !reviewNotes.trim() ? 'bg-gray-200 text-gray-400'
+                          : decisionMode === 'reject' ? 'bg-red-600 text-white' : decisionMode === 'modify' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'}`}>
+                      {deciding ? '…'
+                        : decisionMode === 'reject' ? 'Reject → Completed'
+                        : decisionMode === 'modify' ? 'Save Changes → Completed'
+                        : decisionMode === 'approve' ? 'Approve → Completed'
+                        : 'Choose a decision above'}
+                    </button>
+                    {decisionMode && !reviewNotes.trim() && <div className="text-[12px] text-gray-400 text-center -mt-1">A decision note is required to finalize.</div>}
                     {error && <div className="text-center text-xs text-red-600">{error}</div>}
                   </section>
                 )}

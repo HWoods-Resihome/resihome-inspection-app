@@ -21,7 +21,10 @@ export interface ServicePdfData {
   // Bid items that originated from THIS completion (so the PDF shows their origin).
   bids: { description: string; cost: string; status: string; photos: string[] }[];
   galleryBase: string;
-  isInternal: boolean;   // controls whether the AI-review block is included
+  isInternal: boolean;
+  // 'vendor' → shows the Vendor Cost (given to the vendor); 'client' → shows the
+  // Client Cost (billed to the client). Neither shows internal AI QC notes.
+  variant: 'vendor' | 'client';
 }
 
 // react-pdf's built-in Helvetica lacks some glyphs (≤ ≥ smart quotes) — they render
@@ -101,11 +104,12 @@ function PhotoBlock({ title, urls, group, galleryBase }: { title: string; urls: 
 
 export function ServicePdf({ d }: { d: ServicePdfData }) {
   const anyPhotos = d.before.length || d.after.length || d.petBefore.length || d.petAfter.length;
+  const copyLabel = d.variant === 'client' ? 'Client Copy' : 'Vendor Copy';
   return (
     <Document>
       <Page size="LETTER" style={pdfStyles.page} wrap>
         <PdfHeaderStrip
-          docTitle={`${d.worktype} · ${d.subtype}`}
+          docTitle={`${d.worktype} · ${d.subtype} — ${copyLabel}`}
           propertyName={`${d.address}${d.locality ? `, ${d.locality}` : ''}`}
           inspectorName={d.vendor || 'Unassigned'}
           region={null}
@@ -128,10 +132,14 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
           {!!d.dueDate && <Row label="Due" value={humanDate(d.dueDate)} />}
           {!!d.submittedAt && <Row label="Submitted" value={humanDate(d.submittedAt)} />}
           {!!d.completedAt && <Row label="Completed" value={humanDate(d.completedAt)} />}
-          <Row label="Vendor cost" value={d.vendorCost || '-'} />
-          {!!d.markupPct && <Row label="Markup" value={`${d.markupPct}%`} />}
-          <Row label="Client cost" value={d.clientCost || '-'} last={!d.adjustment} />
-          {!!d.adjustment && <Row label="Payout adjustment" value={`-${d.adjustment}${d.adjustmentReason ? ` (${d.adjustmentReason})` : ''}`} last />}
+          {d.variant === 'client' ? (
+            <Row label="Client Cost" value={d.clientCost || '-'} last />
+          ) : (
+            <>
+              <Row label="Vendor Cost" value={d.vendorCost || '-'} last={!d.adjustment} />
+              {!!d.adjustment && <Row label="Payout adjustment" value={`-${d.adjustment}${d.adjustmentReason ? ` (${d.adjustmentReason})` : ''}`} last />}
+            </>
+          )}
         </Section>
 
         {d.answers.length > 0 && (
@@ -158,14 +166,8 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
           </Section>
         ))}
 
-        {d.isInternal && (d.aiVerdict || d.aiNotes) && (
-          <Section title={`AI Review${d.aiVerdict ? ` — ${d.aiVerdict === 'clean' ? 'Clean' : 'Needs review'}` : ''}`}>
-            {!!d.aiNotes && <Text style={s.note}>{d.aiNotes}</Text>}
-          </Section>
-        )}
-
         {!!d.reviewDecision && (
-          <Section title={`Review — ${d.reviewDecision === 'approve' ? 'Approved' : 'Rejected'}${d.reviewedBy ? ` · ${d.reviewedBy}` : ''}`}>
+          <Section title={`Review — ${d.reviewDecision === 'reject' ? 'Rejected' : d.reviewDecision === 'modify' ? 'Modified' : 'Approved'}${d.reviewedBy ? ` · ${d.reviewedBy}` : ''}`}>
             {!!d.reviewNotes && <View style={s.noteBox}><Text style={s.note}>{d.reviewNotes}</Text></View>}
           </Section>
         )}
