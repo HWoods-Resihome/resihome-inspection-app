@@ -46,17 +46,11 @@ export function SettingsMenu({ isAdmin, onOpen }: { isAdmin: boolean; onOpen?: (
         <>
           <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setOpen(false)} />
           <div className="absolute right-0 mt-1.5 z-50 w-56 rounded-xl border border-gray-200 bg-white shadow-lg ring-1 ring-black/5 overflow-hidden py-1">
-            {/* Training guide — available to ALL users. Opens in a new tab. */}
-            <a
-              href="https://www.resihome.com/resiwalkguide"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setOpen(false)}
-              className={rowCls}
-            >
+            {/* Training guide — available to ALL users. Opens in-app. */}
+            <Link href="/guide" onClick={() => setOpen(false)} className={rowCls}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>
               Training Guide
-            </a>
+            </Link>
             {/* Admin tools — admins only. Identical across Inspections & Services. */}
             {isAdmin && (
               <>
