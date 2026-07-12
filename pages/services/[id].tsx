@@ -274,7 +274,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
             <div />
             <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 text-center">Vendor</div>
             <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 text-center">Markup</div>
-            <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 text-right">Client</div>
+            <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 text-center">Client</div>
 
             <div className="text-[12px] text-gray-500">New</div>
             <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
@@ -282,17 +282,17 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
                 className="w-full text-[13px] border border-gray-300 rounded-lg pl-5 pr-1.5 py-1.5 bg-white focus:outline-none focus:border-brand text-center tabular-nums" /></div>
             <div className="relative"><input type="number" inputMode="decimal" value={mk} onChange={(e) => setMk(e.target.value)}
                 className="w-full text-[13px] border border-gray-300 rounded-lg pl-2 pr-4 py-1.5 bg-white focus:outline-none focus:border-brand text-center tabular-nums" /><span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span></div>
-            <div className="text-right text-[13px] font-bold text-ink tabular-nums">{money(newClient)}</div>
+            <div className="text-center text-[13px] font-bold text-ink tabular-nums">{money(newClient)}</div>
 
             <div className="text-[12px] text-gray-400">Original</div>
             <div className={`${cell} text-gray-400 text-center`}>{money(orig.vendor)}</div>
             <div className={`${cell} text-gray-400 text-center`}>{orig.markup}%</div>
-            <div className={`${cell} text-gray-400 text-right`}>{money(orig.client)}</div>
+            <div className={`${cell} text-gray-400 text-center`}>{money(orig.client)}</div>
 
             <div className="text-[12px] text-gray-400">Difference</div>
             <div className={`${cell} text-center ${diffCls(newVendor - orig.vendor)}`}>{signMoney(newVendor - orig.vendor)}</div>
             <div className={`${cell} text-center ${diffCls(newMarkup - orig.markup)}`}>{signPct(newMarkup - orig.markup)}</div>
-            <div className={`${cell} text-right ${diffCls(newClient - orig.client)}`}>{signMoney(newClient - orig.client)}</div>
+            <div className={`${cell} text-center ${diffCls(newClient - orig.client)}`}>{signMoney(newClient - orig.client)}</div>
           </div>
         </div>
       )}

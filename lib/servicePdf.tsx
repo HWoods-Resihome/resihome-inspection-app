@@ -35,16 +35,22 @@ const pdfSafe = (s: string): string => String(s || '')
 const C = PDF_COLORS;
 const PHOTOS_PER_ROW = 5;
 const s = StyleSheet.create({
-  sectionHeader: { backgroundColor: C.black, color: C.white, padding: 8, marginTop: 10, fontSize: 11, fontFamily: 'Helvetica-Bold' },
-  sectionContent: { border: `1px solid ${C.grayLight}`, borderTop: 'none', padding: 8, marginBottom: 2 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 3, paddingBottom: 3, borderBottom: `0.5px solid ${C.grayLight}` },
-  rowLast: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 3, paddingBottom: 3 },
-  q: { fontSize: 9, fontFamily: 'Helvetica-Bold', flex: 1, paddingRight: 8, color: C.ink },
-  a: { fontSize: 9, fontFamily: 'Helvetica-Bold', textAlign: 'right', flexShrink: 1, maxWidth: '60%', color: C.ink },
-  photosLabel: { fontSize: 9, color: C.gray, fontFamily: 'Helvetica-Bold', marginTop: 6, marginBottom: 4 },
+  // Summary tiles (mirrors the inspection report's stats strip).
+  statsStrip: { flexDirection: 'row', justifyContent: 'center', backgroundColor: C.grayBg, borderTop: `1px solid ${C.grayLight}`, borderBottom: `1px solid ${C.grayLight}`, padding: 6, marginTop: 8 },
+  statItem: { flexDirection: 'column', alignItems: 'center', marginHorizontal: 22 },
+  statLabel: { fontSize: 7, fontFamily: 'Helvetica', color: C.gray, textTransform: 'uppercase', letterSpacing: 0.5 },
+  statValue: { fontSize: 11, fontFamily: 'Helvetica-Bold', color: C.ink, marginTop: 2 },
+  sectionHeader: { backgroundColor: C.black, color: C.white, padding: 6, marginTop: 8, fontSize: 10, fontFamily: 'Helvetica-Bold' },
+  sectionContent: { border: `1px solid ${C.grayLight}`, borderTop: 'none', padding: 6, marginBottom: 2 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 2, paddingBottom: 2, borderBottom: `0.5px solid ${C.grayLight}` },
+  rowLast: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 2, paddingBottom: 2 },
+  // Questions + answers are plain weight (not bold) per request.
+  q: { fontSize: 9, fontFamily: 'Helvetica', flex: 1, paddingRight: 8, color: C.ink },
+  a: { fontSize: 9, fontFamily: 'Helvetica', textAlign: 'right', flexShrink: 1, maxWidth: '60%', color: C.ink },
+  photosLabel: { fontSize: 9, color: C.gray, fontFamily: 'Helvetica-Bold', marginTop: 4, marginBottom: 3 },
   photoGrid: { marginBottom: 2 },
   photoRow: { flexDirection: 'row' },
-  photo: { width: 100, height: 75, margin: 2, objectFit: 'cover' },
+  photo: { width: 92, height: 69, margin: 1.5, objectFit: 'cover' },
   photoFill: { width: '100%', height: '100%', objectFit: 'cover' },
   note: { fontSize: 8.5, color: C.ink, lineHeight: 1.4 },
   noteBox: { backgroundColor: C.white, border: `1px solid ${C.grayLight}`, padding: 6, marginTop: 4, borderRadius: 2 },
@@ -127,20 +133,40 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
           )}
         />
 
-        <Section title="Work Order">
-          <Row label="Vendor" value={d.vendor || '-'} />
-          {!!d.dueDate && <Row label="Due" value={humanDate(d.dueDate)} />}
-          {!!d.submittedAt && <Row label="Submitted" value={humanDate(d.submittedAt)} />}
-          {!!d.completedAt && <Row label="Completed" value={humanDate(d.completedAt)} />}
-          {d.variant === 'client' ? (
-            <Row label="Client Cost" value={d.clientCost || '-'} last />
-          ) : (
-            <>
-              <Row label="Vendor Cost" value={d.vendorCost || '-'} last={!d.adjustment} />
-              {!!d.adjustment && <Row label="Payout adjustment" value={`-${d.adjustment}${d.adjustmentReason ? ` (${d.adjustmentReason})` : ''}`} last />}
-            </>
-          )}
-        </Section>
+        {/* Summary tiles — Due · Submitted · Cost (mirrors the inspection stats strip). */}
+        {(() => {
+          const tiles: { label: string; value: string }[] = [];
+          if (d.dueDate) tiles.push({ label: 'Due Date', value: humanDate(d.dueDate) });
+          if (d.submittedAt) tiles.push({ label: 'Submitted', value: humanDate(d.submittedAt) });
+          else if (d.completedAt) tiles.push({ label: 'Completed', value: humanDate(d.completedAt) });
+          const costVal = d.variant === 'client' ? d.clientCost : d.vendorCost;
+          if (costVal) tiles.push({ label: d.variant === 'client' ? 'Client Cost' : 'Vendor Cost', value: costVal });
+          return tiles.length ? (
+            <View style={s.statsStrip} wrap={false}>
+              {tiles.map((t, i) => (
+                <View key={i} style={s.statItem}>
+                  <Text style={s.statLabel}>{t.label}</Text>
+                  <Text style={s.statValue}>{pdfSafe(t.value)}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null;
+        })()}
+
+        {(() => {
+          // Due / Submitted / Cost live in the summary tiles above, so the Work
+          // Order section carries only what those don't: vendor, completion,
+          // client markup, and any payout adjustment.
+          const rows: { label: string; value: string }[] = [{ label: 'Vendor', value: d.vendor || '-' }];
+          if (d.completedAt) rows.push({ label: 'Completed', value: humanDate(d.completedAt) });
+          if (d.variant === 'client' && d.markupPct) rows.push({ label: 'Markup', value: `${d.markupPct}%` });
+          if (d.variant !== 'client' && d.adjustment) rows.push({ label: 'Payout adjustment', value: `-${d.adjustment}${d.adjustmentReason ? ` (${d.adjustmentReason})` : ''}` });
+          return (
+            <Section title="Work Order">
+              {rows.map((r, i) => <Row key={i} label={r.label} value={r.value} last={i === rows.length - 1} />)}
+            </Section>
+          );
+        })()}
 
         {d.answers.length > 0 && (
           <Section title="Completion Answers">
