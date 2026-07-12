@@ -777,11 +777,11 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
               /* ── Editable completion form (assigned crew) ── */
               <>
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
-                  <div className="font-heading font-bold text-[15px] text-ink">Completion checklist</div>
+                  <div className="font-heading font-bold text-[15px] text-ink">Completion Checklist</div>
                   {form.length === 0 && <div className="text-[13px] text-gray-400">No completion form is configured for this service type yet.</div>}
                   {form.filter(isVisible).map((q) => (
                     <div key={q.id}>
-                      <label className="block text-sm font-semibold text-ink mb-1.5">{q.label}{q.required && <span className="text-brand"> *</span>}</label>
+                      <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">{q.label}{q.required && <span className="text-brand"> *</span>}</label>
                       {q.type === 'yesno' && (
                         <div className="flex gap-2">
                           {(['yes', 'no'] as const).map((v) => (
@@ -864,11 +864,11 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   {bidWanted && (
                     <div className="space-y-3 border-t border-gray-100 pt-3">
                       <div>
-                        <label className="block text-sm font-semibold text-ink mb-1.5">What’s the additional work? <span className="text-brand">*</span></label>
+                        <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">What’s the additional work? <span className="text-brand">*</span></label>
                         <AutoGrowTextarea value={bidDesc} onChange={(e) => setBidDesc(e.target.value)} minPx={64} className={inputCls} placeholder="Describe the extra work needed…" />
                       </div>
                       <div>
-                        <label className="block text-sm font-semibold text-ink mb-1.5">Your bid (vendor cost) <span className="text-brand">*</span></label>
+                        <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">Your bid (vendor cost) <span className="text-brand">*</span></label>
                         <div className="relative w-40">
                           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                           <input type="number" inputMode="decimal" value={bidCost} onChange={(e) => setBidCost(e.target.value)} onBlur={() => setBidCost(fmt2(bidCost))} className="w-full text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" placeholder="0.00" />
