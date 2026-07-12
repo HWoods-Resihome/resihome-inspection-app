@@ -1429,6 +1429,19 @@ export async function patchServiceWorkOrder(id: string, props: Record<string, an
   return true;
 }
 
+/** Bid-item children spawned from a parent completion (enrollment_key = bid:<parentId>). */
+export async function findServiceBidChildren(parentId: string): Promise<{ id: string; props: Record<string, any> }[]> {
+  const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();
+  if (!typeId || !parentId) return [];
+  try {
+    const resp = await hubspotFetch(`/crm/v3/objects/${typeId}/search`, {
+      method: 'POST',
+      body: JSON.stringify({ limit: 20, properties: SERVICE_DETAIL_PROPS, filterGroups: [{ filters: [{ propertyName: 'enrollment_key', operator: 'EQ', value: `bid:${parentId}` }] }] }),
+    });
+    return (resp.results || []).map((r: any) => ({ id: String(r.id), props: r.properties || {} }));
+  } catch (e) { console.warn('[services] bid children search failed:', e); return []; }
+}
+
 /** Service Work Orders in a given status (raw props + id), or null when not configured. */
 export async function searchServiceWorkOrdersByStatus(status: string, limit = 200): Promise<{ id: string; props: Record<string, any> }[] | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_TYPE_ID || '').trim();

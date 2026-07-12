@@ -10,7 +10,7 @@ import { renderToBuffer } from '@react-pdf/renderer';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
-import { fetchServiceWorkOrder, readServiceForms } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, readServiceForms, findServiceBidChildren } from '@/lib/hubspot';
 import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
 import { SAMPLE_FORMS, formKey } from '@/lib/services/serviceForms';
 import { ServicePdf, type ServicePdfData } from '@/lib/servicePdf';
@@ -60,6 +60,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       encodeAll(splitUrls(p.pet_before_photo_urls)), encodeAll(splitUrls(p.pet_after_photo_urls)),
     ]);
 
+    // Bid items that originated from THIS completion (so the PDF shows their origin).
+    const bidChildren = await findServiceBidChildren(id).catch(() => []);
+    const bids = await Promise.all(bidChildren.map(async (c) => ({
+      description: c.props.service_description || '',
+      cost: money(c.props.vendor_cost),
+      status: c.props.status || '',
+      photos: await encodeAll(splitUrls(c.props.before_photo_urls)),
+    })));
+
     const d: ServicePdfData = {
       address: p.address_snapshot || p.service_name || '(Service)', locality: p.locality_snapshot || '',
       worktype: worktypeLabel(worktype), subtype: subtypeLabel(worktype, subtype),
@@ -69,7 +78,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       adjustment: p.vendor_cost_adjustment && Number(p.vendor_cost_adjustment) > 0 ? money(p.vendor_cost_adjustment) : '', adjustmentReason: p.vendor_cost_adjustment_reason || '',
       aiVerdict: p.ai_verdict || '', aiNotes: p.ai_notes || '',
       reviewDecision: p.review_decision || '', reviewNotes: p.review_notes || '', reviewedBy: p.reviewed_by || '',
-      answers, before, after, petBefore, petAfter,
+      answers, before, after, petBefore, petAfter, bids,
       galleryBase: `${(req.headers['x-forwarded-proto'] as string) || 'https'}://${req.headers.host || ''}/services/${encodeURIComponent(id)}/photos`,
       isInternal: isInternalEmail(session?.email),
     };

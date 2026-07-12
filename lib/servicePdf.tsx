@@ -18,9 +18,16 @@ export interface ServicePdfData {
   reviewDecision: string; reviewNotes: string; reviewedBy: string;
   answers: { label: string; value: string }[];
   before: string[]; after: string[]; petBefore: string[]; petAfter: string[];  // data URIs
+  // Bid items that originated from THIS completion (so the PDF shows their origin).
+  bids: { description: string; cost: string; status: string; photos: string[] }[];
   galleryBase: string;
   isInternal: boolean;   // controls whether the AI-review block is included
 }
+
+// react-pdf's built-in Helvetica lacks some glyphs (≤ ≥ smart quotes) — they render
+// as blanks/tofu (the "Standard (≤ 6")" cut-off look). Map them to ASCII.
+const pdfSafe = (s: string): string => String(s || '')
+  .replace(/≤/g, '<=').replace(/≥/g, '>=').replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/—/g, '-').replace(/·/g, '-');
 
 const C = PDF_COLORS;
 const PHOTOS_PER_ROW = 5;
@@ -30,8 +37,7 @@ const s = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 3, paddingBottom: 3, borderBottom: `0.5px solid ${C.grayLight}` },
   rowLast: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 3, paddingBottom: 3 },
   q: { fontSize: 9, fontFamily: 'Helvetica-Bold', flex: 1, paddingRight: 8, color: C.ink },
-  a: { fontSize: 9, fontFamily: 'Helvetica-Bold', textAlign: 'right', maxWidth: '55%', color: C.ink },
-  label: { fontSize: 9, flex: 1, paddingRight: 8, color: C.gray },
+  a: { fontSize: 9, fontFamily: 'Helvetica-Bold', textAlign: 'right', flexShrink: 1, maxWidth: '60%', color: C.ink },
   photosLabel: { fontSize: 9, color: C.gray, fontFamily: 'Helvetica-Bold', marginTop: 6, marginBottom: 4 },
   photoGrid: { marginBottom: 2 },
   photoRow: { flexDirection: 'row' },
@@ -47,20 +53,23 @@ const humanDate = (iso: string): string => {
   return m ? `${Number(m[2])}-${Number(m[3])}-${m[1].slice(2)}` : (iso || '');
 };
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children, breakable }: { title: string; children: React.ReactNode; breakable?: boolean }) {
+  // Non-photo sections stay together (wrap=false); photo sections are breakable so
+  // rows paginate cleanly instead of overflowing a page.
   return (
-    <View wrap={false}>
+    <View wrap={breakable ? true : false}>
       <Text style={s.sectionHeader}>{title}</Text>
       <View style={s.sectionContent}>{children}</View>
     </View>
   );
 }
 
-function DetailRow({ label, value, last }: { label: string; value: string; last?: boolean }) {
+// Consistent row across sections: bold question/label left, bold value right.
+function Row({ label, value, last }: { label: string; value: string; last?: boolean }) {
   return (
     <View style={last ? s.rowLast : s.row}>
-      <Text style={s.label}>{label}</Text>
-      <Text style={s.a}>{value}</Text>
+      <Text style={s.q}>{pdfSafe(label)}</Text>
+      <Text style={s.a}>{pdfSafe(value)}</Text>
     </View>
   );
 }
@@ -69,12 +78,14 @@ function PhotoBlock({ title, urls, group, galleryBase }: { title: string; urls: 
   if (!urls.length) return null;
   const rows: string[][] = [];
   for (let i = 0; i < urls.length; i += PHOTOS_PER_ROW) rows.push(urls.slice(i, i + PHOTOS_PER_ROW));
+  // NOT wrap={false} on the whole block (a big group would overflow a page). Each
+  // ROW is wrap={false} so rows break cleanly between pages — no run-off / scrunch.
   return (
-    <View wrap={false}>
+    <View>
       <Text style={s.photosLabel}>{title}</Text>
       <View style={s.photoGrid}>
         {rows.map((row, ri) => (
-          <View key={ri} style={s.photoRow}>
+          <View key={ri} style={s.photoRow} wrap={false}>
             {row.map((u, i) => {
               const idx = ri * PHOTOS_PER_ROW + i;
               return galleryBase
@@ -113,35 +124,39 @@ export function ServicePdf({ d }: { d: ServicePdfData }) {
         />
 
         <Section title="Work Order">
-          <DetailRow label="Vendor" value={d.vendor || '—'} />
-          {!!d.dueDate && <DetailRow label="Due" value={humanDate(d.dueDate)} />}
-          {!!d.submittedAt && <DetailRow label="Submitted" value={humanDate(d.submittedAt)} />}
-          {!!d.completedAt && <DetailRow label="Completed" value={humanDate(d.completedAt)} />}
-          <DetailRow label="Vendor cost" value={d.vendorCost || '—'} />
-          {!!d.markupPct && <DetailRow label="Markup" value={`${d.markupPct}%`} />}
-          <DetailRow label="Client cost" value={d.clientCost || '—'} last={!d.adjustment} />
-          {!!d.adjustment && <DetailRow label="Payout adjustment" value={`−${d.adjustment}${d.adjustmentReason ? ` (${d.adjustmentReason})` : ''}`} last />}
+          <Row label="Vendor" value={d.vendor || '-'} />
+          {!!d.dueDate && <Row label="Due" value={humanDate(d.dueDate)} />}
+          {!!d.submittedAt && <Row label="Submitted" value={humanDate(d.submittedAt)} />}
+          {!!d.completedAt && <Row label="Completed" value={humanDate(d.completedAt)} />}
+          <Row label="Vendor cost" value={d.vendorCost || '-'} />
+          {!!d.markupPct && <Row label="Markup" value={`${d.markupPct}%`} />}
+          <Row label="Client cost" value={d.clientCost || '-'} last={!d.adjustment} />
+          {!!d.adjustment && <Row label="Payout adjustment" value={`-${d.adjustment}${d.adjustmentReason ? ` (${d.adjustmentReason})` : ''}`} last />}
         </Section>
 
         {d.answers.length > 0 && (
           <Section title="Completion Answers">
-            {d.answers.map((a, i) => (
-              <View key={i} style={i === d.answers.length - 1 ? s.rowLast : s.row}>
-                <Text style={s.q}>{a.label}</Text>
-                <Text style={s.a}>{a.value}</Text>
-              </View>
-            ))}
+            {d.answers.map((a, i) => <Row key={i} label={a.label} value={a.value} last={i === d.answers.length - 1} />)}
           </Section>
         )}
 
         {!!anyPhotos && (
-          <Section title="Photos">
+          <Section title="Photos" breakable>
             <PhotoBlock title="Before photos" urls={d.before} group="before" galleryBase={d.galleryBase} />
             <PhotoBlock title="After photos" urls={d.after} group="after" galleryBase={d.galleryBase} />
-            <PhotoBlock title="Pet station — before" urls={d.petBefore} group="petBefore" galleryBase={d.galleryBase} />
-            <PhotoBlock title="Pet station — after" urls={d.petAfter} group="petAfter" galleryBase={d.galleryBase} />
+            <PhotoBlock title="Pet station - before" urls={d.petBefore} group="petBefore" galleryBase={d.galleryBase} />
+            <PhotoBlock title="Pet station - after" urls={d.petAfter} group="petAfter" galleryBase={d.galleryBase} />
           </Section>
         )}
+
+        {/* Bid item(s) that originated from this completion — shows their origin. */}
+        {d.bids.map((b, i) => (
+          <Section key={i} title={`Bid Item Requested${b.status ? ` — ${b.status}` : ''}`} breakable>
+            {!!b.description && <Row label="Additional work" value={b.description} />}
+            <Row label="Bid (vendor cost)" value={b.cost || '-'} last />
+            {b.photos.length > 0 && <PhotoBlock title="Bid photos" urls={b.photos} group="" galleryBase="" />}
+          </Section>
+        ))}
 
         {d.isInternal && (d.aiVerdict || d.aiNotes) && (
           <Section title={`AI Review${d.aiVerdict ? ` — ${d.aiVerdict === 'clean' ? 'Clean' : 'Needs review'}` : ''}`}>
