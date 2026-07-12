@@ -7,6 +7,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { readServiceAiChecks } from '@/lib/hubspot';
 import { ListPicker } from '@/components/ListPicker';
+import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import { SAMPLE_AI_CHECKS, newCheck, type AiCheck } from '@/lib/services/aiKnowledge';
@@ -125,7 +126,7 @@ function CheckEditor({ c, onPatch, onClose, onDelete }: {
     <section className="bg-pink-50 border border-brand/40 rounded-2xl p-4 space-y-3">
       <div>
         <label className={lbl}>Check — what the AI must verify</label>
-        <textarea value={c.check} onChange={(e) => onPatch({ check: e.target.value })} rows={2} placeholder="e.g. Back yard is clearly shown in the after photos…"
+        <AutoGrowTextarea value={c.check} onChange={(e) => onPatch({ check: e.target.value })} minPx={52} placeholder="e.g. Back yard is clearly shown in the after photos…"
           className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand" />
       </div>
       <div className="flex flex-wrap items-end gap-3">

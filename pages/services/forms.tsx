@@ -7,6 +7,7 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
 import { readServiceForms } from '@/lib/hubspot';
 import { ListPicker } from '@/components/ListPicker';
+import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
   ANSWER_TYPES, SAMPLE_FORMS, formKey, newQuestion, newOption, answerTypeLabel, hasOptions,
@@ -202,7 +203,7 @@ function QuestionEditor({ q, onPatch, onClose, onDelete }: {
   );
   return (
     <section className="bg-pink-50 border border-brand/40 rounded-2xl p-4 space-y-3">
-      <textarea value={q.label} onChange={(e) => onPatch({ label: e.target.value })} rows={2} placeholder="Question text…"
+      <AutoGrowTextarea value={q.label} onChange={(e) => onPatch({ label: e.target.value })} minPx={52} placeholder="Question text…"
         className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand" />
 
       <div className="flex flex-wrap items-end gap-4">

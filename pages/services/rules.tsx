@@ -8,6 +8,7 @@ import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, de
 import { PriceField } from '@/components/PriceField';
 import { MultiFilter } from '@/components/MultiFilter';
 import { ListPicker } from '@/components/ListPicker';
+import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { SAMPLE_SERVICES } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
 import { searchServiceRuleRecords } from '@/lib/hubspot';
@@ -695,7 +696,7 @@ export default function RulesEngine({ ruleRecords, live }: { ruleRecords: { id: 
             )}
             <div className="mb-4">
               <label className={lbl}>Service Description</label>
-              <textarea value={rule.description} onChange={(e) => patch({ description: e.target.value })} rows={3}
+              <AutoGrowTextarea value={rule.description} onChange={(e) => patch({ description: e.target.value })} minPx={60}
                 className="w-full text-[13px] border border-gray-300 rounded-lg px-3 py-2 bg-white text-ink focus:outline-none focus:border-brand" />
             </div>
             <label className={lbl}>{rule.scope === 'property' ? 'Portfolios' : 'Communities'}</label>

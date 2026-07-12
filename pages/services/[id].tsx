@@ -14,6 +14,7 @@ import { PhotoThumb } from '@/components/PhotoThumb';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { UnlockButton, lockRingFromProperty, type LockRing } from '@/components/UnlockButton';
 import { FitText } from '@/components/FitText';
+import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync } from '@/lib/services/offlineServices';
 
 interface ServiceView {
@@ -300,7 +301,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white border-b-2 border-brand sticky top-0 z-20 shrink-0" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
+      <header className="bg-white border-b-2 border-brand sticky top-0 z-30 shrink-0" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
         <div className="max-w-2xl mx-auto px-3 py-2.5 flex items-center gap-2.5">
           <Link href="/services" aria-label="Back to Services" className="shrink-0 text-gray-400 hover:text-ink">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
@@ -413,7 +414,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
                         </div>
                       )}
                       {q.type === 'text' && (
-                        <textarea value={answers[q.id] || ''} onChange={(e) => setAns(q.id, e.target.value)} rows={q.requireNote ? 3 : 1} className={inputCls} placeholder={q.required ? '' : 'Optional'} />
+                        <AutoGrowTextarea value={answers[q.id] || ''} onChange={(e) => setAns(q.id, e.target.value)} className={inputCls} placeholder={q.required ? '' : 'Optional'} />
                       )}
                       {q.type === 'number' && (
                         <input type="number" inputMode="decimal" value={answers[q.id] || ''} onChange={(e) => setAns(q.id, e.target.value)} className={inputCls} />
@@ -452,7 +453,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
                     <div className="space-y-3 border-t border-gray-100 pt-3">
                       <div>
                         <label className="block text-sm font-semibold text-ink mb-1.5">What’s the additional work? <span className="text-brand">*</span></label>
-                        <textarea value={bidDesc} onChange={(e) => setBidDesc(e.target.value)} rows={3} className={inputCls} placeholder="Describe the extra work needed…" />
+                        <AutoGrowTextarea value={bidDesc} onChange={(e) => setBidDesc(e.target.value)} minPx={64} className={inputCls} placeholder="Describe the extra work needed…" />
                       </div>
                       <div>
                         <label className="block text-sm font-semibold text-ink mb-1.5">Your bid (vendor cost) <span className="text-brand">*</span></label>
@@ -523,7 +524,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
                 {canBidReview && (
                   <section className="bg-white border-2 border-brand/30 rounded-2xl p-4 space-y-3">
                     <div className="font-heading font-bold text-[15px] text-ink">Bid review</div>
-                    <textarea value={bidNotes} onChange={(e) => setBidNotes(e.target.value)} rows={2} className={inputCls}
+                    <AutoGrowTextarea value={bidNotes} onChange={(e) => setBidNotes(e.target.value)} minPx={52} className={inputCls}
                       placeholder={bidRejecting ? 'Reason — required to reject (visible on the record)…' : 'Notes for this decision (optional)…'} />
                     {!bidRejecting ? (
                       <>
@@ -574,7 +575,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
                 {canReview && (
                   <section className="bg-white border-2 border-brand/30 rounded-2xl p-4 space-y-3">
                     <div className="font-heading font-bold text-[15px] text-ink">Your decision</div>
-                    <textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} rows={3} className={inputCls}
+                    <AutoGrowTextarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} minPx={64} className={inputCls}
                       placeholder={rejecting ? 'Decision notes — required to reject (visible on the record)…' : 'Review notes for this decision (visible on the record)…'} />
                     {!rejecting ? (
                       <div className="flex gap-2">

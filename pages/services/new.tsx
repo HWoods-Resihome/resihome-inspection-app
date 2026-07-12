@@ -6,6 +6,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { ListPicker } from '@/components/ListPicker';
+import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { Combobox } from '@/components/Combobox';
 import { PriceField } from '@/components/PriceField';
 import { WORKTYPES, descriptionFor, subtypesFor, defaultRateFor } from '@/lib/services/worktypes';
@@ -160,7 +161,7 @@ export default function NewService() {
               {/* Description — pre-filled from the work type + subtype default; editable (blank until a work type is chosen). */}
               <div>
                 <label className={lbl}>Service Description</label>
-                <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
+                <AutoGrowTextarea value={description} onChange={(e) => setDescription(e.target.value)} minPx={64}
                   className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink focus:outline-none focus:border-brand" />
               </div>
 
