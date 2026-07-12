@@ -6,8 +6,8 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
-import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/worktypes';
-import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
+import { worktypeLabel, subtypeLabel, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
+import { SAMPLE_FORMS, formKey, GRASSCUT_AREAS_QID, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, easternTodayISO, type ServiceStatus } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
 import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
@@ -732,6 +732,52 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     </CollapsibleSection>
   ) : null;
 
+  // While the crew is completing the form, the Cost Detail reflects what the
+  // answers will actually bill — mirroring the submit-side pricing so the number
+  // matches before and after submission. Bill Trip Fee = Yes → $35 trip fee,
+  // No → $0; grass-cut is priced by height (−25% if the back yard was skipped);
+  // otherwise the assigned rate stands.
+  const liveCost = useMemo(() => {
+    const orig = svc.vendorCost ?? 0;
+    const markup = svc.markupPct ?? 0;
+    const answerFor = (idHint: string, labelRe: RegExp) => {
+      if (answers[idHint] != null && answers[idHint] !== '') return answers[idHint];
+      const q = form.find((x) => labelRe.test(x.label));
+      return q ? answers[q.id] : undefined;
+    };
+    const billAns = answerFor('bill_trip_fee', /trip\s*fee/i);
+    const completedAns = answerFor('svc_completed', /service\s*completed/i);
+    const heightAns = answerFor('grass_height', /grass\s*height/i);
+    const billTrip = billAns === 'yes' || billAns === true;
+    const billAnswered = billTrip || billAns === 'no' || billAns === false;
+    const notCompleted = String(completedAns) === 'no';
+    let vendor = orig;
+    let reason = '';
+    if (notCompleted || billAnswered) {
+      vendor = billTrip ? (defaultRateFor('trip_fee', 'base_trip_fee') ?? 0) : 0;
+      reason = billTrip ? 'Not completed — trip fee' : 'Not completed — no charge';
+    } else if (svc.worktype === 'landscaping' && svc.subtype === 'cut') {
+      const h = String(heightAns || '').toLowerCase();
+      vendor = (h.includes('heavy') || h.includes('over 12') || h.includes('12"+') || h.includes('12+')) ? 90
+        : (h.includes('overgrown') || h.includes('6-12') || h.includes('6–12') || h.includes('6 - 12')) ? 60 : 45;
+      const areas = Array.isArray(answers[GRASSCUT_AREAS_QID]) ? answers[GRASSCUT_AREAS_QID].map(String) : [];
+      if (areas.length > 0 && !areas.includes('Back Yard')) { vendor = Math.round(vendor * 0.75 * 100) / 100; reason = 'Back yard not serviced — 25% off'; }
+    }
+    const client = Number.isFinite(markup) ? Math.round(vendor * (1 + markup / 100) * 100) / 100 : vendor;
+    return { vendor, client, markup, reason, changed: Math.round(vendor * 100) !== Math.round(orig * 100) };
+  }, [answers, form, svc.vendorCost, svc.markupPct, svc.worktype, svc.subtype]);
+
+  const editableCostDetail = svc.vendorCost != null ? (
+    <CollapsibleSection title="Cost Detail" bodyClass="space-y-1 text-[13px]">
+      <div className="flex justify-between"><span className="text-gray-500">Vendor Cost</span><span className="font-semibold text-ink tabular-nums">{money(liveCost.vendor)}</span></div>
+      {isInternal && <div className="flex justify-between"><span className="text-gray-500">Markup</span><span className="font-semibold text-ink tabular-nums">{liveCost.markup}%</span></div>}
+      {isInternal && <div className="flex justify-between"><span className="text-gray-500">Client Cost</span><span className="font-semibold text-ink tabular-nums">{money(liveCost.client)}</span></div>}
+      {liveCost.changed && liveCost.reason && (
+        <div className="text-[12px] text-amber-700 pt-1">{liveCost.reason} — was {money(svc.vendorCost)}.</div>
+      )}
+    </CollapsibleSection>
+  ) : null;
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b-2 border-brand sticky top-0 z-30 shrink-0" style={{ paddingTop: 'min(env(safe-area-inset-top), 0.5rem)' }}>
@@ -860,7 +906,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                     vendor. Re-issued services carry the reviewer's note here. */}
                 {svc.description.trim() && (
                   <section className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1">Instructions from the office</div>
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1">Service Order Description</div>
                     <p className="text-[13px] text-ink whitespace-pre-line">{svc.description}</p>
                   </section>
                 )}
@@ -972,7 +1018,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   )}
                 </CollapsibleSection>
 
-                {costDetail}
+                {editableCostDetail}
 
                 <button type="button" disabled={!ready} onClick={submit}
                   className={`w-full rounded-2xl py-3.5 font-heading font-bold text-sm ${ready ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
