@@ -858,8 +858,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
                 {/* Additional-work bid — spawns an Estimated "Bid Item" for review. */}
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3">
-                  <div className={SECTION_HEAD}>Submit Separate Bid Item Request</div>
-                  <p className="text-[13px] text-gray-500 -mt-1">Have additional items that need a separate bid? Flag here — the office will review the bid separately.</p>
+                  <div className={SECTION_HEAD}>
+                    Submit Separate Bid Item Request
+                    <p className="text-[12px] font-normal text-gray-500 mt-0.5">Have additional items that need a separate bid? Flag here — the office will review the bid separately.</p>
+                  </div>
                   <div className="flex gap-2">
                     {([['no', 'No'], ['yes', 'Yes — submit a bid']] as const).map(([v, label]) => (
                       <button key={v} type="button" onClick={() => setBidWanted(v === 'yes')}
