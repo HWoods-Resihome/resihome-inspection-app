@@ -5,6 +5,7 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
+import { isViewingAsVendor } from '@/lib/services/viewAs';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { Combobox } from '@/components/Combobox';
@@ -23,7 +24,7 @@ const DEFAULT_MARKUP = '20';
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
-  if (!ok || !isInternalEmail(session?.email)) return { redirect: { destination: '/services', permanent: false } };
+  if (!ok || !isInternalEmail(session?.email) || isViewingAsVendor(ctx.req)) return { redirect: { destination: '/services', permanent: false } };
   return { props: {} };
 };
 

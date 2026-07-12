@@ -11,6 +11,7 @@ import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serv
 import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, type ServiceStatus } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
 import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
+import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
 import type { AuditEvent } from '@/lib/auditLog';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoThumb } from '@/components/PhotoThumb';
@@ -55,7 +56,10 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
-  const isInternal = isInternalEmail(session?.email);
+  // "View as Vendor" (cookie) forces the external vendor experience app-wide, so
+  // internal previewers see exactly what a vendor sees on the record too.
+  const asVendor = isViewingAsVendor(ctx.req);
+  const isInternal = isInternalEmail(session?.email) && !asVendor;
   const id = String(ctx.params?.id || '');
 
   let svc: ServiceView | null = null;
@@ -112,7 +116,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       }
     }
   }
-  return { props: { svc, form, isInternal, unlock, propMeta } };
+  return { props: { svc, form, isInternal, unlock, propMeta, asVendor } };
 };
 
 const money = (n: number | null | undefined) => `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -198,7 +202,7 @@ function AiNotes({ text }: { text: string }) {
   return <div className="space-y-2">{out}</div>;
 }
 
-export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null }) {
+export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta, asVendor }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null; asVendor: boolean }) {
   const router = useRouter();
   // Bid items are never crew-completed here — they go straight to internal bid review.
   const editable = EDITABLE.has(svc.status) && !svc.isBidItem;
@@ -553,6 +557,12 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
       </header>
 
       <main className="max-w-2xl mx-auto w-full px-4 py-4 flex-1 space-y-4">
+        {asVendor && (
+          <div className="flex items-center justify-between gap-2 bg-purple-600 text-white rounded-xl px-3 py-2 text-[12px] font-heading font-semibold">
+            <span>Viewing as Vendor</span>
+            <button type="button" onClick={() => { setViewAsVendor(false); window.location.href = '/services'; }} className="underline shrink-0">Exit</button>
+          </div>
+        )}
         {doneStatus === 'submitted' ? (
           <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center mt-6">
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>

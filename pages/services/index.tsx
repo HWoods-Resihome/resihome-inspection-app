@@ -18,18 +18,23 @@ import {
   type ServiceStatus, type SampleService,
 } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
+import { isViewingAsVendor, setViewAsVendor } from '@/lib/services/viewAs';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   const real = await searchServiceWorkOrders().catch(() => null);
+  // "View as Vendor" persists via cookie (whole-app), with the legacy ?as=vendor
+  // query still honored as an entry point.
+  const asVendor = isViewingAsVendor(ctx.req) || ctx.query.as === 'vendor';
   return {
     props: {
       userName: session?.name || session?.email || '',
       canCreate: isInternalEmail(session?.email),
       services: real ?? SAMPLE_SERVICES,
       live: !!real,
+      asVendor,
     },
   };
 };
@@ -109,12 +114,14 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
   );
 }
 
-export default function ServicesHome({ userName, canCreate, services, live }: { userName: string; canCreate: boolean; services: SampleService[]; live: boolean }) {
+export default function ServicesHome({ userName, canCreate, services, live, asVendor }: { userName: string; canCreate: boolean; services: SampleService[]; live: boolean; asVendor: boolean }) {
   const router = useRouter();
-  // Admin "view as vendor" preview (?as=vendor): shows the external vendor
-  // experience — no admin create/settings, and the vendor-visibility rule applies.
-  const asVendor = router.query.as === 'vendor';
+  // "View as Vendor" preview (cookie-persisted, whole-app): shows the external
+  // vendor experience — no admin create/settings, and the vendor-visibility rule
+  // applies. Entering/exiting sets the cookie then reloads so SSR re-runs.
   const isAdmin = canCreate && !asVendor;
+  const enterVendorView = () => { setViewAsVendor(true); window.location.href = '/services'; };
+  const exitVendorView = () => { setViewAsVendor(false); window.location.href = '/services'; };
   const [status, setStatus] = useState<ServiceStatus | 'all'>('all');
   const [worktype, setWorktype] = useState<string[]>([]);
   const [vendor, setVendor] = useState<string[]>([]);
@@ -328,7 +335,7 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
                     </button>
                     <button type="button" onClick={() => { setGearOpen(false); setSelectedIds(new Set()); setSelectMode(true); }}
                       className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Select Services</button>
-                    <Link href="/services?as=vendor" className="block px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">View as Vendor</Link>
+                    <button type="button" onClick={enterVendorView} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">View as Vendor</button>
                   </div></>)}
               </div>
               )}
@@ -351,7 +358,7 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
         {asVendor && (
           <div className="mb-3 flex items-center justify-between gap-2 bg-purple-600 text-white rounded-xl px-3 py-2 text-[12px] font-heading font-semibold">
             <span>Viewing as Vendor — admin controls &amp; client pricing hidden.</span>
-            <Link href="/services" className="underline shrink-0">Exit</Link>
+            <button type="button" onClick={exitVendorView} className="underline shrink-0">Exit</button>
           </div>
         )}
         {aiRerun && (

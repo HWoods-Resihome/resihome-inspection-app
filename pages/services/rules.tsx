@@ -12,11 +12,13 @@ import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { SAMPLE_SERVICES } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
 import { searchServiceRuleRecords } from '@/lib/hubspot';
+import { isViewingAsVendor } from '@/lib/services/viewAs';
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
+  if (isViewingAsVendor(ctx.req)) return { redirect: { destination: '/services', permanent: false } };
   const recs = await searchServiceRuleRecords().catch(() => null);
   return { props: { ruleRecords: recs, live: !!recs } };
 };

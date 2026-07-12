@@ -5,6 +5,7 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
+import { isViewingAsVendor } from '@/lib/services/viewAs';
 import { readServiceAiChecks } from '@/lib/hubspot';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
@@ -16,6 +17,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
+  if (isViewingAsVendor(ctx.req)) return { redirect: { destination: '/services', permanent: false } };
   const admin = await isAppAdmin(session?.email).catch(() => false);
   const saved = admin ? await readServiceAiChecks().catch(() => null) : null;
   return { props: { savedChecks: saved || null, canSave: admin } };

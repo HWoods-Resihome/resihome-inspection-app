@@ -5,6 +5,7 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isAppAdmin } from '@/lib/adminAccess';
+import { isViewingAsVendor } from '@/lib/services/viewAs';
 import { readServiceForms } from '@/lib/hubspot';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
@@ -18,6 +19,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
+  if (isViewingAsVendor(ctx.req)) return { redirect: { destination: '/services', permanent: false } };
   const admin = await isAppAdmin(session?.email).catch(() => false);
   // Persisted forms (Agent-record JSON) override the seeded defaults per key.
   const saved = admin ? await readServiceForms().catch(() => null) : null;

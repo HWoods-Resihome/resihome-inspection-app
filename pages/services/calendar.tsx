@@ -6,6 +6,7 @@ import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
+import { isViewingAsVendor } from '@/lib/services/viewAs';
 import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
@@ -24,7 +25,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok) return { redirect: { destination: '/', permanent: false } };
   const real = await searchServiceWorkOrders().catch(() => null);
-  return { props: { canSeeAll: isInternalEmail(session?.email), services: real ?? SAMPLE_SERVICES, live: !!real } };
+  const canSeeAll = isInternalEmail(session?.email) && !isViewingAsVendor(ctx.req);
+  return { props: { canSeeAll, services: real ?? SAMPLE_SERVICES, live: !!real } };
 };
 
 type View = 'month' | 'week' | 'day';
