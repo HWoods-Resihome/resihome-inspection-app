@@ -3973,14 +3973,16 @@ export function RateCardForm(props: RateCardFormProps) {
                 className="order-2"
               />
             )}
+            {/* Back — bare chevron (no boxed button) like the services window, so
+                the template title gets more width before it truncates. */}
             <button
               type="button"
               onClick={handleSaveAndClose}
               aria-label="Save and go back"
-              className="order-1 inline-flex items-center justify-center w-8 h-8 text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg bg-white transition-colors"
+              className="order-1 inline-flex items-center justify-center w-6 h-8 -mx-0.5 text-gray-400 hover:text-gray-700"
               title="Save and go back"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M15 18l-6-6 6-6" /></svg>
             </button>
             </div>
           </div>
