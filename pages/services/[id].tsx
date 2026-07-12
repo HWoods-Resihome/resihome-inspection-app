@@ -16,6 +16,7 @@ import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { UnlockButton, lockRingFromProperty, type LockRing } from '@/components/UnlockButton';
 import { FitText } from '@/components/FitText';
 import ServicePager from '@/components/ServicePager';
+import { AiSparkle } from '@/components/AiSparkle';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync } from '@/lib/services/offlineServices';
 
@@ -164,6 +165,8 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
   const editable = EDITABLE.has(svc.status) && !svc.isBidItem;
   // Past-due (open statuses only) — turns the header Due date red, like the home list.
   const overdue = ['estimated', 'assigned', 'submitted', 'review'].includes(svc.status) && !!svc.dueDate && svc.dueDate < REFERENCE_TODAY;
+  // Resting display for a $ input: pad to 2 decimals on blur (e.g. "250" → "250.00").
+  const fmt2 = (v: string): string => { const n = Number(v); return v.trim() !== '' && Number.isFinite(n) ? n.toFixed(2) : v; };
   const underReview = svc.status === 'review';
   const canReview = isInternal && underReview;
   const canBidReview = isInternal && svc.isBidItem && svc.status === 'estimated';
@@ -271,9 +274,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
   const markupPct = svc.markupPct ?? 0;
   const [reviewNotes, setReviewNotes] = useState('');
   const [rejecting, setRejecting] = useState(false);
-  const [rejectCost, setRejectCost] = useState(String(origCost));   // editable payout; defaults to current vendor cost
+  const [rejectCost, setRejectCost] = useState(origCost ? origCost.toFixed(2) : '0.00');   // editable payout; defaults to current vendor cost
   const [deciding, setDeciding] = useState(false);
-  const startReject = () => { setRejectCost(String(origCost)); setRejecting(true); };
+  const startReject = () => { setRejectCost(origCost ? origCost.toFixed(2) : '0.00'); setRejecting(true); };
 
   const decide = async (decision: 'approve' | 'reject') => {
     // A reject must carry a decision note (it's the reason, on the record).
@@ -295,7 +298,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
   // ── Bid-item review state (Estimated bid → approve→Assigned / reject→Canceled) ──
   const [bidNotes, setBidNotes] = useState('');
   const [bidRejecting, setBidRejecting] = useState(false);
-  const [bidVC, setBidVC] = useState(String(origCost));
+  const [bidVC, setBidVC] = useState(origCost ? origCost.toFixed(2) : '0.00');
   const [bidMarkup, setBidMarkup] = useState(String(markupPct));
   const [bidDueDays, setBidDueDays] = useState('5');
   const [bidDeciding, setBidDeciding] = useState(false);
@@ -361,7 +364,10 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
           <div className="min-w-0 flex-1 text-[13px] font-heading font-bold text-ink truncate">
             {worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}
           </div>
-          <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{serviceStatusText(svc.status || 'assigned', isInternal)}</span>
+          <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>
+            {serviceStatusText(svc.status || 'assigned', isInternal)}
+            {isInternal && svc.status === 'submitted' && <AiSparkle className="w-3 h-3" />}
+          </span>
           <ServicePager currentId={svc.id} onNavigate={(id) => router.replace(`/services/${id}`)} />
           {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7 shrink-0" />}
           <Link href="/services" aria-label="Back to Services" className="shrink-0 text-gray-400 hover:text-ink">
@@ -390,30 +396,28 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
 
       <main className="max-w-2xl mx-auto w-full px-4 py-4 flex-1 space-y-4">
         {doneStatus === 'submitted' ? (
-          <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center">
-            <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
-            <div className="font-heading font-extrabold text-lg text-ink">{isInternal ? 'Submitted — AI Processing' : 'Submitted — Under Review'}</div>
-            <p className="text-sm text-gray-500 mt-1">{isInternal
-              ? <>The AI reviews the photos, timing, and selections. If everything looks clean it moves to <b>Completed</b>; if anything needs a human it moves to <b>Review</b>.</>
-              : <>Thanks — your completion was submitted and is now under review. You’ll see it move to <b>Completed</b> once it’s approved.</>}</p>
+          <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center mt-6">
+            <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
+            <div className="font-heading font-extrabold text-lg text-ink">Submitted — Under Review</div>
+            <p className="text-sm text-gray-500 mt-1">Thanks — your completion has been submitted. Our review team will verify the photos and details and process it shortly. You’ll see it move to <b>Completed</b> once it’s approved.</p>
             <Link href="/services" className="inline-block mt-4 bg-brand text-white font-heading font-bold text-sm rounded-xl px-5 py-2.5">Back to Services</Link>
           </div>
         ) : doneStatus === 'queued' ? (
-          <div className="bg-white border border-amber-300 rounded-2xl p-6 text-center">
+          <div className="bg-white border border-amber-300 rounded-2xl p-6 text-center mt-6">
             <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 grid place-items-center text-2xl mx-auto mb-3">⤓</div>
             <div className="font-heading font-extrabold text-lg text-ink">Saved offline</div>
             <p className="text-sm text-gray-500 mt-1">You’re offline. This completion and its photos are saved on your device and will submit automatically the moment you’re back online — you can close the app.</p>
             <Link href="/services" className="inline-block mt-4 bg-brand text-white font-heading font-bold text-sm rounded-xl px-5 py-2.5">Back to Services</Link>
           </div>
         ) : doneStatus === 'decided' ? (
-          <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center">
+          <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center mt-6">
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
             <div className="font-heading font-extrabold text-lg text-ink">Decision recorded</div>
             <p className="text-sm text-gray-500 mt-1">The bid decision was saved. Approved bids move to <b>Assigned</b> and follow the normal cadence; rejected bids are <b>Canceled</b>.</p>
             <Link href="/services" className="inline-block mt-4 bg-brand text-white font-heading font-bold text-sm rounded-xl px-5 py-2.5">Back to Services</Link>
           </div>
         ) : doneStatus === 'completed' ? (
-          <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center">
+          <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center mt-6">
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
             <div className="font-heading font-extrabold text-lg text-ink">Completed</div>
             <p className="text-sm text-gray-500 mt-1">The decision was recorded and the service is closed out.</p>
@@ -520,7 +524,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
                         <label className="block text-sm font-semibold text-ink mb-1.5">Your bid (vendor cost) <span className="text-brand">*</span></label>
                         <div className="relative w-40">
                           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                          <input type="number" inputMode="decimal" value={bidCost} onChange={(e) => setBidCost(e.target.value)} className="w-full text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" placeholder="0.00" />
+                          <input type="number" inputMode="decimal" value={bidCost} onChange={(e) => setBidCost(e.target.value)} onBlur={() => setBidCost(fmt2(bidCost))} className="w-full text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" placeholder="0.00" />
                         </div>
                       </div>
                       <CameraPhotos label="Bid photos" required urls={bidPhotos} onChange={setBidPhotos} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
@@ -532,7 +536,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
 
                 <button type="button" disabled={!ready} onClick={submit}
                   className={`w-full rounded-2xl py-3.5 font-heading font-bold text-sm ${ready ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
-                  {submitting ? 'Submitting…' : 'Submit completion'}
+                  {submitting ? "Submitting…" : "Submit Completion"}
                 </button>
                 {error && <div className="text-center text-xs text-red-600 -mt-2">{error}</div>}
                 {!ready && !error && !submitting && <div className="text-center text-xs text-gray-400 -mt-2">Answer the required questions and add at least one before and one after photo to submit.</div>}
@@ -594,7 +598,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
                           <div className="flex flex-wrap items-center gap-3">
                             <label className="flex items-center gap-1.5 text-[13px] text-gray-500">Vendor cost
                               <span className="relative"><span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                              <input type="number" inputMode="decimal" value={bidVC} onChange={(e) => setBidVC(e.target.value)} className="w-24 text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" /></span>
+                              <input type="number" inputMode="decimal" value={bidVC} onChange={(e) => setBidVC(e.target.value)} onBlur={() => setBidVC(fmt2(bidVC))} className="w-24 text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" /></span>
                             </label>
                             <label className="flex items-center gap-1.5 text-[13px] text-gray-500">Markup
                               <span className="relative"><input type="number" inputMode="decimal" value={bidMarkup} onChange={(e) => setBidMarkup(e.target.value)} className="w-16 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-brand" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span></span>
@@ -651,7 +655,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
                           <span className="text-[13px] text-gray-500">Vendor cost</span>
                           <div className="relative">
                             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                            <input type="number" inputMode="decimal" value={rejectCost} onChange={(e) => setRejectCost(e.target.value)} className="w-28 text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" />
+                            <input type="number" inputMode="decimal" value={rejectCost} onChange={(e) => setRejectCost(e.target.value)} onBlur={() => setRejectCost(fmt2(rejectCost))} className="w-28 text-sm border border-gray-300 rounded-lg pl-6 pr-2 py-2 bg-white focus:outline-none focus:border-brand" />
                           </div>
                           {origCost > 0 && <span className="text-[12px] text-gray-400">was {money(origCost)}</span>}
                         </div>

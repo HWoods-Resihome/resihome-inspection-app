@@ -2665,7 +2665,7 @@ export function CameraCaptureModern({
   );
 
   return (
-    <div ref={rootRef} className="fixed inset-0 z-50 h-[100dvh] bg-black flex flex-col select-none overflow-hidden overscroll-none animate-fadeIn">
+    <div ref={rootRef} className="fixed inset-0 z-50 bg-black flex flex-col select-none overflow-hidden overscroll-none animate-fadeIn">
       {/* AI assist (Beta) — overlay that reads this camera's video + its own mic. */}
       {aiAssist && onAiAddLine && (
         <CameraAILayer

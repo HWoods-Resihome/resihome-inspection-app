@@ -10,6 +10,7 @@ import { isInternalEmail } from '@/lib/userAccess';
 import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { ListPicker } from '@/components/ListPicker';
+import { AiSparkle } from '@/components/AiSparkle';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
   SAMPLE_SERVICES, SAMPLE_REGIONS, SAMPLE_STATUS_ORDER, REFERENCE_TODAY,
@@ -76,9 +77,9 @@ function ServiceCard({ s, overdue, isAdmin, canCancel, onCancel }: {
           <span className="font-heading font-bold text-ink truncate">{s.address}</span>
           <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${s.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{s.scope === 'community' ? 'Community' : 'SFR'}</span>
         </div>
-        <span className="shrink-0 inline-flex items-center gap-1">
-          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>{serviceStatusText(s.status, isAdmin)}</span>
-          {isAdmin && s.status === 'submitted' && <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold border bg-indigo-100 text-indigo-700 border-indigo-300">AI Processing</span>}
+        <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>
+          {serviceStatusText(s.status, isAdmin)}
+          {isAdmin && s.status === 'submitted' && <AiSparkle className="w-3 h-3" />}
         </span>
       </div>
       <div className="text-[12px] text-gray-500 truncate mt-0.5">{s.locality}{s.community ? ` · ${s.community}` : ''}</div>
