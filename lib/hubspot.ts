@@ -1190,6 +1190,12 @@ function mapServiceRow(r: any): SampleService {
   if (p.community_name) rec.community = p.community_name;
   if (p.property_status_snapshot) rec.propertyStatus = p.property_status_snapshot;
   if (p.ontime === 'true') rec.onTime = true;
+  // Completion timestamp (ms epoch or ISO) → ISO, for day-view route ordering.
+  if (p.completed_at) {
+    const t = String(p.completed_at).trim();
+    const d = /^\d{10,}$/.test(t) ? new Date(Number(t)) : new Date(t);
+    if (!isNaN(+d)) rec.completedAt = d.toISOString();
+  }
   const lat = num(p.latitude); if (lat !== null) rec.lat = lat;
   const lng = num(p.longitude); if (lng !== null) rec.lng = lng;
   return rec;

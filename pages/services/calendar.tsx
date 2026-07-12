@@ -44,6 +44,11 @@ const WT: Record<string, { hex: string; chip: string }> = {
 };
 const wtOf = (w: string) => WT[w] || WT.trip_fee;
 
+// Distinct green shades for per-vendor day-routes (base green, then teal / lime /
+// emerald variants) so each vendor's completed route reads as its own color.
+const VENDOR_GREENS = ['#16a34a', '#0d9488', '#65a30d', '#059669', '#15803d', '#0f766e', '#4d7c0f', '#047857'];
+const timeFmt = (iso?: string) => { if (!iso) return ''; const d = new Date(iso); return isNaN(+d) ? '' : d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); };
+
 // Local-time date helpers (avoid TZ drift from ISO parsing).
 const parse = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const toISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -90,18 +95,60 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
     return m;
   }, [scoped]);
 
+  // ── Day-view vendor routes (completed only) ──────────────────────────────
+  // Completed services carry a real completion timestamp = true route order. In
+  // the DAY view, number each vendor's completed stops 1,2,3… by completion time
+  // (numbering restarts per vendor), give each vendor a distinct green, and trace
+  // their stops in order. Week/month + open services are unchanged.
+  const dayRoute = useMemo(() => {
+    const order = new Map<string, number>();     // serviceId → stop #
+    const color = new Map<string, string>();     // vendor → hex
+    const counts = new Map<string, number>();    // vendor → stop count
+    const vendors: string[] = [];
+    if (view !== 'day') return { order, color, counts, vendors };
+    const completed = visible.filter((s) => s.status === 'completed');
+    const groups = new Map<string, SampleService[]>();
+    for (const s of completed) { const v = s.vendor || 'Unassigned'; if (!groups.has(v)) groups.set(v, []); groups.get(v)!.push(s); }
+    const ms = (s: SampleService) => (s.completedAt ? new Date(s.completedAt).getTime() : 0);
+    Array.from(groups.keys()).sort().forEach((v, vi) => {
+      const list = groups.get(v)!.slice().sort((a, b) => (ms(a) - ms(b)) || a.address.localeCompare(b.address));
+      list.forEach((s, i) => order.set(s.id, i + 1));
+      color.set(v, VENDOR_GREENS[vi % VENDOR_GREENS.length]);
+      counts.set(v, list.length);
+      vendors.push(v);
+    });
+    return { order, color, counts, vendors };
+  }, [view, visible]);
+
   const mapItems: MapItem[] = visible.flatMap((s) => {
     if (!Number.isFinite(s.lat) || !Number.isFinite(s.lng)) return [];
     const d = parse(s.dueDate);
     const done = s.status === 'completed';
+    const stopNum = view === 'day' && done ? dayRoute.order.get(s.id) : undefined;
+    const vendor = s.vendor || 'Unassigned';
+    const color = stopNum != null ? (dayRoute.color.get(vendor) || wtOf(s.worktype).hex) : wtOf(s.worktype).hex;
+    const t = stopNum != null ? timeFmt(s.completedAt) : '';
     return [{
-      id: s.id, lat: s.lat as number, lng: s.lng as number, color: wtOf(s.worktype).hex,
+      id: s.id, lat: s.lat as number, lng: s.lng as number, color,
+      badge: stopNum != null ? String(stopNum) : undefined,
       title: s.address, href: `/services/${s.id}`,
-      // Row 2: worktype · subtype · status. Row 3: date · vendor.
+      // Row 2: worktype · subtype · status. Row 3: date · (time) · vendor.
       line2: `${worktypeLabel(s.worktype)} · ${subtypeLabel(s.worktype, s.subtype)} · ${serviceStatusText(s.status, canSeeAll)}`,
-      line3: `${done ? 'Done' : 'Due'} ${d.getMonth() + 1}/${d.getDate()} · ${s.vendor || 'Unassigned'}`,
+      line3: [`${done ? 'Done' : 'Due'} ${d.getMonth() + 1}/${d.getDate()}`, t, vendor].filter(Boolean).join(' · '),
     }];
   });
+
+  // One dashed line per vendor, connecting their completed stops in route order.
+  const routes = useMemo(() => {
+    if (view !== 'day') return [];
+    return dayRoute.vendors.map((v) => ({
+      color: dayRoute.color.get(v) as string,
+      points: visible
+        .filter((s) => s.status === 'completed' && (s.vendor || 'Unassigned') === v && Number.isFinite(s.lat) && Number.isFinite(s.lng))
+        .sort((a, b) => (dayRoute.order.get(a.id) || 0) - (dayRoute.order.get(b.id) || 0))
+        .map((s) => [s.lat as number, s.lng as number] as [number, number]),
+    })).filter((r) => r.points.length >= 2);
+  }, [view, visible, dayRoute]);
 
   const step = (dir: number) => {
     if (view === 'day') setCursorISO(toISO(addDays(cursor, dir)));
@@ -253,16 +300,34 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
         {view === 'day' && (
           <div className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
             {visible.length === 0 && <div className="text-center text-gray-400 text-sm py-8">No services scheduled this day.</div>}
-            {visible.sort((a, b) => a.address.localeCompare(b.address)).map((s) => (
-              <Link key={s.id} href={`/services/${s.id}`} className="flex items-center gap-3 border border-gray-200 rounded-lg px-3 py-2 hover:border-brand/40">
-                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: wtOf(s.worktype).hex }} />
-                <div className="min-w-0 flex-1">
-                  <div className="font-heading font-bold text-ink text-sm truncate">{s.address}</div>
-                  <div className="text-[12px] text-gray-500 truncate">{worktypeLabel(s.worktype)} · {subtypeLabel(s.worktype, s.subtype)} · {s.locality}</div>
-                </div>
-                <span className="text-[12px] text-gray-500 shrink-0">{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
-              </Link>
-            ))}
+            {/* Route legend — when 2+ vendors completed work this day, tie each color to
+                its vendor. Two neatly stacked columns with the dots aligned. */}
+            {dayRoute.vendors.length >= 2 && (
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 pb-2 border-b border-gray-100 mb-1">
+                {dayRoute.vendors.map((v) => (
+                  <div key={v} className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-600 min-w-0">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: dayRoute.color.get(v) }} />
+                    <span className="truncate">{v}</span>
+                    <span className="text-gray-400 shrink-0">· {dayRoute.counts.get(v)} stop{dayRoute.counts.get(v) === 1 ? '' : 's'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {visible.sort((a, b) => a.address.localeCompare(b.address)).map((s) => {
+              const stopNum = s.status === 'completed' ? dayRoute.order.get(s.id) : undefined;
+              return (
+                <Link key={s.id} href={`/services/${s.id}`} className="flex items-center gap-3 border border-gray-200 rounded-lg px-3 py-2 hover:border-brand/40">
+                  {stopNum != null
+                    ? <span className="w-5 h-5 rounded-full shrink-0 grid place-items-center text-[10px] font-bold text-white" style={{ background: dayRoute.color.get(s.vendor || 'Unassigned') }}>{stopNum}</span>
+                    : <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: wtOf(s.worktype).hex }} />}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-heading font-bold text-ink text-sm truncate">{s.address}</div>
+                    <div className="text-[12px] text-gray-500 truncate">{worktypeLabel(s.worktype)} · {subtypeLabel(s.worktype, s.subtype)}{stopNum != null && timeFmt(s.completedAt) ? ` · ${timeFmt(s.completedAt)}` : ` · ${s.locality}`}</div>
+                  </div>
+                  <span className="text-[12px] text-gray-500 shrink-0">{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
+                </Link>
+              );
+            })}
           </div>
         )}
 
@@ -283,7 +348,7 @@ export default function ServicesCalendar({ canSeeAll, services, live }: { canSee
               })}
             </div>
           </div>
-          <ServicesMap items={mapItems} />
+          <ServicesMap items={mapItems} routes={routes} />
         </div>
       </main>
     </div>
