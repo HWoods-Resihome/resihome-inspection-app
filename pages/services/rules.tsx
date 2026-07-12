@@ -248,6 +248,12 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
   const [savingRule, setSavingRule] = useState(false);
   const [genBusy, setGenBusy] = useState(false);
   const [genMsg, setGenMsg] = useState('');
+  // Accurate "would create" count from the server dry-run (a real property query),
+  // not the coverage catalog (which can be incomplete for some portfolios). null =
+  // loading. Bumping wcReload re-runs it (after a generate).
+  const [wouldCreate, setWouldCreate] = useState<number | null>(null);
+  const [coveredLive, setCoveredLive] = useState<number | null>(null);   // applicable = would-create + already-open
+  const [wcReload, setWcReload] = useState(0);
   const [openId, setOpenId] = useState<number | null>(null);   // null = list view; else editing that rule
   const [propsOpen, setPropsOpen] = useState(false);
   const [propSearch, setPropSearch] = useState('');
@@ -456,6 +462,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
   const subFilterUnique = [...new Map(subFilterOptions).entries()].map(([value, label]) => ({ value, label }));
 
   const coveredCount = useMemo(() => (rule ? countFor(rule) : 0), [rule]);
+  // Prefer the accurate server count (real property query) for the open rule;
+  // fall back to the catalog estimate until it loads / for unsaved rules.
+  const coveredDisplay = coveredLive != null ? coveredLive.toLocaleString() : countLabel(coveredCount);
 
   // A month is "accounted for" if it's in a cadence OR explicitly set to no service.
   const coveredMonths = useMemo(() => new Set(rule ? [...rule.cadences.flatMap((c) => c.months), ...rule.skipMonths] : []), [rule]);
@@ -522,9 +531,28 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
       if (skipped) parts.push(`${skipped} already open`);
       if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
       setGenMsg(created ? parts.join(' · ') : (skipped ? `Up to date — ${skipped} already open` : 'No missing work orders to create.'));
+      setWcReload((n) => n + 1);   // refresh the would-create count (some are now open)
     } catch { setGenMsg('Couldn’t reach the server. Try again.'); }
     finally { setGenBusy(false); }
   };
+
+  // Fetch the accurate would-create count for the open (saved) rule.
+  useEffect(() => {
+    if (!canGenerate || !rule?.recordId) { setWouldCreate(null); setCoveredLive(null); return; }
+    let alive = true;
+    setWouldCreate(null); setCoveredLive(null);
+    fetch(`/api/services/admin/generate?ruleId=${encodeURIComponent(rule.recordId)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!alive) return;
+        const wc = typeof d.wouldCreate === 'number' ? d.wouldCreate : 0;
+        const open = typeof d.skippedExisting === 'number' ? d.skippedExisting : 0;
+        setWouldCreate(wc); setCoveredLive(wc + open);
+      })
+      .catch(() => { if (alive) { setWouldCreate(null); setCoveredLive(null); } });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rule?.recordId, canGenerate, wcReload]);
 
   const sec = 'bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 shadow-sm';
   const lbl = 'block text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1';
@@ -679,7 +707,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
               Rules
             </button>
             <div className="ml-auto text-right shrink-0">
-              <div className="text-xl font-heading font-extrabold text-ink tabular-nums leading-none">{countLabel(coveredCount)}</div>
+              <div className="text-xl font-heading font-extrabold text-ink tabular-nums leading-none">{coveredDisplay}</div>
               <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Properties Covered</div>
             </div>
           </div>
@@ -767,7 +795,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
                 <label className={`${lbl} mt-3`}>Applicable Properties</label>
                 <div className="border border-gray-200 rounded-xl max-w-md">
                   <button type="button" onClick={() => setPropsOpen((o) => !o)} className="w-full flex items-center justify-between px-3 py-2.5 text-[13px] font-semibold text-ink">
-                    <span className="text-brand font-bold">{countLabel(coveredCount)} <span className="text-gray-500 font-semibold">included</span></span>
+                    <span className="text-brand font-bold">{coveredDisplay} <span className="text-gray-500 font-semibold">included</span></span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${propsOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
                   </button>
                   {propsOpen && (
@@ -995,7 +1023,9 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
               <>
                 <div className="mt-2 flex items-center justify-between gap-3">
                   <div className="text-[13px] text-ink">
-                    Would create <span className="font-heading font-extrabold">{countLabel(coveredCount)}</span> work order{coveredCount === 1 ? '' : 's'}
+                    {rule.recordId
+                      ? <>Would create <span className="font-heading font-extrabold">{wouldCreate == null ? '…' : wouldCreate.toLocaleString()}</span> work order{wouldCreate === 1 ? '' : 's'}</>
+                      : <span className="text-gray-500">Save the rule to see how many it would create.</span>}
                     {genMsg && <span className="block text-[12px] font-heading font-semibold text-gray-600">{genMsg}</span>}
                   </div>
                   <button onClick={generateNow} disabled={genBusy || !rule.recordId}
