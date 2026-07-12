@@ -96,8 +96,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const heightAns = answerFor('grass_height', /grass\s*height/i);
   const notCompleted = String(completedAns) === 'no';
   const billTrip = billAns === 'yes' || billAns === true;
+  // The Bill Trip Fee question only surfaces when the work isn't being completed
+  // (no access / can't finish), so ANY answer to it — Yes or No — is a trip-fee
+  // close-out, regardless of what the completion gate is named. This is the fix
+  // for forms where "Service Completed?" was renamed (e.g. "Able to Access the
+  // Property?"): pricing must still key off Bill Trip Fee, not the gate's label.
+  const billAnswered = billTrip || billAns === 'no' || billAns === false;
+  const closeoutNoWork = notCompleted || billAnswered;
   let routeToReview = false;
-  if (notCompleted) {
+  if (closeoutNoWork) {
     routeToReview = true;                 // not completed → human review, no AI
     const tripRate = defaultRateFor('trip_fee', 'base_trip_fee') ?? 0;
     const finalV = billTrip ? tripRate : 0;

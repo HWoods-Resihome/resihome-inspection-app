@@ -277,7 +277,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
         <div className="max-w-3xl mx-auto px-4 pt-2 pb-2.5">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <Link href="/" aria-label="Home" className="shrink-0"><img src="/app-icon.svg" alt="ResiWalk" className="h-11 w-11 object-cover" /></Link>
+              <Link href="/services" aria-label="Services home" className="shrink-0"><img src="/app-icon.svg" alt="ResiWalk" className="h-11 w-11 object-cover" /></Link>
               <div className="min-w-0">
                 <h1 className="font-heading font-extrabold text-lg tracking-tight">Services</h1>
                 {userName && <div className="text-xs text-white/80 truncate">Welcome, {userName}</div>}

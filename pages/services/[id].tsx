@@ -370,6 +370,10 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
   );
 }
 
+// The Bill Trip Fee question — by stable id, or by label if it was renamed in the
+// Form Builder. Matches the submit-side pricing resolver (keep them in lockstep).
+const isTripFeeQuestion = (q: ServiceQuestion) => q.id === 'bill_trip_fee' || /trip\s*fee/i.test(q.label);
+
 export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta, asVendor }: { svc: ServiceView; form: ServiceQuestion[]; isInternal: boolean; unlock: { propertyId: string; address: string; ring: LockRing } | null; propMeta: { bedrooms: number | null; bathrooms: number | null; sqft: number | null; region: string } | null; asVendor: boolean }) {
   const router = useRouter();
   // Bid items are never crew-completed here — they go straight to internal bid review.
@@ -715,7 +719,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
         </div>
         {/* Tier 2 — info: logo + full address + (property) bed/bath·sqft·region + vendor·due. */}
         <div className="max-w-2xl mx-auto px-3 pt-1 pb-2.5 flex items-center gap-2.5">
-          <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain shrink-0" />
+          <Link href="/services" aria-label="Services home" className="shrink-0">
+            <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain" />
+          </Link>
           <div className="min-w-0 flex-1 space-y-0.5">
             <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={17} min={11} />
             {svc.scope === 'property' && propMeta && (propMeta.bedrooms || propMeta.bathrooms || propMeta.sqft || propMeta.region) && (
@@ -807,12 +813,22 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                     <div key={q.id}>
                       <label className={Q_LABEL}>{q.label}{q.required && <span className="text-brand"> *</span>}</label>
                       {q.type === 'yesno' && (
-                        <div className="flex gap-2">
-                          {(['yes', 'no'] as const).map((v) => (
-                            <button key={v} type="button" onClick={() => setAns(q.id, v)}
-                              className={`px-4 py-1.5 rounded-full border text-[13px] font-heading font-semibold ${answers[q.id] === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{v === 'yes' ? 'Yes' : 'No'}</button>
-                          ))}
-                        </div>
+                        <>
+                          <div className="flex gap-2">
+                            {(['yes', 'no'] as const).map((v) => (
+                              <button key={v} type="button" onClick={() => setAns(q.id, v)}
+                                className={`px-4 py-1.5 rounded-full border text-[13px] font-heading font-semibold ${answers[q.id] === v ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{v === 'yes' ? 'Yes' : 'No'}</button>
+                            ))}
+                          </div>
+                          {/* Bill Trip Fee — explain the billing outcome of the chosen answer. */}
+                          {isTripFeeQuestion(q) && (answers[q.id] === 'yes' || answers[q.id] === 'no') && (
+                            <div className={`mt-2 text-[12px] font-heading font-semibold rounded-lg px-3 py-2 border ${answers[q.id] === 'yes' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+                              {answers[q.id] === 'yes'
+                                ? 'Service updates for a $35 trip fee, then routes to review to close out.'
+                                : 'Service will close out with no billing.'}
+                            </div>
+                          )}
+                        </>
                       )}
                       {q.type === 'single' && (
                         <div className="flex flex-wrap gap-2">

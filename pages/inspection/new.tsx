@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
-import Link from 'next/link';
 import { useAppDialog } from '@/components/AppDialog';
 import { useRouter } from 'next/router';
+import { PageHeader } from '@/components/PageHeader';
+import { primaryBtn } from '@/components/formStyles';
 import type {
   Property, TemplateType, HubSpotUser,
 } from '@/lib/types';
@@ -636,24 +637,12 @@ export default function NewInspection() {
           form fits on one screen; on a short device it scrolls internally.
           env(safe-area-inset-*) clears the notch and home indicator (0 in a
           normal browser, so web/PWA is unchanged). */}
-      <main
-        className="fixed inset-0 overflow-y-auto overscroll-none p-4 sm:p-6 bg-white"
-        style={{
-          paddingTop: 'calc(0.35rem + env(safe-area-inset-top))',
-          paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))',
-        }}
-      >
-        <div className="max-w-xl mx-auto">
-          <div className="flex items-center justify-between mb-2">
-            <Link href="/" className="text-sm text-gray-500 hover:text-ink font-heading">&larr; Home</Link>
-          </div>
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm px-6 pt-4 pb-6">
-            <h1 className="text-2xl font-heading font-bold mb-1">New Inspection</h1>
-            <p className="text-sm text-gray-500 mb-5 font-heading uppercase tracking-wider">
-              Pick a template and property to begin
-            </p>
-
-            <div className="space-y-5">
+      <div className="min-h-screen bg-gray-50 flex flex-col" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        {/* Shared centered pink header (logo → Inspections home). */}
+        <PageHeader title="New Inspection" backHref="/" maxW="max-w-xl" />
+        <main className="max-w-xl mx-auto w-full px-4 py-4 flex-1">
+          <div className="space-y-4">
+            <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-5">
               {/* Inspection Type / Template */}
               <div>
                 <label htmlFor="template-cb" className="block text-sm font-heading font-semibold text-ink mb-1.5">
@@ -666,7 +655,6 @@ export default function NewInspection() {
                   onChange={(v) => setSelectedTemplate(v)}
                   placeholder="Select template"
                   emptyLabel="No template matches"
-                  filled
                   deferKeyboard
                 />
               </div>
@@ -689,7 +677,6 @@ export default function NewInspection() {
                     placeholder={communitiesLoading ? 'Loading communities…' : 'Select a community'}
                     loading={communitiesLoading}
                     emptyLabel={communitiesLoading ? 'Loading…' : 'No communities found'}
-                    filled
                     deferKeyboard
                   />
                   {!!communityLocationLine && (
@@ -712,7 +699,6 @@ export default function NewInspection() {
                     loading={propertiesLoading}
                     error={propertiesError}
                     emptyLabel={propertyQuery ? 'No matching properties' : 'Type to search properties'}
-                    filled
                     deferKeyboard
                   />
                 </div>
@@ -897,18 +883,19 @@ export default function NewInspection() {
                   {EXTERNAL_1099_STATUS_BLOCK_MSG}
                 </div>
               )}
-              {/* Single action button: Begin now (today) or Schedule & Save (future). */}
-              <button
-                onClick={isFuture ? handleConfirmSchedule : handleBegin}
-                disabled={!setupReady || schedulingBusy || (isFuture && !scheduledDate)}
-                className="w-full bg-brand hover:bg-brand-dark disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-heading font-semibold py-3.5 px-3 rounded-lg transition active:scale-[0.98] mt-2"
-              >
-                {schedulingBusy ? 'Scheduling\u2026' : (isFuture ? 'Schedule & Save' : 'Begin Inspection')}
-              </button>
-            </div>
+            </section>
+
+            {/* Single action button: Begin now (today) or Schedule & Save (future). */}
+            <button
+              onClick={isFuture ? handleConfirmSchedule : handleBegin}
+              disabled={!setupReady || schedulingBusy || (isFuture && !scheduledDate)}
+              className={`${primaryBtn(setupReady && !schedulingBusy && !(isFuture && !scheduledDate))} transition active:scale-[0.98] disabled:cursor-not-allowed`}
+            >
+              {schedulingBusy ? 'Scheduling\u2026' : (isFuture ? 'Schedule & Save' : 'Begin Inspection')}
+            </button>
           </div>
-        </div>
-      </main>
+        </main>
+      </div>
     </>
   );
 }
