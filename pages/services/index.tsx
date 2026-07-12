@@ -10,6 +10,7 @@ import { isInternalEmail } from '@/lib/userAccess';
 import { searchServiceWorkOrders } from '@/lib/hubspot';
 import { MultiFilter } from '@/components/MultiFilter';
 import { ListPicker } from '@/components/ListPicker';
+import { SettingsMenu } from '@/components/SettingsMenu';
 import { AiSparkle } from '@/components/AiSparkle';
 import { WORKTYPES, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
 import {
@@ -120,7 +121,8 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   // vendor experience — no admin create/settings, and the vendor-visibility rule
   // applies. Entering/exiting sets the cookie then reloads so SSR re-runs.
   const isAdmin = canCreate && !asVendor;
-  const enterVendorView = () => { setViewAsVendor(true); window.location.href = '/services'; };
+  // Exiting the vendor preview lives on the in-page banner (below). Entering it
+  // is now offered through the shared "View as User / Vendor" picker in the gear.
   const exitVendorView = () => { setViewAsVendor(false); window.location.href = '/services'; };
   // Past-due is measured against the REAL today for live data (the sample preview
   // keeps its fixed reference date). Strict "<" so a service due TODAY is still
@@ -137,7 +139,6 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [gearOpen, setGearOpen] = useState(false);
   // Press-and-hold a card (internal + live) → enter multi-select, exactly like the
   // inspection home. In select mode an action bar offers Move to Cancelled and
   // Reassign Vendor over the whole selection. Canceled cards are optimistically
@@ -146,6 +147,8 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [actionBusy, setActionBusy] = useState(false);
+  // Inline result banner for bulk actions (cancel / reassign).
+  const [actionMsg, setActionMsg] = useState<{ status: 'done' | 'error'; msg: string } | null>(null);
   const [reassignOpen, setReassignOpen] = useState(false);
   const [reassignVendor, setReassignVendor] = useState(SERVICE_VENDOR_NAMES[0] || '');
   const canSelect = isAdmin && live;
@@ -157,63 +160,39 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   const handleBulkCancel = async () => {
     if (!selectedIds.size || actionBusy) return;
     if (typeof window !== 'undefined' && !window.confirm(`Move ${selectedIds.size} service${selectedIds.size > 1 ? 's' : ''} to Canceled?`)) return;
-    setActionBusy(true); setAiRerun(null);
+    setActionBusy(true); setActionMsg(null);
     const ids = Array.from(selectedIds);
     try {
       const r = await fetch('/api/services/bulk-cancel', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
       });
       const d = await r.json();
-      if (!r.ok) { setAiRerun({ status: 'error', msg: `Cancel — ${d.error || 'failed.'}` }); return; }
+      if (!r.ok) { setActionMsg({ status: 'error', msg: `Cancel — ${d.error || 'failed.'}` }); return; }
       setCancelledIds((p) => { const n = new Set(p); for (const x of ids) n.add(x); return n; });
       const parts = [`${d.canceled} canceled`]; if (d.skipped) parts.push(`${d.skipped} skipped`); if (d.failed) parts.push(`${d.failed} failed`);
-      setAiRerun({ status: d.failed ? 'error' : 'done', msg: `Cancel — ${parts.join(' · ')}` });
+      setActionMsg({ status: d.failed ? 'error' : 'done', msg: `Cancel — ${parts.join(' · ')}` });
       exitSelect();
       router.replace(router.asPath, undefined, { scroll: false });
-    } catch { setAiRerun({ status: 'error', msg: 'Cancel — couldn’t reach the server. Try again.' }); }
+    } catch { setActionMsg({ status: 'error', msg: 'Cancel — couldn’t reach the server. Try again.' }); }
     finally { setActionBusy(false); }
   };
 
   const applyReassign = async () => {
     if (!selectedIds.size || !reassignVendor || actionBusy) return;
-    setActionBusy(true); setAiRerun(null);
+    setActionBusy(true); setActionMsg(null);
     try {
       const r = await fetch('/api/services/bulk-reassign', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids: Array.from(selectedIds), vendorName: reassignVendor }),
       });
       const d = await r.json();
-      if (!r.ok) { setAiRerun({ status: 'error', msg: `Reassign — ${d.error || 'failed.'}` }); return; }
+      if (!r.ok) { setActionMsg({ status: 'error', msg: `Reassign — ${d.error || 'failed.'}` }); return; }
       const parts = [`${d.reassigned} reassigned to ${d.vendorName}`]; if (d.skipped) parts.push(`${d.skipped} skipped`); if (d.failed) parts.push(`${d.failed} failed`);
-      setAiRerun({ status: d.failed ? 'error' : 'done', msg: `Reassign — ${parts.join(' · ')}` });
+      setActionMsg({ status: d.failed ? 'error' : 'done', msg: `Reassign — ${parts.join(' · ')}` });
       exitSelect();
       router.replace(router.asPath, undefined, { scroll: false });
-    } catch { setAiRerun({ status: 'error', msg: 'Reassign — couldn’t reach the server. Try again.' }); }
+    } catch { setActionMsg({ status: 'error', msg: 'Reassign — couldn’t reach the server. Try again.' }); }
     finally { setActionBusy(false); }
-  };
-
-  // Admin: rerun the AI review across every currently-submitted service (the same
-  // apply pass the nightly cron runs). Clean → auto-completed, else → Review.
-  const submittedCount = useMemo(() => services.filter((s) => s.status === 'submitted').length, [services]);
-  const [aiRerun, setAiRerun] = useState<{ status: 'running' | 'done' | 'error'; msg: string } | null>(null);
-  const rerunAiReview = async () => {
-    setGearOpen(false);
-    if (aiRerun?.status === 'running') return;
-    setAiRerun({ status: 'running', msg: 'AI review — Reviewing submitted services…' });
-    try {
-      const r = await fetch('/api/services/admin/review?apply=1');
-      const d = await r.json();
-      if (!r.ok) { setAiRerun({ status: 'error', msg: `AI review — ${d.error || 'failed.'}` }); return; }
-      if (d.configured === false) { setAiRerun({ status: 'error', msg: 'AI review — Services object isn’t configured.' }); return; }
-      if (!d.reviewed) { setAiRerun({ status: 'done', msg: 'AI review — no submitted services to review right now.' }); return; }
-      const parts = [`${d.reviewed} reviewed`];
-      if (d.completed) parts.push(`${d.completed} auto-completed`);
-      if (d.routedToReview) parts.push(`${d.routedToReview} → Review`);
-      if (d.errors) parts.push(`${d.errors} error${d.errors > 1 ? 's' : ''}`);
-      setAiRerun({ status: d.errors ? 'error' : 'done', msg: `AI review — ${parts.join(' · ')}` });
-      // Reflect the new statuses in the list.
-      router.replace(router.asPath, undefined, { scroll: false });
-    } catch { setAiRerun({ status: 'error', msg: 'AI review — couldn’t reach the server. Try again.' }); }
   };
 
   // Scope (type/vendor/region/search) drives the summary bubbles; the status chip
@@ -310,7 +289,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
                 <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
               </Link>
               <div className="relative">
-                <button type="button" onClick={() => { setMenuOpen((o) => !o); setGearOpen(false); }} aria-label="Switch app" aria-expanded={menuOpen}
+                <button type="button" onClick={() => setMenuOpen((o) => !o)} aria-label="Switch app" aria-expanded={menuOpen}
                   className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="4" y1="8" x2="20" y2="8" /><line x1="4" y1="16" x2="20" y2="16" /></svg>
                 </button>
@@ -320,27 +299,9 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
                     <div className="px-4 py-2.5 text-sm font-semibold text-brand bg-brand/5">Services ✓</div>
                   </div></>)}
               </div>
-              {isAdmin && (
-              <div className="relative">
-                <button type="button" onClick={() => { setGearOpen((o) => !o); setMenuOpen(false); }} aria-label="Settings" aria-expanded={gearOpen}
-                  className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
-                </button>
-                {gearOpen && (<><div className="fixed inset-0 z-30" onClick={() => setGearOpen(false)} />
-                  <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-200 z-40 overflow-hidden text-ink">
-                    <div className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Admin</div>
-                    <Link href="/services/rules" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Rules Engine</Link>
-                    <Link href="/services/forms" className="block px-4 py-2.5 text-sm hover:bg-gray-50">Form Builder</Link>
-                    <Link href="/services/ai-knowledge" className="block px-4 py-2.5 text-sm hover:bg-gray-50">AI Knowledge</Link>
-                    <button type="button" onClick={rerunAiReview} disabled={aiRerun?.status === 'running'}
-                      className="w-full flex items-center justify-between gap-2 text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100 disabled:opacity-60">
-                      <span className="inline-flex items-center gap-1.5">Rerun AI Review<AiSparkle className="w-3.5 h-3.5 text-brand" /></span>
-                      {submittedCount > 0 && <span className="text-[11px] font-bold text-gray-400 tabular-nums">{submittedCount}</span>}
-                    </button>
-                    <button type="button" onClick={enterVendorView} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">View as Vendor</button>
-                  </div></>)}
-              </div>
-              )}
+              {/* Settings — the single shared gear (see components/SettingsMenu).
+                  Identical options across Inspections & Services. */}
+              <SettingsMenu isAdmin={isAdmin} onOpen={() => setMenuOpen(false)} />
             </div>
           </div>
           {/* New Service lives INSIDE the pink header (like "+ New Inspection"),
@@ -363,20 +324,11 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
             <button type="button" onClick={exitVendorView} className="underline shrink-0">Exit</button>
           </div>
         )}
-        {aiRerun && (
+        {actionMsg && (
           <div className={`mb-3 flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-[12px] font-heading font-semibold border ${
-            aiRerun.status === 'error' ? 'bg-red-50 border-red-200 text-red-700'
-            : aiRerun.status === 'running' ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
-            : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
-            <span className="inline-flex items-center gap-2 min-w-0">
-              {aiRerun.status === 'running'
-                ? <svg className="w-3.5 h-3.5 animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><circle cx="12" cy="12" r="9" opacity="0.25" /><path d="M21 12a9 9 0 0 0-9-9" strokeLinecap="round" /></svg>
-                : <AiSparkle className="w-3.5 h-3.5 shrink-0" />}
-              <span className="truncate">{aiRerun.msg}</span>
-            </span>
-            {aiRerun.status !== 'running' && (
-              <button type="button" onClick={() => setAiRerun(null)} aria-label="Dismiss" className="shrink-0 opacity-60 hover:opacity-100">✕</button>
-            )}
+            actionMsg.status === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+            <span className="truncate">{actionMsg.msg}</span>
+            <button type="button" onClick={() => setActionMsg(null)} aria-label="Dismiss" className="shrink-0 opacity-60 hover:opacity-100">✕</button>
           </div>
         )}
         {/* Summary bubbles — dynamic; Past Due is a clickable filter. */}

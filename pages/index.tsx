@@ -7,15 +7,14 @@ import type { InspectionSummary } from '@/lib/types';
 import { InspectionCard } from '@/components/InspectionCard';
 import { INSPECTION_NAV_KEY } from '@/components/InspectionPager';
 import { ListPicker } from '@/components/ListPicker';
-import { ViewAsPicker } from '@/components/ViewAsPicker';
+import { SettingsMenu } from '@/components/SettingsMenu';
 import {
   loadCachedRateCard, saveCachedRateCard,
-  loadCachedMe, saveCachedMe, clearCachedMe,
+  loadCachedMe, saveCachedMe,
 } from '@/lib/offlineCache';
 import { precacheActiveInspections } from '@/lib/precache';
 import { warmAi } from '@/lib/aiWarm';
 import { templateLabel } from '@/lib/templateLabels';
-import { openOAuthStartNative } from '@/lib/nativeBridge';
 import { listPendingInspections, removePendingInspection, type PendingInspection } from '@/lib/pendingInspections';
 import { drainPendingCreates } from '@/lib/deferredCreate';
 import { syncAllProperties, dropPropertyMemCache } from '@/lib/propertyCache';
@@ -77,9 +76,6 @@ export default function Home() {
   const router = useRouter();
   const [me, setMe] = useState<MeUser | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  // Admin "Settings" dropdown (Knowledge Base / Form Builder / Admins).
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [viewAsOpen, setViewAsOpen] = useState(false);
 
   const [inspections, setInspections] = useState<InspectionSummary[]>([]);
   // Inspections STARTED OFFLINE that haven't synced to HubSpot yet — merged into
@@ -576,15 +572,6 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [facetQuery]);
 
-  async function handleLogout() {
-    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
-    // Clear the cached identity so an OFFLINE reload after logout doesn't keep
-    // rendering the app as the (now signed-out) user — the cookie is gone
-    // server-side, but /api/auth/me can't be reached offline to confirm it.
-    clearCachedMe();
-    router.replace('/login');
-  }
-
   // Filtering, sorting, search, and the status counts are all evaluated
   // server-side now (see /api/inspections). The browser just renders the page
   // of results the server returned — `inspections` IS the current page.
@@ -827,82 +814,9 @@ export default function Home() {
                     </div>
                   </details>
                 )}
-                {/* Settings — a single gear shown to EVERY user. Account actions
-                    (Gmail connect/disconnect, Sign Out) live in the popover for
-                    all users; the admin tools only render for admins. Keeps the
-                    pink header compact (one control instead of a row of links). */}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setSettingsOpen((o) => !o)}
-                    aria-expanded={settingsOpen}
-                    aria-label="Settings"
-                    title="Settings"
-                    className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-white/90 hover:text-white hover:bg-white/15 transition-colors"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
-                  </button>
-                  {settingsOpen && (
-                    <>
-                      <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setSettingsOpen(false)} />
-                      <div className="absolute right-0 mt-1.5 z-50 w-56 rounded-xl border border-gray-200 bg-white shadow-lg ring-1 ring-black/5 overflow-hidden py-1">
-                        {/* Gmail connect/disconnect — only when the server is
-                            configured for Gmail (component returns null otherwise). */}
-                        <GmailMenuItem email={me?.email} onClose={() => setSettingsOpen(false)} />
-                        {/* Training guide — available to ALL users. Opens the
-                            ResiWALK guide in a new tab / the system browser. */}
-                        <a
-                          href="https://www.resihome.com/resiwalkguide"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={() => setSettingsOpen(false)}
-                          className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100"
-                        >
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>
-                          Training Guide
-                        </a>
-                        {/* Admin tools — admins only. */}
-                        {isAdmin && (
-                          <>
-                            <Link href="/insights" onClick={() => setSettingsOpen(false)} className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100">
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>
-                              Insights
-                            </Link>
-                            <Link href="/ai-knowledge" onClick={() => setSettingsOpen(false)} className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100">
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></svg>
-                              AI Knowledge Base
-                            </Link>
-                            <Link href="/admin/forms" onClick={() => setSettingsOpen(false)} className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100">
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h6" /></svg>
-                              Form Builder
-                            </Link>
-                            <Link href="/admin/flows" onClick={() => setSettingsOpen(false)} className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100">
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
-                              Admin
-                            </Link>
-                            <button
-                              type="button"
-                              onClick={() => { setSettingsOpen(false); setViewAsOpen(true); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100"
-                            >
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M1 1l22 22" /></svg>
-                              View as user
-                            </button>
-                          </>
-                        )}
-                        {/* Sign Out — last, divided from the rest. */}
-                        <button
-                          type="button"
-                          onClick={() => { setSettingsOpen(false); void handleLogout(); }}
-                          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100"
-                        >
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
-                          Sign Out
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
+                {/* Settings — the single shared gear (see components/SettingsMenu).
+                    Identical options across Inspections & Services. */}
+                <SettingsMenu isAdmin={isAdmin} />
               </div>
             </div>
 
@@ -1292,7 +1206,6 @@ export default function Home() {
           </div>
         )}
       </main>
-      {viewAsOpen && <ViewAsPicker onClose={() => setViewAsOpen(false)} />}
     </>
   );
 }
@@ -1317,92 +1230,5 @@ function FilterChip({ label, active, onClick, className = '' }: ChipProps) {
     >
       {label}
     </button>
-  );
-}
-
-/**
- * Settings-menu row showing Gmail connection status. Lets users connect
- * proactively (rather than only being prompted at finalize time) and
- * disconnect. Hidden entirely when the server isn't configured for Gmail
- * (no OAuth client), since there's nothing to connect to.
- */
-function GmailMenuItem({ email, onClose }: { email?: string; onClose: () => void }) {
-  const [state, setState] = useState<{ configured: boolean; connected: boolean } | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/auth/gmail/status')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!cancelled && d) setState(d); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
-
-  // Surface OAuth round-trip results from the query string (set by the
-  // callback) as a one-time toast-ish refresh of state.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('gmail_connected') === '1') {
-      setState((s) => (s ? { ...s, connected: true } : s));
-      params.delete('gmail_connected');
-      const clean = window.location.pathname + (params.toString() ? `?${params}` : '');
-      window.history.replaceState({}, '', clean);
-    }
-  }, []);
-
-  if (!state || !state.configured) return null; // nothing to show if unconfigured
-
-  // Envelope icon — matches the gray-400 line-icon style of the admin rows.
-  const mailIcon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 shrink-0"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-10 6L2 7" /></svg>
-  );
-
-  if (state.connected) {
-    return (
-      <button
-        type="button"
-        onClick={async () => {
-          await fetch('/api/auth/gmail/status', { method: 'DELETE' });
-          setState((s) => (s ? { ...s, connected: false } : s));
-        }}
-        title="Gmail connected — click to disconnect"
-        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-      >
-        {mailIcon}
-        <span className="flex-1 text-left">Gmail</span>
-        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
-          <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
-          Connected
-        </span>
-      </button>
-    );
-  }
-
-  return (
-    <a
-      href="/api/auth/gmail/connect"
-      title="Connect your Gmail to send inspection emails"
-      onClick={async (e) => {
-        // In the native (Capacitor) shell the in-webview /api/auth/gmail/connect
-        // can't complete: Google blocks OAuth in the webview, and the gmail
-        // cookie would land in the system browser's jar (not the webview's). So
-        // re-run the Google login in the SYSTEM browser tagged client=native —
-        // it forces the Gmail consent (the browser has no gmail cookie) and
-        // returns the refresh token to the webview via the resiwalk:// deep link
-        // + /api/auth/exchange. No-op in a normal browser (helper returns false),
-        // so web keeps using the standard connect flow via the href.
-        if (!email) { onClose(); return; } // no email yet → let the href handle it
-        e.preventDefault();
-        const startUrl = `/api/auth/google-login?email=${encodeURIComponent(email)}&reconnect=1`;
-        onClose();
-        if (await openOAuthStartNative(startUrl)) return;
-        window.location.href = '/api/auth/gmail/connect';
-      }}
-      className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-    >
-      {mailIcon}
-      <span className="flex-1 text-left">Connect Gmail</span>
-    </a>
   );
 }
