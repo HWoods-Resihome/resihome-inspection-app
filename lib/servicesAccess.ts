@@ -10,15 +10,13 @@
  */
 
 import { isAppAdmin } from '@/lib/adminAccess';
-import { SERVICES_FLAG_ON } from '@/lib/featureFlags';
 
 /**
- * Authorize an internal Services request: the feature flag must be on AND the
- * caller must be an app admin. Call at the top of every internal Services
- * endpoint. (Vendor-facing endpoints use a separate vendor-session gate — see the
- * plan doc — not this.)
+ * Authorize an internal Services request: the caller must be an app admin.
+ * Services is live on production for admins only — access is gated purely on the
+ * app-admin check (no build flag), so no other users can reach it. Call at the
+ * top of every internal Services endpoint.
  */
 export async function servicesEnabled(email: string | null | undefined): Promise<boolean> {
-  if (!SERVICES_FLAG_ON) return false;
   return isAppAdmin(email);
 }
