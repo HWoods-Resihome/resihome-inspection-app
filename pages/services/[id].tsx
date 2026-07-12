@@ -307,23 +307,37 @@ export default function ServiceDetail({ svc, form, isInternal, unlock }: { svc: 
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
           </Link>
           <img src="/favicon.svg" alt="ResiWalk" className="h-9 w-9 object-contain shrink-0" />
-          <div className="min-w-0 flex-1 space-y-0.5">
-            {/* Address gets the FULL width so it sizes up. */}
-            <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={17} min={11} />
-            {/* Meta rows on the left, status chip + unlock on the right — the chip
-                only sits beside these short rows, never the address, and its height
-                can't inflate the row spacing. */}
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0 space-y-0.5">
-                <div className="text-xs text-gray-500 leading-tight truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}{svc.dueDate ? ` · Due ${fmtMDY(svc.dueDate)}` : ''}</div>
-                <div className="text-xs text-gray-500 leading-tight truncate">{svc.vendor || 'Unassigned'}</div>
+          {(() => {
+            const chip = (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{serviceStatusText(svc.status || 'assigned', isInternal)}</span>
+            );
+            const meta = <div className="text-xs text-gray-500 leading-tight truncate">{worktypeLabel(svc.worktype)} · {subtypeLabel(svc.worktype, svc.subtype)}{svc.dueDate ? ` · Due ${fmtMDY(svc.dueDate)}` : ''}</div>;
+            const vendorRow = <div className="text-xs text-gray-500 leading-tight truncate">{svc.vendor || 'Unassigned'}</div>;
+            // Address always gets full width. WITH a lock button: chip drops to its
+            // own 4th row and the lock button sits far-right (its own column).
+            // WITHOUT: chip sits to the right of the meta/vendor rows.
+            return unlock ? (
+              <>
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={17} min={11} />
+                  {meta}
+                  {vendorRow}
+                  <div>{chip}</div>
+                </div>
+                <div className="shrink-0 self-center">
+                  <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-8 h-8" />
+                </div>
+              </>
+            ) : (
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <FitText text={`${svc.address}${svc.locality ? `, ${svc.locality}` : ''}`} className="font-heading font-extrabold text-ink" max={17} min={11} />
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 space-y-0.5">{meta}{vendorRow}</div>
+                  <div className="shrink-0">{chip}</div>
+                </div>
               </div>
-              <div className="shrink-0 flex flex-col items-end gap-1.5">
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${SERVICE_STATUS_STYLE[(svc.status || 'assigned') as ServiceStatus] || SERVICE_STATUS_STYLE.assigned}`}>{serviceStatusText(svc.status || 'assigned', isInternal)}</span>
-                {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7" />}
-              </div>
-            </div>
-          </div>
+            );
+          })()}
         </div>
       </header>
 
