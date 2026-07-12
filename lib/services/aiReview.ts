@@ -11,7 +11,7 @@
  * (no unattended cron until validated). Analog of the inspection AI review.
  */
 import sharp from 'sharp';
-import { searchServiceWorkOrdersByStatus, patchServiceWorkOrder, readServiceAiChecks } from '@/lib/hubspot';
+import { searchServiceWorkOrdersByStatus, fetchServiceWorkOrder, patchServiceWorkOrder, readServiceAiChecks } from '@/lib/hubspot';
 import { recordAiUsage } from '@/lib/aiUsage';
 import { SAMPLE_AI_CHECKS, type AiCheck } from './aiKnowledge';
 import { worktypeLabel, subtypeLabel, type Worktype } from './worktypes';
@@ -151,9 +151,21 @@ export interface ReviewResult {
  * clean → completed (with completed_at + ontime), needs_review → review.
  */
 export async function runServiceAiReview(apply: boolean, todayISO: string, onlyId?: string): Promise<ReviewResult | null> {
-  const submitted = await searchServiceWorkOrdersByStatus('submitted', 200);
-  if (submitted === null) return null; // not configured
-  const orders = onlyId ? submitted.filter((o) => o.id === onlyId) : submitted;
+  // Reviewing ONE order (the inline call right after submit): fetch it directly by
+  // id instead of the status search. HubSpot's search index lags a few seconds
+  // behind a write, so a just-submitted order usually isn't returned by a
+  // status='submitted' search yet — which made the immediate review a no-op (the
+  // nightly cron picked it up later). A direct GET sees the write immediately.
+  let orders: { id: string; props: Record<string, any> }[];
+  if (onlyId) {
+    const one = await fetchServiceWorkOrder(onlyId);
+    if (one === null) return null; // not configured / not found
+    orders = String(one.props.status || '') === 'submitted' ? [one] : [];
+  } else {
+    const submitted = await searchServiceWorkOrdersByStatus('submitted', 200);
+    if (submitted === null) return null; // not configured
+    orders = submitted;
+  }
   // Live, admin-edited checks (persisted) drive the review; fall back to seeds.
   const savedChecks = await readServiceAiChecks().catch(() => null);
   const allChecks: AiCheck[] = savedChecks && savedChecks.length ? (savedChecks as AiCheck[]) : SAMPLE_AI_CHECKS;

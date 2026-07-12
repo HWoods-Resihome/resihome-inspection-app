@@ -101,16 +101,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Kick the AI review for THIS order immediately — don't wait for the nightly
     // bulk cron. Best-effort: if it errors (e.g. ANTHROPIC_API_KEY missing) the
-    // order stays "submitted" and the cron picks it up. Result surfaced to the client.
+    // order stays "submitted" and the cron picks it up. Result + any error are
+    // surfaced to the client for diagnosis (vendor UI still just shows "under review").
     let review: { verdict: string; status: string } | null = null;
+    let reviewError: string | null = null;
     try {
       const today = new Date().toISOString().slice(0, 10);
       const rep = await runServiceAiReview(true, today, id);
-      const item = rep?.items?.find((i) => i.id === id) || rep?.items?.[0];
-      if (item) review = { verdict: item.verdict, status: item.action === 'completed' ? 'completed' : item.action === 'review' ? 'review' : 'submitted' };
-    } catch (e) { console.warn('[services/submit] inline AI review failed (cron will retry):', e); }
+      if (!rep) {
+        reviewError = 'Services object not configured — AI review skipped.';
+      } else {
+        const item = rep.items.find((i) => i.id === id) || rep.items[0];
+        if (!item) reviewError = 'No submitted record found for AI review.';
+        else if (item.action === 'error') reviewError = item.error || 'AI review failed.';
+        else review = { verdict: item.verdict, status: item.action === 'completed' ? 'completed' : item.action === 'review' ? 'review' : 'submitted' };
+      }
+    } catch (e: any) {
+      reviewError = String(e?.message || e).slice(0, 300);
+      console.warn('[services/submit] inline AI review failed (cron will retry):', e);
+    }
 
-    return res.status(200).json({ ok: true, id, status: review?.status || 'submitted', review, bidId, bidError });
+    return res.status(200).json({ ok: true, id, status: review?.status || 'submitted', review, reviewError, bidId, bidError });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });
   }

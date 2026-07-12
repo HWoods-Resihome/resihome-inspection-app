@@ -172,11 +172,15 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
   const canBidReview = isInternal && svc.isBidItem && svc.status === 'estimated';
 
   // ── Completion (editable) state ──
-  const [answers, setAnswers] = useState<Record<string, any>>({});
-  const [before, setBefore] = useState<string[]>([]);
-  const [after, setAfter] = useState<string[]>([]);
-  const [petBefore, setPetBefore] = useState<string[]>([]);
-  const [petAfter, setPetAfter] = useState<string[]>([]);
+  // Seed from the server-saved DRAFT (answers_json + photo urls the autosave
+  // endpoint persisted) so an in-progress completion restores on ANY device, not
+  // just the one it was typed on. The localStorage draft (below) overlays this
+  // with the most-recent same-device edits.
+  const [answers, setAnswers] = useState<Record<string, any>>(() => (editable ? svc.answers || {} : {}));
+  const [before, setBefore] = useState<string[]>(() => (editable ? svc.before || [] : []));
+  const [after, setAfter] = useState<string[]>(() => (editable ? svc.after || [] : []));
+  const [petBefore, setPetBefore] = useState<string[]>(() => (editable ? svc.petBefore || [] : []));
+  const [petAfter, setPetAfter] = useState<string[]>(() => (editable ? svc.petAfter || [] : []));
   const [submitting, setSubmitting] = useState(false);
   const [doneStatus, setDoneStatus] = useState<string>('');   // '' | submitted | queued | completed
   const [error, setError] = useState('');
@@ -207,48 +211,108 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
   }, [svc.id]);
   const uploadFor = useMemo(() => (file: File) => capturePhotoOrQueue(svc.id, file), [svc.id]);
 
-  // ── Draft autosave: persist in-progress answers/photos/bid locally as you go so
-  // nothing is lost if you leave and come back (no waiting for Submit). Restored on
-  // reopen; cleared once the completion is submitted/queued. Only hosted photo URLs
-  // are kept (session blob: drafts would be dead after a reload). ──
+  // ── Draft autosave: persist the in-progress completion (answers/photos/bid) as
+  // you go so nothing is lost if you leave and come back — no waiting for Submit.
+  // TWO layers: (1) localStorage for instant same-device restore + offline, and
+  // (2) a debounced SERVER save (answers_json + hosted photo urls, no status
+  // change) so the draft also survives a device switch / app reinstall and is
+  // visible server-side. Only hosted photo URLs are kept (blob: drafts die on
+  // reload). Cleared once the completion is submitted/queued. ──
   const DRAFT_KEY = `resiwalk.svc.draft.${svc.id}`;
   const hydrated = useRef(false);
+  const stopSave = useRef(false);            // set once submitted — no more autosave
+  const lastPersisted = useRef('');          // snapshot last written (skip no-op saves)
+
+  // Latest draft snapshot (hosted photo urls only), in a ref so the teardown
+  // handlers always flush the CURRENT values (never a stale closure).
+  const keepHosted = (arr: string[]) => arr.filter((u) => !u.startsWith('blob:'));
+  const draftRef = useRef<any>({});
+  draftRef.current = {
+    answers, before: keepHosted(before), after: keepHosted(after),
+    petBefore: keepHosted(petBefore), petAfter: keepHosted(petAfter),
+    bidWanted, bidDesc, bidCost, bidPhotos: keepHosted(bidPhotos),
+  };
+  const writeLocal = () => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draftRef.current)); } catch { /* quota / private mode */ } };
+  // Persist the draft to the Work Order (no status change). `beacon` uses
+  // sendBeacon for page-teardown (the async fetch wouldn't finish in time).
+  const serverSave = (beacon = false): void => {
+    if (!editable || !svc.live || stopSave.current) return;
+    const d = draftRef.current;
+    const body = JSON.stringify({ answers: d.answers, before: d.before, after: d.after, petBefore: d.petBefore, petAfter: d.petAfter });
+    const url = `/api/services/${encodeURIComponent(svc.id)}/autosave`;
+    try {
+      if (beacon && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+        navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
+      } else {
+        void fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => { /* best-effort */ });
+      }
+    } catch { /* best-effort — localStorage still covers this device */ }
+  };
+  const serverSaveRef = useRef(serverSave);
+  serverSaveRef.current = serverSave;
+  const flushDraft = (beacon = false) => { if (editable && !stopSave.current) { writeLocal(); serverSaveRef.current(beacon); } };
+  const clearDraft = () => { stopSave.current = true; try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ } };
+
+  // (Re-)seed on record change — the pager reuses this component instance, so
+  // state must be reset to THIS order's draft (localStorage same-device draft wins
+  // over the server-seeded values), not left holding the previous order's answers.
   useEffect(() => {
+    let d: any = null;
+    try { const raw = localStorage.getItem(DRAFT_KEY); if (raw) d = JSON.parse(raw); } catch { /* corrupt draft */ }
     if (editable) {
-      try {
-        const raw = localStorage.getItem(DRAFT_KEY);
-        if (raw) {
-          const d = JSON.parse(raw);
-          if (d.answers && typeof d.answers === 'object') setAnswers(d.answers);
-          if (Array.isArray(d.before)) setBefore(d.before);
-          if (Array.isArray(d.after)) setAfter(d.after);
-          if (Array.isArray(d.petBefore)) setPetBefore(d.petBefore);
-          if (Array.isArray(d.petAfter)) setPetAfter(d.petAfter);
-          if (typeof d.bidWanted === 'boolean') setBidWanted(d.bidWanted);
-          if (typeof d.bidDesc === 'string') setBidDesc(d.bidDesc);
-          if (typeof d.bidCost === 'string') setBidCost(d.bidCost);
-          if (Array.isArray(d.bidPhotos)) setBidPhotos(d.bidPhotos);
-        }
-      } catch { /* ignore a corrupt draft */ }
+      const seed = {
+        answers: d?.answers && typeof d.answers === 'object' ? d.answers : (svc.answers || {}),
+        before: Array.isArray(d?.before) ? d.before : (svc.before || []),
+        after: Array.isArray(d?.after) ? d.after : (svc.after || []),
+        petBefore: Array.isArray(d?.petBefore) ? d.petBefore : (svc.petBefore || []),
+        petAfter: Array.isArray(d?.petAfter) ? d.petAfter : (svc.petAfter || []),
+        bidWanted: typeof d?.bidWanted === 'boolean' ? d.bidWanted : false,
+        bidDesc: typeof d?.bidDesc === 'string' ? d.bidDesc : '',
+        bidCost: typeof d?.bidCost === 'string' ? d.bidCost : '',
+        bidPhotos: Array.isArray(d?.bidPhotos) ? d.bidPhotos : [],
+      };
+      setAnswers(seed.answers); setBefore(seed.before); setAfter(seed.after);
+      setPetBefore(seed.petBefore); setPetAfter(seed.petAfter);
+      setBidWanted(seed.bidWanted); setBidDesc(seed.bidDesc); setBidCost(seed.bidCost); setBidPhotos(seed.bidPhotos);
+      // Baseline the persisted snapshot so opening a record doesn't fire a needless save.
+      lastPersisted.current = JSON.stringify(seed);
     }
+    stopSave.current = false;
     hydrated.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [svc.id]);
+
+  // Debounced persist — only when the draft actually changed (skips the open re-seed).
   useEffect(() => {
     if (!hydrated.current || !editable) return;
-    const keep = (arr: string[]) => arr.filter((u) => !u.startsWith('blob:'));
     const t = setTimeout(() => {
-      try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify({
-          answers, before: keep(before), after: keep(after), petBefore: keep(petBefore), petAfter: keep(petAfter),
-          bidWanted, bidDesc, bidCost, bidPhotos: keep(bidPhotos),
-        }));
-      } catch { /* quota / private mode — ignore */ }
-    }, 400);
+      const cur = JSON.stringify(draftRef.current);
+      if (cur === lastPersisted.current) return;
+      lastPersisted.current = cur;
+      writeLocal();
+      serverSaveRef.current(false);
+    }, 700);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answers, before, after, petBefore, petAfter, bidWanted, bidDesc, bidCost, bidPhotos, editable]);
-  const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ } };
+
+  // Flush on teardown so an edit made within the debounce window is never lost:
+  // tab hidden / pagehide (app-switch, close) → sendBeacon; unmount (back) →
+  // keepalive fetch. Pager navigation reuses the component (no unmount) and is
+  // handled explicitly at the ServicePager call site.
+  useEffect(() => {
+    if (!editable) return;
+    const onHidden = () => { if (document.visibilityState === 'hidden') flushDraft(true); };
+    const onTeardown = () => flushDraft(true);
+    document.addEventListener('visibilitychange', onHidden);
+    window.addEventListener('pagehide', onTeardown);
+    return () => {
+      document.removeEventListener('visibilitychange', onHidden);
+      window.removeEventListener('pagehide', onTeardown);
+      if (hydrated.current) flushDraft(true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editable]);
 
   const requiredMissing = useMemo(() => form.some((q) => {
     if (!q.required) return false;
@@ -368,7 +432,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
             {serviceStatusText(svc.status || 'assigned', isInternal)}
             {isInternal && svc.status === 'submitted' && <AiSparkle className="w-3 h-3" />}
           </span>
-          <ServicePager currentId={svc.id} onNavigate={(id) => router.replace(`/services/${id}`)} />
+          <ServicePager currentId={svc.id} onNavigate={(id) => { flushDraft(true); router.replace(`/services/${id}`); }} />
           {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7 shrink-0" />}
           <Link href="/services" aria-label="Back to Services" className="shrink-0 text-gray-400 hover:text-ink">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
