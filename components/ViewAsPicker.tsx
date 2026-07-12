@@ -57,7 +57,7 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
         className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[80vh] flex flex-col overflow-hidden shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between shrink-0">
           <div>
             <h2 className="font-heading font-bold text-ink">View as User / Vendor</h2>
             <p className="text-xs text-gray-500">Preview as an external vendor, or see the app with an inspector’s permissions. Stop from the banner.</p>
@@ -68,7 +68,7 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
         <button
           onClick={viewAsVendor}
           disabled={!!busy}
-          className="w-full text-left px-4 py-3 flex items-center gap-3 border-b border-gray-200 hover:bg-gray-50 disabled:opacity-50"
+          className="w-full text-left px-4 py-3 flex items-center gap-3 border-b border-gray-200 hover:bg-gray-50 disabled:opacity-50 shrink-0"
         >
           <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-brand/10 text-brand shrink-0">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l1-5h16l1 5" /><path d="M4 9v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9" /><path d="M9 21v-6h6v6" /></svg>
@@ -78,16 +78,15 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
             <span className="block text-xs text-gray-500 truncate">{busy === '__vendor__' ? 'Switching…' : 'External vendor experience (Services)'}</span>
           </span>
         </button>
-        <div className="p-3 border-b border-gray-200">
+        <div className="p-3 border-b border-gray-200 shrink-0">
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search inspectors…"
             className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2 text-base"
-            autoFocus
           />
         </div>
-        <div className="overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
           {loading ? (
             <div className="p-4 text-sm text-gray-500">Loading inspectors…</div>
           ) : filtered.length === 0 ? (
