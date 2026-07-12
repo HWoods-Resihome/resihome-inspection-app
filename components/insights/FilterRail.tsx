@@ -12,6 +12,7 @@
  */
 import { useMemo, useState } from 'react';
 import { templateLabel } from '@/lib/templateLabels';
+import { DatePicker } from '@/components/DatePicker';
 import {
   type InsightsFilters, type InspectorOption,
   inspectorOptions, propertyOptions, regionOptions, templateTypeOptions, propertyStatusOptions,
@@ -108,19 +109,13 @@ export function FilterRail({
         <div className="flex flex-col gap-2">
           <label className="text-[11px] text-[#a1a1aa]">
             From
-            <input
-              type="date" value={filters.dateFrom || ''}
-              onChange={(e) => set({ dateFrom: e.target.value || null })}
-              className={dateInputCls}
-            />
+            <DatePicker value={filters.dateFrom || ''} onChange={(v) => set({ dateFrom: v || null })}
+              placeholder="Any" className={`${dateInputCls} flex items-center justify-between gap-2`} />
           </label>
           <label className="text-[11px] text-[#a1a1aa]">
             To
-            <input
-              type="date" value={filters.dateTo || ''}
-              onChange={(e) => set({ dateTo: e.target.value || null })}
-              className={dateInputCls}
-            />
+            <DatePicker value={filters.dateTo || ''} onChange={(v) => set({ dateTo: v || null })}
+              placeholder="Any" className={`${dateInputCls} flex items-center justify-between gap-2`} />
           </label>
         </div>
       </Section>

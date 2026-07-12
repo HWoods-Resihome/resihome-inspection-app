@@ -21,6 +21,7 @@ import { FitText } from '@/components/FitText';
 import ServicePager from '@/components/ServicePager';
 import { AiSparkle } from '@/components/AiSparkle';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
+import { DatePicker } from '@/components/DatePicker';
 import { capturePhotoOrQueue, submitServiceOrQueue, initServiceSync, hasPendingSubmit, onServiceSync } from '@/lib/services/offlineServices';
 
 interface ServiceView {
@@ -783,7 +784,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                         <input type="number" inputMode="decimal" value={answers[q.id] || ''} onChange={(e) => setAns(q.id, e.target.value)} className={inputCls} />
                       )}
                       {q.type === 'date' && (
-                        <input type="date" value={answers[q.id] || ''} onChange={(e) => setAns(q.id, e.target.value)} className={inputCls} />
+                        <DatePicker value={answers[q.id] || ''} onChange={(v) => setAns(q.id, v)} className={`${inputCls} flex items-center justify-between`} />
                       )}
                     </div>
                   ))}

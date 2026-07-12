@@ -8,6 +8,7 @@ import { isAppAdmin } from '@/lib/adminAccess';
 import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, defaultRateFor, type Worktype } from '@/lib/services/worktypes';
 import { PriceField } from '@/components/PriceField';
 import { MultiFilter } from '@/components/MultiFilter';
+import { DatePicker } from '@/components/DatePicker';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { SAMPLE_SERVICES } from '@/lib/services/sampleData';
@@ -977,7 +978,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
                 {rule.stopMode === 'date' && (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[13px] text-gray-600">On</span>
-                    <input type="date" value={rule.stopDate} onChange={(e) => patch({ stopDate: e.target.value })} className={`${ctl} ${!rule.stopDate ? 'border-red-300' : ''}`} />
+                    <DatePicker value={rule.stopDate} onChange={(v) => patch({ stopDate: v })} placeholder="Pick a date" className={`${ctl} flex items-center justify-between gap-2 min-w-[9rem] ${!rule.stopDate ? 'border-red-300' : ''}`} />
                     <span className="text-[13px] text-gray-600">— cancels remaining open orders past this date.</span>
                   </div>
                 )}

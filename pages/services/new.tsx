@@ -9,6 +9,7 @@ import { isViewingAsVendor } from '@/lib/services/viewAs';
 import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { Combobox } from '@/components/Combobox';
+import { DatePicker } from '@/components/DatePicker';
 import { PriceField } from '@/components/PriceField';
 import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, defaultRateFor } from '@/lib/services/worktypes';
 import { sanitizeNum, clientFrom } from '@/lib/services/pricing';
@@ -228,7 +229,7 @@ export default function NewService() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={lbl}>Due date</label>
-                  <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2.5 bg-white text-ink focus:outline-none focus:border-brand" />
+                  <DatePicker value={dueDate} onChange={setDueDate} placeholder="Pick a due date" />
                 </div>
                 <div>
                   <label className={lbl}>Vendor assignment</label>

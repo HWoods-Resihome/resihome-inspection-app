@@ -3,6 +3,7 @@ import type { Question, AnswerInput } from '@/lib/types';
 import { CameraCapture } from './CameraCapture';
 import { ListPicker } from '@/components/ListPicker';
 import { NumberField } from '@/components/NumberPad';
+import { DatePicker } from '@/components/DatePicker';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
 import { useAppDialog } from '@/components/AppDialog';
 import { PhotoThumb } from '@/components/PhotoThumb';
@@ -683,11 +684,11 @@ function renderInput(
 
   if (q.responseType === 'date') {
     return (
-      <input
-        type="date"
+      <DatePicker
         value={a.answerValue}
-        onChange={(e) => onUpdate({ answerValue: e.target.value })}
-        className="focus-brand text-sm border border-gray-300 rounded-md px-2 py-1.5"
+        onChange={(v) => onUpdate({ answerValue: v })}
+        placeholder="Select date"
+        className="focus-brand text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white flex items-center justify-between gap-2 min-w-[9rem]"
       />
     );
   }

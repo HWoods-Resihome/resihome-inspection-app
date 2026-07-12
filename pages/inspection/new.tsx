@@ -8,6 +8,7 @@ import type {
 } from '@/lib/types';
 import { Combobox } from '@/components/Combobox';
 import { NumberField } from '@/components/NumberPad';
+import { DatePicker } from '@/components/DatePicker';
 import { saveCachedProperties, loadCachedMe, saveCachedMe, clearCachedMe, saveCachedInspection, loadCachedQuestions, loadCachedRateCard } from '@/lib/offlineCache';
 import { EXTERNAL_TEMPLATE, externalCanCreate1099ForStatus, EXTERNAL_1099_STATUS_BLOCK_MSG } from '@/lib/userAccess';
 import { newLocalIds, addPendingInspection, buildSeedPayload } from '@/lib/pendingInspections';
@@ -721,20 +722,14 @@ export default function NewInspection() {
                 <label htmlFor="sched-date" className="block text-sm font-heading font-semibold text-ink mb-1.5">
                   Scheduled Date
                 </label>
-                <input
-                  id="sched-date"
-                  type="date"
-                  min={todayStr}
+                <DatePicker
                   value={scheduledDate}
-                  onChange={(e) => setScheduledDate(e.target.value)}
-                  onClick={(e) => {
-                    // Open the native date picker on tap anywhere in the input,
-                    // not just the tiny calendar icon. showPicker() needs a user
-                    // gesture (Chrome 99+, Safari 16+, Firefox 101+).
-                    const el = e.currentTarget as HTMLInputElement & { showPicker?: () => void };
-                    try { el.showPicker?.(); } catch { /* fallback: native behavior */ }
-                  }}
-                  className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base bg-white cursor-pointer"
+                  onChange={setScheduledDate}
+                  min={todayStr}
+                  clearable={false}
+                  placeholder="Pick a date"
+                  ariaLabel="Scheduled date"
+                  className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base bg-white cursor-pointer flex items-center justify-between"
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   {isFuture
