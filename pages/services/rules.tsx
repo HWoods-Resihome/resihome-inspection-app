@@ -271,24 +271,28 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
   // the whole Property object is slow on a cold cache); we then revalidate in the
   // background and only re-render if the numbers actually changed.
   const [coverage, setCoverage] = useState<Coverage>(EMPTY_COVERAGE);
+  // Until the catalog is loaded, counts show "…" instead of a misleading 0.
+  const [covLoaded, setCovLoaded] = useState(false);
   useEffect(() => {
     const CACHE_KEY = 'resiwalk.services.coverage.v1';
     const shape = (d: any): Coverage => ({
       portfolios: d.portfolios || [], regionsByPortfolio: d.regionsByPortfolio || {},
       regions: d.regions || [], communities: d.communities || [], statuses: d.statuses || [],
     });
-    // 1) Instant paint from cache.
-    try { const c = localStorage.getItem(CACHE_KEY); if (c) setCoverage(shape(JSON.parse(c))); } catch { /* ignore */ }
+    // 1) Instant paint from cache (so repeat visits show real counts immediately).
+    try { const c = localStorage.getItem(CACHE_KEY); if (c) { setCoverage(shape(JSON.parse(c))); setCovLoaded(true); } } catch { /* ignore */ }
     // 2) Revalidate in the background; update + re-cache only when it differs.
     let alive = true;
     fetch('/api/services/coverage').then((r) => r.json()).then((d) => {
       if (!alive || !d || d.error) return;
       const next = JSON.stringify(d);
-      try { if (localStorage.getItem(CACHE_KEY) !== next) { localStorage.setItem(CACHE_KEY, next); setCoverage(shape(d)); } else setCoverage(shape(d)); }
-      catch { setCoverage(shape(d)); }
+      try { if (localStorage.getItem(CACHE_KEY) !== next) localStorage.setItem(CACHE_KEY, next); } catch { /* ignore */ }
+      setCoverage(shape(d)); setCovLoaded(true);
     }).catch(() => {});
     return () => { alive = false; };
   }, []);
+  // Count → display: real number once the catalog is loaded, else a loading dash.
+  const countLabel = (n: number) => (covLoaded ? n.toLocaleString() : '…');
   const portfolioCount = useMemo(() => Object.fromEntries(coverage.portfolios.map((p) => [p.key, p.count])), [coverage]);
   const communityUnits = useMemo(() => Object.fromEntries(coverage.communities.map((c) => [c.name, c.units])), [coverage]);
 
@@ -503,25 +507,6 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
   // Ad-hoc: run THIS rule now to create any missing work orders. Idempotent — the
   // enrollment-key dedup means it only creates targets without an open order, so
   // it never duplicates what the nightly job (or a prior run) already made.
-  // Dry-run: show how many work orders WOULD be created for this saved rule
-  // (validates the logic server-side) without creating anything.
-  const previewNow = async () => {
-    if (!rule?.recordId || genBusy) return;
-    setGenBusy(true); setGenMsg('');
-    try {
-      const r = await fetch(`/api/services/admin/generate?ruleId=${encodeURIComponent(rule.recordId)}`);
-      const d = await r.json();
-      if (!r.ok) { setGenMsg(d.error || 'Preview failed.'); return; }
-      if (d.configured === false) { setGenMsg('Services objects aren’t configured yet.'); return; }
-      if (!d.rulesActive) { setGenMsg('This rule is inactive — nothing would generate.'); return; }
-      const would = d.wouldCreate ?? 0, open = d.skippedExisting ?? 0;
-      setGenMsg(would
-        ? `Would create ${would} work order${would === 1 ? '' : 's'}${open ? ` · ${open} already open` : ''}`
-        : (open ? `Up to date — ${open} already open` : 'No missing work orders — nothing to create.'));
-    } catch { setGenMsg('Couldn’t reach the server. Try again.'); }
-    finally { setGenBusy(false); }
-  };
-
   const generateNow = async () => {
     if (!rule?.recordId || genBusy) return;
     setGenBusy(true); setGenMsg('');
@@ -656,7 +641,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
                 <div className="flex items-start gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="font-heading font-bold text-[14px] text-ink leading-tight">
-                      {r.name} <span className="text-brand font-extrabold whitespace-nowrap">({countFor(r).toLocaleString()})</span>
+                      {r.name} <span className="text-brand font-extrabold whitespace-nowrap">({countLabel(countFor(r))})</span>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${r.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{r.scope === 'community' ? 'Community' : 'SFR'}</span>
@@ -694,7 +679,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
               Rules
             </button>
             <div className="ml-auto text-right shrink-0">
-              <div className="text-xl font-heading font-extrabold text-ink tabular-nums leading-none">{coveredCount.toLocaleString()}</div>
+              <div className="text-xl font-heading font-extrabold text-ink tabular-nums leading-none">{countLabel(coveredCount)}</div>
               <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Properties Covered</div>
             </div>
           </div>
@@ -782,7 +767,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
                 <label className={`${lbl} mt-3`}>Applicable Properties</label>
                 <div className="border border-gray-200 rounded-xl max-w-md">
                   <button type="button" onClick={() => setPropsOpen((o) => !o)} className="w-full flex items-center justify-between px-3 py-2.5 text-[13px] font-semibold text-ink">
-                    <span className="text-brand font-bold">{coveredCount.toLocaleString()} <span className="text-gray-500 font-semibold">included</span></span>
+                    <span className="text-brand font-bold">{countLabel(coveredCount)} <span className="text-gray-500 font-semibold">included</span></span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${propsOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
                   </button>
                   {propsOpen && (
@@ -1003,26 +988,24 @@ export default function RulesEngine({ ruleRecords, live, canGenerate }: { ruleRe
             <button onClick={saveRule} disabled={!canSave || savingRule} className={`w-full rounded-2xl py-3 font-heading font-bold text-sm ${canSave && !savingRule ? 'bg-brand text-white' : 'bg-gray-200 text-gray-400'}`}>
               {savingRule ? 'Saving…' : canSave ? 'Save & Close' : 'Resolve the Issues Above to Save'}
             </button>
-            {/* Preview + ad-hoc generation for the saved rule (admin). Preview is a
-                dry-run count; Generate is idempotent and only fills gaps. */}
-            {canGenerate && rule?.recordId && (
+            {/* Live target count (from the coverage catalog — updates as the rule's
+                scope changes) + a compact ad-hoc Generate (idempotent: only fills
+                gaps, never duplicates what's already open or the nightly job made). */}
+            {canGenerate && rule && (
               <>
-                <div className="mt-2 flex gap-2">
-                  <button onClick={previewNow} disabled={genBusy}
-                    className="flex-1 rounded-2xl py-2.5 font-heading font-bold text-[13px] border border-gray-300 text-gray-700 bg-white disabled:opacity-50">
-                    {genBusy ? '…' : 'Preview count'}
-                  </button>
-                  <button onClick={generateNow} disabled={genBusy}
-                    className="flex-1 rounded-2xl py-2.5 font-heading font-bold text-[13px] border border-brand text-brand bg-white disabled:opacity-50">
-                    {genBusy ? '…' : 'Generate missing now'}
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <div className="text-[13px] text-ink">
+                    Would create <span className="font-heading font-extrabold">{countLabel(coveredCount)}</span> work order{coveredCount === 1 ? '' : 's'}
+                    {genMsg && <span className="block text-[12px] font-heading font-semibold text-gray-600">{genMsg}</span>}
+                  </div>
+                  <button onClick={generateNow} disabled={genBusy || !rule.recordId}
+                    title={rule.recordId ? '' : 'Save the rule first'}
+                    className="shrink-0 rounded-xl px-3.5 py-2 text-[12px] font-heading font-bold border border-brand text-brand bg-white disabled:opacity-50">
+                    {genBusy ? '…' : 'Generate now'}
                   </button>
                 </div>
-                {genMsg && <div className="mt-1.5 text-center text-[12px] font-heading font-semibold text-ink">{genMsg}</div>}
-                <p className="mt-1 text-center text-[11px] text-gray-400">Preview shows how many would be created. Generate makes only the missing ones — safe anytime; the nightly job fills the rest.</p>
+                <p className="mt-1 text-[11px] text-gray-400">Generate makes only the missing ones — safe anytime; the nightly job fills the rest.</p>
               </>
-            )}
-            {canGenerate && rule && !rule.recordId && (
-              <p className="mt-2 text-center text-[11px] text-gray-400">Save the rule to preview or generate its work orders.</p>
             )}
           </div>
         </main>

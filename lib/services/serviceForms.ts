@@ -40,6 +40,9 @@ export interface ServiceTrigger {
   requirePhotos: boolean;  // require separate before/after photos on the follow-up
 }
 
+/** Per-answer requirement: when a given answer is chosen, force a note / photo. */
+export interface AnswerReq { note?: boolean; photo?: boolean; }
+
 export interface ServiceQuestion {
   id: string;
   label: string;
@@ -50,6 +53,10 @@ export interface ServiceQuestion {
   enabled: boolean;          // On/Off without deleting
   options?: QuestionOption[];// for type 'select' — the dropdown choices (may drive price)
   trigger?: ServiceTrigger;  // optional: this answer creates a new Estimated service
+  // Per-answer requirements — keyed by the answer value ('yes'/'no' for yes/no,
+  // or the option label for single/multi). Choosing that answer then requires a
+  // note and/or a photo before the completion can be submitted.
+  answerReqs?: Record<string, AnswerReq>;
   // Conditional visibility: only show when another answer equals `value`
   // (drives the universal completion flow — date on Yes, reason/trip-fee on No).
   showWhen?: { qid: string; value: string };
