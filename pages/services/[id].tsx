@@ -499,13 +499,30 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editable]);
 
+  // A question is visible unless its showWhen condition isn't met.
+  const isVisible = (q: ServiceQuestion) => !q.showWhen || answers[q.showWhen.qid] === q.showWhen.value;
+  // Was the service marked completed? (universal gate — 'no' relaxes photo reqs.)
+  const notCompleted = answers.svc_completed === 'no';
+
+  // Default any visible date question flagged defaultToday to today (editable).
+  useEffect(() => {
+    for (const q of form) {
+      if (q.type === 'date' && q.defaultToday && isVisible(q) && !answers[q.id]) {
+        setAns(q.id, easternTodayISO());
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answers.svc_completed, form]);
+
   const requiredMissing = useMemo(() => form.some((q) => {
-    if (!q.required) return false;
+    if (!q.required || !isVisible(q)) return false;
     const v = answers[q.id];
     if (q.type === 'multi') return !Array.isArray(v) || v.length === 0;
     return v === undefined || v === '' || v === null;
   }), [form, answers]);
-  const ready = !requiredMissing && before.length > 0 && after.length > 0 && bidValid && !submitting;
+  // Photos are only required when the service was actually completed.
+  const photosOk = notCompleted || (before.length > 0 && after.length > 0);
+  const ready = !requiredMissing && photosOk && bidValid && !submitting;
 
   const submit = async () => {
     setSubmitting(true); setError('');
@@ -745,7 +762,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
                   <div className="font-heading font-bold text-[15px] text-ink">Completion checklist</div>
                   {form.length === 0 && <div className="text-[13px] text-gray-400">No completion form is configured for this service type yet.</div>}
-                  {form.map((q) => (
+                  {form.filter(isVisible).map((q) => (
                     <div key={q.id}>
                       <label className="block text-sm font-semibold text-ink mb-1.5">{q.label}{q.required && <span className="text-brand"> *</span>}</label>
                       {q.type === 'yesno' && (
@@ -792,8 +809,9 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
 
                 <section className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
                   <div className="font-heading font-bold text-[15px] text-ink">Photos</div>
-                  <CameraPhotos label="Before photos" required urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
-                  <CameraPhotos label="After photos" required urls={after} onChange={setAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
+                  {notCompleted && <p className="text-[12px] text-gray-500 -mt-2">Before/After photos aren’t required since the service wasn’t completed — add any that show why, if helpful.</p>}
+                  <CameraPhotos label="Before photos" required={!notCompleted} urls={before} onChange={setBefore} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
+                  <CameraPhotos label="After photos" required={!notCompleted} urls={after} onChange={setAfter} address={svc.address} propertyRecordId={svc.propertyRecordId} upload={uploadFor} />
                   {svc.petStations && (
                     <div className="border-t border-gray-100 pt-4 space-y-4">
                       <div className="text-[12px] font-bold uppercase tracking-wide text-brand">Pet Stations</div>
@@ -838,7 +856,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   {submitting ? "Submitting…" : "Submit Completion"}
                 </button>
                 {error && <div className="text-center text-xs text-red-600 -mt-2">{error}</div>}
-                {!ready && !error && !submitting && <div className="text-center text-xs text-gray-400 -mt-2">Answer the required questions and add at least one before and one after photo to submit.</div>}
+                {!ready && !error && !submitting && <div className="text-center text-xs text-gray-400 -mt-2">{notCompleted ? 'Answer the required questions to submit.' : 'Answer the required questions and add at least one before and one after photo to submit.'}</div>}
               </>
             ) : (
               /* ── Read-only view (submitted / review / completed / bid) ── */

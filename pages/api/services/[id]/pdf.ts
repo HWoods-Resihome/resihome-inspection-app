@@ -92,6 +92,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const buffer = await renderToBuffer(React.createElement(ServicePdf, { d }) as any);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="service-${id}-${variant}.pdf"`);
+    // Rendered fresh from the live record every request — never cache, so a PDF
+    // opened before a logic/format change is always superseded on the next open.
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
     return res.status(200).send(buffer);
   } catch (e: any) {
     console.error('GET /api/services/[id]/pdf failed:', e);

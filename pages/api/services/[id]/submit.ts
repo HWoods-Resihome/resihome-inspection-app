@@ -13,7 +13,8 @@ import { servicesEnabled } from '@/lib/servicesAccess';
 import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder } from '@/lib/hubspot';
 import { runServiceAiReview } from '@/lib/services/aiReview';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
-import { BID_SUBTYPE } from '@/lib/services/worktypes';
+import { BID_SUBTYPE, defaultRateFor } from '@/lib/services/worktypes';
+import { GRASSCUT_AREAS_QID } from '@/lib/services/serviceForms';
 
 // The AI review call (Claude vision) can take a few seconds — allow headroom so
 // the review runs inline the moment the work order is submitted.
@@ -60,6 +61,44 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     pet_after_photo_urls: petAfter.join('\n'),
   };
 
+  // ── Completion-answer pricing + routing ──────────────────────────────────
+  // Universal gate: "Service Completed? = No" → skip AI, route straight to human
+  // Review, and set the payout (trip-fee rate if billing a trip fee, else $0).
+  // Landscaping grass-cut: if the Back Yard wasn't among the areas serviced,
+  // reduce the vendor payout 25%.
+  const p0 = existing?.props || {};
+  const worktype = String(p0.worktype || '');
+  const subtype = String(p0.subtype || '');
+  const origVendor = Number(p0.vendor_cost);
+  const markup = Number(p0.markup_pct);
+  const clientOf = (v: number) => (Number.isFinite(v) && Number.isFinite(markup) ? Math.round(v * (1 + markup / 100) * 100) / 100 : v);
+  const notCompleted = String(answers.svc_completed) === 'no';
+  const billTrip = answers.bill_trip_fee === 'yes' || answers.bill_trip_fee === true;
+  let routeToReview = false;
+  if (notCompleted) {
+    routeToReview = true;                 // not completed → human review, no AI
+    const tripRate = defaultRateFor('trip_fee', 'base_trip_fee') ?? 0;
+    const finalV = billTrip ? tripRate : 0;
+    props.vendor_cost = finalV;
+    props.client_cost = clientOf(finalV);
+    if (Number.isFinite(origVendor)) {
+      props.vendor_cost_adjustment = Math.round((origVendor - finalV) * 100) / 100;
+      props.vendor_cost_adjustment_reason = billTrip ? 'Not completed — trip fee billed' : 'Not completed — no charge';
+    }
+    props.ai_verdict = 'needs_review';
+    props.ai_notes = billTrip ? 'Vendor marked NOT completed — trip fee billed. Routed to review (AI skipped).' : 'Vendor marked NOT completed — no charge. Routed to review (AI skipped).';
+  } else if (worktype === 'landscaping' && subtype === 'cut') {
+    const areas = Array.isArray(answers[GRASSCUT_AREAS_QID]) ? answers[GRASSCUT_AREAS_QID].map(String) : [];
+    if (areas.length && !areas.includes('Back Yard') && Number.isFinite(origVendor)) {
+      const finalV = Math.round(origVendor * 0.75 * 100) / 100;
+      props.vendor_cost = finalV;
+      props.client_cost = clientOf(finalV);
+      props.vendor_cost_adjustment = Math.round((origVendor - finalV) * 100) / 100;
+      props.vendor_cost_adjustment_reason = 'Back yard not serviced — 25% reduction';
+    }
+  }
+  if (routeToReview) props.status = 'review';
+
   try {
     const okp = await patchServiceWorkOrder(id, props);
     if (!okp) return res.status(200).json({ ok: true, preview: true }); // object not configured
@@ -99,6 +138,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         try { bidId = await createServiceWorkOrder({ ...bidProps, subtype: pp.subtype || BID_SUBTYPE }); }
         catch (e2: any) { console.warn('[services/submit] bid create retry failed:', e2?.message || e2); bidError = String(e2?.message || e2).slice(0, 200); }
       }
+    }
+
+    // Not completed → we already routed straight to Review and skipped AI.
+    if (routeToReview) {
+      void recordServiceAudit({ serviceId: id, action: 'ai_review', actorName: 'System', detail: 'Not completed — AI skipped, routed to Review', meta: { skipped: true } });
+      return res.status(200).json({ ok: true, id, status: 'review', review: null, reviewError: null, skippedAi: true, bidId, bidError });
     }
 
     // Kick the AI review for THIS order immediately — don't wait for the nightly

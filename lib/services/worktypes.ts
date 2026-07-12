@@ -55,7 +55,7 @@ export const WORKTYPES: WorktypeDef[] = [
   {
     id: 'trip_fee', label: 'Trip Fee', scopes: ['property', 'community'],
     defaultDescription: 'Trip fee for a dispatched visit.',
-    subtypes: [{ id: 'base_trip_fee', label: 'Base Trip Fee', description: 'Trip fee for a dispatched visit.' }],
+    subtypes: [{ id: 'base_trip_fee', label: 'Base Trip Fee', defaultRate: 50, description: 'Trip fee for a dispatched visit.' }],
   },
 ];
 
