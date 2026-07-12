@@ -233,11 +233,16 @@ export default function InspectionsCalendar({ isInternal, myEmail, myName }: { i
     if (!c) return [];
     const k = statusKey(i.status);
     const meta = k ? STATUS_META[k] : undefined;
+    const d = parse(dayOf(i)!);
+    const datePart = `${k === 'completed' ? 'Done' : 'Sched'} ${d.getMonth() + 1}/${d.getDate()}`;
+    const t = timeLabel(i);                       // "3:45 PM" for completed; null otherwise
+    const dateTime = t ? `${datePart} · ${t}` : datePart;
     return [{
       id: i.recordId, lat: c.lat, lng: c.lng, color: meta?.hex || '#ff0060',
       title: i.propertyAddressSnapshot || i.inspectionName || 'Inspection',
-      vendor: i.inspectorName || 'Unassigned',
-      subtitle: `${prettyType(i.templateType) || 'Inspection'} · ${meta?.label || i.status} · ${(() => { const d = parse(dayOf(i)!); return `${k === 'completed' ? 'Done' : 'Sched'} ${d.getMonth() + 1}/${d.getDate()}`; })()}`,
+      // Row 2: template · status.  Row 3: date · time · inspector.
+      subtitle: `${prettyType(i.templateType) || 'Inspection'} · ${meta?.label || i.status}`,
+      detail: `${dateTime} · ${i.inspectorName || 'Unassigned'}`,
       href: `/inspection/${i.recordId}`,
     }];
   });
