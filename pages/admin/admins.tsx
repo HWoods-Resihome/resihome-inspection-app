@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { PageHeader } from '@/components/PageHeader';
 import { useRouter } from 'next/router';
 import { InsightsUsersManager } from '@/components/insights/InsightsUsersManager';
 
@@ -97,15 +98,7 @@ export default function AdminsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-brand text-white">
-        <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-            <h1 className="font-heading font-extrabold text-lg tracking-tight truncate">Admins</h1>
-          </div>
-          <Link href="/admin/flows" className="text-xs font-heading font-semibold text-white/90 hover:text-white shrink-0 inline-flex items-center gap-1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M11 18l-6-6 6-6" /></svg> Admin</Link>
-        </div>
-      </header>
+      <PageHeader title="Admins" backHref="/admin/flows" maxW="max-w-3xl" />
 
       <main className="max-w-3xl mx-auto px-4 py-5">
         <p className="text-[13px] text-gray-600 mb-4 leading-snug">
