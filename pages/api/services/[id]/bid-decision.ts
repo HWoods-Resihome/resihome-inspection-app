@@ -13,6 +13,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
+import { recordServiceAudit } from '@/lib/services/serviceAudit';
 
 function addDays(days: number): string {
   const d = new Date();
@@ -49,6 +50,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (decision === 'reject') {
       await patchServiceWorkOrder(id, { ...base, status: 'canceled' });
+      void recordServiceAudit({ serviceId: id, action: 'bid', actorEmail: email, actorName: session?.name, detail: `Bid rejected → Canceled: ${String(b.notes || '')}`.slice(0, 500), meta: { decision } });
       return res.status(200).json({ ok: true, id, status: 'canceled' });
     }
 
@@ -62,6 +64,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       vendor_cost: vendorCost, markup_pct: markupPct, client_cost: clientCost,
       due_date: addDays(dueDays),
     });
+    void recordServiceAudit({ serviceId: id, action: 'bid', actorEmail: email, actorName: session?.name, detail: `Bid approved → Assigned${String(b.notes || '').trim() ? `: ${b.notes}` : ''}`.slice(0, 500), meta: { decision } });
     return res.status(200).json({ ok: true, id, status: 'assigned', vendorCost, markupPct, clientCost });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });

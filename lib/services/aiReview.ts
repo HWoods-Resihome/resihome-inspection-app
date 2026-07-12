@@ -12,6 +12,7 @@
  */
 import sharp from 'sharp';
 import { searchServiceWorkOrdersByStatus, fetchServiceWorkOrder, patchServiceWorkOrder, readServiceAiChecks } from '@/lib/hubspot';
+import { recordServiceAudit } from './serviceAudit';
 import { recordAiUsage } from '@/lib/aiUsage';
 import { SAMPLE_AI_CHECKS, type AiCheck } from './aiKnowledge';
 import { worktypeLabel, subtypeLabel, type Worktype } from './worktypes';
@@ -192,6 +193,11 @@ export async function runServiceAiReview(apply: boolean, todayISO: string, onlyI
           if (due) props.ontime = todayISO <= due ? 'true' : 'false';
         }
         await patchServiceWorkOrder(order.id, props);
+        void recordServiceAudit({
+          serviceId: order.id, action: 'ai_review', actorName: 'AI Review',
+          detail: clean ? 'AI review clean → Completed' : 'AI review flagged → Review',
+          meta: { verdict: v.verdict },
+        });
       }
       result.items.push({ id: order.id, service, verdict: v.verdict, notes: v.notes, issues: v.issues, action: apply ? (clean ? 'completed' : 'review') : (clean ? 'would-complete' : 'would-review') });
     } catch (e: any) {

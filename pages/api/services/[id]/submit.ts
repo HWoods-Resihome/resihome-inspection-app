@@ -12,6 +12,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder } from '@/lib/hubspot';
 import { runServiceAiReview } from '@/lib/services/aiReview';
+import { recordServiceAudit } from '@/lib/services/serviceAudit';
 import { BID_SUBTYPE } from '@/lib/services/worktypes';
 
 // The AI review call (Claude vision) can take a few seconds — allow headroom so
@@ -62,6 +63,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const okp = await patchServiceWorkOrder(id, props);
     if (!okp) return res.status(200).json({ ok: true, preview: true }); // object not configured
+    void recordServiceAudit({ serviceId: id, action: 'submit', actorEmail: email, actorName: session?.name, detail: 'Completion submitted' });
 
     // Bid item: the crew flagged additional work. Spawn a NEW Estimated "Bid Item"
     // service — same worktype/property/community/vendor as the parent — carrying

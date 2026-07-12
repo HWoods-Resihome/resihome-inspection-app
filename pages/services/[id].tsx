@@ -10,6 +10,8 @@ import { worktypeLabel, subtypeLabel, type Worktype } from '@/lib/services/workt
 import { SAMPLE_FORMS, formKey, type ServiceQuestion } from '@/lib/services/serviceForms';
 import { SAMPLE_SERVICES, SERVICE_STATUS_STYLE, serviceStatusText, REFERENCE_TODAY, type ServiceStatus } from '@/lib/services/sampleData';
 import { fetchServiceWorkOrder, fetchPropertyLockInfo, readServiceForms } from '@/lib/hubspot';
+import { SERVICE_VENDOR_NAMES } from '@/lib/services/vendors';
+import type { AuditEvent } from '@/lib/auditLog';
 import { CameraCapture } from '@/components/CameraCapture';
 import { PhotoThumb } from '@/components/PhotoThumb';
 import { PhotoLightbox } from '@/components/PhotoLightbox';
@@ -437,6 +439,39 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
   }, [svc]);
   const [lightbox, setLightbox] = useState<{ groupId: string; index: number } | null>(null);
 
+  // ── Settings (internal): audit log + reassign vendor ──
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[] | null>(null);
+  const [reassignOpen, setReassignOpen] = useState(false);
+  const [reassignVendor, setReassignVendor] = useState(svc.vendor || SERVICE_VENDOR_NAMES[0] || '');
+  const [reassigning, setReassigning] = useState(false);
+  const [settingsMsg, setSettingsMsg] = useState('');
+  const canReassign = isInternal && svc.live && !['completed', 'canceled'].includes(svc.status);
+
+  const openAudit = async () => {
+    setSettingsOpen(false); setAuditOpen(true); setAuditEvents(null);
+    try {
+      const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/audit`);
+      const d = await r.json();
+      setAuditEvents(Array.isArray(d.events) ? d.events : []);
+    } catch { setAuditEvents([]); }
+  };
+  const doReassign = async () => {
+    if (!reassignVendor || reassignVendor === svc.vendor) { setReassignOpen(false); return; }
+    setReassigning(true); setSettingsMsg('');
+    try {
+      const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/reassign`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vendorName: reassignVendor }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setSettingsMsg(d.error || 'Could not reassign.'); return; }
+      setReassignOpen(false);
+      router.replace(router.asPath, undefined, { scroll: false });   // refresh the record
+    } catch { setSettingsMsg('Couldn’t reach the server. Try again.'); }
+    finally { setReassigning(false); }
+  };
+
   // Cost Detail — its own section (after Photos). Vendor Cost is visible to all;
   // Markup % and Client Cost are internal-only (vendors never see them). While a
   // reviewer is deciding (Modify → edited figures; Reject → $0), this reflects the
@@ -476,6 +511,20 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
             {isInternal && svc.status === 'submitted' && <AiSparkle className="w-3 h-3" />}
           </span>
           <ServicePager currentId={svc.id} onNavigate={(id) => { flushDraft(true); router.replace(`/services/${id}`); }} />
+          {isInternal && svc.live && (
+            <div className="relative shrink-0">
+              <button type="button" onClick={() => setSettingsOpen((o) => !o)} aria-label="Service settings" aria-expanded={settingsOpen}
+                className="w-7 h-7 grid place-items-center text-gray-400 hover:text-ink">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+              </button>
+              {settingsOpen && (<><div className="fixed inset-0 z-30" onClick={() => setSettingsOpen(false)} />
+                <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-lg border border-gray-200 z-40 overflow-hidden text-ink">
+                  <div className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Admin</div>
+                  <button type="button" onClick={openAudit} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50">Audit Log</button>
+                  {canReassign && <button type="button" onClick={() => { setSettingsOpen(false); setReassignVendor(svc.vendor || SERVICE_VENDOR_NAMES[0] || ''); setSettingsMsg(''); setReassignOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Reassign Vendor</button>}
+                </div></>)}
+            </div>
+          )}
           {unlock && <UnlockButton propertyId={unlock.propertyId} address={unlock.address} lockRing={unlock.ring} className="w-7 h-7 shrink-0" />}
           <Link href="/services" aria-label="Back to Services" className="shrink-0 text-gray-400 hover:text-ink">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
@@ -849,6 +898,79 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta 
           onReplace={() => { /* read-only */ }}
         />
       )}
+
+      {/* Audit Log modal (internal) — the service's history, newest first. */}
+      {auditOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setAuditOpen(false)}>
+          <div className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+              <div className="font-heading font-bold text-[15px] text-ink">Audit Log</div>
+              <button type="button" onClick={() => setAuditOpen(false)} aria-label="Close" className="text-gray-400 hover:text-ink text-lg leading-none">✕</button>
+            </div>
+            <div className="overflow-y-auto px-4 py-3">
+              {auditEvents === null ? (
+                <div className="text-[13px] text-gray-400 py-6 text-center">Loading…</div>
+              ) : auditEvents.length === 0 ? (
+                <div className="text-[13px] text-gray-400 py-6 text-center">No recorded activity yet.</div>
+              ) : (
+                <ol className="space-y-3">
+                  {auditEvents.map((e, i) => (
+                    <li key={i} className="flex gap-3">
+                      <div className="w-1.5 h-1.5 rounded-full bg-brand mt-1.5 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-heading font-bold text-ink">{auditLabel(e.action)}</div>
+                        {e.detail && <div className="text-[12px] text-gray-600 whitespace-pre-line">{e.detail}</div>}
+                        <div className="text-[11px] text-gray-400 mt-0.5">
+                          {auditWhen(e.ts)}{(e.actorName || e.actorEmail) ? ` · ${e.actorName || e.actorEmail}` : ''}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reassign Vendor modal (internal). */}
+      {reassignOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setReassignOpen(false)}>
+          <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="font-heading font-bold text-[15px] text-ink">Reassign Vendor</div>
+            <p className="text-[13px] text-gray-500 -mt-1">Currently <b className="text-ink">{svc.vendor || 'Unassigned'}</b>. Choose the vendor to take over this service.</p>
+            <div className="space-y-1.5">
+              {SERVICE_VENDOR_NAMES.map((name) => (
+                <button key={name} type="button" onClick={() => setReassignVendor(name)}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm font-heading font-semibold ${reassignVendor === name ? 'bg-brand/5 border-brand text-brand' : 'bg-white border-gray-300 text-gray-700 hover:border-brand/50'}`}>
+                  {name}{name === svc.vendor ? ' · current' : ''}
+                </button>
+              ))}
+            </div>
+            {settingsMsg && <div className="text-xs text-red-600">{settingsMsg}</div>}
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={() => setReassignOpen(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
+              <button type="button" disabled={reassigning || !reassignVendor || reassignVendor === svc.vendor} onClick={doReassign}
+                className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{reassigning ? '…' : 'Reassign'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// Audit event → human label + timestamp (M-D-YY h:mm AM).
+function auditLabel(action: string): string {
+  return ({
+    submit: 'Submitted', ai_review: 'AI Review', review: 'Reviewed', bid: 'Bid Decision',
+    reassign: 'Vendor Reassigned', cancel: 'Canceled', edit: 'Edited', create: 'Created',
+  } as Record<string, string>)[action] || action;
+}
+function auditWhen(ts: string): string {
+  const d = new Date(ts);
+  if (isNaN(+d)) return ts;
+  const h = d.getHours(); const m = d.getMinutes();
+  const ampm = h >= 12 ? 'PM' : 'AM'; const h12 = h % 12 || 12;
+  return `${d.getMonth() + 1}-${d.getDate()}-${String(d.getFullYear()).slice(2)} ${h12}:${String(m).padStart(2, '0')} ${ampm}`;
 }

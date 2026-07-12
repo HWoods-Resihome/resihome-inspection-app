@@ -8,6 +8,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
+import { recordServiceAudit } from '@/lib/services/serviceAudit';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
@@ -24,6 +25,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ ok: true, status: rec.props.status }); // already terminal
     }
     const okp = await patchServiceWorkOrder(id, { status: 'canceled' });
+    if (okp) void recordServiceAudit({ serviceId: id, action: 'cancel', actorEmail: email, actorName: session?.name, detail: 'Service canceled' });
     return res.status(200).json({ ok: true, status: 'canceled', preview: !okp });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });

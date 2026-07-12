@@ -47,15 +47,16 @@ const OPEN_STATUSES: ServiceStatus[] = ['estimated', 'assigned', 'submitted', 'r
 // Service card with press-and-hold to cancel (internal only, live records) —
 // mirrors the inspection card's long-press. A ~500ms hold prompts to cancel; a
 // normal tap opens the service. The click after a long-press is swallowed.
-function ServiceCard({ s, overdue, isAdmin, canCancel, onCancel }: {
+function ServiceCard({ s, overdue, isAdmin, canCancel, onCancel, bulkMode, selectable, selected, onToggleSelect }: {
   s: SampleService; overdue: boolean; isAdmin: boolean; canCancel: boolean; onCancel: (id: string) => void;
+  bulkMode?: boolean; selectable?: boolean; selected?: boolean; onToggleSelect?: (id: string) => void;
 }) {
   const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lpFired = useRef(false);
   const lpStart = useRef<{ x: number; y: number } | null>(null);
   const clearLp = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
   const onPointerDown = (e: React.PointerEvent) => {
-    if (!canCancel) return;
+    if (!canCancel || bulkMode) return;
     lpFired.current = false;
     lpStart.current = { x: e.clientX, y: e.clientY };
     clearLp();
@@ -65,14 +66,23 @@ function ServiceCard({ s, overdue, isAdmin, canCancel, onCancel }: {
     if (!lpTimer.current || !lpStart.current) return;
     if (Math.abs(e.clientX - lpStart.current.x) > 10 || Math.abs(e.clientY - lpStart.current.y) > 10) clearLp();
   };
+  const bulkCls = bulkMode ? (!selectable ? 'opacity-50' : selected ? 'border-brand ring-1 ring-brand' : 'border-gray-200') : 'border-gray-200 hover:border-brand/40';
   return (
     <Link href={`/services/${s.id}`}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={clearLp} onPointerCancel={clearLp}
-      onClick={(e) => { if (lpFired.current) { e.preventDefault(); e.stopPropagation(); lpFired.current = false; } }}
+      onClick={(e) => {
+        if (bulkMode) { e.preventDefault(); e.stopPropagation(); if (selectable) onToggleSelect?.(s.id); return; }
+        if (lpFired.current) { e.preventDefault(); e.stopPropagation(); lpFired.current = false; }
+      }}
       onContextMenu={(e) => { if (canCancel) e.preventDefault(); }}
-      className="block select-none bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 hover:border-brand/40 active:scale-[0.998] transition"
+      className={`block select-none bg-white border rounded-xl px-3.5 py-2.5 active:scale-[0.998] transition ${bulkCls}`}
       style={{ WebkitTouchCallout: 'none' }}>
       <div className="flex items-center gap-2">
+        {bulkMode && (
+          <span className={`shrink-0 w-5 h-5 rounded-md border-2 grid place-items-center ${!selectable ? 'border-gray-200 bg-gray-100' : selected ? 'bg-brand border-brand text-white' : 'border-gray-300 bg-white'}`}>
+            {selectable && selected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+          </span>
+        )}
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <span className="font-heading font-bold text-ink truncate">{s.address}</span>
           <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${s.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{s.scope === 'community' ? 'Community' : 'SFR'}</span>
@@ -134,21 +144,48 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
   const rerunAiReview = async () => {
     setGearOpen(false);
     if (aiRerun?.status === 'running') return;
-    setAiRerun({ status: 'running', msg: 'Reviewing submitted services…' });
+    setAiRerun({ status: 'running', msg: 'AI review — Reviewing submitted services…' });
     try {
       const r = await fetch('/api/services/admin/review?apply=1');
       const d = await r.json();
-      if (!r.ok) { setAiRerun({ status: 'error', msg: d.error || 'AI review failed.' }); return; }
-      if (d.configured === false) { setAiRerun({ status: 'error', msg: 'Services object isn’t configured — nothing to review.' }); return; }
-      if (!d.reviewed) { setAiRerun({ status: 'done', msg: 'No submitted services to review right now.' }); return; }
+      if (!r.ok) { setAiRerun({ status: 'error', msg: `AI review — ${d.error || 'failed.'}` }); return; }
+      if (d.configured === false) { setAiRerun({ status: 'error', msg: 'AI review — Services object isn’t configured.' }); return; }
+      if (!d.reviewed) { setAiRerun({ status: 'done', msg: 'AI review — no submitted services to review right now.' }); return; }
       const parts = [`${d.reviewed} reviewed`];
       if (d.completed) parts.push(`${d.completed} auto-completed`);
       if (d.routedToReview) parts.push(`${d.routedToReview} → Review`);
       if (d.errors) parts.push(`${d.errors} error${d.errors > 1 ? 's' : ''}`);
-      setAiRerun({ status: d.errors ? 'error' : 'done', msg: parts.join(' · ') });
+      setAiRerun({ status: d.errors ? 'error' : 'done', msg: `AI review — ${parts.join(' · ')}` });
       // Reflect the new statuses in the list.
       router.replace(router.asPath, undefined, { scroll: false });
-    } catch { setAiRerun({ status: 'error', msg: 'Couldn’t reach the server. Try again.' }); }
+    } catch { setAiRerun({ status: 'error', msg: 'AI review — couldn’t reach the server. Try again.' }); }
+  };
+
+  // Admin: bulk-reassign vendor across selected ASSIGNED services.
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkSel, setBulkSel] = useState<Set<string>>(new Set());
+  const [bulkVendor, setBulkVendor] = useState(SERVICE_VENDOR_NAMES[0] || '');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const exitBulk = () => { setBulkMode(false); setBulkSel(new Set()); };
+  const toggleBulk = (id: string) => setBulkSel((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const applyBulk = async () => {
+    if (!bulkSel.size || !bulkVendor) return;
+    setBulkBusy(true); setAiRerun(null);
+    try {
+      const r = await fetch('/api/services/bulk-reassign', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(bulkSel), vendorName: bulkVendor }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setAiRerun({ status: 'error', msg: `Reassign — ${d.error || 'failed.'}` }); return; }
+      const parts = [`${d.reassigned} reassigned to ${d.vendorName}`];
+      if (d.skipped) parts.push(`${d.skipped} skipped`);
+      if (d.failed) parts.push(`${d.failed} failed`);
+      setAiRerun({ status: d.failed ? 'error' : 'done', msg: `Reassign — ${parts.join(' · ')}` });
+      exitBulk();
+      router.replace(router.asPath, undefined, { scroll: false });
+    } catch { setAiRerun({ status: 'error', msg: 'Reassign — couldn’t reach the server. Try again.' }); }
+    finally { setBulkBusy(false); }
   };
 
   // Scope (type/vendor/region/search) drives the summary bubbles; the status chip
@@ -272,6 +309,8 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
                       <span className="inline-flex items-center gap-1.5"><AiSparkle className="w-3.5 h-3.5 text-brand" />Rerun AI Review</span>
                       {submittedCount > 0 && <span className="text-[11px] font-bold text-gray-400 tabular-nums">{submittedCount}</span>}
                     </button>
+                    <button type="button" onClick={() => { setGearOpen(false); setBulkSel(new Set()); setBulkMode(true); }}
+                      className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Bulk Reassign Vendors</button>
                     <Link href="/services?as=vendor" className="block px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">View as Vendor</Link>
                   </div></>)}
               </div>
@@ -307,7 +346,7 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
               {aiRerun.status === 'running'
                 ? <svg className="w-3.5 h-3.5 animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><circle cx="12" cy="12" r="9" opacity="0.25" /><path d="M21 12a9 9 0 0 0-9-9" strokeLinecap="round" /></svg>
                 : <AiSparkle className="w-3.5 h-3.5 shrink-0" />}
-              <span className="truncate">AI review — {aiRerun.msg}</span>
+              <span className="truncate">{aiRerun.msg}</span>
             </span>
             {aiRerun.status !== 'running' && (
               <button type="button" onClick={() => setAiRerun(null)} aria-label="Dismiss" className="shrink-0 opacity-60 hover:opacity-100">✕</button>
@@ -406,10 +445,31 @@ export default function ServicesHome({ userName, canCreate, services, live }: { 
           </div>
         )}
 
+        {bulkMode && (
+          <div className="mb-3 bg-white border-2 border-brand rounded-xl px-3 py-2.5 shadow-md">
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] font-heading font-bold text-ink">{bulkSel.size} selected</span>
+              <div className="flex-1" />
+              <button type="button" onClick={exitBulk} className="text-[12px] font-heading font-semibold text-gray-500 hover:text-brand underline">Cancel</button>
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <span className="text-[12px] text-gray-500 shrink-0">Reassign to</span>
+              <div className="flex-1 min-w-0">
+                <ListPicker value={bulkVendor} options={SERVICE_VENDOR_NAMES.map((n) => ({ value: n, label: n }))} onChange={setBulkVendor} ariaLabel="Reassign vendor"
+                  className="w-full text-xs font-heading font-semibold pl-2.5 pr-2 py-2 border border-gray-300 rounded-md bg-white flex items-center justify-between text-gray-700 hover:border-brand/50" />
+              </div>
+              <button type="button" disabled={!bulkSel.size || bulkBusy} onClick={applyBulk}
+                className="shrink-0 rounded-lg px-4 py-2 text-sm font-heading font-bold bg-brand text-white disabled:opacity-50">{bulkBusy ? '…' : 'Apply'}</button>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1.5">Tap <b>Assigned</b> services below to select — only those can be bulk-reassigned.</p>
+          </div>
+        )}
+
         <div className="space-y-2">
           {pagedRows.map((s) => (
             <ServiceCard key={s.id} s={s} overdue={OPEN_STATUSES.includes(s.status) && s.dueDate < REFERENCE_TODAY}
-              isAdmin={isAdmin} canCancel={canCancel} onCancel={cancelService} />
+              isAdmin={isAdmin} canCancel={canCancel} onCancel={cancelService}
+              bulkMode={bulkMode} selectable={s.status === 'assigned'} selected={bulkSel.has(s.id)} onToggleSelect={toggleBulk} />
           ))}
           {visibleRows.length === 0 && (
             <div className="text-center text-gray-500 text-sm py-12 border border-dashed border-gray-300 rounded-xl">No services match these filters.</div>

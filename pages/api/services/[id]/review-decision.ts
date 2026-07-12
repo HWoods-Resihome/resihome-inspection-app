@@ -21,6 +21,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
 import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
+import { recordServiceAudit } from '@/lib/services/serviceAudit';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
@@ -75,6 +76,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     await patchServiceWorkOrder(id, props);
+    const decisionLabel = decision === 'reject' ? 'Rejected — payment denied' : decision === 'modify' ? 'Modified pricing' : 'Approved';
+    void recordServiceAudit({ serviceId: id, action: 'review', actorEmail: email, actorName: session?.name, detail: `${decisionLabel}: ${notes}`.slice(0, 500), meta: { decision } });
     return res.status(200).json({ ok: true, id, decision, status: 'completed', vendorCost: props.vendor_cost ?? originalVendorCost });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });
