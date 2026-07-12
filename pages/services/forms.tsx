@@ -5,7 +5,7 @@ import { ListPicker } from '@/components/ListPicker';
 import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { FIELD_LABEL } from '@/components/formStyles';
 import { SaveFooter } from '@/components/SaveFooter';
-import { WORKTYPES, subtypesFor, worktypeLabel, subtypeLabel } from '@/lib/services/worktypes';
+import { WORKTYPES, subtypesFor, mergeWorktypes, slugifyId, type CustomWorktypeDef } from '@/lib/services/worktypes';
 import {
   ANSWER_TYPES, SAMPLE_FORMS, formKey, newQuestion, newOption, answerTypeLabel, hasOptions,
   type ServiceQuestion, type AnswerType, type QuestionOption,
@@ -30,13 +30,53 @@ function subline(q: ServiceQuestion): string {
   return bits.join(' · ');
 }
 
-export default function FormBuilder({ savedForms, canSave, embedded }: { savedForms: Record<string, ServiceQuestion[]> | null; canSave: boolean; embedded?: boolean }) {
+export default function FormBuilder({ savedForms, canSave, embedded, savedTaxonomy }: { savedForms: Record<string, ServiceQuestion[]> | null; canSave: boolean; embedded?: boolean; savedTaxonomy?: CustomWorktypeDef[] | null }) {
   const [forms, setForms] = useState<Record<string, ServiceQuestion[]>>(() => ({ ...SAMPLE_FORMS, ...(savedForms || {}) }));
+  const [taxonomy, setTaxonomy] = useState<CustomWorktypeDef[]>(() => (savedTaxonomy || []).map((w) => ({ id: w.id, label: w.label, subtypes: [...(w.subtypes || [])] })));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [worktype, setWorktype] = useState('landscaping');
   const [subtype, setSubtype] = useState('cut');
   const [editId, setEditId] = useState<string | null>(null);
+  // Add work type / subtype inline forms.
+  const [addingWt, setAddingWt] = useState(false);
+  const [addingSub, setAddingSub] = useState(false);
+  const [newWtLabel, setNewWtLabel] = useState('');
+  const [newSubLabel, setNewSubLabel] = useState('');
+
+  // Built-in taxonomy merged with the admin's custom work types / subtypes.
+  const defs = useMemo(() => mergeWorktypes(taxonomy), [taxonomy]);
+  const subsOf = (wt: string) => defs.find((w) => w.id === wt)?.subtypes || [];
+  const wtLabelOf = (wt: string) => defs.find((w) => w.id === wt)?.label || wt;
+  const subLabelOf = (wt: string, st: string) => subsOf(wt).find((s) => s.id === st)?.label || st;
+
+  // Add a custom work type (with a first subtype named "General") and select it.
+  const addWorktype = () => {
+    const label = newWtLabel.trim();
+    if (!label) return;
+    const id = slugifyId(label);
+    if (!id || defs.some((w) => w.id === id)) { setAddingWt(false); setNewWtLabel(''); return; }
+    setTaxonomy((t) => [...t, { id, label, subtypes: [{ id: 'general', label: 'General' }] }]);
+    setSaved(false);
+    setWorktype(id); setSubtype('general'); setEditId(null);
+    setNewWtLabel(''); setAddingWt(false);
+  };
+  // Add a custom subtype to the current work type and select it.
+  const addSubtype = () => {
+    const label = newSubLabel.trim();
+    if (!label) return;
+    const id = slugifyId(label);
+    if (!id || subsOf(worktype).some((s) => s.id === id)) { setAddingSub(false); setNewSubLabel(''); return; }
+    setTaxonomy((t) => {
+      const existing = t.find((w) => w.id === worktype);
+      if (existing) return t.map((w) => (w.id === worktype ? { ...w, subtypes: [...w.subtypes, { id, label }] } : w));
+      // Custom subtype on a built-in work type → add a taxonomy entry keyed to it.
+      return [...t, { id: worktype, label: wtLabelOf(worktype), subtypes: [{ id, label }] }];
+    });
+    setSaved(false);
+    setSubtype(id); setEditId(null);
+    setNewSubLabel(''); setAddingSub(false);
+  };
   const key = formKey(worktype, subtype);
   const questions = forms[key] || [];
 
@@ -44,8 +84,12 @@ export default function FormBuilder({ savedForms, canSave, embedded }: { savedFo
   const saveAll = async () => {
     setSaving(true);
     try {
-      const r = await fetch('/api/services/forms/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forms }) });
-      if (r.ok) setSaved(true);
+      const [rForms] = await Promise.all([
+        fetch('/api/services/forms/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forms }) }),
+        // Persist any custom work types / subtypes so they're available app-wide.
+        taxonomy.length ? fetch('/api/services/taxonomy/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taxonomy }) }) : Promise.resolve(null),
+      ]);
+      if (rForms.ok) setSaved(true);
     } catch { /* keep local; retry */ }
     finally { setSaving(false); }
   };
@@ -95,8 +139,8 @@ export default function FormBuilder({ savedForms, canSave, embedded }: { savedFo
   const endDrag = () => { cancelPress(); dragRef.current = null; setDragId(null);
   };
 
-  const worktypeOptions = useMemo(() => WORKTYPES.map((w) => ({ value: w.id, label: w.label })), []);
-  const subtypeOptions = useMemo(() => subtypesFor(worktype).map((s) => ({ value: s.id, label: s.label })), [worktype]);
+  const worktypeOptions = useMemo(() => defs.map((w) => ({ value: w.id, label: w.label })), [defs]);
+  const subtypeOptions = useMemo(() => subsOf(worktype).map((s) => ({ value: s.id, label: s.label })), [defs, worktype]);
 
   return (
     <div className={embedded ? '' : 'min-h-screen bg-gray-50'}>
@@ -126,7 +170,7 @@ export default function FormBuilder({ savedForms, canSave, embedded }: { savedFo
             <div className="w-40">
               <label className={lbl}>Work Type</label>
               <ListPicker value={worktype} options={worktypeOptions} ariaLabel="Work type" className={trig}
-                onChange={(v) => { setWorktype(v); setSubtype(subtypesFor(v)[0]?.id || ''); setEditId(null); }} />
+                onChange={(v) => { setWorktype(v); setSubtype(subsOf(v)[0]?.id || ''); setEditId(null); }} />
             </div>
             <div className="w-40">
               <label className={lbl}>Subtype</label>
@@ -134,8 +178,33 @@ export default function FormBuilder({ savedForms, canSave, embedded }: { savedFo
             </div>
             <button onClick={addQ} className="ml-auto bg-brand text-white font-heading font-bold text-sm rounded-xl px-4 py-2.5">+ Add Question</button>
           </div>
+
+          {/* Add a work type / subtype (persisted on Save). */}
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            {addingWt ? (
+              <div className="flex items-center gap-2">
+                <input autoFocus value={newWtLabel} onChange={(e) => setNewWtLabel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addWorktype(); if (e.key === 'Escape') { setAddingWt(false); setNewWtLabel(''); } }}
+                  placeholder="New work type name" className="focus-brand text-[13px] border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white text-ink w-48" />
+                <button onClick={addWorktype} className="text-[12px] font-heading font-bold text-white bg-brand rounded-lg px-3 py-1.5">Add</button>
+                <button onClick={() => { setAddingWt(false); setNewWtLabel(''); }} className="text-[12px] font-heading font-semibold text-gray-500 px-1">Cancel</button>
+              </div>
+            ) : (
+              <button onClick={() => { setAddingWt(true); setAddingSub(false); }} className="text-[12px] font-heading font-semibold text-brand border border-brand/40 rounded-lg px-3 py-1.5 hover:bg-brand/5">+ New work type</button>
+            )}
+            {addingSub ? (
+              <div className="flex items-center gap-2">
+                <input autoFocus value={newSubLabel} onChange={(e) => setNewSubLabel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addSubtype(); if (e.key === 'Escape') { setAddingSub(false); setNewSubLabel(''); } }}
+                  placeholder={`New ${wtLabelOf(worktype)} subtype`} className="focus-brand text-[13px] border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white text-ink w-48" />
+                <button onClick={addSubtype} className="text-[12px] font-heading font-bold text-white bg-brand rounded-lg px-3 py-1.5">Add</button>
+                <button onClick={() => { setAddingSub(false); setNewSubLabel(''); }} className="text-[12px] font-heading font-semibold text-gray-500 px-1">Cancel</button>
+              </div>
+            ) : (
+              <button onClick={() => { setAddingSub(true); setAddingWt(false); }} className="text-[12px] font-heading font-semibold text-brand border border-brand/40 rounded-lg px-3 py-1.5 hover:bg-brand/5">+ New subtype</button>
+            )}
+          </div>
+
           <p className="text-[12px] text-gray-500 mt-3">
-            Questions for <b className="text-ink">{worktypeLabel(worktype)} · {subtypeLabel(worktype, subtype)}</b>. <b>Save</b> to apply to new service completions of this type.
+            Questions for <b className="text-ink">{wtLabelOf(worktype)} · {subLabelOf(worktype, subtype)}</b>. <b>Save</b> to apply to new service completions of this type.
           </p>
         </section>
 

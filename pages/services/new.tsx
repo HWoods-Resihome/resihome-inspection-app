@@ -12,11 +12,12 @@ import { AutoGrowTextarea } from '@/components/AutoGrowTextarea';
 import { Combobox } from '@/components/Combobox';
 import { DatePicker } from '@/components/DatePicker';
 import { PriceField } from '@/components/PriceField';
-import { WORKTYPES, worktypeLabel, subtypeLabel, descriptionFor, subtypesFor, defaultRateFor } from '@/lib/services/worktypes';
+import { descriptionFor, defaultRateFor, mergeWorktypes, type CustomWorktypeDef } from '@/lib/services/worktypes';
 import { sanitizeNum, clientFrom } from '@/lib/services/pricing';
 import { fmtMDY } from '@/lib/services/sampleData';
 import { SERVICE_VENDOR_NAMES, DEFAULT_SERVICE_VENDOR } from '@/lib/services/vendors';
 import { syncAllProperties, searchCachedProperties } from '@/lib/propertyCache';
+import { readServiceTaxonomy } from '@/lib/hubspot';
 
 interface PropOpt { value: string; label: string; sublabel: string; address: string; locality: string; region: string; }
 
@@ -27,10 +28,11 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const ok = await servicesEnabled(session?.email).catch(() => false);
   if (!ok || !isInternalEmail(session?.email) || isViewingAsVendor(ctx.req)) return { redirect: { destination: '/services', permanent: false } };
-  return { props: {} };
+  const taxonomy = await readServiceTaxonomy().catch(() => null);
+  return { props: { servicesTaxonomy: (taxonomy as CustomWorktypeDef[] | null) || null } };
 };
 
-export default function NewService() {
+export default function NewService({ servicesTaxonomy }: { servicesTaxonomy: CustomWorktypeDef[] | null }) {
   const [worktype, setWorktype] = useState('');
   const [subtype, setSubtype] = useState('');
   const [description, setDescription] = useState('');
@@ -132,8 +134,13 @@ export default function NewService() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const worktypeOptions = useMemo(() => WORKTYPES.filter((w) => w.scopes.includes(scope)).map((w) => ({ value: w.id, label: w.label })), [scope]);
-  const subtypeOptions = useMemo(() => subtypesFor(worktype).map((s) => ({ value: s.id, label: s.label })), [worktype]);
+  // Built-in taxonomy merged with the admin's custom work types / subtypes.
+  const defs = useMemo(() => mergeWorktypes(servicesTaxonomy), [servicesTaxonomy]);
+  const subsOf = (wt: string) => defs.find((w) => w.id === wt)?.subtypes || [];
+  const wtLabelOf = (wt: string) => defs.find((w) => w.id === wt)?.label || wt;
+  const subLabelOf = (wt: string, st: string) => subsOf(wt).find((s) => s.id === st)?.label || st;
+  const worktypeOptions = useMemo(() => defs.filter((w) => w.scopes.includes(scope)).map((w) => ({ value: w.id, label: w.label })), [defs, scope]);
+  const subtypeOptions = useMemo(() => subsOf(worktype).map((s) => ({ value: s.id, label: s.label })), [defs, worktype]);
   const communityOptions = useMemo(() => communities.map((c) => ({ value: c.name, label: c.name, sublabel: c.units ? `${c.units} units` : undefined })), [communities]);
   const vendorOptions = SERVICE_VENDOR_NAMES.map((v) => ({ value: v, label: v }));
 
@@ -156,7 +163,7 @@ export default function NewService() {
           <div className="bg-white border border-emerald-300 rounded-2xl p-6 text-center">
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
             <div className="font-heading font-extrabold text-lg text-ink">Service Created</div>
-            <p className="text-sm text-ink mt-1 font-semibold">{worktypeLabel(worktype)} · {subtypeLabel(worktype, subtype)}</p>
+            <p className="text-sm text-ink mt-1 font-semibold">{wtLabelOf(worktype)} · {subLabelOf(worktype, subtype)}</p>
             <p className="text-sm text-gray-500">{confirmTarget} · Due {fmtMDY(dueDate)}</p>
             <div className="flex gap-2 justify-center mt-4">
               <button onClick={() => { setCreated(false); setWorktype(''); setSubtype(''); setTarget(''); setSelectedProp(null); setDueDate(''); setVendor(DEFAULT_SERVICE_VENDOR.name); }} className="border border-gray-300 bg-white rounded-xl px-4 py-2 font-heading font-bold text-sm">Create another</button>
@@ -171,7 +178,7 @@ export default function NewService() {
               {/* 1 — Work type + subtype */}
               <div>
                 <label className={lbl}>Work Type</label>
-                <ListPicker value={worktype} options={worktypeOptions} onChange={(v) => { setWorktype(v); setSubtype(subtypesFor(v)[0]?.id || ''); }} ariaLabel="Select a work type" placeholder="Select a work type…" className={trig} />
+                <ListPicker value={worktype} options={worktypeOptions} onChange={(v) => { setWorktype(v); setSubtype(subsOf(v)[0]?.id || ''); }} ariaLabel="Select a work type" placeholder="Select a work type…" className={trig} />
               </div>
               <div>
                 <label className={lbl}>Subtype</label>

@@ -59,6 +59,31 @@ export const WORKTYPES: WorktypeDef[] = [
   },
 ];
 
+// Admin-added work types / subtypes (persisted as JSON on the agent record).
+// A custom entry keyed to a BUILT-IN worktype id just contributes extra subtypes;
+// a new id adds a whole new worktype.
+export interface CustomWorktypeDef { id: string; label: string; subtypes: { id: string; label: string }[]; }
+
+/** Built-in taxonomy merged with the admin's custom work types / subtypes. */
+export function mergeWorktypes(custom?: CustomWorktypeDef[] | null): WorktypeDef[] {
+  if (!custom || !custom.length) return WORKTYPES;
+  const out: WorktypeDef[] = WORKTYPES.map((w) => ({ ...w, subtypes: [...w.subtypes] }));
+  for (const c of custom) {
+    if (!c || !c.id) continue;
+    const existing = out.find((w) => w.id === c.id);
+    if (existing) {
+      for (const s of c.subtypes || []) if (s?.id && !existing.subtypes.some((x) => x.id === s.id)) existing.subtypes.push({ id: s.id, label: s.label || s.id });
+    } else {
+      out.push({ id: c.id as Worktype, label: c.label || c.id, scopes: ['property', 'community'], defaultDescription: '', subtypes: (c.subtypes || []).filter((s) => s?.id).map((s) => ({ id: s.id, label: s.label || s.id })) });
+    }
+  }
+  return out;
+}
+
+/** Slugify a human label into a stable id (a-z0-9_). */
+export const slugifyId = (label: string): string =>
+  String(label || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+
 export const worktypeLabel = (id: string): string => WORKTYPES.find((w) => w.id === id)?.label || id;
 export const worktypeDescription = (id: string): string => WORKTYPES.find((w) => w.id === id)?.defaultDescription || '';
 /** Default scope-of-work language for a worktype+subtype: the subtype's own text when set, else the worktype default. */

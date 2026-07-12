@@ -17,7 +17,8 @@ import type { GetServerSideProps } from 'next';
 import type { NextApiRequest } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { isAppAdmin } from '@/lib/adminAccess';
-import { readServiceForms } from '@/lib/hubspot';
+import { readServiceForms, readServiceTaxonomy } from '@/lib/hubspot';
+import type { CustomWorktypeDef } from '@/lib/services/worktypes';
 import type { ServiceQuestion } from '@/lib/services/serviceForms';
 import ServicesFormBuilder from '@/pages/services/forms';
 
@@ -27,7 +28,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const session = await getSessionFromRequest(ctx.req as unknown as NextApiRequest).catch(() => null);
   const admin = await isAppAdmin(session?.email).catch(() => false);
   const servicesForms = admin ? await readServiceForms().catch(() => null) : null;
-  return { props: { servicesForms: servicesForms || null } };
+  const servicesTaxonomy = admin ? await readServiceTaxonomy().catch(() => null) : null;
+  return { props: { servicesForms: servicesForms || null, servicesTaxonomy: (servicesTaxonomy as CustomWorktypeDef[] | null) || null } };
 };
 
 interface TemplateInfo { id: string; label: string; custom: boolean; }
@@ -179,7 +181,7 @@ function QuestionEditor({ initial, onSave, onCancel, busy, knownSections = [] }:
   );
 }
 
-export default function FormBuilderPage({ servicesForms }: { servicesForms: Record<string, ServiceQuestion[]> | null }) {
+export default function FormBuilderPage({ servicesForms, servicesTaxonomy }: { servicesForms: Record<string, ServiceQuestion[]> | null; servicesTaxonomy: CustomWorktypeDef[] | null }) {
   const router = useRouter();
   const [tab, setTab] = useState<'inspections' | 'services'>(router.query.tab === 'services' ? 'services' : 'inspections');
   const [authChecked, setAuthChecked] = useState(false);
@@ -575,7 +577,7 @@ export default function FormBuilderPage({ servicesForms }: { servicesForms: Reco
           ))}
         </div>
         {tab === 'services' ? (
-          <ServicesFormBuilder embedded savedForms={servicesForms} canSave={isAdmin} />
+          <ServicesFormBuilder embedded savedForms={servicesForms} savedTaxonomy={servicesTaxonomy} canSave={isAdmin} />
         ) : (
         <>
         <div className="flex items-end justify-between gap-2 mb-1">

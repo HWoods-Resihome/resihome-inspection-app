@@ -5108,6 +5108,7 @@ const AI_KB_PROP = 'ai_knowledge_base_json';
 // screen reads the forms, the AI review reads the checks.
 const SERVICE_FORMS_PROP = 'service_forms_json';
 const SERVICE_CHECKS_PROP = 'service_ai_checks_json';
+const SERVICE_TAXONOMY_PROP = 'service_taxonomy_json';
 
 async function ensureAgentProp(prop: string, label: string): Promise<string | null> {
   const recId = await resolveKnowledgeAgentRecordId();
@@ -5150,6 +5151,10 @@ export function writeServiceForms(forms: Record<string, any[]>): Promise<boolean
 /** Service AI-review checks (array). Null when unset/unreachable. */
 export function readServiceAiChecks(): Promise<any[] | null> { return readAgentJson<any[]>(SERVICE_CHECKS_PROP); }
 export function writeServiceAiChecks(checks: any[]): Promise<boolean> { return writeAgentJson(SERVICE_CHECKS_PROP, 'Service AI Checks (JSON)', checks); }
+
+/** Admin-added work types / subtypes (array of custom worktype defs). Null when unset. */
+export function readServiceTaxonomy(): Promise<any[] | null> { return readAgentJson<any[]>(SERVICE_TAXONOMY_PROP); }
+export function writeServiceTaxonomy(taxonomy: any[]): Promise<boolean> { return writeAgentJson(SERVICE_TAXONOMY_PROP, 'Service Taxonomy (JSON)', taxonomy); }
 
 /** A learned service-check candidate produced by the review-learning loop. */
 export interface AutoServiceCheckCandidate {
