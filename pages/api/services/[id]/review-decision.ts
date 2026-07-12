@@ -20,8 +20,17 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSessionFromRequest } from '@/lib/auth';
 import { servicesEnabled } from '@/lib/servicesAccess';
 import { isInternalEmail } from '@/lib/userAccess';
-import { fetchServiceWorkOrder, patchServiceWorkOrder } from '@/lib/hubspot';
+import { fetchServiceWorkOrder, patchServiceWorkOrder, createServiceWorkOrder } from '@/lib/hubspot';
 import { recordServiceAudit } from '@/lib/services/serviceAudit';
+import { defaultRateFor } from '@/lib/services/worktypes';
+import { easternTodayISO } from '@/lib/services/sampleData';
+
+/** Add whole days to a YYYY-MM-DD date, returned as YYYY-MM-DD (UTC-safe). */
+const addDaysISO = (iso: string, days: number): string => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
@@ -78,7 +87,51 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     await patchServiceWorkOrder(id, props);
     const decisionLabel = decision === 'reject' ? 'Rejected — payment denied' : decision === 'modify' ? 'Modified pricing' : 'Approved';
     void recordServiceAudit({ serviceId: id, action: 'review', actorEmail: email, actorName: session?.name, detail: `${decisionLabel}: ${notes}`.slice(0, 500), meta: { decision } });
-    return res.status(200).json({ ok: true, id, decision, status: 'completed', vendorCost: props.vendor_cost ?? originalVendorCost });
+
+    // Re-Issue: the reviewer wants the work redone. Spin up a fresh service with
+    // the SAME requirements (worktype/subtype/description), property/community,
+    // and vendor — due in N days — with the reviewer's note surfaced at the top
+    // of the description for the vendor. The original above already closed out.
+    let reissuedId: string | null = null;
+    if (b.reissue) {
+      const days = Math.max(1, Math.round(Number(b.reissueDays) || 0));
+      const dueDate = addDaysISO(easternTodayISO(), days);
+      const reNote = String(b.reissueNote || '').trim();
+      // Recover the original job cost (submit had reduced vendor_cost to the trip
+      // fee; adding back the recorded adjustment restores the real rate). Fall
+      // back to the worktype/subtype default if it can't be reconstructed.
+      const adj = Number(p.vendor_cost_adjustment);
+      let jobCost = Number(p.vendor_cost);
+      if (Number.isFinite(adj)) jobCost = (Number.isFinite(jobCost) ? jobCost : 0) + adj;
+      if (!Number.isFinite(jobCost) || jobCost <= 0) jobCost = defaultRateFor(String(p.worktype || ''), String(p.subtype || '')) ?? 0;
+      const markup = Number(p.markup_pct);
+      const clientCost = Number.isFinite(markup) ? Math.round(jobCost * (1 + markup / 100) * 100) / 100 : jobCost;
+      const origDesc = String(p.service_description || '');
+      const reBy = session?.name || email || 'Office';
+      const newDesc = (reNote ? `⚠ Re-issued by ${reBy}: ${reNote}\n\n${origDesc}` : origDesc).slice(0, 2000);
+      const cloneProps: Record<string, any> = {
+        service_name: p.service_name || p.address_snapshot || 'Service',
+        worktype: p.worktype || '', subtype: p.subtype || '', status: 'assigned', is_bid_item: 'false',
+        scope: p.scope || 'property', service_description: newDesc, due_date: dueDate,
+        region_snapshot: p.region_snapshot || '', address_snapshot: p.address_snapshot || '', locality_snapshot: p.locality_snapshot || '',
+        community_name: p.community_name || '', property_status_snapshot: p.property_status_snapshot || '',
+        vendor_name: p.vendor_name || '', vendor_email: p.vendor_email || '',
+        pet_stations: p.pet_stations === 'true' ? 'true' : 'false',
+        vendor_cost: jobCost, ...(Number.isFinite(markup) ? { markup_pct: markup } : {}), client_cost: clientCost,
+        ...(p.property_id_ref ? { property_id_ref: p.property_id_ref } : {}),
+        ...(p.community_id_ref ? { community_id_ref: p.community_id_ref } : {}),
+        generated_by_rule_id: id, enrollment_key: `reissue:${id}`,
+      };
+      try {
+        reissuedId = await createServiceWorkOrder(cloneProps);
+        void recordServiceAudit({ serviceId: id, action: 'review', actorEmail: email, actorName: session?.name, detail: `Re-issued → new service ${reissuedId || '(preview)'} due ${dueDate}${reNote ? ` · note: ${reNote}` : ''}`.slice(0, 500), meta: { reissue: true, reissuedId, dueDate } });
+      } catch (e: any) {
+        console.warn('[services/review-decision] re-issue create failed:', e?.message || e);
+        // The original still closed out; surface the re-issue failure to the client.
+        return res.status(200).json({ ok: true, id, decision, status: 'completed', vendorCost: props.vendor_cost ?? originalVendorCost, reissued: false, reissueError: String(e?.message || e).slice(0, 200) });
+      }
+    }
+    return res.status(200).json({ ok: true, id, decision, status: 'completed', vendorCost: props.vendor_cost ?? originalVendorCost, reissued: !!b.reissue, reissuedId });
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300), detail: e?.detail || null });
   }

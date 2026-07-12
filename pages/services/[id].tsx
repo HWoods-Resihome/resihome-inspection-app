@@ -235,7 +235,7 @@ function CollapsibleSection({ title, subtitle, right, defaultOpen = true, bodyCl
   );
 }
 
-interface DecisionPayload { decision: 'approve' | 'modify' | 'reject'; vendorCost: number; markupPct: number; dueDays: number; notes: string; }
+interface DecisionPayload { decision: 'approve' | 'modify' | 'reject'; vendorCost: number; markupPct: number; dueDays: number; notes: string; reissue: boolean; reissueDays: number; reissueNote: string; }
 
 // Shared reviewer decision panel — used for BOTH the completion review (kind
 // 'review' → Completed) and the estimated bid review (kind 'bid' → Assigned, with
@@ -253,6 +253,12 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
   const [mk, setMk] = useState(String(orig.markup || 0));
   const [days, setDays] = useState('5');
   const [notes, setNotes] = useState('');
+  // Re-Issue (review only): spin up a fresh service with the same requirements,
+  // property/community, and vendor — due in N days — with an optional note for
+  // the vendor. The original still closes out per the decision above.
+  const [reissue, setReissue] = useState(false);
+  const [reissueDays, setReissueDays] = useState('5');
+  const [reissueNote, setReissueNote] = useState('');
   const money = (n: number) => `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmt2 = (v: string) => { const n = Number(v); return v.trim() !== '' && Number.isFinite(n) ? n.toFixed(2) : v; };
   const inputCls = 'w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand';
@@ -265,7 +271,8 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
   const hints = kind === 'bid'
     ? { approve: 'Assign as-is', modify: 'Edit pricing', reject: 'Cancel bid' }
     : { approve: 'Complete as-is', modify: 'Edit pricing', reject: 'Deny — $0' };
-  const canSubmit = !!decision && !!notes.trim() && (!needsDays || Number(days) > 0) && !busy;
+  const reissueOk = !reissue || Number(reissueDays) > 0;
+  const canSubmit = !!decision && !!notes.trim() && (!needsDays || Number(days) > 0) && reissueOk && !busy;
 
   const diffCls = (d: number) => d > 0 ? 'text-emerald-600' : d < 0 ? 'text-red-600' : 'text-gray-400';
   const signMoney = (d: number) => `${d > 0 ? '+' : d < 0 ? '−' : ''}$${Math.abs(d).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -276,10 +283,10 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
     ['modify', 'Modify', hints.modify, 'amber'],
     ['reject', 'Reject', hints.reject, 'red'],
   ] as const;
-  const submitLabel = decision === 'reject' ? (kind === 'bid' ? 'Reject → Canceled' : 'Reject → Completed')
+  const submitLabel = (decision === 'reject' ? (kind === 'bid' ? 'Reject → Canceled' : 'Reject → Completed')
     : decision === 'modify' ? `Save Changes → ${target}`
     : decision === 'approve' ? `Approve → ${target}`
-    : 'Choose a decision above';
+    : 'Choose a decision above') + (decision && kind === 'review' && reissue ? ' · Re-Issue' : '');
 
   const cell = 'text-[12px] tabular-nums';
   return (
@@ -349,6 +356,37 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
         </div>
       )}
 
+      {/* Re-Issue Service — review only. The original closes out per the decision;
+          a fresh service (same requirements/property/community/vendor) is created. */}
+      {kind === 'review' && (
+        <div className="border-t border-gray-100 pt-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[13px] font-heading font-semibold text-ink">Re-Issue Service?</span>
+            <div className="inline-flex rounded-lg border border-gray-300 bg-gray-100 p-0.5 text-[13px] font-heading font-semibold">
+              <button type="button" onClick={() => setReissue(true)} className={`px-4 py-1.5 rounded-md ${reissue ? 'bg-white text-brand shadow-sm' : 'text-gray-600'}`}>Yes</button>
+              <button type="button" onClick={() => setReissue(false)} className={`px-4 py-1.5 rounded-md ${!reissue ? 'bg-white text-ink shadow-sm' : 'text-gray-600'}`}>No</button>
+            </div>
+          </div>
+          {reissue ? (
+            <div className="mt-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-[13px] text-gray-500">Days until new service is due <span className="text-brand">*</span></span>
+                <input type="number" inputMode="numeric" value={reissueDays} onChange={(e) => setReissueDays(e.target.value)}
+                  className="w-16 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-brand" />
+              </div>
+              <div>
+                <label className="block text-[12px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">Note for the vendor <span className="text-gray-300 normal-case">(optional)</span></label>
+                <AutoGrowTextarea value={reissueNote} onChange={(e) => setReissueNote(e.target.value)} minPx={52} className={inputCls}
+                  placeholder="Shown at the top of the new request for the vendor…" />
+              </div>
+              <p className="text-[12px] text-gray-500">A new service with the original requirements — same property, community, and vendor — will be created, due in {Number(reissueDays) > 0 ? Number(reissueDays) : '…'} day{Number(reissueDays) === 1 ? '' : 's'}.</p>
+            </div>
+          ) : (
+            <p className="mt-2 text-[12px] text-gray-500">The service closes out as-is — no new service is created.</p>
+          )}
+        </div>
+      )}
+
       {/* Notes — below the options; required for every decision. */}
       <div>
         <label className="block text-[12px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">Decision note <span className="text-brand">*</span></label>
@@ -357,7 +395,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
       </div>
 
       <button type="button" disabled={!canSubmit}
-        onClick={() => canSubmit && onSubmit({ decision: decision as DecisionPayload['decision'], vendorCost: Number(vc || '0'), markupPct: Number(mk || '0'), dueDays: Number(days || '0'), notes })}
+        onClick={() => canSubmit && onSubmit({ decision: decision as DecisionPayload['decision'], vendorCost: Number(vc || '0'), markupPct: Number(mk || '0'), dueDays: Number(days || '0'), notes, reissue: kind === 'review' && reissue, reissueDays: Number(reissueDays || '0'), reissueNote })}
         className={`w-full rounded-xl py-3 font-heading font-bold text-sm ${
           !canSubmit ? 'bg-gray-200 text-gray-400'
             : decision === 'reject' ? 'bg-red-600 text-white' : decision === 'modify' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'}`}>
@@ -365,6 +403,7 @@ function DecisionPanel({ kind, orig, busy, error, onSubmit }: {
       </button>
       {decision && !notes.trim() && <div className="text-[12px] text-gray-400 text-center -mt-1">A decision note is required to finalize.</div>}
       {needsDays && !(Number(days) > 0) && <div className="text-[12px] text-gray-400 text-center -mt-1">Enter the days until due.</div>}
+      {kind === 'review' && reissue && !reissueOk && <div className="text-[12px] text-gray-400 text-center -mt-1">Enter the days until the re-issued service is due.</div>}
       {error && <div className="text-center text-xs text-red-600">{error}</div>}
     </section>
   );
@@ -401,6 +440,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const [petAfter, setPetAfter] = useState<string[]>(() => (editable ? svc.petAfter || [] : []));
   const [submitting, setSubmitting] = useState(false);
   const [doneStatus, setDoneStatus] = useState<string>('');   // '' | submitted | queued | completed
+  const [reissueMsg, setReissueMsg] = useState<string>('');   // set when a review re-issues the service
   const [error, setError] = useState('');
   const [pendingQueued, setPendingQueued] = useState(false);
   const setAns = (id: string, v: any) => setAnswers((a) => ({ ...a, [id]: v }));
@@ -599,11 +639,19 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     try {
       const body: any = { decision: p.decision, notes: p.notes };
       if (p.decision === 'modify') { body.vendorCost = p.vendorCost; body.markupPct = p.markupPct; }
+      if (p.reissue) { body.reissue = true; body.reissueDays = p.reissueDays; body.reissueNote = p.reissueNote; }
       const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/review-decision`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const d = await r.json();
       if (!r.ok) { setError(d.error || 'Could not save decision.'); return; }
+      if (p.reissue) {
+        setReissueMsg(d.reissued && d.reissuedId
+          ? 'A new service was created with the original requirements and assignment.'
+          : d.reissueError
+            ? `The service closed out, but the re-issue couldn’t be created: ${d.reissueError}`
+            : 'A new service was created with the original requirements and assignment.');
+      }
       setDoneStatus('completed');
     } catch { setError('Couldn’t reach the server. Try again.'); }
     finally { setDeciding(false); }
@@ -774,6 +822,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 grid place-items-center text-2xl mx-auto mb-3">✓</div>
             <div className="font-heading font-extrabold text-lg text-ink">Completed</div>
             <p className="text-sm text-gray-500 mt-1">The decision was recorded and the service is closed out.</p>
+            {reissueMsg && <p className="text-sm text-brand font-heading font-semibold mt-2">{reissueMsg}</p>}
             <Link href="/services" className="inline-block mt-4 bg-brand text-white font-heading font-bold text-sm rounded-xl px-5 py-2.5">Back to Services</Link>
           </div>
         ) : (
@@ -807,6 +856,14 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
             {editable ? (
               /* ── Editable completion form (assigned crew) ── */
               <>
+                {/* Office instructions / service brief — shown at the top for the
+                    vendor. Re-issued services carry the reviewer's note here. */}
+                {svc.description.trim() && (
+                  <section className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1">Instructions from the office</div>
+                    <p className="text-[13px] text-ink whitespace-pre-line">{svc.description}</p>
+                  </section>
+                )}
                 <CollapsibleSection title="Completion Checklist">
                   {form.length === 0 && <div className="text-[13px] text-gray-400">No completion form is configured for this service type yet.</div>}
                   {form.filter(isVisible).map((q) => (
