@@ -753,19 +753,23 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
     const notCompleted = String(completedAns) === 'no';
     let vendor = orig;
     let reason = '';
-    if (notCompleted || billAnswered) {
-      vendor = billTrip ? (defaultRateFor('trip_fee', 'base_trip_fee') ?? 0) : 0;
-      reason = billTrip ? 'Not completed — trip fee' : 'Not completed — no charge';
-    } else if (svc.worktype === 'landscaping' && svc.subtype === 'cut') {
-      const h = String(heightAns || '').toLowerCase();
-      vendor = (h.includes('heavy') || h.includes('over 12') || h.includes('12"+') || h.includes('12+')) ? 90
-        : (h.includes('overgrown') || h.includes('6-12') || h.includes('6–12') || h.includes('6 - 12')) ? 60 : 45;
-      const areas = Array.isArray(answers[GRASSCUT_AREAS_QID]) ? answers[GRASSCUT_AREAS_QID].map(String) : [];
-      if (areas.length > 0 && !areas.includes('Back Yard')) { vendor = Math.round(vendor * 0.75 * 100) / 100; reason = 'Back yard not serviced — 25% off'; }
+    // Property-scoped cost rules only. Community services keep their assigned
+    // cost here — their own cost logic is coming later.
+    if (svc.scope === 'property') {
+      if (notCompleted || billAnswered) {
+        vendor = billTrip ? (defaultRateFor('trip_fee', 'base_trip_fee') ?? 0) : 0;
+        reason = billTrip ? 'Not completed — trip fee' : 'Not completed — no charge';
+      } else if (svc.worktype === 'landscaping' && svc.subtype === 'cut') {
+        const h = String(heightAns || '').toLowerCase();
+        vendor = (h.includes('heavy') || h.includes('over 12') || h.includes('12"+') || h.includes('12+')) ? 90
+          : (h.includes('overgrown') || h.includes('6-12') || h.includes('6–12') || h.includes('6 - 12')) ? 60 : 45;
+        const areas = Array.isArray(answers[GRASSCUT_AREAS_QID]) ? answers[GRASSCUT_AREAS_QID].map(String) : [];
+        if (areas.length > 0 && !areas.includes('Back Yard')) { vendor = Math.round(vendor * 0.75 * 100) / 100; reason = 'Back yard not serviced — 25% off'; }
+      }
     }
     const client = Number.isFinite(markup) ? Math.round(vendor * (1 + markup / 100) * 100) / 100 : vendor;
     return { vendor, client, markup, reason, changed: Math.round(vendor * 100) !== Math.round(orig * 100) };
-  }, [answers, form, svc.vendorCost, svc.markupPct, svc.worktype, svc.subtype]);
+  }, [answers, form, svc.vendorCost, svc.markupPct, svc.worktype, svc.subtype, svc.scope]);
 
   const editableCostDetail = svc.vendorCost != null ? (
     <CollapsibleSection title="Cost Detail" bodyClass="space-y-1 text-[13px]">

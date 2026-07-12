@@ -78,6 +78,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const p0 = existing?.props || {};
   const worktype = String(p0.worktype || '');
   const subtype = String(p0.subtype || '');
+  // Cost logic below is PROPERTY-scoped only. Community services get their own
+  // cost rules (coming later) — for now their assigned cost is left untouched.
+  const isProperty = String(p0.scope || 'property') !== 'community';
   const origVendor = Number(p0.vendor_cost);
   const markup = Number(p0.markup_pct);
   const clientOf = (v: number) => (Number.isFinite(v) && Number.isFinite(markup) ? Math.round(v * (1 + markup / 100) * 100) / 100 : v);
@@ -106,17 +109,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   let routeToReview = false;
   if (closeoutNoWork) {
     routeToReview = true;                 // not completed → human review, no AI
-    const tripRate = defaultRateFor('trip_fee', 'base_trip_fee') ?? 0;
-    const finalV = billTrip ? tripRate : 0;
-    props.vendor_cost = finalV;
-    props.client_cost = clientOf(finalV);
-    if (Number.isFinite(origVendor)) {
-      props.vendor_cost_adjustment = Math.round((origVendor - finalV) * 100) / 100;
-      props.vendor_cost_adjustment_reason = billTrip ? 'Not completed — trip fee billed' : 'Not completed — no charge';
-    }
     props.ai_verdict = 'needs_review';
-    props.ai_notes = billTrip ? 'Vendor marked NOT completed — trip fee billed. Routed to review (AI skipped).' : 'Vendor marked NOT completed — no charge. Routed to review (AI skipped).';
-  } else if (worktype === 'landscaping' && subtype === 'cut') {
+    // Cost close-out (trip fee / no charge) is PROPERTY-only; community keeps its
+    // assigned cost until its own rules land.
+    if (isProperty) {
+      const tripRate = defaultRateFor('trip_fee', 'base_trip_fee') ?? 0;
+      const finalV = billTrip ? tripRate : 0;
+      props.vendor_cost = finalV;
+      props.client_cost = clientOf(finalV);
+      if (Number.isFinite(origVendor)) {
+        props.vendor_cost_adjustment = Math.round((origVendor - finalV) * 100) / 100;
+        props.vendor_cost_adjustment_reason = billTrip ? 'Not completed — trip fee billed' : 'Not completed — no charge';
+      }
+      props.ai_notes = billTrip ? 'Vendor marked NOT completed — trip fee billed. Routed to review (AI skipped).' : 'Vendor marked NOT completed — no charge. Routed to review (AI skipped).';
+    } else {
+      props.ai_notes = 'Vendor marked NOT completed. Routed to review (AI skipped) — community cost handled at review.';
+    }
+  } else if (isProperty && worktype === 'landscaping' && subtype === 'cut') {
     // Height-based hard rate, then a 25% cut if the back yard wasn't serviced.
     let finalV = grassCutRate(String(heightAns || ''));
     const areas = Array.isArray(answers[GRASSCUT_AREAS_QID]) ? answers[GRASSCUT_AREAS_QID].map(String) : [];
