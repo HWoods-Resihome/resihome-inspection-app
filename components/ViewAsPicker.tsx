@@ -76,7 +76,10 @@ export function ViewAsPicker({ onClose }: { onClose: () => void }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onFocus={() => setKbOpen(true)}
-            onBlur={() => setKbOpen(false)}
+            // Defer the re-center so a tap on a result row registers its click
+            // BEFORE the layout shifts (otherwise the row moves out from under
+            // the finger and the tap is lost).
+            onBlur={() => window.setTimeout(() => setKbOpen(false), 250)}
             placeholder="Search users or vendors…"
             className="focus-brand w-full border border-gray-300 rounded-lg px-3 py-2 text-base bg-white text-ink placeholder-gray-400"
           />
