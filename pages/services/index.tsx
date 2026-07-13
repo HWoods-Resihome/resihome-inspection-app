@@ -153,7 +153,9 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   // keeps its fixed reference date). Strict "<" so a service due TODAY is still
   // on-time — it only goes red once at least a day past due.
   const todayISO = useMemo(() => (live ? easternTodayISO() : REFERENCE_TODAY), [live]);
-  const [status, setStatus] = useState<ServiceStatus | 'all'>('all');
+  // 'all' = everything (incl. completed); 'all_open' = everything except completed.
+  // Tapping the All chip cycles between the two.
+  const [status, setStatus] = useState<ServiceStatus | 'all' | 'all_open'>('all');
   const [worktype, setWorktype] = useState<string[]>([]);
   const [vendor, setVendor] = useState<string[]>([]);
   const [region, setRegion] = useState<string[]>([]);
@@ -247,7 +249,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   // hides cancelled records and doesn't count them).
   const counts = useMemo(() => {
     const active = scoped.filter((s) => s.status !== 'canceled');
-    const c: Record<string, number> = { all: active.length };
+    const c: Record<string, number> = { all: active.length, all_open: active.filter((s) => OPEN_STATUSES.includes(s.status)).length };
     for (const st of SAMPLE_STATUS_ORDER) c[st] = active.filter((s) => s.status === st).length;
     return c;
   }, [scoped]);
@@ -255,6 +257,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
   const rows = useMemo(() => {
     let list = scoped.filter((s) => s.status !== 'canceled');
     if (pastDueOnly) list = list.filter((s) => OPEN_STATUSES.includes(s.status) && !!s.dueDate && s.dueDate < todayISO);
+    else if (status === 'all_open') list = list.filter((s) => OPEN_STATUSES.includes(s.status));
     else if (status !== 'all') list = list.filter((s) => s.status === status);
     const dir = sortDir === 'asc' ? 1 : -1;
     const key = (s: typeof list[number]) => ({
@@ -393,7 +396,13 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
         {filtersOpen && (
           <div className="space-y-1.5 mb-3">
             <div className="grid grid-cols-3 gap-1.5">
-              {chip('all', 'All')}{chip('estimated', 'Estimate')}{chip('assigned', 'Assigned')}{chip('submitted', 'Submitted')}{chip('review', 'Review')}{chip('completed', 'Completed')}
+              <button type="button" onClick={() => { setPastDueOnly(false); setStatus((s) => (s === 'all' ? 'all_open' : 'all')); }}
+                title="Tap again to toggle All ↔ All Open (hide completed)"
+                className={`w-full text-center text-[11px] font-heading font-semibold px-2 py-1.5 rounded-full border transition whitespace-nowrap ${
+                  (status === 'all' || status === 'all_open') && !pastDueOnly ? 'bg-brand text-white border-brand' : 'bg-white text-ink border-gray-300 hover:border-brand/50'}`}>
+                {status === 'all_open' ? `All Open (${counts.all_open})` : `All (${counts.all})`}
+              </button>
+              {chip('estimated', 'Estimate')}{chip('assigned', 'Assigned')}{chip('submitted', 'Submitted')}{chip('review', 'Review')}{chip('completed', 'Completed')}
             </div>
             <div className="flex items-center gap-2 pt-1">
               <div className="flex-1 min-w-0">
