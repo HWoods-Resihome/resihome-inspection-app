@@ -233,7 +233,7 @@ async function enrichCommunityLocalities(items: InspectionSummary[]): Promise<In
   });
 }
 
-const STATUS_KEYS: InspectionStatusKey[] = ['all', 'scheduled', 'in_progress', 'pending_approval', 'completed'];
+const STATUS_KEYS: InspectionStatusKey[] = ['all', 'open', 'scheduled', 'in_progress', 'pending_approval', 'completed'];
 const ZERO_COUNTS: InspectionCounts = { all: 0, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {

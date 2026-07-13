@@ -2195,8 +2195,10 @@ const STATUS_VARIANTS: Record<string, string[]> = {
   completed: ['completed', 'complete', 'Completed', 'submitted'],
 };
 const CANCELLED_VARIANTS = ['cancelled', 'canceled', 'Cancelled', 'Canceled'];
+// "Open" = everything still in flight: not completed and not cancelled.
+const OPEN_EXCLUDE_VARIANTS = [...STATUS_VARIANTS.completed, ...CANCELLED_VARIANTS];
 
-export type InspectionStatusKey = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
+export type InspectionStatusKey = 'all' | 'open' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
 export type InspectionSortField = 'date' | 'updated' | 'scheduled' | 'address' | 'inspector' | 'price' | 'property_status';
 
 export interface InspectionQuery {
@@ -2232,7 +2234,10 @@ export interface InspectionCounts {
 function inspectionAndFilters(q: InspectionQuery): any[] {
   const filters: any[] = [];
   const status = q.status && q.status !== 'all' ? q.status : '';
-  if (status && STATUS_VARIANTS[status]) {
+  if (status === 'open') {
+    // "All Open" — everything except completed (cancelled already excluded).
+    filters.push({ propertyName: 'status', operator: 'NOT_IN', values: OPEN_EXCLUDE_VARIANTS });
+  } else if (status && STATUS_VARIANTS[status]) {
     filters.push({ propertyName: 'status', operator: 'IN', values: STATUS_VARIANTS[status] });
   } else {
     // "All" still hides cancelled inspections from the field team.
@@ -2287,9 +2292,11 @@ function externalAllowGroups(q: InspectionQuery): { filters: any[] }[] {
   const groups: { filters: any[] }[] = [];
   // 1099 group: the user's OWN 1099s — the selected status, or all non-cancelled.
   if (editTpls.length) {
-    const statusFilter = status && STATUS_VARIANTS[status]
-      ? { propertyName: 'status', operator: 'IN', values: STATUS_VARIANTS[status] }
-      : { propertyName: 'status', operator: 'NOT_IN', values: CANCELLED_VARIANTS };
+    const statusFilter = status === 'open'
+      ? { propertyName: 'status', operator: 'NOT_IN', values: OPEN_EXCLUDE_VARIANTS }
+      : status && STATUS_VARIANTS[status]
+        ? { propertyName: 'status', operator: 'IN', values: STATUS_VARIANTS[status] }
+        : { propertyName: 'status', operator: 'NOT_IN', values: CANCELLED_VARIANTS };
     groups.push({ filters: [{ propertyName: 'template_type', operator: 'IN', values: editTpls }, statusFilter, ...ownerFilter, ...common] });
   }
   // Scope / Re-Inspect group: COMPLETED only, and STATE-GATED — restricted to
@@ -2492,7 +2499,9 @@ export async function countInspectionsByStatus(q: InspectionQuery): Promise<Insp
   // all 5 simultaneously slammed HubSpot's per-second search bucket and was the
   // main driver of the 429 spikes on /api/inspections. Bounding the burst spreads
   // them out. Order-independent — each writes its own slot.
-  const out: Record<InspectionStatusKey, number> = { all: 0, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0 };
+  // 'open' isn't counted server-side (the client derives it as all − completed);
+  // it's present here only to satisfy the Record type.
+  const out: Record<InspectionStatusKey, number> = { all: 0, open: 0, scheduled: 0, in_progress: 0, pending_approval: 0, completed: 0 };
   const COUNT_CONCURRENCY = 3;
   let idx = 0;
   const worker = async () => {

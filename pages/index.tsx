@@ -22,7 +22,7 @@ import { syncAllProperties, dropPropertyMemCache } from '@/lib/propertyCache';
 
 interface MeUser { userId: string; email: string; name: string; }
 
-type StatusFilter = 'all' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
+type StatusFilter = 'all' | 'open' | 'scheduled' | 'in_progress' | 'pending_approval' | 'completed';
 type StatusCounts = { all: number; scheduled: number; in_progress: number; pending_approval: number; completed: number };
 
 // The five sortable fields, in dropdown order. Value is what the server's
@@ -911,7 +911,12 @@ export default function Home() {
               the inspector can switch/clear filters even before/while it loads. */}
           <div className="space-y-1.5 mb-3">
             <div className="flex gap-1.5">
-              <FilterChip className="flex-1" label={countsKnown ? `All (${counts.all})` : 'All'} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
+              <FilterChip className="flex-1"
+                label={countsKnown
+                  ? (statusFilter === 'open' ? `All Open (${counts.all - counts.completed})` : `All (${counts.all})`)
+                  : (statusFilter === 'open' ? 'All Open' : 'All')}
+                active={statusFilter === 'all' || statusFilter === 'open'}
+                onClick={() => setStatusFilter(statusFilter === 'all' ? 'open' : 'all')} />
               <FilterChip className="flex-1" label={countsKnown ? `Scheduled (${counts.scheduled})` : 'Scheduled'} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter(statusFilter === 'scheduled' ? 'all' : 'scheduled')} />
               <FilterChip className="flex-1" label={countsKnown ? `In Progress (${counts.in_progress})` : 'In Progress'} active={statusFilter === 'in_progress'} onClick={() => setStatusFilter(statusFilter === 'in_progress' ? 'all' : 'in_progress')} />
             </div>
