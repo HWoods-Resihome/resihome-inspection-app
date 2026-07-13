@@ -167,15 +167,15 @@ export default function NewService({ servicesTaxonomy }: { servicesTaxonomy: Cus
             <div className="font-heading font-extrabold text-lg text-ink">Service Created</div>
             <p className="text-sm text-ink mt-1 font-semibold">{wtLabelOf(worktype)} · {subLabelOf(worktype, subtype)}</p>
             <p className="text-sm text-gray-500">{confirmTarget} · Due {fmtMDY(dueDate)}</p>
-            <div className="flex flex-wrap gap-2 justify-center mt-4">
+            <div className={`grid ${createdId ? 'grid-cols-3' : 'grid-cols-2'} gap-2 mt-4`}>
               {/* Open the new record directly (a by-id fetch, available immediately —
                   the list search can lag a few seconds behind a fresh create). */}
               {createdId && (
-                <a href={`/services/${encodeURIComponent(createdId)}`} className="bg-brand text-white rounded-xl px-5 py-2 font-heading font-bold text-sm">Open Service</a>
+                <a href={`/services/${encodeURIComponent(createdId)}`} className="bg-brand text-white rounded-xl px-3 py-2 font-heading font-bold text-[13px] text-center leading-tight grid place-items-center">Open Service</a>
               )}
-              <button onClick={() => { setCreated(false); setCreatedId(null); setWorktype(''); setSubtype(''); setTarget(''); setSelectedProp(null); setDueDate(''); setVendor(DEFAULT_SERVICE_VENDOR.name); }} className="border border-gray-300 bg-white rounded-xl px-4 py-2 font-heading font-bold text-sm">Create another</button>
+              <button onClick={() => { setCreated(false); setCreatedId(null); setWorktype(''); setSubtype(''); setTarget(''); setSelectedProp(null); setDueDate(''); setVendor(DEFAULT_SERVICE_VENDOR.name); }} className="border border-gray-300 bg-white rounded-xl px-3 py-2 font-heading font-bold text-[13px] text-center leading-tight">Create Another</button>
               {/* Hard navigation so the Services list re-runs its server fetch. */}
-              <a href="/services" className={`rounded-xl px-5 py-2 font-heading font-bold text-sm ${createdId ? 'border border-gray-300 bg-white text-ink' : 'bg-brand text-white'}`}>Back to Services</a>
+              <a href="/services" className={`rounded-xl px-3 py-2 font-heading font-bold text-[13px] text-center leading-tight grid place-items-center ${createdId ? 'border border-gray-300 bg-white text-ink' : 'bg-brand text-white'}`}>Back to Services</a>
             </div>
           </div>
         ) : (

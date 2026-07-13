@@ -960,22 +960,22 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                         </>
                       )}
                       {q.type === 'single' && (
-                        <div className="flex flex-wrap gap-2">
+                        <div className={`gap-2 ${(q.options || []).length === 3 ? 'grid grid-cols-3' : 'flex flex-wrap'}`}>
                           {(q.options || []).map((o) => (
                             <button key={o.id} type="button" onClick={() => setAns(q.id, o.label)}
-                              className={`px-3 py-1.5 rounded-full border text-[13px] font-heading font-semibold ${answers[q.id] === o.label ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
+                              className={`px-3 py-1.5 rounded-xl border text-[13px] font-heading font-semibold text-center leading-tight ${answers[q.id] === o.label ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
                           ))}
                         </div>
                       )}
                       {q.type === 'multi' && (
-                        <div className="flex flex-wrap gap-2">
+                        <div className={`gap-2 ${(q.options || []).length === 3 ? 'grid grid-cols-3' : 'flex flex-wrap'}`}>
                           {(q.options || []).map((o) => {
                             const sel: string[] = Array.isArray(answers[q.id]) ? answers[q.id] : [];
                             const on = sel.includes(o.label);
                             return (
                               <button key={o.id} type="button"
                                 onClick={() => setAns(q.id, on ? sel.filter((x) => x !== o.label) : [...sel, o.label])}
-                                className={`px-3 py-1.5 rounded-full border text-[13px] font-heading font-semibold ${on ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
+                                className={`px-3 py-1.5 rounded-xl border text-[13px] font-heading font-semibold text-center leading-tight ${on ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300'}`}>{o.label}</button>
                             );
                           })}
                         </div>
@@ -1021,7 +1021,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                 </CollapsibleSection>
 
                 {/* Additional-work bid — spawns an Estimated "Bid Item" for review. */}
-                <CollapsibleSection title="Submit Separate Bid Item Request" subtitle="Have additional items that need a separate bid? Flag here — the office will review the bid separately." bodyClass="space-y-3">
+                <CollapsibleSection title="Submit Bid Item?" subtitle="Have additional items that need a separate bid? Flag here — the office will review the bid separately." bodyClass="space-y-3">
                   <div className="flex gap-2">
                     {([['no', 'No'], ['yes', 'Yes — submit a bid']] as const).map(([v, label]) => (
                       <button key={v} type="button" onClick={() => setBidWanted(v === 'yes')}

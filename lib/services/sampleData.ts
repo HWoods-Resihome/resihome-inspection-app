@@ -88,11 +88,11 @@ export const SAMPLE_STATUS_ORDER: ServiceStatus[] =
 // Shared status chip label + color (used on the home list AND the service record
 // header so a status reads identically everywhere).
 export const SERVICE_STATUS_LABEL: Record<ServiceStatus, string> = {
-  estimated: 'Estimated', assigned: 'Assigned', submitted: 'Submitted',
+  estimated: 'Estimate', assigned: 'Assigned', submitted: 'Submitted',
   review: 'Review', completed: 'Completed', canceled: 'Canceled',
 };
 export const SERVICE_STATUS_STYLE: Record<ServiceStatus, string> = {
-  estimated: 'bg-gray-100 text-gray-700 border-gray-300',
+  estimated: 'bg-rose-100 text-rose-700 border-rose-200',
   assigned: 'bg-sky-100 text-sky-800 border-sky-300',
   submitted: 'bg-amber-100 text-amber-800 border-amber-300',
   review: 'bg-purple-100 text-purple-800 border-purple-300',

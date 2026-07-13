@@ -115,7 +115,7 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
         <span className="text-[12px] shrink-0 text-right">{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
       </div>
       {s.status === 'estimated'
-        ? <div className="mt-0.5 text-[12px] font-semibold text-gray-600">Estimated{(s.estimatedAt || s.dueDate) ? ` ${fmtMDY(s.estimatedAt || s.dueDate)}` : ''}</div>
+        ? <div className="mt-0.5 text-[12px] font-semibold text-gray-600">Estimate{(s.estimatedAt || s.dueDate) ? ` ${fmtMDY(s.estimatedAt || s.dueDate)}` : ''}</div>
         : <div className={`mt-0.5 text-[12px] ${overdue ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>Due {fmtMDY(s.dueDate)}</div>}
     </Link>
   );
@@ -374,7 +374,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
         {filtersOpen && (
           <div className="space-y-1.5 mb-3">
             <div className="grid grid-cols-3 gap-1.5">
-              {chip('all', 'All')}{chip('estimated', 'Estimated')}{chip('assigned', 'Assigned')}{chip('submitted', 'Submitted')}{chip('review', 'Review')}{chip('completed', 'Completed')}
+              {chip('all', 'All')}{chip('estimated', 'Estimate')}{chip('assigned', 'Assigned')}{chip('submitted', 'Submitted')}{chip('review', 'Review')}{chip('completed', 'Completed')}
             </div>
             <div className="flex items-center gap-2 pt-1">
               <div className="flex-1 min-w-0">
