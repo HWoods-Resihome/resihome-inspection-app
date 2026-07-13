@@ -49,7 +49,7 @@ export default function InsightsPortal() {
       <div className="min-h-screen bg-[#0e0e11]">
         {/* Standard centered header (logo + title + back), with the account menu
             in the right slot. */}
-        <PageHeader title="Insights" backHref="/" maxW="max-w-[1600px]" />
+        <PageHeader title="Insights" onBack={() => { if (typeof window !== 'undefined' && window.history.length > 1) window.history.back(); else window.location.href = '/'; }} backHref="/" maxW="max-w-[1600px]" />
 
         <main className="max-w-[1600px] mx-auto px-5 py-6">
           {loading ? (

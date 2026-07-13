@@ -598,7 +598,7 @@ export default function RulesEngine({ ruleRecords, live, canGenerate, taxonomy }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <PageHeader title="Rules Engine" backHref="/services" maxW="max-w-3xl" />
+      <PageHeader title="Rules Engine" onBack={() => { if (typeof window !== 'undefined' && window.history.length > 1) window.history.back(); else window.location.href = '/services'; }} backHref="/services" maxW="max-w-3xl" />
 
       {openId === null ? (
         /* ───────────── LIST VIEW: search + filters + rule cards ───────────── */

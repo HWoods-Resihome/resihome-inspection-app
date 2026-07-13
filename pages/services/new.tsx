@@ -234,11 +234,11 @@ export default function NewService({ servicesTaxonomy }: { servicesTaxonomy: Cus
               {/* 4 — Due date + Vendor */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className={lbl}>Due date</label>
+                  <label className={lbl}>Due Date</label>
                   <DatePicker value={dueDate} onChange={setDueDate} placeholder="Pick a due date" />
                 </div>
                 <div>
-                  <label className={lbl}>Vendor assignment</label>
+                  <label className={lbl}>Vendor Assignment</label>
                   <ListPicker value={vendor} options={vendorOptions} onChange={setVendor} ariaLabel="Select a vendor" placeholder="Select a vendor…" className={trig} />
                 </div>
               </div>

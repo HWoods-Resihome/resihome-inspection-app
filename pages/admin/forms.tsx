@@ -567,7 +567,7 @@ export default function FormBuilderPage({ servicesForms, servicesTaxonomy }: { s
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <PageHeader title="Form Builder" backHref="/" maxW="max-w-3xl" />
+      <PageHeader title="Form Builder" onBack={() => (typeof window !== 'undefined' && window.history.length > 1 ? router.back() : router.push('/'))} backHref="/" maxW="max-w-3xl" />
 
       <main className="max-w-3xl mx-auto px-4 py-5">
         {/* Unified builder: Inspections templates + Services completion forms. */}
