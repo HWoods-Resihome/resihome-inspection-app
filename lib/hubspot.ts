@@ -5312,6 +5312,15 @@ export function writeServiceAiChecks(checks: any[]): Promise<boolean> { return w
 export function readServiceTaxonomy(): Promise<any[] | null> { return readAgentJson<any[]>(SERVICE_TAXONOMY_PROP); }
 export function writeServiceTaxonomy(taxonomy: any[]): Promise<boolean> { return writeAgentJson(SERVICE_TAXONOMY_PROP, 'Service Taxonomy (JSON)', taxonomy); }
 
+/** Per-user email notification preferences: a map of lowercased email →
+ *  { [notificationKey]: boolean }. Absent keys default to ON. Null when unset. */
+export function readNotificationPrefsRaw(): Promise<Record<string, Record<string, boolean>> | null> {
+  return readAgentJson<Record<string, Record<string, boolean>>>('notification_prefs_json');
+}
+export function writeNotificationPrefsRaw(map: Record<string, Record<string, boolean>>): Promise<boolean> {
+  return writeAgentJson('notification_prefs_json', 'Notification Preferences (JSON)', map);
+}
+
 /** A learned service-check candidate produced by the review-learning loop. */
 export interface AutoServiceCheckCandidate {
   signature: string;
