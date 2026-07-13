@@ -920,6 +920,12 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
   const [reassigning, setReassigning] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState('');
   const canReassign = isInternal && svc.live && !['completed', 'canceled'].includes(svc.status);
+  // Internal users can push a service's due date out (vendor feedback, etc.) any
+  // time before it's terminal.
+  const canEditDue = isInternal && svc.live && !['completed', 'canceled'].includes(svc.status);
+  const [dueOpen, setDueOpen] = useState(false);
+  const [newDue, setNewDue] = useState(svc.dueDate || '');
+  const [savingDue, setSavingDue] = useState(false);
 
   const openAudit = async () => {
     setSettingsOpen(false); setAuditOpen(true); setAuditEvents(null);
@@ -942,6 +948,20 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
       router.replace(router.asPath, undefined, { scroll: false });   // refresh the record
     } catch { setSettingsMsg('Couldn’t reach the server. Try again.'); }
     finally { setReassigning(false); }
+  };
+  const doChangeDue = async () => {
+    if (!newDue || newDue === svc.dueDate) { setDueOpen(false); return; }
+    setSavingDue(true); setSettingsMsg('');
+    try {
+      const r = await fetch(`/api/services/${encodeURIComponent(svc.id)}/due-date`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dueDate: newDue }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setSettingsMsg(d.error || 'Could not change the due date.'); return; }
+      setDueOpen(false);
+      router.replace(router.asPath, undefined, { scroll: false });   // refresh with the new due date
+    } catch { setSettingsMsg('Couldn’t reach the server. Try again.'); }
+    finally { setSavingDue(false); }
   };
 
   // Cost Detail — its own section (after Photos). Vendor Cost is visible to all;
@@ -1029,6 +1049,7 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
                   <div className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Admin</div>
                   <button type="button" onClick={openAudit} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50">Audit Log</button>
                   {canReassign && <button type="button" onClick={() => { setSettingsOpen(false); setReassignVendor(svc.vendor || SERVICE_VENDOR_NAMES[0] || ''); setSettingsMsg(''); setReassignOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Reassign Vendor</button>}
+                  {canEditDue && <button type="button" onClick={() => { setSettingsOpen(false); setNewDue(svc.dueDate || ''); setSettingsMsg(''); setDueOpen(true); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 border-t border-gray-100">Change Due Date</button>}
                 </div></>)}
             </div>
           )}
@@ -1457,6 +1478,24 @@ export default function ServiceDetail({ svc, form, isInternal, unlock, propMeta,
               <button type="button" onClick={() => setReassignOpen(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
               <button type="button" disabled={reassigning || !reassignVendor || reassignVendor === svc.vendor} onClick={doReassign}
                 className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{reassigning ? '…' : 'Reassign'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Due Date modal (internal) — the calendar opens on the current due
+          date; pick a new one and save to push it out. */}
+      {dueOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDueOpen(false)}>
+          <div className="bg-white w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="font-heading font-bold text-[15px] text-ink">Change Due Date</div>
+            <p className="text-[13px] text-gray-500 -mt-1">Currently due <b className="text-ink">{svc.dueDate ? fmtMDY(svc.dueDate) : '—'}</b>. Pick a new date to push it out.</p>
+            <DatePicker value={newDue} onChange={setNewDue} className={`${inputCls} flex items-center justify-between`} ariaLabel="New due date" />
+            {settingsMsg && <div className="text-xs text-red-600">{settingsMsg}</div>}
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={() => setDueOpen(false)} className="px-4 py-2.5 rounded-xl text-sm font-heading font-semibold bg-white text-gray-600 border border-gray-300">Cancel</button>
+              <button type="button" disabled={savingDue || !newDue || newDue === svc.dueDate} onClick={doChangeDue}
+                className="flex-1 rounded-xl py-2.5 font-heading font-bold text-sm bg-brand text-white disabled:opacity-50">{savingDue ? '…' : 'Save'}</button>
             </div>
           </div>
         </div>
