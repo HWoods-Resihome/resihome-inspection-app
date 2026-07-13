@@ -79,7 +79,17 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
     if (!lpTimer.current || !lpStart.current) return;
     if (Math.abs(e.clientX - lpStart.current.x) > 10 || Math.abs(e.clientY - lpStart.current.y) > 10) clearLp();
   };
-  const selCls = selectMode ? (!selectable ? 'opacity-50 border-gray-200' : selected ? 'border-brand ring-1 ring-brand' : 'border-gray-200') : 'border-gray-200 hover:border-brand/40';
+  const selCls = selectMode ? (!selectable ? 'opacity-50 border-gray-200' : selected ? 'border-brand ring-1 ring-brand' : 'border-gray-200') : 'border-gray-200 hover:border-brand/40 hover:shadow-md';
+  // Bottom-left date cell: "Estimate <date>" while estimating, else "Due <date>"
+  // (turns red once past due) — mirrors the inspection card's date.
+  const dateText = s.status === 'estimated'
+    ? `Estimate${(s.estimatedAt || s.dueDate) ? ` ${fmtMDY(s.estimatedAt || s.dueDate)}` : ''}`
+    : `Due ${fmtMDY(s.dueDate)}`;
+  // Locality line: a community's title is already its name, so show just the
+  // locality; a property appends a distinct community tag.
+  const localityLine = s.scope === 'community'
+    ? (s.locality || '')
+    : `${s.locality}${s.community && s.community !== s.address ? ` · ${s.community}` : ''}`;
   return (
     <Link href={`/services/${s.id}`}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={clearLp} onPointerCancel={clearLp}
@@ -88,39 +98,44 @@ function ServiceCard({ s, overdue, isAdmin, selectMode, selectable, selected, on
         if (lpFired.current) { e.preventDefault(); e.stopPropagation(); lpFired.current = false; }
       }}
       onContextMenu={(e) => { if (isAdmin) e.preventDefault(); }}
-      className={`block select-none bg-white border rounded-xl px-3.5 py-2.5 active:scale-[0.998] transition ${selCls}`}
+      className={`block select-none bg-white border rounded-xl p-4 shadow-sm active:scale-[0.995] transition ${selCls}`}
       style={{ WebkitTouchCallout: 'none' }}>
-      <div className="flex items-center gap-2">
+      <div className="flex items-start gap-3">
         {selectMode && (
-          <span className={`shrink-0 w-5 h-5 rounded-md border-2 grid place-items-center ${!selectable ? 'border-gray-200 bg-gray-100' : selected ? 'bg-brand border-brand text-white' : 'border-gray-300 bg-white'}`}>
+          <span className={`mt-0.5 shrink-0 w-5 h-5 rounded-md border-2 grid place-items-center ${!selectable ? 'border-gray-200 bg-gray-100' : selected ? 'bg-brand border-brand text-white' : 'border-gray-300 bg-white'}`}>
             {selectable && selected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
           </span>
         )}
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <span className="font-heading font-bold text-ink truncate">{s.address}</span>
-          <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${s.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{s.scope === 'community' ? 'Community' : 'SFR'}</span>
+        <div className="min-w-0 flex-1">
+          {/* Header: pink work-type kicker · address (+ scope chip) · status pill —
+              matches the Field Inspections card. */}
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-heading font-bold uppercase tracking-wide text-brand mb-1 truncate">
+                {worktypeLabel(s.worktype)} · {subtypeLabel(s.worktype, s.subtype)}
+              </p>
+              <h3 className="font-bold text-[15px] text-ink break-words leading-snug">
+                <span className="align-middle">{s.address}</span>
+                <span className={`ml-2 align-middle inline-block text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${s.scope === 'community' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{s.scope === 'community' ? 'Community' : 'SFR'}</span>
+              </h3>
+              {localityLine && (
+                <p className="text-[13px] text-gray-500 break-words leading-snug mt-0.5">{localityLine}</p>
+              )}
+            </div>
+            <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>
+              {serviceStatusText(s.status, isAdmin)}
+              {isAdmin && s.status === 'submitted' && <AiSparkle className="w-3 h-3" />}
+            </span>
+          </div>
+          {/* Meta row: date (left) · property status (center, muted) · vendor
+              (right) — three EQUAL cells so the center sits at the true middle. */}
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <span className={`flex-1 min-w-0 truncate whitespace-nowrap ${overdue ? 'text-red-600 font-semibold' : ''}`}>{dateText}</span>
+            <span className="flex-1 min-w-0 truncate text-center text-gray-400">{s.scope !== 'community' ? (s.propertyStatus || '') : ''}</span>
+            <span className="flex-1 min-w-0 truncate text-right">{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
+          </div>
         </div>
-        <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading font-semibold border ${STATUS_STYLE[s.status]}`}>
-          {serviceStatusText(s.status, isAdmin)}
-          {isAdmin && s.status === 'submitted' && <AiSparkle className="w-3 h-3" />}
-        </span>
       </div>
-      {/* Second line: the locality (City, ST ZIP). For a community the title is
-          already the community name, so show just the locality (never repeat the
-          name); for a property, append a community tag only if distinct. */}
-      <div className="text-[12px] text-gray-500 truncate mt-0.5">
-        {s.scope === 'community' ? (s.locality || ' ') : `${s.locality}${s.community && s.community !== s.address ? ` · ${s.community}` : ''}`}
-      </div>
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <div className="text-[12px] text-gray-600 flex flex-wrap gap-x-3 gap-y-0.5 min-w-0">
-          <span className="font-semibold text-ink">{worktypeLabel(s.worktype)} · {subtypeLabel(s.worktype, s.subtype)}</span>
-          {s.scope !== 'community' && s.propertyStatus && <span>{s.propertyStatus}</span>}
-        </div>
-        <span className="text-[12px] shrink-0 text-right">{s.vendor || <span className="text-brand font-semibold">Unassigned</span>}</span>
-      </div>
-      {s.status === 'estimated'
-        ? <div className="mt-0.5 text-[12px] font-semibold text-gray-600">Estimate{(s.estimatedAt || s.dueDate) ? ` ${fmtMDY(s.estimatedAt || s.dueDate)}` : ''}</div>
-        : <div className={`mt-0.5 text-[12px] ${overdue ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>Due {fmtMDY(s.dueDate)}</div>}
     </Link>
   );
 }
@@ -454,7 +469,7 @@ export default function ServicesHome({ userName, canCreate, services, live, asVe
           </div>
         )}
 
-        <div className="space-y-2">
+        <div className="space-y-3">
           {pagedRows.map((s) => (
             <ServiceCard key={s.id} s={s} overdue={OPEN_STATUSES.includes(s.status) && !!s.dueDate && s.dueDate < todayISO}
               isAdmin={isAdmin}
