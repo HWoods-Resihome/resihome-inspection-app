@@ -47,6 +47,13 @@ function encodeHeader(value: string): string {
   return `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
 }
 
+/** A From header value: `"Display Name" <email>` when a name is given (so mail
+ *  clients show the friendly name, not the bare address), else the bare email. */
+function formatFrom(email: string, name?: string): string {
+  const n = (name || '').trim();
+  return n ? `${encodeHeader(n).includes('=?') ? encodeHeader(n) : `"${n.replace(/"/g, '')}"`} <${email}>` : email;
+}
+
 /** Fetch a file URL and return its bytes. */
 async function fetchAttachment(url: string): Promise<Buffer> {
   const res = await fetch(url);
@@ -252,6 +259,8 @@ export async function sendInspectionEmail(
 export interface ReplyEmailInput {
   refreshToken: string;
   fromEmail: string;
+  /** Optional From display name (e.g. "ResiWalk") → `"ResiWalk" <email>`. */
+  fromName?: string;
   to: string[];
   cc?: string[];
   subject: string;          // already-prefixed (e.g. "Re: ...")
@@ -266,7 +275,7 @@ function buildReplyMime(input: ReplyEmailInput): string {
   const mixedBoundary = `mixed_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const altBoundary = `alt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const lines: string[] = [];
-  lines.push(`From: ${input.fromEmail}`);
+  lines.push(`From: ${formatFrom(input.fromEmail, input.fromName)}`);
   lines.push(`To: ${input.to.join(', ')}`);
   if (input.cc && input.cc.length) lines.push(`Cc: ${input.cc.join(', ')}`);
   lines.push(`Subject: ${encodeHeader(input.subject)}`);
@@ -329,6 +338,7 @@ export async function sendSystemEmail(input: {
   return sendReplyEmailWithToken({
     refreshToken,
     fromEmail,
+    fromName: process.env.SYSTEM_GMAIL_FROM_NAME || 'ResiWalk',
     to: [input.to],
     subject: input.subject,
     htmlBody: input.htmlBody,

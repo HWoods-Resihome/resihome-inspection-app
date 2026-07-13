@@ -77,7 +77,8 @@ export async function sendNotificationEmail(e: NotificationEmail): Promise<{ sen
   }
   try {
     return await sendReplyEmailWithToken({
-      refreshToken, fromEmail, to: [e.to],
+      refreshToken, fromEmail, fromName: process.env.SYSTEM_GMAIL_FROM_NAME || 'ResiWalk',
+      to: [e.to],
       subject: e.subject, htmlBody: buildHtml(e), textBody: buildText(e),
       attachments: e.attachment ? [e.attachment] : [],
     });

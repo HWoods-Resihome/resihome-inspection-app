@@ -22,7 +22,7 @@ export async function notifyInspectionCompleted(o: {
     let attachment: { filename: string; content: Buffer; mimeType: string } | null = null;
     if (o.pdfUrl) { const buf = await fetchToBuffer(o.pdfUrl); if (buf) attachment = { filename: pdfName('inspection', o.inspectionId), content: buf, mimeType: 'application/pdf' }; }
     await sendNotificationEmail({
-      to, subject: `Inspection completed — ${o.address}`,
+      to, subject: `Inspection Completed — ${o.address}`,
       heading: 'Inspection Completed',
       intro: `Your ${o.templateLabel} at ${o.address} is complete.${attachment ? ' A copy of the report is attached.' : ''}`,
       rows: [['Property', o.address], ['Inspection', o.templateLabel]],
@@ -41,7 +41,7 @@ export async function notifyServiceAssigned(o: {
     const to = String(o.vendorEmail || '').trim();
     if (!validEmail(to) || (!o.force && !(await isNotificationEnabled(to, 'service_assigned')))) return;
     await sendNotificationEmail({
-      to, subject: `New service assigned — ${o.address}`,
+      to, subject: `New Service Assigned — ${o.address}`,
       heading: 'New Service Assigned',
       intro: `A new ${o.worktypeLabel} · ${o.subtypeLabel} service has been assigned to you.`,
       rows: [['Property', o.address], ['Service', `${o.worktypeLabel} · ${o.subtypeLabel}`], ['Due', o.dueDate || '—'], ['Vendor', o.vendorName || '']],
@@ -64,7 +64,7 @@ export async function notifyServiceCompleted(o: {
       if (buf) attachment = { filename: pdfName('service', o.serviceId), content: buf, mimeType: 'application/pdf' };
     } catch (e: any) { console.warn('[notify] service PDF render failed:', String(e?.message || e).slice(0, 120)); }
     await sendNotificationEmail({
-      to, subject: `Service completed — ${o.address}`,
+      to, subject: `Service Completed — ${o.address}`,
       heading: 'Service Completed',
       intro: `Your ${o.worktypeLabel} · ${o.subtypeLabel} at ${o.address} has been completed.${attachment ? ' The completion report is attached.' : ''}`,
       rows: [['Property', o.address], ['Service', `${o.worktypeLabel} · ${o.subtypeLabel}`]],
@@ -83,7 +83,7 @@ export async function notifyServicePastDue(o: {
     const to = String(o.vendorEmail || '').trim();
     if (!validEmail(to) || (!o.force && !(await isNotificationEnabled(to, 'service_past_due')))) return;
     await sendNotificationEmail({
-      to, subject: `Past due — please complete: ${o.address}`,
+      to, subject: `Past Due — Please Complete: ${o.address}`,
       heading: 'Service Past Due',
       intro: `Your ${o.worktypeLabel} · ${o.subtypeLabel} at ${o.address} is past due. Please submit the completion as soon as possible.`,
       rows: [['Property', o.address], ['Service', `${o.worktypeLabel} · ${o.subtypeLabel}`], ['Was due', o.dueDate || '—']],
