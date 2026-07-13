@@ -1583,12 +1583,39 @@ export async function searchServiceRuleRecords(): Promise<{ id: string; props: R
 
 /** Create (id null) or update a Service Rule record. Returns the record id, or
  *  null when the object type id env var isn't set. */
+// Extract property names HubSpot reports as non-existent from an error's raw
+// detail (e.g. `Property "enroll_criteria_json" does not exist`). Lets a write
+// self-heal by dropping not-yet-provisioned props and retrying — so shipping a
+// schema-dependent field before the provision run never breaks the save.
+function missingPropNames(e: any): string[] {
+  const blob = `${String(e?.detail || '')} ${String(e?.message || '')}`;
+  if (!/PROPERTY_DOESNT_EXIST|does not exist/i.test(blob)) return [];
+  const out = new Set<string>();
+  const re = /"([a-z0-9_]+)"\s*does not exist|Property\s+"?([a-z0-9_]+)"?\s+does not exist/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(blob))) { const n = m[1] || m[2]; if (n) out.add(n); }
+  return [...out];
+}
+
 export async function upsertServiceRuleRecord(id: string | null, props: Record<string, any>): Promise<string | null> {
   const typeId = (process.env.HUBSPOT_SERVICE_RULE_TYPE_ID || '').trim();
   if (!typeId) return null;
-  if (id) { await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) }); return id; }
-  const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: props }) });
-  return resp?.id ? String(resp.id) : null;
+  let body = { ...props };
+  // Retry a few times, each pass stripping any property HubSpot rejects as
+  // unknown (new fields not yet provisioned). Non-property errors rethrow.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      if (id) { await hubspotFetch(`/crm/v3/objects/${typeId}/${id}`, { method: 'PATCH', body: JSON.stringify({ properties: body }) }); return id; }
+      const resp = await hubspotFetch(`/crm/v3/objects/${typeId}`, { method: 'POST', body: JSON.stringify({ properties: body }) });
+      return resp?.id ? String(resp.id) : null;
+    } catch (e: any) {
+      const missing = missingPropNames(e).filter((n) => n in body);
+      if (!missing.length) throw e;
+      for (const n of missing) delete body[n];
+      console.warn(`[services] rule save: dropping unprovisioned props and retrying: ${missing.join(', ')}`);
+    }
+  }
+  throw new Error('rule save failed after stripping unknown properties');
 }
 
 export async function deleteServiceRuleRecord(id: string): Promise<boolean> {
